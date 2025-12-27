@@ -1,20 +1,33 @@
-# RCX-π Core v1
+# RCX-π Core — Minimal Structural Runtime v1
 
-This directory (`WorkingRCX/`) is a **minimal RCX-π core**:
+This is the **minimal working implementation of RCX-π**, built entirely from a
+single recursive motif structure `μ(...)`.  
+Everything—numbers, pairs, triples, programs, projections, activation closures—
+is represented as pure nested structure instead of syntax or bytecode.
 
-- A single structural type: `Motif` (built with `μ(...)`)
-- Peano arithmetic as pure structure (`VOID` = 0, successors, add, mult)
-- Structural “programs” via **projection / closure / activation** motifs
-- A tiny meta layer that classifies motifs as value / program / mixed / struct
-- A single runner `run_all.py` that exercises the whole core
-
-If `run_all.py` is green, RCX-π Core v1 is intact.
+RCX-π = *Computation without instructions.*  
+Only shape. Only structure. The program **is** the data.
 
 ---
 
-## How to run everything
+## 🌱 Core Components
 
-From `WorkingRCX/`:
+| Module | Purpose |
+|-------|---------|
+| `core/motif.py` | Defines the `Motif` object and constructor `μ(...)` |
+| `rules_pure.py` | Pure rewrite rules (no semantics baked in) |
+| `engine/evaluator_pure.py` | Structural evaluator + reduction engine |
+| `programs.py` | Reusable structural closures (swap, dup, rotate, etc.) |
+| `utils.py` | Peano helpers: `num(n)`, `motif_to_int`, decode to tuples |
+| `run_all.py` | Runs **all demos + tests** in one command |
+
+If `run_all.py` finishes without red errors — **RCX-π Core is healthy.**
+
+---
+
+## ▶ Running Everything
+
+From inside `WorkingRCX/`:
 
 ```bash
 python3 run_all.py
