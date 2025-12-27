@@ -1,105 +1,131 @@
 # rcx_pi/programs.py
-#
-# Small library of "RCX-π programs":
-#   - numeric constructor: num(n)
-#   - pair/triple construction
-#   - higher-level closures built from PROJECTION/CLOSURE/VAR
+"""
+RCX-π structural programs and helpers.
+
+All of these are *pure motifs* built from:
+  - Motif / μ / VOID
+  - PROJECTION / CLOSURE / ACTIVATION / VAR markers
+
+Exposed:
+  - num(n)                       : Peano number builder
+  - activate(closure, arg)       : wrap as ACTIVATION motif
+
+  - swap_xy_closure()            : (x, y)   -> (y, x)
+  - dup_x_closure()              : (x, y)   -> (x, x)
+  - rotate_xyz_closure()         : (x, y, z)-> (y, z, x)
+  - swap_ends_xyz_closure()      : (x, y, z)-> (z, y, x)
+"""
 
 from .core.motif import Motif, μ, VOID
-from .reduction.pattern_matching import PROJECTION, CLOSURE, VAR
+from .reduction.pattern_matching import (
+    PROJECTION,
+    CLOSURE,
+    ACTIVATION,
+    VAR,
+)
 
-
-# ---------- numeric helpers ----------
+# ---------- basic helpers ----------
 
 def num(n: int) -> Motif:
-    """Build Peano number n as nested successors over VOID."""
+    """
+    Build Peano n as nested successors over VOID:
+
+        0 -> VOID
+        1 -> succ(VOID)
+        2 -> succ(succ(VOID))
+        ...
+    """
     m = VOID
     for _ in range(n):
         m = m.succ()
     return m
 
 
-# ---------- basic structural constructors ----------
-
-def make_pair(a: Motif, b: Motif) -> Motif:
-    """μ(a, b)"""
-    return μ(a, b)
-
-
-def make_triple(a: Motif, b: Motif, c: Motif) -> Motif:
-    """μ(a, b, c)"""
-    return μ(a, b, c)
-
-
-# ---------- pattern variables ----------
-
-def pattern_var(var_id: int) -> Motif:
+def activate(closure: Motif, arg: Motif) -> Motif:
     """
-    Create a pattern variable motif.
+    Structural application:
 
-    We distinguish variables structurally by using different Peano IDs
-    as the second field: μ(VAR, num(var_id)).
-    PatternMatcher keys by repr(), so distinct structure = distinct var.
+        closure(arg)  ~>  μ(ACTIVATION, closure, arg)
+
+    The PureEvaluator + PureRules know how to reduce this.
     """
-    return μ(VAR, num(var_id))
+    return μ(ACTIVATION, closure, arg)
 
 
-# ---------- projection-built closures ----------
+# ---------- tiny structural “programs” via projection ----------
+
+def _triple_vars():
+    """
+    Convenience: three distinct pattern variables for triple-based programs.
+    We only care that they are structurally distinct VAR-headed motifs.
+    """
+    vx = μ(VAR, VOID)           # x
+    vy = μ(VAR, μ(VOID))        # y
+    vz = μ(VAR, μ(μ(VOID)))     # z
+    return vx, vy, vz
+
 
 def swap_xy_closure() -> Motif:
     """
-    Closure that swaps a pair:
+    Closure for (x, y) -> (y, x).
 
-        input motif shape:  μ(x, y)
-        output motif:       μ(y, x)
-
-    Encoded as:
-
-        μ(CLOSURE,
-          μ(PROJECTION,
-            μ(x, y),
-            μ(y, x)))
+    Pattern: μ(vx, vy)
+    Body:    μ(vy, vx)
     """
-    x = pattern_var(1)
-    y = pattern_var(2)
+    vx = μ(VAR, VOID)           # x
+    vy = μ(VAR, μ(VOID))        # y
 
-    pattern = μ(x, y)
-    body    = μ(y, x)
+    pattern = μ(vx, vy)
+    body = μ(vy, vx)
 
-    projection = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, projection)
+    proj = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, proj)
 
 
 def dup_x_closure() -> Motif:
     """
-    Closure that duplicates the first element of a pair:
+    Closure for (x, y) -> (x, x).
 
-        input:  μ(x, y)
-        output: μ(x, x)
+    Pattern: μ(vx, vy)
+    Body:    μ(vx, vx)
     """
-    x = pattern_var(1)
-    y = pattern_var(2)
+    vx = μ(VAR, VOID)           # x
+    vy = μ(VAR, μ(VOID))        # y (unused in body)
 
-    pattern = μ(x, y)
-    body    = μ(x, x)
+    pattern = μ(vx, vy)
+    body = μ(vx, vx)
 
-    projection = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, projection)
+    proj = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, proj)
 
 
 def rotate_xyz_closure() -> Motif:
     """
-    Closure that rotates a triple left:
+    Closure for (x, y, z) -> (y, z, x).
 
-        input:  μ(x, y, z)
-        output: μ(y, z, x)
+    Pattern: μ(vx, vy, vz)
+    Body:    μ(vy, vz, vx)
     """
-    x = pattern_var(1)
-    y = pattern_var(2)
-    z = pattern_var(3)
+    vx, vy, vz = _triple_vars()
 
-    pattern = μ(x, y, z)
-    body    = μ(y, z, x)
+    pattern = μ(vx, vy, vz)
+    body = μ(vy, vz, vx)
 
-    projection = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, projection)
+    proj = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, proj)
+
+
+def swap_ends_xyz_closure() -> Motif:
+    """
+    Closure for (x, y, z) -> (z, y, x).
+
+    Pattern: μ(vx, vy, vz)
+    Body:    μ(vz, vy, vx)
+    """
+    vx, vy, vz = _triple_vars()
+
+    pattern = μ(vx, vy, vz)
+    body = μ(vz, vy, vx)
+
+    proj = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, proj)

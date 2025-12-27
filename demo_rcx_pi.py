@@ -1,30 +1,31 @@
 # demo_rcx_pi.py
-#
-# One-stop RCX-π demo:
-#   - Peano numbers
-#   - arithmetic via patterns
-#   - projection/closures
-#   - tiny "programs" library
-#   - meta classification
-#
+"""
+RCX-π DEMO
+
+End-to-end structural demo:
+  1) Peano numbers
+  2) Pairs and closures (swap, dup, rotate)
+  3) Meta classification
+"""
 
 from rcx_pi import μ, VOID, UNIT, PureEvaluator
+from rcx_pi.core.motif import Motif
 from rcx_pi.programs import (
-    num,
-    make_pair,
     swap_xy_closure,
     dup_x_closure,
     rotate_xyz_closure,
+    activate,
 )
 from rcx_pi.meta import classify_motif, classification_label
-from rcx_pi.reduction.pattern_matching import ACTIVATION
 
 
 # ---------- helpers ----------
 
-def motif_to_int(m):
-    """Convert Peano motif to Python int, or None if not pure."""
-    # Zero
+def motif_to_int(m: Motif):
+    """Convert Peano motif to Python int (if pure Peano)."""
+    if not isinstance(m, Motif):
+        return None
+
     if m.is_zero_pure():
         return 0
 
@@ -34,88 +35,108 @@ def motif_to_int(m):
         count += 1
         cur = cur.head()
 
-    return count if cur.is_zero_pure() else None
+    if cur.is_zero_pure():
+        return count
+    return None
 
 
-def pair_to_ints(p):
-    """Assume μ(x, y) where x, y are Peano; return (int, int) or (None, None)."""
-    if not isinstance(p, type(VOID)) or len(p.structure) != 2:
-        return (None, None)
-    a, b = p.structure
+def num(n: int) -> Motif:
+    """Build Peano n as nested successors over VOID."""
+    m = VOID
+    for _ in range(n):
+        m = m.succ()
+    return m
+
+
+def motif_to_pair(m: Motif):
+    """Assume motif is μ(a, b); decode each as int."""
+    if not isinstance(m, Motif) or len(m.structure) != 2:
+        return None
+    a, b = m.structure
     return motif_to_int(a), motif_to_int(b)
 
 
-def triple_to_ints(t):
-    """Assume μ(x, y, z) where x,y,z are Peano."""
-    if not isinstance(t, type(VOID)) or len(t.structure) != 3:
-        return (None, None, None)
-    a, b, c = t.structure
+def motif_to_triple(m: Motif):
+    """Assume motif is μ(a, b, c); decode each as int."""
+    if not isinstance(m, Motif) or len(m.structure) != 3:
+        return None
+    a, b, c = m.structure
     return motif_to_int(a), motif_to_int(b), motif_to_int(c)
 
 
 # ---------- main demo ----------
 
 if __name__ == "__main__":
-    # Turn on tracing so we can watch reductions
-    ev = PureEvaluator(trace=True)
+    ev = PureEvaluator()
 
     print("=== RCX-π DEMO ===\n")
 
-    # 1) Pure numbers
-    print("1) Pure Peano numbers")
+    # 1) Pure Peano numbers
     n2 = num(2)
     n5 = num(5)
-    print("  2 as motif:", n2, "=>", motif_to_int(n2))
-    print("  5 as motif:", n5, "=>", motif_to_int(n5))
 
-    # 2) A pair and projection-based swap
-    print("\n2) Pairs and swap closure")
-    pair = make_pair(num(2), num(5))
-    print("  Original pair motif: ", pair, " => ", pair_to_ints(pair))
+    print("1) Pure Peano numbers")
+    print("  2 as motif: ", n2, "=>", motif_to_int(n2))
+    print("  5 as motif: ", n5, "=>", motif_to_int(n5))
+    print()
+
+    # 2) Pairs and swap closure
+    print("2) Pairs and swap closure")
+    pair = μ(n2, n5)
+    print("  Original pair motif: ", pair, " => ", motif_to_pair(pair))
 
     swap_cl = swap_xy_closure()
-    act_swap = μ(ACTIVATION, swap_cl, pair)
+    act_swap = activate(swap_cl, pair)
     print("  Activation motif:    ", act_swap)
+    r_swap = ev.reduce(act_swap)
+    print("  Reduced motif:       ", r_swap, " => ", motif_to_pair(r_swap))
+    print()
 
-    result_swap = ev.reduce(act_swap)
-    print("  Reduced motif:       ", result_swap, " => ", pair_to_ints(result_swap))
-
-    # 3) Duplicate-X closure
-    print("\n3) Duplicate-X closure: (2,5) -> (2,2)")
+    # 3) Duplicate-X closure: (2,5) -> (2,2)
+    print("3) Duplicate-X closure: (2,5) -> (2,2)")
     dup_cl = dup_x_closure()
-    act_dup = μ(ACTIVATION, dup_cl, pair)
+    act_dup = activate(dup_cl, pair)
     print("  Activation motif:    ", act_dup)
-    result_dup = ev.reduce(act_dup)
-    print("  Reduced motif:       ", result_dup, " => ", pair_to_ints(result_dup))
+    r_dup = ev.reduce(act_dup)
+    print("  Reduced motif:       ", r_dup, " => ", motif_to_pair(r_dup))
+    print()
 
-    # 4) Rotate triple
-    print("\n4) Rotate triple: (2,5,7) -> (5,7,2)")
-    triple = μ(num(2), num(5), num(7))
-    print("  Original triple:     ", triple, " => ", triple_to_ints(triple))
+    # 4) Rotate triple: (2,5,7) -> (5,7,2)
+    print("4) Rotate triple: (2,5,7) -> (5,7,2)")
+    n7 = num(7)
+    triple = μ(n2, n5, n7)
+    print("  Original triple:     ", triple, " => ", motif_to_triple(triple))
 
     rot_cl = rotate_xyz_closure()
-    act_rot = μ(ACTIVATION, rot_cl, triple)
+    act_rot = activate(rot_cl, triple)
     print("  Activation motif:    ", act_rot)
-    result_rot = ev.reduce(act_rot)
-    print("  Reduced motif:       ", result_rot, " => ", triple_to_ints(result_rot))
+    r_rot = ev.reduce(act_rot)
+    print("  Reduced motif:       ", r_rot, " => ", motif_to_triple(r_rot))
+    print()
 
     # 5) Meta classification
-    print("\n5) Meta classification (external, but structural)")
+    print("5) Meta classification (external, structural)")
 
-    tagged_val = classify_motif(n5)
-    tagged_prog = classify_motif(swap_cl)
-    tagged_mix = classify_motif(act_swap)
-
+    # classify(5)
+    tagged_5 = classify_motif(n5)
     print("  classify(5):")
-    print("    tagged:", tagged_val)
-    print("    label: ", classification_label(tagged_val))
+    print("    tagged:", tagged_5)
+    print("    label: ", classification_label(tagged_5))
+    print()
 
-    print("\n  classify(swap_closure):")
-    print("    tagged:", tagged_prog)
-    print("    label: ", classification_label(tagged_prog))
+    # classify(swap_closure)
+    tagged_swap = classify_motif(swap_cl)
+    print("  classify(swap_closure):")
+    print("    tagged:", tagged_swap)
+    print("    label: ", classification_label(tagged_swap))
+    print()
 
-    print("\n  classify(activation(swap, pair)):")
-    print("    tagged:", tagged_mix)
-    print("    label: ", classification_label(tagged_mix))
+    # classify(activate(swap, pair))
+    act_swap_again = activate(swap_cl, pair)
+    tagged_act = classify_motif(act_swap_again)
+    print("  classify(activation(swap, pair)):")
+    print("    tagged:", tagged_act)
+    print("    label: ", classification_label(tagged_act))
+    print()
 
-    print("\n=== end demo ===")
+    print("=== end demo ===")
