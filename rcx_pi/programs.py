@@ -1,103 +1,105 @@
 # rcx_pi/programs.py
 #
-# Tiny RCX-π “standard library” of pure structural programs:
-#   - swap (x, y) -> (y, x)
-#   - dup  (x, y) -> (x, x)
-#   - rotate (x, y, z) -> (y, z, x)
-#
-# All of this is pure μ-structure: no strings, no external env.
+# Small library of "RCX-π programs":
+#   - numeric constructor: num(n)
+#   - pair/triple construction
+#   - higher-level closures built from PROJECTION/CLOSURE/VAR
 
-from .core.motif import Motif, μ, VOID, UNIT
-from .reduction.pattern_matching import PROJECTION, CLOSURE, ACTIVATION
+from .core.motif import Motif, μ, VOID
+from .reduction.pattern_matching import PROJECTION, CLOSURE, VAR
 
 
-# ---------- local reconstruction of the pattern-var marker ----------
+# ---------- numeric helpers ----------
 
-def depth_marker(depth: int) -> Motif:
-    """
-    Build a unary-depth marker:
-        depth 0: VOID           = μ()
-        depth 1: μ(VOID)
-        depth 2: μ(μ(VOID))
-        ...
-    """
+def num(n: int) -> Motif:
+    """Build Peano number n as nested successors over VOID."""
     m = VOID
-    for _ in range(depth):
-        m = μ(m)
+    for _ in range(n):
+        m = m.succ()
     return m
 
-# In pattern_matching.py, PATTERN_VAR_MARKER is defined as 7-deep.
-# We recreate it structurally here so we don't need to import it.
-PATTERN_VAR_MARKER = depth_marker(7)
+
+# ---------- basic structural constructors ----------
+
+def make_pair(a: Motif, b: Motif) -> Motif:
+    """μ(a, b)"""
+    return μ(a, b)
 
 
-# ---------- pattern variables (pure, no names) ----------
-
-# We use unary-encoded IDs:
-#   X_ID = 0 (VOID)
-#   Y_ID = 1 (UNIT)
-#   Z_ID = 2 (succ(UNIT))
-
-X_ID = VOID          # 0
-Y_ID = UNIT          # 1
-Z_ID = UNIT.succ()   # 2
-
-# Pattern-vars are motifs of the form μ(PATTERN_VAR_MARKER, id)
-X = μ(PATTERN_VAR_MARKER, X_ID)
-Y = μ(PATTERN_VAR_MARKER, Y_ID)
-Z = μ(PATTERN_VAR_MARKER, Z_ID)
+def make_triple(a: Motif, b: Motif, c: Motif) -> Motif:
+    """μ(a, b, c)"""
+    return μ(a, b, c)
 
 
-# ---------- helpers to build RCX-π constructs ----------
+# ---------- pattern variables ----------
 
-def make_projection(pattern: Motif, body: Motif) -> Motif:
-    """Build PROJECTION(pattern, body)."""
-    return μ(PROJECTION, pattern, body)
+def pattern_var(var_id: int) -> Motif:
+    """
+    Create a pattern variable motif.
 
-
-def make_closure(pattern: Motif, body: Motif) -> Motif:
-    """Build CLOSURE(PROJECTION(pattern, body))."""
-    return μ(CLOSURE, make_projection(pattern, body))
-
-
-def activate(func: Motif, arg: Motif) -> Motif:
-    """Build ACTIVATION(func, arg)."""
-    return μ(ACTIVATION, func, arg)
+    We distinguish variables structurally by using different Peano IDs
+    as the second field: μ(VAR, num(var_id)).
+    PatternMatcher keys by repr(), so distinct structure = distinct var.
+    """
+    return μ(VAR, num(var_id))
 
 
-# ---------- library “programs” (all pure structure) ----------
+# ---------- projection-built closures ----------
 
 def swap_xy_closure() -> Motif:
     """
-    (x, y) ↦ (y, x)
+    Closure that swaps a pair:
 
-    pattern: μ(X, Y)
-    body:    μ(Y, X)
+        input motif shape:  μ(x, y)
+        output motif:       μ(y, x)
+
+    Encoded as:
+
+        μ(CLOSURE,
+          μ(PROJECTION,
+            μ(x, y),
+            μ(y, x)))
     """
-    pattern = μ(X, Y)
-    body = μ(Y, X)
-    return make_closure(pattern, body)
+    x = pattern_var(1)
+    y = pattern_var(2)
+
+    pattern = μ(x, y)
+    body    = μ(y, x)
+
+    projection = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, projection)
 
 
 def dup_x_closure() -> Motif:
     """
-    (x, y) ↦ (x, x)
+    Closure that duplicates the first element of a pair:
 
-    pattern: μ(X, Y)
-    body:    μ(X, X)
+        input:  μ(x, y)
+        output: μ(x, x)
     """
-    pattern = μ(X, Y)
-    body = μ(X, X)
-    return make_closure(pattern, body)
+    x = pattern_var(1)
+    y = pattern_var(2)
+
+    pattern = μ(x, y)
+    body    = μ(x, x)
+
+    projection = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, projection)
 
 
 def rotate_xyz_closure() -> Motif:
     """
-    (x, y, z) ↦ (y, z, x)
+    Closure that rotates a triple left:
 
-    pattern: μ(X, Y, Z)
-    body:    μ(Y, Z, X)
+        input:  μ(x, y, z)
+        output: μ(y, z, x)
     """
-    pattern = μ(X, Y, Z)
-    body = μ(Y, Z, X)
-    return make_closure(pattern, body)
+    x = pattern_var(1)
+    y = pattern_var(2)
+    z = pattern_var(3)
+
+    pattern = μ(x, y, z)
+    body    = μ(y, z, x)
+
+    projection = μ(PROJECTION, pattern, body)
+    return μ(CLOSURE, projection)
