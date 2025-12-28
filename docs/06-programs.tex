@@ -1,0 +1,169 @@
+\section{06 \textbar\ Programs, Closures, and Activation in RCX-$\pi$}
+
+A remarkable property of RCX-$\pi$ is that \emph{programs are not separate
+entities}. A function, a value, a list, and a closure all inhabit the same
+universe:
+
+\[
+\text{everything is a motif.}
+\]
+
+There are no keywords, no opcodes, no call stack. A program is simply a
+motif shaped so that, when placed against data, a reduction rule fires.
+Computation is what happens when geometry aligns.
+
+\subsection*{Motifs as Programs}
+
+A \textbf{closure} in RCX-$\pi$ is just a motif representing a structural
+transformation. It becomes a program only when data is attached.
+
+\[
+\text{program} := \mu(\text{pattern},\dots)
+\]
+
+\[
+\text{activation} := \mu(\text{program},\text{data})
+\Rightarrow \text{result}
+\]
+
+There is no symbolic difference between:
+
+\[
+\underbrace{\text{value}}_{\mu(\mu(\mu()))}
+\qquad
+\underbrace{\text{program}}_{\mu(\dots)}
+\qquad
+\underbrace{\text{activation}}_{\mu(\text{program},\text{data})}
+\]
+
+All three are motifs — only structure distinguishes the role they play.
+
+%----------------------------------------------------------
+\subsection{Example Closures}
+
+RCX-$\pi$ ships with several canonical shape-transformers:
+
+\[
+\text{swap}_{xy} : (x,y) \mapsto (y,x)
+\]
+\[
+\text{dup}_x : (x,y) \mapsto (x,x)
+\]
+\[
+\text{rot}_{xyz} : (x,y,z) \mapsto (y,z,x)
+\]
+
+All of these are encoded without syntax or variables. They \emph{are
+motifs}, not code about motifs.
+
+\[
+\text{swap}_{xy}
+  = \mu(\dots)   % not expanding here for brevity
+\]
+
+\[
+\text{rot}_{xyz}
+  = \mu(\dots)
+\]
+
+Their representations live in \texttt{rcx\_pi/programs.py}.
+
+%----------------------------------------------------------
+\subsection{Activation is Geometry}
+
+To evaluate \(\text{swap}(2,5)\) we do not "call a function".
+Instead we \emph{grow a tree}:
+
+\[
+\mu(\text{swap},\mu(2,5))
+\]
+
+Reduction rules inside the evaluator recognize the pattern:
+
+\[
+\mu(\text{swap},\mu(a,b)) \Rightarrow \mu(b,a)
+\]
+
+\[
+\Rightarrow (5,2)
+\]
+
+There is no stack or environment. Execution is literal form-shifting —
+like a piece of origami folding into meaning.
+
+%----------------------------------------------------------
+\subsection{Activation Walkthrough Examples}
+
+\paragraph{Swap a Pair}
+\[
+\text{swap}(2,5)
+\Rightarrow (5,2)
+\]
+
+\paragraph{Duplicate First Element}
+\[
+\text{dup}(2,5)
+\Rightarrow (2,2)
+\]
+
+\paragraph{Rotate Triple}
+\[
+\text{rot}(2,5,7)
+\Rightarrow (5,7,2)
+\]
+
+Every closure is simply a structural rewrite rule waiting to fire.
+
+%----------------------------------------------------------
+\subsection{Programs as Data}
+
+Because closures are motifs, they can be:
+
+\begin{itemize}
+\item passed as values
+\item stored inside other motifs
+\item sent through meta-classifiers
+\item inspected, tagged, and rearranged
+\item activated recursively on their own structure
+\end{itemize}
+
+This is the seed of RCX self-hosting: the interpreter could eventually
+be expressed in the same motif language it executes.
+
+\[
+\text{future: }
+\mu(\text{eval}, M) \Rightarrow \text{reduce}(M)
+\]
+
+When the evaluator itself becomes a motif, RCX-$\pi$ becomes a closed
+world capable of reflection.
+
+%----------------------------------------------------------
+\subsection{Design Consequences}
+
+\begin{itemize}
+\item No syntax or instruction set needed
+\item Functions and data unify under one form
+\item Execution is structural alignment, not interpretation
+\item Programs are visible objects — you can \emph{look at a function}
+\item Higher-order behavior emerges naturally
+\end{itemize}
+
+\[
+\text{Computation = Geometry + Rewrite Rules}
+\]
+
+RCX-$\pi$ is not coded — it is \emph{grown}.
+
+%----------------------------------------------------------
+\subsection{Next: Higher-Level Behavior (factorials, maps, folds)}
+
+With closures and activation understood, we can now climb one step up:
+
+\[
+\text{structure} \Rightarrow \text{programs}
+\Rightarrow \text{patterns of computation}
+\]
+
+In the next chapter we construct factorial, summation, \texttt{map}, and
+other classical patterns \emph{using only motifs}.

@@ -1,0 +1,199 @@
+\section{04 \textbar\ Structural Classification and Meta-Layer}
+
+In RCX-$\pi$, motifs have no inherent ``types.''  
+Everything is the same constructor:
+
+\[
+\mu(a,b,c,\dots)
+\]
+
+Yet when building programs, closures, tuples, numbers,
+and later evaluators, we require \emph{structural reflection}.
+The classification system provides this.
+
+It is not semantic typing.  
+It is \textbf{shape recognition as meaning.}
+
+% ---------------------------------------------------------
+\subsection{Why Classification Exists}
+
+A motif can represent:
+
+\begin{itemize}
+\item a Peano number
+\item a program/closure expecting activation
+\item a tuple/pair/triple \dots
+\item mixed structures in mid-reduction
+\item fully abstract unknown geometry
+\end{itemize}
+
+To manipulate them safely we need meta labels.
+
+\[
+M \mapsto \langle \text{label}, M \rangle
+\]
+
+Labels are grafted \emph{onto the motif itself} in a reversible way.
+
+% ---------------------------------------------------------
+\subsection{Core Labels}
+
+The classifier currently distinguishes four canonical categories:
+
+\[
+\text{label}(M) \in \{ \text{value}, \text{program}, \text{mixed}, \text{struct} \}
+\]
+
+\begin{center}
+\begin{tabular}{|c|c|}
+\hline
+Label & Interpretation \\
+\hline
+value   & Peano/atomic motif (stable number-like form) \\
+program & closure awaiting arguments (callable structure) \\
+mixed   & program+data structure not yet reduced \\
+struct  & generic motif / composite / unknown form \\
+\hline
+\end{tabular}
+\end{center}
+
+No runtime dispatch.  
+No typing discipline.  
+Just geometry.
+
+% ---------------------------------------------------------
+\subsection{How Tagging Works}
+
+A tagged motif wraps metadata structurally:
+
+\[
+\text{tagged}(M) = \mu(\text{meta\_label}, M)
+\]
+
+In code, classification is a pure function:
+
+\[
+\text{classify}(M) \Rightarrow \text{tagged\_motif}
+\]
+
+Example walk:
+
+\[
+\text{pair}(2,5)
+  \Rightarrow \mu(\mu(\dots),\mu(\dots))\;\text{(raw)}
+\]
+\[
+\text{classify(pair)} 
+  \Rightarrow \mu(\langle\text{value}\rangle,\mu(2,5))
+\]
+
+Meta-motifs remain motifs. Reduction rules still apply.
+
+This enables future self-reflection loops.
+
+% ---------------------------------------------------------
+\subsection{Recognition Rules}
+
+\paragraph{Value Check}
+A motif is a numeric value if it matches Peano form:
+
+\[
+M = \mu(\mu(\mu(\dots\mu()))) \Rightarrow \text{value}
+\]
+
+\paragraph{Program Check}
+If the outer layer is one of the known closure patterns:
+
+\[
+M = \mu(\text{closure\_pattern},\dots) \Rightarrow \text{program}
+\]
+
+\paragraph{Mixed Form}
+If partial application exists:
+
+\[
+\mu(\text{closure}, x) \text{ unreduced} \Rightarrow \text{mixed}
+\]
+
+\paragraph{Fallback}
+Everything else is structural:
+
+\[
+\_\Rightarrow \text{struct}
+\]
+
+All logic is pattern-based.  
+There is still no notion of type enforcement.
+
+% ---------------------------------------------------------
+\subsection{Why Meta Matters}
+
+The moment a motif can classify another motif,
+or itself, the system steps toward self-bootstrap:
+
+\[
+M \rightarrow \text{classify}(M)
+\]
+\[
+\text{reduce}(\text{classify}(M)) \rightarrow M'
+\]
+
+Self-reflection unlocks:
+
+\begin{itemize}
+\item safe program execution restrictions
+\item trace inspection
+\item printable representation for debugging
+\item code that reasons about code
+\item later: evaluator written as a motif itself
+\end{itemize}
+
+Meta makes RCX-$\pi$ \emph{navigable by itself}.
+
+% ---------------------------------------------------------
+\subsection{Example Trace}
+
+\[
+M = (2,5) = \mu(2,5)
+\]
+
+Classification:
+
+\[
+\text{classify}(M)
+  \Rightarrow
+  \mu(\text{value}, \mu(2,5))
+\]
+
+Pretty-printed:
+
+\[
+\texttt{<value> (2,5)}
+\]
+
+The label is visible, yet evaluation remains purely structural.
+
+% ---------------------------------------------------------
+\subsection{Bridge to Pretty Printer}
+
+Classification feeds human-friendly rendering.
+
+Value motifs collapse to numbers,
+tuples render as \((a,b,c)\),
+tagged structures prefix label annotations.
+
+Pretty printing is not semantic decoration.
+It is \textbf{structure translated into readable form.}
+
+% ---------------------------------------------------------
+\subsection{Summary}
+
+\begin{itemize}
+\item Classification is pattern-based structural tagging
+\item Labels describe motifs without altering core rules
+\item Supports debugging, printing, safe execution
+\item Essential stepping stone toward a self-hosting core
+\end{itemize}
+
+RCX-$\pi$ now sees shape.  
+Next it will \emph{name} and \emph{speak} it.

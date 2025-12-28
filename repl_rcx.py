@@ -1,349 +1,357 @@
-#!/usr/bin/env python3
+# repl_rcx.py
 """
-RCX-π interactive REPL.
+Tiny RCX-π REPL on top of the core engine.
 
-Tiny structural playground on top of:
+Commands (all structural, no cheating):
+  num N            -> Peano number N
+  pair a b         -> (a, b)
+  swap a b         -> swap (a, b) -> (b, a) via closure
+  rot a b c        -> rotate (a, b, c) -> (b, c, a)
+  classify num N   -> meta-tagged Peano N
+  classify pair a b
+  pretty num N     -> pretty-print Peano N
+  pretty pair a b  -> pretty-print pair with meta tag
+  safe num N       -> self-host safety check on a value
+  safe pair a b    -> self-host safety check on a structural pair
 
-    - μ, VOID, UNIT
-    - PureEvaluator
-    - num / motif_to_int
-    - local motif_to_pair / motif_to_triple
-    - high-level closures (swap, dup, rot, swapends)
-    - meta classifier + pretty printer
+Type 'help' to see this summary again, 'quit' to exit.
 """
 
 from __future__ import annotations
 
 import sys
-from typing import Optional
+from typing import Optional, Tuple
 
 from rcx_pi import (
     μ,
     VOID,
-    UNIT,
     PureEvaluator,
     num,
     motif_to_int,
+    pretty_motif,
+    classify_motif,
 )
-
 from rcx_pi.core.motif import Motif
 
 from rcx_pi.programs import (
     swap_xy_closure,
     dup_x_closure,
     rotate_xyz_closure,
-    swap_ends_xyz_closure,
     activate,
 )
+from rcx_pi.self_host import (
+    is_pure_peano,
+    is_structurally_pure,
+    is_meta_tagged,
+    is_self_host_value,
+    is_self_host_safe,
+)
 
-from rcx_pi.meta import classify_motif
-from rcx_pi.pretty import pretty_motif
+
+# --- small structural helpers ------------------------------------------------
 
 
-# ---------------------------------------------------------------------
-# Local helpers (mirroring tests/examples)
-# ---------------------------------------------------------------------
-
-
-def motif_to_pair(m: Motif):
-    """Assume motif is μ(a, b); decode each as int."""
+def motif_to_pair(m: Motif) -> Optional[Tuple[int, int]]:
+    """Assume μ(a, b) where a, b are Peano; decode to (int, int)."""
     if not isinstance(m, Motif) or len(m.structure) != 2:
         return None
     a, b = m.structure
     return motif_to_int(a), motif_to_int(b)
 
 
-def motif_to_triple(m: Motif):
-    """Assume motif is μ(a, b, c); decode each as int."""
+def motif_to_triple(m: Motif) -> Optional[Tuple[int, int, int]]:
+    """Assume μ(a, b, c) where a, b, c are Peano; decode to (int, int, int)."""
     if not isinstance(m, Motif) or len(m.structure) != 3:
         return None
     a, b, c = m.structure
     return motif_to_int(a), motif_to_int(b), motif_to_int(c)
 
 
-def parse_nat(token: str) -> Optional[int]:
-    """Parse a non-negative integer from a token, else None."""
-    try:
-        n = int(token)
-    except ValueError:
-        return None
-    if n < 0:
-        return None
-    return n
+# --- command handlers --------------------------------------------------------
 
 
-def print_header() -> None:
-    print("=== RCX-π REPL ===")
-    print("Type 'help' for commands, 'quit' to exit.")
-
-
-def print_help() -> None:
-    print(
-        """
-Commands:
-
-  help
-    Show this help.
-
-  quit | exit
-    Leave the REPL.
-
-  num N
-    Build Peano number N.
-      e.g. num 5
-
-  pair A B
-    Build a pair (A, B).
-      e.g. pair 2 5
-
-  triple A B C
-    Build a triple (A, B, C).
-      e.g. triple 2 5 7
-
-  swap A B
-    Use swap_xy_closure on (A, B) -> (B, A).
-
-  dup A B
-    Use dup_x_closure on (A, B) -> (A, A).
-
-  rot A B C
-    Use rotate_xyz_closure on (A, B, C) -> (B, C, A).
-
-  swapends A B C
-    Use swap_ends_xyz_closure on (A, B, C) -> (C, B, A).
-
-  classify num N
-  classify pair A B
-  classify triple A B C
-    Tag the motif structurally and print the meta label and pretty form.
-
-Notes:
-  • All numbers are Peano-encoded μ-terms internally.
-  • pretty_motif() shows short tuple-style views when it can.
-"""
-    )
-
-
-# ---------------------------------------------------------------------
-# Command handlers
-# ---------------------------------------------------------------------
-
-
-def cmd_num(args, ev: PureEvaluator) -> None:
+def cmd_num(ev: PureEvaluator, args):
     if len(args) != 1:
         print("usage: num N")
         return
-    n = parse_nat(args[0])
-    if n is None:
-        print("error: N must be a non-negative integer")
+    try:
+        n = int(args[0])
+    except ValueError:
+        print("N must be an int")
         return
+
     m = num(n)
     print("motif:", m)
     print("int:  ", motif_to_int(m))
 
 
-def cmd_pair(args, ev: PureEvaluator) -> None:
+def cmd_pair(ev: PureEvaluator, args):
     if len(args) != 2:
         print("usage: pair A B")
         return
-    a = parse_nat(args[0])
-    b = parse_nat(args[1])
-    if a is None or b is None:
-        print("error: A and B must be non-negative integers")
+    try:
+        a = int(args[0])
+        b = int(args[1])
+    except ValueError:
+        print("A, B must be ints")
         return
+
     m = μ(num(a), num(b))
     print("motif:", m)
     print("pair: ", motif_to_pair(m))
 
 
-def cmd_triple(args, ev: PureEvaluator) -> None:
-    if len(args) != 3:
-        print("usage: triple A B C")
-        return
-    ns = [parse_nat(t) for t in args]
-    if any(n is None for n in ns):
-        print("error: A, B, C must be non-negative integers")
-        return
-    a, b, c = ns  # type: ignore[misc]
-    m = μ(num(a), num(b), num(c))
-    print("motif:", m)
-    print("triple:", motif_to_triple(m))
-
-
-def _binary_closure(
-    name: str,
-    args,
-    ev: PureEvaluator,
-    closure_factory,
-) -> None:
+def cmd_swap(ev: PureEvaluator, args):
     if len(args) != 2:
-        print(f"usage: {name} A B")
+        print("usage: swap A B")
         return
-    a = parse_nat(args[0])
-    b = parse_nat(args[1])
-    if a is None or b is None:
-        print("error: A and B must be non-negative integers")
+    try:
+        a = int(args[0])
+        b = int(args[1])
+    except ValueError:
+        print("A, B must be ints")
         return
 
     pair = μ(num(a), num(b))
-    print("pair motif:    ", pair, " => ", motif_to_pair(pair))
+    swap_cl = swap_xy_closure()
 
-    cl = closure_factory()
-    expr = activate(cl, pair)
+    # Use the same activation shape as example_rcx / test_programs
+    expr = activate(swap_cl, pair)
+
+    print("pair motif:    ", pair, " => ", motif_to_pair(pair))
     print("activation raw:", expr)
 
+    # PureEvaluator.reduce does not take max_steps as a keyword
     res = ev.reduce(expr)
-    print("reduced:       ", res, " => ", motif_to_pair(res))
+
+    decoded = motif_to_pair(res)
+    if decoded is not None:
+        print("reduced:       ", res, " => ", decoded)
+    else:
+        print("reduced:       ", res)
 
 
-def _triple_closure(
-    name: str,
-    args,
-    ev: PureEvaluator,
-    closure_factory,
-) -> None:
+def cmd_rot(ev: PureEvaluator, args):
     if len(args) != 3:
-        print(f"usage: {name} A B C")
+        print("usage: rot A B C")
         return
-    ns = [parse_nat(t) for t in args]
-    if any(n is None for n in ns):
-        print("error: A, B, C must be non-negative integers")
+    try:
+        a = int(args[0])
+        b = int(args[1])
+        c = int(args[2])
+    except ValueError:
+        print("A, B, C must be ints")
         return
-    a, b, c = ns  # type: ignore[misc]
 
     triple = μ(num(a), num(b), num(c))
-    print("triple motif:  ", triple, " => ", motif_to_triple(triple))
+    rot_cl = rotate_xyz_closure()
 
-    cl = closure_factory()
-    expr = activate(cl, triple)
+    # Same activation helper as tests
+    expr = activate(rot_cl, triple)
+
+    print("triple motif:  ", triple, " => ", motif_to_triple(triple))
     print("activation raw:", expr)
 
     res = ev.reduce(expr)
-    print("reduced:       ", res, " => ", motif_to_triple(res))
 
-
-def cmd_swap(args, ev: PureEvaluator) -> None:
-    _binary_closure("swap", args, ev, swap_xy_closure)
-
-
-def cmd_dup(args, ev: PureEvaluator) -> None:
-    _binary_closure("dup", args, ev, dup_x_closure)
-
-
-def cmd_rot(args, ev: PureEvaluator) -> None:
-    _triple_closure("rot", args, ev, rotate_xyz_closure)
-
-
-def cmd_swapends(args, ev: PureEvaluator) -> None:
-    _triple_closure("swapends", args, ev, swap_ends_xyz_closure)
-
-
-def _build_motif_for_classify(kind: str, args) -> Optional[Motif]:
-    """Support: classify num N / pair A B / triple A B C."""
-    if kind == "num":
-        if len(args) != 1:
-            print("usage: classify num N")
-            return None
-        n = parse_nat(args[0])
-        if n is None:
-            print("error: N must be a non-negative integer")
-            return None
-        return num(n)
-
-    if kind == "pair":
-        if len(args) != 2:
-            print("usage: classify pair A B")
-            return None
-        a = parse_nat(args[0])
-        b = parse_nat(args[1])
-        if a is None or b is None:
-            print("error: A and B must be non-negative integers")
-            return None
-        return μ(num(a), num(b))
-
-    if kind == "triple":
-        if len(args) != 3:
-            print("usage: classify triple A B C")
-            return None
-        ns = [parse_nat(t) for t in args]
-        if any(n is None for n in ns):
-            print("error: A, B, C must be non-negative integers")
-            return None
-        a, b, c = ns  # type: ignore[misc]
-        return μ(num(a), num(b), num(c))
-
-    print("usage: classify [num|pair|triple] ...")
-    return None
-
-
-def cmd_classify(args, ev: PureEvaluator) -> None:
+    decoded = motif_to_triple(res)
+    if decoded is not None:
+        print("reduced:       ", res, " => ", decoded)
+    else:
+        print("reduced:       ", res)
+def cmd_classify(ev: PureEvaluator, args):
     if not args:
-        print("usage: classify [num|pair|triple] ...")
+        print("usage: classify num N | classify pair A B")
         return
 
     kind = args[0]
-    motif = _build_motif_for_classify(kind, args[1:])
-    if motif is None:
+
+    if kind == "num":
+        if len(args) != 2:
+            print("usage: classify num N")
+            return
+        try:
+            n = int(args[1])
+        except ValueError:
+            print("N must be an int")
+            return
+
+        v = num(n)
+        tagged = classify_motif(v)
+        print("motif:   ", v)
+        print("tagged:  ", tagged)
+        print("pretty:  ", pretty_motif(tagged))
+        print("is_meta_tagged(tagged):", is_meta_tagged(tagged))
+        print("is_self_host_safe(tagged):", is_self_host_safe(tagged))
+
+    elif kind == "pair":
+        if len(args) != 3:
+            print("usage: classify pair A B")
+            return
+        try:
+            a = int(args[1])
+            b = int(args[2])
+        except ValueError:
+            print("A, B must be ints")
+            return
+
+        pair = μ(num(a), num(b))
+        tagged = classify_motif(pair)
+        print("motif:   ", pair)
+        print("tagged:  ", tagged)
+        print("pretty:  ", pretty_motif(tagged))
+        print("is_meta_tagged(tagged):", is_meta_tagged(tagged))
+        print("is_self_host_safe(tagged):", is_self_host_safe(tagged))
+
+    else:
+        print("unknown classify kind:", kind)
+        print("usage: classify num N | classify pair A B")
+
+
+def cmd_pretty(ev: PureEvaluator, args):
+    if not args:
+        print("usage: pretty num N | pretty pair A B")
         return
 
-    print("motif:   ", motif)
+    kind = args[0]
 
-    tagged = classify_motif(motif)
-    print("tagged:  ", tagged)
-    print("pretty:  ", pretty_motif(tagged))
+    if kind == "num":
+        if len(args) != 2:
+            print("usage: pretty num N")
+            return
+        try:
+            n = int(args[1])
+        except ValueError:
+            print("N must be an int")
+            return
+
+        v = num(n)
+        print("motif: ", v)
+        print("pretty:", pretty_motif(v))
+
+    elif kind == "pair":
+        if len(args) != 3:
+            print("usage: pretty pair A B")
+            return
+        try:
+            a = int(args[1])
+            b = int(args[2])
+        except ValueError:
+            print("A, B must be ints")
+            return
+
+        pair = μ(num(a), num(b))
+        tagged = classify_motif(pair)
+        print("motif:  ", pair)
+        print("tagged: ", tagged)
+        print("pretty:", pretty_motif(tagged))
+
+    else:
+        print("unknown pretty kind:", kind)
+        print("usage: pretty num N | pretty pair A B")
 
 
-# ---------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------
+def cmd_safe(ev: PureEvaluator, args):
+    """
+    Self-host safety probe:
+
+      safe num N
+      safe pair A B
+    """
+    if not args:
+        print("usage: safe num N | safe pair A B")
+        return
+
+    kind = args[0]
+
+    if kind == "num":
+        if len(args) != 2:
+            print("usage: safe num N")
+            return
+        try:
+            n = int(args[1])
+        except ValueError:
+            print("N must be an int")
+            return
+
+        v = num(n)
+        print("v:", v)
+        print("is_pure_peano(v):         ", is_pure_peano(v))
+        print("is_structurally_pure(v):  ", is_structurally_pure(v))
+        print("is_self_host_value(v):    ", is_self_host_value(v))
+        print("is_self_host_safe(v):     ", is_self_host_safe(v))
+
+    elif kind == "pair":
+        if len(args) != 3:
+            print("usage: safe pair A B")
+            return
+        try:
+            a = int(args[1])
+            b = int(args[2])
+        except ValueError:
+            print("A, B must be ints")
+            return
+
+        pair = μ(num(a), num(b))
+        print("pair:", pair)
+        print("is_pure_peano(pair):        ", is_pure_peano(pair))
+        print("is_structurally_pure(pair): ", is_structurally_pure(pair))
+        print("is_self_host_value(pair):   ", is_self_host_value(pair))
+        print("is_self_host_safe(pair):    ", is_self_host_safe(pair))
+
+    else:
+        print("unknown safe kind:", kind)
+        print("usage: safe num N | safe pair A B")
 
 
-def main(argv=None) -> int:
+def cmd_help():
+    print(__doc__)
+
+
+# --- main loop ----------------------------------------------------------------
+
+
+def main():
     ev = PureEvaluator()
-    print_header()
+    print("=== RCX-π REPL ===")
+    print("Type 'help' for commands, 'quit' to exit.")
 
     while True:
         try:
-            line = input("rcx> ")
+            line = input("rcx> ").strip()
         except EOFError:
             print()
             break
 
-        line = line.strip()
         if not line:
             continue
-
         if line in ("quit", "exit"):
             break
-
         if line == "help":
-            print_help()
+            cmd_help()
             continue
 
         parts = line.split()
         cmd, args = parts[0], parts[1:]
 
         if cmd == "num":
-            cmd_num(args, ev)
+            cmd_num(ev, args)
         elif cmd == "pair":
-            cmd_pair(args, ev)
-        elif cmd == "triple":
-            cmd_triple(args, ev)
+            cmd_pair(ev, args)
         elif cmd == "swap":
-            cmd_swap(args, ev)
-        elif cmd == "dup":
-            cmd_dup(args, ev)
+            cmd_swap(ev, args)
         elif cmd == "rot":
-            cmd_rot(args, ev)
-        elif cmd == "swapends":
-            cmd_swapends(args, ev)
+            cmd_rot(ev, args)
         elif cmd == "classify":
-            cmd_classify(args, ev)
+            cmd_classify(ev, args)
+        elif cmd == "pretty":
+            cmd_pretty(ev, args)
+        elif cmd == "safe":
+            cmd_safe(ev, args)
         else:
-            print(f"unknown command: {cmd!r} (try 'help')")
-
-    return 0
+            print("unknown command:", cmd)
+            print("Type 'help' for usage.")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

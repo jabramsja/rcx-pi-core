@@ -1,0 +1,161 @@
+\section{03 \textbar\ The Evaluator and Reduction Rules}
+
+RCX-$\pi$ has no opcodes, no bytecode, and no virtual machine.  
+Computation is enacted by a \textbf{pure reduction engine} that rewrites
+motif trees according to shape alone.
+
+\[
+\text{Motif} \xrightarrow{\text{rewrite}} \text{Motif}
+\]
+
+There is no semantic substrate beneath it — \emph{shape is both data and execution.}
+
+%----------------------------------------------------------
+\subsection{Purpose of the Evaluator}
+
+Given a motif \(M\), the evaluator repeatedly applies rewrite rules until
+no further rule matches:
+
+\[
+\text{reduce}(M) =
+\begin{cases}
+M' & \text{if } M \Rightarrow M' \\
+M  & \text{otherwise}
+\end{cases}
+\]
+
+Where \(\Rightarrow\) indicates a single structural contraction.
+
+Evaluation halts when the motif reaches \textbf{normal form} (stable geometry).
+
+%----------------------------------------------------------
+\subsection{Rewrite Semantics}
+
+All rules in RCX-$\pi$ follow the same pattern:
+
+\[
+\mu(\text{pattern}, \text{arguments}) \Rightarrow \text{replacement}
+\]
+
+Arguments are \emph{subtrees} — no variable environments, no symbol table,
+no call frames. Matching is purely geometric.
+
+Illustrative rule:
+
+\[
+\mu(\text{succ},\mu()) \Rightarrow \mu(\mu()) \equiv 1
+\]
+
+Note: numerals are not primitive — they are \(\mu\)-chains.
+
+%----------------------------------------------------------
+\subsection{Core Numeric Reductions}
+
+Peano naturals arise by nested \(\mu\)-application:
+
+\[
+0 := \mu()
+\qquad
+n+1 := \mu(n)
+\]
+
+Reduction rules:
+
+\[
+\text{pred}(\mu(n)) \Rightarrow n
+\qquad\qquad
+\text{succ}(n) := \mu(n)
+\]
+
+Addition and multiplication emerge from structure rather than arithmetic:
+
+\[
+a+b := \mu(a,b)
+\quad
+\Rightarrow\quad
+\mu^{a+b}()
+\]
+
+\[
+a\times b := \mu(a,b,\text{mult})
+\quad\Rightarrow\quad
+\mu^{ab}()
+\]
+
+The evaluator does not "compute numbers" —  
+it \textbf{folds geometry into canonical chains}.
+
+%----------------------------------------------------------
+\subsection{Program Activation}
+
+Programs are motifs. Function application is the moment structure aligns:
+
+\[
+\mu(\text{swap},\mu(x,y)) \Rightarrow \mu(y,x)
+\]
+\[
+\mu(\text{rot},\mu(x,y,z)) \Rightarrow \mu(y,z,x)
+\]
+
+No syntax dictates "call" — activation is a physical configuration.
+
+\[
+\text{execution} := \text{shape rearrangement}
+\]
+
+%----------------------------------------------------------
+\subsection{Reduction Strategy}
+
+\[
+\text{reduce}(M) =
+M \Rightarrow M_1 \Rightarrow M_2 \Rightarrow \dots \Rightarrow M_n
+\]
+
+Like gravity settling blocks into place,
+evaluation is the relaxation of tension in structure.
+
+%----------------------------------------------------------
+\subsection{Determinism and Confluence}
+
+Goal: \textbf{confluence} — different rewrite paths produce same result.
+
+Sometimes motifs create divergent normal forms — a feature, not a bug.
+These behaviors will feed later RCX research:
+
+\begin{itemize}
+\item reversible and bidirectional rewrites
+\item chaotic activation forests
+\item self-observing reductions
+\item evolving internal rule sets
+\end{itemize}
+
+The evaluator is minimal by design — \textit{simplicity fuels emergence}.
+
+%----------------------------------------------------------
+\subsection{Example Reduction Trace}
+
+\[
+\text{swap}(2,5) = \mu(\text{swap},\mu(2,5))
+\]
+
+\[
+\mu(\text{swap},\mu(a,b)) \Rightarrow \mu(b,a) \Rightarrow (5,2)
+\]
+
+Execution history is visible as living structure.
+
+Reduction is not hidden --- it \textbf{is the runtime}.
+
+%----------------------------------------------------------
+\subsection{Summary}
+
+\begin{itemize}
+\item The evaluator rewrites motifs until no rules apply
+\item Structure alone defines computation — no syntax layer
+\item Programs and data share the same form
+\item Activation is geometric: place forms together and reduce
+\item Execution traces are motifs changing shape in the open
+\end{itemize}
+
+RCX-$\pi$ is computation without instructions.  
+The engine is geometry.

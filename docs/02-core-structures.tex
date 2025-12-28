@@ -1,0 +1,171 @@
+\section{02 \textbar\ Core Structures of RCX-$\pi$}
+
+This section explains the essential building blocks of computation in RCX-$\pi$.
+Everything reduces to a single data form — the motif — and a small set of
+structural rules that govern how motifs combine, transform, and collapse.
+
+RCX-$\pi$ does not distinguish between data and code. A number, a pair, a closure,
+a program, and a meta-transform are all constructed from identical material.
+Computation is the \emph{geometry of motifs}.
+
+%----------------------------------------------------------
+\subsection{The Motif Primitive}
+
+All structure is built from a single constructor:
+
+\[
+\mu(a_1, a_2, \dots, a_n)
+\]
+
+where $n \ge 0$ and each $a_i$ is itself a motif.
+There are no alternative node types, tags, or syntactic layers.
+
+\[
+\text{Motif} := \mu(M_1, M_2, \dots, M_k)
+\]
+
+\textbf{Everything is a tree.}
+No values, variables, or functions exist apart from shape.
+
+\begin{itemize}
+\item $\mu()$ is the empty motif (Peano zero)
+\item $\mu(X)$ is unary structure (successor or embedding)
+\item $\mu(X,Y)$ is binary — the seed of pairs/closures
+\item Higher arity emerges recursively
+\end{itemize}
+
+%----------------------------------------------------------
+\subsection{Peano Naturals as Pure Structure}
+
+Integers require no numeric type. They are purely spatial depth.
+
+\[
+0 := \mu()
+\qquad
+1 := \mu(0)
+\qquad
+2 := \mu(1)
+\qquad ...
+\]
+
+\[
+n := \mu^n(\mu())
+\]
+
+Reduction can convert motifs to integers via collapse, but no numeric layer is
+required for computation.
+
+%----------------------------------------------------------
+\subsection{Pairs and Tuples}
+
+Pairs are not a datatype — just arity-2 motifs:
+
+\[
+(x,y) := \mu(x,y)
+\]
+
+Triples generalize naturally:
+
+\[
+(x,y,z) := \mu(x,y,z)
+\]
+
+and arbitrary tuples follow the same pattern. RCX-$\pi$ does not need
+type constructors for lists, arrays, or vectors. Structure alone encodes them.
+
+\begin{center}
+\begin{tabular}{c|c}
+\textbf{Form} & \textbf{Meaning (informal)} \\
+\hline
+$\mu(a,b)$ & pair $(a,b)$ \\
+$\mu(a,b,c)$ & triple $(a,b,c)$ \\
+$\mu(a,b,c,d,\dots)$ & n-tuple \\
+\end{tabular}
+\end{center}
+
+The evaluator does not special-case tuples. Interpretation is purely pattern-based.
+
+%----------------------------------------------------------
+\subsection{Closures as Motifs}
+
+A program is simply a motif that, when activated, reduces into a new shape.
+There are no lambdas, argument lists, or binding rules. \emph{A closure is
+structure awaiting another structure.}
+
+\[
+\text{closure}(f,x) = \mu(f,x)
+\]
+
+where evaluation rules know how to collapse it.
+
+Example program motifs:
+
+\[
+\text{swap}(x,y) \rightarrow (y,x)
+\qquad
+\text{rot}(x,y,z) \rightarrow (y,z,x)
+\]
+
+There is no code vs data barrier. A closure is indistinguishable from data until
+reduction triggers semantic behavior.
+
+%----------------------------------------------------------
+\subsection{Structural Rewriting}
+
+Computation occurs when motifs match one of the evaluator’s rewrite schemas:
+
+\[
+\mu(\text{rule},\text{args}) \Rightarrow \text{reduced motif}
+\]
+
+Rules live in \verb|evaluator.py|, forming the ``physics'' of RCX-$\pi$.
+
+Example (conceptual):
+
+\[
+\mu(\text{succ},\mu()) \Rightarrow 1
+\qquad
+\mu(\text{pred},1) \Rightarrow 0
+\]
+
+but no numeric primitives exist — all are patterns over motifs.
+
+%----------------------------------------------------------
+\subsection{Activation}
+
+To call a program, we grow a motif:
+
+\[
+\mu(\text{closure},\text{data}) \Rightarrow \text{reduction cascade}
+\]
+
+Execution is spatial. There is no instruction pointer.
+Computation is what happens when geometry relaxes.
+
+%----------------------------------------------------------
+\subsection{Self-Reference and Meta-Structure}
+
+Because both programs and values are motifs, RCX-$\pi$ naturally supports
+introspection:
+
+\[
+\text{classify}(m) \Rightarrow \mu(\langle\text{tag}\rangle,m)
+\]
+
+This tagging layer does not change the core, but reveals structure to itself.
+It is the beginning of RCX self-awareness.
+
+%----------------------------------------------------------
+\subsection{Summary}
+
+\begin{itemize}
+\item One primitive constructor: $\mu$
+\item Numbers, tuples, and closures are the same thing structurally
+\item Programs are motifs that collapse when activated
+\item Computation is geometric, not procedural
+\item Everything is visible and introspectable as shape
+\end{itemize}
+
+RCX-$\pi$ is a universe made of folding. Nothing more is required.
+The next sections will expand the evaluator, rules, classifier, and eventually
+the seeds of fully self-hosting behavior.

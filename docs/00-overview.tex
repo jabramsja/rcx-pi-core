@@ -1,0 +1,231 @@
+\section{00 \textbar\ RCX-$\pi$ Core Overview}
+
+RCX-$\pi$ is a \textbf{tiny structural engine} built entirely on one primitive constructor:
+
+\[
+\mu(\;\cdot\;)
+\]
+
+Everything arises from this single form — no types, no bytecode, no opcodes.
+Numbers, programs, meta-operations, and even evaluators are \emph{motifs}.
+Computation occurs by \textbf{structural rewriting} rather than executing
+instructions.
+
+RCX-$\pi$ is a minimal, executable slice of RCX theory. It demonstrates how
+computation can emerge from structure alone, and is deliberately small enough
+that a human can inspect and evolve it directly.
+
+%----------------------------------------------------------
+\subsection{What is a Motif?}
+
+A \textbf{motif} is a tree:
+
+\[
+\mu(\;\mu(\;\mu(\dots)\;)\;)
+\]
+
+The empty motif is:
+
+\[
+\mu()
+\]
+
+Peano naturals are nested applications of $\mu$:
+
+\begin{center}
+\begin{tabular}{c|c}
+\textbf{Number} & \textbf{Motif} \\
+\hline
+0 & $\mu()$ \\
+1 & $\mu(\mu())$ \\
+2 & $\mu(\mu(\mu()))$ \\
+5 & $\mu$ applied 6 times \\
+\end{tabular}
+\end{center}
+
+There is no semantic type system.
+A number, a closure, a tuple, a program — all are motifs.
+Their identity comes only from \textbf{shape} and \textbf{reduction behavior}.
+
+%----------------------------------------------------------
+\subsection{Evaluation}
+
+Reduction is defined in \verb|evaluator.py|.
+There is no instruction set; instead RCX-$\pi$ computes by structural pattern
+collapse.
+
+Computation is visible and inspectable as geometry.
+
+Example:
+
+\[
+\text{pred}(\text{succ}(0))
+\]
+
+reduces structurally — nothing is executed, only folded.
+
+%----------------------------------------------------------
+\subsection{Programs as Motifs}
+
+Programs are not separate entities.
+A closure \emph{is} a motif that expects activation.
+
+\begin{center}
+\begin{tabular}{l|l}
+\textbf{Name} & \textbf{Meaning} \\
+\hline
+\verb|swap_xy_closure| & $(x,y) \rightarrow (y,x)$ \\
+\verb|dup_x_closure| & $(x,y) \rightarrow (x,x)$ \\
+\verb|rotate_xyz_closure| & $(x,y,z) \rightarrow (y,z,x)$ \\
+\end{tabular}
+\end{center}
+
+Activation is structural growth:
+
+\[
+\text{closure} \;+\; \text{data} \; \Rightarrow \; \mu(\text{closure},\text{data})
+\]
+
+then reduction collapses the geometry into a result.
+No VM stack — computation is origami.
+
+%----------------------------------------------------------
+\subsection{Activation Example}
+
+During evaluation you can watch the motif twist and collapse.
+Execution becomes visual rather than symbolic — instructions are replaced
+by \emph{shape transformations}.
+
+%----------------------------------------------------------
+\subsection{Structural Classification Layer}
+
+RCX-$\pi$ includes a minimal \textbf{meta-classifier} that inspects motifs and
+tags them as:
+
+\begin{center}
+\begin{tabular}{l|l}
+\textbf{Label} & \textbf{Meaning} \\
+\hline
+\verb|value| & numeric/atomic \\
+\verb|program| & closure awaiting activation \\
+\verb|mixed| & partial application \\
+\verb|struct| & generic composite motif \\
+\end{tabular}
+\end{center}
+
+Example classification:
+
+\[
+\text{pair}(2,5)
+\;\Rightarrow\;
+\langle \text{value} \rangle (2,5)
+\]
+
+Motifs become reflective — structure is visible to itself.
+
+%----------------------------------------------------------
+\subsection{Pairs, Triples, and Higher Arity}
+
+Tuples require no new rules — they are just nested motifs.
+Closures operate by rearranging structure:
+
+\[
+(x,y,z) \mapsto (y,z,x)
+\]
+
+Everything is \emph{fold, reorder, collapse}.
+
+Structure \textbf{is} the computation.
+
+%----------------------------------------------------------
+\subsection{Why This Matters}
+
+Traditional systems rely on:
+
+\begin{itemize}
+\item opcodes
+\item call stacks
+\item environments
+\item interpreters evaluating interpreters
+\end{itemize}
+
+RCX-$\pi$ replaces all of this with:
+
+\[
+\text{Geometry} + \text{Reduction Rules} = \text{Computation}
+\]
+
+Programs are not written — they \textbf{grow}.
+Evaluation is physical, spatial, inspectable.
+
+%----------------------------------------------------------
+\subsection{Higher-Level Toolkit (v1.2+)}
+
+The engine remains minimal, but a standard library of structural patterns is
+emerging:
+
+\begin{center}
+\begin{tabular}{l|p{7cm}}
+\textbf{Feature} & \textbf{What it does} \\
+\hline
+\verb|motif_to_int| & collapse Peano motif to Python integer \\
+\verb|num(n)| & lift Python integer to motif form \\
+\verb|pretty(m)| & pretty-print motif as $(a,b,c)$ \\
+\verb|bench()| & micro-benchmark evaluator \\
+\verb|higher.py| & factorial, summation, map, tuple ops \\
+\verb|self_host.py| & seed of eventual RCX self-boot process \\
+\end{tabular}
+\end{center}
+
+All helpers are optional — the core depends on none.
+
+%----------------------------------------------------------
+\subsection{Pretty Printing}
+
+Raw motifs are dense:
+
+\[
+\mu(\mu(\mu(\mu(\dots))))
+\]
+
+Pretty printing renders nested arity naturally:
+
+\[
+(2,5,7)
+\]
+
+allowing large RCX structures to be debugged with clarity.
+
+%----------------------------------------------------------
+\subsection{Higher-Order Combinators}
+
+Functional patterns arise from shape alone:
+
+\[
+\text{map},\; \text{fold},\; \text{sum},\; \text{factorial}
+\]
+
+No mutation, no loops — recursion is pattern propagation.
+
+%----------------------------------------------------------
+\subsection{Benchmarks}
+
+A tiny engine with tiny timing.
+Motif reduction is light and fast — like a watch-spring.
+
+%----------------------------------------------------------
+\subsection{Vision Beyond the Core}
+
+Today RCX-$\pi$ is a \textbf{self-consistent computational seed}.
+Tomorrow:
+
+\begin{itemize}
+\item typed motifs
+\item self-host evaluator
+\item evolving closures
+\item membrane/lobe growth
+\item semantic fold → behavior
+\item emergence instead of instruction
+\end{itemize}
+
+The core will not grow larger — the universe grows around it.

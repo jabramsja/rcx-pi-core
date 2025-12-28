@@ -1,0 +1,194 @@
+\section{01 \textbar\ Getting Started}
+
+This document is the practical entry point into RCX-$\pi$.
+After reading this section you should be able to:
+
+\begin{itemize}
+    \item clone the repository and enter the working directory,
+    \item run the full demo + test suite,
+    \item experiment interactively using the minimal REPL,
+    \item understand where to go next in the documentation.
+\end{itemize}
+
+RCX-$\pi$ is intentionally small --- you can inspect and understand the full
+core in one sitting. This section gets your hands on a living instance quickly
+rather than only reading abstract theory.
+
+%----------------------------------------------------------
+\subsection{1. Clone the Repository}
+
+\begin{verbatim}
+git clone https://github.com/jabramsja/rcx-pi-core.git
+cd rcx-pi-core/WorkingRCX
+\end{verbatim}
+
+The working tree contains:
+
+\begin{verbatim}
+WorkingRCX/
+  rcx_pi/            # Core RCX-π package
+  demo_rcx_pi.py     # End-to-end demonstration
+  example_numbers.py # Peano / arithmetic examples
+  example_rcx.py     # Closure / swap / rotate examples
+  example_higher.py  # Higher-level helpers (factorial, map/sum)
+  bench_rcx.py       # Micro benchmark for reductions
+  repl_rcx.py        # Minimal interactive REPL
+  run_all.py         # Unified test + demo runner
+  tests/             # Validation scripts
+\end{verbatim}
+
+No installation step is required --- the engine runs locally in-place.
+
+%----------------------------------------------------------
+\subsection{2. Python Environment}
+
+A standard CPython $\geq$ 3.10 is recommended.
+
+\begin{verbatim}
+python3 --version
+\end{verbatim}
+
+On macOS and Linux the usual invocation is:
+
+\begin{verbatim}
+python3 run_all.py
+\end{verbatim}
+
+(Replace \verb|python3| with \verb|python| if your system maps it to Python~3.)
+
+%----------------------------------------------------------
+\subsection{3. Run the Full Demo \& Test Suite}
+
+From inside \verb|WorkingRCX/|:
+
+\begin{verbatim}
+python3 run_all.py
+\end{verbatim}
+
+Expected output structure:
+
+\begin{verbatim}
+=== RCX-π Full Test & Demo Runner ===
+
+>>> Running demo_rcx_pi.py
+[OK]
+
+>>> Running example_numbers.py
+[OK]
+
+>>> Running test_*.py
+[OK]
+
+=== End of RCX-π test suite ===
+\end{verbatim}
+
+If a failure occurs, the runner shows the failing script and a traceback.
+You can execute a single component directly:
+
+\begin{verbatim}
+python3 demo_rcx_pi.py
+python3 example_rcx.py
+python3 tests/test_numbers.py
+\end{verbatim}
+
+%----------------------------------------------------------
+\subsection{4. Interactive REPL}
+
+Launch:
+
+\begin{verbatim}
+python3 repl_rcx.py
+\end{verbatim}
+
+You should see:
+
+\begin{verbatim}
+=== RCX-π REPL ===
+Type 'help' for commands, 'quit' to exit.
+rcx>
+\end{verbatim}
+
+Example session:
+
+\paragraph{Peano Numbers}
+
+\begin{verbatim}
+rcx> num 5
+motif: μ(μ(μ(μ(μ(μ())))))
+int:   5
+\end{verbatim}
+
+\paragraph{Pairs \& structural programs}
+
+\begin{verbatim}
+rcx> pair 2 5
+motif: μ(μ(μ(μ())), μ(μ(μ(μ(μ(μ()))))))
+pair:  (2, 5)
+
+rcx> swap 2 5
+...
+reduced => (5, 2)
+
+rcx> rot 2 5 7
+...
+reduced => (5, 7, 2)
+\end{verbatim}
+
+\paragraph{Meta classification}
+
+\begin{verbatim}
+rcx> classify pair 2 5
+motif:    μ(...)
+tagged:   μ(tag, payload)
+pretty:   <value> (2, 5)
+\end{verbatim}
+
+\paragraph{Safety Probes}
+
+\begin{verbatim}
+rcx> safe num 5
+is_self_host_safe: True
+
+rcx> safe pair 2 5
+is_self_host_safe: True
+\end{verbatim}
+
+\verb|help| in the REPL lists available commands.
+
+%----------------------------------------------------------
+\subsection{5. Optional Shell Shortcuts}
+
+If you frequently enter the working directory, you may define aliases.
+
+Example for \verb|~/.zshrc|:
+
+\begin{verbatim}
+alias wrx='cd ~/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX'
+alias gl='git log --oneline --graph --decorate --all'
+\end{verbatim}
+
+Reload:
+
+\begin{verbatim}
+source ~/.zshrc
+wrx   # jump directly to WorkingRCX/
+gl    # view prettified git history
+\end{verbatim}
+
+Adjust the path in \verb|wrx| to match your environment.
+
+%----------------------------------------------------------
+\subsection{6. Where to Go Next}
+
+Once \verb|run_all.py| passes with \verb|[OK]| and you have played inside the
+REPL, move deeper:
+
+\begin{itemize}
+    \item \textbf{00-overview} --- motivation and conceptual framing
+    \item \textbf{02-core-structures} --- motif representation and evaluation
+    \item \textbf{03-program-library} --- structural programs and composition
+\end{itemize}
+
+You now have a live RCX-$\pi$ environment and the shortest path to experiments.
+From here the system opens outward: self-hosting, growth laws, meta tags,
+recursion scaffolds and the eventual RCX higher manifolds.

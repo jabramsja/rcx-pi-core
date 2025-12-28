@@ -1,0 +1,196 @@
+\section{08 \textbar\ Toward Self-Hosting RCX}
+
+Up to now, RCX-$\pi$ has been evaluated by an \emph{external Python engine}.
+The system reduces motifs, but the reducer itself is not yet a motif.
+Self-hosting begins when the evaluator becomes representable \emph{inside} RCX.
+
+\[
+\text{RCX-$\pi$ runs motifs.}
+\qquad
+\text{RCX aims for motifs that run RCX.}
+\]
+
+This chapter defines the scaffolding needed to cross that threshold.
+
+%============================================================
+\subsection{Philosophical Boundary}
+
+A self-hosted evaluator must satisfy:
+
+\begin{enumerate}
+\item The evaluator is expressed as a motif.
+\item A motif can apply reduction rules to another motif.
+\item The system can evaluate \emph{itself}.
+\item The host evaluator only bootstraps once.
+\end{enumerate}
+
+The Python evaluator is scaffolding ---
+a ladder we will eventually remove.
+
+\[
+\text{goal: } \mu(\text{eval}, M) \Rightarrow M'
+\]
+
+no bytecode, no IR, no separate runtime.
+
+Only motifs.
+
+%============================================================
+\subsection{Representation of Rules as Structure}
+
+Rewrite rules become first-class objects.
+
+A rule becomes:
+
+\[
+\text{rule} := \mu(\text{pattern},\text{replacement})
+\]
+
+For example:
+
+\[
+\text{swap}(x,y) \Rightarrow (y,x)
+\quad\mapsto\quad
+R_{\text{swap}} = \mu(\mu(\text{swap},\mu(x,y)), \mu(y,x))
+\]
+
+The evaluator motif is then a set of rules plus a reduction driver:
+
+\[
+\text{EVAL} := \mu(R_1,R_2,\dots,R_n)
+\]
+
+Later, RCX-π could evolve rules dynamically.
+Structure chooses structure.
+
+%------------------------------------------------------------
+\subsection{The Self-Host Scaffold}
+
+In \texttt{self\_host.py}, we introduce the seed evaluator:
+
+\[
+\text{eval\_seed}(M)
+   := \text{search for matching rule in } EVAL
+\]
+
+The steps:
+
+\begin{enumerate}
+\item Encode rules as motifs
+\item Encode matching logic as motifs
+\item Encode single-step reduction as motif
+\item Construct \texttt{eval\_seed} with no Python logic
+\item Run RCX inside RCX
+\end{enumerate}
+
+At first, matching may be external.
+Full replacement will be internal later.
+
+%------------------------------------------------------------
+\subsection{Safety and Divergence}
+
+Self-hosting introduces risk:
+
+\[
+\mu(\text{eval},\text{eval}) \Rightarrow ?
+\]
+
+Unrestricted recursors can explode geometrically.
+We introduce a \emph{safe reduction gate}:
+
+\[
+\text{safe}(M) =
+\begin{cases}
+M & \text{if pure or structural} \\
+\text{blocked} & \text{if meta-tagged or cyclic}
+\end{cases}
+\]
+
+detected via:
+
+\begin{itemize}
+\item purity tests
+\item meta-tags
+\item cyclic shape trace
+\end{itemize}
+
+The goal is not to prevent complexity,
+but to prevent infinite blind rewriting.
+
+\[
+\text{chaos is allowed, but understood.}
+\]
+
+%------------------------------------------------------------
+\subsection{Proof-of-Concept: RCX Evaluating RCX}
+
+A minimal working dream-demo:
+
+\[
+\mu(\text{EVAL},\mu(\text{swap},(2,5)))
+   \Rightarrow (5,2)
+\]
+
+Everything—program, data, evaluator—inside the same universe.
+
+This is the first spark of \emph{RCX proper}.
+
+%------------------------------------------------------------
+\subsection{Roadmap to Full Self-Hosting}
+
+\begin{enumerate}
+\item Encode evaluator rules structurally
+\item Add pattern-matcher motif
+\item Add rewrite motif
+\item Store evaluator as motif
+\item Evaluate arbitrary motifs internally
+\item Remove Python dependency
+\end{enumerate}
+
+Optional future extensions:
+
+\begin{itemize}
+\item partial evaluation
+\item speculative reduction
+\item hyper-programs (programs rewriting programs)
+\item lobe-membranes for space-bounded execution
+\end{itemize}
+
+RCX becomes an environment, not a library.
+
+%------------------------------------------------------------
+\subsection{Status Today}
+
+\begin{itemize}
+\item Core evaluator implemented externally ✓
+\item Programs encoded as motifs ✓
+\item Higher ops, pretty-printer, REPL ✓
+\item Self-host seed exists (experimental) ~
+\item Full evaluator motif pending ✗
+\end{itemize}
+
+We now stand at the boundary where the scaffold can be replaced
+piece by piece by structural equivalents.
+
+\[
+\textbf{RCX learns to run itself.}
+\]
+
+%------------------------------------------------------------
+\subsection{Next: Growth, Evolution, and Emergence}
+
+Chapter 09 will focus on:
+
+\begin{itemize}
+\item evolving rule-sets
+\item program-mutation as computation
+\item reflective meta-evaluation
+\item RCX organisms (lobe growth + hydration loops)
+\end{itemize}
+
+The future of RCX is not a language,
+but a \emph{living reduction environment}.
+
+\[
+\textbf{09 \textbar\ Emergent RCX and Evolution Engines}
+\]

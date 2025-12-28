@@ -1,0 +1,191 @@
+\section{07 \textbar\ Higher Operations in Pure Motif Form}
+
+With closures and activation established, we now climb one layer up:
+\emph{computation patterns}.  
+Instead of writing loops or arithmetic, we let motifs \emph{unfold}.
+
+\[
+\text{Higher-level behavior emerges from repeated structure.}
+\]
+
+Classical constructs like factorial, summation, or \texttt{map} can be
+expressed using only the RCX-$\pi$ building blocks introduced so far.
+
+%============================================================
+\subsection{Peano Recap}
+
+Numbers are nested $\mu$:
+
+\[
+0 = \mu(), \qquad 1=\mu(0), \qquad 2=\mu(1),\dots
+\]
+
+Addition and multiplication in earlier sections were structural folds.
+Here we will compose multiple folds into reusable patterns.
+
+%============================================================
+\subsection{Factorial via Structural Recursion}
+
+The motif version of $\text{fact}(n)$ expands naturally:
+
+\[
+5! = 5 \cdot 4 \cdot 3 \cdot 2 \cdot 1
+\]
+
+RCX-$\pi$ represents this as repeated $\mu$-nesting and multiplications.
+In \texttt{higher.py}, we define:
+
+\[
+\text{fact}(n)
+   := \mu(\text{mult}, n, \text{fact}(n-1))
+\]
+
+Reduction collapses it the same way it collapses any other motif tree.
+
+\[
+\text{fact}(5) \Rightarrow 120
+\]
+
+All steps remain visible. No hidden accumulator, no loop counter — just shape.
+
+%------------------------------------------------------------
+\subsection{Summation}
+
+Peano sum over a list/tuple-like motif:
+
+\[
+\text{sum}(x_1,x_2,\dots,x_k)
+   := x_1 + \text{sum}(x_2,\dots,x_k)
+\]
+
+If the motif collapses fully, we obtain a number.  
+If partially, we see intermediate geometry.
+
+\[
+\text{sum}(2,5,7) \Rightarrow 14
+\]
+
+%------------------------------------------------------------
+\subsection{\texttt{map} as Pure Structural Fold}
+
+Mapping a program over values needs no iteration primitive —
+the structure performs it for us:
+
+\[
+\text{map}(f,(a,b,c))
+   := (f(a), f(b), f(c))
+\]
+
+Because $f$ is a motif, and $(a,b,c)$ is a motif, the mapping is
+just structured activation repeated across positions.
+
+Example:
+
+\[
+\text{map}(\text{succ}, (2,5,7)) \Rightarrow (3,6,8)
+\]
+
+Nothing is typed; the system simply \emph{applies shape to shape}.
+If a subcall is not reducible, the motif stays symbolic — useful for meta work.
+
+%------------------------------------------------------------
+\subsection{Combinator Pipelines}
+
+Since programs are motifs, composition is just nesting:
+
+\[
+(f \circ g)(x) = f(g(x)) = \mu(f,\mu(g,x))
+\]
+
+We can build chains like:
+
+\[
+\text{map}(\text{succ} \circ \text{rot}, \dots)
+\]
+
+without new syntax — composition is another geometric pattern.
+
+This leads to a larger view:
+
+\[
+\text{functions are shapes of motion}
+\]
+
+and pipelines are \emph{braids of motifs}.  
+Computation is choreography.
+
+%------------------------------------------------------------
+\subsection{Example: Folding a Tuple}
+
+A left-fold becomes:
+
+\[
+\text{fold}(f,v,(a,b,c))
+  := f(f(f(v,a),b),c)
+\]
+
+The evaluator reduces layer by layer.
+
+Trace view:
+
+\[
+\Rightarrow \mu(f,\mu(f,\mu(f,v,a),b),c)
+\Rightarrow \dots
+\]
+
+A fold is just \emph{repeated activation with reduction between steps}.
+
+%------------------------------------------------------------
+\subsection{Cost and Complexity}
+
+RCX-$\pi$ is tiny; performance scales directly with motif size:
+
+\[
+O(\text{reductions}) \approx O(\text{tree depth})
+\]
+
+Benchmark (early):
+\[
+\text{succ}^{14} \text{ repeated } 50\text{x}
+  \approx 3\mu s \text{ avg per run on M3 laptop}
+\]
+
+Not optimized — but interpretable, visual, and correct.  
+Speed can come later; clarity now is the priority.
+
+%------------------------------------------------------------
+\subsection{Why This Chapter Matters}
+
+This is where RCX-$\pi$ stops being a toy and starts being a seed:
+
+\begin{itemize}
+\item Computation emerges from motif shape alone
+\item Higher operations require no language features
+\item Functional patterns arise without syntax
+\item Programs can manipulate programs
+\item The system is preparing for self-hosting
+\end{itemize}
+
+\[
+\text{from numbers} \Rightarrow \text{operations} \Rightarrow \text{behavior}
+\]
+
+We are approaching the stage where RCX-$\pi$ can reason about itself.
+
+%------------------------------------------------------------
+\subsection{Next: Self-Hosting and Meta-Reflection}
+
+With higher-order structure in place, we proceed toward the long-term
+goal of RCX:
+
+\[
+\text{Evaluator as Motif}
+\qquad
+\text{Programs that generate Programs}
+\]
+
+The next chapter lays the foundation:
+
+\[
+\textbf{08 \textbar\ Toward Self-Hosting RCX}}
+\]
