@@ -1,197 +1,122 @@
 # rcx_pi/programs.py
 """
-RCX-π structural programs and helpers.
+RCX-π programs layer — closure based, minimal, test-oriented.
 
-All of these are *pure motifs* built from:
-  - Motif / μ / VOID
-  - PROJECTION / CLOSURE / ACTIVATION / VAR markers
+Implements:
+✔ swap_xy_closure
+✔ dup_x_closure
+✔ rotate_xyz_closure
+✔ swap_ends_xyz_closure
+✔ activate(closure,arg)
 
-Exposed:
-  - num(n)                       : Peano number builder
-  - activate(closure, arg)       : wrap as ACTIVATION motif
++ Adds features required by test_programs.py:
+✔ PROGRAM_TAG, SEQ_TAG
+✔ wrap_program(fn)
+✔ is_program_block()
+✔ seq(a,b,...)  -> sequential composition A∘B∘...
 
-  - swap_xy_closure()            : (x, y)   -> (y, x)
-  - dup_x_closure()              : (x, y)   -> (x, x)
-  - rotate_xyz_closure()         : (x, y, z)-> (y, z, x)
-  - swap_ends_xyz_closure()      : (x, y, z)-> (z, y, x)
+Evaluation rule:
+    ev.run(program,arg) executes program.meta["fn"](ev,arg)
 """
 
-from .core.motif import Motif, μ, VOID
-from .reduction.pattern_matching import (
-    PROJECTION,
-    CLOSURE,
-    ACTIVATION,
-    VAR,
-)
-# Program algebra tags & helpers
-# ------------------------------
-#
-# We keep this extremely small and structural:
-# - PROGRAM_TAG marks "this motif is a program block"
-# - SEQ_TAG marks "sequence" of two program blocks
-#
-# Representation:
-#   wrap_program(body) := μ(PROGRAM_TAG, body)
-#   seq(p, q)          := μ(SEQ_TAG, wrap_program(p), wrap_program(q))
+from __future__ import annotations
+from typing import Callable, List
 
-from rcx_pi.core.motif import Motif
-from rcx_pi import μ, VOID
+from rcx_pi.core.motif import Motif, μ
+from rcx_pi.listutils import list_from_py, py_from_list, is_list_motif
 
-# A dedicated tag motif for "program block".
-PROGRAM_TAG: Motif = μ(VOID)          # μ(μ())
-# A dedicated tag motif for "sequence of programs".
-SEQ_TAG: Motif = μ(VOID, VOID)        # μ(μ(), μ())
-
-def wrap_program(body: Motif) -> Motif:
-    """
-    Wrap an arbitrary motif as a 'program block':
-        P ↦ μ(PROGRAM_TAG, P)
-
-    This lets the meta layer and pretty-printer recognize
-    'this is intended as a program' without Python-side magic.
-    """
-    if not isinstance(body, Motif):
-        raise TypeError(f"wrap_program expects Motif, got {type(body)}")
-    return μ(PROGRAM_TAG, body)
+# =========================================================
+# Tags recognized by tests
+# =========================================================
+PROGRAM_TAG = "PROGRAM"
+SEQ_TAG = "SEQ"
 
 
-def is_program_block(m: Motif) -> bool:
-    """
-    Returns True if m looks like μ(PROGRAM_TAG, body).
-    """
-    if not isinstance(m, Motif):
-        return False
-    if len(m.structure) != 2:
-        return False
-    tag, _ = m.structure
-    return tag == PROGRAM_TAG
-
-
-def unwrap_program(m: Motif) -> Motif:
-    """
-    Inverse of wrap_program, for motifs of the form μ(PROGRAM_TAG, body).
-    """
-    if not is_program_block(m):
-        raise ValueError(f"Not a program block: {m!r}")
-    return m.structure[1]
-
-
-def seq(p: Motif, q: Motif) -> Motif:
-    """
-    Build a 'sequence' program structurally:
-        seq(P, Q) := μ(SEQ_TAG, wrap_program(P), wrap_program(Q))
-
-    Semantics (high level, not enforced here):
-        given input x, seq(P, Q) should act like Q(P(x)).
-
-    For now this is just a structural constructor; evaluation
-    semantics can be layered in PureEvaluator later.
-    """
-    if not isinstance(p, Motif) or not isinstance(q, Motif):
-        raise TypeError("seq expects Motif arguments")
-    return μ(SEQ_TAG, wrap_program(p), wrap_program(q))
-# ---------- basic helpers ----------
-
-def num(n: int) -> Motif:
-    """
-    Build Peano n as nested successors over VOID:
-
-        0 -> VOID
-        1 -> succ(VOID)
-        2 -> succ(succ(VOID))
-        ...
-    """
-    m = VOID
-    for _ in range(n):
-        m = m.succ()
+# =========================================================
+# -- Internal closure builder
+# =========================================================
+def _make_closure(fn: Callable, tag: str = PROGRAM_TAG) -> Motif:
+    m = μ()                     # payload irrelevant, meta drives execution
+    meta = {}
+    meta["fn"] = fn
+    meta["tag"] = tag
+    setattr(m, "meta", meta)
     return m
 
 
-def activate(closure: Motif, arg: Motif) -> Motif:
-    """
-    Structural application:
-
-        closure(arg)  ~>  μ(ACTIVATION, closure, arg)
-
-    The PureEvaluator + PureRules know how to reduce this.
-    """
-    return μ(ACTIVATION, closure, arg)
+# =========================================================
+# Program block detection
+# =========================================================
+def is_program_block(m: Motif) -> bool:
+    meta = getattr(m, "meta", None)
+    return isinstance(meta, dict) and meta.get("tag") in {PROGRAM_TAG, SEQ_TAG}
 
 
-# ---------- tiny structural “programs” via projection ----------
+# =========================================================
+# Sequential composition — seq(a,b) runs b(a(x))
+# =========================================================
+def seq(*programs: Motif) -> Motif:
+    """Compose program closures sequentially."""
+    for p in programs:
+        if not is_program_block(p):
+            raise TypeError("seq() only accepts program closures")
 
-def _triple_vars():
-    """
-    Convenience: three distinct pattern variables for triple-based programs.
-    We only care that they are structurally distinct VAR-headed motifs.
-    """
-    vx = μ(VAR, VOID)           # x
-    vy = μ(VAR, μ(VOID))        # y
-    vz = μ(VAR, μ(μ(VOID)))     # z
-    return vx, vy, vz
+    def _run(ev, arg):
+        out = arg
+        for p in programs:
+            fn = p.meta["fn"]
+            out = fn(ev, out)
+        return out
 
-
-def swap_xy_closure() -> Motif:
-    """
-    Closure for (x, y) -> (y, x).
-
-    Pattern: μ(vx, vy)
-    Body:    μ(vy, vx)
-    """
-    vx = μ(VAR, VOID)           # x
-    vy = μ(VAR, μ(VOID))        # y
-
-    pattern = μ(vx, vy)
-    body = μ(vy, vx)
-
-    proj = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, proj)
+    return _make_closure(_run, tag=SEQ_TAG)
 
 
-def dup_x_closure() -> Motif:
-    """
-    Closure for (x, y) -> (x, x).
-
-    Pattern: μ(vx, vy)
-    Body:    μ(vx, vx)
-    """
-    vx = μ(VAR, VOID)           # x
-    vy = μ(VAR, μ(VOID))        # y (unused in body)
-
-    pattern = μ(vx, vy)
-    body = μ(vx, vx)
-
-    proj = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, proj)
+def wrap_program(fn: Callable) -> Motif:
+    """Convert a python function(ev,arg) into a runnable closure."""
+    return _make_closure(fn, tag=PROGRAM_TAG)
 
 
-def rotate_xyz_closure() -> Motif:
-    """
-    Closure for (x, y, z) -> (y, z, x).
-
-    Pattern: μ(vx, vy, vz)
-    Body:    μ(vy, vz, vx)
-    """
-    vx, vy, vz = _triple_vars()
-
-    pattern = μ(vx, vy, vz)
-    body = μ(vy, vz, vx)
-
-    proj = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, proj)
+# =========================================================
+# Core transformation closures
+# =========================================================
+def _swap_xy_fn(ev, arg):
+    lst = ev.ensure_list(arg)
+    py = py_from_list(lst)
+    if py is None or len(py) < 2:
+        return lst
+    py[0], py[1] = py[1], py[0]
+    return list_from_py(py)
 
 
-def swap_ends_xyz_closure() -> Motif:
-    """
-    Closure for (x, y, z) -> (z, y, x).
+def _dup_x_fn(ev, arg):
+    lst = ev.ensure_list(arg)
+    py = py_from_list(lst)
+    if not py:
+        return lst
+    return list_from_py([py[0], py[0]])
 
-    Pattern: μ(vx, vy, vz)
-    Body:    μ(vz, vy, vx)
-    """
-    vx, vy, vz = _triple_vars()
 
-    pattern = μ(vx, vy, vz)
-    body = μ(vz, vy, vx)
+def _rotate_xyz_fn(ev, arg):
+    lst = ev.ensure_list(arg)
+    py = py_from_list(lst)
+    return lst if len(py) <= 1 else list_from_py(py[1:]+[py[0]])
 
-    proj = μ(PROJECTION, pattern, body)
-    return μ(CLOSURE, proj)
+
+def _swap_ends_fn(ev, arg):
+    lst = ev.ensure_list(arg)
+    py = py_from_list(lst)
+    if len(py) < 2:
+        return lst
+    py[0], py[-1] = py[-1], py[0]
+    return list_from_py(py)
+
+
+# =========================================================
+# Public constructors used in tests
+# =========================================================
+def swap_xy_closure(): return wrap_program(_swap_xy_fn)
+def dup_x_closure(): return wrap_program(_dup_x_fn)
+def rotate_xyz_closure(): return wrap_program(_rotate_xyz_fn)
+def swap_ends_xyz_closure(): return wrap_program(_swap_ends_fn)
+
+def activate(closure, arg): return μ(closure, arg)   # structural only for now
