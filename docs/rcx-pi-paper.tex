@@ -1,0 +1,49 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}  % allow UTF-8 source, including π, μ
+\usepackage{amsmath,amssymb}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+
+% Map Unicode π (U+03C0) and μ (U+03BC) to math macros
+\DeclareUnicodeCharacter{03C0}{\ensuremath{\pi}}
+\DeclareUnicodeCharacter{03BC}{\ensuremath{\mu}}
+% Map Unicode checkmark ✓ (U+2713) to a LaTeX symbol
+\DeclareUnicodeCharacter{2713}{\ensuremath{\checkmark}}
+% Map Unicode cross ✗ (U+2717) to a math times symbol
+\DeclareUnicodeCharacter{2717}{\ensuremath{\times}}
+% Map Unicode ω (U+03C9) to math \omega
+\DeclareUnicodeCharacter{03C9}{\ensuremath{\omega}}
+% Box drawing characters used in visual debugging trees
+\DeclareUnicodeCharacter{2500}{-}  % ─
+\DeclareUnicodeCharacter{2502}{|}  % │
+\DeclareUnicodeCharacter{2514}{+}  % └
+\DeclareUnicodeCharacter{251C}{+}  % ├
+\DeclareUnicodeCharacter{2524}{+}  % ┤
+\DeclareUnicodeCharacter{2534}{+}  % ┴
+\DeclareUnicodeCharacter{253C}{+}  % ┼
+
+\title{RCX-$\pi$: A Minimal Structural Engine}
+\author{Jeff Abrams}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\input{00-overview}
+\input{01-getting-started}
+\input{02-core-structures}
+\input{03-evaluator}
+\input{04-classification}
+\input{05-pretty-printing}
+\input{06-programs}
+\input{07-higher-operations}
+\input{08-self-hosting}
+\input{09-emergence}
+\input{10-visual-debugging}
+
+\end{document}

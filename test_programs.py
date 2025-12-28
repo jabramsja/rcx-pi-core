@@ -112,3 +112,25 @@ if __name__ == "__main__":
 
     res3 = ev.reduce(expr3)
     print("Reduced motif:        ", res3, " =>  ", motif_to_triple(res3))
+
+from rcx_pi.programs import wrap_program, is_program_block, seq, PROGRAM_TAG, SEQ_TAG
+
+if __name__ == "__main__":
+    # ...existing tests...
+
+    print()
+    print("=== program block + seq structural sanity ===")
+    swap_cl = swap_xy_closure()
+
+    prog_swap = wrap_program(swap_cl)
+    print("Program block motif:", prog_swap)
+    print("is_program_block:", is_program_block(prog_swap))
+
+    seq_prog = seq(swap_cl, swap_cl)
+    print("Sequence motif:", seq_prog)
+    # Very shallow structural checks:
+    assert isinstance(seq_prog, Motif)
+    assert len(seq_prog.structure) == 3
+    assert seq_prog.structure[0] == SEQ_TAG
+
+    print("[OK program algebra skeleton]")

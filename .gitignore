@@ -1,2 +1,17 @@
 __pycache__/
 *.pyc
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# Optional: ignore generated PDFs
+docs/rcx-pi-paper.pdf
+
+# Python bytecode / caches
+__pycache__/
+*.pyc
