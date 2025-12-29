@@ -13,7 +13,11 @@ Run with:
     python3 demo_rcx_pi.py
 """
 
-from __future__ import annotations
+from rcx_pi import num, add, motif_to_int
+from rcx_pi.core.motif import Motif
+from rcx_pi.listutils import list_from_py, py_from_list, is_list_motif
+from rcx_pi.programs import swap_ends_xyz_closure, succ_list_program
+from rcx_pi import PureEvaluator
 
 import rcx_pi
 
@@ -61,6 +65,21 @@ def demo_swap_ends() -> None:
     print("output as python: ", out_py)
     print()
 
+    # === succ_list_program (map +1 over a list of Peano numbers) ===
+    print("\n=== succ_list_program (RCX-π named program) ===")
+
+    ev = PureEvaluator()
+    prog = succ_list_program()
+
+    xs = list_from_py([num(0), num(1), num(2), num(3)])
+    out = ev.run(prog, xs)
+
+    print("input Peano list motif: ", xs)
+    print("output Peano list motif:", out)
+
+    # py_from_list now decodes Peano motifs to ints, so this should be [1, 2, 3, 4]
+    out_ints = py_from_list(out)
+    print("output as Python ints:  ", out_ints)
 
 def main() -> None:
     print("RCX-π demo (current core)\n")

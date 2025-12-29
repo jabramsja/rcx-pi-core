@@ -331,6 +331,24 @@ def add1_closure() -> Motif:
 
     return _make_closure(_impl)
 
+def succ_list_program() -> Motif:
+    """
+    RCX-π named program:
+        succ-list : [n0, n1, ...] -> [n0+1, n1+1, ...]
+
+    Implemented as map(add1) over a motif list of Peano numbers.
+    """
+    # Build the underlying closure: map(add1)
+    mapper = map_closure(add1_closure())
+
+    # Attach a small RCX-facing name tag so higher layers
+    # can treat this as a "program cell".
+    meta = getattr(mapper, "meta", {}) or {}
+    meta.setdefault("rcx_name", "succ-list")
+    mapper.meta = meta
+
+    return mapper
+
 # ============================
 # Bytecode interpreter support
 # ============================

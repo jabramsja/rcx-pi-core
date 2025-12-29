@@ -9,9 +9,12 @@ This module exposes a small, coherent core:
     - Numbers: num, succ, pred, motif_to_int, add, zero
     - Lists: list_from_py, py_from_list, NIL, CONS, is_list_motif, head, tail
     - Pretty / meta: pretty_motif, classify_motif
-    - Programs: swap_xy_closure, dup_x_closure, rotate_xyz_closure,
-                swap_ends_xyz_closure, reverse_list_closure,
-                append_lists_closure, activate
+    - Programs (structural & bytecode):
+        swap_xy_closure, dup_x_closure, rotate_xyz_closure,
+        swap_ends_xyz_closure, reverse_list_closure,
+        append_lists_closure, activate,
+        map_closure, add1_closure, seq_closure, succ_list_program,
+        OP_PUSH_CONST, OP_ADD, OP_HALT, make_instr, bytecode_closure
 """
 
 from __future__ import annotations
@@ -134,7 +137,13 @@ from .programs import (
     reverse_list_closure,
     append_lists_closure,
     activate,
-    OP_PUSH_CONST,	
+    # higher-order / named programs
+    map_closure,
+    add1_closure,
+    seq_closure,
+    succ_list_program,
+    # bytecode
+    OP_PUSH_CONST,
     OP_ADD,
     OP_HALT,
     make_instr,
@@ -176,7 +185,7 @@ __all__ = [
     # meta
     "classify_motif",
 
-    # programs
+    # programs (structural / higher-order)
     "swap_xy_closure",
     "dup_x_closure",
     "rotate_xyz_closure",
@@ -184,10 +193,15 @@ __all__ = [
     "reverse_list_closure",
     "append_lists_closure",
     "activate",
+    "map_closure",
+    "add1_closure",
+    "seq_closure",
+    "succ_list_program",
+
+    # bytecode
     "OP_PUSH_CONST",
     "OP_ADD",
     "OP_HALT",
     "make_instr",
     "bytecode_closure",
-
 ]

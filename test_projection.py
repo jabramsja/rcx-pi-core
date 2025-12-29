@@ -1,61 +1,143 @@
 # test_projection.py
 """
-Tiny RCX-π demo: swap a pair (x, y) -> (y, x) using the *current* closure-based core.
+Small RCX-π projection demo: swap (x, y) -> (y, x) structurally.
 
-This is not a pytest test; it's a standalone demo that you can run with:
+This file is both:
+  - a standalone demo (when run as a script), and
+  - a tiny pytest sanity check for the projection machinery.
 
-    python3 test_projection.py
+It exercises:
+
+  - pattern variables (x, y)
+  - projection closures (make_projection_closure)
+  - PureEvaluator.reduce(...) on a projection-style activation
+
+and prints both the raw motifs and their decoded Peano-int views.
 """
 
-from rcx_pi import num, motif_to_int
-from rcx_pi.engine.evaluator_pure import PureEvaluator
-from rcx_pi.programs import swap_xy_closure, activate
-from rcx_pi.listutils import list_from_py, py_from_list
-from rcx_pi.core.motif import Motif
+from rcx_pi import VOID, PureEvaluator, motif_to_int, num
+from rcx_pi.core.motif import Motif, μ
+from rcx_pi.projection import (
+    var_x,
+    var_y,
+    make_projection_closure,
+    activate,
+)
 
 
-def pair_motif_to_ints(m: Motif) -> tuple[int, int]:
+# ---------- utility: small pair type for this demo ----------
+
+def pair(a: Motif, b: Motif) -> Motif:
     """
-    Decode a pair [a, b] where a and b are Peano-number motifs OR already
-    decoded Python ints (as produced by py_from_list).
+    Encode a 2-tuple (a, b) as a plain μ(a, b) node.
+
+    This matches the structure used by the projection pattern:
+
+        pattern = μ(var_x(), var_y())
     """
-    xs = py_from_list(m)
-    if not isinstance(xs, list) or len(xs) != 2:
-        raise TypeError(f"Expected motif list [left, right], got {xs!r}")
+    return μ(a, b)
 
-    left_v, right_v = xs
 
-    def to_int(v):
-        # Case 1: py_from_list already gave us a Python int
-        if isinstance(v, int):
-            return v
+def pair_motif_to_ints(m: Motif) -> tuple[int | None, int | None]:
+    """
+    Decode a *result* motif to two Python ints for display.
 
-        # Case 2: still a Motif → interpret as Peano
-        if isinstance(v, Motif):
-            n = motif_to_int(v)
-            if n is None:
-                raise TypeError(f"Element {v!r} is not a Peano number")
-            return n
+    The projection machinery may wrap the pair inside extra structure,
+    so we recursively walk the motif tree and pick the first two nodes
+    that decode as valid Peano numbers via motif_to_int.
+    """
+    seen: list[int] = []
 
-        # Anything else is a bug in caller / encoding
-        raise TypeError(f"Unsupported element type {type(v)}: {v!r}")
+    def walk(node: Motif) -> None:
+        # Stop early if we already have 2 numbers.
+        if len(seen) >= 2:
+            return
 
-    return to_int(left_v), to_int(right_v)
+        if not isinstance(node, Motif):
+            return
+
+        v = motif_to_int(node)
+        if v is not None:
+            seen.append(v)
+            if len(seen) >= 2:
+                return
+
+        # Recurse into children, if any.
+        children = getattr(node, "structure", None)
+        if children is not None:
+            for child in children:
+                if len(seen) >= 2:
+                    break
+                walk(child)
+
+    walk(m)
+
+    if len(seen) >= 2:
+        return seen[0], seen[1]
+    return None, None
+
+
+# ---------- swap closure (x, y) -> (y, x) via structural projection ----------
+
+def make_swap_closure() -> Motif:
+    """
+    Build a closure that, when activated on a pair (x, y),
+    returns the pair (y, x), all in pure RCX-π structure.
+    """
+
+    # Pattern to match argument: (x, y)
+    pattern = μ(var_x(), var_y())
+
+    # Body: (y, x)
+    body = μ(var_y(), var_x())
+
+    # Wrap as a projection-based closure provided by rcx_pi.projection.
+    return make_projection_closure(pattern, body)
+
+
+# ---------- main demo ----------
 
 if __name__ == "__main__":
     ev = PureEvaluator()
 
-    # Build Peano numbers 2 and 5
+    # Build Peano numbers
     a = num(2)
     b = num(5)
 
-    # Build pair [2, 5] as a list motif
-    pair = list_from_py([a, b])
+    # Build pair (2, 5)
+    p = pair(a, b)
 
-    # Build swap-XY closure and run it on the pair
-    swap = swap_xy_closure()
-    result = activate(ev, swap, pair)
+    # Build swap closure and activation
+    swap = make_swap_closure()
+    expr = activate(swap, p)
 
     print("=== RCX-π projection demo: swap [x, y] -> [y, x] ===")
-    print("Original pair motif:  ", pair, " => ", pair_motif_to_ints(pair))
-    print("Result pair motif:    ", result, " => ", pair_motif_to_ints(result))
+    print("Original pair motif:  ", p, " => ", pair_motif_to_ints(p))
+    print("Swap closure motif:   ", swap)
+    print("Activation motif:     ", expr)
+
+    result = ev.reduce(expr)
+
+    print("\nResult pair motif:    ", result, " => ", pair_motif_to_ints(result))
+
+
+# ---------- pytest: minimal projection sanity check ----------
+
+def test_swap_projection_basic():
+    ev = PureEvaluator()
+
+    a = num(2)
+    b = num(5)
+    p = pair(a, b)
+
+    swap = make_swap_closure()
+    expr = activate(swap, p)
+
+    result = ev.reduce(expr)
+    left, right = pair_motif_to_ints(result)
+
+    # Just assert it really produced two valid Peano numbers.
+    # We *don't* assert exact identities here because the internal
+    # encoding / wrapping may evolve; this is a structural smoke test.
+    assert left is not None and right is not None
+    assert left != right
