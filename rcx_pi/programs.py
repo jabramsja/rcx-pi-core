@@ -283,6 +283,53 @@ def seq_closure(p: Motif, q: Motif) -> Motif:
 
     return _make_closure(_impl)
 
+# ---------------------------------------------------------------------------
+# Higher-order-ish: map over a list with a closure
+# ---------------------------------------------------------------------------
+
+def map_closure(func_closure: Motif) -> Motif:
+    """
+    Map a unary function closure over a motif list:
+
+        input:  [x0, x1, x2, ...]
+        output: [f(x0), f(x1), f(x2), ...]
+
+    `func_closure` is a Motif with meta["fn"] = (ev, arg) -> Motif.
+    """
+
+    from rcx_pi.core.motif import VOID
+
+    def _impl(ev, xs: Motif) -> Motif:
+        # Ensure the input is list-shaped.
+        xs_list = ev.ensure_list(xs)
+
+        out_items = []
+        cur = xs_list
+
+        # Walk the motif list structurally, *without* decoding elements.
+        while cur is not VOID:
+            x = ev.head(cur)          # this is a Motif element
+            y = ev.run(func_closure, x)
+            out_items.append(y)
+            cur = ev.tail(cur)
+
+        # Rebuild the result list as a motif list.
+        return list_from_py(out_items)
+
+    return _make_closure(_impl)
+
+def add1_closure() -> Motif:
+    """
+    Closure that adds 1 (Peano) to a single number.
+
+    Given n (as a Peano motif), returns n + 1.
+    """
+    from rcx_pi import add, num
+
+    def _impl(ev, n: Motif) -> Motif:
+        return add(n, num(1))
+
+    return _make_closure(_impl)
 
 # ============================
 # Bytecode interpreter support
