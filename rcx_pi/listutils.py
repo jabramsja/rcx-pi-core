@@ -19,7 +19,7 @@ to prevent circular-import issues. Any bridges to the public API
 from __future__ import annotations
 from typing import Any, Optional
 
-from rcx_pi.core.motif import Motif, μ, VOID
+from rcx_pi.core.motif import Motif, μ, VOID, UNIT
 
 
 # ---------------------------------------------------------------------------
@@ -72,35 +72,63 @@ def list_from_py(seq: list[Any]) -> Motif:
     from rcx_pi import num  # type: ignore
 
     for item in reversed(seq):
+        # 1) ints → Peano numbers
         if isinstance(item, int):
-            item = num(item)
-        elif not isinstance(item, Motif):
-            raise TypeError(f"list_from_py: cannot embed {item!r} directly")
-        m = CONS(item, m)
+            elem = num(item)
+
+        # 2) already a Motif → use as-is (lists, numbers, closures, etc)
+        elif isinstance(item, Motif):
+            elem = item
+
+        # 3) anything else (e.g. "x", "y") → box in a Motif with meta["py"]
+        else:
+            # Use a non-Peano shape so motif_to_int(elem) returns None.
+            box = μ(UNIT, VOID)
+            meta = getattr(box, "meta", None)
+            if not isinstance(meta, dict):
+                box.meta = {}
+            box.meta["py"] = item
+            elem = box
+
+        m = CONS(elem, m)
+
     return m
 
 
-def py_from_list(m: Motif) -> Optional[list[Any]]:
+def py_from_list(m: Motif) -> list[Any]:
     """
-    Attempt to convert a motif list back to a Python list.
+    Convert a motif list back to a Python list.
 
-    Returns None if the structure is not a pure list.
-
-    Numbers are decoded using a local Peano recognizer, everything
-    else is returned as the raw Motif.
+    Integers encoded as Peano numbers (VOID, succ(...)) are mapped back
+    to Python ints via motif_to_int. Any element that is a Motif with
+    meta["py"] is unboxed to that Python value. Everything else is
+    returned as-is.
     """
+    from rcx_pi import motif_to_int  # type: ignore
+
     out: list[Any] = []
-    cur: Motif = m
+    cur = m
 
-    while isinstance(cur, Motif) and len(cur.structure) == 2:
-        h, t = cur.structure
+    while cur != VOID:
+        h = head(cur)
+        cur = tail(cur)
 
-        n = _motif_to_int_local(h)
-        out.append(n if n is not None else h)
+        # Try Peano int
+        n = motif_to_int(h)
+        if n is not None:
+            out.append(n)
+            continue
 
-        cur = t  # type: ignore[assignment]
+        # Try boxed Python value
+        meta = getattr(h, "meta", None)
+        if isinstance(meta, dict) and "py" in meta:
+            out.append(meta["py"])
+            continue
 
-    return out if cur == VOID else None
+        # Fallback: return motif itself
+        out.append(h)
+
+    return out
 
 
 # ---------------------------------------------------------------------------

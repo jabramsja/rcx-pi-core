@@ -50,12 +50,17 @@ from rcx_pi.listutils import (
 # Bytecode opcodes (host-level)
 # ============================
 
-# Represent opcodes as small *Python ints*.
-# We encode them into Peano motifs when building instructions.
+# Represent opcodes as small Python ints.
+# They are encoded as Peano motifs when building instructions.
 
-OP_PUSH_CONST = 0
-OP_ADD        = 1
-OP_HALT       = 2
+OP_PUSH_CONST = 0  # push a constant motif
+OP_ADD        = 1  # pop 2 Peano numbers, push their sum
+OP_HALT       = 2  # stop execution
+
+OP_PUSH_NIL   = 3  # push empty list NIL()
+OP_CONS       = 4  # stack [..., xs, x] -> [..., CONS(x, xs)]
+OP_HEAD       = 5  # pop list xs, push head(xs)
+OP_TAIL       = 6  # pop list xs, push tail(xs)
 
 
 def make_instr(op: int, arg: Motif) -> Motif:
@@ -279,20 +284,32 @@ def _eval_bytecode(ev, bytecode_motif: Motif, stack_motif: Motif) -> Motif:
 
     For now we support:
       OP_PUSH_CONST: push the arg motif.
-      OP_ADD: pop 2 numbers (Peano motifs), push their sum.
-      OP_HALT: stop iterating and return top of stack.
+      OP_ADD       : pop 2 numbers (Peano motifs), push their sum.
+      OP_HALT      : stop iterating and return top of stack.
+      OP_PUSH_NIL  : push NIL() list.
+      OP_CONS      : stack [..., xs, x] -> [..., CONS(x, xs)].
+      OP_HEAD      : pop xs, push head(xs).
+      OP_TAIL      : pop xs, push tail(xs).
     """
     # Local imports to avoid circular imports at module import time.
     from rcx_pi import add, num, motif_to_int
-    from rcx_pi.listutils import py_from_list
+    from rcx_pi.listutils import py_from_list, NIL, CONS
     from rcx_pi.core.motif import Motif, VOID
 
     # Decode only the *list structure* of the bytecode into Python lists.
     instructions_py = py_from_list(bytecode_motif)
 
-    # For now we ignore stack_motif and start with an empty Python stack
-    # of motifs. (Can be generalized later if needed.)
-    stack: list[Motif] = []
+    # Decode the initial stack motif as a Python list (top-of-stack is last).
+    stack_py = py_from_list(stack_motif)
+
+    stack: list[Motif | int] = []
+    if stack_py is not None:
+        for item in stack_py:
+            if isinstance(item, Motif):
+                stack.append(item)
+            else:
+                # If py_from_list converted a Peano motif to an int, re-box it.
+                stack.append(num(int(item)))
 
     for instr in instructions_py:
         # Each instr is a motif list [opcode, arg] → Python list [opcode_val, arg_val]
@@ -327,7 +344,6 @@ def _eval_bytecode(ev, bytecode_motif: Motif, stack_motif: Motif) -> Motif:
             b = stack.pop()
             a = stack.pop()
 
-            # Re-box if py_from_list (or something else) left these as ints.
             if not isinstance(a, Motif):
                 a = num(int(a))
             if not isinstance(b, Motif):
@@ -337,6 +353,44 @@ def _eval_bytecode(ev, bytecode_motif: Motif, stack_motif: Motif) -> Motif:
 
         elif op_code == OP_HALT:
             break
+
+        elif op_code == OP_PUSH_NIL:
+            stack.append(NIL())
+
+        elif op_code == OP_CONS:
+            if len(stack) < 2:
+                raise RuntimeError("OP_CONS requires at least 2 stack items")
+
+            x  = stack.pop()   # element
+            xs = stack.pop()   # list
+
+            if not isinstance(xs, Motif):
+                raise TypeError("OP_CONS expects a list motif as xs")
+
+            # Just trust caller that xs is list-shaped; we can tighten later.
+            stack.append(CONS(x, xs))
+
+        elif op_code == OP_HEAD:
+            if not stack:
+                raise RuntimeError("OP_HEAD requires a list on the stack")
+
+            xs = stack.pop()
+            if not isinstance(xs, Motif):
+                raise TypeError("OP_HEAD expects a list motif")
+
+            xs_list = ev.ensure_list(xs)
+            stack.append(ev.head(xs_list))
+
+        elif op_code == OP_TAIL:
+            if not stack:
+                raise RuntimeError("OP_TAIL requires a list on the stack")
+
+            xs = stack.pop()
+            if not isinstance(xs, Motif):
+                raise TypeError("OP_TAIL expects a list motif")
+
+            xs_list = ev.ensure_list(xs)
+            stack.append(ev.tail(xs_list))
 
         else:
             raise ValueError(f"Unknown bytecode opcode: {op_code!r}")
