@@ -251,6 +251,38 @@ def append_lists_closure() -> Motif:
 
     return _make_closure(_impl)
 
+# ---------------------------------------------------------------------------
+# Program composition: seq(p, q)
+# ---------------------------------------------------------------------------
+
+def seq_closure(p: Motif, q: Motif) -> Motif:
+    """
+    Compose two already-constructed program closures p and q.
+
+        seq_closure(p, q)  is a new program r such that
+
+            r(arg) = q(p(arg))
+
+    Here p and q are *program motifs* (closures) created by other
+    *_closure() constructors, not Python functions.
+
+    Example usage:
+
+        swap = swap_xy_closure()
+        dup  = dup_x_closure()
+        pipe = seq_closure(swap, dup)
+
+        # Then in an evaluator:
+        #   result = ev.run(pipe, some_arg)
+    """
+
+    def _impl(ev, arg: Motif) -> Motif:
+        # Run p then q using the same evaluator.
+        mid = ev.run(p, arg)
+        return ev.run(q, mid)
+
+    return _make_closure(_impl)
+
 
 # ============================
 # Bytecode interpreter support

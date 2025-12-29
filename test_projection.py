@@ -1,120 +1,61 @@
-import pytest
-
-pytest.skip(
-    "Legacy projection API (.structure + pair_motif_to_ints) "
-    "not wired to current RCX-π core yet.",
-    allow_module_level=True,
-)
-
 # test_projection.py
+"""
+Tiny RCX-π demo: swap a pair (x, y) -> (y, x) using the *current* closure-based core.
 
-from rcx_pi import μ, VOID, UNIT, PureEvaluator
+This is not a pytest test; it's a standalone demo that you can run with:
 
-# ---------- shared helpers (copied from test_numbers) ----------
+    python3 test_projection.py
+"""
 
-def motif_to_int(m):
-    """Convert Peano motif to Python int for readable output."""
-    if m.is_zero_pure():
-        return 0
-
-    count = 0
-    cur = m
-    while cur.is_successor_pure():
-        count += 1
-        cur = cur.head()
-
-    if cur.is_zero_pure():
-        return count
-    return None
+from rcx_pi import num, motif_to_int
+from rcx_pi.engine.evaluator_pure import PureEvaluator
+from rcx_pi.programs import swap_xy_closure, activate
+from rcx_pi.listutils import list_from_py, py_from_list
+from rcx_pi.core.motif import Motif
 
 
-def num(n: int):
-    """Build Peano number n as nested successors over VOID."""
-    m = VOID
-    for _ in range(n):
-        m = m.succ()
-    return m
-
-
-# ---------- RCX-π markers (must match rules/pattern matcher) ----------
-
-# These depths mirror what you're already using in rules_pure / pattern_matching
-CLOSURE_MARKER     = μ(μ(μ(μ(μ()))))                # 4-deep
-ACTIVATION_MARKER  = μ(μ(μ(μ(μ(μ())))))             # 5-deep
-PROJECTION_MARKER  = μ(μ(μ(μ(μ(μ(μ()))))))          # 6-deep
-PATTERN_VAR_MARKER = μ(μ(μ(μ(μ(μ(μ(μ())))))))       # 7-deep
-
-
-def var_x():
-    """Pattern variable x (ID = VOID)."""
-    return μ(PATTERN_VAR_MARKER, VOID)
-
-
-def var_y():
-    """Pattern variable y (ID = succ(VOID))."""
-    return μ(PATTERN_VAR_MARKER, μ(VOID))
-
-
-# ---------- swap closure (x, y) -> (y, x) ----------
-
-def make_swap_closure():
+def pair_motif_to_ints(m: Motif) -> tuple[int, int]:
     """
-    Build a closure that, when activated on a pair (x, y),
-    returns the pair (y, x), all in pure RCX-π structure.
+    Decode a pair [a, b] where a and b are Peano-number motifs OR already
+    decoded Python ints (as produced by py_from_list).
     """
+    xs = py_from_list(m)
+    if not isinstance(xs, list) or len(xs) != 2:
+        raise TypeError(f"Expected motif list [left, right], got {xs!r}")
 
-    # Pattern to match argument: (x, y)
-    pattern = μ(var_x(), var_y())
+    left_v, right_v = xs
 
-    # Body: (y, x)
-    body = μ(var_y(), var_x())
+    def to_int(v):
+        # Case 1: py_from_list already gave us a Python int
+        if isinstance(v, int):
+            return v
 
-    # Projection: PROJECTION_MARKER, pattern, body
-    projection = μ(PROJECTION_MARKER, pattern, body)
+        # Case 2: still a Motif → interpret as Peano
+        if isinstance(v, Motif):
+            n = motif_to_int(v)
+            if n is None:
+                raise TypeError(f"Element {v!r} is not a Peano number")
+            return n
 
-    # Closure: CLOSURE_MARKER, projection
-    swap_closure = μ(CLOSURE_MARKER, projection)
-    return swap_closure
+        # Anything else is a bug in caller / encoding
+        raise TypeError(f"Unsupported element type {type(v)}: {v!r}")
 
-
-def activate(func, arg):
-    """Structural activation wrapper."""
-    return μ(ACTIVATION_MARKER, func, arg)
-
-
-def pair(a, b):
-    """Just a 2-tuple as a motif."""
-    return μ(a, b)
-
-
-def pair_motif_to_ints(m):
-    """Decode a pair of Peano motifs to Python ints (for display)."""
-    left, right = m.structure
-    return motif_to_int(left), motif_to_int(right)
-
-
-# ---------- main test ----------
+    return to_int(left_v), to_int(right_v)
 
 if __name__ == "__main__":
     ev = PureEvaluator()
 
-    # Build Peano numbers
+    # Build Peano numbers 2 and 5
     a = num(2)
     b = num(5)
 
-    # Build pair (2, 5)
-    p = pair(a, b)
+    # Build pair [2, 5] as a list motif
+    pair = list_from_py([a, b])
 
-    # Build swap closure and activation
-    swap = make_swap_closure()
-    expr = activate(swap, p)
+    # Build swap-XY closure and run it on the pair
+    swap = swap_xy_closure()
+    result = activate(ev, swap, pair)
 
-    print("=== RCX-π projection demo: swap (x, y) -> (y, x) ===")
-    print("Original pair motif:  ", p, " => ", pair_motif_to_ints(p))
-    print("Swap closure motif:   ", swap)
-    print("Activation motif:     ", expr)
-
-    result = ev.reduce(expr)
-
-    print("\nReduced motif:        ", result)
-    print("As ints (expect 5, 2):", pair_motif_to_ints(result))
+    print("=== RCX-π projection demo: swap [x, y] -> [y, x] ===")
+    print("Original pair motif:  ", pair, " => ", pair_motif_to_ints(pair))
+    print("Result pair motif:    ", result, " => ", pair_motif_to_ints(result))
