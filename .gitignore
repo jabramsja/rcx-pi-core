@@ -16,3 +16,6 @@ docs/rcx-pi-paper.pdf
 __pycache__/
 *.pyc
 docs/rcx-pi-paper.pdf
+rcx_pi_rust/target/
+rcx_pi_rust/**/target/
+**/target/
