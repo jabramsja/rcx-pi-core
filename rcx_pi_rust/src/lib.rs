@@ -24,6 +24,8 @@ pub mod orbit;
 pub mod parser;
 pub mod pattern;
 pub mod runtime;
+pub mod serialize;
+pub mod serialize_json;
 pub mod sink;
 pub mod state;
 pub mod state_io;

@@ -7,8 +7,9 @@ use rcx_pi_rust::{
     mu_loader::{load_mu_file, save_mu_file},
     orbit::orbit,
     parser::parse_mu,
+    serialize::{load_state, save_state},
+    serialize_json,
     state::RCXState,
-    state_io::{load_state, save_state},
     types::{Mu, RcxProgram, RcxRule, RuleAction},
 };
 
@@ -87,11 +88,14 @@ fn main() {
     println!("  :worlds          list available .mu worlds");
     println!("  :save-world NAME save current rules as mu_programs/NAME.mu");
     println!("  :load-world NAME reset + load mu_programs/NAME.mu as the world");
-    println!("  :save-state NAME save current buckets to snapshots/NAME.state");
-    println!("  :load-state NAME load buckets from snapshots/NAME.state");
+    println!("  :save-state NAME save rules + buckets to snapshots/NAME.state");
+    println!("  :load-state NAME load rules + buckets from snapshots/NAME.state");
+    println!("  :export-json NAME  save rules to worlds_json/NAME.json");
     println!("  :trace           dump trace log");
     println!("  :clear           reset state (r_a, lobes, sink, trace)");
     println!("  :reset           reset rules + state to default NEWS world");
+    println!("  :export-json NAME  save rules to worlds_json/NAME.json");
+    println!("  :import-json NAME  load rules from worlds_json/NAME.json");
     println!("  :q               exit\n");
 
     let stdin = io::stdin();
@@ -328,6 +332,96 @@ fn main() {
             continue;
         }
 
+        // :save-state NAME  -> snapshots/NAME.state
+        if line.starts_with(":save-state ") {
+            let name = line[12..].trim();
+            if name.is_empty() {
+                println!("usage: :save-state NAME");
+                continue;
+            }
+
+            // Ensure snapshots/ exists
+            if let Err(e) = std::fs::create_dir_all("snapshots") {
+                println!("[save-state] could not create snapshots/ directory: {e}");
+                continue;
+            }
+
+            let path = format!("snapshots/{}.state", name);
+
+            match save_state(&path, &state, &program) {
+                Ok(()) => {
+                    println!(
+                        "[save-state] wrote {} rules + buckets to {}",
+                        program.rules.len(),
+                        path
+                    );
+                }
+                Err(e) => {
+                    println!("[save-state] error: {e}");
+                }
+            }
+
+            continue;
+        }
+
+        // :load-state NAME  -> snapshots/NAME.state
+        if line.starts_with(":load-state ") {
+            let name = line[12..].trim();
+            if name.is_empty() {
+                println!("usage: :load-state NAME");
+                continue;
+            }
+
+            let path = format!("snapshots/{}.state", name);
+
+            match load_state(&path) {
+                Ok((new_state, new_program)) => {
+                    state = new_state;
+                    program = new_program;
+                    // Rebuild engine so routing uses restored rules
+                    engine = Engine::new(program.clone());
+
+                    println!(
+                        "[load-state] restored from {} (rules: {}, r_a: {}, lobes: {}, sink: {})",
+                        path,
+                        program.rules.len(),
+                        state.ra.len(),
+                        state.lobes.len(),
+                        state.sink.len()
+                    );
+                }
+                Err(e) => {
+                    println!("[load-state] error: {e}");
+                }
+            }
+
+            continue;
+        }
+
+        // :export-json NAME -> write rules to worlds_json/NAME.json
+        if line.starts_with(":export-json ") {
+            let name = line[13..].trim();
+            if name.is_empty() {
+                println!("usage: :export-json NAME");
+                continue;
+            }
+
+            match serialize_json::export_world_json(name, &program) {
+                Ok(path) => {
+                    println!(
+                        "[export-json] saved {} rules to {}",
+                        program.rules.len(),
+                        path
+                    );
+                }
+                Err(e) => {
+                    println!("[export-json] error: {e}");
+                }
+            }
+
+            continue;
+        }
+
         // :learn pattern rewrite target
         // :learn pattern ra|lobe|sink
         //
@@ -479,46 +573,6 @@ fn main() {
             );
             println!("[ω] classification: {}", classification);
 
-            continue;
-        }
-
-        // :save-state NAME  -> save r_a / lobes / sink to snapshots/NAME.state
-        if line.starts_with(":save-state ") {
-            let name = line[12..].trim();
-            if name.is_empty() {
-                println!("usage: :save-state NAME");
-                continue;
-            }
-
-            let path = format!("snapshots/{}.state", name);
-            match save_state(&path, &state) {
-                Ok(()) => {
-                    println!("[save-state] wrote state (r_a/lobes/sink) to {}", path);
-                }
-                Err(e) => {
-                    println!("save-state error: {e}");
-                }
-            }
-            continue;
-        }
-
-        // :load-state NAME  -> load r_a / lobes / sink from snapshots/NAME.state
-        if line.starts_with(":load-state ") {
-            let name = line[12..].trim();
-            if name.is_empty() {
-                println!("usage: :load-state NAME");
-                continue;
-            }
-
-            let path = format!("snapshots/{}.state", name);
-            match load_state(&path, &mut state) {
-                Ok(()) => {
-                    println!("[load-state] restored state (r_a/lobes/sink) from {}", path);
-                }
-                Err(e) => {
-                    println!("load-state error: {e}");
-                }
-            }
             continue;
         }
 
