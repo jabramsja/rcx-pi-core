@@ -1,0 +1,8 @@
+:save-world foo
+→ [save-world] saved 13 rules to mu_worlds/foo.json
+
+:load-world foo
+→ rules reset to foo + state cleared
+
+:worlds
+→ lists available worlds
