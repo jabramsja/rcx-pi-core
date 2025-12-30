@@ -1,46 +1,110 @@
 # rcx_pi/program_registry.py
 """
-Tiny RCX-π program registry.
+Simple in-memory registry for named RCX-π programs.
 
-Maps human-facing RCX program names to factory functions that
-construct the corresponding program closures.
+This is a tiny helper layer so higher-level APIs can talk in terms of
+string-named programs like "succ-list" instead of passing closures around.
 
-This is intentionally minimal; higher layers (RCX-Diamond, etc.)
-can wrap this with richer metadata, versions, etc.
+Design:
+
+- Registry is just a dict[str, Motif].
+- We provide basic CRUD-ish helpers:
+    * register_program(name, program)
+    * get_program(name)
+    * has_program(name)
+    * clear_registry()
+    * list_programs() / list_program_names()
+
+- We also lazily seed a default program "succ-list" so that:
+    * list_program_names() includes "succ-list"
+    * get_program("succ-list") returns the succ-list closure
+
+  This lazy seeding avoids brittle import-order issues.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Dict
 
-from rcx_pi.core.motif import Motif
-from rcx_pi.programs import succ_list_program
+from .core.motif import Motif
 
-# The registry maps names -> zero-arg factories returning Motif programs.
-_PROGRAM_FACTORIES: Dict[str, Callable[[], Motif]] = {
-    "succ-list": succ_list_program,
-}
+# Internal registry mapping string names -> Motif closures.
+_REGISTRY: Dict[str, Motif] = {}
 
 
-def list_program_names() -> list[str]:
-    """Return all registered RCX-π program names."""
-    return sorted(_PROGRAM_FACTORIES.keys())
+# ---------------------------------------------------------------------------
+# Core registry operations
+# ---------------------------------------------------------------------------
+
+def register_program(name: str, program: Motif) -> None:
+    """
+    Register (or overwrite) a named RCX-π program.
+
+    Args:
+        name: Human-readable / API-facing program name.
+        program: Motif closure with meta["fn"] = (ev, arg) -> Motif.
+    """
+    _REGISTRY[name] = program
+
+
+def get_program(name: str) -> Motif | None:
+    """
+    Look up a named program by string name.
+
+    Returns:
+        Motif closure if present, or None if not registered.
+    """
+    _ensure_defaults()
+    return _REGISTRY.get(name)
 
 
 def has_program(name: str) -> bool:
-    """Check if a program name is registered."""
-    return name in _PROGRAM_FACTORIES
-
-
-def get_program(name: str) -> Motif:
     """
-    Look up a program by RCX name and construct a fresh closure.
-
-        get_program("succ-list") -> Motif closure
-
-    Raises KeyError if the name is unknown.
+    Return True if a program with this name is registered.
     """
-    factory = _PROGRAM_FACTORIES.get(name)
-    if factory is None:
-        raise KeyError(f"Unknown RCX-π program: {name!r}")
-    return factory()
+    _ensure_defaults()
+    return name in _REGISTRY
+
+
+def clear_registry() -> None:
+    """
+    Remove all registered programs.
+
+    Used by tests and callers that want a clean slate.
+    """
+    _REGISTRY.clear()
+
+
+def list_programs() -> list[str]:
+    """
+    Return all registered program names, sorted for stability.
+    """
+    _ensure_defaults()
+    return sorted(_REGISTRY.keys())
+
+
+def list_program_names() -> list[str]:
+    """
+    Backwards-compatible alias expected by tests.
+
+    Returns:
+        List of registered program names, sorted.
+    """
+    return list_programs()
+
+
+# ---------------------------------------------------------------------------
+# Default / built-in programs
+# ---------------------------------------------------------------------------
+
+def _ensure_defaults() -> None:
+    """
+    Lazily seed built-in named programs into the registry.
+
+    Currently this ensures that "succ-list" is always available.
+    """
+    if "succ-list" not in _REGISTRY:
+        # Local import avoids circular import at module import time.
+        from .programs import succ_list_program
+
+        register_program("succ-list", succ_list_program())
