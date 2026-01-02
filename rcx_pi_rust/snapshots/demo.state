@@ -1,0 +1,8 @@
+# RCX-π snapshot v1
+PROGRAM:
+RULE: [news,stable] -> ra
+RULE: [news,unstable] -> lobe
+RULE: [news,paradox] -> sink
+RULE: [news,_] -> sink
+STATE:
+RA: [news,stable]

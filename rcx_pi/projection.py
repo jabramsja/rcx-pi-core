@@ -32,13 +32,14 @@ from rcx_pi.core.motif import Motif, μ, VOID
 
 # ---------- markers (must match evaluator rules) ----------
 
-CLOSURE_MARKER     = μ(μ(μ(μ(μ()))))              # 4-deep
-ACTIVATION_MARKER  = μ(μ(μ(μ(μ(μ())))))           # 5-deep
-PROJECTION_MARKER  = μ(μ(μ(μ(μ(μ(μ()))))))        # 6-deep
-PATTERN_VAR_MARKER = μ(μ(μ(μ(μ(μ(μ(μ())))))))     # 7-deep
+CLOSURE_MARKER = μ(μ(μ(μ(μ()))))  # 4-deep
+ACTIVATION_MARKER = μ(μ(μ(μ(μ(μ())))))  # 5-deep
+PROJECTION_MARKER = μ(μ(μ(μ(μ(μ(μ()))))))  # 6-deep
+PATTERN_VAR_MARKER = μ(μ(μ(μ(μ(μ(μ(μ())))))))  # 7-deep
 
 
 # ---------- pattern variables ----------
+
 
 def var(id_motif: Motif) -> Motif:
     """
@@ -62,6 +63,7 @@ def var_y() -> Motif:
 
 
 # ---------- projections & closures ----------
+
 
 def make_projection(pattern: Motif, body: Motif) -> Motif:
     """

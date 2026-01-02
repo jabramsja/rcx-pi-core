@@ -1,6 +1,7 @@
 # rcx_pi/utils/compression.py
 from ..core.motif import μ, VOID
 
+
 class Compression:
     """Depth markers used by recursion, divergence detection and pattern scopes."""
 
@@ -19,5 +20,6 @@ class Compression:
         if depth not in self.cache:
             self.cache[depth] = self._mk(depth)
         return self.cache[depth]
+
 
 compression = Compression()

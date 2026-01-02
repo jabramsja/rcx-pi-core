@@ -9,7 +9,7 @@ They are stepping stones toward fully structural closures.
 """
 
 from __future__ import annotations
-from typing import Callable, Iterable, Optional
+from typing import Iterable, Optional
 
 from .core.motif import Motif
 from .engine.evaluator_pure import PureEvaluator
@@ -17,6 +17,7 @@ from . import μ, VOID  # rcx_pi/__init__.py exposes these
 
 
 # ---------- local Peano helpers (no utils dependency) ----------
+
 
 def num(n: int) -> Motif:
     """Build Peano n as nested successors over VOID."""
@@ -48,6 +49,7 @@ def motif_to_int(m: Motif) -> Optional[int]:
 
 
 # ---------- higher-level helpers ----------
+
 
 def peano_list(ints: Iterable[int]) -> Motif:
     """
@@ -83,7 +85,9 @@ def peano_factorial(n_val: int, ev: Optional[PureEvaluator] = None) -> Motif:
     return acc
 
 
-def peano_sum(ints: Iterable[int], ev: Optional[PureEvaluator] = None) -> Motif:
+def peano_sum(
+        ints: Iterable[int],
+        ev: Optional[PureEvaluator] = None) -> Motif:
     """
     Sum a list of Python ints as Peano motifs.
 

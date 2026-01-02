@@ -20,12 +20,9 @@ All classification is done by *structural inspection*:
   - "struct"  = none of the above (generic structural / nested numeric junk)
 """
 
-from .core.motif import Motif, μ, VOID
+from .core.motif import Motif, μ
 from .utils.compression import compression
 from .reduction.pattern_matching import (
-    PROJECTION,
-    CLOSURE,
-    ACTIVATION,
     is_closure,
     is_proj,
     is_act,
@@ -53,6 +50,7 @@ def strip_meta_tag(m: Motif) -> Motif:
 
 # ---------- helpers to detect "program-ness" and "value-ness" ----------
 
+
 def _has_program_marker(m: Motif) -> bool:
     """
     True if the motif contains any *well-formed* closure / activation / projection.
@@ -69,10 +67,8 @@ def _has_program_marker(m: Motif) -> bool:
         return True
 
     # Recurse into children
-    return any(
-        isinstance(c, Motif) and _has_program_marker(c)
-        for c in m.structure
-    )
+    return any(isinstance(c, Motif) and _has_program_marker(c)
+               for c in m.structure)
 
 
 def _contains_data_number(m: Motif, inside_prog: bool = False) -> bool:
@@ -175,6 +171,7 @@ def _classify_core(m: Motif) -> str:
 
 
 # ---------- public API used by test_meta.py ----------
+
 
 def classify_motif(m: Motif) -> Motif:
     """

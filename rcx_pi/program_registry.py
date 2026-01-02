@@ -36,6 +36,7 @@ _REGISTRY: Dict[str, Motif] = {}
 # Core registry operations
 # ---------------------------------------------------------------------------
 
+
 def register_program(name: str, program: Motif) -> None:
     """
     Register (or overwrite) a named RCX-π program.
@@ -96,6 +97,7 @@ def list_program_names() -> list[str]:
 # ---------------------------------------------------------------------------
 # Default / built-in programs
 # ---------------------------------------------------------------------------
+
 
 def _ensure_defaults() -> None:
     """

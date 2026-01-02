@@ -25,6 +25,7 @@ from .core.motif import Motif
 # Basic structural helpers
 # ---------------------------------------------------------------------
 
+
 def _motif_to_int(m: Motif) -> Optional[int]:
     """
     Local, minimal copy of the Peano-decoder logic.
@@ -125,6 +126,7 @@ def is_meta_tagged(m: Motif) -> bool:
 # Self-hosting profile & invariants
 # ---------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SelfHostProfile:
     """
@@ -134,6 +136,7 @@ class SelfHostProfile:
     future, we might extend this with more fine-grained restrictions
     (e.g. allowed closure shapes, maximum depth, etc.).
     """
+
     allow_meta_tagged: bool = False
     allow_mixed_struct: bool = True  # e.g. (value, value) pairs are OK
 
@@ -141,7 +144,9 @@ class SelfHostProfile:
 DEFAULT_PROFILE = SelfHostProfile()
 
 
-def is_self_host_value(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
+def is_self_host_value(
+        m: Motif,
+        profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
     """
     A value that is allowed in the self-hosted core.
 
@@ -156,7 +161,9 @@ def is_self_host_value(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> 
     return True
 
 
-def is_self_host_struct(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
+def is_self_host_struct(
+        m: Motif,
+        profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
     """
     A structurally pure motif that can live in the self-hosted core
     (values, closures, pairs, triples, etc.).
@@ -171,7 +178,9 @@ def is_self_host_struct(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) ->
     return True
 
 
-def is_self_host_safe(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
+def is_self_host_safe(
+        m: Motif,
+        profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
     """
     Top-level guard: True iff m is structurally acceptable to hand off
     to a future self-hosting RCX-π kernel.

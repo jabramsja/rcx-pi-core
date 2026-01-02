@@ -1,0 +1,15 @@
+# RCX-π snapshot v1
+PROGRAM:
+RULE: [null,_] -> ra
+RULE: [inf,_] -> lobe
+RULE: [paradox,_] -> sink
+RULE: [ra,_] -> ra
+RULE: [lobe,_] -> lobe
+RULE: [sink,_] -> sink
+RULE: [shadow,_] -> sink
+RULE: [omega,_] -> lobe
+STATE:
+RA: [null,a]
+LOBE: [inf,a]
+SINK: [paradox,a]
+SINK: [omega,[a,b]]

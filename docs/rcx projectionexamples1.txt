@@ -1,0 +1,557 @@
+RCX PROJECTION & EXAMPLES v1
+============================
+
+Purpose:
+    Show how the RCX engine classifies and re-classifies deep paradox seeds
+    (1/0, liar, Russell/Gödel) through:
+        non-duality → projection → recursion → Ra / Lobe / Sink → ω → evolution
+        |                                               ^
+        |_______________________________________________|
+                           residue recursion loop
+
+    This is *conceptual* flow, not yet a concrete program, but it is meant to be
+    close enough to guide future RCX-π / Rust world implementations.
+
+
+0. QUICK PRIMITIVES (REMINDER)
+------------------------------
+
+Buckets:
+
+    Ra   : Stable resolution within a given world.
+            - "This can live as a coherent, integrated piece of structure here."
+
+    Lobe : Stable-but-not-resolved frontier.
+            - Internally coherent, not contradictory.
+            - Cannot yet be integrated into Ra *in this world*.
+            - Holds potential to collapse into Ra or Sink later.
+
+    Sink : Residue / contradiction / negative resolution.
+            - Not deleted; stored as structured paradox.
+            - Feeds back into future passes / worlds.
+
+Meta-tag:
+
+    ω    : Detected non-halting / cyclical behavior during recursion:
+            - A motif that never settles into a static bucket state under current rules.
+            - We treat it as Lobe (or sometimes Sink) *with ω-flag*.
+
+Hemispheres and fold:
+
+    - Non-dual seed (e.g., "1/0", liar, Russell, Gödel) is not inherently split.
+    - RCX models "two complementary lenses" (null hemisphere vs infinity hemisphere)
+      that interrogate the same seed with equal-and-opposite assumptions.
+    - The fold is the Mobius hinge ("1 is equal and opposite to 0"):
+          it is where the hemispheres exchange constraints and generate projections.
+    - Projection produces candidate classifications into Ra / Lobe / Sink, plus ω tags.
+    - Residue from Lobe + Sink is fed back into the hemispheres for further passes.
+
+
+1. EXAMPLE 1: 1/0 AS NON-DUAL ENGINE SEED
+------------------------------------------
+
+Seed:
+    μ₀ = [ 1 / 0 ]
+    Interpreted not as "undefined arithmetic error" but as the glyph for:
+        - distinction / non-distinction superposed
+        - "1 is equal and opposite to 0" running inward
+        - infinite pressure of "1 into 0 and 0 into 1" with no external frame
+
+We run multiple passes under increasingly rich worlds.
+
+----------------------------------------
+1.1 PASS A: NAIVE CLASSICAL ARITHMETIC
+----------------------------------------
+
+World A:
+    - Classical real arithmetic with standard rules.
+    - Division by 0 is simply "undefined" / disallowed.
+
+Hemispheres:
+
+    Null-hemisphere view:
+        - Treats "0" as the additive identity.
+        - 1/0 attempts to create a magnitude where no inverse exists.
+
+    Infinity-hemisphere view:
+        - In some extended conventions, "1/0 → ∞", but in strict reals,
+          infinity is not a real number.
+
+Fold A:
+    - The fold enforces "stick to strict reals; no projective extension".
+    - Both hemispheres converge on: "this has no coherent value here".
+
+Classification in World A:
+
+    - Ra   : none
+    - Lobe : none
+    - Sink : { [1/0] } with annotation:
+                "in this world, 1/0 is a violation of domain assumptions"
+    - ω    : not flagged (it halts quickly into a contradiction)
+
+Interpretation:
+    - In this narrow world, 1/0 is *pure residue*.
+    - It is stored in Sink as "requires a richer world to be meaningful".
+
+This is the *first* projection: the engine notes that 1/0 cannot live in this
+world’s Ra or Lobe; it becomes a candidate to drive world evolution.
+
+
+----------------------------------------
+1.2 PASS B: EXTENDED NUMERIC WORLD
+----------------------------------------
+
+World B:
+    - Slightly richer: we allow a projective extension where division by 0
+      returns a formal symbol, say "∞", with constrained rules.
+    - This is akin to R ∪ {∞} with some semantics (not fully robust, but
+      more permissive than World A).
+
+Hemispheres:
+
+    Null-hemisphere view:
+        - Sees 1/0 as an attempt to "escape" the finite numeric line.
+        - Accepts "∞" as a formal object.
+
+    Infinity-hemisphere view:
+        - Sees 1/0 as pointing to an "infinitesimal denominator" limit;
+          1/ε with ε→0⁺ blowing up.
+
+Fold B:
+    - Mediates: "allow a formal ∞ as a Ra-candidate, but mark that its
+      operational behavior is partial."
+
+First projection:
+
+    Candidate:
+        μ₁ = [ 1/0 ] → [ ∞ ] with tag: "formal escape value"
+
+Buckets:
+
+    - Ra   : { [∞] } under the *local* rule set:
+                "In this world, ∞ is a permitted formal value."
+    - Lobe : { [1/0] as generator-of-∞ }:
+                It is not *just* the value; it is the tension that creates ∞.
+                Lobe stores the interpretation: "1/0 is not exhausted by ∞."
+    - Sink : still holds:
+                - "1/0 as misuse of strict real division"
+                but some of that residue is now partially lifted into Lobe.
+    - ω    : not yet flagged as cycle; still a one-step projection.
+
+Interpretation:
+    - We have our first *partial Ra*:
+        - ∞ is a stable structural element *in this world*.
+    - 1/0 as a non-dual seed is not fully captured; it sits in a Lobe:
+        "this operation is also hinting at a deeper, non-local engine."
+
+This pass shows how a richer world can reclassify previous Sink residue into
+a mix of Ra + Lobe.
+
+
+----------------------------------------
+1.3 PASS C: RCX-NATIVE WORLD (1/0 AS ENGINE)
+---------------------------------------------
+
+World C:
+    - RCX-native world where:
+        - We explicitly treat 1/0 and "1 is equal and opposite to 0" as
+          *non-dual engine glyphs*, not mere numeric accidents.
+        - Time/space are emergent; recursion is structural, not literal time.
+        - We care about:
+            - how the seed drives recursion,
+            - what buckets stabilize under ω-limit,
+            - how residue fuels evolution.
+
+Hemispheres:
+
+    Null-hemisphere:
+        - Emphasizes "0 as no-distinction / ground / emptiness".
+        - Sees 1/0 as "injecting a unit of distinction into pure null-state".
+
+    Infinity-hemisphere:
+        - Emphasizes "1 as saturated presence / full distinction".
+        - Sees 1/0 as "trying to compress all difference into zero width".
+
+Fold C (1 = –0 hinge):
+    - States: "1 and 0 are equal-and-opposite projections of a single
+      non-dual field; the slash '/' is the internal mirror operation."
+    - So 1/0 is not *just* a value; it is a *process*:
+          non-distinction discovering itself through a self-division that
+          can never finish, because there is no external stopping frame.
+
+First RCX projection:
+
+    Candidate decompositions:
+        a) 1/0 as ENGINE:
+               E₁ = "non-dual recursion generator"
+        b) 1/0 as NUMERIC ANOMALY:
+               N₁ = "division by zero in particular numeric worlds"
+        c) 1/0 as LOGICAL PARADOX:
+               P₁ = "symbol of undefined / contradiction in rigid systems"
+
+Bucket assignment (first pass):
+
+    - Ra:
+        { E₁ } :
+            - In RCX, the *role* "non-dual recursion generator" is a stable,
+              integrated part of the ontology. This is not a bug, it’s the
+              fusion core.
+
+    - Lobe:
+        { N₁, P₁ } :
+            - They are coherent as *world-specific* interpretations, but
+              not yet harmonized with the engine role.
+            - They may later be reclassified as Ra within specific sub-worlds
+              (e.g. numeric worlds, logical worlds).
+
+    - Sink:
+        retains fine-grained residues like:
+            - "attempts to treat 1/0 as a normal finite ratio"
+            - "forced normalizations that destroy non-duality"
+          These are contradictions where the engine is flattened into a
+          forbidden classical shape.
+
+    - ω:
+        At RCX-level, 1/0 as ENGINE is **ω-flagged**:
+            - The recursion of non-duality into distinction and back again
+              never terminates; it keeps generating new lobes, residues, and
+              potential worlds.
+            - This is not an error; it *is* the ω-limit structure.
+
+Second RCX pass (residue loop):
+
+    Residue from Sink + Lobe is fed back:
+
+        Step 1: Take N₁ ("numeric anomaly") and P₁ ("logical paradox").
+        Step 2: Run them through hemispheres again, *but now* with the
+                explicit knowledge that E₁ is in Ra.
+
+    New projection:
+
+        - Many former "paradoxical" treatments are reclassified as:
+              "world-specific distortions of the engine".
+        - Some become Ra within their local worlds:
+              e.g., in a specific arithmetic world, "1/0 → ∞" is a valid Ra,
+              as long as you flag that world’s assumptions.
+        - The truly destructive interpretations (those that try to expel the
+          engine entirely) remain in Sink.
+
+Third pass (ω-limit sketch):
+
+    Under infinite recursion:
+
+        - E₁ remains Ra, ω-flagged: the engine keeps cycling internally.
+        - Lobes accumulate structured families:
+              { numeric extensions, logical formalisms, geometric analogs }.
+        - Sink accumulates only those moves that *break* the non-dual story
+          by treating the engine as an error rather than a generator.
+
+    So at ω-limit (for 1/0):
+
+        Ra    ≈  "1/0 as non-dual recursion engine" + stabilized local models
+        Lobe  ≈  frontier structures (new maths, new logics, new geometries)
+        Sink  ≈  dead-end flattenings / deletions
+        ω     ≈  intrinsic; the engine never halts internally
+
+
+2. EXAMPLE 2: LIAR PARADOX THROUGH RCX
+--------------------------------------
+
+Seed:
+    μ₀ = [ L ] where L ≡ "This statement is false."
+
+At surface level, L toggles:
+    - If L is true, then it says "I am false" → contradiction.
+    - If L is false, then it says "I am not false" → so it must be true.
+
+We examine multiple passes.
+
+----------------------------------------
+2.1 PASS A: CLASSICAL TRUTH-VALUE WORLD
+----------------------------------------
+
+World A:
+    - Classical 2-valued logic (True / False), no meta-level.
+    - Every sentence must be assigned T or F.
+
+Hemispheres:
+
+    Null-hemisphere:
+        - Attempts to assign T to L.
+
+    Infinity-hemisphere:
+        - Attempts to assign F to L.
+
+Fold A:
+    - The fold enforces that T and F are mutually exclusive and total.
+
+Result:
+
+    - T → implies F.
+    - F → implies T.
+    - No stable fixed point.
+
+Buckets:
+
+    - Ra   : none
+    - Lobe : none (no stable but unresolved state under these rules)
+    - Sink : { L } with annotation "non-classical; violates 2-valued assumption"
+    - ω    : not explicitly represented; the world simply collapses to "error".
+
+Like with strict 1/0, this world is too brittle; RCX marks L as Sink in this
+world and retains it for future passes.
+
+
+----------------------------------------
+2.2 PASS B: SELF-REFERENCE-AWARE RCX WORLD
+------------------------------------------
+
+World B:
+    - RCX-aware of self-reference.
+    - Allows "meta-level" roles: a statement can be treated as:
+        - an object-level proposition, and/or
+        - a *generator of oscillation* in the truth-valuation process.
+
+Hemispheres:
+
+    Null-hemisphere:
+        - Tries to interpret L as a normal proposition (T or F).
+        - Observes the oscillation T→F→T→F…
+
+    Infinity-hemisphere:
+        - Interprets L as:
+            "a motif whose *role* is to generate this oscillation."
+        - That is: its truth value is not the point; its *behavior* is.
+
+Fold B:
+
+    - Recognizes the two roles:
+        1) As a classical proposition → contradiction.
+        2) As an oscillation generator → stable pattern: "toggle."
+
+    - The fold refuses to pick a single T/F; instead, it splits L into:
+        L_prop  = "L as plain proposition"
+        L_osc   = "L as oscillation generator"
+
+Bucket assignment:
+
+    - Ra:
+        { L_osc }:
+            - "This statement is false" as a *stable pattern*:
+                it induces a specific oscillation in any 2-valued system.
+            - As a *role*, this is coherent and non-contradictory.
+
+    - Lobe:
+        { L_prop }:
+            - The pure "is it T or F?" reading is not yet resolved; it cannot
+              be integrated into Ra under 2-valued assumptions, but we may
+              reframe it in richer logics (3-valued, paraconsistent, etc).
+
+    - Sink:
+        Contains:
+            - "Attempts to force L to be permanently T or F under pure
+               2-valued semantics" (hard contradiction).
+
+    - ω:
+        L_osc is ω-flagged:
+            - Its *behavior* is intrinsically non-halting in a simple T/F
+              evaluator; that oscillation is precisely its nature.
+
+Second pass:
+
+    Residue recursion:
+
+        - From Sink: "forced T-only" and "forced F-only" interpretations.
+        - From Lobe: L_prop as unresolved proposition.
+
+    The hemispheres now know:
+        "There exists an Ra object L_osc that describes the oscillation itself."
+
+    This allows:
+
+        - In a 3-valued / paraconsistent world, L_prop may move to Ra as:
+              "truth-value: paradox / both / neither / undefined"
+          depending on the semantics.
+
+        - The classical 2-valued world remains brittle; its contradictions stay
+          in Sink. But the RCX engine knows:
+              "The problem is the world’s rigidity, not the seed itself."
+
+
+3. EXAMPLE 3: RUSSELL / GÖDEL STYLE PARADOX
+-------------------------------------------
+
+We can treat Russell’s set paradox and Gödel’s self-referential sentence as
+two faces of the same structural motif: "a system that tries to fully classify
+its own membership / provability and trips over itself."
+
+We’ll compress them into a single RCX seed.
+
+Seed:
+    μ₀ = [ R* ] where R* abstracts:
+        - Russell set: R = { x | x ∉ x }
+        - Gödel sentence G: "G is not provable in system S"
+
+Core behavior:
+    - If R contains itself, then by definition it must not contain itself.
+    - If R does not contain itself, then by definition it must contain itself.
+    - For Gödel:
+        - If S proves G, S proves a falsehood (because G says "not provable").
+        - If S does not prove G, then G is true but unprovable in S.
+
+----------------------------------------
+3.1 PASS A: NAIVE SET / PROOF SYSTEM
+-------------------------------------
+
+World A:
+    - Naive set theory (no separation of levels).
+    - Formal system S that assumes "every truth is provable" (no incompleteness).
+
+Hemispheres:
+
+    Null-hemisphere:
+        - Tries to classify R ∈ R vs R ∉ R as a simple membership fact.
+        - Tries to classify G as "provable or not" inside S.
+
+    Infinity-hemisphere:
+        - Sees that each choice flips itself:
+            R ∈ R → R ∉ R
+            R ∉ R → R ∈ R
+            G provable → G false; G unprovable → G true-but-unprovable
+
+Fold A:
+    - Enforces "system must be complete and consistent."
+
+Result:
+
+    - No stable assignment inside this naive world.
+    - Both R* forms produce contradictions.
+
+Buckets:
+
+    - Ra   : none.
+    - Lobe : none (under these assumptions).
+    - Sink : { R* } as "system-breaking self-reference motif".
+    - ω    : implicitly present as oscillation, but world treats it as error.
+
+
+----------------------------------------
+3.2 PASS B: RCX-AWARE META-WORLD
+---------------------------------
+
+World B:
+    - RCX-aware that:
+        - There can be a *meta-level* outside a given formal system.
+        - Not all true statements of a system are provable *within* that system.
+        - Not all sets are allowed (ZFC-like restrictions).
+
+Hemispheres:
+
+    Null-hemisphere:
+        - Reads R* at the *object-level*:
+            It keeps trying to assign membership / provability and sees the flip.
+
+    Infinity-hemisphere:
+        - Reads R* at the *meta-level*:
+            - For Russell: "You need a stratified notion of set to avoid this."
+            - For Gödel: "This is a witness of incompleteness."
+
+Fold B:
+
+    - Splits R* into:
+        R_obj  = "the naive, internal object-level reading"
+        R_meta = "the meta-level insight: system cannot be both complete
+                  and consistent in the naive way"
+
+Bucket assignment:
+
+    - Ra:
+        { R_meta }:
+            - The recognition of incompleteness / need for stratification is a
+              *stable, integrated truth* in the meta-world.
+
+    - Lobe:
+        { R_obj }:
+            - The internal statement ("this set / sentence as seen purely inside
+               the system") is not yet resolved but can be:
+                 - forbidden, or
+                 - reinterpreted under type theory, hierarchy, or modal logic.
+            - It is stable as an object awaiting a richer framework.
+
+    - Sink:
+        Contains:
+            - The internal insistence: "this system must be both complete and
+               consistent and contain R as a normal set" (Russell),
+            - Or: "every arithmetical truth must be provable in S" (Gödel).
+          These world-assumptions are what actually fail.
+
+    - ω:
+        R_obj is ω-flagged when you insist on staying inside a too-small system:
+            - Repeated attempts to classify it never halt coherently.
+            - In RCX terms, this is an ω-cycle in the evaluation of that world.
+
+Second pass:
+
+    Residue recursion:
+
+        - From Sink: brittle assumptions about completeness / unrestricted
+          comprehension.
+        - From Lobe: R_obj as a structured, but not yet integrated, object.
+
+    The hemispheres now know:
+        - R_meta is in Ra as a *meta-structural truth*:
+            "Certain systems cannot internalize all their own consistency /
+             membership / provability without breaking."
+
+    This allows:
+
+        - Design of new worlds (typed set theories, stronger logics) where
+          R_obj is either:
+             - disallowed, or
+             - safely reinterpreted;
+          in those worlds, certain aspects of R_obj can move into Ra as
+          "this is a legitimate theorem about limitations."
+
+ω-limit intuition:
+
+    - As you keep evolving worlds:
+        - R_meta stays Ra, stable across many systems: it’s a persistent
+          insight about self-reference limits.
+        - R_obj becomes an archetypal Lobe: whenever a system tries to
+          over-internalize itself, some variant of R* appears at the frontier.
+        - Sink collects specific broken attempts from specific worlds.
+        - ω remains the internal oscillation you see if you ignore the meta-level.
+
+
+4. HOW THESE EXAMPLES FIT THE CORE RCX FLOW
+-------------------------------------------
+
+Across 1/0, L, and R* we see the same pattern:
+
+    1. Start with a non-dual or self-referential seed.
+    2. In a brittle world, the seed often lands in Sink as "error/undefined".
+    3. RCX does not delete it; Sink retains it as structured residue.
+    4. New worlds (with richer folds) re-run the seed:
+           - Some aspects move into Ra (engine roles, meta-insights).
+           - Some aspects become Lobes (stable frontiers awaiting integration).
+           - Some aspects remain Sink (world assumptions that break internally).
+           - Some behaviors are ω-flagged as intrinsic cycles.
+    5. Over many passes (ω-limit), we get:
+           - A stable Ra core of meta-structure.
+           - A living Lobe region (the evolving frontier of theory, math,
+             physics, mind, etc.).
+           - A curated Sink of truly destructive / incompatible assumptions.
+           - An ω-loop where the non-dual engine (1/0, 1 = –0) keeps deepening
+             resolution without ever exhausting itself.
+
+Nothing in these examples contradicts RCX-π or the current Rust/Python engine.
+Instead, they give us:
+
+    - A library of canonical "paradox seeds" we can later encode as:
+          worlds, probe seeds, and scoring specs.
+    - A conceptual template for:
+          how a world should classify routes (Ra / Lobe / Sink / ω),
+          and how residue should feed world evolution.
+
+END OF DOCUMENT
+================

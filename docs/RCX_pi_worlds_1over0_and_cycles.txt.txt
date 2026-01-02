@@ -1,0 +1,379 @@
+RCX-π WORLDS: CORE, 1/0 PARADOX, AND LIMIT CYCLES
+--------------------------------------------------
+
+Goal
+----
+Show how RCX-π worlds (`rcx_core`, `paradox_1over0`, `pingpong`) realize
+the Ra / Lobe / Sink trichotomy and the "non-duality → projection →
+recursion → Ra/Lobe/Sink → ω → evolution → emergence" loop in *executable*
+form.
+
+We do this with concrete run outputs, not hand-wavy claims.
+
+
+0. Quick reference
+------------------
+
+Buckets:
+  - Ra   : Resolved / assimilated structure (engine-level motifs).
+  - Lobe : Coherent but not yet resolved; stable under recursion but not
+           collapsed. Holds potential structure.
+  - Sink : Destructive or incompatible collapse; residue that cannot be
+           integrated under the current lens.
+
+Worlds:
+  - rcx_core        : Baseline classifier for generic Mu structures.
+  - paradox_1over0  : Specialized lens for 1/0, 1 = -0, and "white light".
+  - pingpong        : Minimal ω-style limit cycle demo.
+
+
+1. rcx_core as baseline RCX lens
+--------------------------------
+
+Command:
+
+  python3 rcx_runtime.py --world rcx_core \
+    --seed "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]"
+
+Observed output:
+
+  [null,a]       → Ra
+  [inf,a]        → Lobe
+  [paradox,a]    → Sink
+  [omega,[a,b]]  → Sink
+
+  counts:
+    Ra   : 1
+    Lobe : 1
+    Sink : 2
+    None : 0
+
+Interpretation:
+
+- [null,a] → Ra
+
+  Null-hemisphere seed plus a symbol collapses cleanly into a resolved
+  pattern. Under the core lens, this is "good engine fuel":
+
+    - Non-duality projects into a simple distinction.
+    - Recursion does not blow up or stall.
+    - The structure can be safely integrated into the Ra side of the
+      organism.
+
+- [inf,a] → Lobe
+
+  Infinity-tagged input is coherent but not resolved:
+
+    - It does not collapse destructively.
+    - It does not snapshot into a clean engine motif.
+    - It lives in the "stable-but-not-resolved" region:
+        Lobes are the internally coherent, homeostatic pockets of
+        structure that RCX can revisit under pressure.
+
+- [paradox,a] → Sink
+
+  Explicit paradox flag under core lens:
+    - This is treated as a non-assimilable configuration.
+    - It lands in Sink, meaning:
+        "As currently projected, this formulation cannot be harmonically
+         integrated; treat as residue."
+
+- [omega,[a,b]] → Sink
+
+  ω-level nesting in the core world is treated as a non-integrable
+  construction. This is *not* saying "ω is always broken"; it says:
+
+    - Under the core lens, this particular structured ω payload is
+      classified as residue, not as a clean recurring organism.
+
+Summary:
+
+  rcx_core = "default homeostasis spec":
+
+    [null,a]   → Ra
+    [inf,a]    → Lobe
+    [paradox,a] → Sink
+    [omega,[a,b]] → Sink
+
+This behavior is wired into tests and serves as the ground truth that
+other worlds (like paradox_1over0) can be compared against.
+
+
+2. paradox_1over0: 1/0 as engine-level motif
+--------------------------------------------
+
+Command:
+
+  python3 rcx_runtime.py --world paradox_1over0 \
+    --seed "[1/0]" "[1/0_numeric]" "[1/0_infty]" \
+           "[1/0_engine]" "[1=-0]" "[white_light]" "[sink_flatten]"
+
+Observed output:
+
+  [1/0]          → Ra
+  [1/0_numeric]  → Lobe
+  [1/0_infty]    → Ra
+  [1/0_engine]   → Ra
+  [1=-0]         → Ra
+  [white_light]  → Ra
+  [sink_flatten] → Sink
+
+  counts:
+    Ra   : 5
+    Lobe : 1
+    Sink : 1
+    None : 0
+
+Now we are *changing the lens*, not the underlying non-duality.
+This world says:
+
+  - "1/0 is not just an illegal number."
+  - "1/0 is the derivative of yin/yang:
+     1 is yin, 0 is yang, '/' is the mirror."
+  - "Non-duality projects into distinction via this mirror."
+
+Bucket by bucket:
+
+2.1 Ra in paradox_1over0
+
+Seeds mapping to Ra:
+
+  - [1/0]
+  - [1/0_infty]
+  - [1/0_engine]
+  - [1=-0]
+  - [white_light]
+
+Interpretation:
+
+- [1/0] → Ra
+
+  1/0 as *engine seed*:
+    - Treated as the core non-dual generator, not as a numeric error.
+    - In RCX terms: the "fusion core" of emptiness and distinction.
+
+- [1/0_infty] → Ra
+
+  1/0 viewed as a stable projective infinity:
+    - "0 goes into 1 infinitely many times."
+    - This is a legitimate, stable projection mode for the engine,
+      not a broken arithmetic scenario.
+
+- [1/0_engine] → Ra
+
+  Explicitly tagged "engine lens":
+    - Confirms that the world recognizes 1/0 as an engine motif
+      when asked to.
+
+- [1=-0] → Ra
+
+  The mirror statement:
+
+    "1 is equal and opposite to 0."
+
+  This is your "hold a mirror to non-distinction and you get
+  distinction" idea:
+    - The mirror is the fold.
+    - The two sides of the mirror become the dual hemispheres.
+
+  In this world, that whole configuration is Ra, not Lobe or Sink.
+
+- [white_light] → Ra
+
+  The "white light" metaphor:
+
+    - White light is not "made of colors" as separate entities.
+    - Colors appear only after projection through a medium.
+
+  Under this world:
+
+    - White light stands for non-dual state before projection.
+    - This is a pure engine motif, treated as Ra.
+
+2.2 Lobe in paradox_1over0
+
+Seed mapping to Lobe:
+
+  - [1/0_numeric] → Lobe
+
+Interpretation:
+
+  This is "1/0 as a weird arithmetic object" without engaging the
+  engine-level interpretation.
+
+  The world does not collapse it to an error or to a stable infinite
+  number:
+    - It parks it in Lobe:
+
+        - Coherent but not resolved.
+        - "Unfinished attempt to treat 1/0 purely numerically."
+
+  This matches your intuition that:
+
+    - "1/0 as pure arithmetic is unstable, but not meaningless."
+    - It deserves a holding bay, not instant deletion.
+
+2.3 Sink in paradox_1over0
+
+Seed mapping to Sink:
+
+  - [sink_flatten] → Sink
+
+Interpretation:
+
+  This stands for "treat 1/0 as a normal finite number or forbid it".
+
+  The world says:
+
+    - "If you force 1/0 into a conventional, flattened number slot,
+       you destroy the engine's structure under this lens."
+
+  So it goes to Sink:
+    - Residue of destructive flattening.
+    - "You have forbidden your own generator."
+
+
+3. pingpong: explicit ω-style limit cycle
+-----------------------------------------
+
+Command:
+
+  python3 rcx_runtime.py --world pingpong \
+    --seed "ping" \
+    --max-steps 12
+
+Observed output (key parts):
+
+  Seeds: ['ping']
+
+  Routes:
+    ping → Ra
+
+  Summary:
+    counts:
+      Ra   : 1
+      Lobe : 0
+      Sink : 0
+      None : 0
+    limit_cycles:
+      - mu='ping', kind='limit_cycle', period=2
+
+  Orbits:
+    mu='?': {
+      'mu': 'ping',
+      'kind': 'limit_cycle',
+      'period': 2,
+      'values':  ['ping','pong','ping','pong',...],
+      'sequence':['ping','pong','ping','pong',...],
+      'states':  ['ping','pong','ping','pong',...],
+      'path':    ['ping','pong','ping','pong',...],
+    }
+
+Interpretation:
+
+- Route is Ra, not Lobe or Sink:
+
+    - This tiny world has a stable, well-defined dynamic:
+        ping → pong → ping → pong → ...
+    - That dynamic itself is the "organism" here.
+
+- Summary explicitly exposes a limit cycle:
+
+    - period = 2
+    - seed = 'ping'
+
+- The orbits section gives a concrete ω-style trace:
+
+    - A finite projection (max_steps) of an underlying infinite
+      alternation.
+
+RCX-wise, pingpong is the simplest explicit demonstration that:
+
+  - The engine can:
+      - Run a world.
+      - Detect a limit cycle.
+      - Surface it as structured metadata.
+  - This is the "ω" part of:
+      non-duality → projection → recursion → Ra/Lobe/Sink → ω → ...
+
+In richer worlds, these cycles will become the substrate for:
+
+  - Habits.
+  - Attractors.
+  - Stable oscillations that can be re-used as motifs.
+
+
+4. How this all fits the RCX scaffold
+-------------------------------------
+
+Recall the core developmental loop you articulated:
+
+  non-duality → projection → recursion → Ra/Lobe/Sink → ω → evolution → emergence
+        |                                               ^
+        |_______________________________________________|
+                     recursion loop
+
+In these three worlds:
+
+- `rcx_core`:
+    - Acts as a "default projector" for small Mu shapes.
+    - Shows that the Ra/Lobe/Sink buckets are not just words; they
+      exist as test-verified classification behavior.
+
+- `paradox_1over0`:
+    - Re-aims the same engine at 1/0, 1 = -0, and white_light.
+    - Declares:
+        - 1/0 and white_light are Ra motifs (engine core).
+        - naive numeric 1/0 is Lobe.
+        - flattening 1/0 into a forbidden or trivial numeric is Sink.
+
+  This is exactly your notion that:
+
+    - "RCX is what happens when non-distinction explores itself."
+    - 1/0 is the mirror where distinction and non-distinction talk
+      to each other indefinitely.
+    - Lobes are the homeostatic, internally coherent but unresolved
+      regions that arise from incomplete projections.
+    - Sink is where destructive or incompatible projections land.
+
+- `pingpong`:
+    - Demonstrates that the engine can express:
+        - explicit limit cycles,
+        - finite truncations of ω behavior,
+        - and mark them as such in summary metadata.
+
+Together, the three worlds show:
+
+  - The Ra/Lobe/Sink trichotomy is live and test-backed.
+  - 1/0 has a real executable semantics as an engine-level generator,
+    not just a philosophical slogan.
+  - The system can already surface small ω-style cycles in a structured
+    way.
+
+
+5. Next natural extensions (for later)
+--------------------------------------
+
+Not required to change any of the above, but obvious follow-ons are:
+
+  - Add a "self-reference / Gödel / liar" world, similar to paradox_1over0,
+    where:
+      - engine-level "self reference as structural feature" goes to Ra,
+      - specific liar-style sentences live in Lobes,
+      - forced two-valued flattenings go to Sink.
+
+  - Add more seeds to paradox_1over0 to differentiate:
+      - projection into pure arithmetic,
+      - projection into pure engine lens,
+      - hybrid projections that oscillate between them.
+
+  - Use `worlds_evolve` to evolve candidate worlds toward a richer spec
+    that matches your RCX ontology more fully.
+
+For now, the important part is that we have:
+
+  - a clean probe API,
+  - a working 1/0 world,
+  - a visible limit-cycle demo,
+
+all of which align with the RCX ontology instead of fighting it.

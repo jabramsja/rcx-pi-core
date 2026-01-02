@@ -17,7 +17,7 @@ to prevent circular-import issues. Any bridges to the public API
 """
 
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any
 
 from rcx_pi.core.motif import Motif, μ, VOID, UNIT
 
@@ -25,6 +25,7 @@ from rcx_pi.core.motif import Motif, μ, VOID, UNIT
 # ---------------------------------------------------------------------------
 # Core constructors
 # ---------------------------------------------------------------------------
+
 
 def NIL() -> Motif:
     """Empty list sentinel."""
@@ -39,6 +40,7 @@ def CONS(h: Motif, t: Motif) -> Motif:
 # ---------------------------------------------------------------------------
 # Local Peano helper to avoid rcx_pi import at module import time
 # ---------------------------------------------------------------------------
+
 
 def _motif_to_int_local(m: Motif) -> int | None:
     """Local Peano decoder: succ^n(VOID) -> n, else None."""
@@ -57,6 +59,7 @@ def _motif_to_int_local(m: Motif) -> int | None:
 # ---------------------------------------------------------------------------
 # Python list <-> Motif list bridges
 # ---------------------------------------------------------------------------
+
 
 def list_from_py(seq: list[Any]) -> Motif:
     """
@@ -134,6 +137,7 @@ def py_from_list(m: Motif) -> list[Any]:
 # ---------------------------------------------------------------------------
 # List recognizers and accessors
 # ---------------------------------------------------------------------------
+
 
 def is_list_motif(m: Motif) -> bool:
     """Return True if m structurally looks like a list."""

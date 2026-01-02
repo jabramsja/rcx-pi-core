@@ -1,0 +1,36 @@
+{
+  "rules": [
+    {
+      "action": "ra",
+      "pattern": "[null,_]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[inf,_]"
+    },
+    {
+      "action": "sink",
+      "pattern": "[paradox,_]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[ra,_]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[lobe,_]"
+    },
+    {
+      "action": "sink",
+      "pattern": "[sink,_]"
+    },
+    {
+      "action": "sink",
+      "pattern": "[shadow,_]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[omega,_]"
+    }
+  ]
+}

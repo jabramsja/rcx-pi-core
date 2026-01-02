@@ -1,0 +1,75 @@
+RCX-π / RCX Stack — Bootstrap Guide
+
+This file exists so that future AI sessions can quickly understand the repository without needing past conversation context.
+
+Repository layout:
+- rcx_pi/               Python RCX-π engine (Motif VM, evaluator, registry)
+- rcx_pi_rust/          Rust RCX-π runtime (Mu, buckets, rules, REPL)
+- worlds_json/          JSON world format for Rust <-> Python sync
+- README_BOOTSTRAP.md   This onboarding guide (main file for new AI)
+
+Rust RCX-π (rcx_pi_rust):
+- Runs minimal Mu routing system: r_a (stable), lobes (potential), sink (paradox)
+- Pattern rules may send to buckets or Rewrite(Mu)
+- If no rule matches, fallback classifier:
+    Sym(x) -> r_a
+    [x,x]  -> lobes
+    [x,y]  -> sink
+- Worlds live at rcx_pi_rust/mu_programs/*.mu
+
+Run REPL:
+cd rcx_pi_rust
+cargo run --example repl
+
+Useful REPL commands:
+:load-world NAME
+:save-world NAME
+:rules
+:why MU
+:orbit MU n
+:omega MU n
+:export-json NAME
+:import-json NAME
+:doc-world NAME
+:save-state NAME
+:load-state NAME
+:reset
+:q
+
+Example worlds:
+- rcx_core.mu   core tags null/inf/paradox/shadow/omega
+- pingpong.mu   ping ↔ pong rewrite for orbit cycles
+- vars_demo.mu  $x,$y variable patterns
+- news.mu       small classification demo
+
+Orbit demo:
+cargo run --example orbit_cli -- pingpong ping 12
+
+State snapshot demo:
+cargo run --example state_demo
+
+Python RCX-π (rcx_pi):
+- Motif VM (numbers, lists, evaluator, registry)
+- modules:
+  rcx_pi/api.py
+  rcx_pi/program_registry.py
+  rcx_pi/worlds_json.py
+  rcx_pi/worlds_bridge.py
+
+World conversion:
+MU -> JSON:
+python3 -m rcx_pi.worlds_json to-json rcx_pi_rust/mu_programs/rcx_core.mu worlds_json/rcx_core.json
+JSON -> MU:
+python3 -m rcx_pi.worlds_json to-mu worlds_json/rcx_core.json rcx_pi_rust/mu_programs/rcx_core.mu
+
+How to brief a new AI session:
+"I am working on RCX-π. Repo contains rcx_pi (Python) and rcx_pi_rust (Rust). Worlds are stored in .mu and JSON. Mu terms route into r_a, lobes, sink. REPL supports rules, orbits, snapshots. Read README_BOOTSTRAP.md first."
+Then paste any file(s) that AI must edit.
+
+Roadmap:
+short-term: serialization, auto-doc
+mid-term: visual orbit exploration, rule mutation tools
+long-term: self-hosting/meta-circular RCX core
+
+Remember:
+RCX-π is the minimal organism spine. We will build higher RCX layers on top.

@@ -41,9 +41,6 @@ from rcx_pi.listutils import (
     py_from_list,
     NIL,
     CONS,
-    is_list_motif,
-    head,
-    tail,
 )
 
 # ============================
@@ -54,13 +51,13 @@ from rcx_pi.listutils import (
 # They are encoded as Peano motifs when building instructions.
 
 OP_PUSH_CONST = 0  # push a constant motif
-OP_ADD        = 1  # pop 2 Peano numbers, push their sum
-OP_HALT       = 2  # stop execution
+OP_ADD = 1  # pop 2 Peano numbers, push their sum
+OP_HALT = 2  # stop execution
 
-OP_PUSH_NIL   = 3  # push empty list NIL()
-OP_CONS       = 4  # stack [..., xs, x] -> [..., CONS(x, xs)]
-OP_HEAD       = 5  # pop list xs, push head(xs)
-OP_TAIL       = 6  # pop list xs, push tail(xs)
+OP_PUSH_NIL = 3  # push empty list NIL()
+OP_CONS = 4  # stack [..., xs, x] -> [..., CONS(x, xs)]
+OP_HEAD = 5  # pop list xs, push head(xs)
+OP_TAIL = 6  # pop list xs, push tail(xs)
 
 
 def make_instr(op: int, arg: Motif) -> Motif:
@@ -79,6 +76,7 @@ def make_instr(op: int, arg: Motif) -> Motif:
 # ---------------------------------------------------------------------------
 # Small structural utilities used by programs
 # ---------------------------------------------------------------------------
+
 
 def _append_lists_struct(ev, xs: Motif, ys: Motif) -> Motif:
     """
@@ -132,6 +130,7 @@ def _to_py_list_strict(ev, xs: Motif, ctx: str) -> list[Motif]:
 # Basic combinator-ish list programs
 # ---------------------------------------------------------------------------
 
+
 def swap_xy_closure() -> Motif:
     """
     Closure that expects a 2-element list [x, y] and returns [y, x].
@@ -180,7 +179,8 @@ def rotate_xyz_closure() -> Motif:
     def _impl(ev, arg: Motif) -> Motif:
         items = _to_py_list_strict(ev, arg, "rotate_xyz_closure")
         if len(items) != 3:
-            raise TypeError("rotate_xyz_closure expects a 3-element list [x, y, z]")
+            raise TypeError(
+                "rotate_xyz_closure expects a 3-element list [x, y, z]")
         x, y, z = items
         return list_from_py([y, z, x])
 
@@ -190,6 +190,7 @@ def rotate_xyz_closure() -> Motif:
 # ---------------------------------------------------------------------------
 # swap_ends & reverse – used in tests and demos
 # ---------------------------------------------------------------------------
+
 
 def swap_ends_xyz_closure() -> Motif:
     """
@@ -230,6 +231,7 @@ def reverse_list_closure() -> Motif:
 # Append two lists
 # ---------------------------------------------------------------------------
 
+
 def append_lists_closure() -> Motif:
     """
     Return a closure that appends two lists encoded as a pair:
@@ -251,9 +253,11 @@ def append_lists_closure() -> Motif:
 
     return _make_closure(_impl)
 
+
 # ---------------------------------------------------------------------------
 # Program composition: seq(p, q)
 # ---------------------------------------------------------------------------
+
 
 def seq_closure(p: Motif, q: Motif) -> Motif:
     """
@@ -283,9 +287,11 @@ def seq_closure(p: Motif, q: Motif) -> Motif:
 
     return _make_closure(_impl)
 
+
 # ---------------------------------------------------------------------------
 # Higher-order-ish: map over a list with a closure
 # ---------------------------------------------------------------------------
+
 
 def map_closure(func_closure: Motif) -> Motif:
     """
@@ -308,7 +314,7 @@ def map_closure(func_closure: Motif) -> Motif:
 
         # Walk the motif list structurally, *without* decoding elements.
         while cur is not VOID:
-            x = ev.head(cur)          # this is a Motif element
+            x = ev.head(cur)  # this is a Motif element
             y = ev.run(func_closure, x)
             out_items.append(y)
             cur = ev.tail(cur)
@@ -317,6 +323,7 @@ def map_closure(func_closure: Motif) -> Motif:
         return list_from_py(out_items)
 
     return _make_closure(_impl)
+
 
 def add1_closure() -> Motif:
     """
@@ -330,6 +337,7 @@ def add1_closure() -> Motif:
         return add(n, num(1))
 
     return _make_closure(_impl)
+
 
 def succ_list_program() -> Motif:
     """
@@ -349,9 +357,11 @@ def succ_list_program() -> Motif:
 
     return mapper
 
+
 # ============================
 # Bytecode interpreter support
 # ============================
+
 
 def bytecode_closure(bytecode: Motif) -> Motif:
     """
@@ -409,7 +419,8 @@ def _eval_bytecode(ev, bytecode_motif: Motif, stack_motif: Motif) -> Motif:
                 stack.append(num(int(item)))
 
     for instr in instructions_py:
-        # Each instr is a motif list [opcode, arg] → Python list [opcode_val, arg_val]
+        # Each instr is a motif list [opcode, arg] → Python list [opcode_val,
+        # arg_val]
         pair = py_from_list(instr)
         if len(pair) != 2:
             raise TypeError("Bytecode instruction must be [opcode, arg]")
@@ -458,8 +469,8 @@ def _eval_bytecode(ev, bytecode_motif: Motif, stack_motif: Motif) -> Motif:
             if len(stack) < 2:
                 raise RuntimeError("OP_CONS requires at least 2 stack items")
 
-            x  = stack.pop()   # element
-            xs = stack.pop()   # list
+            x = stack.pop()  # element
+            xs = stack.pop()  # list
 
             if not isinstance(xs, Motif):
                 raise TypeError("OP_CONS expects a list motif as xs")
@@ -500,12 +511,112 @@ def _eval_bytecode(ev, bytecode_motif: Motif, stack_motif: Motif) -> Motif:
 # Misc helper – "activate" convenience
 # ---------------------------------------------------------------------------
 
+
 def activate(ev, program: Motif, arg: Motif) -> Motif:
     """
     Convenience wrapper:
 
         activate(ev, prog, arg) ≡ ev.run(prog, arg)
 
-    Exists mainly to keep backwards-compatibility with earlier demos.
+    Backwards-compat: if prog is a tagged program block / seq block,
+    unwrap and execute structurally.
     """
+    # Tagged program blocks / seq blocks (legacy)
+    try:
+        if is_program_block(program) or _is_seq_block(program):
+            return run_program_block(ev, program, arg)
+    except Exception:
+        # If anything about shape/parsing is weird, fall back to native run
+        pass
+
+    # Native closure motifs
     return ev.run(program, arg)
+
+# ---------------------------------------------------------------------------
+# Backwards-compatibility shims for older rcx_python_examples/test_programs.py
+# ---------------------------------------------------------------------------
+
+# Historically, some examples treated "programs" as tagged motif blocks.
+# The current core uses closure motifs (meta["fn"]). To keep both working,
+# we provide a minimal "program block" representation:
+#
+#   program_block := [PROGRAM_TAG, closure]
+#   seq_block     := [SEQ_TAG, [p_block, q_block]]
+#
+# wrap_program(closure) -> program_block
+# is_program_block(x)   -> bool
+# seq(p_block, q_block) -> seq_block
+#
+# And we also provide an *evaluator-friendly* way to run them by unwrapping
+# to closures when needed.
+
+PROGRAM_TAG = "program"
+SEQ_TAG = "seq"
+
+
+def wrap_program(prog: Motif) -> Motif:
+    """Wrap a closure-motif as a tagged 'program block' motif."""
+    return list_from_py([PROGRAM_TAG, prog])
+
+
+def is_program_block(m: Motif) -> bool:
+    """True iff m is a tagged program block [PROGRAM_TAG, <closure>]."""
+    py = py_from_list(m)
+    return bool(
+        py is not None
+        and len(py) == 2
+        and py[0] == PROGRAM_TAG
+    )
+
+
+def _unwrap_program_block(m: Motif) -> Motif:
+    """Extract closure from [PROGRAM_TAG, closure]. Raise on invalid shape."""
+    py = py_from_list(m)
+    if py is None or len(py) != 2 or py[0] != PROGRAM_TAG:
+        raise TypeError("expected program block [PROGRAM_TAG, closure]")
+    closure = py[1]
+    if not isinstance(closure, Motif):
+        # Some list roundtrips might return non-Motif elements; be strict.
+        raise TypeError("program block must contain a Motif closure")
+    return closure
+
+
+def seq(p_block: Motif, q_block: Motif) -> Motif:
+    """
+    Build a tagged seq block.
+
+    Note: this is a *structural* tagged representation for tests/examples.
+    """
+    return list_from_py([SEQ_TAG, list_from_py([p_block, q_block])])
+
+
+def _is_seq_block(m: Motif) -> bool:
+    py = py_from_list(m)
+    return bool(py is not None and len(py) == 2 and py[0] == SEQ_TAG)
+
+
+def run_program_block(ev, block: Motif, arg: Motif) -> Motif:
+    """
+    Execute either a program block or a seq block.
+
+    - program block: [PROGRAM_TAG, closure] => ev.run(closure, arg)
+    - seq block:     [SEQ_TAG, [p_block, q_block]] => run q(run p(arg))
+    """
+    if is_program_block(block):
+        closure = _unwrap_program_block(block)
+        return ev.run(closure, arg)
+
+    if _is_seq_block(block):
+        py = py_from_list(block)
+        pair = py_from_list(py[1]) if py and isinstance(py[1], Motif) else None
+        if pair is None or len(pair) != 2:
+            raise TypeError("seq block must be [SEQ_TAG, [p_block, q_block]]")
+        p_block, q_block = pair[0], pair[1]
+        if not isinstance(p_block, Motif) or not isinstance(q_block, Motif):
+            raise TypeError("seq children must be Motifs")
+        mid = run_program_block(ev, p_block, arg)
+        return run_program_block(ev, q_block, mid)
+
+    raise TypeError("unknown program block shape")
+
+

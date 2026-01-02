@@ -5,21 +5,23 @@ Now includes readable list formatting: [1,2,3]
 """
 
 from __future__ import annotations
-from typing import Optional
-from rcx_pi.core.motif import Motif
-from rcx_pi import motif_to_int
-from rcx_pi.listutils import is_list_motif, py_from_list
+
+from .core.motif import Motif, VOID, UNIT
+from .core.numbers import motif_to_int
+from .listutils import is_list_motif, py_from_list
 
 
-def pretty_motif(m: Motif, *, depth=0, max_depth=10) -> str:
+def pretty_motif(m: Motif, *, depth: int = 0, max_depth: int = 10) -> str:
     """Human-oriented view of motifs.
 
     Numbers → N:3
-    Lists → [1,2,3]
-    VOID → ∅
-    UNIT → •
+    Lists   → [1,2,3]
+    VOID    → ∅
+    UNIT    → •
     General → μ(a,b,c)
     """
+    # Import here to avoid circular import at module load time
+    from . import motif_to_int
 
     # --- recursion stop ---
     if depth > max_depth:
@@ -37,17 +39,20 @@ def pretty_motif(m: Motif, *, depth=0, max_depth=10) -> str:
         return f"[{inner}]"
 
     # VOID / UNIT simplified -----------------------------------------
-    from rcx_pi.core.motif import VOID, UNIT
     if m == VOID:
         return "∅"
     if m == UNIT:
         return "•"
 
-    # Generic Motif --------------------------------------------------
+    # Generic Motif ---------------------------------------------------
     items = []
     for child in m.structure:
         if isinstance(child, Motif):
-            items.append(pretty_motif(child, depth=depth+1))
+            items.append(
+                pretty_motif(
+                    child,
+                    depth=depth + 1,
+                    max_depth=max_depth))
         else:
             items.append(repr(child))
 

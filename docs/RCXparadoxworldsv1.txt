@@ -1,0 +1,443 @@
+RCX PARADOX WORLDS v1
+=====================
+
+Purpose
+-------
+
+This document defines *paradox-focused worlds* for RCX, in a way that can be
+implemented later in rcx_pi / rcx_pi_rust / worlds_json without breaking the
+existing green test suite.
+
+We design three conceptual worlds:
+
+    W_1O   : world for 1/0 as non-dual recursion engine
+    W_LIAR : world for the liar paradox
+    W_RSTAR: world for Russell/Gödel-style self-reference
+
+Each world is defined in terms of:
+
+    - WORLD NAME
+    - ROLE in RCX ontology
+    - SEEDS (μ-strings we probe)
+    - ROUTE TABLE (Ra / Lobe / Sink, ω-flags)
+    - INTENDED BEHAVIOR (how it fits non-duality → projection → recursion → Ra/Lobe/Sink → ω → evolution → emergence)
+
+
+0. SHARED PRIMITIVES
+--------------------
+
+Buckets:
+
+    Ra   = Stable resolution within this world.
+    Lobe = Stable-but-not-resolved frontier (internally coherent, not yet integrated).
+    Sink = Contradiction / residue (stored, not deleted).
+
+Meta-tag:
+
+    ω    = Non-halting / cyclical behavior under this world’s rules.
+
+Global RCX metaphysics:
+
+    - Non-duality (1/0, 1 = –0) is the *engine*, not a single value.
+    - Hemispheres:
+         • Null hemisphere: favors "0 / emptiness / non-distinction"
+         • Infinity hemisphere: favors "1 / fullness / distinction"
+    - Fold: the Mobius hinge "1 is equal and opposite to 0"; where hemispheres exchange constraints.
+    - Residue loop: Lobes + Sink feed forward into new projections and new worlds.
+
+We assume the existing tri-bucket model from rcx_core:
+
+    Ra   ↔ "Ra"
+    Lobe ↔ "Lobe"
+    Sink ↔ "Sink"
+
+and the existing world-probing machinery (worlds_probe, score/evolve functions, etc.) as the eventual executable target.
+
+
+1. WORLD W_1O : 1/0 AS ENGINE
+------------------------------
+
+WORLD NAME
+    "paradox_1over0" (symbolic)
+    Short: W_1O
+
+ROLE
+    - Make 1/0 *explicitly* a first-class engine glyph, not an error.
+    - Demonstrate how 1/0 decomposes into:
+         - ENGINE role (Ra, ω-flagged)
+         - LOCAL NUMERIC anomalies (Lobe → Ra / Sink in other worlds)
+         - RESIDUE (failed flattenings) in Sink.
+
+SEEDS (conceptual μ-strings)
+    μ₁ = "[1/0]"         ; raw non-dual engine glyph
+    μ₂ = "[1/0_numeric]" ; 1/0 as naive arithmetic operation
+    μ₃ = "[1/0_infty]"   ; 1/0 → ∞ in projective numeric world
+    μ₄ = "[1/0_engine]"  ; explicit engine role: "non-dual recursion generator"
+    μ₅ = "[1=-0]"        ; equal-and-opposite identity glyph
+    μ₆ = "[white_light]" ; alias for "non-dual undifferentiated state"
+    μ₇ = "[RGB_split]"   ; projection of white_light into [R,G,B] structure
+    μ₈ = "[sink_flatten]" ; "force engine to be a normal finite ratio"
+    μ₉ = "[omega_cycle_1o]" ; explicit ω-cycle instance for 1/0
+
+
+ROUTE TABLE (intended classification in W_1O)
+
+    μ₁ = [1/0]
+        route: Ra
+        flags: ω = true
+        meaning:
+            - Core engine glyph.
+            - Stable as "non-dual recursion generator".
+            - ω-flag indicates intrinsic non-halting nature.
+
+    μ₂ = [1/0_numeric]
+        route: Lobe
+        flags: ω = false
+        meaning:
+            - "1/0 as naive arithmetic operation" is coherent as an object,
+              but not integrated here; its proper place is a numeric sub-world.
+            - Candidate to be projected into numeric worlds where it may become:
+                Ra (e.g. 1/0 → ∞ in extended projective line),
+                or Sink (strict reals).
+
+    μ₃ = [1/0_infty]
+        route: Ra
+        flags: ω = false
+        meaning:
+            - "formal ∞ from 1/0" is accepted as a stable local structure
+              in the extended numeric lens of W_1O.
+            - This is *not* the whole engine, just one projection.
+
+    μ₄ = [1/0_engine]
+        route: Ra
+        flags: ω = true
+        meaning:
+            - Explicit naming of the engine role.
+            - Should always be classified identical to μ₁ but more explicit.
+
+    μ₅ = [1=-0]
+        route: Ra
+        flags: ω = true
+        meaning:
+            - Equal-and-opposite identity glyph for the fold.
+            - Represents the Mobius hinge where 1 and 0 are two faces of the
+              same non-dual manifold.
+            - ω because its implications cascade without terminal halt.
+
+    μ₆ = [white_light]
+        route: Ra
+        flags: ω = false
+        meaning:
+            - Non-dual, pre-split state.
+            - Equivalent to "non-distinction" / undifferentiated engine.
+            - Stable as an identity element in this world.
+
+    μ₇ = [RGB_split]
+        route: Lobe
+        flags: ω = false
+        meaning:
+            - Example of "projection into structured distinctions".
+            - Stable shape, but not *the* engine; it depends on world context.
+            - Lives in Lobe because it is a frontier structure: it can re-collapse
+              back into white_light or be reinterpreted in other worlds.
+
+    μ₈ = [sink_flatten]
+        route: Sink
+        flags: ω = false
+        meaning:
+            - Represents attempts to treat 1/0 as "just a finite rational number"
+              or to forbid it entirely as meaningless.
+            - These moves break the engine story and are stored as residue.
+
+    μ₉ = [omega_cycle_1o]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - Explicit representation of an ω-cycle induced by 1/0 in a specific
+              sub-world (e.g. repeated renormalization attempts).
+            - Lives in Lobe because it is a frontier behavior pattern:
+                stable-as-cycle, not yet integrated into Ra.
+
+
+INTENDED BEHAVIOR (W_1O)
+------------------------
+
+    - 1/0 as ENGINE (μ₁, μ₄, μ₅, μ₆) is Ra + ω-flagged.
+    - Projections (μ₂, μ₃, μ₇, μ₉) show how 1/0 manifests in numeric / structural
+      sub-worlds; these mostly become Lobe or Ra.
+    - Residue (μ₈) is captured in Sink to avoid deleting mis-frames; they can fuel
+      future world adjustments.
+    - At ω-limit:
+        Ra    ≈ engine glyphs + some stable projections (∞, white_light)
+        Lobe  ≈ structured projections (RGB, numeric anomalies, explicit ω-cycles)
+        Sink  ≈ destructive flattenings that deny the engine
+        ω     ≈ intrinsic to engine motifs; they never fully halt internally.
+
+
+2. WORLD W_LIAR : LIAR PARADOX
+------------------------------
+
+WORLD NAME
+    "paradox_liar"
+    Short: W_LIAR
+
+ROLE
+    - Make "This statement is false" a *first-class oscillation generator*.
+    - Separate:
+         - its oscillatory role (Ra, ω-flagged),
+         - its naive 2-valued reading (Lobe),
+         - brittle assumptions that force pure T/F (Sink).
+
+SEEDS
+    μ₁ = "[L]"          ; the liar statement "This statement is false."
+    μ₂ = "[L_prop]"     ; L treated as pure proposition (T or F)
+    μ₃ = "[L_osc]"      ; L treated as an oscillation generator
+    μ₄ = "[L_T_only]"   ; attempt to force L permanently True
+    μ₅ = "[L_F_only]"   ; attempt to force L permanently False
+    μ₆ = "[L_3val]"     ; 3-valued interpretation: "paradox / both / neither"
+    μ₇ = "[L_meta]"     ; meta-level description: "produces T/F oscillation"
+    μ₈ = "[L_omega]"    ; explicit ω-cycle trace for T↔F toggling
+
+ROUTE TABLE (intended classification in W_LIAR)
+
+    μ₁ = [L]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - The raw liar sentence, un-typed, is an ω-oscillator in any
+              strict 2-valued world.
+            - In W_LIAR, we treat it as a frontier object that can be split into
+              roles (prop vs oscillator).
+
+    μ₂ = [L_prop]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - L as plain proposition under T/F semantics.
+            - It never stabilizes, but the *pattern* of toggling is stable.
+            - Kept in Lobe until world semantics are chosen.
+
+    μ₃ = [L_osc]
+        route: Ra
+        flags: ω = true
+        meaning:
+            - Core insight: "L is a generator of T/F oscillation."
+            - As a *role*, this is coherent and integrated in this world.
+            - ω-flag indicates its intrinsic non-halting pattern.
+
+    μ₄ = [L_T_only]
+        route: Sink
+        flags: ω = false
+        meaning:
+            - Attempt to assert L is permanently True under 2-valued logic.
+            - Contradicts itself; stored as destructive assumption.
+
+    μ₅ = [L_F_only]
+        route: Sink
+        flags: ω = false
+        meaning:
+            - Attempt to assert L is permanently False under 2-valued logic.
+            - Also self-contradictory.
+
+    μ₆ = [L_3val]
+        route: Ra
+        flags: ω = false
+        meaning:
+            - 3-valued or paraconsistent interpretation: "paradox / both / neither."
+            - In a suitable many-valued world, this is an integrated Ra outcome.
+
+    μ₇ = [L_meta]
+        route: Ra
+        flags: ω = true
+        meaning:
+            - Meta-level description: "L induces T/F oscillation in 2-valued systems."
+            - Stable meta-truth; ω-flag because it *refers* to a non-halting behavior.
+
+    μ₈ = [L_omega]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - Concrete cycle trace of T↔F toggling.
+            - Frontier object that can be imported into other worlds as a pattern.
+
+INTENDED BEHAVIOR (W_LIAR)
+--------------------------
+
+    - W_LIAR is a *clinic* for self-reference in truth-valuation.
+    - It makes the oscillatory role of the liar (μ₃, μ₇, μ₈) explicit.
+    - It keeps naive T-only / F-only stances in Sink.
+    - It allows 3-valued / paraconsistent interpretations (μ₆) to live in Ra
+      when the world’s semantics support them.
+    - At ω-limit:
+        Ra    ≈ "L as oscillation generator" + "L as paradox-value in richer logics"
+        Lobe  ≈ raw liar under unspecified logics, explicit ω-traces
+        Sink  ≈ brittle classical attempts to force T-only or F-only
+        ω     ≈ the core toggling behavior itself.
+
+
+3. WORLD W_RSTAR : RUSSELL / GÖDEL
+-----------------------------------
+
+WORLD NAME
+    "paradox_rstar"
+    Short: W_RSTAR
+
+ROLE
+    - Capture Russell’s set paradox and Gödel’s self-referential sentence as a
+      single motif: "system tries to fully classify itself and breaks."
+    - Distinguish:
+         - meta-level insight (Ra),
+         - internal naive object (Lobe),
+         - brittle system assumptions (Sink),
+         - ω-cycles at proof / membership boundaries (ω).
+
+SEEDS
+    μ₁ = "[R_set]"       ; Russell set R = { x | x ∉ x }
+    μ₂ = "[R_mem]"       ; proposition "R ∈ R" (membership question)
+    μ₃ = "[R_nomem]"     ; proposition "R ∉ R"
+    μ₄ = "[G_sentence]"  ; Gödel sentence G: "G is not provable in S"
+    μ₅ = "[G_provable]"  ; state "S proves G"
+    μ₆ = "[G_unprovable]"; state "S does not prove G"
+    μ₇ = "[R_meta]"      ; meta-level insight: need stratification / type levels
+    μ₈ = "[G_meta]"      ; meta: "S is incomplete if consistent"
+    μ₉ = "[R_sys_complete]" ; assumption: system must be complete + naive
+    μ₁₀ = "[G_sys_all_true_provable]" ; assumption: all truths provable in S
+    μ₁₁ = "[R_omega]"    ; oscillation of R ∈ R ↔ R ∉ R
+    μ₁₂ = "[G_omega]"    ; oscillation of "provable / not provable" in too-small S
+
+ROUTE TABLE (intended classification in W_RSTAR)
+
+    μ₁ = [R_set]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - Russell’s set as an internal object in naive set theory.
+            - Drives an ω-cycle in membership classification.
+
+    μ₂ = [R_mem]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - "R ∈ R" toggles with its negation under naive comprehension.
+
+    μ₃ = [R_nomem]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - "R ∉ R" toggles with its opposite, same ω-cycle.
+
+    μ₄ = [G_sentence]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - Gödel sentence internal to S.
+            - Its status (provable/unprovable) toggles interpretation.
+
+    μ₅ = [G_provable]
+        route: Sink
+        flags: ω = false
+        meaning:
+            - If S proves G, S proves a statement that says "I am not provable."
+            - This breaks consistency; captured as destructive assumption.
+
+    μ₆ = [G_unprovable]
+        route: Lobe
+        flags: ω = false
+        meaning:
+            - "S does not prove G" is a coherent condition, but its *status*
+              lives on the frontier: it implies G is true-but-unprovable.
+
+    μ₇ = [R_meta]
+        route: Ra
+        flags: ω = false
+        meaning:
+            - Meta insight: you need stratified / typed set theory or controlled
+              comprehension to avoid Russell-type paradoxes.
+            - Stable integrated truth in this world.
+
+    μ₈ = [G_meta]
+        route: Ra
+        flags: ω = false
+        meaning:
+            - Meta insight: any sufficiently strong, consistent formal system S
+              is incomplete (cannot prove all truths about itself).
+            - Stable integrated truth.
+
+    μ₉ = [R_sys_complete]
+        route: Sink
+        flags: ω = false
+        meaning:
+            - Assumption: "A naive set system can be complete and consistent and
+              still allow R as a normal set."
+            - This is what actually fails; stored as residue.
+
+    μ₁₀ = [G_sys_all_true_provable]
+        route: Sink
+        flags: ω = false
+        meaning:
+            - Assumption: "All arithmetical truths are provable in S."
+            - Gödel shows this cannot hold if S is consistent.
+
+    μ₁₁ = [R_omega]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - Explicit ω-cycle trace: R ∈ R ↔ R ∉ R under naive comprehension.
+            - Frontier object illustrating what goes wrong.
+
+    μ₁₂ = [G_omega]
+        route: Lobe
+        flags: ω = true
+        meaning:
+            - Explicit ω-cycle trace: attempts to classify G within S oscillate
+              if you insist on completeness.
+
+INTENDED BEHAVIOR (W_RSTAR)
+---------------------------
+
+    - W_RSTAR is a *clinic* for self-reference in sets/proofs.
+    - It promotes meta-insights (μ₇, μ₈) to Ra.
+    - It keeps the raw self-referential forms (μ₁–μ₄, μ₁₁, μ₁₂) in Lobe, ω-flagged.
+    - It stores brittle completeness assumptions (μ₉, μ₁₀) in Sink.
+    - At ω-limit:
+        Ra    ≈ stable meta-structure about incompleteness / stratification
+        Lobe  ≈ recurring self-reference motifs whenever systems overreach
+        Sink  ≈ specific over-strong assumptions that break in each world
+        ω     ≈ internal self-oscillation whenever a system tries to seal itself.
+
+
+4. HOW TO IMPLEMENT LATER (NON-BREAKING)
+----------------------------------------
+
+When you eventually wire these into rcx_pi / Rust, a safe incremental path is:
+
+    Step 1: Add conceptual worlds in JSON / μ WITHOUT touching existing ones.
+        - e.g. worlds_json/paradox_1over0.json
+              worlds_json/paradox_liar.json
+              worlds_json/paradox_rstar.json
+
+    Step 2: Use the existing CLI:
+        - python3 -m rcx_pi.worlds_json to-mu paradox_1over0.json rcx_pi_rust/mu_programs/paradox_1over0.mu
+        - same for liar, rstar.
+
+    Step 3: Add new probe seeds to a dedicated test file:
+        - rcx_pi/worlds/test_worlds_paradox.py
+        - Use the same pattern as test_worlds_probe.py:
+              from rcx_pi.worlds_probe import probe_world
+              def test_paradox_1over0_basic():
+                  fp = probe_world("paradox_1over0", [...seeds...])
+                  assert ... route classifications match this doc ...
+
+    Step 4: Run:
+        - python3 -m pytest
+      and ensure:
+        - All old tests still pass.
+        - New tests only exercise the new worlds.
+
+We keep rcx_core and existing examples untouched, so nothing you have built
+so far is invalidated. These paradox worlds just become new lobes in the codebase,
+ready to be integrated further.
+
+
+END OF DOCUMENT
+================

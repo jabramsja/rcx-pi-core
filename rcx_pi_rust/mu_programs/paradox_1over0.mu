@@ -1,0 +1,14 @@
+[null,[1/0]] -> ra
+[inf,[1/0]] -> lobe
+[liar,1/0] -> lobe
+[Gödel,1/0_engine] -> ra
+[white_light,paradox] -> ra
+[1/0] -> ra
+[1/0_engine] -> ra
+[1=-0] -> ra
+[white_light] -> ra
+[1/0_numeric] -> lobe
+[1/0_infty] -> ra
+[RGB_split] -> lobe
+[omega_cycle_1o] -> lobe
+[sink_flatten] -> sink

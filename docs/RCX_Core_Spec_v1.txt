@@ -1,0 +1,165 @@
+RCX CORE SPEC v1
+================
+
+Purpose:
+    RCX describes how information behaves when the distinction between 0 and 1 
+    is allowed to recursively explore itself. The engine must remain lossless, 
+    self-referential, and capable of reclassification over time.
+
+The model is not static — it evolves. Nothing is thrown away.
+
+---------------------------------------------------------------------------
+BUCKETS (FINAL 3-BUCKET REALITY MODEL)
+---------------------------------------------------------------------------
+
+Every motif (μ) is classified into one of three resolution states:
+
+    1. Ra
+        - Stable resolution
+        - Integrated truth
+        - Terminal for current world state
+        - Equivalent to "escape" or successful projection
+
+    2. Lobe
+        - Unresolved frontier
+        - Not contradictory, not integrated
+        - Holds potential to collapse to Ra or Sink later
+        - Stores structural information for reprocessing
+
+    3. Sink
+        - Contradiction / paradox / unresolved negative
+        - Not deleted — retained as semantic residue
+        - Source of shadow sets and future reinterpretation
+
+Note:
+    Lobes and Sink together form the "potential space". 
+    Ra is the only resolved space.
+
+---------------------------------------------------------------------------
+OMEGA (ω) BEHAVIOR
+---------------------------------------------------------------------------
+
+ω is NOT a bucket. It is a *meta-state* detected during iteration.
+
+Definition:
+    ω-cycle occurs when a motif never reaches Ra, Lobe, or Sink terminally,
+    but instead transitions endlessly or returns to previously seen states.
+
+Representation:
+    μ.state = LOBE
+    μ.omega = cycle signature
+    μ.last_transition_count = N
+    μ.revisit = true
+
+Meaning:
+    ω represents "unresolved but active". 
+    It is potential, not failure.
+
+---------------------------------------------------------------------------
+LOBE MANAGEMENT RULES
+---------------------------------------------------------------------------
+
+To prevent infinite unresolved growth:
+
+    - Lobes can be *compressed* to signature objects if inactive
+    - Compression is lossless and reversible
+    - Rehydration occurs when new rules or worlds may resolve them
+
+Compression record form:
+
+    LobeSignatureObject:
+        hash
+        minimal core form
+        last_state
+        provenance
+        rehydrate_on_change = true
+
+No lobe is deleted. Ever.
+
+---------------------------------------------------------------------------
+RECURSION AND RESIDUE FLOW
+---------------------------------------------------------------------------
+
+Computation Model:
+
+    Step 1: motif enters evaluation
+    Step 2: if resolvable → Ra
+    Step 3: if contradictory → Sink (stored)
+    Step 4: if undecided → Lobe (stored)
+    Step 5: Lobes + Sink are fed back through evaluation loops
+    Step 6: ω-cycles flagged, not bucketed
+
+Residue Loop:
+    Sink → hemispheres → fold → new projection → (Ra | Lobe | Sink | ω)
+
+This repeats until ω-limit (convergent or stable oscillation).
+No informational branch dies; it transitions states.
+
+---------------------------------------------------------------------------
+WORLD EVOLUTION FRAMEWORK
+---------------------------------------------------------------------------
+
+World = rule-set for classification & behavior.
+
+Three modes exist:
+
+    1. Manual Mode:
+        user edits or defines rules
+
+    2. Score-Selected Evolution Mode:
+        candidate worlds are evaluated and ranked against a spec
+        winners propagate; others archived
+
+    3. Genetic / Automatic Mode:
+        mutation + recombination generates new worlds automatically
+
+Metadata stored per world:
+
+    accuracy vs spec
+    mismatch count
+    ω-frequency
+    lobe density
+    sink entropy
+    evolution lineage
+
+---------------------------------------------------------------------------
+LOSSLESSNESS REQUIREMENTS
+---------------------------------------------------------------------------
+
+1. No motif is deleted.
+2. Sink is not terminal — only currently negative.
+3. Lobes must be reversible.
+4. ω must be traceable.
+5. Every historical route is stored for future reclassification.
+
+---------------------------------------------------------------------------
+MAPPING TO RCX-π (CURRENT IMPLEMENTATION)
+---------------------------------------------------------------------------
+
+Ra  --> "Ra" bucket in worlds JSON
+Lobe --> "Lobe" bucket
+Sink --> "Sink" bucket
+ω    --> detected cyclic route, stored in route metadata
+
+Future integration: 
+    compressed lobe signatures, evolutionary rehydration,
+    score-driven spec refinement.
+
+---------------------------------------------------------------------------
+GOING FORWARD
+---------------------------------------------------------------------------
+
+This spec forms the foundation.
+Next expansions may include:
+
+    - Residue compression format
+    - Lobe-to-Ra rehydration heuristics
+    - Multi-world conversation protocol
+    - Proof format for stabilization or divergence
+    - Visualization interface
+    - Integration into Rust core
+
+---------------------------------------------------------------------------
+
+END OF SPEC v1
+---------------------------------------------------------------------------

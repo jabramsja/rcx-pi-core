@@ -1,14 +1,15 @@
 # rcx_pi/reduction/pattern_matching.py
-from ..core.motif import Motif, μ, VOID
+from ..core.motif import Motif, μ
 
 # Marker depths (structural symbols)
-PROJECTION = μ(μ(μ(μ(μ(μ(μ()))))))      # 6-deep marker
-CLOSURE    = μ(μ(μ(μ(μ()))))            # 4-deep marker
-ACTIVATION = μ(μ(μ(μ(μ(μ())))))         # 5-deep marker
+PROJECTION = μ(μ(μ(μ(μ(μ(μ()))))))  # 6-deep marker
+CLOSURE = μ(μ(μ(μ(μ()))))  # 4-deep marker
+ACTIVATION = μ(μ(μ(μ(μ(μ())))))  # 5-deep marker
 
 # 7-deep marker = pattern variable
-VAR = μ(μ(μ(μ(μ(μ(μ(μ())))))))          # internal name
-PATTERN_VAR_MARKER = VAR                # exported name used by rules_pure
+VAR = μ(μ(μ(μ(μ(μ(μ(μ())))))))  # internal name
+PATTERN_VAR_MARKER = VAR  # exported name used by rules_pure
+
 
 def is_var(m):
     return (
@@ -18,6 +19,7 @@ def is_var(m):
         and m.structure[0].structurally_equal(VAR)
     )
 
+
 def is_closure(m):
     return (
         isinstance(m, Motif)
@@ -26,6 +28,7 @@ def is_closure(m):
         and m.structure[0].structurally_equal(CLOSURE)
     )
 
+
 def is_proj(m):
     return (
         isinstance(m, Motif)
@@ -33,6 +36,7 @@ def is_proj(m):
         and isinstance(m.structure[0], Motif)
         and m.structure[0].structurally_equal(PROJECTION)
     )
+
 
 def is_act(m):
     return (
@@ -66,7 +70,7 @@ class PatternMatcher:
     def _match(self, p, v, env):
         """Match pattern p against value v, filling env with bindings."""
         if is_var(p):
-            key = repr(p)          # structural key for this variable pattern
+            key = repr(p)  # structural key for this variable pattern
             env[key] = v
             return True
 
@@ -76,7 +80,8 @@ class PatternMatcher:
         if len(p.structure) != len(v.structure):
             return False
 
-        return all(self._match(a, b, env) for a, b in zip(p.structure, v.structure))
+        return all(self._match(a, b, env)
+                   for a, b in zip(p.structure, v.structure))
 
     # ----- binding substitution -----
 

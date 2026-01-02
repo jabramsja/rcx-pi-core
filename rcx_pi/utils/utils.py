@@ -1,4 +1,5 @@
-from rcx_pi import μ, VOID
+from rcx_pi import VOID
+
 
 def motif_to_int(m):
     """Interpret a Motif Peano number as an int, or None if not a pure number."""

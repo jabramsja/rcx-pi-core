@@ -23,10 +23,13 @@ and rebuild them using CONS/NIL.
 from __future__ import annotations
 from typing import Callable
 
-from rcx_pi.core.motif import Motif, μ
+from rcx_pi.core.motif import Motif
 from rcx_pi.listutils import (
-    CONS, NIL, head, tail, is_list_motif,
-    list_from_py, py_from_list,
+    CONS,
+    NIL,
+    head,
+    tail,
+    is_list_motif,
 )
 
 
@@ -50,7 +53,6 @@ class PureEvaluator:
 
         return fn(self, arg)
 
-
     # ----------------------------------------------------------------------
     # Closure extraction
     # ----------------------------------------------------------------------
@@ -66,7 +68,6 @@ class PureEvaluator:
             raise TypeError("Motif is not a function closure")
 
         return meta["fn"]
-
 
     # ----------------------------------------------------------------------
     # Helpers used by functions inside programs.py
@@ -87,6 +88,7 @@ class PureEvaluator:
 
     def tail(self, m: Motif) -> Motif:
         return tail(m)
+
     # ----------------------------------------------------------------------
     # Legacy compatibility shims for old tests/benchmarks
     # ----------------------------------------------------------------------
@@ -101,7 +103,7 @@ class PureEvaluator:
         try:
             fn = self._extract_func(expr)
             # treat as nullary program taking UNIT/NIL
-            return fn(self, None)   # modify if benchmarks need argument passing
+            return fn(self, None)  # modify if benchmarks need argument passing
         except Exception:
             return expr  # not executable → return motif as-is
 
@@ -112,7 +114,7 @@ class PureEvaluator:
         Later replaced by structural rewrite loop.
         """
         prev = None
-        cur  = expr
+        cur = expr
         steps = 0
         while cur != prev and steps < max_steps:
             prev = cur

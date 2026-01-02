@@ -15,7 +15,9 @@ from __future__ import annotations
 from typing import List
 
 from .core.motif import Motif
-from . import num, motif_to_int, list_from_py, py_from_list, PureEvaluator
+from rcx_pi.core.numbers import num, motif_to_int
+from rcx_pi.listutils import list_from_py, py_from_list
+from rcx_pi.engine.evaluator_pure import PureEvaluator
 from .program_registry import get_program
 
 

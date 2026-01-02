@@ -12,21 +12,21 @@ from .pattern_matching import (
 
 # ---------- structural arithmetic markers ----------
 
-ADD  = μ(μ(), μ())            # 2-void header
-MULT = μ(μ(), μ(), μ())       # 3-void header
-SUCC = μ(μ(μ()))              # encoded successor
-PRED = μ(μ(μ(μ())))           # encoded predecessor
+ADD = μ(μ(), μ())  # 2-void header
+MULT = μ(μ(), μ(), μ())  # 3-void header
+SUCC = μ(μ(μ()))  # encoded successor
+PRED = μ(μ(μ(μ())))  # encoded predecessor
 
 # ---------- meta-classification markers (RCX-π "introspection ops") ----------
 
 # operator: classify(target)
-CLASSIFY     = compression.marker(20)
+CLASSIFY = compression.marker(20)
 
 # tags (these are just structural motifs; engine treats them as opaque labels)
-VALUE_TAG    = compression.marker(21)  # “pure value / number lobe”
-PROGRAM_TAG  = compression.marker(22)  # “program / projection lobe”
-MIXED_TAG    = compression.marker(23)  # “mixed value+program lobe”
-STRUCT_TAG   = compression.marker(24)  # “generic structural lobe”
+VALUE_TAG = compression.marker(21)  # “pure value / number lobe”
+PROGRAM_TAG = compression.marker(22)  # “program / projection lobe”
+MIXED_TAG = compression.marker(23)  # “mixed value+program lobe”
+STRUCT_TAG = compression.marker(24)  # “generic structural lobe”
 
 
 class PureRules(PatternMatcher):
@@ -92,7 +92,8 @@ class PureRules(PatternMatcher):
                 if isinstance(func, Motif) and func.structure:
                     fhead = func.structure[0]
                     # closure encoded as μ(CLOSURE, projection)
-                    if isinstance(fhead, Motif) and fhead.structurally_equal(CLOSURE):
+                    if isinstance(fhead,
+                                  Motif) and fhead.structurally_equal(CLOSURE):
                         # projection is second element of closure
                         if len(func.structure) >= 2:
                             projection = func.structure[1]
@@ -125,8 +126,8 @@ class PureRules(PatternMatcher):
             # Non-motif → generic structural
             return μ(STRUCT_TAG, target)
 
-        is_num      = target.is_number_pure()
-        has_prog    = self._contains_program_marker(target)
+        is_num = target.is_number_pure()
+        has_prog = self._contains_program_marker(target)
         has_num_sub = self._contains_number_substructure(target)
 
         # Pure value lobe
@@ -163,7 +164,9 @@ class PureRules(PatternMatcher):
                 return True
 
         for child in m.structure:
-            if isinstance(child, Motif) and self._contains_program_marker(child):
+            if isinstance(
+                    child,
+                    Motif) and self._contains_program_marker(child):
                 return True
 
         return False
@@ -177,7 +180,9 @@ class PureRules(PatternMatcher):
             return True
 
         for child in m.structure:
-            if isinstance(child, Motif) and self._contains_number_substructure(child):
+            if isinstance(
+                    child,
+                    Motif) and self._contains_number_substructure(child):
                 return True
 
         return False

@@ -1,0 +1,60 @@
+{
+  "rules": [
+    {
+      "action": "ra",
+      "pattern": "[null,[1/0]]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[inf,[1/0]]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[liar,1/0]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[Gödel,1/0_engine]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[white_light,paradox]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[1/0]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[1/0_engine]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[1=-0]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[white_light]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[1/0_numeric]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[1/0_infty]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[RGB_split]"
+    },
+    {
+      "action": "lobe",
+      "pattern": "[omega_cycle_1o]"
+    },
+    {
+      "action": "sink",
+      "pattern": "[sink_flatten]"
+    }
+  ]
+}

@@ -1,6 +1,26 @@
+# =========================
+# Python
+# =========================
 __pycache__/
 *.pyc
-# LaTeX build artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Rust
+# =========================
+target/
+**/target/
+
+# =========================
+# macOS
+# =========================
+.DS_Store
+
+# =========================
+# LaTeX
+# =========================
 *.aux
 *.log
 *.out
@@ -9,13 +29,17 @@ __pycache__/
 *.fdb_latexmk
 *.fls
 
-# Optional: ignore generated PDFs
+# Optional: ignore generated PDF build output
 docs/rcx-pi-paper.pdf
 
-# Python bytecode / caches
-__pycache__/
-*.pyc
-docs/rcx-pi-paper.pdf
-rcx_pi_rust/target/
-rcx_pi_rust/**/target/
-**/target/
+# =========================
+# RCX outputs
+# =========================
+# DO NOT ignore these if you want them committed:
+# - rcx_pi_rust/ra (marker file)
+# - rcx_pi_rust/snapshots (dir)
+# - rcx_pi_rust/mu_programs/vars_demo__g*.mu
+# - rcx_pi_rust/mu_programs/rcx_core_mut*.mu
+#
+# If later you decide snapshots should NOT be committed, uncomment:
+# rcx_pi_rust/snapshots/
