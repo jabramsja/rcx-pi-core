@@ -1,17 +1,5 @@
 """
 RCX-Ω trace CLI (staging)
-
-Usage:
-  python3 -m rcx_omega.cli.trace_cli void
-  python3 -m rcx_omega.cli.trace_cli unit
-  python3 -m rcx_omega.cli.trace_cli mu
-  python3 -m rcx_omega.cli.trace_cli "mu(mu())"
-
-JSON mode:
-  python3 -m rcx_omega.cli.trace_cli --json void
-  python3 -m rcx_omega.cli.trace_cli --json --max-steps 16 "mu(mu())"
-
-This is intentionally tiny and dumb: it's a debug lens.
 """
 
 from __future__ import annotations
@@ -22,7 +10,6 @@ import sys
 from typing import List
 
 from rcx_pi import new_evaluator, μ, VOID, UNIT
-
 from rcx_omega.engine.lens import trace_reduce_with_stats
 
 
@@ -35,9 +22,6 @@ def parse_token(tok: str):
         return UNIT
     if t in ("mu", "μ", "mu()"):
         return μ()
-
-    # ultra-minimal parser for a few patterns:
-    # "mu(mu())" -> μ(μ())
     if t == "mu(mu())":
         return μ(μ())
 
@@ -49,38 +33,40 @@ def parse_token(tok: str):
 
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument("motif", help="Motif literal: void|unit|mu|mu(mu())")
-    parser.add_argument("--json", action="store_true", help="Emit JSON only")
-    parser.add_argument("--max-steps", type=int, default=64, help="Trace cap")
+    parser.add_argument("motif")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--max-steps", type=int, default=64)
     args = parser.parse_args(argv[1:])
 
-    x = parse_token(args.motif)
     ev = new_evaluator()
-
+    x = parse_token(args.motif)
     lr = trace_reduce_with_stats(ev, x, max_steps=args.max_steps)
-    tr = lr.trace
-    st = lr.stats
 
     if args.json:
         payload = {
             "input": str(x),
-            "result": str(tr.result),
-            "steps": [{"i": s.i, "value": str(s.value)} for s in tr.steps],
-            "stats": {
-                "input": {"nodes": st.input_stats.nodes, "depth": st.input_stats.depth},
-                "result": {"nodes": st.result_stats.nodes, "depth": st.result_stats.depth},
-            },
+            "result": str(lr.trace.result),
+            "steps": [
+                {
+                    "i": d.i,
+                    "nodes": d.nodes,
+                    "depth": d.depth,
+                    "delta_nodes": d.delta_nodes,
+                    "delta_depth": d.delta_depth,
+                }
+                for d in lr.stats.deltas
+            ],
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
-    for s in tr.steps:
-        print(f"{s.i:03d}: {s.value}")
+    for d in lr.stats.deltas:
+        print(
+            f"{d.i:03d}: nodes={d.nodes:+d} depth={d.depth:+d} "
+            f"(Δn={d.delta_nodes:+d}, Δd={d.delta_depth:+d})"
+        )
 
-    print(f"result: {tr.result}")
-    print(f"steps:  {len(tr.steps)}")
-    print(f"stats:  input(nodes={st.input_stats.nodes}, depth={st.input_stats.depth}) "
-          f"-> result(nodes={st.result_stats.nodes}, depth={st.result_stats.depth})")
+    print(f"result: {lr.trace.result}")
     return 0
 
 
