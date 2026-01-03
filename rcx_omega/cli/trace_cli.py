@@ -22,8 +22,8 @@ import sys
 from typing import List
 
 from rcx_pi import new_evaluator, μ, VOID, UNIT
-from rcx_omega.engine.trace import trace_reduce
-from rcx_omega.utils.motif_codec import motif_to_json_obj
+
+from rcx_omega.engine.lens import trace_reduce_with_stats
 
 
 def parse_token(tok: str):
@@ -52,20 +52,24 @@ def main(argv: List[str]) -> int:
     parser.add_argument("motif", help="Motif literal: void|unit|mu|mu(mu())")
     parser.add_argument("--json", action="store_true", help="Emit JSON only")
     parser.add_argument("--max-steps", type=int, default=64, help="Trace cap")
-    parser.add_argument("--meta", action="store_true", help="Include JSON-safe meta when possible")
     args = parser.parse_args(argv[1:])
 
     x = parse_token(args.motif)
     ev = new_evaluator()
-    tr = trace_reduce(ev, x, max_steps=args.max_steps)
+
+    lr = trace_reduce_with_stats(ev, x, max_steps=args.max_steps)
+    tr = lr.trace
+    st = lr.stats
 
     if args.json:
         payload = {
-            "input": motif_to_json_obj(x, include_meta=args.meta),
-            "result": motif_to_json_obj(tr.result, include_meta=args.meta),
-            "steps": [{"i": s.i, "value": motif_to_json_obj(s.value, include_meta=args.meta)} for s in tr.steps],
-            "input_repr": str(x),
-            "result_repr": str(tr.result),
+            "input": str(x),
+            "result": str(tr.result),
+            "steps": [{"i": s.i, "value": str(s.value)} for s in tr.steps],
+            "stats": {
+                "input": {"nodes": st.input_stats.nodes, "depth": st.input_stats.depth},
+                "result": {"nodes": st.result_stats.nodes, "depth": st.result_stats.depth},
+            },
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
@@ -75,6 +79,8 @@ def main(argv: List[str]) -> int:
 
     print(f"result: {tr.result}")
     print(f"steps:  {len(tr.steps)}")
+    print(f"stats:  input(nodes={st.input_stats.nodes}, depth={st.input_stats.depth}) "
+          f"-> result(nodes={st.result_stats.nodes}, depth={st.result_stats.depth})")
     return 0
 
 
