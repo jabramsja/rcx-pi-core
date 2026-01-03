@@ -51,10 +51,29 @@ def main(argv: List[str]) -> int:
     parser.add_argument("motif")
     parser.add_argument("--json", action="store_true", help="Emit JSON payload")
     parser.add_argument("--max-steps", type=int, default=64, help="Trace cap")
+    parser.add_argument("--stdin", action="store_true", help="Read motif literal from stdin")
+    parser.add_argument("--file", type=str, default=None, help="Read motif literal from a file")
     args = parser.parse_args(argv[1:])
 
     ev = new_evaluator()
-    x = parse_token(args.motif)
+    # Input selection (positional | --stdin | --file)
+    if args.stdin and args.file:
+        raise SystemExit("Use only one of --stdin or --file")
+
+    if args.file is not None:
+        raw = Path(args.file).read_text(encoding="utf-8")
+    elif args.stdin:
+        raw = sys.stdin.read()
+    else:
+        if args.motif is None:
+            raise SystemExit("Missing motif literal. Provide MOTIF, or use --stdin/--file.")
+        raw = args.motif
+
+    raw = raw.strip()
+    if not raw:
+        raise SystemExit("Empty motif literal")
+
+    x = parse_token(raw)
     lr = trace_reduce_with_stats(ev, x, max_steps=args.max_steps)
 
     if args.json:
