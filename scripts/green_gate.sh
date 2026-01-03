@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run from repo root (where rcx_start.py lives)
-cd "$(dirname "$0")"
+# Resolve repo root no matter where this script lives
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
 echo "== RCX green gate =="
 
