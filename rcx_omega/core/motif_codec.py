@@ -1,20 +1,17 @@
 """
-RCX-Ω: Motif <-> JSON object codec (staging)
+RCX-Ω: Motif <-> JSON object codec (staging, CANONICAL)
 
-Goal:
-- Provide a stable, explicit JSON-ish representation of π Motifs
-  WITHOUT modifying rcx_pi internals.
+Encoding contract (minimal):
+- VOID/UNIT are encoded as atoms ONLY when they are the canonical singletons
+  (identity check), NOT when merely structurally equal.
+    {"atom": "VOID"} / {"atom": "UNIT"}
+- General motifs are encoded as μ nodes with children:
+    {"μ": [<child1>, <child2>, ...]}
 
-Canonical π fact (discovered via introspection):
+π fact:
 - Motif children live in `Motif.structure` as a tuple.
-
-Encoding (minimal + explicit):
-- VOID -> {"VOID": []}
-- UNIT -> {"UNIT": []}
-- μ(...) -> {"μ": [<child1>, <child2>, ...]}
-
-This is intentionally conservative. As Ω grows, we can add richer atoms,
-metadata, or alternative forms, but this base should stay stable.
+- Motif equality is structural, so user-built μ(μ()) can be == UNIT.
+  We must not collapse that into an atom unless it is literally the UNIT singleton.
 """
 
 from __future__ import annotations
@@ -24,16 +21,10 @@ from typing import Any, Dict, List
 from rcx_pi import μ, VOID, UNIT
 from rcx_pi.core.motif import Motif
 
+JsonObj = Any
 
-JsonObj = Any  # nested dict/list/str/int etc. (we keep it loose for staging)
 
-
-def _motif_children(x: Motif) -> List[Motif]:
-    """
-    Canonical child discovery for π Motif: use `x.structure`.
-
-    In π, `structure` is a tuple of Motif children (possibly empty).
-    """
+def _children(x: Motif) -> List[Motif]:
     st = getattr(x, "structure", None)
     if st is None:
         return []
@@ -41,41 +32,43 @@ def _motif_children(x: Motif) -> List[Motif]:
         return list(st)
     if isinstance(st, list):
         return st
-    # If someone mutates π later (they shouldn't), fail safe:
     return []
 
 
-def motif_to_json_obj(x: Motif) -> Dict[str, Any]:
+def motif_to_json_obj(x: Motif, *, include_meta: bool = False) -> Dict[str, Any]:
     """
-    Encode a π Motif into a JSON-friendly object.
+    Encode a π Motif as a JSON object.
 
-    This returns a dict with a single key.
+    include_meta is accepted for forward-compatibility with Ω tooling/CLI.
+    (Currently ignored; Ω may later include lightweight annotations.)
     """
-    if x == VOID:
-        return {"VOID": []}
-    if x == UNIT:
-        return {"UNIT": []}
+    # Identity checks only: avoid collapsing arbitrary motifs that are structurally
+    # equal to UNIT/VOID.
+    if x is VOID:
+        return {"atom": "VOID"}
+    if x is UNIT:
+        return {"atom": "UNIT"}
 
-    kids = _motif_children(x)
-    return {"μ": [motif_to_json_obj(k) for k in kids]}
+    kids = _children(x)
+    return {"μ": [motif_to_json_obj(k, include_meta=include_meta) for k in kids]}
 
 
 def json_obj_to_motif(obj: JsonObj) -> Motif:
-    """
-    Decode a JSON object produced by `motif_to_json_obj` back into a π Motif.
-    """
-    if not isinstance(obj, dict) or len(obj) != 1:
-        raise ValueError(f"Invalid motif JSON object (expected 1-key dict): {obj!r}")
+    if not isinstance(obj, dict):
+        raise ValueError(f"Invalid motif JSON object (expected dict): {obj!r}")
 
-    (k, v), = obj.items()
+    if "atom" in obj:
+        a = obj["atom"]
+        if a == "VOID":
+            return VOID
+        if a == "UNIT":
+            return UNIT
+        raise ValueError(f"Unknown atom: {a!r}")
 
-    if k == "VOID":
-        return VOID
-    if k == "UNIT":
-        return UNIT
-    if k == "μ":
+    if "μ" in obj:
+        v = obj["μ"]
         if not isinstance(v, list):
             raise ValueError(f"Invalid μ payload (expected list): {v!r}")
         return μ(*[json_obj_to_motif(child) for child in v])
 
-    raise ValueError(f"Unknown motif tag: {k!r}")
+    raise ValueError(f"Invalid motif JSON object (expected 'μ' or 'atom'): {obj!r}")
