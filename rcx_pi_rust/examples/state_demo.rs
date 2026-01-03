@@ -73,7 +73,6 @@ fn main() {
     // 4) Wipe everything to prove restore actually does something
     state = RCXState::new();
     program = RcxProgram { rules: vec![] };
-    engine = Engine::new(program.clone());
 
     println!("\n[phase 2] after wipe:");
     println!("  rules: {}", program.rules.len());

@@ -239,3 +239,84 @@ def probe_world(world: str,
         "orbits": orbits,
         "raw_output": out,
     }
+
+# ---------------------------------------------------------------------------
+# Legacy-compatible wrappers (used by older demos)
+# ---------------------------------------------------------------------------
+
+def spec_from_world(world: str, seeds: List[str], max_steps: int = 20) -> Dict[str, str]:
+    """
+    Build a spec dict {mu -> route} by probing a world on the given seeds.
+    Matches the older demo API shape.
+    """
+    fp = probe_world(world, seeds, max_steps=max_steps)
+    return {row["mu"]: row["route"] for row in fp["routes"]}
+
+
+def score_world(world: str, spec: Dict[str, str], max_steps: int = 20) -> Dict[str, Any]:
+    """
+    Score a world against a spec {mu -> desired_route}.
+    Returns an older-demo-friendly dict.
+    """
+    seeds = list(spec.keys())
+    fp = probe_world(world, seeds, max_steps=max_steps)
+
+    mismatches: List[Dict[str, Any]] = []
+    correct = 0
+
+    for row in fp["routes"]:
+        mu = row["mu"]
+        actual = row["route"]
+        desired = spec.get(mu, "None")
+        ok = (actual == desired)
+        if ok:
+            correct += 1
+        else:
+            mismatches.append(
+                {"mu": mu, "desired": desired, "actual": actual}
+            )
+
+    total = len(seeds) if seeds else 0
+    accuracy = (correct / total) if total else 1.0
+
+    return {
+        "world": world,
+        "accuracy": accuracy,
+        "correct": correct,
+        "total": total,
+        "mismatches": mismatches,
+        "fingerprint": fp,
+    }
+
+
+def compare_worlds(world_a: str, world_b: str, seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
+    """
+    Compare two worlds on the same seeds.
+    Returns the dict shape your worlds_compare_demo.py expects.
+    """
+    fp_a = probe_world(world_a, seeds, max_steps=max_steps)
+    fp_b = probe_world(world_b, seeds, max_steps=max_steps)
+
+    a_map = {r["mu"]: r["route"] for r in fp_a["routes"]}
+    b_map = {r["mu"]: r["route"] for r in fp_b["routes"]}
+
+    diffs: List[Dict[str, Any]] = []
+    for mu in seeds:
+        ra = a_map.get(mu, "None")
+        rb = b_map.get(mu, "None")
+        diffs.append(
+            {
+                "mu": mu,
+                "route_a": ra,
+                "route_b": rb,
+                "same": (ra == rb),
+            }
+        )
+
+    return {
+        "world_a": world_a,
+        "world_b": world_b,
+        "diffs": diffs,
+        "fingerprint_a": fp_a,
+        "fingerprint_b": fp_b,
+    }

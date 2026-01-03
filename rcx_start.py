@@ -14,7 +14,8 @@ import os
 import sys
 import subprocess
 import glob
-from typing import Dict, Callable, Tuple
+from typing import Dict, Callable, Tuple, List
+
 
 # ---------------------------------------------------------------------
 # Repo root detection
@@ -32,6 +33,7 @@ REPO_ROOT = get_repo_root()
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+
 # ---------------------------------------------------------------------
 # Helpers to run commands
 # ---------------------------------------------------------------------
@@ -41,31 +43,39 @@ def _env_with_repo_on_path() -> dict:
     """Return a copy of os.environ with REPO_ROOT added to PYTHONPATH."""
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
-    if existing:
-        env["PYTHONPATH"] = REPO_ROOT + os.pathsep + existing
-    else:
-        env["PYTHONPATH"] = REPO_ROOT
+    env["PYTHONPATH"] = (
+        REPO_ROOT + os.pathsep + existing if existing else REPO_ROOT
+    )
     return env
 
 
-def run_python_module(module: str, args=None) -> int:
+def run_python_module(module: str, args: List[str] | None = None) -> int:
     """Run `python3 -m <module> [args...]` from the repo root."""
     if args is None:
         args = []
-    cmd = ["python3", "-m", module] + list(args)
+    cmd = ["python3", "-m", module, *args]
     print(f"\n[run] cwd={REPO_ROOT}\n[run] {' '.join(cmd)}\n")
     result = subprocess.run(cmd, cwd=REPO_ROOT, env=_env_with_repo_on_path())
     return result.returncode
 
 
-def run_python_file(relative_path: str, args=None) -> int:
+def run_python_file(relative_path: str, args: List[str] | None = None) -> int:
     """Run `python3 <relative_path> [args...]` from the repo root."""
     if args is None:
         args = []
     script_path = os.path.join(REPO_ROOT, relative_path)
-    cmd = ["python3", script_path] + list(args)
+    cmd = ["python3", script_path, *args]
     print(f"\n[run] cwd={REPO_ROOT}\n[run] {' '.join(cmd)}\n")
     result = subprocess.run(cmd, cwd=REPO_ROOT, env=_env_with_repo_on_path())
+    return result.returncode
+
+
+def run_cmd(cmd: List[str], cwd: str | None = None) -> int:
+    """Run an arbitrary command (list[str]) with repo-root env + cwd."""
+    if cwd is None:
+        cwd = REPO_ROOT
+    print(f"\n[run] cwd={cwd}\n[run] {' '.join(cmd)}\n")
+    result = subprocess.run(cmd, cwd=cwd, env=_env_with_repo_on_path())
     return result.returncode
 
 
@@ -80,8 +90,7 @@ def pick_and_run_example() -> int:
     to run. Returns the exit code of the chosen script (or 0 if nothing run).
     """
     examples_dir = os.path.join(REPO_ROOT, "rcx_python_examples")
-    pattern = os.path.join(examples_dir, "*.py")
-    files = sorted(glob.glob(pattern))
+    files = sorted(glob.glob(os.path.join(examples_dir, "*.py")))
 
     if not files:
         print("\n[examples] No .py files found in rcx_python_examples/\n")
@@ -121,49 +130,46 @@ MenuEntry = Tuple[str, Callable[[], int]]
 
 
 def make_menu() -> Dict[str, MenuEntry]:
-    """
-    Define the menu here.
-
-    Each entry is: key -> (label, function)
-    """
     menu: Dict[str, MenuEntry] = {}
 
-    # ---- Rust-bridge / world tools (Python side) --------------------
     menu["1"] = (
         "Worlds: mutation demo (rcx_pi.worlds.worlds_mutate_demo)",
         lambda: run_python_module("rcx_pi.worlds.worlds_mutate_demo"),
     )
+
     menu["2"] = (
         "Worlds: evolve / score demo (rcx_pi.worlds.worlds_evolve)",
         lambda: run_python_module("rcx_pi.worlds.worlds_evolve"),
     )
+
     menu["3"] = (
         "Worlds: compare demo (rcx_pi.worlds.worlds_compare_demo)",
         lambda: run_python_module("rcx_pi.worlds.worlds_compare_demo"),
     )
+
     menu["4"] = (
         "Worlds: score demo (rcx_pi.worlds.worlds_score_demo)",
         lambda: run_python_module("rcx_pi.worlds.worlds_score_demo"),
     )
 
-    # ---- Orbit ASCII demo -------------------------------------------
     menu["5"] = (
         "Orbit ASCII: pingpong / ping / 12 steps",
-        lambda: run_python_module(
-            "rcx_pi.worlds.orbit_ascii_demo", ["pingpong", "ping", "12"]
-        ),
+        lambda: run_python_module("rcx_pi.worlds.orbit_ascii_demo", ["pingpong", "ping", "12"]),
     )
 
-    # ---- Dynamic examples picker ------------------------------------
-    menu["7"] = (
+    menu["6"] = (
         "Run example from rcx_python_examples/",
         pick_and_run_example,
     )
 
-    # ---- pytest (everything) ----------------------------------------
-    menu["9"] = (
+    menu["7"] = (
+        "Rust: green examples suite (rcx_pi_rust/scripts/green_examples.sh)",
+        lambda: run_cmd(["bash", "rcx_pi_rust/scripts/green_examples.sh"]),
+    )
+
+    menu["8"] = (
         "Run pytest (all rcx_pi tests)",
-        lambda: run_python_module("pytest"),
+        lambda: run_cmd(["python3", "-m", "pytest"]),
     )
 
     return menu
@@ -183,12 +189,11 @@ def main() -> None:
 
     while True:
         print("Menu:")
-        for key in sorted(
-                menu.keys(),
-                key=lambda k: int(k) if k.isdigit() else k):
+        for key in sorted(menu.keys(), key=lambda k: int(k) if k.isdigit() else k):
             label, _fn = menu[key]
             print(f"  {key}) {label}")
         print("  q) quit")
+
         choice = input("\nSelect option: ").strip()
 
         if choice.lower() in {"q", "quit", "exit"}:
