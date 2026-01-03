@@ -25,9 +25,11 @@ If `run_all.py` finishes without red errors — **RCX-π Core is healthy.**
 
 ---
 
-## ▶ Running Everything
+## 🔒 Green Gate (Canonical Health Check)
 
-From inside `WorkingRCX/`:
+The **only supported correctness gate** for this repository is:
 
 ```bash
-python3 run_all.py
+scripts/green_gate.sh
+
+If scripts/green_gate.sh finishes without red errors — RCX-π Core is healthy.
