@@ -38,8 +38,12 @@ docs/rcx-pi-paper.pdf
 # DO NOT ignore these if you want them committed:
 # - rcx_pi_rust/ra (marker file)
 # - rcx_pi_rust/snapshots (dir)
-# - rcx_pi_rust/mu_programs/vars_demo__g*.mu
 # - rcx_pi_rust/mu_programs/rcx_core_mut*.mu
 #
 # If later you decide snapshots should NOT be committed, uncomment:
 # rcx_pi_rust/snapshots/
+
+# =========================
+# RCX generated swarm artifacts (do not commit)
+# =========================
+rcx_pi_rust/mu_programs/vars_demo__g*.mu
