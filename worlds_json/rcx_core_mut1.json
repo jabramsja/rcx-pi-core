@@ -2,6 +2,22 @@
   "rules": [
     {
       "action": "ra",
+      "pattern": "[I_am_true,null]"
+    },
+    {
+      "action": "sink",
+      "pattern": "[collapse]"
+    },
+    {
+      "action": "ra",
+      "pattern": "[expand]"
+    },
+    {
+      "action": "sink",
+      "pattern": "[flatten]"
+    },
+    {
+      "action": "ra",
       "pattern": "[null,_]"
     },
     {

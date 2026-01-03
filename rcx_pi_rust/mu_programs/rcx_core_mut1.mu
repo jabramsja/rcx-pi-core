@@ -1,3 +1,7 @@
+[I_am_true,null] -> ra
+[collapse] -> sink
+[expand] -> ra
+[flatten] -> sink
 [null,_] -> ra
 [inf,_] -> lobe
 [paradox,_] -> sink

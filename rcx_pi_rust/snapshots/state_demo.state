@@ -1,5 +1,9 @@
 # RCX-π snapshot v1
 PROGRAM:
+RULE: [I_am_true,null] -> ra
+RULE: [collapse] -> sink
+RULE: [expand] -> ra
+RULE: [flatten] -> sink
 RULE: [null,_] -> ra
 RULE: [inf,_] -> lobe
 RULE: [paradox,_] -> sink

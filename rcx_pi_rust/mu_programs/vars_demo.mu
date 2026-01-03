@@ -3,5 +3,6 @@
 
 [null,$x]    -> ra
 [paradox,$x] -> sink
+[inf,$x]     -> lobe
 [$x,$x]      -> lobe
 [$x,$y]      -> rewrite([$y,$x])
