@@ -2,14 +2,14 @@
 RCX-Ω trace CLI (staging)
 
 Usage:
-  python3 -m rcx_omega.trace_cli void
-  python3 -m rcx_omega.trace_cli unit
-  python3 -m rcx_omega.trace_cli mu
-  python3 -m rcx_omega.trace_cli "mu(mu())"
+  python3 -m rcx_omega.cli.trace_cli void
+  python3 -m rcx_omega.cli.trace_cli unit
+  python3 -m rcx_omega.cli.trace_cli mu
+  python3 -m rcx_omega.cli.trace_cli "mu(mu())"
 
 JSON mode:
-  python3 -m rcx_omega.trace_cli --json void
-  python3 -m rcx_omega.trace_cli --json --max-steps 16 "mu(mu())"
+  python3 -m rcx_omega.cli.trace_cli --json void
+  python3 -m rcx_omega.cli.trace_cli --json --max-steps 16 "mu(mu())"
 
 This is intentionally tiny and dumb: it's a debug lens.
 """
@@ -23,7 +23,7 @@ from typing import List
 
 from rcx_pi import new_evaluator, μ, VOID, UNIT
 from rcx_omega.engine.trace import trace_reduce
-from rcx_omega.analyze import analyze_trace
+from rcx_omega.utils.motif_codec import motif_to_json_obj
 
 
 def parse_token(tok: str):
@@ -52,26 +52,20 @@ def main(argv: List[str]) -> int:
     parser.add_argument("motif", help="Motif literal: void|unit|mu|mu(mu())")
     parser.add_argument("--json", action="store_true", help="Emit JSON only")
     parser.add_argument("--max-steps", type=int, default=64, help="Trace cap")
+    parser.add_argument("--meta", action="store_true", help="Include JSON-safe meta when possible")
     args = parser.parse_args(argv[1:])
 
     x = parse_token(args.motif)
     ev = new_evaluator()
     tr = trace_reduce(ev, x, max_steps=args.max_steps)
-    an = analyze_trace(tr)
 
     if args.json:
         payload = {
-            "input": str(x),
-            "result": str(tr.result),
-            "converged": tr.converged,
-            "maxed": tr.maxed,
-            "analysis": {
-                "kind": an.kind,
-                "period": an.period,
-                "cycle_start": an.cycle_start,
-                "note": an.note,
-            },
-            "steps": [{"i": s.i, "value": str(s.value)} for s in tr.steps],
+            "input": motif_to_json_obj(x, include_meta=args.meta),
+            "result": motif_to_json_obj(tr.result, include_meta=args.meta),
+            "steps": [{"i": s.i, "value": motif_to_json_obj(s.value, include_meta=args.meta)} for s in tr.steps],
+            "input_repr": str(x),
+            "result_repr": str(tr.result),
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
@@ -80,9 +74,6 @@ def main(argv: List[str]) -> int:
         print(f"{s.i:03d}: {s.value}")
 
     print(f"result: {tr.result}")
-    print(f"converged: {tr.converged}")
-    print(f"maxed: {tr.maxed}")
-    print(f"analysis: {an.kind}" + (f" (period={an.period})" if an.period else ""))
     print(f"steps:  {len(tr.steps)}")
     return 0
 
