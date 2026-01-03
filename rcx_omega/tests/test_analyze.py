@@ -1,5 +1,5 @@
 from rcx_pi import new_evaluator, VOID
-from rcx_omega.trace import trace_reduce
+from rcx_omega.engine.trace import trace_reduce
 from rcx_omega.analyze import analyze_trace
 
 
