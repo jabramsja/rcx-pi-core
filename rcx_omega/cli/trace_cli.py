@@ -17,6 +17,7 @@ from typing import List
 
 from rcx_pi import new_evaluator, μ, VOID, UNIT
 from rcx_omega.core.motif_codec import motif_to_json_obj
+from rcx_omega.core import parse_motif
 from rcx_omega.engine.lens import trace_reduce_with_stats
 
 
@@ -32,9 +33,16 @@ def parse_token(tok: str):
     if t == "mu(mu())":
         return μ(μ())
 
+    # If it looks like a μ(...) expression, try the μ-only parser.
+    if "(" in tok and (("μ" in tok) or ("mu" in tok.lower())):
+        try:
+            return parse_motif(tok)
+        except ValueError as e:
+            raise SystemExit(f"Invalid μ literal: {tok!r}\n{e}") from None
+
     raise SystemExit(
         f"Unsupported motif literal: {tok!r}\n"
-        "Supported: void, unit, mu, mu(mu())"
+        "Supported: void, unit, mu, mu(mu()), or any μ(...) tree like μ(μ())"
     )
 
 
