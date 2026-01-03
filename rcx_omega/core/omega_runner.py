@@ -113,9 +113,13 @@ def run_omega(seed: Any, *, max_steps: int = 64) -> OmegaRun:
     )
 
 
-def omega_run_to_json(run: OmegaRun, *, include_meta: bool = False) -> Dict[str, Any]:
+def omega_run_to_json(run: OmegaRun, *, include_meta: bool = False, include_steps: bool = False) -> Dict[str, Any]:
     """
     JSON object suitable for piping into analyze_cli.
+
+    - Always emits omega payload with classification + orbit metrics.
+    - If include_steps=True, also emits trace-shaped "steps" with deltas, and
+      includes "input"/"result" aliases for easier interop with trace/analyze tools.
     """
     seed_obj = motif_to_json_obj(run.seed, include_meta=include_meta)
     result_obj = motif_to_json_obj(run.result, include_meta=include_meta)
@@ -123,12 +127,12 @@ def omega_run_to_json(run: OmegaRun, *, include_meta: bool = False) -> Dict[str,
     seed_stats = _count_nodes_depth(run.seed)
     result_stats = _count_nodes_depth(run.result)
 
-    orbit_rows = []
+    orbit_rows: List[Dict[str, int]] = []
     for s in run.orbit:
         m = _count_nodes_depth(s.value)
         orbit_rows.append({"i": s.i, "nodes": m["nodes"], "depth": m["depth"]})
 
-    return {
+    payload: Dict[str, Any] = {
         "kind": "omega",
         "seed": seed_obj,
         "result": result_obj,
@@ -144,3 +148,35 @@ def omega_run_to_json(run: OmegaRun, *, include_meta: bool = False) -> Dict[str,
         },
         "orbit": orbit_rows,
     }
+
+    if include_steps:
+        # Trace-shaped steps[] expected by analyze_cli: include deltas.
+        steps: List[Dict[str, int]] = []
+        prev_nodes: Optional[int] = None
+        prev_depth: Optional[int] = None
+        for row in orbit_rows:
+            nodes = int(row["nodes"])
+            depth = int(row["depth"])
+            if prev_nodes is None:
+                delta_nodes = 0
+                delta_depth = 0
+            else:
+                delta_nodes = nodes - prev_nodes
+                delta_depth = depth - prev_depth  # type: ignore[operator]
+            steps.append(
+                {
+                    "i": int(row["i"]),
+                    "nodes": nodes,
+                    "depth": depth,
+                    "delta_nodes": int(delta_nodes),
+                    "delta_depth": int(delta_depth),
+                }
+            )
+            prev_nodes = nodes
+            prev_depth = depth
+
+        # Compatibility aliases: trace_cli uses input/result; keep omega seed/result too.
+        payload["input"] = seed_obj
+        payload["steps"] = steps
+
+    return payload

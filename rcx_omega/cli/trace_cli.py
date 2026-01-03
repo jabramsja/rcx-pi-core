@@ -24,6 +24,7 @@ from rcx_pi.core.motif import Motif
 
 from rcx_omega.engine.trace import trace_reduce
 from rcx_omega.core.motif_codec import motif_to_json_obj
+from rcx_omega.json_versioning import maybe_add_schema_fields
 
 
 def _motif_children(x: Motif) -> Tuple[Motif, ...]:
@@ -220,7 +221,7 @@ def main(argv: List[str]) -> int:
             },
             "steps": derived_steps if derived_steps else [{"i": 0, "nodes": in_nodes, "depth": in_depth, "delta_nodes": 0, "delta_depth": 0}],
         }
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(json.dumps(maybe_add_schema_fields(payload, kind='trace'), indent=2, sort_keys=True))
         return 0
 
     # Human output (tests expect "result:" and "steps:")

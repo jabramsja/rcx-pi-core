@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rcx-omega://schemas/trace.v1.schema.json",
+  "title": "RCX-Ω Trace-shaped JSON (v1)",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "description": "Optional semantic version of the schema governing this payload.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "kind": {
+      "description": "Optional discriminator for payload family.",
+      "type": "string",
+      "enum": ["trace"]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Extensible step object. Consumers must not assume internal fields."
+      }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": ["steps", "stats"]
+}
