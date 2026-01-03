@@ -26,6 +26,8 @@ class TraceStep:
 class TraceResult:
     result: Motif
     steps: List[TraceStep]
+    converged: bool
+    maxed: bool
 
 
 def trace_reduce(
@@ -55,11 +57,11 @@ def trace_reduce(
             nxt = step_fn(nxt)
 
         if nxt == cur:
-            # Converged
-            return TraceResult(result=cur, steps=steps)
+            # Converged to fixedpoint
+            return TraceResult(result=cur, steps=steps, converged=True, maxed=False)
 
         cur = nxt
 
     # Maxed out: return last state as result (still useful for debugging)
     steps.append(TraceStep(i=max_steps, value=cur))
-    return TraceResult(result=cur, steps=steps)
+    return TraceResult(result=cur, steps=steps, converged=False, maxed=True)

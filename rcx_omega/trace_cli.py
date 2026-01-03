@@ -23,6 +23,7 @@ from typing import List
 
 from rcx_pi import new_evaluator, μ, VOID, UNIT
 from rcx_omega.trace import trace_reduce
+from rcx_omega.analyze import analyze_trace
 
 
 def parse_token(tok: str):
@@ -56,11 +57,20 @@ def main(argv: List[str]) -> int:
     x = parse_token(args.motif)
     ev = new_evaluator()
     tr = trace_reduce(ev, x, max_steps=args.max_steps)
+    an = analyze_trace(tr)
 
     if args.json:
         payload = {
             "input": str(x),
             "result": str(tr.result),
+            "converged": tr.converged,
+            "maxed": tr.maxed,
+            "analysis": {
+                "kind": an.kind,
+                "period": an.period,
+                "cycle_start": an.cycle_start,
+                "note": an.note,
+            },
             "steps": [{"i": s.i, "value": str(s.value)} for s in tr.steps],
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -70,6 +80,9 @@ def main(argv: List[str]) -> int:
         print(f"{s.i:03d}: {s.value}")
 
     print(f"result: {tr.result}")
+    print(f"converged: {tr.converged}")
+    print(f"maxed: {tr.maxed}")
+    print(f"analysis: {an.kind}" + (f" (period={an.period})" if an.period else ""))
     print(f"steps:  {len(tr.steps)}")
     return 0
 

@@ -9,6 +9,8 @@ def test_trace_reduce_converges_on_void():
 
     tr = trace_reduce(ev, x, max_steps=8)
     assert tr.result == VOID
+    assert tr.converged is True
+    assert tr.maxed is False
     assert len(tr.steps) >= 1
     assert tr.steps[0].value == VOID
 
@@ -24,3 +26,5 @@ def test_trace_reduce_records_progress():
     tr = trace_reduce(ev, x, max_steps=8)
     assert tr.steps[0].value == x
     assert tr.result == x
+    assert tr.converged is True
+    assert tr.maxed is False

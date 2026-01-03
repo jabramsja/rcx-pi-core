@@ -12,6 +12,7 @@ def test_trace_cli_void_smoke():
     )
     assert "result:" in p.stdout
     assert "steps:" in p.stdout
+    assert "analysis:" in p.stdout
 
 
 def test_trace_cli_json_smoke():
@@ -25,3 +26,5 @@ def test_trace_cli_json_smoke():
     assert obj["result"] is not None
     assert isinstance(obj["steps"], list)
     assert obj["steps"][0]["i"] == 0
+    assert "analysis" in obj
+    assert obj["analysis"]["kind"] in ("fixedpoint", "cycle", "maxed")
