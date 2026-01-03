@@ -1,99 +1,81 @@
 """
-RCX-Ω: Motif codec (staging)
+RCX-Ω: Motif <-> JSON object codec (staging)
 
 Goal:
-- JSON-ish encoding of π Motifs as {"μ": [...]}
-- Preserve μ arity exactly (μ(μ()) must show one child)
-- NO π mutation. Ω only reflects.
+- Provide a stable, explicit JSON-ish representation of π Motifs
+  WITHOUT modifying rcx_pi internals.
+
+Canonical π fact (discovered via introspection):
+- Motif children live in `Motif.structure` as a tuple.
+
+Encoding (minimal + explicit):
+- VOID -> {"VOID": []}
+- UNIT -> {"UNIT": []}
+- μ(...) -> {"μ": [<child1>, <child2>, ...]}
+
+This is intentionally conservative. As Ω grows, we can add richer atoms,
+metadata, or alternative forms, but this base should stay stable.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List
 
+from rcx_pi import μ, VOID, UNIT
 from rcx_pi.core.motif import Motif
 
 
-def _as_seq(v: Any) -> List[Any] | None:
-    if isinstance(v, (list, tuple)):
-        return list(v)
-    return None
+JsonObj = Any  # nested dict/list/str/int etc. (we keep it loose for staging)
 
 
-def _try_attr_or_method(obj: Any, name: str) -> Any:
-    if not hasattr(obj, name):
-        return None
-    v = getattr(obj, name)
-    # If it's a zero-arg method, call it.
-    if callable(v):
-        try:
-            return v()
-        except TypeError:
-            return None
-    return v
-
-
-def motif_children(m: Motif) -> List[Any]:
+def _motif_children(x: Motif) -> List[Motif]:
     """
-    Discover Motif children in a slots-safe, API-tolerant way.
+    Canonical child discovery for π Motif: use `x.structure`.
 
-    Priority:
-    1) Known attribute/method names
-    2) Iteration protocol
-    3) __slots__ inspection (best-effort)
+    In π, `structure` is a tuple of Motif children (possibly empty).
     """
-    # 1) Known/common names (attr OR method)
-    for name in ("children", "args", "items", "xs", "elts", "_children", "_args", "_items", "_xs"):
-        v = _try_attr_or_method(m, name)
-        seq = _as_seq(v)
-        if seq is not None:
-            return seq
-
-    # 2) If Motif is iterable (common for tree nodes), use that.
-    try:
-        it = list(m)  # type: ignore[arg-type]
-        # Guard: if it iterates characters or nonsense, ignore.
-        if all(isinstance(x, Motif) for x in it) or it == []:
-            return it
-    except Exception:
-        pass
-
-    # 3) Slots inspection: scan slot values for a list/tuple that looks like children.
-    slots = getattr(type(m), "__slots__", ())
-    if isinstance(slots, str):
-        slots = (slots,)
-    for s in slots:
-        try:
-            v = getattr(m, s)
-        except Exception:
-            continue
-        seq = _as_seq(v)
-        if seq is None:
-            continue
-        # Heuristic: children are often Motifs (or empty)
-        if seq == [] or all(isinstance(x, Motif) for x in seq):
-            return seq
-
+    st = getattr(x, "structure", None)
+    if st is None:
+        return []
+    if isinstance(st, tuple):
+        return list(st)
+    if isinstance(st, list):
+        return st
+    # If someone mutates π later (they shouldn't), fail safe:
     return []
 
 
-def motif_to_json_obj(x: Any) -> Any:
-    # JSON primitives
-    if x is None or isinstance(x, (bool, int, float, str)):
-        return x
+def motif_to_json_obj(x: Motif) -> Dict[str, Any]:
+    """
+    Encode a π Motif into a JSON-friendly object.
 
-    # Lists / tuples
-    if isinstance(x, (list, tuple)):
-        return [motif_to_json_obj(v) for v in x]
+    This returns a dict with a single key.
+    """
+    if x == VOID:
+        return {"VOID": []}
+    if x == UNIT:
+        return {"UNIT": []}
 
-    # Dicts
-    if isinstance(x, dict):
-        return {str(k): motif_to_json_obj(v) for k, v in x.items()}
+    kids = _motif_children(x)
+    return {"μ": [motif_to_json_obj(k) for k in kids]}
 
-    # π Motif
-    if isinstance(x, Motif):
-        kids = motif_children(x)
-        return {"μ": [motif_to_json_obj(c) for c in kids]}
 
-    # Fallback (debug only)
-    return {"$repr": repr(x)}
+def json_obj_to_motif(obj: JsonObj) -> Motif:
+    """
+    Decode a JSON object produced by `motif_to_json_obj` back into a π Motif.
+    """
+    if not isinstance(obj, dict) or len(obj) != 1:
+        raise ValueError(f"Invalid motif JSON object (expected 1-key dict): {obj!r}")
+
+    (k, v), = obj.items()
+
+    if k == "VOID":
+        return VOID
+    if k == "UNIT":
+        return UNIT
+    if k == "μ":
+        if not isinstance(v, list):
+            raise ValueError(f"Invalid μ payload (expected list): {v!r}")
+        return μ(*[json_obj_to_motif(child) for child in v])
+
+    raise ValueError(f"Unknown motif tag: {k!r}")
