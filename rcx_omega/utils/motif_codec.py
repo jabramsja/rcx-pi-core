@@ -1,162 +1,69 @@
 """
-RCX-Ω: Motif codec (staging)
+RCX-Ω: Motif <-> JSON object codec (staging)
 
-Goal: provide a stable, machine-readable JSON encoding for rcx_pi Motifs,
-WITHOUT relying on rcx_pi internal/private APIs.
+IMPORTANT:
+- rcx_omega/tests currently import this module path:
+    rcx_omega.utils.motif_codec
 
-Design constraints:
-- π stays frozen; Ω wraps.
-- Must never choke on meta/functions/etc.
-- Best-effort structural introspection with safe fallbacks.
+Encoding contract (minimal):
+- VOID/UNIT are encoded as atoms:
+    {"atom": "VOID"} / {"atom": "UNIT"}
+- General motifs are encoded as μ nodes with children:
+    {"μ": [<child1>, <child2>, ...]}
+
+π fact:
+- Motif children live in `Motif.structure` as a tuple.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, List
 
-JSON = Union[None, bool, int, float, str, List["JSON"], Dict[str, "JSON"]]
+from rcx_pi import μ, VOID, UNIT
+from rcx_pi.core.motif import Motif
 
-
-def _is_json_scalar(x: Any) -> bool:
-    return x is None or isinstance(x, (bool, int, float, str))
-
-
-def _safe_meta(meta: Any) -> Dict[str, JSON]:
-    """
-    Attempt to export a JSON-safe subset of meta (if present).
-    Drops non-JSON-safe entries.
-    """
-    if meta is None:
-        return {}
-
-    if not isinstance(meta, Mapping):
-        return {}
-
-    out: Dict[str, JSON] = {}
-    for k, v in meta.items():
-        if not isinstance(k, str):
-            continue
-        if _is_json_scalar(v):
-            out[k] = v
-        # allow shallow lists/dicts of scalars
-        elif isinstance(v, list) and all(_is_json_scalar(i) for i in v):
-            out[k] = list(v)
-        elif isinstance(v, dict) and all(isinstance(kk, str) and _is_json_scalar(vv) for kk, vv in v.items()):
-            out[k] = {str(kk): vv for kk, vv in v.items()}
-        else:
-            # skip callables / motifs / complex objects
-            continue
-    return out
+JsonObj = Any
 
 
-def _children_of(m: Any) -> Tuple[Any, ...]:
-    """
-    Best-effort extraction of motif children across possible implementations.
-    If no known child container is found, returns empty tuple.
-    """
-    # common patterns we might see
-    for attr in ("args", "xs", "children", "_children", "items", "_items"):
-        if hasattr(m, attr):
-            try:
-                val = getattr(m, attr)
-                if isinstance(val, tuple):
-                    return val
-                if isinstance(val, list):
-                    return tuple(val)
-            except Exception:
-                pass
-
-    # Sometimes motifs store children in a method
-    for meth in ("children", "to_list", "as_list"):
-        if hasattr(m, meth) and callable(getattr(m, meth)):
-            try:
-                val = getattr(m, meth)()
-                if isinstance(val, tuple):
-                    return val
-                if isinstance(val, list):
-                    return tuple(val)
-            except Exception:
-                pass
-
-    return ()
+def _children(x: Motif) -> List[Motif]:
+    st = getattr(x, "structure", None)
+    if st is None:
+        return []
+    if isinstance(st, tuple):
+        return list(st)
+    if isinstance(st, list):
+        return st
+    return []
 
 
-def motif_to_json_obj(
-    m: Any,
-    *,
-    include_meta: bool = False,
-    max_depth: int = 128,
-    _depth: int = 0,
-) -> JSON:
-    """
-    Encode a motif-ish object into a stable JSON object.
+def motif_to_json_obj(x: Motif) -> Dict[str, Any]:
+    if x == VOID:
+        return {"atom": "VOID"}
+    if x == UNIT:
+        return {"atom": "UNIT"}
 
-    Primary encoding:
-      {"μ": [child0, child1, ...]}
-
-    Optional meta:
-      {"μ": [...], "meta": {...}}
-
-    Always safe:
-      - If structure can't be introspected, returns {"atom": "<str(m)>"}.
-      - Never raises on unknown motif shapes.
-    """
-    if _depth >= max_depth:
-        return {"cut": True, "repr": str(m)}
-
-    # If it looks like a motif (or motif-like), try structural encoding
-    kids = _children_of(m)
-
-    if kids:
-        base: Dict[str, JSON] = {"μ": [motif_to_json_obj(k, include_meta=include_meta, max_depth=max_depth, _depth=_depth + 1) for k in kids]}
-        if include_meta:
-            meta_val = None
-            for meta_attr in ("meta", "_meta"):
-                if hasattr(m, meta_attr):
-                    try:
-                        meta_val = getattr(m, meta_attr)
-                    except Exception:
-                        meta_val = None
-                    break
-            sm = _safe_meta(meta_val)
-            if sm:
-                base["meta"] = sm
-        return base
-
-    # Some motifs may be leaf nodes but still motifs: represent as empty μ()
-    # We still use μ:[] as the canonical leaf structure.
-    try:
-        # If it has a recognizable motif-ish class name, treat as leaf motif.
-        cls = type(m).__name__.lower()
-        if "motif" in cls:
-            base2: Dict[str, JSON] = {"μ": []}
-            if include_meta:
-                meta_val = None
-                for meta_attr in ("meta", "_meta"):
-                    if hasattr(m, meta_attr):
-                        try:
-                            meta_val = getattr(m, meta_attr)
-                        except Exception:
-                            meta_val = None
-                        break
-                sm = _safe_meta(meta_val)
-                if sm:
-                    base2["meta"] = sm
-            return base2
-    except Exception:
-        pass
-
-    # Hard fallback for unknown atoms
-    return {"atom": str(m)}
+    kids = _children(x)
+    return {"μ": [motif_to_json_obj(k) for k in kids]}
 
 
-def motif_to_json_str(
-    m: Any,
-    *,
-    include_meta: bool = False,
-    max_depth: int = 128,
-) -> str:
-    import json
+def json_obj_to_motif(obj: JsonObj) -> Motif:
+    if not isinstance(obj, dict):
+        raise ValueError(f"Invalid motif JSON object (expected dict): {obj!r}")
 
-    obj = motif_to_json_obj(m, include_meta=include_meta, max_depth=max_depth)
-    return json.dumps(obj, indent=2, sort_keys=True)
+    # atom form
+    if "atom" in obj:
+        a = obj["atom"]
+        if a == "VOID":
+            return VOID
+        if a == "UNIT":
+            return UNIT
+        raise ValueError(f"Unknown atom: {a!r}")
+
+    # μ form
+    if "μ" in obj:
+        v = obj["μ"]
+        if not isinstance(v, list):
+            raise ValueError(f"Invalid μ payload (expected list): {v!r}")
+        return μ(*[json_obj_to_motif(child) for child in v])
+
+    raise ValueError(f"Invalid motif JSON object (expected 'μ' or 'atom'): {obj!r}")

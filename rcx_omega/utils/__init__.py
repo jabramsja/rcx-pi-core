@@ -1,6 +1,5 @@
 """
-RCX-Ω utilities (staging).
+RCX-Ω utils namespace (staging).
 
-Anything in here must NOT mutate rcx_pi.
-This is the "toolshed" for Ω lenses, tracing, inspection, and codecs.
+Note: tests currently import codecs from rcx_omega.utils.*.
 """
