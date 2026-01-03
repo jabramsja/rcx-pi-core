@@ -50,8 +50,31 @@ def _size_hint(s: str) -> int:
 
 def analyze_trace_payload(payload: Dict[str, Any]) -> AnalyzeReport:
     steps: List[Dict[str, Any]] = payload.get("steps") or []
+
     if not steps:
-        raise SystemExit("analyze_cli: payload had no steps[]")
+        # Allow analyzing omega_cli JSON, which is summary-shaped and may not include steps[].
+        classification = payload.get("classification")
+        stats = payload.get("stats")
+        if classification or stats:
+            # Emit something stable-ish for piping / smoke tests.
+            print("analyze: summary")
+            if classification:
+                ctype = classification.get("type", "unknown")
+                period = classification.get("period")
+                max_steps = classification.get("max_steps")
+                extra = []
+                if period is not None:
+                    extra.append(f"period={period}")
+                if max_steps is not None:
+                    extra.append(f"max_steps={max_steps}")
+                tail = (" " + " ".join(extra)) if extra else ""
+                print(f"classification: {ctype}{tail}")
+            if stats:
+                # stats shape varies; print compactly without assuming keys.
+                print("stats: " + str(stats))
+            raise SystemExit(0)
+        sys.stderr.write("analyze_cli: payload had no steps[]\n")
+        return 1
 
     input_s = str(payload.get("input", ""))
     result_s = str(payload.get("result", ""))
