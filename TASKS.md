@@ -144,8 +144,7 @@ Worlds:
 
 - ✅ JSON diff / inspection
 **Status:** 🟡 OPTIONAL
-
-- ⬜ World auto-documentation
+- ✅ World auto-documentation
 - ✅ JSON diff / inspection
 - ✅ Rule precedence visualization
 
