@@ -1,0 +1,46 @@
+name: Rust Examples
+
+on:
+  push:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/*.rs"
+      - "scripts/green_examples.sh"
+      - ".github/workflows/rust_examples.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/*.rs"
+      - "scripts/green_examples.sh"
+      - ".github/workflows/rust_examples.yml"
+
+jobs:
+  rust_examples:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard (must have Cargo.toml at repo root)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Cargo.toml || { echo "SKIP: no Cargo.toml at repo root"; exit 0; }
+
+      - name: Install ripgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust examples green gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/green_examples.sh
