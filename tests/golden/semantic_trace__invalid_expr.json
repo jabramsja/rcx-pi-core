@@ -1,0 +1,7 @@
+{
+  "error": {
+    "message": "Expected 'μ' or 'mu' at pos 2",
+    "type": "ValueError"
+  },
+  "expr": "μ(]"
+}

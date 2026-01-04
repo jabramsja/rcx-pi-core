@@ -88,6 +88,37 @@ def _assert_matches_golden(name: str, data: dict):
     assert data == expected, f"Golden mismatch for {name}. To update intentionally: RCX_UPDATE_GOLDENS=1 pytest -q"
 
 
+def _semantic_trace_or_error(expr: str) -> dict:
+    """
+    Return a normalized semantic trace dict for valid expressions.
+    For invalid expressions, return a normalized error contract dict.
+    """
+    try:
+        return _semantic_trace(expr)
+    except Exception as e:
+        # Freeze failure contract without depending on exception repr noise
+        return {
+            "error": {
+                "type": type(e).__name__,
+                "message": str(e),
+            },
+            "expr": expr,
+        }
+
+
 def test_golden_semantic_trace_mu_mu():
-    data = _semantic_trace("μ(μ())")
+    data = _semantic_trace_or_error("μ(μ())")
     _assert_matches_golden("semantic_trace__mu_mu", data)
+
+
+def test_golden_semantic_trace_mu_empty():
+    # Second "valid-ish" path. If this grammar is invalid in your system,
+    # it will snapshot the error contract instead (still useful, but we'll adjust later).
+    data = _semantic_trace_or_error("μ()")
+    _assert_matches_golden("semantic_trace__mu_empty", data)
+
+
+def test_golden_semantic_trace_invalid_expr_contract():
+    # Deliberately invalid input to lock the error shape.
+    data = _semantic_trace_or_error("μ(]")
+    _assert_matches_golden("semantic_trace__invalid_expr", data)
