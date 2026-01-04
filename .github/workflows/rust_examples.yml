@@ -3,21 +3,15 @@ name: Rust Examples
 on:
   push:
     paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "**/*.rs"
+      - "rcx_pi_rust/**"
       - "scripts/green_examples.sh"
       - "scripts/green_gate.sh"
-      - "rcx_pi_rust/scripts/green_examples.sh"
       - ".github/workflows/rust_examples.yml"
   pull_request:
     paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "**/*.rs"
+      - "rcx_pi_rust/**"
       - "scripts/green_examples.sh"
       - "scripts/green_gate.sh"
-      - "rcx_pi_rust/scripts/green_examples.sh"
       - ".github/workflows/rust_examples.yml"
 
 jobs:
@@ -27,21 +21,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect Cargo.toml at repo root
+      - name: Detect rcx_pi_rust/Cargo.toml
         id: detect
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f Cargo.toml ]; then
-            echo "has_cargo=true" >> "$GITHUB_OUTPUT"
-            echo "Cargo.toml found; Rust steps enabled."
+          if [ -f rcx_pi_rust/Cargo.toml ]; then
+            echo "has_rust=true" >> "$GITHUB_OUTPUT"
+            echo "rcx_pi_rust/Cargo.toml found; Rust steps enabled."
           else
-            echo "has_cargo=false" >> "$GITHUB_OUTPUT"
-            echo "SKIP: no Cargo.toml at repo root; remaining steps disabled."
+            echo "has_rust=false" >> "$GITHUB_OUTPUT"
+            echo "SKIP: no rcx_pi_rust/Cargo.toml; remaining steps disabled."
           fi
 
       - name: Install ripgrep
-        if: steps.detect.outputs.has_cargo == 'true'
+        if: steps.detect.outputs.has_rust == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -49,11 +43,11 @@ jobs:
           sudo apt-get install -y ripgrep
 
       - name: Set up Rust
-        if: steps.detect.outputs.has_cargo == 'true'
+        if: steps.detect.outputs.has_rust == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Green gate (rust-only)
-        if: steps.detect.outputs.has_cargo == 'true'
+        if: steps.detect.outputs.has_rust == 'true'
         shell: bash
         run: |
           set -euo pipefail
