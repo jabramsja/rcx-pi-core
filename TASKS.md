@@ -147,7 +147,7 @@ Worlds:
 
 - ⬜ World auto-documentation
 - ✅ JSON diff / inspection
-- ⬜ Rule precedence visualization
+- ✅ Rule precedence visualization
 
 ---
 
