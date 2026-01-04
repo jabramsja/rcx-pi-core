@@ -155,7 +155,7 @@ Worlds:
 **Status:** 🟡 OPTIONAL
 - ✅ Rewrite termination contracts
 - ✅ Snapshot integrity checks
-- ⬜ CI hook for `green_gate.sh`
+- ✅ CI hook for `green_gate.sh`
 
 ---
 
