@@ -71,4 +71,5 @@ else
   echo "$OUT"
 fi
 
-exit 0 || true
+# Propagate json_diff.sh semantics (0 ok, 1 mismatch, 2 error)
+exit "$RC"
