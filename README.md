@@ -33,3 +33,13 @@ The **only supported correctness gate** for this repository is:
 scripts/green_gate.sh
 
 If scripts/green_gate.sh finishes without red errors — RCX-π Core is healthy.
+
+## JSON diff / inspection
+
+Use `scripts/json_diff.sh` to compare JSON outputs semantically (object key order ignored; arrays remain order-sensitive).
+
+Examples:
+- Compare full docs (ignoring optional schema metadata):
+  - `scripts/json_diff.sh a.json b.json --ignore kind,schema_version`
+- Compare only the frozen minimum field:
+  - `scripts/json_diff.sh a.json b.json --only result`
