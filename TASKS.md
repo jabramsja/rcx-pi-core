@@ -141,6 +141,8 @@ Worlds:
 
 ## F. TOOLING EXTENSIONS
 
+
+- ✅ JSON diff / inspection
 **Status:** 🟡 OPTIONAL
 
 - ⬜ World auto-documentation
