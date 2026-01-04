@@ -1,8 +1,6 @@
 name: CI
 
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 
 jobs:
   test:
@@ -10,13 +8,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Install (best-effort)
+      - name: Install
         shell: bash
         run: |
           set -euo pipefail
@@ -24,40 +20,35 @@ jobs:
           python -m pip install pytest
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then python -m pip install -e .; fi
-
       - name: Goldens check (no updates)
         shell: bash
         run: |
           set -euo pipefail
-          if [ -x scripts/goldens_check.sh ]; then
-            scripts/goldens_check.sh
-          else
-            python -m pytest -q tests/test_semantic_goldens.py
-          fi
-
-      - name: Pytest (full suite)
+          if [ -x scripts/goldens_check.sh ]; then scripts/goldens_check.sh; else python -m pytest -q tests/test_semantic_goldens.py; fi
+      - name: Pytest
         shell: bash
         run: |
           set -euo pipefail
           python -m pytest -q
 
   rust_examples:
-    if: ${{ hashFiles('Cargo.toml') != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+      - name: Skip if no Cargo.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.toml ]; then echo 'SKIP: no Cargo.toml'; exit 0; fi
       - name: Install ripgrep
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y ripgrep
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Rust examples green gate
         shell: bash
         run: |
