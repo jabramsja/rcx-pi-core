@@ -2,12 +2,47 @@
 % wrapper.tex -- Final wrapper for RCX Core Engine with tabularx support
 \documentclass[10pt]{article}
 
+
+% --- RCX CANON: engine-aware Unicode font setup ---
+\usepackage{iftex}
+\ifPDFTeX
+  % pdfLaTeX fallback path
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\else
+  % XeLaTeX/LuaLaTeX path (Unicode-safe, full glyph coverage)
+  \usepackage{fontspec}
+  \defaultfontfeatures{Ligatures=TeX}
+
+  % Use macOS system fonts (available on default installs)
+  \setmainfont{Times New Roman}
+  \setsansfont{Helvetica}
+
+  % Mono font for code blocks (needs π/μ/ω + box drawing + arrows + (check)(cross))
+  \IfFontExistsTF{Menlo}{
+    \setmonofont{Menlo}
+  }{
+    \IfFontExistsTF{Courier New}{
+      \setmonofont{Courier New}
+    }{
+      \setmonofont{Latin Modern Mono}
+    }
+  }
+\fi
+% --- /RCX CANON: engine-aware Unicode font setup ---
+
+% --- RCX CANON: checkmark/crossmark glyph routing (avoids missing glyphs in body font) ---
+% We do NOT use Unicode (check)/(cross) at all. Use dingbats via pifont (works in pdfLaTeX + XeLaTeX).
+\usepackage{pifont}
+\newcommand{\RCXcheck}{\ding{51}} % check mark
+\newcommand{\RCXcross}{\ding{55}} % cross mark
+% --- /RCX CANON: checkmark/crossmark glyph routing ---
+
+
 %%% Encoding & Fonts %%%
-\usepackage[utf8]{inputenc}
 \usepackage{tikz}
 \usetikzlibrary{positioning}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
 \usepackage{microtype}
 
 %%% Spacing & Wrapping %%%
@@ -50,7 +85,7 @@
 \makeatother
 
 %%% Hyperlinks %%%
-\usepackage{hyperref}
+\usepackage[unicode=true]{hyperref}
 \hypersetup{
   colorlinks,
   linkcolor=blue,
@@ -163,12 +198,17 @@ Detailed mechanics: Rules 0.5--0.7, Appendix A.4.
   \label{fig:rcx-cycle}
 \end{figure}
 
-% TODO (canonization step): add \input{00-overview.tex} ... \input{10-visual-debugging.tex}
-% after we place those files into docs/latex/src/
-% Example:
-% \input{00-overview.tex}
-% \input{01-getting-started.tex}
-% ...
-% \input{10-visual-debugging.tex}
+s% --- RCX CANON: chapter includes (order is canonical) ---
+\input{00-overview.tex}
+\input{01-getting-started.tex}
+\input{02-core-structures.tex}
+\input{03-evaluator.tex}
+\input{04-classification.tex}
+\input{05-pretty-printing.tex}
+\input{06-programs.tex}
+\input{07-higher-operations.tex}
+\input{08-self-hosting.tex}
+\input{09-emergence.tex}
+\input{10-visual-debugging.tex}
 
 \end{document}

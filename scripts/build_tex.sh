@@ -6,6 +6,10 @@ SRC_DIR="$ROOT/docs/latex/src"
 BUILD_DIR="$ROOT/docs/latex/build"
 
 mkdir -p "$BUILD_DIR"
+
+# Hard clean: kills stale wrapper.toc/out/aux that can preserve old Unicode ✓/✗
+rm -rf "$BUILD_DIR"/*
+mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 # Copy sources into build dir (keeps build artifacts out of src)
@@ -17,7 +21,7 @@ for f in "$SRC_DIR"/*.tex; do
   cp -f "$f" .
 done
 
-# Prefer XeLaTeX for Unicode (π, etc), fallback to pdfLaTeX.
+# Prefer XeLaTeX for Unicode (π, μ, ω, box drawing), fallback to pdfLaTeX.
 if command -v latexmk >/dev/null 2>&1; then
   if command -v xelatex >/dev/null 2>&1; then
     latexmk -xelatex -interaction=nonstopmode -halt-on-error wrapper.tex
