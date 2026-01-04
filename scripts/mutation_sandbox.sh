@@ -28,9 +28,13 @@ Optional:
   --max-steps N  Gate (exit 1) if inferred steps > N (uses scripts/world_score.sh --max-steps).
   --runner ...   Force runner selection:
                  auto (default): try rust-examples, then trace-cli, else none
-                 rust-examples: use `python3 -m rcx_pi_rust.cli.examples_cli` if available
-                 trace-cli:     use `python3 -m rcx_omega.cli.trace_cli` if available (world-agnostic, best-effort)
+                 rust-examples: use `python3 -m rcx_pi_rust.cli.examples_cli` (if available)
+                 trace-cli:     use `python3 -m rcx_omega.cli.trace_cli` (if available)
                  none:          mutation-only (no execution)
+
+Runner behavior (important):
+  If a runner's --help includes a --world flag, this tool will execute baseline.mu and mutated.mu
+  as separate runs using --world <file>. Otherwise, it will run the runner in its default mode.
 
 Conservative mutations:
   - flip:    change only terminal route tokens in lines like "-> ra|lobe|sink"
@@ -49,6 +53,7 @@ Outputs:
     - (optional) baseline.json / mutated.json
     - (optional) baseline.score.json / mutated.score.json
     - (optional) comparison.json
+    - (optional) snapshot_integrity.json
 
 Exit codes:
   0 success
@@ -115,7 +120,6 @@ if runner_mode not in {"auto", "rust-examples", "trace-cli", "none"}:
 text = world_path.read_text(encoding="utf-8", errors="replace")
 lines = text.splitlines()
 
-# Conservative detector
 rule_like = re.compile(
     r"^\s*(?!#)(?:"
     r"(?:rule|rewrite|when|defrule)\b"
@@ -124,8 +128,6 @@ rule_like = re.compile(
     r")",
     re.IGNORECASE,
 )
-
-# Strict flip target: terminal "-> ra|lobe|sink" (ignore other arrows)
 flip_re = re.compile(r"(->\s*)(ra|lobe|sink)\s*$", re.IGNORECASE)
 
 @dataclass
@@ -198,25 +200,16 @@ run_id = f"run_{stamp}_{h}"
 run_dir = out_dir / run_id
 run_dir.mkdir(parents=True, exist_ok=False)
 
-baseline_out = run_dir / "baseline.mu"
-mut_out = run_dir / "mutated.mu"
-baseline_out.write_text(text, encoding="utf-8")
-mut_out.write_text(mut_text, encoding="utf-8")
+baseline_mu = run_dir / "baseline.mu"
+mutated_mu = run_dir / "mutated.mu"
+baseline_mu.write_text(text, encoding="utf-8")
+mutated_mu.write_text(mut_text, encoding="utf-8")
 
 mut_rule_like_count = sum(1 for ln in mut_lines if rule_like.search(ln))
 flips_applied = sum(1 for e in events if e.kind == "flip")
 
-def which_module(mod: str) -> bool:
-    # best-effort: `python -m mod --help` should exit 0/2; any output means importable.
-    p = subprocess.run([sys.executable, "-m", mod, "--help"], text=True, capture_output=True)
-    return p.returncode in (0, 2)
-
-def run_cmd(cmd: list[str], timeout: int = 60) -> Tuple[int, str, str]:
-    p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, check=False)
-    return p.returncode, p.stdout, p.stderr
-
 def try_json_load(s: str) -> Optional[Any]:
-    s = s.strip()
+    s = (s or "").strip()
     if not s:
         return None
     try:
@@ -224,8 +217,19 @@ def try_json_load(s: str) -> Optional[Any]:
     except Exception:
         return None
 
+def run_cmd(cmd: list[str], timeout: int = 120) -> Tuple[int, str, str]:
+    p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, check=False)
+    return p.returncode, p.stdout, p.stderr
+
+def which_module(mod: str) -> bool:
+    p = subprocess.run([sys.executable, "-m", mod, "--help"], text=True, capture_output=True)
+    return p.returncode in (0, 2)
+
+def module_help(mod: str) -> str:
+    p = subprocess.run([sys.executable, "-m", mod, "--help"], text=True, capture_output=True)
+    return (p.stdout or "") + (("\n" + p.stderr) if p.stderr else "")
+
 def runner_auto() -> str:
-    # Prefer the rust examples CLI if available, else trace_cli, else none.
     if which_module("rcx_pi_rust.cli.examples_cli"):
         return "rust-examples"
     if which_module("rcx_omega.cli.trace_cli"):
@@ -236,11 +240,6 @@ chosen_runner = runner_mode
 if chosen_runner == "auto":
     chosen_runner = runner_auto()
 
-# Runner adapters:
-# - rust-examples: run the existing examples suite (not world-specific), but we still record baseline/mutated as artifacts.
-#   If there is a way to point it at a world file, we won't assume it; we just run and capture outputs.
-# - trace-cli: best-effort call trace_cli with fixed expr (world-agnostic), and save JSON as a "trace sample".
-# - none: skip.
 run_artifacts: dict[str, Any] = {"runner": chosen_runner, "baseline": {}, "mutated": {}, "notes": []}
 
 def write_text(path: Path, s: str) -> None:
@@ -249,17 +248,23 @@ def write_text(path: Path, s: str) -> None:
 def write_json(path: Path, obj: Any) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-def do_one(label: str) -> None:
+def run_one(label: str, world_file: Path) -> None:
     out_txt = run_dir / f"{label}.out.txt"
     out_json = run_dir / f"{label}.json"
-    info: dict[str, Any] = {"exit_code": None, "stdout_path": str(out_txt), "json_path": None, "json_ok": False}
+    info: dict[str, Any] = {"exit_code": None, "stdout_path": str(out_txt), "json_path": None, "json_ok": False, "world_used": str(world_file)}
 
     if chosen_runner == "rust-examples":
-        rc, so, se = run_cmd([sys.executable, "-m", "rcx_pi_rust.cli.examples_cli"], timeout=120)
+        mod = "rcx_pi_rust.cli.examples_cli"
+        help_txt = module_help(mod)
+        cmd = [sys.executable, "-m", mod]
+        if "--world" in help_txt:
+            cmd += ["--world", str(world_file)]
+        else:
+            run_artifacts["notes"].append("rust-examples runner has no --world flag; ran in default mode (baseline/mutated will not diverge).")
+        rc, so, se = run_cmd(cmd, timeout=180)
         combined = (so or "") + (("\n" + se) if se else "")
         write_text(out_txt, combined)
         info["exit_code"] = rc
-        # try to find a JSON blob in stdout (rare). If not, json_path stays None.
         obj = try_json_load(so)
         if obj is not None:
             write_json(out_json, obj)
@@ -267,8 +272,14 @@ def do_one(label: str) -> None:
             info["json_ok"] = True
 
     elif chosen_runner == "trace-cli":
-        # World-agnostic: trace_cli on a stable expr. Save JSON to label.json.
-        rc, so, se = run_cmd([sys.executable, "-m", "rcx_omega.cli.trace_cli", "--json", "μ(μ())"], timeout=60)
+        mod = "rcx_omega.cli.trace_cli"
+        help_txt = module_help(mod)
+        # trace-cli is expression-centric; if it *also* supports --world we’ll use it.
+        cmd = [sys.executable, "-m", mod, "--json"]
+        if "--world" in help_txt:
+            cmd += ["--world", str(world_file)]
+        cmd += ["μ(μ())"]
+        rc, so, se = run_cmd(cmd, timeout=90)
         combined = (so or "") + (("\n" + se) if se else "")
         write_text(out_txt, combined)
         info["exit_code"] = rc
@@ -286,14 +297,8 @@ def do_one(label: str) -> None:
 
     run_artifacts[label] = info
 
-# For now baseline/mutated runs are symmetric (they don't actually execute the mutated world unless future runner supports it).
-# Still useful: it validates the runner ladder, and sets up comparison plumbing.
-if do_run:
-    do_one("baseline")
-    do_one("mutated")
-
+force_rc1 = False
 comparison: dict[str, Any] = {"enabled": False}
-rc_final = 0
 
 def score_one(label: str, json_path: Optional[str]) -> Optional[dict[str, Any]]:
     if not json_path:
@@ -301,46 +306,39 @@ def score_one(label: str, json_path: Optional[str]) -> Optional[dict[str, Any]]:
     p = Path(json_path)
     if not p.is_file():
         return None
-    # Score using world_score.sh (it accepts trace-shaped JSON best-effort)
     cmd = ["bash", "scripts/world_score.sh", str(p), "--json", "--loop"]
     if max_steps > 0:
         cmd += ["--max-steps", str(max_steps)]
     pr = subprocess.run(cmd, text=True, capture_output=True, check=False)
-    outp = pr.stdout.strip()
-    obj = try_json_load(outp)
+    obj = try_json_load(pr.stdout)
     if obj is None:
         return None
     score_path = run_dir / f"{label}.score.json"
     write_json(score_path, obj)
+    d: dict[str, Any] = {"score_path": str(score_path), "score": obj.get("score"), "violation": obj.get("violation"), "exit_code": pr.returncode}
     if pr.returncode == 1:
-        # violation (e.g., max-steps)
-        nonlocal_rc = 1
-        return {"score_path": str(score_path), "score": obj.get("score"), "violation": obj.get("violation"), "exit_code": pr.returncode, "_force_rc1": True}
-    return {"score_path": str(score_path), "score": obj.get("score"), "violation": obj.get("violation"), "exit_code": pr.returncode}
+        d["_force_rc1"] = True
+    return d
 
-# Python doesn't allow nonlocal at module scope; do it via flag:
-force_rc1 = False
+if do_run:
+    run_one("baseline", baseline_mu)
+    run_one("mutated", mutated_mu)
 
 if do_run and do_score:
     b = run_artifacts.get("baseline", {})
     m = run_artifacts.get("mutated", {})
-    bjson = b.get("json_path")
-    mjson = m.get("json_path")
+    bs = score_one("baseline", b.get("json_path"))
+    ms = score_one("mutated", m.get("json_path"))
 
-    bs = score_one("baseline", bjson)
-    ms = score_one("mutated", mjson)
-
-    if bs and bs.get("_force_rc1"):
+    if bs and bs.pop("_force_rc1", False):
         force_rc1 = True
-        bs.pop("_force_rc1", None)
-    if ms and ms.get("_force_rc1"):
+    if ms and ms.pop("_force_rc1", False):
         force_rc1 = True
-        ms.pop("_force_rc1", None)
 
     snap = None
-    if bjson and mjson:
+    if b.get("json_path") and m.get("json_path"):
         pr = subprocess.run(
-            ["bash", "scripts/snapshot_integrity_check.sh", bjson, mjson, "--json"],
+            ["bash", "scripts/snapshot_integrity_check.sh", b["json_path"], m["json_path"], "--json"],
             text=True,
             capture_output=True,
             check=False,
@@ -357,14 +355,13 @@ if do_run and do_score:
         "scores": {"baseline": bs, "mutated": ms},
         "snapshot_integrity": snap,
         "notes": [
-            "Current runner ladder may not execute mutated world semantics yet; this is plumbing + safety scaffolding.",
-            "Once a runner supports 'world file' input, baseline/mutated will diverge meaningfully in outputs.",
+            "If runner lacks --world, baseline/mutated outputs may not diverge yet; see run.notes.",
+            "Once a runner supports --world and emits trace-shaped JSON, scoring/integrity become meaningful.",
         ],
     }
     write_json(run_dir / "comparison.json", comparison)
 
-if force_rc1:
-    rc_final = 1
+rc_final = 1 if force_rc1 else 0
 
 report: dict[str, Any] = {
     "run_id": run_id,
@@ -374,8 +371,8 @@ report: dict[str, Any] = {
     "apply": apply,
     "paths": {
         "run_dir": str(run_dir),
-        "baseline_mu": str(baseline_out),
-        "mutated_mu": str(mut_out),
+        "baseline_mu": str(baseline_mu),
+        "mutated_mu": str(mutated_mu),
         "report_json": str(run_dir / "report.json"),
     },
     "metrics": {
@@ -389,7 +386,7 @@ report: dict[str, Any] = {
     "notes": [
         "Sandbox is isolated: writes only under out-dir/run_id/",
         "Mutations are conservative and deterministic for a given seed + apply mode.",
-        "This tool does NOT change runtime semantics directly; it only produces mutated copies for experimentation.",
+        "This tool only executes worlds if runner supports --world; otherwise it records runner outputs in default mode.",
     ],
 }
 
@@ -399,11 +396,15 @@ if as_json:
     print(json.dumps(report, ensure_ascii=False, indent=2))
 else:
     print(f"OK: wrote {run_dir}")
-    print(f"- baseline: {baseline_out}")
-    print(f"- mutated:  {mut_out}")
+    print(f"- baseline: {baseline_mu}")
+    print(f"- mutated:  {mutated_mu}")
     print(f"- report:   {run_dir / 'report.json'}")
     if do_run:
         print(f"- runner:   {chosen_runner}")
+        if run_artifacts.get("notes"):
+            print("- runner_notes:")
+            for n in run_artifacts["notes"][:10]:
+                print(f"  - {n}")
     if do_score and do_run:
         print(f"- comparison: {run_dir / 'comparison.json'}")
 
