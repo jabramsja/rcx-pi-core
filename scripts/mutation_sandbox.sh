@@ -15,50 +15,11 @@ Usage:
     [--max-steps N]
     [--runner auto|omega-cli|trace-cli|none]
 
-Purpose:
-  Create an ISOLATED mutation sandbox run:
-    - Reads the input .mu world
-    - Applies deterministic, conservative mutations to "rule-like" lines
-    - Writes outputs under sandbox_runs/ (or --out-dir)
-    - Produces report.json
+Notes:
+  - omega-cli / trace-cli operate on motif expressions (μ(...) / mu(...)).
+  - This tool will only invoke omega-cli/trace-cli when the input file looks like a motif source.
+  - If input looks like a "world" file (e.g., starts with '[' rules), runner execution is skipped safely.
 
-Optional:
-  --run     Attempt to run baseline + mutated via available runner(s), capturing stdout/stderr and JSON if produced.
-  --score   If trace-shaped JSON is produced, compute world scores & snapshot integrity checks.
-  --max-steps N  Gate (exit 1) if inferred steps > N (uses scripts/world_score.sh --max-steps).
-  --runner ...   Force runner selection:
-                 auto (default): prefer omega-cli, then trace-cli, else none
-                 omega-cli:      python3 -m rcx_omega.cli.omega_cli  (uses --file; prefers --trace)
-                 trace-cli:      python3 -m rcx_omega.cli.trace_cli  (uses --file)
-                 none:           mutation-only (no execution)
-
-Runner behavior (important):
-  This tool executes baseline.mu and mutated.mu only when a runner supports --file (rcx_omega CLIs do).
-  If a run does not emit JSON, scoring is skipped for that side (but the run still succeeds).
-
-Conservative mutations:
-  - flip:    change only terminal route tokens in lines like "-> ra|lobe|sink"
-  - shuffle: reorder rule-like lines (deterministically) while keeping all lines
-  - both:    shuffle then flip
-
-Rule-like detector (conservative):
-  - non-comment lines containing "->" OR ":=" OR starting with rule|rewrite|when|defrule
-
-Outputs:
-  <out-dir>/<run_id>/
-    - baseline.mu
-    - mutated.mu
-    - report.json
-    - (optional) baseline.out.txt / mutated.out.txt
-    - (optional) baseline.json / mutated.json
-    - (optional) baseline.score.json / mutated.score.json
-    - (optional) comparison.json
-    - (optional) snapshot_integrity.json
-
-Exit codes:
-  0 success
-  1 violation detected (e.g., --max-steps exceeded)
-  2 usage / file errors
 USAGE
 }
 
@@ -129,6 +90,17 @@ rule_like = re.compile(
     re.IGNORECASE,
 )
 flip_re = re.compile(r"(->\s*)(ra|lobe|sink)\s*$", re.IGNORECASE)
+
+# Detect "motif source": first non-empty, non-comment token starts with μ or mu
+def looks_like_motif(src: str) -> bool:
+    for ln in src.splitlines():
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        return s.startswith("μ") or s.startswith("mu")
+    return False
+
+is_motif = looks_like_motif(text)
 
 @dataclass
 class MutEvent:
@@ -223,7 +195,6 @@ def module_available(mod: str) -> bool:
     return p.returncode in (0, 2)
 
 def runner_auto() -> str:
-    # Prefer omega-cli (can emit trace), then trace-cli, else none
     if module_available("rcx_omega.cli.omega_cli"):
         return "omega-cli"
     if module_available("rcx_omega.cli.trace_cli"):
@@ -242,7 +213,7 @@ def write_text(path: Path, s: str) -> None:
 def write_json(path: Path, obj: Any) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-def run_one(label: str, world_file: Path) -> None:
+def run_one(label: str, file_path: Path) -> None:
     out_txt = run_dir / f"{label}.out.txt"
     out_json = run_dir / f"{label}.json"
     info: dict[str, Any] = {
@@ -250,30 +221,39 @@ def run_one(label: str, world_file: Path) -> None:
         "stdout_path": str(out_txt),
         "json_path": None,
         "json_ok": False,
-        "world_used": str(world_file),
+        "world_used": str(file_path),
         "cmd_used": None,
+        "skipped": False,
     }
 
+    # Hard gate: omega/trace are motif-only. If file isn't a motif, skip cleanly.
+    if chosen_runner in {"omega-cli", "trace-cli"} and not is_motif:
+        info["exit_code"] = 0
+        info["skipped"] = True
+        write_text(out_txt, "NOTE: skipped runner execution (file does not look like motif: expected μ(...) / mu(...)).\n")
+        run_artifacts["notes"].append(f"{label}: skipped ({chosen_runner}) because input is not motif-shaped.")
+        run_artifacts[label] = info
+        return
+
     if chosen_runner == "omega-cli":
-        # Try the most meaningful form first: --trace + --json + --file
         cmd_candidates = [
-            [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--json", "--trace", "--file", str(world_file)],
-            [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--json", "--file", str(world_file)],
+            [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--json", "--trace", "--file", str(file_path)],
+            [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--json", "--file", str(file_path)],
         ]
     elif chosen_runner == "trace-cli":
         cmd_candidates = [
-            [sys.executable, "-m", "rcx_omega.cli.trace_cli", "--json", "--file", str(world_file)],
+            [sys.executable, "-m", "rcx_omega.cli.trace_cli", "--json", "--file", str(file_path)],
         ]
     else:
         cmd_candidates = []
 
     if not cmd_candidates:
         info["exit_code"] = 0
+        info["skipped"] = True
         write_text(out_txt, "NOTE: runner=none; mutation-only run\n")
         run_artifacts[label] = info
         return
 
-    last_rc, last_so, last_se = 1, "", ""
     for cmd in cmd_candidates:
         rc, so, se = run_cmd(cmd, timeout=180)
         combined = (so or "") + (("\n" + se) if se else "")
@@ -287,10 +267,8 @@ def run_one(label: str, world_file: Path) -> None:
             info["json_ok"] = True
             run_artifacts[label] = info
             return
-        last_rc, last_so, last_se = rc, so, se
 
-    # No JSON from any candidate
-    run_artifacts["notes"].append(f"{label}: runner produced no JSON (cmd tried: {info.get('cmd_used')})")
+    run_artifacts["notes"].append(f"{label}: runner produced no JSON (last cmd tried: {info.get('cmd_used')})")
     run_artifacts[label] = info
 
 force_rc1 = False
@@ -351,8 +329,8 @@ if do_run and do_score:
         "scores": {"baseline": bs, "mutated": ms},
         "snapshot_integrity": snap,
         "notes": [
-            "If json_ok is false, that runner run did not emit JSON; scoring is skipped for that side.",
-            "With omega-cli --trace, baseline/mutated should diverge once the CLI actually consumes the .mu file.",
+            "omega-cli/trace-cli are motif-only. If inputs aren’t μ(...) / mu(...), execution is skipped.",
+            "If json_ok is false, that run did not emit JSON; scoring is skipped for that side.",
         ],
     }
     write_json(run_dir / "comparison.json", comparison)
@@ -382,7 +360,7 @@ report: dict[str, Any] = {
     "notes": [
         "Sandbox is isolated: writes only under out-dir/run_id/",
         "Mutations are conservative and deterministic for a given seed + apply mode.",
-        "Runner ladder now uses rcx_omega CLIs with --file (omega_cli preferred).",
+        f"is_motif_input={is_motif} (omega/trace runners only apply if true)",
     ],
 }
 
