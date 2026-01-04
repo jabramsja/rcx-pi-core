@@ -51,3 +51,6 @@ omega.json
 docs/latex/build/
 *.bbl
 *.blg
+
+# RCX hydration manifest (generated)
+.rcx_manifest.json
