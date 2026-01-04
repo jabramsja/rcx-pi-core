@@ -5,9 +5,24 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      has_cargo: ${{ steps.detect.outputs.has_cargo }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Detect Rust workspace (Cargo.toml at repo root)
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f Cargo.toml ]; then
+            echo "has_cargo=true" >> "$GITHUB_OUTPUT"
+            echo "Rust workspace detected (Cargo.toml present)."
+          else
+            echo "has_cargo=false" >> "$GITHUB_OUTPUT"
+            echo "No Cargo.toml at repo root."
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,26 +55,14 @@ jobs:
           python -m pytest -q
 
   rust_examples:
+    needs: test
+    if: ${{ needs.test.outputs.has_cargo == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect Rust workspace (Cargo.toml at repo root)
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f Cargo.toml ]; then
-            echo "has_cargo=true" >> "$GITHUB_OUTPUT"
-            echo "Rust workspace detected."
-          else
-            echo "has_cargo=false" >> "$GITHUB_OUTPUT"
-            echo "SKIP: no Cargo.toml at repo root; rust_examples not applicable."
-          fi
-
       - name: Install ripgrep
-        if: steps.detect.outputs.has_cargo == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -67,11 +70,9 @@ jobs:
           sudo apt-get install -y ripgrep
 
       - name: Set up Rust
-        if: steps.detect.outputs.has_cargo == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust examples green gate
-        if: steps.detect.outputs.has_cargo == 'true'
         shell: bash
         run: |
           set -euo pipefail
