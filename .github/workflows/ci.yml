@@ -28,3 +28,28 @@ jobs:
 
       - name: Pytest (full suite)
         run: python3 -m pytest -q
+
+  rust_examples:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip if no Rust project
+        run: |
+          if [ ! -f Cargo.toml ]; then
+            echo "No Cargo.toml at repo root; skipping Rust examples gate."
+            exit 0
+          fi
+
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust examples green gate
+        run: |
+          scripts/green_examples.sh
