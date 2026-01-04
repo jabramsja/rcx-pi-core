@@ -8,11 +8,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install
+
+      - name: Install deps
         shell: bash
         run: |
           set -euo pipefail
@@ -20,11 +22,17 @@ jobs:
           python -m pip install pytest
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then python -m pip install -e .; fi
+
       - name: Goldens check (no updates)
         shell: bash
         run: |
           set -euo pipefail
-          if [ -x scripts/goldens_check.sh ]; then scripts/goldens_check.sh; else python -m pytest -q tests/test_semantic_goldens.py; fi
+          if [ -x scripts/goldens_check.sh ]; then
+            scripts/goldens_check.sh
+          else
+            python -m pytest -q tests/test_semantic_goldens.py
+          fi
+
       - name: Pytest
         shell: bash
         run: |
@@ -32,25 +40,38 @@ jobs:
           python -m pytest -q
 
   rust_examples:
-    if: ${{ hashFiles('Cargo.toml') != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Skip if no Cargo.toml
+
+      - name: Detect Rust workspace (Cargo.toml at repo root)
+        id: detect
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f Cargo.toml ]; then echo 'SKIP: no Cargo.toml'; exit 0; fi
+          if [ -f Cargo.toml ]; then
+            echo "has_cargo=true" >> "$GITHUB_OUTPUT"
+            echo "Rust workspace detected."
+          else
+            echo "has_cargo=false" >> "$GITHUB_OUTPUT"
+            echo "SKIP: no Cargo.toml at repo root; rust_examples not applicable."
+          fi
+
       - name: Install ripgrep
+        if: steps.detect.outputs.has_cargo == 'true'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y ripgrep
+
       - name: Set up Rust
+        if: steps.detect.outputs.has_cargo == 'true'
         uses: dtolnay/rust-toolchain@stable
+
       - name: Rust examples green gate
+        if: steps.detect.outputs.has_cargo == 'true'
         shell: bash
         run: |
           set -euo pipefail
