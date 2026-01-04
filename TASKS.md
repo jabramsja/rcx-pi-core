@@ -194,3 +194,21 @@ Worlds:
 
 **Current kernel:** `rcx-pi-green-002`  
 **Green status:** VERIFIED
+------------------------------------------------------------
+Governance & Execution Rails (Binding)
+
+All RCX-Ω work is governed by:
+
+  docs/RCX_OMEGA_GOVERNANCE.md
+
+This document defines:
+- The Frozen / Staging / Vector zones
+- The NOW / NEXT / VECTOR queues
+- Readiness-detected promotion rules (including self-hosting)
+- Execution discipline and conflict resolution
+
+If there is any ambiguity:
+- Governance overrides enthusiasm
+- Tests override documentation
+- Repo state overrides conversation state
+------------------------------------------------------------
