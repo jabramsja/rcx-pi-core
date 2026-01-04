@@ -3,6 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+if [ ! -f Cargo.toml ]; then
+  echo "SKIP: no Cargo.toml at repo root; Rust examples gate not applicable."
+  exit 0
+fi
+
+
 echo "== RCX-π Rust: green examples suite =="
 
 cargo run --quiet --example classify_cli -- rcx_core "[null,a]"
