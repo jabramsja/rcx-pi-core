@@ -39,3 +39,12 @@ def test_rule_precedence_top(tmp_path: Path):
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["rule_count_detected"] == 2
+
+def test_rule_precedence_detects_real_world():
+    # Ensure detector matches RCX-π real .mu syntax (route/rewrite lines like "[x] -> ra").
+    world = Path("rcx_pi_rust/mu_programs/rcx_core.mu")
+    assert world.is_file()
+    p = _run(["bash", "scripts/rule_precedence.sh", str(world), "--json"])
+    assert p.returncode == 0
+    obj = json.loads(p.stdout)
+    assert obj["rule_count_detected"] > 0

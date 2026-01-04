@@ -45,7 +45,18 @@ if not world.is_file():
 txt = world.read_text(encoding="utf-8", errors="replace").splitlines()
 
 # Conservative detection: only obvious rule-like lines.
-rule_re = re.compile(r"^\s*(rule|rewrite|when|defrule)\b", re.IGNORECASE)
+# Conservative detection: rule-like lines in RCX-π .mu worlds.
+# - Skip comments (# ...)
+# - Match "->" rewrite/route lines (core world syntax)
+# - Also match explicit keywords if present
+rule_re = re.compile(
+    r"^\s*(?!#)(?:"
+    r"(?:rule|rewrite|when|defrule)\b"
+    r"|.*->.*"
+    r"|.*:=.*"
+    r")",
+    re.IGNORECASE,
+)
 
 rules: list[dict] = []
 for i, line in enumerate(txt, start=1):
