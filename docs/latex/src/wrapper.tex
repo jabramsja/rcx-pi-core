@@ -1,0 +1,174 @@
+% Edited version: RCX Core Engine 
+% wrapper.tex -- Final wrapper for RCX Core Engine with tabularx support
+\documentclass[10pt]{article}
+
+%%% Encoding & Fonts %%%
+\usepackage[utf8]{inputenc}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+%%% Spacing & Wrapping %%%
+\usepackage{setspace}
+\onehalfspacing
+\sloppy
+\emergencystretch=3em
+
+%%% Page Layout %%%
+\usepackage{geometry}
+\geometry{margin=1in}
+
+%%% Table Wrapping %%%
+\usepackage{tabularx}
+
+%%% Math Breaks %%%
+\binoppenalty=1000
+\relpenalty=1000
+
+%%% Mathematics & Lists %%%
+\usepackage{amsmath,amssymb}
+\allowdisplaybreaks
+\usepackage{enumitem}
+\setlist{nosep,topsep=6pt}
+
+%%% Auto-include starred sections in ToC %%%
+\makeatletter
+  \let\origsection\section
+  \renewcommand{\section}{\@ifstar{\secstar}{\origsection}}
+  \newcommand{\secstar}[1]{%
+    \origsection*{#1}%
+    \addcontentsline{toc}{section}{#1}%
+  }
+  \let\origsubsection\subsection
+  \renewcommand{\subsection}{\@ifstar{\subsecstar}{\origsubsection}}
+  \newcommand{\subsecstar}[1]{%
+    \origsubsection*{#1}%
+    \addcontentsline{toc}{subsection}{#1}%
+  }
+\makeatother
+
+%%% Hyperlinks %%%
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks,
+  linkcolor=blue,
+  urlcolor=teal,
+  citecolor=magenta
+}
+
+%%% Tables & Multi-column support %%%
+\usepackage{booktabs}
+\usepackage{multicol}
+
+%%% Headers & Footers %%%
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textsc{RCX Core Engine}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+%%% RCX Engine Parameter Macros %%%
+\newcommand{\EngineParams}{\mathcal{E}=(P,m,Hash,Order,Sched)}
+\newcommand{\NextID}{\mathsf{NextID}(G)}
+\newcommand{\ValidID}[1]{\mathsf{ValidID}(G,#1)}
+\newcommand{\EvalMap}[2]{\mathsf{EvalMap}(#1,#2,G)}
+\newcommand{\IdPair}[1]{\langle \Xi(#1),\,|E(#1)|\rangle}
+\newcommand{\Ident}[1]{\IdPair{#1}} 
+\newcommand{\Order}{\mathrm{Order}}
+\newcommand{\Sched}{\mathrm{Sched}}
+\newcommand{\nablaR}{\ensuremath{\nabla R}}
+\newcommand{\ACflag}{\ensuremath{\mathsf{AC\!Flag}}}
+\newcommand{\RuleSymDiamond}{\ensuremath{\Diamond}}
+\newcommand{\RuleSymStar}{\ensuremath{\circledast}}
+\DeclareMathOperator{\GlobalStall}{GlobalStall}
+
+%%% Document Metadata %%%
+\title{RCX Core Engine  Stateless Specification}
+\author{Jeffrey Abrams}
+\date{10 May 2025} 
+
+\setcounter{secnumdepth}{2}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip
+
+\begin{center}\small
+\begin{tabular}{|c|l|}
+\hline
+Symbolic tag & Canonical rule number \\\hline
+0.5b          & Rule 0.5(b) Global-Stall Progress \\
+2.2$\Diamond$ & Rule 2.2  Closure-on-Second-Demand \\
+2.3$\diamond$ & Rule 2.3  ImageClosure \\
+2.3$\circledast$ & Rule 2.3* PatternClosure \\
+2.4$\Diamond$ & Rule 2.4  SubsetClosure (Power Set) \\
+2.6$\Diamond$ & Rule 2.6  ReflectionClosure \\\hline
+\end{tabular}
+\end{center}
+
+\section*{Purpose and Positioning}
+RCX is not a formal theory like ZFC or a type-theoretic calculus. It is a structural engine designed to reconstruct logic, set-like behavior, and projection operators from purely recursive containment growth. Rather than assuming symbols, logic, or axioms, RCX initiates with an empty acyclic graph and progresses only via deterministic stall-driven recursion. Traditional mathematical objects (such as $\emptyset$, $\omega$, $\mathcal P(x)$, or choice functions) are not postulated; they are introduced only if recursion stalls and their presence becomes structurally unavoidable. 
+
+The engine is capable of reproducing fragments of ZFC, CZF, or rejecting both, depending on how closure rules resolve. It is agnostic to classical logic and functions as a deterministic generator of symbolic structure under recursive pressure.
+
+\section*{Preface}
+The engine begins with an \emph{empty} graph. On the first stall the minimal \textsc{Fix} introduces the unique vertex $0$ (denoted $\varnothing$); no EmptySet axiom is assumed.
+
+\paragraph*{FirstFix vs.\ Projection.}
+The edge $\langle 0,1\rangle$ that \textsc{Fix} inserts on the very first
+stall freezes the edge-constructor operator immediately (Rule 3.1).
+The \emph{label} "$\varnothing$" is \emph{not} projected at that moment;
+it is introduced only after a \emph{second}, independent encounter of
+the same trace-token $\tau$, in accordance with
+Rule 2.2$\diamond$ (closure-on-second-demand).
+
+\section*{Reader's Guide}
+
+This primer sketches the three pillars of RCX in plain language,
+so a first-time reader can orient before diving into the rules.
+
+\subsection*{1.  From Stalls to Growth}
+\begin{enumerate}[nosep]
+\item The engine starts with the \emph{empty graph} $(\{0\},\varnothing)$.
+\item A \textbf{unary map} $O$ is applied; if it makes no structural
+      change the run \emph{stalls}.
+\item On every stall, Rule 0.6 invokes \textsc{Fix} to add \emph{exactly one}
+      containment edge that keeps the graph acyclic and changes the
+      identity hash~$\Xi$.
+\end{enumerate}
+Detailed mechanics: Rules 0.5--0.7, Appendix A.4.
+(See formula \eqref{eq:stall-pred}.)
+
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[node distance=1cm, auto]
+    \node[draw,rounded corners]    (start) {1. Start with $G_0$};
+    \node[draw,rounded corners, below=of start]  (apply) {2. Apply operator};
+    \node[draw,rounded corners, below=of apply]  (stall) {3. Stall check};
+    \node[draw,rounded corners, below=of stall]  (fix)   {4--5. Fix or approxFix};
+    \node[draw,rounded corners, below=of fix]    (recur) {6. Recur pipeline};
+    \node[draw,rounded corners, below=of recur]  (deg)   {7. LeafInvariance};
+    \node[draw,rounded corners, below=of deg]    (close) {8. Closure rules};
+    \node[draw,rounded corners, below=of close]  (freeze){9. Freeze or switch};
+    \node[draw,rounded corners, below=of freeze] (loop)  {10. Loop to step 2};
+    \foreach \a/\b in {start/apply, apply/stall, stall/fix, fix/recur,
+                      recur/deg, deg/close, close/freeze, freeze/loop}
+      \draw[->] (\a) -- (\b);
+  \end{tikzpicture}
+  \caption{RCX engine cycle: stall-fix-promote loop.}
+  \label{fig:rcx-cycle}
+\end{figure}
+
+% TODO (canonization step): add \input{00-overview.tex} ... \input{10-visual-debugging.tex}
+% after we place those files into docs/latex/src/
+% Example:
+% \input{00-overview.tex}
+% \input{01-getting-started.tex}
+% ...
+% \input{10-visual-debugging.tex}
+
+\end{document}

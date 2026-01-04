@@ -1,0 +1,204 @@
+\section{05 \textbar\ Pretty Printing and Structural Rendering}
+
+Raw RCX-$\pi$ motifs are fully structural:
+
+\[
+\mu(\mu(\mu(\mu())), \mu(\mu(\mu(\mu(\mu(\mu()))))))
+\]
+
+Readable, but only for ascetics.  
+Pretty printing is the layer that lets humans \emph{see the motif} as a number,
+a pair, a triple, or an $n$-ary tuple.
+
+It does not change meaning.  
+It \textbf{interprets shape as form}.
+
+% ---------------------------------------------------------
+\subsection{Goals of the Pretty Printer}
+
+\begin{itemize}
+\item Render Peano values as natural numbers
+\item Display nested motifs as tuples: $(a,b,c,\dots)$
+\item Work with or without meta-tags
+\item Never break purity of core representation
+\item Remain reversible: pretty-printing is view, not mutation
+\end{itemize}
+
+Pretty printing is a \emph{lens}.  
+The motif underneath is untouched.
+
+% ---------------------------------------------------------
+\subsection{Basic Value Rendering}
+
+Given:
+
+\[
+0 = \mu(),\quad
+1 = \mu(\mu()),\quad
+2 = \mu(\mu(\mu()))
+\]
+
+The printer collapses Peano depth to an integer:
+
+\[
+\texttt{pretty}(\mu(\mu(\mu()))) = 2
+\]
+
+Internally:
+
+\[
+\text{depth-count}(M) = n \Rightarrow \texttt{int}(n)
+\]
+
+This is optional.
+Raw structure is still preserved if needed.
+
+% ---------------------------------------------------------
+\subsection{Tuples from Nested Motifs}
+
+RCX-$\pi$ treats pairs and triples as plain motifs:
+
+\[
+(a,b)    \equiv \mu(a,b)
+\]
+\[
+(a,b,c)  \equiv \mu(a,b,c)
+\]
+
+Pretty print becomes:
+
+\[
+\texttt{pretty}(\mu(2,5)) = (2,5)
+\]
+\[
+\texttt{pretty}(\mu(2,5,7)) = (2,5,7)
+\]
+
+There is no tuple type.  
+Tuples are \emph{recognized via arity of structure}.
+
+% ---------------------------------------------------------
+\subsection{Higher Arity and Recursion}
+
+The renderer recurses:
+
+\[
+\mu(a,b,c,d) \Rightarrow (a,b,c,d)
+\]
+
+Each element is printed with value collapse if possible,
+otherwise rendered structurally.
+
+Mixed forms remain structural:
+
+\[
+\mu(\mu(\mu()), \mu(x,y,z)) \Rightarrow (1,(x,y,z))
+\]
+
+% ---------------------------------------------------------
+\subsection{Meta-aware Rendering}
+
+Tagged motifs are displayed with label header:
+
+\[
+\langle\text{value}\rangle \;\mu(2,5)
+  \Rightarrow \texttt{<value> (2,5)}
+\]
+
+\[
+\langle\text{program}\rangle \;M
+  \Rightarrow \texttt{<program> (...)}
+\]
+
+Classification adds meaning, printing reflects it.
+
+% ---------------------------------------------------------
+\subsection{Raw Structural Form (Fallback)}
+
+Any motif that cannot be recognized prints as canonical form:
+
+\[
+\mu(x,y,z)
+\]
+
+If no value collapse is available,
+\textbf{the printer shows raw geometry}.
+
+This ensures nothing is lost or coerced.
+
+% ---------------------------------------------------------
+\subsection{Pretty Printing as Cognitive Tool}
+
+Pretty printing is the difference between
+
+\[
+\mu(\mu(\mu(\dots))) 
+\]
+
+and
+
+\[
+(3,7,12)
+\]
+
+It enables:
+
+\begin{itemize}
+\item debugging large reductions
+\item teaching RCX-$\pi$ concepts visually
+\item introspection during self-host development
+\item future visualization engines (trees, animations, fold maps)
+\end{itemize}
+
+The printer is the first bridge from alien syntax to thought.
+
+% ---------------------------------------------------------
+\subsection{Example Session}
+
+Raw:
+
+\[
+M = \mu(2,5)
+\]
+
+Pretty:
+
+\[
+\texttt{pretty}(M) \Rightarrow (2,5)
+\]
+
+Classified:
+
+\[
+\texttt{pretty}(\text{classify}(M)) \Rightarrow \texttt{<value> (2,5)}
+\]
+
+Pretty printer + classifier produce \emph{structural cognition}.
+
+% ---------------------------------------------------------
+\subsection{Future Extensions}
+
+\begin{itemize}
+\item Color-coded depth maps
+\item Pretty-print as tree / graph
+\item Unicode glyph bodies ($\mu$-gardens)
+\item Interactive fold visualization
+\item Reduction animation traces
+\item Surface forms for self-host evaluator outputs
+\end{itemize}
+
+This module is a seed for UI and introspection tooling.
+The machine sees motifs — the printer lets humans see them too.
+
+% ---------------------------------------------------------
+\subsection{Summary}
+
+\begin{itemize}
+\item Pretty printing converts raw motifs into readable form
+\item Works with values, tuples, tagged motifs
+\item Does not alter core structure
+\item Essential to scaling cognition and debugging
+\end{itemize}
+
+RCX-$\pi$ now has a voice.
+Soon it will narrate its own execution.

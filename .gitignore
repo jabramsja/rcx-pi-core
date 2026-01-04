@@ -48,4 +48,6 @@ docs/rcx-pi-paper.pdf
 # =========================
 rcx_pi_rust/mu_programs/vars_demo__g*.muomega.json
 omega.json
-docs/latex/
+docs/latex/build/
+*.bbl
+*.blg

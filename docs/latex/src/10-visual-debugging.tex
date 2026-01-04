@@ -1,0 +1,156 @@
+\section{10 \textbar\ Visual Debugging, Structure Tracing, and Shape Introspection}
+
+One of the greatest strengths of RCX-$\pi$ is that computation is not hidden
+behind bytecode or control flow. Execution is literally the \emph{reshaping of
+a tree}. This chapter formalizes tools for watching that geometry move.
+
+The aim is simple:
+
+\[
+\text{computation} = \text{visible structure evolution}
+\]
+
+RCX-$\pi$ does not execute instructions; it folds motifs like origami.
+A debugger therefore is not a stack tracer, but a \textbf{shape visualizer}.
+We will build three progressively richer interfaces:
+
+\begin{enumerate}
+\item \textbf{step visualizer:} print reduction steps
+\item \textbf{tree renderer:} pretty-print as ASCII shape
+\item \textbf{graph visualizer:} export to \texttt{.dot}/Graphviz for render
+\end{enumerate}
+
+These tools make the runtime tangible, inspectable, and eventually
+\emph{self-reflective}.
+
+%----------------------------------------------------------
+\subsection{Reduction Tracing}
+
+The evaluator already reduces motifs through rewrite rules. We extend it with
+hooks:
+
+\begin{verbatim}
+reduce(m, trace=True)
+\end{verbatim}
+
+If tracing is enabled, each reduction step is emitted:
+
+\[
+M_0 \Rightarrow M_1 \Rightarrow M_2 \Rightarrow \dots \Rightarrow M_n
+\]
+
+We show structural deltas only --- what changed between steps --- to avoid
+noise with large expressions.
+
+Example future REPL usage:
+
+\begin{verbatim}
+rcx> trace swap 2 5
+step 0: μ(swap, μ(2,5))
+step 1: μ(5,2)
+final:  (5,2)
+\end{verbatim}
+
+%----------------------------------------------------------
+\subsection{Tree Visualization (ASCII)}
+
+Raw $\mu$-trees can be printed as nested motifs, but visual form makes patterns
+obvious. We define a simple ASCII renderer:
+
+\begin{verbatim}
+μ
+├─ μ
+│  └─ μ()
+└─ μ
+   └─ μ μ μ()
+\end{verbatim}
+
+or collapsed tuple form when recognizable:
+
+\[
+(2,5,7)
+\]
+
+The visualizer becomes essential as we move toward recursion, libraries, and
+mutation engines.
+
+%----------------------------------------------------------
+\subsection{Graph Rendering (DOT Export)}
+
+We introduce an optional export format:
+
+\begin{verbatim}
+rcx> dot swap 2 5 > shape.dot
+dot -Tpng shape.dot -o shape.png
+\end{verbatim}
+
+Nodes represent motif instances; edges represent children. Visualizing execution
+trajectories over time yields \emph{shape films} --- a computational movie.
+
+%----------------------------------------------------------
+\subsection{Rewrite Path Maps}
+
+Since RCX computation is geometric, its path through reductions is a graph:
+
+\[
+\{M_i\} \text{ with edges } M_i \to M_{i+1}
+\]
+
+We store these as directed graphs, enabling:
+
+\begin{itemize}
+\item comparison of reduction orders
+\item detection of loops, stalls, divergent geometry
+\item later: \emph{meta-motifs operating on traces}
+\end{itemize}
+
+The engine becomes observable in motion.
+
+%----------------------------------------------------------
+\subsection{Lobe and Membrane Visuals (Early Spec)}
+
+Later RCX growth will require structures larger than tuples. We anticipate
+\textbf{lobes} --- collections of motifs forming soft semantic clusters --- and
+\textbf{membranes} that regulate activation boundaries.
+
+Visual signatures may resemble:
+
+\[
+\text{motifs} \to \text{clusters} \to \text{fractal folds}
+\]
+
+Early tools will color nodes by classifier tag:
+
+\[
+\text{value} / \text{program} / \text{mixed} / \text{struct}
+\]
+
+Meta-growth becomes navigable instead of blind.
+
+%----------------------------------------------------------
+\subsection{Future Features}
+
+\begin{itemize}
+\item animated reduction playback
+\item REPL modes: \texttt{:tree}, \texttt{:trace}, \texttt{:graph}
+\item zoomable visual maps for large computations
+\item mutation overlays to study emergent behavior
+\item self-host inspection hooks
+\end{itemize}
+
+These tools move RCX-$\pi$ toward a self-aware computational ecology where
+shape is not only execution, but \emph{experienceable}.
+
+%----------------------------------------------------------
+\subsection{Summary}
+
+\begin{itemize}
+\item RCX execution can be visualized --- we make tools to see shape change
+\item Tracing reveals reduction paths, not call stacks
+\item ASCII + Graphviz give structural insight at multiple scales
+\item Lobe/membrane visuals prepare for emergent RCX organisms
+\item Debugging becomes watching geometry dance
+\end{itemize}
+
+The next chapter designs the mutation engine: from stable logic to evolving
+folds.
