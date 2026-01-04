@@ -164,7 +164,7 @@ Worlds:
 **Status:** ⏸ DEFERRED
 
 - ⬜ Rule mutation sandbox (isolated)
-- ⬜ World scoring metrics
+- ✅ World scoring metrics
 - ⬜ Orbit visualization
 
 ---
