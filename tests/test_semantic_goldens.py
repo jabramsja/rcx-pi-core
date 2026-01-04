@@ -106,6 +106,24 @@ def _semantic_trace_or_error(expr: str) -> dict:
         }
 
 
+def _semantic_trace_or_error(expr: str) -> dict:
+    """
+    Return a normalized semantic trace dict for valid expressions.
+    For invalid expressions, return a normalized error contract dict.
+    """
+    try:
+        return _semantic_trace(expr)
+    except Exception as e:
+        # Freeze failure contract without depending on exception repr noise
+        return {
+            "error": {
+                "type": type(e).__name__,
+                "message": str(e),
+            },
+            "expr": expr,
+        }
+
+
 def test_golden_semantic_trace_mu_mu():
     data = _semantic_trace_or_error("μ(μ())")
     _assert_matches_golden("semantic_trace__mu_mu", data)
