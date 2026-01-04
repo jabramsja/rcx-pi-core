@@ -164,3 +164,12 @@ We introduce schema definitions (see `schemas/rcx-omega/`) with explicit version
 - If analyzing omega-summary, output includes `classification:`
 - If analyzing trace-shaped, output includes `converged:`
 
+## Env-gated optional schema fields
+
+### Trace-shaped outputs (omega_cli --trace)
+- When `omega_cli --trace` emits **trace-shaped JSON**, it is compatible with `analyze_cli`.
+- Schema metadata fields remain **optional and opt-in**.
+- If and only if `RCX_OMEGA_ADD_SCHEMA_FIELDS=1` is set, producers MAY inject:
+  - `schema_version` (required when injected)
+  - `kind` (only if absent)
+- Default behavior (env var unset) MUST remain unchanged.
