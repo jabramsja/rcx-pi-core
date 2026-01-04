@@ -98,6 +98,10 @@ Instead:
 
 ### B) Omega-summary JSON (frozen shape)
 
+
+
+Note: fields beyond the frozen minimum (e.g., `seed`) MAY appear, but they are OPTIONAL and not part of the frozen minimum.
+The frozen minimum remains: `result`.
 An **omega-summary** JSON object has (at minimum) the following top-level members:
 
 - `result`: present (type is implementation-defined but must be JSON-serializable)
@@ -166,10 +170,10 @@ We introduce schema definitions (see `schemas/rcx-omega/`) with explicit version
 
 ## Env-gated optional schema fields
 
-### Trace-shaped outputs (omega_cli --trace)
+### Trace-shaped outputs (trace_cli and omega_cli --trace)
 - When `omega_cli --trace` emits **trace-shaped JSON**, it is compatible with `analyze_cli`.
 - Schema metadata fields remain **optional and opt-in**.
 - If and only if `RCX_OMEGA_ADD_SCHEMA_FIELDS=1` is set, producers MAY inject:
-  - `schema_version` (required when injected)
+  - `schema_version` (if injected, SHOULD be present and semver-formatted)
   - `kind` (only if absent)
 - Default behavior (env var unset) MUST remain unchanged.
