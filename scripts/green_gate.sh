@@ -21,7 +21,7 @@ run_python() {
 }
 
 run_rust() {
-  echo "[RUST 1/1] Rust examples suite (no cargo test)"
+  echo "[RUST 1/2] Rust examples suite (no cargo test)"
   # Prefer repo-root scripts/green_examples.sh if present; fallback to rcx_pi_rust/scripts/green_examples.sh
   if [ -x scripts/green_examples.sh ]; then
     bash scripts/green_examples.sh
@@ -31,6 +31,10 @@ run_rust() {
     echo "Not found in provided corpus/output: scripts/green_examples.sh or rcx_pi_rust/scripts/green_examples.sh"
     exit 2
   fi
+  echo
+
+  echo "[RUST 2/2] Snapshot integrity (sha256 locked)"
+  python3 -m pytest -q tests/test_snapshot_integrity.py
   echo
 }
 
