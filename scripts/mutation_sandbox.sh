@@ -13,7 +13,7 @@ Usage:
     [--run]
     [--score]
     [--max-steps N]
-    [--runner auto|rust-examples|trace-cli|none]
+    [--runner auto|omega-cli|trace-cli|none]
 
 Purpose:
   Create an ISOLATED mutation sandbox run:
@@ -23,25 +23,25 @@ Purpose:
     - Produces report.json
 
 Optional:
-  --run     Run baseline + mutated through a best-effort runner ladder and capture outputs.
-  --score   If traces (JSON) are available, compute world scores & snapshot integrity checks.
+  --run     Attempt to run baseline + mutated via available runner(s), capturing stdout/stderr and JSON if produced.
+  --score   If trace-shaped JSON is produced, compute world scores & snapshot integrity checks.
   --max-steps N  Gate (exit 1) if inferred steps > N (uses scripts/world_score.sh --max-steps).
   --runner ...   Force runner selection:
-                 auto (default): try rust-examples, then trace-cli, else none
-                 rust-examples: use `python3 -m rcx_pi_rust.cli.examples_cli` (if available)
-                 trace-cli:     use `python3 -m rcx_omega.cli.trace_cli` (if available)
-                 none:          mutation-only (no execution)
+                 auto (default): prefer omega-cli, then trace-cli, else none
+                 omega-cli:      python3 -m rcx_omega.cli.omega_cli  (uses --file; prefers --trace)
+                 trace-cli:      python3 -m rcx_omega.cli.trace_cli  (uses --file)
+                 none:           mutation-only (no execution)
 
 Runner behavior (important):
-  If a runner's --help includes a --world flag, this tool will execute baseline.mu and mutated.mu
-  as separate runs using --world <file>. Otherwise, it will run the runner in its default mode.
+  This tool executes baseline.mu and mutated.mu only when a runner supports --file (rcx_omega CLIs do).
+  If a run does not emit JSON, scoring is skipped for that side (but the run still succeeds).
 
 Conservative mutations:
   - flip:    change only terminal route tokens in lines like "-> ra|lobe|sink"
   - shuffle: reorder rule-like lines (deterministically) while keeping all lines
   - both:    shuffle then flip
 
-Rule-like line detector (conservative):
+Rule-like detector (conservative):
   - non-comment lines containing "->" OR ":=" OR starting with rule|rewrite|when|defrule
 
 Outputs:
@@ -114,8 +114,8 @@ runner_mode = sys.argv[10].strip().lower()
 
 if apply not in {"flip", "shuffle", "both"}:
     raise SystemExit("ERROR: --apply must be one of: flip|shuffle|both")
-if runner_mode not in {"auto", "rust-examples", "trace-cli", "none"}:
-    raise SystemExit("ERROR: --runner must be one of: auto|rust-examples|trace-cli|none")
+if runner_mode not in {"auto", "omega-cli", "trace-cli", "none"}:
+    raise SystemExit("ERROR: --runner must be one of: auto|omega-cli|trace-cli|none")
 
 text = world_path.read_text(encoding="utf-8", errors="replace")
 lines = text.splitlines()
@@ -166,10 +166,7 @@ def do_shuffle():
         mut_lines[i] = bucket[pos]
 
 def do_flip(k_times: int):
-    flips: List[int] = []
-    for i in idxs:
-        if flip_re.search(mut_lines[i]):
-            flips.append(i)
+    flips: List[int] = [i for i in idxs if flip_re.search(mut_lines[i])]
     if not flips or k_times <= 0:
         return
     targets = ["ra", "lobe", "sink"]
@@ -217,22 +214,19 @@ def try_json_load(s: str) -> Optional[Any]:
     except Exception:
         return None
 
-def run_cmd(cmd: list[str], timeout: int = 120) -> Tuple[int, str, str]:
+def run_cmd(cmd: list[str], timeout: int = 180) -> Tuple[int, str, str]:
     p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, check=False)
     return p.returncode, p.stdout, p.stderr
 
-def which_module(mod: str) -> bool:
+def module_available(mod: str) -> bool:
     p = subprocess.run([sys.executable, "-m", mod, "--help"], text=True, capture_output=True)
     return p.returncode in (0, 2)
 
-def module_help(mod: str) -> str:
-    p = subprocess.run([sys.executable, "-m", mod, "--help"], text=True, capture_output=True)
-    return (p.stdout or "") + (("\n" + p.stderr) if p.stderr else "")
-
 def runner_auto() -> str:
-    if which_module("rcx_pi_rust.cli.examples_cli"):
-        return "rust-examples"
-    if which_module("rcx_omega.cli.trace_cli"):
+    # Prefer omega-cli (can emit trace), then trace-cli, else none
+    if module_available("rcx_omega.cli.omega_cli"):
+        return "omega-cli"
+    if module_available("rcx_omega.cli.trace_cli"):
         return "trace-cli"
     return "none"
 
@@ -251,50 +245,52 @@ def write_json(path: Path, obj: Any) -> None:
 def run_one(label: str, world_file: Path) -> None:
     out_txt = run_dir / f"{label}.out.txt"
     out_json = run_dir / f"{label}.json"
-    info: dict[str, Any] = {"exit_code": None, "stdout_path": str(out_txt), "json_path": None, "json_ok": False, "world_used": str(world_file)}
+    info: dict[str, Any] = {
+        "exit_code": None,
+        "stdout_path": str(out_txt),
+        "json_path": None,
+        "json_ok": False,
+        "world_used": str(world_file),
+        "cmd_used": None,
+    }
 
-    if chosen_runner == "rust-examples":
-        mod = "rcx_pi_rust.cli.examples_cli"
-        help_txt = module_help(mod)
-        cmd = [sys.executable, "-m", mod]
-        if "--world" in help_txt:
-            cmd += ["--world", str(world_file)]
-        else:
-            run_artifacts["notes"].append("rust-examples runner has no --world flag; ran in default mode (baseline/mutated will not diverge).")
+    if chosen_runner == "omega-cli":
+        # Try the most meaningful form first: --trace + --json + --file
+        cmd_candidates = [
+            [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--json", "--trace", "--file", str(world_file)],
+            [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--json", "--file", str(world_file)],
+        ]
+    elif chosen_runner == "trace-cli":
+        cmd_candidates = [
+            [sys.executable, "-m", "rcx_omega.cli.trace_cli", "--json", "--file", str(world_file)],
+        ]
+    else:
+        cmd_candidates = []
+
+    if not cmd_candidates:
+        info["exit_code"] = 0
+        write_text(out_txt, "NOTE: runner=none; mutation-only run\n")
+        run_artifacts[label] = info
+        return
+
+    last_rc, last_so, last_se = 1, "", ""
+    for cmd in cmd_candidates:
         rc, so, se = run_cmd(cmd, timeout=180)
         combined = (so or "") + (("\n" + se) if se else "")
         write_text(out_txt, combined)
         info["exit_code"] = rc
+        info["cmd_used"] = " ".join(cmd)
         obj = try_json_load(so)
         if obj is not None:
             write_json(out_json, obj)
             info["json_path"] = str(out_json)
             info["json_ok"] = True
+            run_artifacts[label] = info
+            return
+        last_rc, last_so, last_se = rc, so, se
 
-    elif chosen_runner == "trace-cli":
-        mod = "rcx_omega.cli.trace_cli"
-        help_txt = module_help(mod)
-        # trace-cli is expression-centric; if it *also* supports --world we’ll use it.
-        cmd = [sys.executable, "-m", mod, "--json"]
-        if "--world" in help_txt:
-            cmd += ["--world", str(world_file)]
-        cmd += ["μ(μ())"]
-        rc, so, se = run_cmd(cmd, timeout=90)
-        combined = (so or "") + (("\n" + se) if se else "")
-        write_text(out_txt, combined)
-        info["exit_code"] = rc
-        obj = try_json_load(so)
-        if obj is not None:
-            write_json(out_json, obj)
-            info["json_path"] = str(out_json)
-            info["json_ok"] = True
-        else:
-            run_artifacts["notes"].append("trace-cli did not emit valid JSON on stdout")
-
-    else:
-        info["exit_code"] = 0
-        write_text(out_txt, "NOTE: runner=none; mutation-only run\n")
-
+    # No JSON from any candidate
+    run_artifacts["notes"].append(f"{label}: runner produced no JSON (cmd tried: {info.get('cmd_used')})")
     run_artifacts[label] = info
 
 force_rc1 = False
@@ -355,8 +351,8 @@ if do_run and do_score:
         "scores": {"baseline": bs, "mutated": ms},
         "snapshot_integrity": snap,
         "notes": [
-            "If runner lacks --world, baseline/mutated outputs may not diverge yet; see run.notes.",
-            "Once a runner supports --world and emits trace-shaped JSON, scoring/integrity become meaningful.",
+            "If json_ok is false, that runner run did not emit JSON; scoring is skipped for that side.",
+            "With omega-cli --trace, baseline/mutated should diverge once the CLI actually consumes the .mu file.",
         ],
     }
     write_json(run_dir / "comparison.json", comparison)
@@ -386,7 +382,7 @@ report: dict[str, Any] = {
     "notes": [
         "Sandbox is isolated: writes only under out-dir/run_id/",
         "Mutations are conservative and deterministic for a given seed + apply mode.",
-        "This tool only executes worlds if runner supports --world; otherwise it records runner outputs in default mode.",
+        "Runner ladder now uses rcx_omega CLIs with --file (omega_cli preferred).",
     ],
 }
 
