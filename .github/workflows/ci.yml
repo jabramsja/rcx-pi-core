@@ -33,8 +33,9 @@ jobs:
             python -m pytest -q tests/test_semantic_goldens.py
           fi
 
-      - name: Green gate (python-only)
+      - name: Green gate (authoritative, python-only)
         shell: bash
         run: |
           set -euo pipefail
+          chmod +x scripts/green_gate.sh || true
           scripts/green_gate.sh python-only
