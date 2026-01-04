@@ -153,8 +153,7 @@ Worlds:
 ## G. CONTRACT EXTENSIONS
 
 **Status:** 🟡 OPTIONAL
-
-- ⬜ Rewrite termination contracts
+- ✅ Rewrite termination contracts
 - ⬜ Snapshot integrity checks
 - ⬜ CI hook for `green_gate.sh`
 
