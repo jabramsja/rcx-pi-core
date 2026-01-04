@@ -54,3 +54,6 @@ docs/latex/build/
 
 # RCX hydration manifest (generated)
 .rcx_manifest.json
+
+# RCX tooling sandboxes
+sandbox_runs/
