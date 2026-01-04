@@ -43,3 +43,14 @@ Examples:
   - `scripts/json_diff.sh a.json b.json --ignore kind,schema_version`
 - Compare only the frozen minimum field:
   - `scripts/json_diff.sh a.json b.json --only result`
+
+## Rule precedence visualization
+
+Use `scripts/rule_precedence.sh` to inspect a `.mu` world file and list rule-like lines in **textual order** (earlier lines first).
+This is a tooling inspector only; it does not change runtime semantics.
+
+Examples:
+- Show the first 25 rules detected:
+  - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --top 25`
+- Emit a stable JSON summary:
+  - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --json`
