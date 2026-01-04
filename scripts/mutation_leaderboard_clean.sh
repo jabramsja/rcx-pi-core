@@ -16,6 +16,9 @@ Output:
   Clears scrollback+screen and prints a compact leaderboard summary only.
 
 Notes:
+  - When --runner auto:
+      * motif-shaped input (μ(...) / mu(...)) -> omega-cli if available else trace-cli else none
+      * world-shaped input -> runner=none
   - This uses scripts/mutation_sandbox.sh and is safe to ⌘A copy.
 USAGE
 }
@@ -43,6 +46,7 @@ done
 cd "$(git rev-parse --show-toplevel)"
 
 test -f scripts/mutation_sandbox.sh || { echo "Not found: scripts/mutation_sandbox.sh" >&2; exit 2; }
+test -f scripts/clean_print.sh || { echo "Not found: scripts/clean_print.sh" >&2; exit 2; }
 mkdir -p "$OUT_DIR"
 
 # Pick a deterministic world if not specified (exclude .git + sandbox_runs)
@@ -59,12 +63,40 @@ fi
 test -n "${WORLD:-}" || { echo "ERROR: no *.mu found" >&2; exit 2; }
 test -f "$WORLD" || { echo "ERROR: world not found: $WORLD" >&2; exit 2; }
 
+# Determine motif-shape vs world-shape from first non-empty, non-comment line
+first_token="$(
+  awk '
+    /^[[:space:]]*$/ { next }
+    /^[[:space:]]*#/ { next }
+    { gsub(/^[[:space:]]+/, "", $0); print $0; exit }
+  ' "$WORLD" 2>/dev/null || true
+)"
+
+is_motif=0
+if [[ "${first_token:-}" == μ* || "${first_token:-}" == mu* ]]; then
+  is_motif=1
+fi
+
+# If runner is auto, select runner based on shape + availability
+if [ "$RUNNER" = "auto" ]; then
+  if [ "$is_motif" -eq 0 ]; then
+    RUNNER="none"
+  else
+    if python3 -m rcx_omega.cli.omega_cli --help >/dev/null 2>&1; then
+      RUNNER="omega-cli"
+    elif python3 -m rcx_omega.cli.trace_cli --help >/dev/null 2>&1; then
+      RUNNER="trace-cli"
+    else
+      RUNNER="none"
+    fi
+  fi
+fi
+
 WORK_LOG="${TMPDIR:-/tmp}/rcx_mutation_leaderboard_work.log"
 SUMMARY="${TMPDIR:-/tmp}/rcx_mutation_leaderboard_summary.txt"
 
-# Delegate “quiet run + clean print” to clean_print helper.
 bash scripts/clean_print.sh --work "$WORK_LOG" --summary "$SUMMARY" -- \
-  python3 - "$WORLD" "$N" "$MUTS" "$APPLY" "$RUNNER" "$OUT_DIR" "$SUMMARY" <<'PY'
+  python3 - "$WORLD" "$N" "$MUTS" "$APPLY" "$RUNNER" "$OUT_DIR" "$SUMMARY" "$is_motif" <<'PY'
 from __future__ import annotations
 import json, subprocess, sys
 from pathlib import Path
@@ -76,6 +108,7 @@ apply = sys.argv[4]
 runner = sys.argv[5]
 out_dir = sys.argv[6]
 summary_path = Path(sys.argv[7])
+is_motif = bool(int(sys.argv[8]))
 
 def run_seed(seed: int):
     p = subprocess.run(
@@ -89,7 +122,6 @@ def run_seed(seed: int):
          "--json"],
         text=True, capture_output=True
     )
-    # 0=ok, 1=violation path (still valid report), others are failures
     if p.returncode not in (0, 1):
         return {"seed": seed, "ok": False, "rc": p.returncode, "err": (p.stderr or p.stdout)[:4000]}
 
@@ -120,7 +152,6 @@ def run_seed(seed: int):
 
 rows = [run_seed(i) for i in range(1, n + 1)]
 
-# "best" only defined if mutated score is numeric (not None)
 def sort_key(r):
     sm = r.get("score_m")
     sb = r.get("score_b")
@@ -133,6 +164,7 @@ rows_sorted = sorted(rows, key=sort_key)
 lines = []
 lines.append("== RCX: mutation sandbox leaderboard (clean) ==")
 lines.append(f"-- world: {world} --")
+lines.append(f"-- detected: {'motif' if is_motif else 'world'} --")
 lines.append(f"-- runner: {runner}   apply: {apply}   mutations: {muts}   seeds: {n} --")
 lines.append("")
 lines.append("seed | runner     | score_b | score_m | snap_ok | rc | run_dir")
@@ -157,7 +189,7 @@ if best:
     lines.append(f"best_seed: {best['seed']}  score_m: {best['score_m']}  score_b: {best['score_b']}  runner: {best.get('runner')}")
     lines.append(f"best_run_dir: {best.get('run_dir')}")
 else:
-    lines.append("best_seed: (none)  NOTE: no numeric score_m produced (runner may be skipping or emitting non-scoreable JSON).")
+    lines.append("best_seed: (none)  NOTE: no numeric score_m produced (runner may be none/skip or emitting non-scoreable JSON).")
 
 summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
