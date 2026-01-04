@@ -32,6 +32,7 @@ jobs:
           python -m pytest -q
 
   rust_examples:
+    if: ${{ hashFiles('Cargo.toml') != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
