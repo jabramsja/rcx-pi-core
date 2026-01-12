@@ -10,6 +10,16 @@ Only shape. Only structure. The program **is** the data.
 
 ---
 
+## World tracing (stable entrypoint)
+
+Use the stable wrapper script (no PYTHONPATH required):
+
+  ./scripts/world_trace.sh --help
+  ./scripts/world_trace.sh --max-steps 50 --json --pretty < world.json
+
+This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
+
+
 ## 🌱 Core Components
 
 | Module | Purpose |
