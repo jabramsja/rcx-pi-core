@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rcx-world-trace.v1",
+  "title": "RCX World Trace",
+  "type": "object",
+  "required": [
+    "schema",
+    "schema_doc",
+    "world",
+    "seed",
+    "max_steps",
+    "orbit",
+    "trace"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "rcx-world-trace.v1"
+    },
+    "schema_doc": {
+      "type": "string",
+      "const": "docs/world_trace_json_schema.md"
+    },
+    "world": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": "string",
+      "minLength": 1
+    },
+    "max_steps": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "orbit": {
+      "type": "object",
+      "required": ["kind", "period", "states"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": ["string", "null"]
+        },
+        "period": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "state"],
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "raw_output": {
+      "type": "string"
+    }
+  }
+}
