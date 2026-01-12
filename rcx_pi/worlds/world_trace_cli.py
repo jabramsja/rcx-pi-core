@@ -42,6 +42,13 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
             "states": states,
         },
     }
+    # Step A: optional semantic summary (purely derived, no inference)
+    if kind is not None:
+        out["classification_summary"] = {
+            "kind": kind,
+            "period": period,
+        }
+
     return out
 
 
