@@ -6,9 +6,8 @@ from pathlib import Path
 
 
 def _run(script: Path, repo_root: Path, world: str, seed: str) -> subprocess.CompletedProcess[str]:
-    # argparse wants: world seed [options]
     return subprocess.run(
-        ["bash", str(script), world, seed, "--max-steps", "3", "--json", "--pretty"],
+        ["bash", str(script), world, seed, "--json", "--pretty", "--max-steps", "3"],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
@@ -47,7 +46,7 @@ def test_world_trace_json_contract_minimal_world():
 
     candidates: list[str] = world_names + file_candidates
 
-    last = None
+    last: subprocess.CompletedProcess[str] | None = None
     for world in candidates:
         for seed in seeds:
             r = _run(script, repo_root, world, seed)
@@ -69,7 +68,6 @@ def test_world_trace_json_contract_minimal_world():
     # ---- Minimal stable JSON contract (matches current CLI output) ----
     assert isinstance(data, dict), f"expected object, got {type(data)}"
 
-    # Required keys we actually see in output today
     required = {"schema", "world", "seed", "max_steps", "orbit", "trace"}
     missing = required - set(data.keys())
     assert not missing, f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
@@ -79,7 +77,13 @@ def test_world_trace_json_contract_minimal_world():
     extra = set(data.keys()) - allowed
     assert not extra, f"unexpected keys: {sorted(extra)}; allowed={sorted(allowed)}"
 
+    # schema tag (canonical today, plus forward-compatible family)
     assert isinstance(data["schema"], str) and data["schema"]
+    schema = data["schema"]
+    assert (
+        schema == "rcx-world-trace.v1" or schema.startswith("rcx-world-trace.")
+    ), f"unexpected schema tag: {schema}"
+
     assert isinstance(data["world"], str) and data["world"]
     assert isinstance(data["seed"], str) and data["seed"]
     assert isinstance(data["max_steps"], int) and data["max_steps"] >= 0
@@ -89,9 +93,5 @@ def test_world_trace_json_contract_minimal_world():
     assert "states" in data["orbit"], f"orbit missing 'states': keys={sorted(data['orbit'].keys())}"
     assert isinstance(data["orbit"]["states"], list), f"expected orbit.states list, got {type(data['orbit']['states'])}"
 
-    # trace is a list of step objects/entries
+    # trace is a list of step entries (shape may evolve)
     assert isinstance(data["trace"], list)
-
-    # If classification shows up later, enforce its type.
-    if "classification" in data:
-        assert isinstance(data["classification"], str)
