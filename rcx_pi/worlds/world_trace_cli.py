@@ -17,13 +17,6 @@ from typing import Any, Dict, List
 
 from rcx_pi.worlds.worlds_bridge import orbit_with_world_parsed
 
-# Step-011: self-describing contract without running a trace
-if "--schema" in sys.argv:
-    print("rcx-world-trace.v1 docs/world_trace_json_schema.md")
-    raise SystemExit(0)
-
-
-
 def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]) -> Dict[str, Any]:
     states: List[str] = list(parsed.get("states") or [])
     kind = parsed.get("kind")
@@ -40,7 +33,7 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
         trace.append(entry)
         prev = s
 
-    now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     inputs_hash = hashlib.sha256(
         f"{world}|{seed}|{max_steps}".encode("utf-8")
     ).hexdigest()
@@ -98,14 +91,26 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Emit trace-shaped JSON for a Mu world by running the Rust orbit_cli example."
     )
-    ap.add_argument("world", help="World name (e.g. rcx_core, pingpong, paradox_1over0)")
-    ap.add_argument("seed", help="Seed term for orbit (e.g. ping, [omega,[a,b]])")
+    ap.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print world_trace JSON schema tag + schema doc path and exit.",
+    )
+    ap.add_argument("world", nargs="?", help="World name (e.g. rcx_core, pingpong, paradox_1over0)")
+    ap.add_argument("seed", nargs="?", help="Seed term for orbit (e.g. ping, [omega,[a,b]])")
     ap.add_argument("--max-steps", type=int, default=12, help="Max orbit steps (default 12)")
     ap.add_argument("--json", action="store_true", help="Emit JSON to stdout (default)")
     ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     ap.add_argument("--raw", action="store_true", help="Also include raw orbit_cli output in JSON")
 
     args = ap.parse_args(argv)
+
+    if args.schema:
+        print("rcx-world-trace.v1 docs/world_trace_json_schema.md")
+        return 0
+
+    if not args.world or not args.seed:
+        ap.error("world and seed are required unless --schema is used")
 
     code, raw, parsed = orbit_with_world_parsed(args.world, args.seed, max_steps=args.max_steps)
     if code != 0:
