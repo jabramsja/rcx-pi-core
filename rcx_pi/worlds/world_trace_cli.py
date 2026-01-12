@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+# Allow running this file directly (subprocess tests, ad-hoc use) without requiring PYTHONPATH.
+# When invoked as a module (python -m rcx_pi.worlds.world_trace_cli), this block is harmless.
+if __package__ is None or __package__ == "":
+    import sys
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root))
+
 import argparse
 import json
 import sys
