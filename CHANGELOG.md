@@ -10,6 +10,7 @@ Format:
 ## 2026-01-12
 
 ### Tooling
+- Kernel step-003/004: stabilize world_trace_cli invocation (script + module); tests now 216 passed, 1 skipped.
 - Verified repo green gate (212 passed, 1 skipped).
 - Freeze tag created on dev: `rcx-freeze-verified-2026-01-12` → `18c2dad`.
 - Quarantine cleanup / ignore rules for accidental CLI-arg files.
@@ -49,4 +50,3 @@ Format:
 
 ### Tests
 - Verified green gate: `python3 -m pytest -q`
-
