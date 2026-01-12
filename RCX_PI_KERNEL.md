@@ -1,5 +1,5 @@
 RCX-π Kernel Overview (tag: rcx-pi-green-002)
-Status: 123 passed, 1 skipped
+Status: 212 passed, 1 skipped (verified 2026-01-12)
 Layer: Core RCX-π minimal, stable baseline
 Purpose: A self-consistent execution nucleus for RCX, from which higher layers can grow.
 

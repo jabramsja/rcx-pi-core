@@ -99,7 +99,7 @@ Worlds:
 **Status:** ✅ DONE
 
 ### D1. Python
-- ✅ 137 tests passing
+- ✅ 212 tests passing
 - ✅ Kernel invariants
 - ✅ Contract tests
 
@@ -194,6 +194,7 @@ Worlds:
 
 **Current kernel:** `rcx-pi-green-002`  
 **Green status:** VERIFIED
+**Freeze tag (dev):** `rcx-freeze-verified-2026-01-12` → `18c2dad` (2026-01-12)
 ------------------------------------------------------------
 Governance & Execution Rails (Binding)
 

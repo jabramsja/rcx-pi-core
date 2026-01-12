@@ -7,6 +7,15 @@ Format:
 - Category: Docs / Schemas / Runtime / Tests / Tooling
 - Notes: Must distinguish "frozen contract" vs "future target"
 
+## 2026-01-12
+
+### Tooling
+- Verified repo green gate (212 passed, 1 skipped).
+- Freeze tag created on dev: `rcx-freeze-verified-2026-01-12` → `18c2dad`.
+- Quarantine cleanup / ignore rules for accidental CLI-arg files.
+- Added world trace CLI (Python).
+- Added core MU freezer utility (`rcx_pi_rust/scripts/freeze_core_mu.py`).
+
 ## 2026-01-03
 
 ### Docs
