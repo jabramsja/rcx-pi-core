@@ -49,6 +49,11 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
             "kind": kind,
             "period": period,
             "states": states,
+            "invariants": {
+                "unique_states": len(set(states)),
+                "is_fixed_point": bool(states) and all(s == states[0] for s in states),
+                "is_cycle": period is not None and period > 0,
+            },
         },
     }
     # Step A: optional semantic summary (purely derived, no inference)
