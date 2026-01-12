@@ -81,6 +81,16 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
         },
     }
 
+    # Step E: bounded derived stats (no inference; computed only)
+    stats = out.get("stats") if isinstance(out.get("stats"), dict) else {}
+    stats.setdefault("trace_len", len(trace))
+    stats.setdefault("orbit_len", len(states))
+    stats.setdefault("unique_states", len(set(states)))
+    stats.setdefault("has_cycle", bool(period) and int(period) > 0)
+    stats.setdefault("period", period)
+    stats.setdefault("kind", kind)
+    out["stats"] = stats
+
     return out
 
 
