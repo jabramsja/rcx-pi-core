@@ -99,7 +99,7 @@ Worlds:
 **Status:** ✅ DONE
 
 ### D1. Python
-- ✅ 216 tests passing
+- ✅ 217 tests passing
 - ✅ Kernel invariants
 - ✅ Contract tests
 
