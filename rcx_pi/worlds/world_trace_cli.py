@@ -40,11 +40,12 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
         trace.append(entry)
         prev = s
 
-    out: Dict[str, Any] = {
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     inputs_hash = hashlib.sha256(
         f"{world}|{seed}|{max_steps}".encode("utf-8")
     ).hexdigest()
+
+    out: Dict[str, Any] = {
 
         "schema": "rcx-world-trace.v1",
         "schema_doc": "docs/world_trace_json_schema.md",
@@ -65,7 +66,7 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
     }
     # Step A: optional semantic summary (purely derived, no inference)
     if kind is not None:
-        out["classification_summary"] = {
+        out["classification"] = {
             "kind": kind,
             "period": period,
         }
