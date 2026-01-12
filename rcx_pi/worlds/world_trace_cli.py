@@ -15,6 +15,12 @@ from typing import Any, Dict, List
 
 from rcx_pi.worlds.worlds_bridge import orbit_with_world_parsed
 
+# Step-011: self-describing contract without running a trace
+if "--schema" in sys.argv:
+    print("rcx-world-trace.v1 docs/world_trace_json_schema.md")
+    raise SystemExit(0)
+
+
 
 def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]) -> Dict[str, Any]:
     states: List[str] = list(parsed.get("states") or [])
