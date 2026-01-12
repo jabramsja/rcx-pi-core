@@ -57,3 +57,25 @@ docs/latex/build/
 
 # RCX tooling sandboxes
 sandbox_runs/
+
+
+
+.quarantine_untracked_*
+
+# --- RCX generated artifacts (auto-added) ---
+rcx_pi_rust/mu_programs/__sandbox_run_*.mu
+rcx_pi_rust/mu_programs/__smoke_*.mu
+*.bak.*
+**/*.bak.*
+.bak_rcx_fixes_*/
+.quarantine_untracked_*
+--world
+--orbit-seed
+cd
+ls
+echo
+rg
+sed
+set
+.DS_Store
+# --- /RCX generated artifacts ---

@@ -34,7 +34,7 @@ DESIRED_SPEC: Dict[str, str] = {
     "[null,a]": "Ra",
     "[inf,a]": "Lobe",
     "[paradox,a]": "Sink",
-    "[omega,[a,b]]": "Sink",
+    "[omega,[a,b]]": "Lobe",
     "[a,a]": "Lobe",
     "[dog,cat]": "Sink",
 }

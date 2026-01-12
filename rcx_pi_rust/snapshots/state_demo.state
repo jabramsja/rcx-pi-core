@@ -15,5 +15,5 @@ RULE: [omega,_] -> lobe
 STATE:
 RA: [null,a]
 LOBE: [inf,a]
+LOBE: [omega,[a,b]]
 SINK: [paradox,a]
-SINK: [omega,[a,b]]

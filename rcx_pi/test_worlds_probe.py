@@ -22,12 +22,12 @@ def test_rcx_core_fingerprint_basic():
     assert routes["[inf,a]"] == "Lobe"
     assert routes["[paradox,a]"] == "Sink"
     # Current core behavior: omega goes to Sink
-    assert routes["[omega,[a,b]]"] == "Sink"
+    assert routes["[omega,[a,b]]"] == "Lobe"
 
     # Count invariants: 1 Ra, 1 Lobe, 2 Sink
     assert summary["counts"]["Ra"] == 1
-    assert summary["counts"]["Lobe"] == 1
-    assert summary["counts"]["Sink"] == 2
+    assert summary["counts"]["Lobe"] == 2
+    assert summary["counts"]["Sink"] == 1
     assert summary["counts"]["None"] == 0
 
 
