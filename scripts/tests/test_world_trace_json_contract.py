@@ -73,7 +73,17 @@ def test_world_trace_json_contract_minimal_world():
     assert not missing, f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
 
     # Allow future additions without breaking, but keep it bounded.
-    allowed = required | {"ok", "warnings", "stats", "meta", "classification", "classification_summary"}
+    # Allow forward-compatible additions, but keep them bounded.
+    # These are the only optional top-level blocks permitted by the contract.
+    allowed = required | {
+        "ok",
+        "warnings",
+        "stats",
+        "meta",
+        "classification",
+        "classification_summary",
+        "raw_output",
+    }
     extra = set(data.keys()) - allowed
     assert not extra, f"unexpected keys: {sorted(extra)}; allowed={sorted(allowed)}"
 
