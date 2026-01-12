@@ -27,7 +27,16 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
     kind = parsed.get("kind")
     period = parsed.get("period")
 
-    trace = [{"step": i, "state": s} for i, s in enumerate(states)]
+    trace = []
+    prev = None
+    for i, s in enumerate(states):
+        entry = {"step": i, "state": s}
+        if prev is not None:
+            entry["delta"] = {
+                "changed": s != prev
+            }
+        trace.append(entry)
+        prev = s
 
     out: Dict[str, Any] = {
         "schema": "rcx-world-trace.v1",
