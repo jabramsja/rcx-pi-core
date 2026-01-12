@@ -25,6 +25,7 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
 
     out: Dict[str, Any] = {
         "schema": "rcx-world-trace.v1",
+        "schema_doc": "docs/world_trace_json_schema.md",
         "world": world,
         "seed": seed,
         "max_steps": max_steps,

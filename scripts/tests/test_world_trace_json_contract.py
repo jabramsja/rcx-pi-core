@@ -68,7 +68,7 @@ def test_world_trace_json_contract_minimal_world():
     # ---- Minimal stable JSON contract (matches current CLI output) ----
     assert isinstance(data, dict), f"expected object, got {type(data)}"
 
-    required = {"schema", "world", "seed", "max_steps", "orbit", "trace"}
+    required = {"schema", "world", "seed", "max_steps", "orbit", "trace", "schema_doc"}
     missing = required - set(data.keys())
     assert not missing, f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
 
@@ -83,6 +83,9 @@ def test_world_trace_json_contract_minimal_world():
     assert (
         schema == "rcx-world-trace.v1" or schema.startswith("rcx-world-trace.")
     ), f"unexpected schema tag: {schema}"
+
+    assert isinstance(data["schema_doc"], str) and data["schema_doc"]
+    assert data["schema_doc"].endswith("docs/world_trace_json_schema.md")
 
     assert isinstance(data["world"], str) and data["world"]
     assert isinstance(data["seed"], str) and data["seed"]
