@@ -4,13 +4,13 @@
   "title": "RCX World Trace",
   "type": "object",
   "required": [
-    "schema",
-    "schema_doc",
-    "world",
-    "seed",
     "max_steps",
     "orbit",
-    "trace"
+    "schema",
+    "schema_doc",
+    "seed",
+    "trace",
+    "world"
   ],
   "additionalProperties": false,
   "properties": {
@@ -61,6 +61,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "invariants": {
+          "type": [
+            "array",
+            "object",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "additionalProperties": true
         }
       }
     },
@@ -164,6 +175,10 @@
           }
         }
       }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": true
     }
   }
 }
