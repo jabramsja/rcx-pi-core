@@ -10,6 +10,8 @@ if __package__ is None or __package__ == "":
 
 import argparse
 import json
+import hashlib
+import datetime
 import sys
 from typing import Any, Dict, List
 
@@ -39,6 +41,11 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
         prev = s
 
     out: Dict[str, Any] = {
+    now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    inputs_hash = hashlib.sha256(
+        f"{world}|{seed}|{max_steps}".encode("utf-8")
+    ).hexdigest()
+
         "schema": "rcx-world-trace.v1",
         "schema_doc": "docs/world_trace_json_schema.md",
         "world": world,
@@ -62,6 +69,16 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
             "kind": kind,
             "period": period,
         }
+
+    # Step D: run-level provenance (pure metadata)
+    out["meta"] = {
+        "tool": "world_trace_cli",
+        "schema": out.get("schema"),
+        "generated_at": now,
+        "determinism": {
+            "inputs_hash": inputs_hash,
+        },
+    }
 
     return out
 
