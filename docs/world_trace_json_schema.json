@@ -36,14 +36,24 @@
     },
     "orbit": {
       "type": "object",
-      "required": ["kind", "period", "states"],
+      "required": [
+        "kind",
+        "period",
+        "states"
+      ],
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "period": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "states": {
@@ -58,7 +68,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["step", "state"],
+        "required": [
+          "step",
+          "state"
+        ],
         "additionalProperties": false,
         "properties": {
           "step": {
@@ -73,6 +86,84 @@
     },
     "raw_output": {
       "type": "string"
+    },
+    "classification_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "trace_len": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "orbit_len": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_states": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "has_cycle": {
+          "type": "boolean"
+        },
+        "period": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "determinism": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "inputs_hash": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   }
 }

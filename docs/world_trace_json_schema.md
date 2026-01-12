@@ -21,3 +21,18 @@ Top-level object keys (required):
 
 Notes:
 - Additional top-level keys may be added in the future, but existing keys must remain.
+
+## Machine-readable schema
+
+The canonical JSON Schema for this contract lives at:
+
+docs/world_trace_json_schema.json
+
+Consumers SHOULD validate against the JSON schema for strict compatibility.
+
+
+## Optional keys
+
+- `classification_summary`: Derived summary of `orbit.kind` and `orbit.period`.
+- `stats`: Derived counts (trace/orbit lengths, uniqueness, cycle flag).
+- `meta`: Run-level provenance (tool name, timestamp, determinism hash).
