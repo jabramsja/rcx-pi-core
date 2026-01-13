@@ -2,30 +2,25 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import List
+from typing import Sequence
 
-from rcx_pi.program_descriptor import SCHEMA_DOC, SCHEMA_TAG, resolve_mu_program
+from rcx_pi.program_descriptor import SCHEMA_DOC, SCHEMA_TAG, describe_program
 
 
-def main(argv: List[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
-        description="Emit a ProgramDescriptor (pure metadata, no execution)."
-    )
+def main(argv: Sequence[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="rcx-program-descriptor")
     ap.add_argument(
         "--schema",
         action="store_true",
-        help="Print ProgramDescriptor schema tag + schema doc path and exit.",
+        help="Print schema tag + schema doc path and exit.",
     )
+    # Keep --json for backwards/ergonomic symmetry, but default is JSON anyway.
     ap.add_argument(
-        "--pretty",
+        "--json",
         action="store_true",
-        help="Pretty-print JSON",
+        help="Emit JSON (default).",
     )
-    ap.add_argument(
-        "program",
-        nargs="?",
-        help="Mu program name (e.g. rcx_core) or a path to a .mu file",
-    )
+    ap.add_argument("program", nargs="?", help="Program name or path to a .mu file")
 
     args = ap.parse_args(argv)
 
@@ -36,14 +31,37 @@ def main(argv: List[str] | None = None) -> int:
     if not args.program:
         ap.error("program is required unless --schema is used")
 
-    desc = resolve_mu_program(args.program)
-    payload = desc.to_dict()
-
-    if args.pretty:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        print(json.dumps(payload, ensure_ascii=False))
-    return 0
+    warnings: list[str] = []
+    try:
+        desc = describe_program(args.program)
+        # describe_program returns a flat dict; contract wants it nested under 'descriptor'
+        payload = {
+            "schema": SCHEMA_TAG,
+            "schema_doc": SCHEMA_DOC,
+            "program": args.program,
+            "descriptor": {
+                "name": desc.get("name"),
+                "resolved_path": desc.get("resolved_path"),
+                "format": desc.get("format"),
+                "bytes": desc.get("bytes"),
+            },
+            "ok": True,
+            "warnings": warnings,
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    except Exception as e:
+        warnings.append(str(e))
+        payload = {
+            "schema": SCHEMA_TAG,
+            "schema_doc": SCHEMA_DOC,
+            "program": args.program,
+            "descriptor": None,
+            "ok": False,
+            "warnings": warnings,
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 2
 
 
 if __name__ == "__main__":

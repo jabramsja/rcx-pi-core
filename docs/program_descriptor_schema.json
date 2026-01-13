@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RCX Program Descriptor (CLI wrapper)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_doc",
+    "program",
+    "descriptor"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "rcx-program-descriptor.v1"
+    },
+    "schema_doc": {
+      "type": "string"
+    },
+    "program": {
+      "type": "string"
+    },
+    "descriptor": {
+      "type": [
+        "object",
+        "string"
+      ],
+      "additionalProperties": true
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  }
+}

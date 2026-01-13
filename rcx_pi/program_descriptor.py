@@ -1,98 +1,80 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, Optional
-import hashlib
-
 
 SCHEMA_TAG = "rcx-program-descriptor.v1"
 SCHEMA_DOC = "docs/program_descriptor_schema.md"
 
 
-@dataclass(frozen=True)
-class ProgramDescriptor:
+def _find_repo_root(start: Path) -> Optional[Path]:
+    cur = start.resolve()
+    for p in [cur] + list(cur.parents):
+        if (p / ".git").exists():
+            return p
+    return None
+
+
+def _module_repo_root() -> Path:
+    # rcx_pi/program_descriptor.py -> rcx_pi -> repo_root guess
+    here = Path(__file__).resolve()
+    guess = here.parents[1]
+    rr = _find_repo_root(guess)
+    return rr if rr is not None else guess
+
+
+def _resolve_mu_program(program: str, cwd_base: Path) -> Path:
     """
-    Minimal, machine-readable descriptor for an RCX program artifact.
-
-    IMPORTANT: Pure metadata. No execution, no interpretation, no Rust calls.
+    Resolve a Mu program using stable anchors:
+      1) cwd/<program> (relative) or <program> (absolute)
+      2) repo_root/<program> (if user passed rcx_pi_rust/mu_programs/rcx_core.mu)
+      3) repo_root/mu_programs/<name>.mu (legacy slot)
+      4) repo_root/rcx_pi_rust/mu_programs/<name>.mu (current slot)
     """
-    schema: str
-    schema_doc: str
-    kind: str
-    name: str
-    language: str
-    source_path: str
-    source_sha256: str
-    entrypoint: str
-    determinism: Dict[str, Any]
-    version: str = "v1"
+    repo_root = _module_repo_root()
+    p = Path(program)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+    candidates: list[Path] = []
 
+    # 1) direct path relative to cwd
+    candidates.append((p if p.is_absolute() else (cwd_base / p)).resolve())
 
-def _sha256_file(p: Path) -> str:
-    h = hashlib.sha256()
-    with p.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    # 2) same relative path, but anchored at repo root
+    if not p.is_absolute():
+        candidates.append((repo_root / p).resolve())
 
+    # name for "<name>.mu" fallback
+    name = p.stem if p.suffix else program
 
-def resolve_mu_program(name_or_path: str, repo_root: Optional[Path] = None) -> ProgramDescriptor:
-    """
-    Resolve a Mu program by:
-      - direct file path, OR
-      - known world name (tries common locations)
+    # 3) legacy location
+    candidates.append((repo_root / "mu_programs" / f"{name}.mu").resolve())
 
-    Returns a ProgramDescriptor without running anything.
-    """
-    if repo_root is None:
-        repo_root = Path(__file__).resolve().parents[1]  # rcx_pi/ -> repo root
+    # 4) current location (your layout)
+    candidates.append((repo_root / "rcx_pi_rust" / "mu_programs" / f"{name}.mu").resolve())
 
-    cand: Optional[Path] = None
-    raw = name_or_path.strip()
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return c
 
-    # Direct path?
-    p = (repo_root / raw) if not Path(raw).is_absolute() else Path(raw)
-    if p.exists() and p.is_file():
-        cand = p
-
-    # Try known world-name locations
-    if cand is None:
-        world = raw
-        candidates = [
-            repo_root / "mu_programs" / f"{world}.mu",
-            repo_root / "rcx_pi" / "worlds" / f"{world}.mu",
-            repo_root / "rcx_pi" / "worlds" / "mu_programs" / f"{world}.mu",
-        ]
-        for c in candidates:
-            if c.exists() and c.is_file():
-                cand = c
-                break
-
-    if cand is None:
-        raise FileNotFoundError(
-            f"Could not resolve Mu program '{raw}'. Tried direct path and common locations like "
-            f"mu_programs/{raw}.mu"
-        )
-
-    rel = cand.relative_to(repo_root)
-    file_hash = _sha256_file(cand)
-
-    return ProgramDescriptor(
-        schema=SCHEMA_TAG,
-        schema_doc=SCHEMA_DOC,
-        kind="mu_program",
-        name=raw if not cand.name.endswith(".mu") else cand.stem,
-        language="mu",
-        source_path=str(rel),
-        source_sha256=file_hash,
-        entrypoint="world_trace_cli",
-        determinism={
-            "claim": "deterministic_given_inputs_and_fixed_runtime",
-            "inputs": ["world", "seed", "max_steps"],
-            "content_hash": {"algo": "sha256", "field": "source_sha256"},
-        },
+    tried = "\n  - ".join(str(x) for x in candidates)
+    raise FileNotFoundError(
+        f"Could not resolve Mu program '{program}'. Tried:\n  - {tried}"
     )
+
+
+def describe_program(program: str) -> Dict[str, Any]:
+    """
+    Produce a stable JSON-serializable descriptor for a Mu program.
+    Metadata only (no interpretation).
+    """
+    mu_path = _resolve_mu_program(program, cwd_base=Path.cwd())
+
+    return {
+        "schema": SCHEMA_TAG,
+        "schema_doc": SCHEMA_DOC,
+        "program": program,
+        "resolved_path": str(mu_path),
+        "name": mu_path.stem,
+        "format": "mu",
+        "bytes": mu_path.stat().st_size,
+    }
