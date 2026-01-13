@@ -20,6 +20,20 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v5
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install ripgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
         with:
           python-version: "3.13"
 
@@ -43,8 +57,12 @@ jobs:
             pip install -r requirements.txt
           else
             python -m pip install --upgrade pip
-            pip install -e . || true
+            pip install -e .
           fi
+
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run green gate
         shell: bash
