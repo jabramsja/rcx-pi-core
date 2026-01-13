@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [ "dev" ]
 
+
+concurrency:
+  group: rcx-green-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   green-gate:
     runs-on: ubuntu-latest
