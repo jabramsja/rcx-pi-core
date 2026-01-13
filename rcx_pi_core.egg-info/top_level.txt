@@ -1,3 +1,1 @@
-rcx_omega
 rcx_pi
-rcx_pi_rust

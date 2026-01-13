@@ -1,15 +1,9 @@
 Metadata-Version: 2.4
 Name: rcx-pi-core
 Version: 0.0.0
-Summary: RCX-π core (Python)
-Author: Jeff Abrams
-License: Proprietary
+Summary: RCX-π core (Python utilities + CLIs)
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
-Provides-Extra: test
-Requires-Dist: pytest>=8; extra == "test"
-Requires-Dist: jsonschema>=4; extra == "test"
-Requires-Dist: ruff>=0.5; extra == "test"
 
 # RCX-π Core — Minimal Structural Runtime v1
 

@@ -50,10 +50,13 @@ rcx_pi/meta.py
 rcx_pi/pretty.py
 rcx_pi/program_descriptor.py
 rcx_pi/program_descriptor_cli.py
+rcx_pi/program_descriptor_lib.py
 rcx_pi/program_registry.py
+rcx_pi/program_run.py
 rcx_pi/program_run_cli.py
 rcx_pi/programs.py
 rcx_pi/projection.py
+rcx_pi/rcx_cli.py
 rcx_pi/self_host.py
 rcx_pi/test_worlds_probe.py
 rcx_pi/worlds_bridge.py
@@ -94,7 +97,6 @@ rcx_pi_core.egg-info/PKG-INFO
 rcx_pi_core.egg-info/SOURCES.txt
 rcx_pi_core.egg-info/dependency_links.txt
 rcx_pi_core.egg-info/entry_points.txt
-rcx_pi_core.egg-info/requires.txt
 rcx_pi_core.egg-info/top_level.txt
 rcx_pi_rust/scripts/freeze_core_mu.py
 tests/test_clean_print_helper.py

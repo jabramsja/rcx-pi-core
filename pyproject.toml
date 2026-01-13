@@ -5,30 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rcx-pi-core"
 version = "0.0.0"
-description = "RCX-π core (Python)"
+description = "RCX-π core (Python utilities + CLIs)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
-authors = [{ name = "Jeff Abrams" }]
-
-# Keep runtime deps minimal. (jsonschema is only needed for tests.)
 dependencies = []
 
-[project.optional-dependencies]
-test = [
-  "pytest>=8",
-  "jsonschema>=4",
-  "ruff>=0.5",
-]
-
 [project.scripts]
-rcx-program-run = "rcx_pi.program_run_cli:main"
+rcx = "rcx_pi.rcx_cli:main"
 rcx-program-descriptor = "rcx_pi.program_descriptor_cli:main"
+rcx-program-run = "rcx_pi.program_run_cli:main"
 rcx-world-trace = "rcx_pi.worlds.world_trace_cli:main"
 
 [tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["rcx_pi*", "rcx_omega*"]
+packages = ["rcx_pi", "rcx_pi.core", "rcx_pi.engine", "rcx_pi.reduction", "rcx_pi.utils", "rcx_pi.worlds"]
