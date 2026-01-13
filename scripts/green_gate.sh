@@ -16,6 +16,13 @@ run_python() {
   python3 -m py_compile rcx_start.py
   echo
   echo "[PY 2/2] Python test suite"
+
+echo
+echo "[PY] Ensure test deps (pytest, jsonschema)"
+python3 -c "import pytest, jsonschema" >/dev/null 2>&1 || {
+  python3 -m pip install -U pip >/dev/null
+  python3 -m pip install -U pytest jsonschema >/dev/null
+}
   python3 -m pytest
 echo
 echo "[PY] CLI smoke (end-to-end entrypoints)"
