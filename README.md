@@ -70,3 +70,5 @@ See `docs/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emittin
 
 <!-- protection smoke: 2026-01-13T23:02:14Z -->
 
+
+# protection proof: 2026-01-13T23:29:28Z
