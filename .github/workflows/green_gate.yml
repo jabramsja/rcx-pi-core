@@ -23,6 +23,17 @@ jobs:
         with:
           python-version: "3.13"
 
+
+      - name: Install system deps (ripgrep) + Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y ripgrep
+          curl -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustc --version
+          cargo --version
       - name: Install python deps (if requirements file exists)
         shell: bash
         run: |
