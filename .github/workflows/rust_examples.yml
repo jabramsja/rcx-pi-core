@@ -5,6 +5,14 @@ on:
     paths:
       - "rcx_pi_rust/**"
       - "scripts/green_examples.sh"
+
+      - name: Install package + test deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e ".[test]"
+
       - "scripts/green_gate.sh"
       - ".github/workflows/rust_examples.yml"
   pull_request:
@@ -18,8 +26,14 @@ jobs:
   rust_examples:
     runs-on: ubuntu-latest
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
       - name: Detect rcx_pi_rust/Cargo.toml
         id: detect

@@ -6,6 +6,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -19,6 +20,14 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
+
+      - name: Install package + test deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e ".[test]"
+
           python -m pip install pytest
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then python -m pip install -e .; fi
