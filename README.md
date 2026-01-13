@@ -64,3 +64,6 @@ Examples:
   - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --top 25`
 - Emit a stable JSON summary:
   - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --json`
+
+## CLI Quickstart
+See `docs/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
