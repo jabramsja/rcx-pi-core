@@ -69,3 +69,4 @@ Examples:
 See `docs/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
 
 <!-- protection smoke: 2026-01-13T23:02:14Z -->
+
