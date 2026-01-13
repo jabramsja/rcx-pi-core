@@ -11,9 +11,15 @@ concurrency:
   group: rcx-green-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   green-gate:
+    name: green-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,9 +28,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: "pip"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install system deps
         shell: bash
@@ -38,6 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -U pip
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
           python -m pip install -e ".[test]"
 
       - name: Run green gate

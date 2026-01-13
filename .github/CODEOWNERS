@@ -1,0 +1,11 @@
+# Default: everything
+* @jabramsja
+
+# CI / workflows: explicitly owned
+.github/workflows/ @jabramsja
+
+# RCX core areas (adjust as you like)
+scripts/ @jabramsja
+rcx_omega/ @jabramsja
+rcx_pi/ @jabramsja
+mu_programs/ @jabramsja
