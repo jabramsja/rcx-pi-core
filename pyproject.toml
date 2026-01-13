@@ -11,6 +11,8 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
+rcx-cli = "rcx_pi.rcx_cli:main"
+
 rcx = "rcx_pi.rcx_cli:main"
 rcx-program-descriptor = "rcx_pi.program_descriptor_cli:main"
 rcx-program-run = "rcx_pi.program_run_cli:main"

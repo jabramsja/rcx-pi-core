@@ -42,3 +42,13 @@ rcx-world-trace --schema
 - Program descriptor: docs/program_descriptor_schema.json (tag: rcx-program-descriptor.v1)
 - Program run:        docs/program_run_schema.json (tag: rcx-program-run.v1)
 - World trace:        docs/world_trace_json_schema.md (tag: rcx-world-trace.v1)
+
+
+## Umbrella command (non-conflicting)
+
+If you already use `rcx` as a shell alias, use `rcx-cli` as the umbrella dispatcher:
+
+- `rcx-cli --help`
+- `rcx-cli program describe --schema`
+- `rcx-cli program run succ-list "[1,2,3]" --pretty`
+- `rcx-cli trace pingpong ping --max-steps 6 --pretty`
