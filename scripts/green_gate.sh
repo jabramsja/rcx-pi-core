@@ -39,6 +39,15 @@ run_rust() {
   echo
 
   echo "[RUST 2/2] Snapshot integrity (sha256 locked)"
+
+echo
+echo "[PY] Ensure pytest for Rust snapshot integrity"
+python3 -c "import pytest" >/dev/null 2>&1 || {
+  # Make pip available (best-effort), then install pytest into user site so it works even on system python.
+  python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
+  python3 -m pip install --user -U pip >/dev/null 2>&1 || true
+  python3 -m pip install --user -U pytest >/dev/null
+}
   python3 -m pytest -q tests/test_snapshot_integrity.py
   echo
 }
