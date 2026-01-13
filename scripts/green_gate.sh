@@ -17,6 +17,10 @@ run_python() {
   echo
   echo "[PY 2/2] Python test suite"
   python3 -m pytest
+echo
+echo "[PY] CLI smoke (end-to-end entrypoints)"
+python3 scripts/cli_smoke.py
+
   echo
 }
 
