@@ -39,6 +39,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -U pytest
+          python -m pip install -U jsonschema
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
