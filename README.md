@@ -1,5 +1,15 @@
 # RCX-π Core — Minimal Structural Runtime v1
 
+## CI (Green Gate)
+
+Before you open a PR, run the local gate:
+
+    make green
+
+Policy + definition of GREEN: see `CI_POLICY.md`.
+
+
+
 This is the **minimal working implementation of RCX-π**, built entirely from a
 single recursive motif structure `μ(...)`.  
 Everything—numbers, pairs, triples, programs, projections, activation closures—
