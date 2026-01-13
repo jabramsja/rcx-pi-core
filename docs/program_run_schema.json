@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RCX Program Run (CLI wrapper)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_doc", "program", "input", "output", "ok"],
+  "properties": {
+    "schema": { "type": "string", "const": "rcx-program-run.v1" },
+    "schema_doc": { "type": "string" },
+    "program": { "type": "string" },
+    "input": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "output": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "ok": { "type": "boolean" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
