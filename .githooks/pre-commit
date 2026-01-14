@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Friendly reminder only (does NOT block commit).
+# Triggers if you changed code/tests but did not touch docs/task trackers.
+
+changed="$(git diff --cached --name-only)"
+
+touches_docs=false
+touches_code=false
+
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  case "$f" in
+    TASKS.md|README.md|CI_POLICY.md|docs/*) touches_docs=true ;;
+    rcx_pi_rust/*|tests/*|rcx_pi_*|core/*|engine/*|scripts/*|src/*) touches_code=true ;;
+  esac
+done <<< "$changed"
+
+if [[ "$touches_code" == true && "$touches_docs" == false ]]; then
+  echo
+  echo "⚠️  Doc Sync reminder:"
+  echo "   You staged code/tests changes but didn't stage TASKS.md / README.md / docs/*."
+  echo "   If this PR completes a task or changes behavior, consider updating the trackers."
+  echo
+fi
+
+exit 0
