@@ -102,3 +102,16 @@ Enable them locally (per-machine):
     git config core.hooksPath .githooks
 
 These hooks are reminders only (they do not block commits).
+
+## JSON fixtures (golden outputs)
+
+We keep small “golden” JSON outputs under `docs/fixtures/` for quick diffs and schema stability:
+
+- `docs/fixtures/orbit_pingpong_v1.json`
+- `docs/fixtures/engine_rcx_core_v1.json`
+
+Regenerate locally:
+
+    (cd rcx_pi_rust && cargo build --examples)
+    (cd rcx_pi_rust && cargo run --example orbit_json_cli -- pingpong ping 12 > ../docs/fixtures/orbit_pingpong_v1.json)
+    (cd rcx_pi_rust && cargo run --example engine_json_cli -- rcx_core "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]" > ../docs/fixtures/engine_rcx_core_v1.json)
