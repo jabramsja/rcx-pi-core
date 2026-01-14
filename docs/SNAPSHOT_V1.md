@@ -1,35 +1,14 @@
 # Snapshot v1 (RCX-π) — Canonical State Serialization
 
-This document defines the **stable, deterministic** snapshot format for RCX-π runtime state.
+Canonical snapshot artifacts live in:
 
-## Goals
-- Deterministic round-trip: save → reset → load must preserve behavior.
-- Versioned: future formats must not break old snapshots silently.
-- Portable: format must be stable across machines/OS/arch.
+- `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/rcx_pi_rust/snapshots/`
 
-## Snapshot v1 fields (minimum)
-- `version`: integer (must be `1`)
-- `world`: string (world/program name, if applicable)
-- `rules`: ordered list (preserve precedence)
-- `r_a`: list of Mu terms
-- `lobes`: list of Mu terms
-- `sink`: list of Mu terms
-- `meta`: object (optional; reserved for future)
+They use a stable, deterministic **`.state`** text format, with a sha256 lockfile:
 
-## Determinism requirements
-- Ordering is part of the meaning (especially rules/precedence).
-- No host-only pointers or non-serializable closures.
-- Loading a snapshot must not re-order or re-normalize terms.
+- `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/rcx_pi_rust/snapshots/SHA256SUMS`
 
-## Round-trip contract
-A snapshot is **valid** only if this holds:
-
-1. Start from a known world + seed set.
-2. Run a small, fixed probe suite (classify/orbit/omega samples).
-3. Save snapshot.
-4. Reset runtime.
-5. Load snapshot.
-6. Re-run the same probe suite.
-7. Outputs must match byte-for-byte (or structurally, if JSON normalized).
-
-See: `tests/test_snapshot_roundtrip_v1.py`.
+## Verification contracts
+- `SHA256SUMS` pins expected sha256 for canonical snapshots.
+- CI fails if a pinned snapshot changes unexpectedly.
+- The Rust demo should show: wrote snapshot → wipe → restore → same behavior.
