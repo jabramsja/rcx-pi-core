@@ -1,5 +1,6 @@
 use crate::formatter::mu_to_string;
 use crate::orbit::orbit;
+use crate::schemas::ORBIT_SCHEMA_V1;
 use crate::types::{Mu, RcxProgram};
 
 /// Classify an orbit sequence into a simple ω-limit description.
@@ -80,7 +81,7 @@ pub fn orbit_to_json(program: &RcxProgram, seed: Mu, max_steps: usize) -> String
 
     let mut out = String::new();
     out.push_str("{");
-    out.push_str(r#""schema":"rcx.orbit.v1","#);
+    out.push_str(&format!(r#"\"schema\":{},\"#, json_escape(ORBIT_SCHEMA_V1)));
     out.push_str(&format!(r#""seed":{},"#, json_escape(&mu_to_string(&seed))));
     out.push_str(&format!(r#""max_steps":{},"#, max_steps));
     out.push_str(r#""states":["#);
