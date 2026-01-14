@@ -213,3 +213,27 @@ If there is any ambiguity:
 - Tests override documentation
 - Repo state overrides conversation state
 ------------------------------------------------------------
+
+
+## NEXT BLOCKER (do this before anything else)
+**Serialization + full state snapshot**
+
+Rationale:
+- Required for reproducibility
+- Required for orbit visualization
+- Required for mutation / evolution
+- Required for RCX-Ω later
+
+No new evolutionary features should land before this exists.
+
+## CI / Tooling — DONE (locked)
+
+Completed and enforced as of 2026-01-14T01:07:44Z:
+
+- Branch protection on `dev` (PR-only; direct pushes blocked)
+- Required checks on PRs: `green-gate`, `test`
+- `CI_POLICY.md` added (canonical definition of GREEN)
+- Local gate: `make green` (runs `scripts/green_gate_local.sh`)
+- Nightly drift detection: scheduled `rcx-green-gate` on `dev`
+
+**Policy:** These items are frozen. Reopening requires an explicit governance decision.

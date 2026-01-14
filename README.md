@@ -1,5 +1,16 @@
 # RCX-π Core — Minimal Structural Runtime v1
 
+
+### Development Rules (Enforced)
+
+- RCX-π kernel is **frozen**
+- All changes go through PRs
+- CI green is mandatory (`green-gate` + `test`)
+- Development proceeds by **layering**, not kernel mutation
+
+If CI is not green, the change does not exist.
+
+
 ## CI (Green Gate)
 
 Before you open a PR, run the local gate:
