@@ -1,6 +1,9 @@
 name: rcx-green-gate
 
 on:
+  schedule:
+    # Nightly GREEN gate on dev (14:00 UTC ≈ 9:00 AM Detroit)
+    - cron: '0 14 * * *'
   workflow_dispatch:
   push:
     branches: ["dev"]
