@@ -92,3 +92,13 @@ long-term: self-hosting/meta-circular RCX core
 
 Remember:
 RCX-π is the minimal organism spine. We will build higher RCX layers on top.
+
+## Local Git hooks (recommended)
+
+This repo includes non-blocking helper hooks under `.githooks/`.
+
+Enable them locally (per-machine):
+
+    git config core.hooksPath .githooks
+
+These hooks are reminders only (they do not block commits).

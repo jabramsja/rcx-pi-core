@@ -21,6 +21,7 @@ pub mod lobes;
 pub mod matching;
 pub mod mu_loader;
 pub mod orbit;
+pub mod orbit_json;
 pub mod parser;
 pub mod pattern;
 pub mod runtime;
