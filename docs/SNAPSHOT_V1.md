@@ -1,35 +1,45 @@
 # Snapshot v1 (RCX-π) — Canonical State Serialization
 
-This document defines the **stable, deterministic** snapshot format for RCX-π runtime state.
+This repo’s canonical snapshot artifacts live in `snapshots/` and use a stable, deterministic `.state` text format,
+with a sha256 lockfile (`snapshots/SHA256SUMS`) to detect drift.
+
+This document describes the current v1 snapshot format used by the Rust demo(s).
 
 ## Goals
-- Deterministic round-trip: save → reset → load must preserve behavior.
-- Versioned: future formats must not break old snapshots silently.
-- Portable: format must be stable across machines/OS/arch.
+- Deterministic round-trip: save → wipe/reset → load preserves behavior.
+- Portable: snapshot files are stable across machines/OS/arch.
+- Verifiable: `SHA256SUMS` locks known-good snapshots.
 
-## Snapshot v1 fields (minimum)
-- `version`: integer (must be `1`)
-- `world`: string (world/program name, if applicable)
-- `rules`: ordered list (preserve precedence)
-- `r_a`: list of Mu terms
-- `lobes`: list of Mu terms
-- `sink`: list of Mu terms
-- `meta`: object (optional; reserved for future)
+## File format (v1)
 
-## Determinism requirements
-- Ordering is part of the meaning (especially rules/precedence).
-- No host-only pointers or non-serializable closures.
-- Loading a snapshot must not re-order or re-normalize terms.
+A snapshot file is UTF-8 text with these top-level sections:
 
-## Round-trip contract
-A snapshot is **valid** only if this holds:
+### 1) PROGRAM section
+Starts with:
 
-1. Start from a known world + seed set.
-2. Run a small, fixed probe suite (classify/orbit/omega samples).
-3. Save snapshot.
-4. Reset runtime.
-5. Load snapshot.
-6. Re-run the same probe suite.
-7. Outputs must match byte-for-byte (or structurally, if JSON normalized).
+    PROGRAM:
 
-See: `tests/test_snapshot_roundtrip_v1.py`.
+Followed by 0+ rule lines, each of the form:
+
+    RULE <mu-term>
+
+Ordering matters. Rules are applied in file order.
+
+### 2) STATE section
+Starts with:
+
+    STATE:
+
+Followed by 0+ state lines, each of the form:
+
+    RA   <mu-term>
+    LOBE <mu-term>
+    SINK <mu-term>
+
+Ordering matters for deterministic replay and comparisons.
+
+## Verification
+- `snapshots/SHA256SUMS` pins the expected sha256 for each canonical snapshot.
+- CI fails if a pinned snapshot changes unexpectedly.
+- The round-trip demo should show: wrote snapshot → wipe → restore → same behavior.
+
