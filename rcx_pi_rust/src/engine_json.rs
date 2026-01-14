@@ -1,6 +1,7 @@
 use crate::engine::Engine;
 use crate::formatter::mu_to_string;
 use crate::parser::parse_mu;
+use crate::schemas::ENGINE_RUN_SCHEMA_V1;
 use crate::trace::RouteKind;
 use crate::types::{Mu, RcxProgram};
 
@@ -54,7 +55,10 @@ pub fn engine_run_to_json(world_name: &str, program: &RcxProgram, inputs: &[Mu])
     // Build JSON (no external deps)
     let mut out = String::new();
     out.push('{');
-    out.push_str(r#""schema":"rcx.engine_run.v1","#);
+    out.push_str(&format!(
+        r#"\"schema\":{},\"#,
+        json_escape(ENGINE_RUN_SCHEMA_V1)
+    ));
     out.push_str(&format!(r#""world":{},"#, json_escape(world_name)));
 
     // inputs
