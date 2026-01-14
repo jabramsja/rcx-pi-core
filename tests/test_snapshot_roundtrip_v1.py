@@ -10,6 +10,11 @@ def sha256_file(p: Path) -> str:
     return h.hexdigest()
 
 def find_snapdir(repo: Path) -> Path:
+    """
+    Canonical snapshots can live either at repo-root ./snapshots/
+    or under ./rcx_pi_rust/snapshots/ depending on the repo layout.
+    CI runners must succeed without assuming repo-root snapshots/.
+    """
     a = repo / "snapshots"
     b = repo / "rcx_pi_rust" / "snapshots"
     if a.exists():
@@ -34,11 +39,13 @@ def parse_sha256sums(p: Path) -> dict[str, str]:
 def test_snapshot_v1_sha256sum_matches_repo_lockfile():
     repo = Path(__file__).resolve().parents[1]
     sd = find_snapdir(repo)
+
     sums = sd / "SHA256SUMS"
     assert sums.exists(), f"Missing {sums}"
-    expected = parse_sha256sums(sums)
 
+    expected = parse_sha256sums(sums)
     assert "state_demo.state" in expected, "SHA256SUMS should include state_demo.state"
+
     st = sd / "state_demo.state"
     assert st.exists(), f"Missing {st}"
     assert sha256_file(st) == expected["state_demo.state"]
@@ -56,6 +63,5 @@ def test_snapshot_roundtrip_demo_runs_and_mentions_restore():
         capture_output=True,
     )
     s = (out.stdout or "") + "\n" + (out.stderr or "")
-
     assert "state_demo.state" in s
     assert "restore" in s.lower()
