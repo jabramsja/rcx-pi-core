@@ -1,3 +1,22 @@
+# BOOTSTRAP COMPLETE (Historical)
+
+Bootstrap phase completed as of 2026-01-14T00:19:50Z.
+
+This document records:
+- founding constraints
+- invariants
+- initial architecture decisions
+
+It is no longer a live roadmap.
+Ongoing work must follow:
+- CI_POLICY.md
+- TASKS.md
+- NEXT_STEPS.md (if present)
+
+Kernel remains frozen.
+Layered growth only.
+
+---
 RCX-π / RCX Stack — Bootstrap Guide
 
 This file exists so that future AI sessions can quickly understand the repository without needing past conversation context.
