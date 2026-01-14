@@ -14,6 +14,7 @@ mod tests {
 }
 
 pub mod engine;
+pub mod engine_json;
 pub mod eval;
 pub mod fold;
 pub mod formatter;

@@ -237,3 +237,10 @@ Completed and enforced as of 2026-01-14T01:07:44Z:
 - Nightly drift detection: scheduled `rcx-green-gate` on `dev`
 
 **Policy:** These items are frozen. Reopening requires an explicit governance decision.
+
+## Open tasks
+
+- [ ] Decide next engineering milestone (pick one):
+  - [ ] orbit JSON v1: add optional per-step rewrite provenance (rule idx / matched pattern)
+  - [x] engine run JSON: export {ra,lobes,sink,trace} as schema v1
+  - [ ] orbit explorer UI stub: read rcx.orbit.v1 JSON and render timeline
