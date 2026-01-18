@@ -30,6 +30,7 @@ pub mod schemas;
 pub mod serialize;
 pub mod serialize_json;
 pub mod sink;
+pub mod snapshot_json;
 pub mod state;
 pub mod state_io;
 pub mod trace;
