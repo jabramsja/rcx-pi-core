@@ -1,0 +1,6 @@
+digraph rcx_orbit {
+  rankdir=LR;
+  labelloc="t";
+  label="rcx_core | rcx.engine_run.v1 orbit";
+  node [shape=box];
+}
