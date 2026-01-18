@@ -115,3 +115,18 @@ Regenerate locally:
     (cd rcx_pi_rust && cargo build --examples)
     (cd rcx_pi_rust && cargo run --example orbit_json_cli -- pingpong ping 12 > ../docs/fixtures/orbit_pingpong_v1.json)
     (cd rcx_pi_rust && cargo run --example engine_json_cli -- rcx_core "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]" > ../docs/fixtures/engine_rcx_core_v1.json)
+
+## Snapshot JSON (golden outputs)
+
+We keep a replayable snapshot fixture under docs/fixtures:
+
+- docs/fixtures/snapshot_rcx_core_v1.json (rcx.snapshot.v1)
+
+Regenerate:
+
+    (cd rcx_pi_rust && cargo build --examples)
+    (cd rcx_pi_rust && cargo run --example snapshot_json_cli -- rcx_core "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]" > ../docs/fixtures/snapshot_rcx_core_v1.json)
+
+Roundtrip proof (write -> wipe -> restore -> same behavior):
+
+    (cd rcx_pi_rust && cargo run --example snapshot_roundtrip_cli)
