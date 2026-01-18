@@ -56,7 +56,7 @@ pub fn engine_run_to_json(world_name: &str, program: &RcxProgram, inputs: &[Mu])
     let mut out = String::new();
     out.push('{');
     out.push_str(&format!(
-        r#"\"schema\":{},\"#,
+        r#""schema":{},"#,
         json_escape(ENGINE_RUN_SCHEMA_V1)
     ));
     out.push_str(&format!(r#""world":{},"#, json_escape(world_name)));
@@ -124,6 +124,95 @@ pub fn engine_run_to_json(world_name: &str, program: &RcxProgram, inputs: &[Mu])
 }
 
 /// Convenience: parse multiple Mu sources (strings) into a Vec<Mu>.
+
+/// Run an Engine starting from an existing RCXState (e.g. restored from a snapshot)
+/// and export the full run as JSON.
+///
+/// This is the bridge for "snapshot -> replay -> deterministic engine_run".
+pub fn engine_run_from_state_to_json(
+    world_name: &str,
+    program: &RcxProgram,
+    state: &mut crate::state::RCXState,
+    inputs: &[Mu],
+) -> String {
+    let mut engine = Engine::new(program.clone());
+
+    // Run from existing state
+    for mu in inputs {
+        let _ = engine.process_input(state, mu.clone());
+    }
+
+    // Build JSON (no external deps) - mirrors engine_run_to_json schema.
+    let mut out = String::new();
+    out.push('{');
+    out.push_str(&format!(
+        r#""schema":{},"#,
+        json_escape(ENGINE_RUN_SCHEMA_V1)
+    ));
+    out.push_str(&format!(r#""world":{},"#, json_escape(world_name)));
+
+    // inputs
+    out.push_str(r#""inputs":["#);
+    for (i, m) in inputs.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!(r#""i":{},"#, i));
+        out.push_str(&format!(r#""mu":{}"#, json_escape(&mu_to_string(m))));
+        out.push('}');
+    }
+    out.push_str("],");
+
+    // buckets
+    out.push_str(r#""buckets":{"ra":["#);
+    for (i, m) in state.ra.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_escape(&mu_to_string(m)));
+    }
+    out.push_str(r#"],"lobes":["#);
+    for (i, m) in state.lobes.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_escape(&mu_to_string(m)));
+    }
+    out.push_str(r#"],"sink":["#);
+    for (i, m) in state.sink.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_escape(&mu_to_string(m)));
+    }
+    out.push_str("]},");
+
+    // trace
+    out.push_str(r#""trace":["#);
+    for (i, ev) in state.trace.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!(r#""step":{},"#, ev.step_index));
+        out.push_str(&format!(r#""phase":{},"#, json_escape(&ev.phase)));
+        out.push_str(&format!(
+            r#""route":{},"#,
+            json_escape(&format!("{:?}", ev.route))
+        ));
+        out.push_str(&format!(
+            r#""payload":{}"#,
+            json_escape(&mu_to_string(&ev.payload))
+        ));
+        out.push('}');
+    }
+    out.push_str("]");
+
+    out.push('}');
+    out
+}
+
 pub fn parse_inputs(mu_srcs: &[String]) -> Result<Vec<Mu>, String> {
     let mut out = Vec::new();
     for s in mu_srcs {
