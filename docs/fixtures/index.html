@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RCX Orbit Artifacts (v1)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    .meta { color: #444; margin-bottom: 16px; }
+    .box { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }
+    .links a { margin-right: 12px; }
+    .svgwrap { overflow: auto; border: 1px solid #eee; border-radius: 10px; padding: 10px; background: #fafafa; }
+    .hint { color: #666; font-size: 0.95rem; }
+    code { background: #f2f2f2; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>RCX Orbit Artifacts (v1)</h1>
+  <div class="meta">
+    Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code>
+  </div>
+
+  <div class="box links">
+    <strong>Fixtures</strong><br/>
+    <a href="engine_run_from_snapshot_rcx_core_v1.json">engine_run_from_snapshot_rcx_core_v1.json</a>
+    <a href="orbit_from_engine_run_rcx_core_v1.dot">orbit_from_engine_run_rcx_core_v1.dot</a>
+    <a href="orbit_from_engine_run_rcx_core_v1.svg">orbit_from_engine_run_rcx_core_v1.svg</a>
+  </div>
+
+  <div class="box">
+    <strong>Orbit (SVG)</strong>
+    <div class="hint">If this looks huge, zoom your browser or open the SVG directly.</div>
+    <div class="svgwrap">
+      <object type="image/svg+xml" data="orbit_from_engine_run_rcx_core_v1.svg" width="100%" height="600"></object>
+    </div>
+  </div>
+
+  <div class="box">
+    <strong>Build</strong>
+    <div class="hint">From repo root:</div>
+    <pre><code>./scripts/build_orbit_artifacts.sh</code></pre>
+  </div>
+</body>
+</html>
