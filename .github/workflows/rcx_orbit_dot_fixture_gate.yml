@@ -1,0 +1,20 @@
+name: RCX Orbit DOT Fixture Gate
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  orbit-dot-fixture-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Orbit DOT fixture gate
+        run: ./scripts/check_orbit_dot_fixture.sh
