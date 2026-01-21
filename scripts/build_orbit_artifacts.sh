@@ -44,9 +44,21 @@ html = f"""<!doctype html>
     .meta {{ color: #444; margin-bottom: 16px; }}
     .box {{ border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }}
     .links a {{ margin-right: 12px; }}
+    .layout {{ display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }}
+    .panel {{ border: 1px solid #ddd; border-radius: 10px; padding: 12px; background: #fff; }}
+    .panel h2 {{ font-size: 1rem; margin: 0 0 10px 0; }}
+    .panel .status {{ color: #555; font-size: 0.92rem; margin: 8px 0 0 0; }}
+    .filter {{ width: 100%; padding: 10px 10px; border: 1px solid #ccc; border-radius: 10px; }}
+    .list {{ margin-top: 10px; max-height: 520px; overflow: auto; border: 1px solid #eee; border-radius: 10px; background: #fafafa; padding: 8px; }}
+    .nodebtn {{ display: block; width: 100%; text-align: left; border: 0; padding: 8px 10px; margin: 0; border-radius: 8px; background: transparent; cursor: pointer; }}
+    .nodebtn:hover {{ background: #eaeaea; }}
     .svgwrap {{ overflow: auto; border: 1px solid #eee; border-radius: 10px; padding: 10px; background: #fafafa; }}
-    .hint {{ color: #666; font-size: 0.95rem; }}
+    .hint {{ color: #666; font-size: 0.95rem; margin-top: 8px; }}
     code {{ background: #f2f2f2; padding: 2px 6px; border-radius: 6px; }}
+    @media (max-width: 980px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      .list {{ max-height: 260px; }}
+    }}
   </style>
 </head>
 <body>
@@ -60,14 +72,25 @@ html = f"""<!doctype html>
     <a href="{engine_run.name}">{engine_run.name}</a>
     <a href="{dotp.name}">{dotp.name}</a>
     <a href="{svgp.name}">{svgp.name}</a>
+    <a href="orbit_drilldown_v1.js">orbit_drilldown_v1.js</a>
   </div>
 
-  <div class="box">
-    <strong>Orbit (SVG)</strong>
-    <div class="hint">If this looks huge, zoom your browser or open the SVG directly.</div>
-    <div class="svgwrap">
-      <object type="image/svg+xml" data="{svgp.name}" width="100%" height="600"></object>
-    </div>
+  <div class="layout">
+    <aside class="panel">
+      <h2>Orbit drilldown</h2>
+      <input id="nodeFilter" class="filter" placeholder="Filter nodes (label or id)..." />
+      <div id="nodeList" class="list" aria-label="Orbit node list"></div>
+      <div id="statusLine" class="status">Loading…</div>
+      <div class="hint">Click a node to highlight it in the SVG (best effort across Graphviz versions).</div>
+    </aside>
+
+    <section class="panel">
+      <h2>Orbit (SVG)</h2>
+      <div class="hint">If this looks huge, zoom your browser or open the SVG directly.</div>
+      <div class="svgwrap">
+        <object id="orbitSvgObj" type="image/svg+xml" data="{svgp.name}" width="100%" height="650"></object>
+      </div>
+    </section>
   </div>
 
   <div class="box">
@@ -75,6 +98,8 @@ html = f"""<!doctype html>
     <div class="hint">From repo root:</div>
     <pre><code>./scripts/build_orbit_artifacts.sh</code></pre>
   </div>
+
+  <script src="orbit_drilldown_v1.js"></script>
 </body>
 </html>
 """
