@@ -1,0 +1,15 @@
+name: RCX Orbit Provenance Fixture Gate
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  orbit-provenance-fixture-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Orbit provenance fixture gate
+        run: ./scripts/check_orbit_provenance.sh
