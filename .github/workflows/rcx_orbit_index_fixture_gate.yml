@@ -1,0 +1,21 @@
+name: RCX Orbit Index Fixture Gate
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  orbit-index-fixture-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Build artifacts
+        run: ./scripts/build_orbit_artifacts.sh
+
+      - name: Index semantic gate
+        run: ./scripts/check_orbit_index_fixture.sh
