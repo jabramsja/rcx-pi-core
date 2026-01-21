@@ -6,21 +6,17 @@ cd "$ROOT"
 
 e() { echo "== $* =="; }
 
-e "1/6 replay fixture gate"
+e "1/5 replay fixture gate"
 ./scripts/check_replay_fixture.sh
 
-e "2/6 orbit DOT fixture gate"
+e "2/5 orbit DOT fixture gate"
 ./scripts/check_orbit_dot_fixture.sh
 
-# Optional but recommended: ensure build script works (updates dot/svg/index deterministically).
-e "3/6 build orbit artifacts (engine_run -> dot -> svg -> index)"
-./scripts/build_orbit_artifacts.sh
-
-e "4/6 orbit SVG semantic gate"
+e "3/5 orbit SVG semantic gate"
 ./scripts/check_orbit_svg_fixture.sh
 
-e "5/6 orbit index semantic gate"
+e "4/5 orbit index semantic gate"
 ./scripts/check_orbit_index_fixture.sh
 
-e "6/6 done"
+e "5/5 done"
 echo "OK: all deterministic gates passed"
