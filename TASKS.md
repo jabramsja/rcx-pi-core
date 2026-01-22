@@ -218,6 +218,10 @@ If there is any ambiguity:
 ## NEXT BLOCKER (do this before anything else)
 **Serialization + full state snapshot**
 
+**Status:** ✅ Ra-for-now (implemented + locked by tests/fixtures)
+- Proof: docs/fixtures/snapshot_rcx_core_v1.json + snapshot roundtrip + integrity tests (green)
+
+
 Rationale:
 - Required for reproducibility
 - Required for orbit visualization
