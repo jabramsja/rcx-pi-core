@@ -1,0 +1,18 @@
+name: RCX Engine Run Schema Gate
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  engine-run-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jsonschema
+        run: python3 -m pip install --upgrade pip && python3 -m pip install jsonschema
+
+      - name: Engine run schema gate
+        run: ./scripts/check_engine_run_schema.sh

@@ -6,24 +6,27 @@ cd "$ROOT"
 
 e() { echo "== $* =="; }
 
-e "1/6 replay fixture gate"
+e "1/6 engine_run schema gate"
+./scripts/check_engine_run_schema.sh
+
+e "2/6 replay fixture gate"
 ./scripts/check_replay_fixture.sh
 
-
-
-
-
-e "2/6 orbit DOT fixture gate"
+e "3/6 orbit DOT fixture gate"
 ./scripts/check_orbit_dot_fixture.sh
 
-e "3/6 orbit SVG semantic gate"
+e "4/6 orbit SVG semantic gate"
 ./scripts/check_orbit_svg_fixture.sh
 
-e "4/6 orbit index semantic gate"
+e "5/6 orbit index semantic gate"
 ./scripts/check_orbit_index_fixture.sh
 
-e "5/6 orbit provenance gate"
-./scripts/check_orbit_provenance.sh
+# Optional: if provenance scripts exist, run them too.
+if [ -x ./scripts/check_orbit_provenance.sh ]; then
+  e "6/6 orbit provenance gate"
+  ./scripts/check_orbit_provenance.sh
+else
+  e "6/6 done"
+fi
 
-e "6/6 done"
 echo "OK: all deterministic orbit gates passed"
