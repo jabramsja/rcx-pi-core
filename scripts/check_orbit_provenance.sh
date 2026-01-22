@@ -20,12 +20,18 @@ eng, gen, prov = map(pathlib.Path, sys.argv[1:4])
 def sha(p: pathlib.Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
-data = json.loads(prov.read_text())
+try:
+    data = json.loads(prov.read_text())
+except Exception as e:
+    print("FAIL: provenance fixture is not valid JSON:", e, file=sys.stderr)
+    sys.exit(2)
 
 errors = []
+
 if data.get("schema") != "rcx.orbit.provenance.v1":
     errors.append("schema tag mismatch")
 
+# Enforce ONLY the hashes (everything else is informational / optional)
 if data.get("engine_run_sha256") != sha(eng):
     errors.append("engine_run hash mismatch")
 
@@ -38,5 +44,5 @@ if errors:
         print(" -", e, file=sys.stderr)
     sys.exit(2)
 
-print("OK: orbit provenance matches inputs")
+print("OK: orbit provenance matches inputs (hashes-only enforcement)")
 PY

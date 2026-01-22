@@ -13,12 +13,14 @@ OUT="docs/fixtures/orbit_provenance_v1.json"
 
 engine_hash="$(sha256sum "$ENGINE_RUN" | awk '{print $1}')"
 generator_hash="$(sha256sum "$GENERATOR" | awk '{print $1}')"
+git_commit="$(git rev-parse HEAD)"
 
 cat > "$OUT" <<JSON
 {
   "schema": "rcx.orbit.provenance.v1",
   "engine_run_sha256": "$engine_hash",
-  "generator_sha256": "$generator_hash"
+  "generator_sha256": "$generator_hash",
+  "git_commit": "$git_commit"
 }
 JSON
 
