@@ -219,6 +219,9 @@ If there is any ambiguity:
 **Serialization + full state snapshot**
 
 **Status:** ✅ Ra-for-now (implemented + locked by tests/fixtures)
+- Proof: docs/fixtures/snapshot_rcx_core_v1.json + replay->engine_run fixture + orbit/provenance gates (green)
+
+
 - Proof: docs/fixtures/snapshot_rcx_core_v1.json + snapshot roundtrip + integrity tests (green)
 
 
@@ -229,7 +232,6 @@ Rationale:
 - Required for RCX-Ω later
 
 No new evolutionary features should land before this exists.
-
 ## CI / Tooling — DONE (locked)
 
 Completed and enforced as of 2026-01-14T01:07:44Z:
@@ -243,6 +245,7 @@ Completed and enforced as of 2026-01-14T01:07:44Z:
 **Policy:** These items are frozen. Reopening requires an explicit governance decision.
 
 ## Open tasks
+- [x] engine_run versioning hygiene: checker accepts schema as alias; emitter includes schema_version (keeps schema)
 
 - [ ] Decide next engineering milestone (pick one):
   - [ ] orbit JSON v1: add optional per-step rewrite provenance (rule idx / matched pattern)
