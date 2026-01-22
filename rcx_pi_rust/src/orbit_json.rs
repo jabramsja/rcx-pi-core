@@ -1,5 +1,5 @@
 use crate::formatter::mu_to_string;
-use crate::orbit::orbit;
+use crate::orbit::orbit_with_provenance;
 use crate::schemas::ORBIT_SCHEMA_V1;
 use crate::types::{Mu, RcxProgram};
 
@@ -66,42 +66,84 @@ fn classify_orbit(seq: &[Mu]) -> String {
 }
 
 /// Produce a JSON string describing an orbit run.
-/// Output schema (stable v1):
+/// Output schema (stable v1; additive optional fields allowed):
 ///
 /// {
 ///   "schema": "rcx.orbit.v1",
 ///   "seed": "<Mu>",
 ///   "max_steps": N,
 ///   "states": [ { "i": 0, "mu": "<Mu>" }, ... ],
+///   "provenance": [ { "i": 1, "rule_i": 0, "pattern": "<Mu>", "template": "<Mu>", "bindings": { ... } }, ... ],
 ///   "classification": "<string>"
 /// }
 pub fn orbit_to_json(program: &RcxProgram, seed: Mu, max_steps: usize) -> String {
-    let seq = orbit(program, seed.clone(), max_steps);
+    let (seq, prov) = orbit_with_provenance(program, seed.clone(), max_steps);
     let classification = classify_orbit(&seq);
 
     let mut out = String::new();
-    out.push_str("{");
-    out.push_str(&format!(r#"\"schema\":{},\"#, json_escape(ORBIT_SCHEMA_V1)));
+    out.push('{');
+
+    out.push_str(&format!(r#""schema":{},"#, json_escape(ORBIT_SCHEMA_V1)));
     out.push_str(&format!(r#""seed":{},"#, json_escape(&mu_to_string(&seed))));
     out.push_str(&format!(r#""max_steps":{},"#, max_steps));
-    out.push_str(r#""states":["#);
 
+    // states
+    out.push_str(r#""states":["#);
     for (i, m) in seq.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
-        out.push_str("{");
+        out.push('{');
         out.push_str(&format!(r#""i":{},"#, i));
         out.push_str(&format!(r#""mu":{}"#, json_escape(&mu_to_string(m))));
-        out.push_str("}");
+        out.push('}');
     }
-
     out.push_str("],");
+
+    // provenance (additive, tool-facing)
+    out.push_str(r#""provenance":["#);
+    for (j, p) in prov.iter().enumerate() {
+        if j > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!(r#""i":{},"#, p.i));
+        out.push_str(&format!(r#""rule_i":{},"#, p.rule_i));
+        out.push_str(&format!(
+            r#""pattern":{},"#,
+            json_escape(&mu_to_string(&p.pattern))
+        ));
+        out.push_str(&format!(
+            r#""template":{}"#,
+            json_escape(&mu_to_string(&p.template))
+        ));
+
+        if !p.bindings.is_empty() {
+            out.push_str(r#","bindings":{"#);
+            for (k, (name, mu)) in p.bindings.iter().enumerate() {
+                if k > 0 {
+                    out.push(',');
+                }
+                out.push_str(&format!(
+                    r#"{}:{}"#,
+                    json_escape(name),
+                    json_escape(&mu_to_string(mu))
+                ));
+            }
+            out.push('}');
+        }
+
+        out.push('}');
+    }
+    out.push_str("],");
+
+    // classification
     out.push_str(&format!(
         r#""classification":{}"#,
         json_escape(&classification)
     ));
-    out.push_str("}");
+
+    out.push('}');
     out
 }
 
