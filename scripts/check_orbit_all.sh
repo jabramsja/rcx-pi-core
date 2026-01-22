@@ -9,6 +9,10 @@ e() { echo "== $* =="; }
 e "1/6 replay fixture gate"
 ./scripts/check_replay_fixture.sh
 
+
+
+
+
 e "2/6 orbit DOT fixture gate"
 ./scripts/check_orbit_dot_fixture.sh
 

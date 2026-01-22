@@ -4,12 +4,12 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-ENGINE_RUN_FIXTURE="docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
+ENGINE_RUN_FIXTURE="docs/fixtures/orbit_input_v1.json"
 DOT_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
 SVG_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
 INDEX_HTML="docs/fixtures/index.html"
 
-GEN_DOT="./scripts/orbit_engine_run_to_dot.py"
+GEN_DOT="./scripts/orbit_input_to_dot.py"
 
 [[ -f "$ENGINE_RUN_FIXTURE" ]] || { echo "missing engine-run fixture: $ENGINE_RUN_FIXTURE" >&2; exit 1; }
 [[ -x "$GEN_DOT" ]] || { echo "missing generator (not executable): $GEN_DOT" >&2; exit 1; }

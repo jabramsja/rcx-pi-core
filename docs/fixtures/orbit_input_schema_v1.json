@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RCX Orbit Input Schema v1",
+  "description": "EXPERIMENTAL boundary artifact. Derived from engine_run. Not a stable public contract yet.",
+  "type": "object",
+  "required": ["schema_version", "nodes", "edges"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["rcx.orbit_input.v1"]
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  },
+  "additionalProperties": false
+}
