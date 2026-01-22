@@ -57,3 +57,11 @@ Tracked, but should live as a separate governed layer/repo/zone.
 - Kernel stays immutable
 - New behavior = new layer/tool
 - Tests override docs; green gate is law
+
+## Status (post-serialization)
+
+- ✅ Snapshot/serialization: Ra-for-now (tests/fixtures lock behavior)
+- ✅ engine_run: checker accepts schema as alias for schema_version
+- ✅ engine_run: emitter now includes schema_version (keeps schema for now)
+- ✅ Deterministic gates: ./scripts/check_orbit_all.sh (green)
+
