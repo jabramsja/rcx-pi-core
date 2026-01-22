@@ -37,7 +37,7 @@ fn route_to_string(r: RouteKind) -> &'static str {
 ///
 /// Schema v1:
 /// {
-///   "schema": "rcx.engine_run.v1",
+///   "schema": "rcx.engine_run.v1","schema_version":"rcx.engine_run.v1",
 ///   "world": "<world_name>",
 ///   "inputs": [ {"i":0,"mu":"..."}, ... ],
 ///   "buckets": { "ra":[...], "lobes":[...], "sink":[...] },

@@ -2,5 +2,5 @@
   "schema": "rcx.orbit.provenance.v1",
   "engine_run_sha256": "80cfe31141589cb80c7185b6dd3db35255ff2372f82ffb4f4301baae7d38f5cb",
   "generator_sha256": "3c6062d9f4139852c5f45263facad8e1936e1e7ac3061bb26126f2b10eba4aca",
-  "git_commit": "fa208901155f82569b0ce6cab07e54b28fd59749"
+  "git_commit": "b898c3cf7edea5fbfc16fdce4ea32debaf2bd9bb"
 }
