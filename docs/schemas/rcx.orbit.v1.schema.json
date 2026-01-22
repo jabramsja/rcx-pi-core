@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RCX Orbit JSON (v1)",
+  "description": "Schema for rcx.orbit.v1 orbit export. Additive fields may be added in future versions; consumers should ignore unknown fields.",
+  "type": "object",
+  "required": ["schema", "seed", "max_steps", "states", "classification"],
+  "properties": {
+    "schema": {
+      "const": "rcx.orbit.v1",
+      "description": "Stable schema identifier."
+    },
+    "seed": {
+      "type": "string",
+      "description": "Seed Mu serialized as text."
+    },
+    "max_steps": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Requested max rewrite steps (seed is included in states as i=0)."
+    },
+    "states": {
+      "type": "array",
+      "description": "Orbit states including seed at i=0.",
+      "items": {
+        "type": "object",
+        "required": ["i", "mu"],
+        "properties": {
+          "i": { "type": "integer", "minimum": 0 },
+          "mu": { "type": "string", "description": "Mu serialized as text." }
+        },
+        "additionalProperties": false
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "description": "Optional per-step provenance for rewrite transitions. One entry per successful rewrite step (i = 1..).",
+      "items": {
+        "type": "object",
+        "required": ["i", "rule_i", "pattern", "template"],
+        "properties": {
+          "i": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Step index in the orbit sequence (seed is i=0, first rewrite produces i=1)."
+          },
+          "rule_i": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0-based index into program.rules for the rule that fired."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Matched rule pattern (Mu serialized as text)."
+          },
+          "template": {
+            "type": "string",
+            "description": "Rewrite template that fired (Mu serialized as text)."
+          },
+          "bindings": {
+            "type": "object",
+            "description": "Optional environment bindings captured during pattern match. Keys are variable names; values are Mu serialized as text.",
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "classification": {
+      "type": "string",
+      "description": "Human-readable ω-limit classification."
+    }
+  },
+  "additionalProperties": false
+}
