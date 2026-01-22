@@ -30,10 +30,16 @@ schema = json.load(open(schema_path))
 
 # Soft version check:
 sv = engine.get("schema_version")
-if sv is None:
-    print("WARN: engine_run has no schema_version (allowed for raw v1 artifacts)")
-elif sv != "rcx.engine_run.v1":
-    print(f"FAIL: unsupported schema_version: {sv!r}", file=sys.stderr)
+schema_field = engine.get("schema")
+
+# Accept either schema_version (preferred) or schema (legacy/current fixture field).
+effective = sv if sv is not None else schema_field
+
+if effective is None:
+    print("WARN: engine_run has no schema_version/schema (allowed for raw v1 artifacts)")
+elif effective != "rcx.engine_run.v1":
+    label = "schema_version" if sv is not None else "schema"
+    print(f"FAIL: unsupported {label}: {effective!r}", file=sys.stderr)
     sys.exit(2)
 
 validator = Draft7Validator(schema)
