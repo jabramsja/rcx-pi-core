@@ -79,3 +79,9 @@ sed
 set
 .DS_Store
 # --- /RCX generated artifacts ---
+rcx_pack_minimal.txt
+rcx_pack_extended.txt
+rcx_pack_minimal.tgz
+rcx_pack_extended.tgz
+RCX_MINIMAL_SPINE_MANIFEST.md
+RCX_MINIMAL_SPINE_MANIFEST.json
