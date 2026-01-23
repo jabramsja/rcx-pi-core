@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RCX Orbit Explorer (v1)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+    .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; }
+    h1 { margin: 0 0 8px 0; }
+    h2 { font-size: 1rem; margin: 0 0 10px 0; }
+    .meta { color: #555; margin: 8px 0 16px 0; }
+    .ctrl { display: flex; gap: 10px; align-items: center; margin: 10px 0 12px 0; flex-wrap: wrap; }
+    input[type="text"] { padding: 10px; border: 1px solid #ccc; border-radius: 10px; min-width: 280px; }
+    button { padding: 10px 12px; border: 1px solid #ccc; border-radius: 10px; background: #fafafa; cursor: pointer; }
+    button:hover { background: #f0f0f0; }
+    pre { margin: 0; padding: 10px; background: #fafafa; border: 1px solid #eee; border-radius: 10px; overflow: auto; }
+    .list { max-height: 560px; overflow: auto; border: 1px solid #eee; border-radius: 10px; background: #fafafa; padding: 8px; }
+    .item { padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+    .item:hover { background: #eaeaea; }
+    .item.sel { background: #dfefff; }
+    code { background: #f2f2f2; padding: 2px 6px; border-radius: 6px; }
+    @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>RCX Orbit Explorer (v1)</h1>
+  <div class="meta">
+    Loads an <code>rcx.orbit.v1</code> JSON file and renders states + provenance (tool-facing, additive).
+  </div>
+
+  <div class="ctrl">
+    <label>JSON path:</label>
+    <input id="path" type="text" value="orbit_provenance_v1.json" />
+    <button id="loadBtn">Load</button>
+    <span id="status" class="meta"></span>
+  </div>
+
+  <div class="row">
+    <section class="panel">
+      <h2>States</h2>
+      <div id="states" class="list" aria-label="States list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Provenance</h2>
+      <div id="prov" class="list" aria-label="Provenance list"></div>
+      <div style="height:12px"></div>
+      <h2>Selected</h2>
+      <pre id="detail">{}</pre>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function esc(s) {
+      return (s ?? "").toString()
+        .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    }
+
+    function mkItem(text, onClick) {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = text;
+      div.addEventListener("click", onClick);
+      return div;
+    }
+
+    function setSelected(listEl, idx) {
+      [...listEl.querySelectorAll(".item")].forEach((el, i) => {
+        el.classList.toggle("sel", i === idx);
+      });
+    }
+
+    async function loadOrbit(path) {
+      $("status").textContent = "Loading…";
+      const res = await fetch(path, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+      const data = await res.json();
+
+      if (data.schema !== "rcx.orbit.v1") {
+        throw new Error(`Unexpected schema: ${data.schema}`);
+      }
+
+      const states = Array.isArray(data.states) ? data.states : [];
+      const prov = Array.isArray(data.provenance) ? data.provenance : [];
+
+      $("status").textContent = `schema=${data.schema} states=${states.length} provenance=${prov.length} classification="${data.classification ?? ""}"`;
+
+      // Render states
+      const statesEl = $("states");
+      statesEl.innerHTML = "";
+      states.forEach((s, i) => {
+        const html = `<strong>${esc(s.i)}</strong> : <code>${esc(s.mu)}</code>`;
+        statesEl.appendChild(mkItem(html, () => {
+          setSelected(statesEl, i);
+        }));
+      });
+
+      // Render provenance
+      const provEl = $("prov");
+      provEl.innerHTML = "";
+      prov.forEach((p, i) => {
+        const html = `<strong>i=${esc(p.i)}</strong> rule_i=${esc(p.rule_i)} &nbsp; <code>${esc(p.pattern)}</code> → <code>${esc(p.template)}</code>`;
+        provEl.appendChild(mkItem(html, () => {
+          setSelected(provEl, i);
+          $("detail").textContent = JSON.stringify(p, null, 2);
+        }));
+      });
+
+      // Default selection
+      if (prov.length) {
+        setSelected(provEl, 0);
+        $("detail").textContent = JSON.stringify(prov[0], null, 2);
+      } else {
+        $("detail").textContent = JSON.stringify({}, null, 2);
+      }
+    }
+
+    $("loadBtn").addEventListener("click", () => {
+      const p = $("path").value.trim();
+      loadOrbit(p).catch((e) => $("status").textContent = `ERROR: ${e.message}`);
+    });
+
+    // Auto-load on open
+    loadOrbit($("path").value.trim()).catch((e) => $("status").textContent = `ERROR: ${e.message}`);
+  </script>
+</body>
+</html>

@@ -64,7 +64,8 @@ html = f"""<!doctype html>
 <body>
   <h1>RCX Orbit Artifacts (v1)</h1>
   <div class="meta">
-    Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code>
+    Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code><br/>
+    Explorer: <code>orbit_explorer_v1.html</code> (states + provenance drilldown)
   </div>
 
   <div class="box links">
@@ -73,6 +74,15 @@ html = f"""<!doctype html>
     <a href="{dotp.name}">{dotp.name}</a>
     <a href="{svgp.name}">{svgp.name}</a>
     <a href="orbit_drilldown_v1.js">orbit_drilldown_v1.js</a>
+    <a href="orbit_explorer_v1.html">orbit_explorer_v1.html</a>
+  </div>
+
+  <div class="box">
+    <strong>How to open locally</strong>
+    <div class="hint">Because this page fetches JSON, open it via a local web server (not <code>file://</code>).</div>
+    <pre><code>cd docs/fixtures
+python3 -m http.server 8000</code></pre>
+    <div class="hint">Then open <code>http://localhost:8000/index.html</code> (or <code>orbit_explorer_v1.html</code> directly).</div>
   </div>
 
   <div class="layout">
