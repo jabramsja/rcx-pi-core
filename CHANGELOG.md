@@ -50,3 +50,30 @@ Format:
 
 ### Tests
 - Verified green gate: `python3 -m pytest -q`
+
+## 2026-01-23
+
+### Tests
+- Enforced **orbit artifact idempotence** for tracked files.
+  - Re-running `scripts/build_orbit_artifacts.sh` no longer dirties the working tree.
+- Formalized **orbit provenance semantics**:
+  - Provenance entries validated against emitted state transitions.
+  - Supports both legacy (`from` / `to`) and current (`pattern` / `template`) schemas.
+  - State entries may be strings or structured objects (e.g. `{"i": 0, "mu": "ping"}`).
+
+### Tooling
+- Added Graphviz SVG normalization to strip version-specific metadata.
+  - SVG fixtures are now stable across Graphviz versions.
+- Added `scripts/merge_pr_clean.sh` helper for repositories with auto-merge disabled.
+  - Rebase head onto base, safe force-push, gate wait, manual merge, post-merge sync.
+  - Convenience script only; repository policy unchanged.
+
+### Process
+- Confirmed layered-growth rule enforcement:
+  - Kernel remains frozen.
+  - All new behavior implemented via tools, fixtures, or validation layers.
+- Green gate verified after each change sequence.
+
+Notes:
+- No kernel or runtime semantics were modified.
+- All changes live strictly outside the frozen RCX-π core.
