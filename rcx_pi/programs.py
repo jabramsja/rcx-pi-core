@@ -179,8 +179,7 @@ def rotate_xyz_closure() -> Motif:
     def _impl(ev, arg: Motif) -> Motif:
         items = _to_py_list_strict(ev, arg, "rotate_xyz_closure")
         if len(items) != 3:
-            raise TypeError(
-                "rotate_xyz_closure expects a 3-element list [x, y, z]")
+            raise TypeError("rotate_xyz_closure expects a 3-element list [x, y, z]")
         x, y, z = items
         return list_from_py([y, z, x])
 
@@ -532,6 +531,7 @@ def activate(ev, program: Motif, arg: Motif) -> Motif:
     # Native closure motifs
     return ev.run(program, arg)
 
+
 # ---------------------------------------------------------------------------
 # Backwards-compatibility shims for older rcx_python_examples/test_programs.py
 # ---------------------------------------------------------------------------
@@ -562,11 +562,7 @@ def wrap_program(prog: Motif) -> Motif:
 def is_program_block(m: Motif) -> bool:
     """True iff m is a tagged program block [PROGRAM_TAG, <closure>]."""
     py = py_from_list(m)
-    return bool(
-        py is not None
-        and len(py) == 2
-        and py[0] == PROGRAM_TAG
-    )
+    return bool(py is not None and len(py) == 2 and py[0] == PROGRAM_TAG)
 
 
 def _unwrap_program_block(m: Motif) -> Motif:
@@ -618,5 +614,3 @@ def run_program_block(ev, block: Motif, arg: Motif) -> Motif:
         return run_program_block(ev, q_block, mid)
 
     raise TypeError("unknown program block shape")
-
-

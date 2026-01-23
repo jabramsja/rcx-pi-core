@@ -51,9 +51,7 @@ class Motif:
         return self.is_void()
 
     def is_successor_pure(self):
-        return len(
-            self.structure) == 1 and isinstance(
-            self.structure[0], Motif)
+        return len(self.structure) == 1 and isinstance(self.structure[0], Motif)
 
     def is_number_pure(self):
         if self.is_zero_pure():
@@ -113,8 +111,7 @@ class Motif:
         )
 
     def count_nodes(self):
-        return 1 + sum(s.count_nodes()
-                       for s in self.structure if isinstance(s, Motif))
+        return 1 + sum(s.count_nodes() for s in self.structure if isinstance(s, Motif))
 
     def find_shared(self):
         seen = set()

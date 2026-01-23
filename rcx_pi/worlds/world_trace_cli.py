@@ -5,6 +5,7 @@ from __future__ import annotations
 if __package__ is None or __package__ == "":
     import sys
     from pathlib import Path
+
     repo_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(repo_root))
 
@@ -17,7 +18,10 @@ from typing import Any, Dict, List
 
 from rcx_pi.worlds.worlds_bridge import orbit_with_world_parsed
 
-def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]) -> Dict[str, Any]:
+
+def _as_trace_json(
+    world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
+) -> Dict[str, Any]:
     states: List[str] = list(parsed.get("states") or [])
     kind = parsed.get("kind")
     period = parsed.get("period")
@@ -27,19 +31,20 @@ def _as_trace_json(world: str, seed: str, max_steps: int, parsed: Dict[str, Any]
     for i, s in enumerate(states):
         entry = {"step": i, "state": s}
         if prev is not None:
-            entry["delta"] = {
-                "changed": s != prev
-            }
+            entry["delta"] = {"changed": s != prev}
         trace.append(entry)
         prev = s
 
-    now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    now = (
+        datetime.datetime.now(datetime.UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
     inputs_hash = hashlib.sha256(
         f"{world}|{seed}|{max_steps}".encode("utf-8")
     ).hexdigest()
 
     out: Dict[str, Any] = {
-
         "schema": "rcx-world-trace.v1",
         "schema_doc": "docs/world_trace_json_schema.md",
         "world": world,
@@ -96,12 +101,20 @@ def main(argv: List[str] | None = None) -> int:
         action="store_true",
         help="Print world_trace JSON schema tag + schema doc path and exit.",
     )
-    ap.add_argument("world", nargs="?", help="World name (e.g. rcx_core, pingpong, paradox_1over0)")
-    ap.add_argument("seed", nargs="?", help="Seed term for orbit (e.g. ping, [omega,[a,b]])")
-    ap.add_argument("--max-steps", type=int, default=12, help="Max orbit steps (default 12)")
+    ap.add_argument(
+        "world", nargs="?", help="World name (e.g. rcx_core, pingpong, paradox_1over0)"
+    )
+    ap.add_argument(
+        "seed", nargs="?", help="Seed term for orbit (e.g. ping, [omega,[a,b]])"
+    )
+    ap.add_argument(
+        "--max-steps", type=int, default=12, help="Max orbit steps (default 12)"
+    )
     ap.add_argument("--json", action="store_true", help="Emit JSON to stdout (default)")
     ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
-    ap.add_argument("--raw", action="store_true", help="Also include raw orbit_cli output in JSON")
+    ap.add_argument(
+        "--raw", action="store_true", help="Also include raw orbit_cli output in JSON"
+    )
 
     args = ap.parse_args(argv)
 
@@ -112,7 +125,9 @@ def main(argv: List[str] | None = None) -> int:
     if not args.world or not args.seed:
         ap.error("world and seed are required unless --schema is used")
 
-    code, raw, parsed = orbit_with_world_parsed(args.world, args.seed, max_steps=args.max_steps)
+    code, raw, parsed = orbit_with_world_parsed(
+        args.world, args.seed, max_steps=args.max_steps
+    )
     if code != 0:
         print(raw, file=sys.stderr)
         return code

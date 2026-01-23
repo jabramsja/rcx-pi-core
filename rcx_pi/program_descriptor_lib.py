@@ -12,11 +12,17 @@ SCHEMA_DOC = "docs/program_descriptor_schema.md"
 
 
 def _utc_now_z() -> str:
-    return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return (
+        datetime.datetime.now(datetime.UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _hash_inputs(program: str) -> str:
-    blob = json.dumps({"program": program}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    blob = json.dumps(
+        {"program": program}, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 

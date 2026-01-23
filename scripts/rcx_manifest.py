@@ -54,7 +54,9 @@ def iter_files(root: Path) -> Iterable[Path]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Create a deterministic RCX repo manifest.")
+    ap = argparse.ArgumentParser(
+        description="Create a deterministic RCX repo manifest."
+    )
     ap.add_argument("--repo-root", default=".", help="Repo root (default: .)")
     ap.add_argument("--out", default=".rcx_manifest.json", help="Output JSON path")
     ap.add_argument(
@@ -130,7 +132,9 @@ def main() -> int:
         ],
     }
 
-    out_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out_path.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(f"OK: wrote {os.path.relpath(out_path, repo_root)}")
     print(f"OK: file_count={len(entries)} manifest_sha256={manifest_digest}")
     if missing_roots:

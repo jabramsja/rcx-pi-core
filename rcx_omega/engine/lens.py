@@ -52,9 +52,7 @@ def trace_reduce_with_stats(
     tr = trace_reduce(ev, x, max_steps=max_steps)
 
     # analyze all steps
-    step_stats: List[MotifStats] = [
-        analyze_motif(s.value) for s in tr.steps
-    ]
+    step_stats: List[MotifStats] = [analyze_motif(s.value) for s in tr.steps]
 
     deltas: List[StepDelta] = []
     prev: Optional[MotifStats] = None

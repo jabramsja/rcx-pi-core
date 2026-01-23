@@ -13,12 +13,18 @@ SCHEMA_DOC = "docs/program_run_schema.md"
 
 
 def _utc_now_z() -> str:
-    return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return (
+        datetime.datetime.now(datetime.UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _hash_inputs(program: str, input_list: List[int]) -> str:
     # Determinism hash should be simple and stable across platforms.
-    blob = json.dumps({"program": program, "input": input_list}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    blob = json.dumps(
+        {"program": program, "input": input_list}, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 

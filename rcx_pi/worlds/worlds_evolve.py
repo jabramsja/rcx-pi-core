@@ -115,38 +115,35 @@ SPEC_PRESETS["rcx_triad"] = RCX_TRIAD_SPEC
 TRIAD_PLUS_SPEC: Dict[str, str] = {}
 TRIAD_PLUS_SPEC.update(RCX_TRIAD_SPEC)
 
-TRIAD_PLUS_SPEC.update({
-    # core-ish but edgy
-    "[null,[1/0]]": "Ra",
-    "[inf,[1/0]]": "Lobe",
-    "[paradox,[1/0]]": "Sink",
-
-    # godel-ish but grounded
-    "[truth_object]": "Ra",
-    "[self_reference]": "Lobe",
-    "[forbid_self_reference]": "Sink",
-
-    # triad collisions
-    "[liar,1/0]": "Lobe",
-    "[Gödel,1/0_engine]": "Ra",
-    "[binary_truth_only,1/0_numeric]": "Sink",
-
-    # omega pressure tests
-    "[omega,[1/0]]": "Sink",
-    "[omega,[liar]]": "Sink",
-
-    # “world selection” stressors
-    "[white_light,paradox]": "Ra",
-    "[sink_flatten,null]": "Sink",
-    "[I_am_true,null]": "Ra",
-
-    # noise seeds
-    "[maybe]": "Lobe",
-    "[collapse]": "Sink",
-    "[expand]": "Ra",
-    "[observer]": "Lobe",
-    "[flatten]": "Sink",
-})
+TRIAD_PLUS_SPEC.update(
+    {
+        # core-ish but edgy
+        "[null,[1/0]]": "Ra",
+        "[inf,[1/0]]": "Lobe",
+        "[paradox,[1/0]]": "Sink",
+        # godel-ish but grounded
+        "[truth_object]": "Ra",
+        "[self_reference]": "Lobe",
+        "[forbid_self_reference]": "Sink",
+        # triad collisions
+        "[liar,1/0]": "Lobe",
+        "[Gödel,1/0_engine]": "Ra",
+        "[binary_truth_only,1/0_numeric]": "Sink",
+        # omega pressure tests
+        "[omega,[1/0]]": "Sink",
+        "[omega,[liar]]": "Sink",
+        # “world selection” stressors
+        "[white_light,paradox]": "Ra",
+        "[sink_flatten,null]": "Sink",
+        "[I_am_true,null]": "Ra",
+        # noise seeds
+        "[maybe]": "Lobe",
+        "[collapse]": "Sink",
+        "[expand]": "Ra",
+        "[observer]": "Lobe",
+        "[flatten]": "Sink",
+    }
+)
 
 SPEC_PRESETS["rcx_triad_plus"] = TRIAD_PLUS_SPEC
 
@@ -154,6 +151,7 @@ SPEC_PRESETS["rcx_triad_plus"] = TRIAD_PLUS_SPEC
 # ---------------------------------------------------------------------------
 # Scoring structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ScoreResult:
@@ -172,6 +170,7 @@ class ScoreResult:
 # ---------------------------------------------------------------------------
 # Core scoring against a spec
 # ---------------------------------------------------------------------------
+
 
 def score_world_against_spec(world: str, spec: Dict[str, str]) -> ScoreResult:
     """
@@ -228,6 +227,7 @@ def score_world_against_spec(world: str, spec: Dict[str, str]) -> ScoreResult:
 # World ranking helper
 # ---------------------------------------------------------------------------
 
+
 def rank_worlds(worlds: List[str], spec: Dict[str, str]) -> List[ScoreResult]:
     """
     Score multiple worlds against a spec and return them ranked.
@@ -237,11 +237,7 @@ def rank_worlds(worlds: List[str], spec: Dict[str, str]) -> List[ScoreResult]:
         2. Fewest mismatches
         3. World name (lexicographically) to keep ordering deterministic.
     """
-    results: List[ScoreResult] = [
-        score_world_against_spec(w, spec) for w in worlds
-    ]
+    results: List[ScoreResult] = [score_world_against_spec(w, spec) for w in worlds]
 
-    results.sort(
-        key=lambda r: (-r.accuracy, r.mismatches, r.world)
-    )
+    results.sort(key=lambda r: (-r.accuracy, r.mismatches, r.world))
     return results

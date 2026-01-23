@@ -13,7 +13,20 @@ def test_leaderboard_auto_uses_none_for_world_like_mu(tmp_path: Path):
     w = tmp_path / "w.mu"
     w.write_text("[a] -> ra\n[b] -> lobe\n", encoding="utf-8")
 
-    p = _run(["bash", "scripts/mutation_leaderboard_clean.sh", "--world", str(w), "--seeds", "1", "--runner", "auto"])
+    p = _run(
+        [
+            "bash",
+            "scripts/mutation_leaderboard_clean.sh",
+            "--world",
+            str(w),
+            "--seeds",
+            "1",
+            "--runner",
+            "auto",
+        ]
+    )
     assert p.returncode == 0
     assert "-- detected: world --" in p.stdout
-    assert "-- runner: none" in p.stdout  # auto selection should pick none for world-like
+    assert (
+        "-- runner: none" in p.stdout
+    )  # auto selection should pick none for world-like

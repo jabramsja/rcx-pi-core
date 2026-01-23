@@ -7,10 +7,14 @@ import subprocess
 import sys
 from typing import List, Optional
 
+
 def _which(cmd: str) -> Optional[str]:
     return shutil.which(cmd)
 
-def _run(cmd: List[str], cwd: str = ".", stdin: Optional[str] = None) -> subprocess.CompletedProcess:
+
+def _run(
+    cmd: List[str], cwd: str = ".", stdin: Optional[str] = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
         cwd=cwd,
@@ -20,8 +24,10 @@ def _run(cmd: List[str], cwd: str = ".", stdin: Optional[str] = None) -> subproc
         stderr=subprocess.PIPE,
     )
 
+
 def _py_m(module: str, *args: str) -> List[str]:
     return [sys.executable, "-m", module, *args]
+
 
 def _best_cmd(preferred: List[str], fallback: List[str]) -> List[str]:
     # preferred[0] is the executable name
@@ -29,11 +35,13 @@ def _best_cmd(preferred: List[str], fallback: List[str]) -> List[str]:
         return preferred
     return fallback
 
+
 def _require_json(s: str) -> dict:
     try:
         return json.loads(s)
     except Exception as e:
         raise AssertionError(f"Expected JSON, got:\n{s[:4000]}") from e
+
 
 def main() -> int:
     repo_root = "."
@@ -76,13 +84,15 @@ def main() -> int:
         data = _require_json(r.stdout)
         for k in ["schema", "schema_doc", "program", "input", "output", "ok"]:
             if k not in data:
-                failures.append(f"program-run JSON missing key {k!r}; keys={sorted(data.keys())}")
+                failures.append(
+                    f"program-run JSON missing key {k!r}; keys={sorted(data.keys())}"
+                )
                 break
         if data.get("schema") != "rcx-program-run.v1":
             failures.append(f"program-run schema mismatch: {data.get('schema')!r}")
         if data.get("program") != "succ-list":
             failures.append(f"program-run program mismatch: {data.get('program')!r}")
-        if data.get("output") != [2,3,4]:
+        if data.get("output") != [2, 3, 4]:
             failures.append(f"program-run output mismatch: {data.get('output')!r}")
         if data.get("ok") is not True:
             failures.append(f"program-run ok not true: {data.get('ok')!r}")
@@ -109,9 +119,20 @@ def main() -> int:
         failures.append(f"world-trace pingpong ping failed:\n{r.stderr.strip()}")
     else:
         data = _require_json(r.stdout)
-        for k in ["schema", "schema_doc", "world", "seed", "max_steps", "trace", "orbit", "meta"]:
+        for k in [
+            "schema",
+            "schema_doc",
+            "world",
+            "seed",
+            "max_steps",
+            "trace",
+            "orbit",
+            "meta",
+        ]:
             if k not in data:
-                failures.append(f"world-trace JSON missing key {k!r}; keys={sorted(data.keys())}")
+                failures.append(
+                    f"world-trace JSON missing key {k!r}; keys={sorted(data.keys())}"
+                )
                 break
         if data.get("schema") != "rcx-world-trace.v1":
             failures.append(f"world-trace schema mismatch: {data.get('schema')!r}")
@@ -140,6 +161,7 @@ def main() -> int:
 
     print("✅ CLI SMOKE OK")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

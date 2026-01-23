@@ -34,8 +34,8 @@ def num(n: int):
 
 
 # Markers must match what rules_pure expects structurally
-ADD_MARKER = μ(μ(), μ())          # two voids
-MULT_MARKER = μ(μ(), μ(), μ())    # three voids
+ADD_MARKER = μ(μ(), μ())  # two voids
+MULT_MARKER = μ(μ(), μ(), μ())  # three voids
 
 
 def add_pattern(a, b):
@@ -101,13 +101,7 @@ if __name__ == "__main__":
     n4 = num(4)
 
     # 4! = 4 * 3 * 2 * 1, encoded as nested mult-patterns
-    fact4_rcx = mult_pattern(
-        n4,
-        mult_pattern(
-            n3,
-            mult_pattern(n2, n1)
-        )
-    )
+    fact4_rcx = mult_pattern(n4, mult_pattern(n3, mult_pattern(n2, n1)))
 
     print("Raw factorial motif:")
     print("   ", fact4_rcx)
@@ -122,5 +116,4 @@ if __name__ == "__main__":
     fact4_peano = fact_peano(4)
     print("Raw Peano motif:   ", fact4_peano)
     fact4_peano_red = ev.reduce(fact4_peano)
-    print("Reduced Peano:     ", fact4_peano_red,
-          " => ", motif_to_int(fact4_peano_red))
+    print("Reduced Peano:     ", fact4_peano_red, " => ", motif_to_int(fact4_peano_red))

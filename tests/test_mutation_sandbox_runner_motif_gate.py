@@ -15,7 +15,20 @@ def test_runner_omega_cli_is_skipped_for_world_like_mu_file(tmp_path: Path):
     w.write_text("[a] -> ra\n[b] -> lobe\n", encoding="utf-8")
 
     out = tmp_path / "sandbox_runs"
-    p = _run(["bash", "scripts/mutation_sandbox.sh", str(w), "--out-dir", str(out), "--run", "--score", "--runner", "omega-cli", "--json"])
+    p = _run(
+        [
+            "bash",
+            "scripts/mutation_sandbox.sh",
+            str(w),
+            "--out-dir",
+            str(out),
+            "--run",
+            "--score",
+            "--runner",
+            "omega-cli",
+            "--json",
+        ]
+    )
     assert p.returncode == 0
 
     obj = json.loads(p.stdout)

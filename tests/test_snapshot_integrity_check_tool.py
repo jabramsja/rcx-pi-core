@@ -35,7 +35,16 @@ def test_snapshot_custom_only(tmp_path: Path):
     b = tmp_path / "b.json"
     a.write_text(json.dumps({"stats": {"n": 1}, "result": 10}), encoding="utf-8")
     b.write_text(json.dumps({"stats": {"n": 2}, "result": 10}), encoding="utf-8")
-    p = _run(["bash", "scripts/snapshot_integrity_check.sh", str(a), str(b), "--only", "result"])
+    p = _run(
+        [
+            "bash",
+            "scripts/snapshot_integrity_check.sh",
+            str(a),
+            str(b),
+            "--only",
+            "result",
+        ]
+    )
     assert p.returncode == 0
 
 

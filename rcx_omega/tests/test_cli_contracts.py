@@ -19,7 +19,9 @@ def test_contract_trace_to_analyze_has_header_and_converged():
     obj = json.loads(trace.stdout)
     assert "steps" in obj and isinstance(obj["steps"], list)
 
-    analyzed = _run([sys.executable, "-m", "rcx_omega.cli.analyze_cli"], input_text=trace.stdout)
+    analyzed = _run(
+        [sys.executable, "-m", "rcx_omega.cli.analyze_cli"], input_text=trace.stdout
+    )
 
     assert "== Ω analyze ==" in analyzed.stdout
     assert "analyze: trace" in analyzed.stdout
@@ -33,7 +35,9 @@ def test_contract_omega_to_analyze_has_header_and_summary():
     obj = json.loads(omega.stdout)
     assert "result" in obj
 
-    analyzed = _run([sys.executable, "-m", "rcx_omega.cli.analyze_cli"], input_text=omega.stdout)
+    analyzed = _run(
+        [sys.executable, "-m", "rcx_omega.cli.analyze_cli"], input_text=omega.stdout
+    )
 
     assert "== Ω analyze ==" in analyzed.stdout
     assert "analyze: summary" in analyzed.stdout

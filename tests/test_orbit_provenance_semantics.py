@@ -49,15 +49,23 @@ def test_orbit_provenance_semantics():
         )
         frm, to = ft
 
-        assert isinstance(frm, str) and frm, f"provenance[{idx}] 'from/pattern' must be a non-empty string"
-        assert isinstance(to, str) and to, f"provenance[{idx}] 'to/template' must be a non-empty string"
+        assert isinstance(frm, str) and frm, (
+            f"provenance[{idx}] 'from/pattern' must be a non-empty string"
+        )
+        assert isinstance(to, str) and to, (
+            f"provenance[{idx}] 'to/template' must be a non-empty string"
+        )
 
         assert "i" in entry, f"provenance[{idx}] missing 'i'"
         assert isinstance(entry["i"], int), f"provenance[{idx}] 'i' must be int"
-        assert 1 <= entry["i"] <= max_state, f"provenance[{idx}] 'i' out of range: {entry['i']} (max={max_state})"
+        assert 1 <= entry["i"] <= max_state, (
+            f"provenance[{idx}] 'i' out of range: {entry['i']} (max={max_state})"
+        )
 
         if "rule_i" in entry:
-            assert isinstance(entry["rule_i"], int), f"provenance[{idx}] 'rule_i' must be int"
+            assert isinstance(entry["rule_i"], int), (
+                f"provenance[{idx}] 'rule_i' must be int"
+            )
             assert entry["rule_i"] >= 0, f"provenance[{idx}] 'rule_i' must be >= 0"
 
         # Semantic check (when states are present):
@@ -66,11 +74,15 @@ def test_orbit_provenance_semantics():
         if 0 <= i - 1 < len(states) and 0 <= i < len(states):
             s_prev = _state_mu(states[i - 1])
             s_next = _state_mu(states[i])
-            assert s_prev is not None, f"states[{i-1}] not a recognized state shape: {states[i-1]!r}"
-            assert s_next is not None, f"states[{i}] not a recognized state shape: {states[i]!r}"
+            assert s_prev is not None, (
+                f"states[{i - 1}] not a recognized state shape: {states[i - 1]!r}"
+            )
+            assert s_next is not None, (
+                f"states[{i}] not a recognized state shape: {states[i]!r}"
+            )
 
             assert s_prev == frm, (
-                f"provenance[{idx}] mismatch: states[{i-1}] mu={s_prev!r} != from/pattern={frm!r}"
+                f"provenance[{idx}] mismatch: states[{i - 1}] mu={s_prev!r} != from/pattern={frm!r}"
             )
             assert s_next == to, (
                 f"provenance[{idx}] mismatch: states[{i}] mu={s_next!r} != to/template={to!r}"

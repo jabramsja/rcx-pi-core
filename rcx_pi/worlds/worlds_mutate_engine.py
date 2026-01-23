@@ -70,8 +70,9 @@ def mutate_world_dict(route_map: Dict[str, str]) -> Dict[str, str]:
     return new
 
 
-def write_mutated_world_file(parent: str, generation: int,
-                             routes: Dict[str, str]) -> str:
+def write_mutated_world_file(
+    parent: str, generation: int, routes: Dict[str, str]
+) -> str:
     """
     Writes a new Python file expressing this world's routing table.
     """
@@ -111,8 +112,7 @@ def load_base_world_routes(world: str) -> Dict[str, str]:
     return {row["mu"]: row["route"] for row in result["routes"]}
 
 
-def mutate_world(parent_world: str,
-                 generation: int) -> Tuple[str, Dict[str, str]]:
+def mutate_world(parent_world: str, generation: int) -> Tuple[str, Dict[str, str]]:
     """
     Produce a mutated world. Returns (world_name, route_map).
     """

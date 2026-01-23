@@ -144,9 +144,7 @@ class SelfHostProfile:
 DEFAULT_PROFILE = SelfHostProfile()
 
 
-def is_self_host_value(
-        m: Motif,
-        profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
+def is_self_host_value(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
     """
     A value that is allowed in the self-hosted core.
 
@@ -161,9 +159,7 @@ def is_self_host_value(
     return True
 
 
-def is_self_host_struct(
-        m: Motif,
-        profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
+def is_self_host_struct(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
     """
     A structurally pure motif that can live in the self-hosted core
     (values, closures, pairs, triples, etc.).
@@ -178,9 +174,7 @@ def is_self_host_struct(
     return True
 
 
-def is_self_host_safe(
-        m: Motif,
-        profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
+def is_self_host_safe(m: Motif, profile: SelfHostProfile = DEFAULT_PROFILE) -> bool:
     """
     Top-level guard: True iff m is structurally acceptable to hand off
     to a future self-hosting RCX-π kernel.

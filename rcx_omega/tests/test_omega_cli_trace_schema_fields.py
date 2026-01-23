@@ -16,7 +16,14 @@ def _run_omega_trace(env: dict | None = None) -> dict:
     - Trace-shaped should include `steps` (list-like)
     We do NOT assume internal step fields.
     """
-    cmd = [sys.executable, "-m", "rcx_omega.cli.omega_cli", "--trace", "--json", "μ(μ())"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "rcx_omega.cli.omega_cli",
+        "--trace",
+        "--json",
+        "μ(μ())",
+    ]
     p = subprocess.run(
         cmd,
         input=None,
@@ -67,4 +74,6 @@ def test_trace_env_on_injects_schema_version():
     assert "schema_version" in obj, "schema_version must appear when env is ON"
     sv = obj["schema_version"]
     assert isinstance(sv, str), "schema_version must be a string"
-    assert SEMVER_RE.match(sv), f"schema_version must look like semver (x.y.z), got: {sv!r}"
+    assert SEMVER_RE.match(sv), (
+        f"schema_version must look like semver (x.y.z), got: {sv!r}"
+    )

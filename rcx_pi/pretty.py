@@ -48,11 +48,7 @@ def pretty_motif(m: Motif, *, depth: int = 0, max_depth: int = 10) -> str:
     items = []
     for child in m.structure:
         if isinstance(child, Motif):
-            items.append(
-                pretty_motif(
-                    child,
-                    depth=depth + 1,
-                    max_depth=max_depth))
+            items.append(pretty_motif(child, depth=depth + 1, max_depth=max_depth))
         else:
             items.append(repr(child))
 

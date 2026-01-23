@@ -53,7 +53,9 @@ def triad_dispatch(mu: str) -> str:
     return "rcx_core"
 
 
-def _merge_fingerprints(parts: List[Dict[str, Any]], seeds_in_order: List[str]) -> Dict[str, Any]:
+def _merge_fingerprints(
+    parts: List[Dict[str, Any]], seeds_in_order: List[str]
+) -> Dict[str, Any]:
     """
     Merge multiple fingerprints (each from probe_world) into one unified fingerprint.
     Preserves the original seed order from the caller.
@@ -70,7 +72,7 @@ def _merge_fingerprints(parts: List[Dict[str, Any]], seeds_in_order: List[str]) 
         raw_chunks.append(fp.get("raw_output", "") or "")
 
         # bring routes in
-        for row in (fp.get("routes", []) or []):
+        for row in fp.get("routes", []) or []:
             mu = row.get("mu")
             route = row.get("route", "None")
             if not mu:
@@ -78,7 +80,7 @@ def _merge_fingerprints(parts: List[Dict[str, Any]], seeds_in_order: List[str]) 
             route_by_mu[mu] = route
 
         # bring dispatch (optional)
-        for row in (fp.get("dispatch", []) or []):
+        for row in fp.get("dispatch", []) or []:
             mu = row.get("mu")
             w = row.get("world")
             if mu and w:
@@ -159,7 +161,9 @@ def probe_triad_router(seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
             # Still record override, but ALSO record where it would have gone.
             w = triad_dispatch(mu)
 
-            dispatch_rows.append({"mu": mu, "world": "rcx_triad_router", "reason": "override"})
+            dispatch_rows.append(
+                {"mu": mu, "world": "rcx_triad_router", "reason": "override"}
+            )
             dispatch_rows.append({"mu": mu, "world": w, "reason": "would_dispatch"})
             continue
 
@@ -214,7 +218,7 @@ def probe_triad_router(seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
         merged["summary"]["counts"] = counts
 
     # --- Fixup: make liar orbit reflect the claimed period-2 oscillation ---
-    for o in (merged.get("orbits", []) or []):
+    for o in merged.get("orbits", []) or []:
         if o.get("mu") != "[liar]":
             continue
 

@@ -130,7 +130,7 @@ def score_world_against_spec(
 
     for mu, desired in spec.items():
         actual = route_by_mu.get(mu, "None")
-        match = (actual == desired)
+        match = actual == desired
         if not match:
             mismatches += 1
         rows.append(
@@ -204,8 +204,7 @@ def mutate_world_json_once(base: Dict) -> Dict:
     new_action = random.choice(choices)
 
     print(
-        f"[mutate] rule {idx}: pattern={rule.get('pattern')} "
-        f"{action} -> {new_action}"
+        f"[mutate] rule {idx}: pattern={rule.get('pattern')} {action} -> {new_action}"
     )
     rule["action"] = new_action
 

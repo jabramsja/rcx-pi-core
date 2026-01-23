@@ -48,11 +48,9 @@ EXPECTED_ROUTES = {
     "[1/0_engine]": "Ra",
     "[1=-0]": "Ra",
     "[white_light]": "Ra",
-
     "[1/0_numeric]": "Lobe",
     "[RGB_split]": "Lobe",
     "[omega_cycle_1o]": "Lobe",
-
     "[1/0_infty]": "Ra",
     "[sink_flatten]": "Sink",
 }

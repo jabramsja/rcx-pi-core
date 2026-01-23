@@ -54,12 +54,12 @@ def num(n: int):
 # pattern matcher.
 
 # Structural markers
-CLOSURE_MARKER = μ(μ(μ(μ(μ()))))              # 4-deep in that file
-ACTIVATION_MARKER = μ(μ(μ(μ(μ(μ())))))          # 5-deep
-PROJECTION_MARKER = μ(μ(μ(μ(μ(μ(μ()))))))       # 6/7-deep as used there
+CLOSURE_MARKER = μ(μ(μ(μ(μ()))))  # 4-deep in that file
+ACTIVATION_MARKER = μ(μ(μ(μ(μ(μ())))))  # 5-deep
+PROJECTION_MARKER = μ(μ(μ(μ(μ(μ(μ()))))))  # 6/7-deep as used there
 
 # Pattern-variable marker (used to tag "x", "y", etc. as bindable)
-PATTERN_VAR_MARKER = μ(μ(μ(μ(μ(μ(μ(μ())))))))    # 7/8-deep in that file
+PATTERN_VAR_MARKER = μ(μ(μ(μ(μ(μ(μ(μ())))))))  # 7/8-deep in that file
 
 
 def var_x():
@@ -75,6 +75,7 @@ def var_y():
 
 
 # ---------- Combinator encodings (copied from your RCX-π spec) ----------
+
 
 def make_I():
     """

@@ -23,6 +23,7 @@ All remaining arguments are forwarded verbatim.
 if __package__ is None or __package__ == "":
     import sys
     from pathlib import Path
+
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
@@ -77,10 +78,12 @@ def main(argv: List[str] | None = None) -> int:
 
         if sub == "describe":
             from rcx_pi.program_descriptor_cli import main as program_descriptor_main
+
             return int(program_descriptor_main(rest))
 
         if sub == "run":
             from rcx_pi.program_run_cli import main as program_run_main
+
             return int(program_run_main(rest))
 
         print(f"rcx: unknown program subcommand: {sub!r}", file=sys.stderr)
@@ -92,6 +95,7 @@ def main(argv: List[str] | None = None) -> int:
 
         if sub == "trace":
             from rcx_pi.worlds.world_trace_cli import main as world_trace_main
+
             return int(world_trace_main(rest))
 
         print(f"rcx: unknown world subcommand: {sub!r}", file=sys.stderr)

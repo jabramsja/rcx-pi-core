@@ -32,13 +32,21 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Run a named RCX-π list program and emit JSON (contracted)."
     )
-    ap.add_argument("--schema", action="store_true", help="Print schema tag + doc path and exit.")
-    ap.add_argument("--list", action="store_true", help="List available named programs and exit.")
+    ap.add_argument(
+        "--schema", action="store_true", help="Print schema tag + doc path and exit."
+    )
+    ap.add_argument(
+        "--list", action="store_true", help="List available named programs and exit."
+    )
 
     ap.add_argument("program", nargs="?", help="Program name (e.g. succ-list)")
-    ap.add_argument("input_json", nargs="?", default="", help="JSON list of ints (e.g. [1,2,3])")
+    ap.add_argument(
+        "input_json", nargs="?", default="", help="JSON list of ints (e.g. [1,2,3])"
+    )
 
-    ap.add_argument("--stdin", action="store_true", help="Read input JSON list from stdin.")
+    ap.add_argument(
+        "--stdin", action="store_true", help="Read input JSON list from stdin."
+    )
     ap.add_argument("--input-file", help="Read input JSON list from file path.")
     ap.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 

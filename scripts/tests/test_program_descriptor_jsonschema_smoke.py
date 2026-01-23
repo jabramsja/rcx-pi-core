@@ -47,6 +47,7 @@ def _discover_candidates(repo_root: Path) -> list[str]:
             seen.add(c)
     return out
 
+
 def test_program_descriptor_jsonschema_smoke():
     repo_root = Path(__file__).resolve().parents[2]
     schema_path = repo_root / "docs" / "program_descriptor_schema.json"
@@ -62,7 +63,9 @@ def test_program_descriptor_jsonschema_smoke():
             last = r
             break
 
-    assert last is not None, f"Could not resolve any candidate program for --json. Tried: {candidates[:30]}"
+    assert last is not None, (
+        f"Could not resolve any candidate program for --json. Tried: {candidates[:30]}"
+    )
 
     data = json.loads(last.stdout)
     jsonschema.validate(instance=data, schema=schema)

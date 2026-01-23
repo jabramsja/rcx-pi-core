@@ -13,7 +13,20 @@ def test_mutation_sandbox_runner_none_still_works(tmp_path: Path):
     w = tmp_path / "w.mu"
     w.write_text("[a] -> ra\n", encoding="utf-8")
     out = tmp_path / "sandbox_runs"
-    p = _run(["bash", "scripts/mutation_sandbox.sh", str(w), "--out-dir", str(out), "--run", "--score", "--runner", "none", "--json"])
+    p = _run(
+        [
+            "bash",
+            "scripts/mutation_sandbox.sh",
+            str(w),
+            "--out-dir",
+            str(out),
+            "--run",
+            "--score",
+            "--runner",
+            "none",
+            "--json",
+        ]
+    )
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["run"]["runner"] == "none"
@@ -25,7 +38,19 @@ def test_mutation_sandbox_runner_trace_cli_does_not_crash(tmp_path: Path):
     w = tmp_path / "w.mu"
     w.write_text("[a] -> ra\n", encoding="utf-8")
     out = tmp_path / "sandbox_runs"
-    p = _run(["bash", "scripts/mutation_sandbox.sh", str(w), "--out-dir", str(out), "--run", "--runner", "trace-cli", "--json"])
+    p = _run(
+        [
+            "bash",
+            "scripts/mutation_sandbox.sh",
+            str(w),
+            "--out-dir",
+            str(out),
+            "--run",
+            "--runner",
+            "trace-cli",
+            "--json",
+        ]
+    )
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["run"]["runner"] == "trace-cli"

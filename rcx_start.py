@@ -43,9 +43,7 @@ def _env_with_repo_on_path() -> dict:
     """Return a copy of os.environ with REPO_ROOT added to PYTHONPATH."""
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        REPO_ROOT + os.pathsep + existing if existing else REPO_ROOT
-    )
+    env["PYTHONPATH"] = REPO_ROOT + os.pathsep + existing if existing else REPO_ROOT
     return env
 
 
@@ -154,7 +152,9 @@ def make_menu() -> Dict[str, MenuEntry]:
 
     menu["5"] = (
         "Orbit ASCII: pingpong / ping / 12 steps",
-        lambda: run_python_module("rcx_pi.worlds.orbit_ascii_demo", ["pingpong", "ping", "12"]),
+        lambda: run_python_module(
+            "rcx_pi.worlds.orbit_ascii_demo", ["pingpong", "ping", "12"]
+        ),
     )
 
     menu["6"] = (
