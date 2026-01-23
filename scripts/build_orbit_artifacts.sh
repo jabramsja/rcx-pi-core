@@ -24,6 +24,9 @@ if ! command -v dot >/dev/null 2>&1; then
   exit 1
 fi
 dot -Tsvg "$DOT_FIXTURE" > "$SVG_FIXTURE"
+
+# Normalize SVG bytes (Graphviz may emit version-specific metadata)
+python3 scripts/normalize_graphviz_svg.py "docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
 echo "OK: wrote $SVG_FIXTURE"
 
 echo "== 3/4) write docs/fixtures/index.html =="
