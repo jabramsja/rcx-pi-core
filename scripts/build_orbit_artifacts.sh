@@ -64,7 +64,8 @@ html = f"""<!doctype html>
 <body>
   <h1>RCX Orbit Artifacts (v1)</h1>
   <div class="meta">
-    Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code>
+    Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code><br/>
+    Explorer: <code>orbit_explorer_v1.html</code> (states + provenance drilldown)
   </div>
 
   <div class="box links">
