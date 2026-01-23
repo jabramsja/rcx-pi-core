@@ -62,6 +62,12 @@ html = f"""<!doctype html>
   </style>
 </head>
 <body>
+  <div style="margin:0 0 14px 0; padding:12px; border:1px solid #eee; border-radius:12px; background:#fafafa;">
+    <strong>How to view these fixtures locally</strong><br/>
+    Run: <code>./scripts/open_fixtures.sh</code> (serves <code>docs/fixtures/</code> + opens <code>index.html</code>)<br/>
+    Tip: the explorer loads <code>orbit_provenance_v1.json</code> via <code>fetch()</code>, so using a local server avoids browser restrictions.
+  </div>
+
   <h1>RCX Orbit Artifacts (v1)</h1>
   <div class="meta">
     Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code><br/>
