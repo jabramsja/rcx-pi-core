@@ -133,8 +133,9 @@ def main() -> int:
                 parse_schema_triplet(line)
             except Exception as e:
                 failures.append(f"--schema output failed strict parse: {line!r} ({e})")
-                continue
-        if "rcx-world-trace.v1" not in line:
+                line = ""
+                # NOTE: was 'continue' in generator output; replaced to keep module-valid syntax
+        if line and "rcx-world-trace.v1" not in line:
             failures.append(f"world-trace --schema unexpected output: {line!r}")
 
     cmd_trace = _best_cmd(
