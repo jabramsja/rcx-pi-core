@@ -40,157 +40,99 @@ If a task is not listed here, it is NOT to be implemented.
 - Golden fixtures in place
 - Replay gate + CI enforcement in place
 - Rust replay acceleration bit-for-bit compatible
+- v2 trace schema + observability events (RCX_TRACE_V2=1)
+- Stall/Fix execution semantics v0 (RCX_EXECUTION_V0=1)
+- ExecutionEngine + value_hash() + _motif_to_json()
+- Record Mode v0 (execution → trace for stall/fix events)
+- Minimal Native Execution Primitive doc (Boundary Question answered)
+- v2 replay validation (_validate_v2_execution_sequence)
 
 ---
 
-## Lobe: Stall/Fix Observability (v2, non-breaking)
-
-### NOW (blocking)
-
-1. **Write Stall/Fix Observability design doc** ✅
-   - Deliverable: `docs/StallFixObservability.v0.md`
-   - Done: doc in PR #80
-
-2. **Implement v2 trace schema (alongside v1)** ✅
-   - Deliverables:
-     - `docs/schemas/rcx-trace-event.v2.json`
-     - v2 canonicalizer updates in `trace_canon.py`
-   - Done: schema created, canonicalizer accepts v=1 or v=2
-
-3. **Emit v2 events (flagged) for:** ✅
-   - reduction.stall (pattern match failed)
-   - reduction.applied (rule transformed value)
-   - reduction.normal (no rule matched)
-   - Deliverables:
-     - Feature flag: `RCX_TRACE_V2=1` (off by default)
-     - Instrumentation in `pattern_matching.py` and `rules_pure.py`
-   - Done:
-     - With flag OFF: v1 fixtures unchanged (bit-for-bit)
-     - With flag ON: v2 events appear as expected
-
-4. **Add minimal v2 fixtures + gate (separate from v1)** ✅
-   - Deliverables:
-     - `tests/fixtures/traces_v2/observer.v2.jsonl`
-     - `tests/test_replay_gate_v2.py`
-   - Done: v2 gate passes, v1 gate untouched
-
-5. **Bytecode mapping v0 alignment pass** ✅
-   - Input: `BytecodeMapping.v0.md`
-   - Deliverable: update mapping to include new v2 observability events (as "debug-only")
-   - Done: PR #81 merged, doc now references v2 debug-only opcodes
-
-6. **Stall/Fix Execution Semantics (v0)** ✅
-   - Design doc: `docs/StallFixExecution.v0.md`
-   - Feature flag: `RCX_EXECUTION_V0=1` (off by default)
-   - Decisions: Q1=A (Rule ID only), Q2=A (serialize stalls), Q3=A (whole value stalls)
-   - Phases:
-     - **Phase 1: Schema + Validation** ✅ (PR #85)
-       - v2 schema extended with execution.stall, execution.fix, execution.fixed
-       - ExecutionEngine class in trace_canon.py
-       - value_hash() for deterministic references
-     - **Phase 2: Golden Fixture + Tests** ✅ (PR #85)
-       - `tests/fixtures/traces_v2/stall_fix.v2.jsonl`
-       - Execution engine tests in test_replay_gate_v2.py
-     - **Phase 3: Integration** ✅ (PR #86)
-       - ExecutionEngine wired into PatternMatcher
-       - Pattern match failure → STALL (when execution_engine provided)
-       - _motif_to_json() for deterministic value serialization
-   - Done: All tests pass, all CI green
-
----
-
-## Meta-circular Readiness (Docs only)
-
-7. **MetaCircularReadiness.v1.md review pass** ✅
-   - Deliverable: ensure it references the current frozen invariants and v2 observability plan
-   - Done: PR #83 merged, doc updated to v1.1 with v2 observability references
-
----
-
-## Boundary Question (Unanswered)
+## Boundary Question (Answered)
 
 What is the smallest, host-independent execution primitive that RCX must possess
 such that a structural program can cause new structure to emerge only via
 Stall → Fix → Trace → Closure, and in no other way?
 
-This question defines the boundary between substrate completion and
-Sink-level capability growth. Anything beyond answering this question
-requires explicit promotion.
-
-**Operational restatement:**
-
-What is the minimal native execution loop that can:
-(a) detect a true stall,
-(b) apply a structurally justified fix,
-(c) record that as a trace event, and
-(d) make closure unavoidable on second independent encounter,
-without importing semantics from the host language?
+**Answer:** The Structural Reduction Loop (MATCH → REDUCE/STALL → TRACE → NORMAL_FORM).
+See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
-## Lobe: Minimal Native Execution Primitive
+## NOW (tight, measurable, no new architecture)
 
-### NOW (blocking)
+1. **Trace Reading Primer (for humans)**
+   - Deliverable: `docs/TraceReadingPrimer.v0.md`
+   - Contents:
+     - How to read v1 vs v2 traces
+     - "verbs not meaning": start/stall/fix/fixed/end
+     - What "hash" means and what to ignore
+     - 2 annotated examples: stall_fix.v2.jsonl + record_mode.v2.jsonl
+   - Done when: you can sanity-check a trace in 60 seconds without guessing.
 
-8. **Minimal Native Execution Primitive (v0)** ✅
-   - Deliverable: `docs/MinimalNativeExecutionPrimitive.v0.md`
-   - Purpose: Answer the Boundary Question above
-   - Done:
-     - Doc defines Structural Reduction Loop (MATCH → REDUCE/STALL → TRACE → NORMAL_FORM)
-     - 5 invariants explicit and testable
-     - 7 non-goals enumerated (no scope creep)
-     - Uses existing primitives only (Motif, PatternMatcher, ExecutionEngine, value_hash)
+2. **Record→Replay Gate (single command, end-to-end)**
+   - Deliverable: one CLI entrypoint (or documented command) that:
+     - runs record mode on a tiny deterministic input
+     - writes a temp trace
+     - runs replay --check-canon + v2 validation
+     - asserts bit-for-bit identical on second run
+   - Done when: one command proves "execution → trace → replay" determinism.
 
-9. **Doc coherence pass (NOW-A)** ✅
-   - Purpose: Align terminology across docs
-   - Done:
-     - Both docs use: `reduction.*` = observability, `execution.*` = state transitions
-     - No CLOSE opcode language (both say "normal form detected, not commanded")
-     - v0 marked as replay-only, single-value, STALL/FIX only
-
-10. **Gate wiring verification (NOW-B)** ✅
-    - Purpose: Confirm existing gates are correctly wired (no new capability)
-    - Done:
-      - v1 gates green (test_replay_gate_idempotent.py)
-      - v2 gates green (test_replay_gate_v2.py: 17 tests)
-      - Fixtures: `traces/` (4 v1), `traces_v2/` (3 v2)
-      - Clean repo after pytest (no tracked diffs)
-
-11. **Replay validation for v2 execution events (NOW-C)** ✅
-    - Purpose: Prove Stall→Fix→Trace loop is deterministic and replayable (trace-consumption only)
-    - Done:
-      - `_validate_v2_execution_sequence()` in replay_cli.py
-      - Validates: fix-without-stall, fixed-without-stall, hash mismatch, double stall
-      - Accepts: stall at trace end (normal form), valid stall→fixed cycle
-      - v1 unchanged, v2 fixtures pass validation
+3. **Flag Discipline Contract**
+   - Deliverable: `docs/Flags.md` (or section in TASKS.md)
+   - Must state:
+     - `RCX_TRACE_V2=1` is observability only
+     - `RCX_EXECUTION_V0=1` is execution/record only
+     - default OFF behavior is unchanged
+   - Done when: no test suite run depends on flags implicitly.
 
 ---
 
-## Sink Promotion Candidate
+## NEXT (still small, but capability growth)
 
-12. **Record Mode v0: execution → trace for stall/fix events** ✅
-    - Purpose: Emit execution.* events during actual reduction (inverse of replay)
-    - Flag: `RCX_EXECUTION_V0=1` (reuse existing flag, default OFF)
-    - Scope:
-      - Single-value path only, no concurrency
-      - Emit `execution.stall` when PatternMatcher mismatch causes true stall
-      - Emit `execution.fixed` ONLY if prior `execution.stall` exists for same value_hash in same run
-        (do NOT emit fixed on normal reductions without preceding stall)
-      - Collect events into trace output
-    - Deliverables:
-      - Edit `rcx_pi/reduction/pattern_matching.py`: call `engine.fixed()` after successful reduction IF engine is stalled
-      - Edit `rcx_pi/trace_canon.py` ExecutionEngine: track stall state to gate fixed emission
-      - Add ONE golden fixture: `tests/fixtures/traces_v2/record_mode.v2.jsonl` (generated from tiny deterministic input)
-      - Edit `tests/test_replay_gate_v2.py`: add record → replay → validate gate
-    - Done:
-      - Gate: (engine present) ∧ (engine STALLED) ∧ (hash match) ∧ (RCX_EXECUTION_V0=1)
-      - 4 tests: stall→fix cycle, no-fixed-without-stall, fixture match, replay validation
-      - Re-record determinism verified (PYTHONHASHSEED=0)
+4. **Consume execution.fix from trace (true cycle replay)**
+   - Purpose: close the loop so a trace can drive a full stall→fix progression
+   - Deliverable:
+     - extend replay to optionally apply execution.fix events to the engine
+     - new golden fixture: "stall + fix + fixed + end" where fix is consumed, not just validated
+   - Done when:
+     - replay can execute a fix when present
+     - still rejects invalid ordering/hashes
+     - v1 unchanged
+
+5. **Minimal "Closure-as-termination" fixture family**
+   - Purpose: make "normal form termination" a first-class, tested concept
+   - Deliverable: 2 fixtures:
+     - stall_at_end.v2.jsonl (normal form)
+     - stall_then_fix_then_end.v2.jsonl (resolved)
+   - Done when: tests distinguish the two cleanly and deterministically.
 
 ---
 
-## Sink (Unknown / Deferred)
+## VECTOR (design-first, defer implementation unless you promote)
 
-- Full RCX bytecode VM bootstrap
-- Meta-circular execution without host language
-- Performance-first optimizations before semantic lock
+6. **"Second independent encounter" semantics**
+   - Deliverable: `docs/IndependentEncounter.v0.md`
+   - Defines:
+     - what counts as "independent"
+     - how it's tracked (hash lineage? ancestry bookkeeping? tokenization?)
+     - what event signals closure becomes unavoidable
+   - Done when: you can implement later without re-arguing definitions.
+
+7. **Bytecode VM mapping v1 (upgrade from v0)**
+   - Deliverable: `BytecodeMapping.v1.md`
+   - Includes:
+     - how MATCH/REDUCE/STALL/FIX map to ops
+     - what state lives in registers vs trace
+     - determinism constraints carried forward
+   - Done when: it's implementable but still deferred.
+
+---
+
+## SINK (requires explicit promotion)
+
+- Multi-value/concurrent execution
+- ROUTE/CLOSE opcodes (if ever needed)
+- Full VM bootstrap / meta-circular execution
+- Performance-first optimizations
