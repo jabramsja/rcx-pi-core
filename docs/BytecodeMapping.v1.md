@@ -169,7 +169,7 @@ Guideline:
 - 0x40 OP_FIX
 - 0x41 OP_FIXED
 
-Exact numeric values are placeholders; only the semantic separation matters in v1.
+These numeric values are intentional placeholders, not a fixed bytecode commitment. They exist to make semantic boundaries concrete and auditable, not to lock an ABI. Only the semantic separation matters at this stage; numeric values are forward-compatible and disposable.
 
 ## Example trace-producing run
 

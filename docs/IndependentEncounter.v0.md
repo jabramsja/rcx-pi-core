@@ -137,6 +137,7 @@ But v0 stays detection-only to preserve minimal surface area.
 - Anti-theater: prevents repeated identical work from looking like progress.
 - No private engine access: only uses fields already emitted in trace.
 - Conservative reset: clearing stall memory on any value change prevents false closures.
+- Detected inevitability, not policy: the VM observes that closure has become unavoidable based on the event stream; it does not decide to close. What happens after closure is detected is policy that lives elsewhere.
 
 ## Non-goals (v0)
 
