@@ -17,10 +17,8 @@ def test_schema_files_live_in_docs_schemas():
 
     # Allow-list: files under docs/schemas are fine.
     # Disallow: any JSON schema-looking files directly under docs/ root.
-    bad = sorted(
-        p.name
-        for p in docs.glob("*.json")
-        if "schema" in p.name.lower()
-    )
+    bad = sorted(p.name for p in docs.glob("*.json") if "schema" in p.name.lower())
 
-    assert bad == [], f"Schema JSON files must live in docs/schemas/, found in docs/: {bad}"
+    assert bad == [], (
+        f"Schema JSON files must live in docs/schemas/, found in docs/: {bad}"
+    )
