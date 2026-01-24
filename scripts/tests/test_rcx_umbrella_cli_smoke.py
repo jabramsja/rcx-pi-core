@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from rcx_pi.cli_schema_run import parse_schema_triplet_stdout, run_schema_triplet
 
 PYTHON = sys.executable
 
