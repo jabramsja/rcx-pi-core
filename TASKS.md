@@ -121,21 +121,23 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## VECTOR (design-first, defer implementation unless you promote)
 
-6. **"Second independent encounter" semantics**
+6. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
-   - Defines:
-     - what counts as "independent"
-     - how it's tracked (hash lineage? ancestry bookkeeping? tokenization?)
-     - what event signals closure becomes unavoidable
-   - Done when: you can implement later without re-arguing definitions.
+   - Done:
+     - "Independent" defined: same (value_hash, pattern_id) with no intervening reduction
+     - Tracking: stall_memory map, cleared on any value transition
+     - Closure signal: second stall at same (v, p) implies normal form
+     - Minimal state: last_stall[(pattern_id)] = value_hash
+     - Conservative reset on execution.fixed
 
-7. **Bytecode VM mapping v1 (upgrade from v0)**
-   - Deliverable: `BytecodeMapping.v1.md`
-   - Includes:
-     - how MATCH/REDUCE/STALL/FIX map to ops
-     - what state lives in registers vs trace
-     - determinism constraints carried forward
-   - Done when: it's implementable but still deferred.
+7. **Bytecode VM mapping v1 (upgrade from v0)** ✅
+   - Deliverable: `docs/BytecodeMapping.v1.md`
+   - Done:
+     - MATCH/STALL/FIX/FIXED ops defined with semantics
+     - State model extended: value_state + stall_memory
+     - Registers vs trace: all register state derivable from trace
+     - Determinism constraints carried forward + new hash constraints
+     - Closure detection via independent encounter protocol
 
 ---
 
