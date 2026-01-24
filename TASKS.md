@@ -119,11 +119,20 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - `test_stall_then_fix_then_end_is_resolved`: validates full cycle
      - `test_closure_fixtures_are_distinguishable`: proves structural difference
 
+6. **IndependentEncounter pathological fixtures + tests** ✅
+   - Purpose: lock the edge-case semantics from `docs/IndependentEncounter.v0.md` into minimal, deterministic fixtures
+   - Done:
+     - Added minimal v2 fixtures under `tests/fixtures/traces_v2/independent_encounter/`
+     - Added pytest coverage asserting:
+       - closure evidence behavior per the doc's normative examples
+       - deterministic results (pure helper run twice)
+       - replay/validation acceptance via `validate_v2_execution_sequence()` on execution-only subsequence
+
 ---
 
 ## VECTOR (design-first, defer implementation unless you promote)
 
-6. **"Second independent encounter" semantics** ✅
+7. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
    - Done:
      - "Independent" defined: same (value_hash, pattern_id) with no intervening reduction
@@ -133,7 +142,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Conservative reset on execution.fixed
      - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
 
-7. **Bytecode VM mapping v1 (upgrade from v0)** ✅
+8. **Bytecode VM mapping v1 (upgrade from v0)** ✅
    - Deliverable: `docs/BytecodeMapping.v1.md`
    - Done:
      - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
