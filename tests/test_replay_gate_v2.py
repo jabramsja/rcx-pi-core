@@ -458,3 +458,84 @@ def test_record_mode_replay_validates() -> None:
         text=True,
     )
     assert result.returncode == 0, f"Record mode fixture failed replay validation:\n{result.stderr}"
+
+
+# --- Record→Replay Gate (NOW item 2) ---
+
+
+def _run_record_mode():
+    """
+    Run record mode on a tiny deterministic input.
+    Returns the generated trace as a string.
+    """
+    from rcx_pi.trace_canon import ExecutionEngine, canon_event_json
+    from rcx_pi.reduction.pattern_matching import (
+        PatternMatcher,
+        PROJECTION,
+        PATTERN_VAR_MARKER,
+    )
+    from rcx_pi.core.motif import μ
+
+    engine = ExecutionEngine(enabled=True)
+    pm = PatternMatcher(execution_engine=engine)
+
+    # Tiny deterministic input: μ(μ())
+    value = μ(μ())
+
+    # First projection: pattern that won't match → stall
+    non_matching_pattern = μ(μ(μ()))
+    proj_fail = μ(PROJECTION, non_matching_pattern, μ())
+    pm.apply_projection(proj_fail, value)
+
+    # Second projection: pattern that matches → fixed
+    var_x = μ(PATTERN_VAR_MARKER, μ())
+    matching_pattern = μ(var_x)
+    proj_match = μ(PROJECTION, matching_pattern, μ())
+    pm.apply_projection(proj_match, value)
+
+    # Serialize to canonical JSONL
+    events = engine.get_events()
+    return "".join(canon_event_json(ev) + "\n" for ev in events)
+
+
+def test_record_replay_gate_end_to_end(tmp_path) -> None:
+    """
+    Record→Replay Gate: single end-to-end determinism proof.
+
+    This test:
+    1. Runs record mode on a tiny deterministic input
+    2. Writes a temp trace
+    3. Runs replay --check-canon + v2 validation
+    4. Runs record mode again on the same input
+    5. Asserts bit-for-bit identical
+
+    Run standalone: PYTHONHASHSEED=0 pytest tests/test_replay_gate_v2.py::test_record_replay_gate_end_to_end -v
+    """
+    root = _repo_root()
+
+    # Step 1: Run record mode (first run)
+    trace1 = _run_record_mode()
+
+    # Step 2: Write to temp file
+    trace_file = tmp_path / "recorded.v2.jsonl"
+    trace_file.write_text(trace1, encoding="utf-8")
+
+    # Step 3: Run replay --check-canon + v2 validation
+    result = subprocess.run(
+        ["python3", "-m", "rcx_pi.rcx_cli", "replay", "--trace", str(trace_file), "--check-canon"],
+        cwd=str(root),
+        env={**os.environ, "PYTHONHASHSEED": "0"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"Replay validation failed:\n{result.stderr}"
+
+    # Step 4: Run record mode again (second run)
+    trace2 = _run_record_mode()
+
+    # Step 5: Assert bit-for-bit identical
+    assert trace1 == trace2, (
+        f"Record mode not deterministic!\n"
+        f"First run:\n{trace1}\n"
+        f"Second run:\n{trace2}"
+    )

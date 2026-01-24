@@ -62,30 +62,32 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NOW (tight, measurable, no new architecture)
 
-1. **Trace Reading Primer (for humans)**
+1. **Trace Reading Primer (for humans)** ✅
    - Deliverable: `docs/TraceReadingPrimer.v0.md`
-   - Contents:
-     - How to read v1 vs v2 traces
-     - "verbs not meaning": start/stall/fix/fixed/end
-     - What "hash" means and what to ignore
-     - 2 annotated examples: stall_fix.v2.jsonl + record_mode.v2.jsonl
-   - Done when: you can sanity-check a trace in 60 seconds without guessing.
+   - Done:
+     - v1 vs v2 event types documented
+     - Verb table: START/STALL/FIXED/END
+     - Hash fields explained (value_hash, before_hash, after_hash)
+     - 2 annotated examples with validation walkthrough
+     - 60-second method checklist
 
-2. **Record→Replay Gate (single command, end-to-end)**
-   - Deliverable: one CLI entrypoint (or documented command) that:
-     - runs record mode on a tiny deterministic input
-     - writes a temp trace
-     - runs replay --check-canon + v2 validation
-     - asserts bit-for-bit identical on second run
-   - Done when: one command proves "execution → trace → replay" determinism.
+2. **Record→Replay Gate (single command, end-to-end)** ✅
+   - Deliverable: `test_record_replay_gate_end_to_end` in test_replay_gate_v2.py
+   - Run: `PYTHONHASHSEED=0 pytest tests/test_replay_gate_v2.py::test_record_replay_gate_end_to_end -v`
+   - Done:
+     - Runs record mode on tiny input
+     - Writes temp trace
+     - Runs replay --check-canon + v2 validation
+     - Re-runs record mode, asserts bit-for-bit identical
 
-3. **Flag Discipline Contract**
-   - Deliverable: `docs/Flags.md` (or section in TASKS.md)
-   - Must state:
-     - `RCX_TRACE_V2=1` is observability only
-     - `RCX_EXECUTION_V0=1` is execution/record only
-     - default OFF behavior is unchanged
-   - Done when: no test suite run depends on flags implicitly.
+3. **Flag Discipline Contract** ✅
+   - Deliverable: `docs/Flags.md`
+   - Done:
+     - RCX_TRACE_V2=1: observability only
+     - RCX_EXECUTION_V0=1: execution/record only
+     - PYTHONHASHSEED=0: determinism
+     - Default OFF invariant documented
+     - Flag combinations table
 
 ---
 
