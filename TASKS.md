@@ -32,6 +32,17 @@ If a task is not listed here, it is NOT to be implemented.
 
 ---
 
+## Promotion Criteria (Non-Negotiable)
+
+- **SINK → VECTOR**: Item must have a clear semantic question to answer. A design doc must be written before any implementation. Promotion must be explicit and documented in this file.
+- **VECTOR → NEXT**: Design doc must be complete and reviewed. Semantics must be locked. Implementation scope must be bounded and testable. Observability must precede mechanics.
+- Promotion is never implicit. Moving an item between sections requires updating this file with rationale.
+- **PR rule**: Any PR that implements a VECTOR/SINK item without an explicit promotion note in this file must be rejected.
+- No implementation work may begin on VECTOR items. VECTOR is design-only.
+- No SINK item may advance without answering: "What semantic question does this resolve?"
+
+---
+
 ## Ra (Resolved / Merged)
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests.
@@ -66,7 +77,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
-## NOW (tight, measurable, no new architecture)
+## NOW (empty by design; only populated if an invariant is broken)
 
 1. **Trace Reading Primer (for humans)** ✅
    - Deliverable: `docs/TraceReadingPrimer.v0.md`
@@ -97,7 +108,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
-## NEXT (still small, but capability growth)
+## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
 4. **Consume execution.fix from trace (true cycle replay)** ✅
    - Purpose: close the loop so a trace can drive a full stall→fix progression
@@ -152,7 +163,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
-## VECTOR (design-first, defer implementation unless you promote)
+## VECTOR (design-only; semantics locked, no implementation allowed)
 
 8. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
@@ -183,7 +194,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
-## SINK (requires explicit promotion)
+## SINK (ideas parked; may not advance without explicit promotion decision)
 
 - Multi-value/concurrent execution
 - ROUTE/CLOSE opcodes (if ever needed)
