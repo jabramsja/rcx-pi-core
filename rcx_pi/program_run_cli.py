@@ -9,6 +9,11 @@ from rcx_pi.program_run import SCHEMA, SCHEMA_DOC, run_program_json
 from rcx_pi.program_registry import list_program_names
 
 
+from rcx_pi.cli_schema import print_schema_triplet
+
+SCHEMA_JSON = "docs/schemas/program_run_schema.json"
+
+
 def _read_input(args: argparse.Namespace) -> List[int]:
     if args.stdin:
         raw = sys.stdin.read()
@@ -53,8 +58,8 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print(
-            "rcx-program-run.v1 docs/program_run_schema.md docs/schemas/program_run_schema.json"
+        print_schema_triplet(
+            "rcx-program-run.v1", "docs/program_run_schema.md", SCHEMA_JSON
         )
         return 0
 

@@ -8,6 +8,11 @@ from typing import List
 from rcx_pi.program_descriptor_lib import SCHEMA, SCHEMA_DOC, describe_program_json
 
 
+from rcx_pi.cli_schema import print_schema_triplet
+
+SCHEMA_JSON = "docs/schemas/program_descriptor_schema.json"
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Describe a program (Mu) and emit JSON (contracted)."
@@ -28,8 +33,10 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print(
-            "rcx-program-descriptor.v1 docs/program_descriptor_schema.md docs/schemas/program_descriptor_schema.json"
+        print_schema_triplet(
+            "rcx-program-descriptor.v1",
+            "docs/program_descriptor_schema.md",
+            SCHEMA_JSON,
         )
         return 0
 

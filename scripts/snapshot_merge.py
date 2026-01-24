@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from rcx_pi.cli_schema import print_schema_triplet
+
+SCHEMA_TAG = "rcx.snapshot.v1"
+SCHEMA_DOC = "docs/snapshot_json_schema.md"
+SCHEMA_JSON = "docs/schemas/rcx.snapshot.v1.schema.json"
+
+#!/usr/bin/env python3
+
 import argparse
 import json
 import sys
@@ -88,9 +96,7 @@ def main(argv: List[str]) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print(
-            "rcx.snapshot.v1 docs/snapshot_json_schema.md docs/schemas/rcx.snapshot.v1.schema.json"
-        )
+        print_schema_triplet(SCHEMA_TAG, SCHEMA_DOC, SCHEMA_JSON)
         return 0
     a = _load_json(args.a)
     b = _load_json(args.b)

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from rcx_pi.cli_schema import print_schema_triplet
+
+SCHEMA_JSON = "docs/schemas/world_trace_json_schema.json"
 # Allow running this file directly (subprocess tests, ad-hoc use) without requiring PYTHONPATH.
 # When invoked as a module (python -m rcx_pi.worlds.world_trace_cli), this block is harmless.
 if __package__ is None or __package__ == "":
@@ -119,8 +122,8 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print(
-            "rcx-world-trace.v1 docs/world_trace_json_schema.md docs/schemas/world_trace_json_schema.json"
+        print_schema_triplet(
+            "rcx-world-trace.v1", "docs/world_trace_json_schema.md", SCHEMA_JSON
         )
         return 0
 
