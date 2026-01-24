@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from rcx_pi.cli_schema_run import parse_schema_triplet_stdout, run_schema_triplet
 
 
 def _run(cmd: list[str]) -> str:

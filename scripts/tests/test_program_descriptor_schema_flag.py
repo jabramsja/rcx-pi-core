@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from rcx_pi.cli_schema_run import parse_schema_triplet_stdout, run_schema_triplet
 
 
 def test_program_descriptor_schema_flag():
