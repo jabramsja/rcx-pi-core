@@ -159,6 +159,23 @@ without importing semantics from the host language?
       - Clean repo clone produces no tracked diffs after `pytest`
       - CI green on dev branch
 
+11. **Replay validation for v2 execution events (NOW-C)**
+    - Purpose: Prove Stall→Fix→Trace loop is deterministic and replayable (trace-consumption only)
+    - Deliverable: Edit `rcx_pi/replay_cli.py` to validate execution.* event sequences
+    - Scope:
+      - Validates stall/fix consistency (no invented fixes, no value rewrites)
+      - Does NOT claim "second independent encounter" semantics (that's Sink-level)
+      - v1 replay unchanged (no regression)
+    - DONE criteria:
+      - `replay --check-canon` validates execution.stall/fix/fixed sequence when present
+      - execution.fix must follow execution.stall (else HALT_ERR)
+      - execution.fix target_hash must match preceding stall value_hash (else HALT_ERR)
+      - execution.fixed must follow execution.fix (else HALT_ERR)
+      - Stall without fix before trace.end → valid (normal form termination)
+      - v1 fixtures unchanged, v1 gates green
+      - Golden fixture `stall_fix.v2.jsonl` passes validation
+      - CI green
+
 ---
 
 ## Sink (Unknown / Deferred)
