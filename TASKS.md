@@ -180,7 +180,7 @@ without importing semantics from the host language?
 
 ## Sink Promotion Candidate
 
-12. **Record Mode v0: execution → trace for stall/fix events**
+12. **Record Mode v0: execution → trace for stall/fix events** ✅
     - Purpose: Emit execution.* events during actual reduction (inverse of replay)
     - Flag: `RCX_EXECUTION_V0=1` (reuse existing flag, default OFF)
     - Scope:
@@ -194,17 +194,10 @@ without importing semantics from the host language?
       - Edit `rcx_pi/trace_canon.py` ExecutionEngine: track stall state to gate fixed emission
       - Add ONE golden fixture: `tests/fixtures/traces_v2/record_mode.v2.jsonl` (generated from tiny deterministic input)
       - Edit `tests/test_replay_gate_v2.py`: add record → replay → validate gate
-    - DONE criteria:
-      - Record tiny input → produces execution.stall/fixed trace (only when stall occurred)
-      - Replay validate passes on recorded trace
-      - Re-record same input → bit-for-bit identical trace (PYTHONHASHSEED=0)
-      - v1 gates unchanged, v2 gates green
-      - Flag OFF: no behavior change (existing tests pass)
-    - Constraints:
-      - No v1 schema changes
-      - No new test files (edit existing)
-      - No concurrency / multi-value
-      - Reuse existing v2 event schema + validator
+    - Done:
+      - Gate: (engine present) ∧ (engine STALLED) ∧ (hash match) ∧ (RCX_EXECUTION_V0=1)
+      - 4 tests: stall→fix cycle, no-fixed-without-stall, fixture match, replay validation
+      - Re-record determinism verified (PYTHONHASHSEED=0)
 
 ---
 
