@@ -1,322 +1,196 @@
-# RCX Bytecode Mapping (v1)
+# Bytecode VM Mapping v1
 
 Status: VECTOR (design-first, no code changes)
 
-This document promotes STALL and FIX from reserved (v0) to executable operations, and maps the MATCH/REDUCE/STALL/FIX primitives to bytecode-level ops.
+This document upgrades BytecodeMapping.v0.md to v1 by specifying a minimal bytecode VM model that aligns with the RCX-π execution lifecycle:
 
----
+MATCH → REDUCE or STALL → (optional FIX) → FIXED → continue
 
-## 1. Changes from v0
+v1 clarifies how STALL/FIX participate in execution (not just reserved opcodes), while keeping the system replayable and trace-driven.
 
-| Aspect | v0 | v1 |
-|--------|----|----|
-| STALL opcode | Reserved | Implemented |
-| FIX opcode | Reserved | Implemented |
-| MATCH opcode | Implicit | Explicit |
-| Closure detection | External | Inline via independent encounter |
-| State components | 4 (mu_store, buckets, cursor, artifacts) | 5 (adds stall_memory) |
+## Goals
 
-v0 reference: `docs/BytecodeMapping.v0.md`
+- Define an execution loop that produces trace events consistent with v2 validation.
+- Map conceptual phases (MATCH/REDUCE/STALL/FIX) to bytecode operations.
+- Specify what state belongs in registers vs what is derived from the trace.
+- Preserve "anti-theater" invariants: progress must be observable as value transitions or explicit stalls.
 
----
+## Non-goals
 
-## 2. VM State Model (v1)
+- Full instruction set for all motifs and reductions.
+- Performance optimizations.
+- Self-hosting bytecode compiler in this doc.
+- Defining new trace schemas beyond existing v2 fields.
 
-The VM maintains five state components:
+## Model overview
 
-### 2.1 Mu Store
+The VM is an interpreter over a linear bytecode stream. It evaluates a current value in registers, applies pattern rules, and emits trace events.
 
-```
-mu_store: Map<Index, JsonValue>
-```
+There are two distinct representations:
 
-Same as v0. Deep-sorted at insertion per EntropyBudget.md.
+1. Execution state (registers): what the VM actively mutates.
+2. Trace state (events): the public, canonical record that must be sufficient to validate behavior.
 
-### 2.2 Value State
+Key rule: replay validation depends on the trace, but the VM must be able to emit that trace without private coupling to the validator.
 
-```
-value_state: {
-  current_hash: String,     // Hash of current value
-  current_value: JsonValue, // Current value (for reduction)
-}
-```
+## Registers (v1)
 
-New in v1. Tracks the live value being reduced.
+Minimum register file:
 
-### 2.3 Stall Memory
+- R0: value (mu object)
+- RH: current_value_hash (derived from R0 via canonical hash function)
+- RP: current_pattern_id (the pattern site currently being matched)
+- RS: status enum {ACTIVE, STALLED}
+- RF: pending_fix_target_hash (optional; used only when status is STALLED)
 
-```
-stall_memory: Map<PatternId, ValueHash>
-```
+Additional optional registers:
 
-New in v1. Tracks most recent stall at each pattern site. Used for independent encounter detection per `IndependentEncounter.v0.md`.
+- RI: instruction pointer
+- RC: counters (stall/fix/fixed), though these can be derived from the trace
 
-### 2.4 Cursor
-
-```
-cursor: {
-  i: Integer,
-  phase: Enum(START, RUNNING, STALLED, FIXING, END, HALTED),
-}
-```
-
-Extended from v0. Adds STALLED and FIXING phases.
-
-### 2.5 Artifacts
-
-```
-artifacts: {
-  canon_out: String,
-  error: Option<String>,
-}
-```
+## Trace events (v2 alignment)
 
-Same as v0.
-
----
-
-## 3. Instruction Set (v1)
-
-### 3.1 Replay Ops (from v0)
-
-| Opcode | Args | Description |
-|--------|------|-------------|
-| `INIT` | — | Initialize VM state |
-| `LOAD_EVENT` | `ev: JsonValue` | Parse and validate event |
-| `CANON_EVENT` | — | Canonicalize loaded event |
-| `STORE_MU` | — | Store mu payload |
-| `EMIT_CANON` | — | Append canonical JSON line |
-| `ADVANCE` | — | Increment cursor.i |
-| `SET_PHASE` | `phase: Enum` | Set cursor.phase |
-| `ASSERT_CONTIGUOUS` | `expected: Integer` | Fail if cursor.i != expected |
-| `HALT_OK` | — | Return success |
-| `HALT_ERR` | `msg: String` | Return failure |
-
-### 3.2 Execution Ops (new in v1)
+The VM emits these v2 execution events:
 
-| Opcode | Args | Description |
-|--------|------|-------------|
-| `MATCH` | `pattern_id: String` | Attempt pattern match at current value |
-| `STALL` | `pattern_id: String` | Record stall, check independent encounter |
-| `FIX` | `fix_expr: JsonValue` | Apply fix expression to current value |
-| `FIXED` | `before: Hash, after: Hash` | Confirm value transition, clear stall memory |
-| `CHECK_CLOSURE` | `pattern_id: String` | Return true if closure detected at pattern |
-
-### 3.3 Opcode Semantics
-
-#### MATCH(pattern_id)
-
-```
-Preconditions: cursor.phase in {RUNNING, STALLED}
-Side effects:
-  - If pattern matches current_value: proceed to reduction
-  - If pattern fails: emit STALL(pattern_id)
-```
-
-#### STALL(pattern_id)
-
-```
-Preconditions: MATCH just failed
-Side effects:
-  - v := value_state.current_hash
-  - p := pattern_id
-  - If stall_memory[p] == v:
-      - Closure detected (second independent encounter)
-      - SET_PHASE(END)
-      - Return closure_detected = true
-  - Else:
-      - stall_memory[p] = v
-      - SET_PHASE(STALLED)
-      - Emit execution.stall event
-```
-
-#### FIX(fix_expr)
-
-```
-Preconditions: cursor.phase == STALLED
-Side effects:
-  - Apply fix_expr to value_state.current_value
-  - Compute new hash
-  - Emit execution.fix event
-  - SET_PHASE(FIXING)
-```
-
-#### FIXED(before_hash, after_hash)
-
-```
-Preconditions: cursor.phase == FIXING
-Validation:
-  - Assert before_hash == value_state.current_hash (pre-fix)
-  - Assert after_hash == hash(new_value)
-Side effects:
-  - value_state.current_hash = after_hash
-  - value_state.current_value = new_value
-  - Clear stall_memory (conservative reset per IndependentEncounter.v0.md)
-  - Emit execution.fixed event
-  - SET_PHASE(RUNNING)
-```
-
-#### CHECK_CLOSURE(pattern_id)
-
-```
-Preconditions: any
-Side effects: none
-Returns: true if stall_memory[pattern_id] == value_state.current_hash
-```
-
----
-
-## 4. State: Registers vs Trace
-
-| State Component | Register | Trace |
-|-----------------|----------|-------|
-| `cursor.i` | Yes | No |
-| `cursor.phase` | Yes | Derived from event sequence |
-| `value_state.current_hash` | Yes | Emitted in execution.stall, execution.fixed |
-| `value_state.current_value` | Yes | Not emitted (hash is sufficient) |
-| `stall_memory` | Yes | Not emitted (derived from stall events) |
-| `mu_store` | Yes | Derived from step events |
-| `artifacts.canon_out` | Yes | Is the trace |
-
-### 4.1 Derivability
-
-All register state can be reconstructed from the trace:
-- `cursor.i`: Count of events processed
-- `cursor.phase`: Inferred from last event type
-- `value_state.current_hash`: Tracked through execution.stall and execution.fixed events
-- `stall_memory`: Rebuilt by replaying stall events and clearing on fixed events
-
-This means: trace is authoritative, registers are cache.
-
----
-
-## 5. Mapping: Trace Event → Op Sequence
-
-### 5.1 execution.stall
-
-```
-LOAD_EVENT(ev)
-ASSERT_CONTIGUOUS(cursor.i)
-STALL(ev.mu.pattern_id)
-CANON_EVENT
-EMIT_CANON
-ADVANCE
-```
+- execution.stall
+  - mu.value_hash = RH
+  - mu.pattern_id = RP
 
-### 5.2 execution.fix
+- execution.fix (optional)
+  - mu.target_hash = RF (must equal RH at time of stall)
 
-```
-LOAD_EVENT(ev)
-ASSERT_CONTIGUOUS(cursor.i)
-FIX(ev.mu.fix_expr)
-CANON_EVENT
-EMIT_CANON
-ADVANCE
-```
+- execution.fixed
+  - mu.before_hash
+  - mu.after_hash
 
-### 5.3 execution.fixed
+v1 treats these events as first-class outputs of VM execution.
 
-```
-LOAD_EVENT(ev)
-ASSERT_CONTIGUOUS(cursor.i)
-FIXED(ev.mu.before_hash, ev.mu.after_hash)
-CANON_EVENT
-EMIT_CANON
-ADVANCE
-```
-
-### 5.4 v1 Events (trace.start, step, trace.end)
-
-Same as v0. No execution ops involved.
-
----
-
-## 6. Closure Detection Protocol
-
-Per `IndependentEncounter.v0.md`, closure is detected when:
-
-1. STALL(pattern_id) is invoked
-2. stall_memory[pattern_id] == value_state.current_hash
-3. No FIXED event occurred between the two stalls
-
-The VM signals closure by:
-- Setting cursor.phase = END
-- Emitting trace.end (or closure-specific event if schema evolves)
-
-### 6.1 Stall Memory Invariants
-
-- On STALL: record (pattern_id → current_hash)
-- On FIXED: clear all stall_memory (conservative reset)
-- On trace.end: stall_memory is discarded
-
----
-
-## 7. Determinism Constraints (carried from v0)
-
-All v0 determinism constraints apply:
-
-| Requirement | Enforcement |
-|-------------|-------------|
-| PYTHONHASHSEED=0 | CI environment |
-| Dict key ordering | Deep-sort at CANON_EVENT |
-| No RNG | No randomness in any opcode |
-| No floats in trace | Schema validation at LOAD_EVENT |
-| Contiguous indices | ASSERT_CONTIGUOUS |
-| Canonical JSON output | EMIT_CANON uses frozen key order |
-
-### 7.1 New in v1
-
-| Requirement | Enforcement |
-|-------------|-------------|
-| Value hash determinism | value_hash() function per trace_canon.py |
-| Stall memory reset | Clear on any FIXED (not partial invalidation) |
-| Pattern ID stability | Must be stable across replay |
-
----
-
-## 8. Fail-Loud Policy (extended from v0)
-
-The VM MUST halt with explicit error on:
-
-1. **Schema violation**: (same as v0)
-2. **Contiguity violation**: (same as v0)
-3. **Unmappable event type**: (same as v0)
-4. **Entropy leak**: (same as v0)
-5. **Hash mismatch**: execution.fixed before_hash != tracked current_hash
-6. **Invalid phase transition**: e.g., FIX when not STALLED
-7. **Stall without prior match**: STALL invoked without MATCH context
-
----
-
-## 9. Still Reserved (not in v1)
-
-| Opcode | Status | Notes |
-|--------|--------|-------|
-| `ROUTE` | Reserved | Bucket routing not in v1 scope |
-| `CLOSE` | Reserved | Explicit closure event not required (implicit via stall memory) |
-
-These remain deferred to SINK.
-
----
-
-## 10. Validation Criteria
-
-A conforming v1 VM implementation MUST:
-
-1. Pass all v0 validation criteria
-2. Accept execution.stall/fix/fixed events and update state correctly
-3. Detect second independent encounter and signal closure
-4. Produce output identical to Python reference (diff-empty)
-5. Clear stall memory on any value transition
-
----
-
-## Version
-
-Document version: v1.0
-Last updated: 2026-01-24
-Dependencies:
-- `docs/BytecodeMapping.v0.md` (base)
-- `docs/IndependentEncounter.v0.md` (closure detection)
-- `docs/schemas/rcx-trace-event.v2.json` (execution events)
-- `EntropyBudget.md` (determinism)
+## Bytecode operations
+
+v1 defines a minimal set of operations sufficient to express MATCH/REDUCE/STALL/FIX:
+
+### Core ops
+
+- OP_MATCH pattern_id
+  - Sets RP = pattern_id
+  - Attempts to match RP against the current value R0
+
+- OP_REDUCE rule_id
+  - Applies a reduction rule to R0
+  - Updates R0 and RH
+  - Emits execution.fixed with (before_hash, after_hash)
+  - Sets RS = ACTIVE
+
+- OP_STALL
+  - Declares no reduction is available for the current (RH, RP)
+  - Emits execution.stall with (value_hash=RH, pattern_id=RP)
+  - Sets RS = STALLED
+  - Clears RF unless already set by a fix plan
+
+### Fix ops
+
+- OP_FIX target_hash
+  - Allowed only when RS == STALLED
+  - Requires target_hash == RH
+  - Sets RF = target_hash
+  - Emits execution.fix(target_hash=RF)
+  - Does NOT change R0/RH
+
+- OP_FIXED after_value
+  - Allowed only when RS == STALLED
+  - Requires RF is None or RF == RH (depending on whether fix is optional at this stall)
+  - Computes after_hash from after_value
+  - Emits execution.fixed(before_hash=RH, after_hash=after_hash)
+  - Sets R0 = after_value; RH = after_hash
+  - Sets RS = ACTIVE
+  - Clears RF
+
+Notes:
+- execution.fix is optional in the trace. Therefore OP_FIXED must be valid whether OP_FIX occurred or not.
+- The constraints above match the existing replay_cli validation semantics.
+
+## Execution loop semantics
+
+High-level loop:
+
+1. ACTIVE:
+   - OP_MATCH(pattern_id)
+   - If a reduction exists:
+       - OP_REDUCE(rule_id)
+     Else:
+       - OP_STALL
+
+2. STALLED:
+   - Either:
+     - Provide OP_FIX(RH) then OP_FIXED(after_value), OR
+     - Provide OP_FIXED(after_value) directly (fix absent)
+   - Return to ACTIVE after OP_FIXED
+
+This captures the reality that "stall" is a public state and "fix/fixed" is an explicit transition out of it.
+
+## Determinism and anti-theater invariants
+
+### Deterministic hashing
+
+- RH must be computed via the canonical hash used everywhere else.
+- A change in R0 must change RH (unless it is structurally identical).
+
+### No-op prevention
+
+- OP_REDUCE and OP_FIXED must produce after_hash that differs from before_hash unless the semantics explicitly allow idempotent transitions (discouraged).
+- If idempotence is allowed for a specific rule, it must be justified and observable.
+
+### Stall integrity
+
+- OP_STALL cannot be emitted while RS == STALLED (no double-stall without leaving stall).
+- Stalling twice at the same (RH, RP) without an intervening RH change is a closure condition and should be recognized by higher-level semantics (see IndependentEncounter.v0.md).
+
+## What lives in registers vs trace
+
+Registers are authoritative during execution.
+Trace is authoritative for post-hoc validation.
+
+Guideline:
+- Anything needed for validation must be emitted into the trace as public fields.
+- The VM may compute derived values (counts, summaries), but these must always be derivable from the event stream.
+
+## Mapping MATCH/REDUCE/STALL/FIX to ops
+
+- MATCH: OP_MATCH(pattern_id)
+- REDUCE: OP_REDUCE(rule_id) → emits execution.fixed
+- STALL: OP_STALL → emits execution.stall
+- FIX: OP_FIX(target_hash) + OP_FIXED(after_value) → emits execution.fix (optional) and execution.fixed
+
+## Recommended minimal opcode table (v1)
+
+- 0x10 OP_MATCH
+- 0x20 OP_REDUCE
+- 0x30 OP_STALL
+- 0x40 OP_FIX
+- 0x41 OP_FIXED
+
+Exact numeric values are placeholders; only the semantic separation matters in v1.
+
+## Example trace-producing run
+
+Scenario: value stalls, then is fixed.
+
+- Start ACTIVE, RH = H0
+- OP_MATCH(P1)
+- no reduction
+- OP_STALL → emit execution.stall(value_hash=H0, pattern_id=P1)
+- RS = STALLED
+- OP_FIX(H0) → emit execution.fix(target_hash=H0)
+- OP_FIXED(value'=V1) → compute H1, emit execution.fixed(before_hash=H0, after_hash=H1)
+- RS = ACTIVE
+
+## Compatibility notes
+
+- This design remains compatible with existing replay validation rules.
+- The VM does not need to import or consult the validator; it only needs to obey constraints that are already trace-validated.
+
+## v1 upgrades vs v0
+
+- STALL/FIX are not merely reserved concepts; they are executable transitions with strict constraints.
+- Execution loop is explicitly defined.
+- Registers and trace responsibilities are separated and documented.
