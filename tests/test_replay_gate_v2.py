@@ -198,7 +198,7 @@ def test_replay_validation_rejects_fix_without_stall() -> None:
     """
     Replay validation must HALT_ERR if execution.fix appears without prior stall.
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
     import pytest
 
     # execution.fix without preceding execution.stall
@@ -206,14 +206,14 @@ def test_replay_validation_rejects_fix_without_stall() -> None:
         {"v": 2, "type": "execution.fix", "i": 0, "t": "rule", "mu": {"target_hash": "abc123"}},
     ]
     with pytest.raises(ValueError, match="fix without stall"):
-        _validate_v2_execution_sequence(bad_trace)
+        validate_v2_execution_sequence(bad_trace)
 
 
 def test_replay_validation_rejects_fixed_without_stall() -> None:
     """
     Replay validation must HALT_ERR if execution.fixed appears without prior stall.
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
     import pytest
 
     # execution.fixed without preceding execution.stall
@@ -221,14 +221,14 @@ def test_replay_validation_rejects_fixed_without_stall() -> None:
         {"v": 2, "type": "execution.fixed", "i": 0, "t": "rule", "mu": {"before_hash": "abc", "after_hash": "def"}},
     ]
     with pytest.raises(ValueError, match="fixed without stall"):
-        _validate_v2_execution_sequence(bad_trace)
+        validate_v2_execution_sequence(bad_trace)
 
 
 def test_replay_validation_rejects_mismatched_fix_hash() -> None:
     """
     Replay validation must HALT_ERR if execution.fix target_hash doesn't match stall value_hash.
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
     import pytest
 
     # execution.fix with wrong target_hash
@@ -237,14 +237,14 @@ def test_replay_validation_rejects_mismatched_fix_hash() -> None:
         {"v": 2, "type": "execution.fix", "i": 1, "t": "rule", "mu": {"target_hash": "wrong_hash"}},
     ]
     with pytest.raises(ValueError, match="target_hash mismatch"):
-        _validate_v2_execution_sequence(bad_trace)
+        validate_v2_execution_sequence(bad_trace)
 
 
 def test_replay_validation_rejects_mismatched_fixed_hash() -> None:
     """
     Replay validation must HALT_ERR if execution.fixed before_hash doesn't match stall value_hash.
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
     import pytest
 
     # execution.fixed with wrong before_hash
@@ -253,14 +253,14 @@ def test_replay_validation_rejects_mismatched_fixed_hash() -> None:
         {"v": 2, "type": "execution.fixed", "i": 1, "t": "rule", "mu": {"before_hash": "wrong_hash", "after_hash": "new"}},
     ]
     with pytest.raises(ValueError, match="before_hash mismatch"):
-        _validate_v2_execution_sequence(bad_trace)
+        validate_v2_execution_sequence(bad_trace)
 
 
 def test_replay_validation_rejects_double_stall() -> None:
     """
     Replay validation must HALT_ERR if execution.stall appears while already stalled.
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
     import pytest
 
     # Two stalls without intervening fixed
@@ -269,28 +269,28 @@ def test_replay_validation_rejects_double_stall() -> None:
         {"v": 2, "type": "execution.stall", "i": 1, "mu": {"pattern_id": "p2", "value_hash": "hash2"}},
     ]
     with pytest.raises(ValueError, match="double stall"):
-        _validate_v2_execution_sequence(bad_trace)
+        validate_v2_execution_sequence(bad_trace)
 
 
 def test_replay_validation_accepts_stall_at_trace_end() -> None:
     """
     Replay validation must accept stall without fix at trace end (normal form termination).
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
 
     # Stall at end of trace = normal form, should NOT raise
     valid_trace = [
         {"v": 2, "type": "execution.stall", "i": 0, "mu": {"pattern_id": "p1", "value_hash": "hash1"}},
     ]
     # Should not raise
-    _validate_v2_execution_sequence(valid_trace)
+    validate_v2_execution_sequence(valid_trace)
 
 
 def test_replay_validation_accepts_valid_stall_fix_cycle() -> None:
     """
     Replay validation must accept valid stall → fixed sequence.
     """
-    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
 
     # Valid cycle: stall → fixed (fix is optional)
     valid_trace = [
@@ -298,7 +298,7 @@ def test_replay_validation_accepts_valid_stall_fix_cycle() -> None:
         {"v": 2, "type": "execution.fixed", "i": 1, "t": "rule", "mu": {"before_hash": "abc123", "after_hash": "def456"}},
     ]
     # Should not raise
-    _validate_v2_execution_sequence(valid_trace)
+    validate_v2_execution_sequence(valid_trace)
 
 
 # --- Record Mode v0 Tests ---
@@ -336,7 +336,7 @@ def test_record_mode_stall_then_fix() -> None:
     result1 = pm.apply_projection(proj_fail, value)
     assert result1 is value, "Value unchanged on mismatch"
     assert engine.is_stalled, "Engine should be stalled"
-    assert engine._current_value_hash == value_h
+    # value_hash verified via emitted event (line 359), not private state
 
     # Projection 2: pattern that matches (expects μ(X)) with variable X
     var_x = μ(PATTERN_VAR_MARKER, μ())  # pattern variable
@@ -539,3 +539,195 @@ def test_record_replay_gate_end_to_end(tmp_path) -> None:
         f"First run:\n{trace1}\n"
         f"Second run:\n{trace2}"
     )
+
+
+# --- Closure-as-termination fixture family (NEXT item 5) ---
+
+
+def test_stall_at_end_is_normal_form() -> None:
+    """
+    stall_at_end.v2.jsonl: stall with no fix = normal form termination.
+    Validates that a trace ending with stall (no fix) is valid.
+    """
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
+    import json
+
+    fixture = _repo_root() / "tests" / "fixtures" / "traces_v2" / "stall_at_end.v2.jsonl"
+    events = [json.loads(ln) for ln in fixture.read_text().strip().split("\n") if ln.strip()]
+
+    # Should not raise - stall at end is valid (normal form)
+    validate_v2_execution_sequence(events)
+
+    # Verify structure: exactly one stall, no fix, no fixed
+    assert len(events) == 1
+    assert events[0]["type"] == "execution.stall"
+
+
+def test_stall_then_fix_then_end_is_resolved() -> None:
+    """
+    stall_then_fix_then_end.v2.jsonl: stall → fix → fixed = resolved.
+    Validates that a trace with full stall/fix/fixed cycle is valid.
+    """
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
+    import json
+
+    fixture = _repo_root() / "tests" / "fixtures" / "traces_v2" / "stall_then_fix_then_end.v2.jsonl"
+    events = [json.loads(ln) for ln in fixture.read_text().strip().split("\n") if ln.strip()]
+
+    # Should not raise - complete cycle is valid
+    validate_v2_execution_sequence(events)
+
+    # Verify structure: stall → fix → fixed
+    assert len(events) == 3
+    assert events[0]["type"] == "execution.stall"
+    assert events[1]["type"] == "execution.fix"
+    assert events[2]["type"] == "execution.fixed"
+
+    # Verify hash continuity
+    stall_hash = events[0]["mu"]["value_hash"]
+    fix_target = events[1]["mu"]["target_hash"]
+    fixed_before = events[2]["mu"]["before_hash"]
+
+    assert fix_target == stall_hash, "fix target must match stall hash"
+    assert fixed_before == stall_hash, "fixed before must match stall hash"
+
+
+def test_closure_fixtures_are_distinguishable() -> None:
+    """
+    The two closure fixtures represent different outcomes:
+    - stall_at_end: normal form (no resolution possible)
+    - stall_then_fix_then_end: resolved (fix was applied)
+
+    This test proves the distinction is captured in trace structure.
+    """
+    import json
+
+    stall_only = _repo_root() / "tests" / "fixtures" / "traces_v2" / "stall_at_end.v2.jsonl"
+    stall_fixed = _repo_root() / "tests" / "fixtures" / "traces_v2" / "stall_then_fix_then_end.v2.jsonl"
+
+    events_stall = [json.loads(ln) for ln in stall_only.read_text().strip().split("\n") if ln.strip()]
+    events_fixed = [json.loads(ln) for ln in stall_fixed.read_text().strip().split("\n") if ln.strip()]
+
+    # Stall-only ends in stalled state
+    has_fixed_stall = any(e["type"] == "execution.fixed" for e in events_stall)
+    assert not has_fixed_stall, "stall_at_end should not have execution.fixed"
+
+    # Stall-then-fixed ends in active state
+    has_fixed_resolved = any(e["type"] == "execution.fixed" for e in events_fixed)
+    assert has_fixed_resolved, "stall_then_fix_then_end should have execution.fixed"
+
+    # They start with same stall hash but diverge
+    assert events_stall[0]["mu"]["value_hash"] == events_fixed[0]["mu"]["value_hash"]
+
+
+# --- Consume execution.fix from trace (NEXT item 4) ---
+
+
+def test_replay_consumes_execution_fix() -> None:
+    """
+    Replay can drive ExecutionEngine through stall→fix→fixed cycle via public API.
+    The execution.fix event is consumed (validated against engine state), not just sequence-checked.
+
+    Uses public replay_* methods: consume_stall, consume_fix, consume_fixed.
+    Test will fail if these methods break (no private state mutation).
+    """
+    from rcx_pi.trace_canon import ExecutionEngine, ExecutionStatus
+    import json
+
+    fixture = _repo_root() / "tests" / "fixtures" / "traces_v2" / "stall_then_fix_then_end.v2.jsonl"
+    events = [json.loads(ln) for ln in fixture.read_text().strip().split("\n") if ln.strip()]
+
+    # Drive engine through the trace using public replay API
+    engine = ExecutionEngine(enabled=True)
+
+    for ev in events:
+        ev_type = ev["type"]
+        mu = ev.get("mu", {})
+
+        if ev_type == "execution.stall":
+            engine.consume_stall(mu["pattern_id"], mu["value_hash"])
+
+        elif ev_type == "execution.fix":
+            engine.consume_fix(ev.get("t", ""), mu["target_hash"])
+
+        elif ev_type == "execution.fixed":
+            engine.consume_fixed(ev.get("t", ""), mu["before_hash"], mu["after_hash"])
+
+    # After consuming all events, engine should be active
+    assert engine.status == ExecutionStatus.ACTIVE, "Engine should be active after consuming fix"
+
+
+def test_replay_api_rejects_invalid_sequence() -> None:
+    """
+    Replay API enforces state machine invariants (same as record API).
+    """
+    from rcx_pi.trace_canon import ExecutionEngine
+    import pytest
+
+    engine = ExecutionEngine(enabled=True)
+
+    # Cannot consume_fix when not stalled
+    with pytest.raises(RuntimeError, match="expected STALLED"):
+        engine.consume_fix("rule", "hash")
+
+    # Cannot consume_fixed when not stalled
+    with pytest.raises(RuntimeError, match="expected STALLED"):
+        engine.consume_fixed("rule", "before", "after")
+
+    # Stall, then try wrong target_hash
+    engine.consume_stall("pattern", "correct_hash")
+    with pytest.raises(RuntimeError, match="target mismatch"):
+        engine.consume_fix("rule", "wrong_hash")
+
+    # Reset and try wrong before_hash
+    engine.reset()
+    engine.consume_stall("pattern", "correct_hash")
+    with pytest.raises(RuntimeError, match="before_hash mismatch"):
+        engine.consume_fixed("rule", "wrong_hash", "after")
+
+
+# --- Fixture coverage tests (ensure all v2 fixtures are referenced) ---
+
+
+def test_observer_v2_fixture_is_canonical() -> None:
+    """
+    observer.v2.jsonl contains v2 observability events (reduction.*).
+    Verifies the fixture is canonical.
+    """
+    root = _repo_root()
+    fixture = root / "tests" / "fixtures" / "traces_v2" / "observer.v2.jsonl"
+
+    result = subprocess.run(
+        ["python3", "-m", "rcx_pi.rcx_cli", "replay", "--trace", str(fixture), "--check-canon"],
+        cwd=str(root),
+        env={**os.environ, "PYTHONHASHSEED": "0"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"observer.v2.jsonl failed validation:\n{result.stderr}"
+
+
+def test_stall_fix_v2_fixture_is_canonical() -> None:
+    """
+    stall_fix.v2.jsonl contains v2 execution events (stall→fixed, no explicit fix).
+    Verifies the fixture is canonical and passes v2 validation.
+    """
+    from rcx_pi.replay_cli import validate_v2_execution_sequence
+    import json
+
+    root = _repo_root()
+    fixture = root / "tests" / "fixtures" / "traces_v2" / "stall_fix.v2.jsonl"
+
+    # Check canonical
+    result = subprocess.run(
+        ["python3", "-m", "rcx_pi.rcx_cli", "replay", "--trace", str(fixture), "--check-canon"],
+        cwd=str(root),
+        env={**os.environ, "PYTHONHASHSEED": "0"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"stall_fix.v2.jsonl failed validation:\n{result.stderr}"
+
+    # Also validate execution sequence
+    events = [json.loads(ln) for ln in fixture.read_text().strip().split("\n") if ln.strip()]
+    validate_v2_execution_sequence(events)  # Should not raise

@@ -14,7 +14,7 @@ _EXECUTION_FIX = "execution.fix"
 _EXECUTION_FIXED = "execution.fixed"
 
 
-def _validate_v2_execution_sequence(events: List[Dict[str, Any]]) -> None:
+def validate_v2_execution_sequence(events: List[Dict[str, Any]]) -> None:
     """
     Validate v2 execution event sequence (trace-consumption only).
 
@@ -175,7 +175,7 @@ def replay_main(argv: List[str] | None = None) -> int:
 
         # Validate v2 execution event sequence (if present)
         try:
-            _validate_v2_execution_sequence(raw_events)
+            validate_v2_execution_sequence(raw_events)
         except ValueError as e:
             print(f"REPLAY_EXECUTION_ERROR: {e}", file=sys.stderr)
             return 1
