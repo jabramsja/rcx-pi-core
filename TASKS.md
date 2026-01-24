@@ -129,15 +129,16 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Closure signal: second stall at same (v, p) implies normal form
      - Minimal state: last_stall[(pattern_id)] = value_hash
      - Conservative reset on execution.fixed
+     - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
 
 7. **Bytecode VM mapping v1 (upgrade from v0)** ✅
    - Deliverable: `docs/BytecodeMapping.v1.md`
    - Done:
-     - MATCH/STALL/FIX/FIXED ops defined with semantics
-     - State model extended: value_state + stall_memory
-     - Registers vs trace: all register state derivable from trace
-     - Determinism constraints carried forward + new hash constraints
-     - Closure detection via independent encounter protocol
+     - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
+     - Bytecode ops: OP_MATCH, OP_REDUCE, OP_STALL, OP_FIX, OP_FIXED
+     - Opcode table: semantic placeholders (0x10-0x41), not ABI commitment
+     - Registers authoritative during execution, trace authoritative for validation
+     - Execution loop: ACTIVE → STALL → (optional FIX) → FIXED → ACTIVE
 
 ---
 
