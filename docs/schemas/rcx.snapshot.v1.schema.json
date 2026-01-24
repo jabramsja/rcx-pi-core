@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "program": {
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": "rcx.snapshot.v1"
+    },
+    "state": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inf_reg": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lobes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "null_reg": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ra": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sink": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step_counter": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trace": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "payload": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "route": {
+                "type": "string"
+              },
+              "step": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "step",
+              "phase",
+              "route",
+              "payload"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "current",
+        "ra",
+        "lobes",
+        "sink",
+        "step_counter",
+        "null_reg",
+        "inf_reg",
+        "trace"
+      ],
+      "type": "object"
+    },
+    "world": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "world",
+    "program",
+    "state"
+  ],
+  "title": "rcx.snapshot.v1",
+  "type": "object"
+}
