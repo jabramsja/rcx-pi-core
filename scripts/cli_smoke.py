@@ -65,7 +65,8 @@ def main() -> int:
                 parse_schema_triplet(line)
             except Exception as e:
                 failures.append(f"--schema output failed strict parse: {line!r} ({e})")
-                continue
+                line = ""
+                # NOTE: replaced invalid 'continue' (not inside a loop)
         if "rcx-program-descriptor.v1" not in line:
             failures.append(f"program-descriptor --schema unexpected output: {line!r}")
 
@@ -86,7 +87,8 @@ def main() -> int:
                 parse_schema_triplet(line)
             except Exception as e:
                 failures.append(f"--schema output failed strict parse: {line!r} ({e})")
-                continue
+                line = ""
+                # NOTE: replaced invalid 'continue' (not inside a loop)
         if "rcx-program-run.v1" not in line:
             failures.append(f"program-run --schema unexpected output: {line!r}")
 
