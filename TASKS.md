@@ -142,6 +142,14 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
        - Determinism assertion (run CLI twice, compare JSON)
      - No engine access, no private attributes, no mocking
 
+8. **CI: run tools/audit_all.sh as required gate** ✅
+   - Purpose: make the repo provably "not a house of cards" via CI
+   - Done:
+     - Added `.github/workflows/audit_all.yml`
+     - Runs on push and pull_request
+     - Executes `tools/audit_all.sh` with PYTHONHASHSEED=0
+     - Covers: pytest, anti-cheat scans, fixture size checks, CLI spot-checks
+
 ---
 
 ## VECTOR (design-first, defer implementation unless you promote)
