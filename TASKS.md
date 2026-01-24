@@ -35,6 +35,8 @@
 - Replay gate runs all fixtures; CI enforces determinism
 - Comprehensive freeze fixture (`replay_freeze.v1.jsonl`) - contiguity, nested mu, metadata
 - Rust replay acceleration (`rcx_pi_rust/examples/replay_cli.rs`) - bit-for-bit compatible with Python
+- Bytecode mapping design doc (`docs/BytecodeMapping.v0.md`) - VECTOR #5 deliverable
+- Meta-circular readiness definition (`docs/MetaCircularReadiness.v1.md`) - VECTOR #6 deliverable
 
 ---
 
@@ -61,14 +63,32 @@ The Python replay semantics are now locked. This freeze means:
 
 **Status: Complete. Replay semantics frozen. Rust acceleration shipped.**
 
-### VECTOR (intentionally deferred)
+### VECTOR (design docs complete, implementation blocked)
 
-5. **Bytecode / VM mapping draft**
-   - Deliverable: mapping of trace events → bytecode ops
-   - Prerequisite: add stall/fix trace events (currently untraced: no-match stalls, null/inf register fixes)
+5. **Bytecode / VM mapping draft** — DESIGN COMPLETE
+   - Deliverable: `docs/BytecodeMapping.v0.md`
+   - Implementation blocked: requires stall/fix trace events (currently untraced)
 
-6. **Meta-circular readiness definition**
-   - Deliverable: explicit self-hosting criteria (v1)
+6. **Meta-circular readiness definition** — DESIGN COMPLETE
+   - Deliverable: `docs/MetaCircularReadiness.v1.md`
+   - Gates 1-4 PASS, Gate 5 BLOCKED (requires stall/fix trace events)
+
+---
+
+## Decision Point: Scope Expansion
+
+**Status: PAUSED as of 2026-01-24**
+
+VECTOR design docs are complete. The next implementation step requires **scope expansion**:
+
+1. **Add stall trace event type** to schema (no-match stalls)
+2. **Add fix trace event type** to schema (null/inf register fixes)
+3. **Implement reference interpreter** with v0 opcodes
+4. **Create opcode golden fixtures**
+
+This crosses the "semantic freeze" boundary. Proceeding requires explicit approval.
+
+**Current freeze:** Replay semantics v1 remain frozen. New trace event types would extend (not replace) the schema.
 
 ---
 
