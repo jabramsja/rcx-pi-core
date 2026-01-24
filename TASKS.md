@@ -88,11 +88,9 @@ If a task is not listed here, it is NOT to be implemented.
 
 ## Meta-circular Readiness (Docs only)
 
-### NOW
-
-7. **MetaCircularReadiness.v1.md review pass**
+7. **MetaCircularReadiness.v1.md review pass** ✅
    - Deliverable: ensure it references the current frozen invariants and v2 observability plan
-   - Done when: doc aligns with current repo state
+   - Done: PR #83 merged, doc updated to v1.1 with v2 observability references
 
 ---
 
