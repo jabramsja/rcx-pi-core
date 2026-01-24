@@ -1,0 +1,7 @@
+{"v":1,"type":"trace.start","i":0,"t":"engine-loop-test","mu":{"seed":"void"},"meta":{"contract":"trace-event-types-v1"}}
+{"v":1,"type":"step","i":1,"mu":{"state":"initial"}}
+{"v":1,"type":"stall","i":2,"mu":{"value":{"input":"[x]","pattern":"[a,b]"}},"meta":{"reason":"pattern_mismatch"}}
+{"v":1,"type":"fix","i":3,"mu":{"value":"[x]"},"meta":{"after":"routed","before":"stalled","bucket":"r_null"}}
+{"v":1,"type":"step","i":4,"mu":{"state":"after_fix"}}
+{"v":1,"type":"closure","i":5,"mu":{"result":"complete"},"meta":{"gate":"test_gate","inputs":1,"outputs":1}}
+{"v":1,"type":"trace.end","i":6,"mu":{"final":"stable"},"meta":{"contract":"trace-event-types-v1"}}
