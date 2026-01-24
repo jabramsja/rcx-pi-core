@@ -138,10 +138,32 @@ _(No active items.)_
       - Future promotion checklist
     - Non-goal: no engine termination directive, no ROUTE opcode, no implementation
 
+13. **Rule-as-Motif representation v0** (promoted from SINK: "Full VM bootstrap / meta-circular execution")
+    - Deliverable: `docs/RuleAsMotif.v0.md`
+    - Semantic question: "What is the minimal representation of an RCX reduction rule as a motif, such that rules become first-class structural data?"
+    - Promotion rationale:
+      - MetaCircularReadiness.v1.md Gate 5 is blocked; this unblocks M4 (Organism extraction)
+      - code=data principle requires rules to be structural, not host closures
+      - Advances self-hosting without requiring execution semantics changes
+      - Pure design work: defines representation, not matching or application
+      - Follows "observability precedes mechanics": define shape before behavior
+    - Scope:
+      - Rule motif structure: `{"rule": {"id": ..., "pattern": ..., "body": ...}}`
+      - Variable site representation: `{"var": "<name>"}`
+      - Canonical examples (add.zero, add.succ)
+      - Invariants: determinism, structural equality, no host leakage
+      - Promotion gates for VECTOR → NEXT
+    - Non-goals:
+      - No execution semantics (how VM applies rule motifs)
+      - No pattern matching algorithm
+      - No rule compilation to bytecode
+      - No rule ordering/priority
+      - No implementation
+
 ---
 
 ## SINK (ideas parked; may not advance without explicit promotion decision)
 
 - Multi-value/concurrent execution
-- Full VM bootstrap / meta-circular execution
+- Full VM bootstrap / meta-circular execution (partial: rule-as-motif promoted to VECTOR #13)
 - Performance-first optimizations
