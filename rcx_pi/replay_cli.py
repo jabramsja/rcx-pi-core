@@ -94,3 +94,24 @@ def replay_main(argv: List[str] | None = None) -> int:
             return 1
 
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Module entrypoint for `python -m rcx_pi.replay_cli`.
+
+    We delegate to replay_main() to keep rcx_cli routing stable.
+    argparse prints help by raising SystemExit(0); convert that to rc=0.
+    """
+    try:
+        return replay_main(argv)
+    except SystemExit as e:
+        code = e.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -43,3 +43,12 @@ def test_replay_cli_expect_mismatch_is_nonzero(tmp_path: Path):
     r = _run(["replay", "--trace", str(trace), "--expect", str(exp)])
     assert r.returncode == 1, r.stdout + "\n" + r.stderr
     assert "REPLAY_MISMATCH" in (r.stderr + r.stdout)
+
+
+def test_replay_cli_help_smoke(capsys):
+    from rcx_pi import replay_cli
+
+    rc = replay_cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "RCX Replay CLI" in out or "rcx-replay" in out or "usage:" in out.lower()
