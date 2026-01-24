@@ -71,6 +71,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - IndependentEncounter pathological fixtures + tests
 - Enginenews spec stress-test harness (`tests/test_enginenews_spec_v0.py`)
 - CI audit gate (`tools/audit_all.sh` + `.github/workflows/audit_all.yml`)
+- Closure Evidence reporting flag + CLI test (`--print-closure-evidence`, `closure_evidence_v2()`)
 
 ---
 
@@ -93,15 +94,7 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-13. **Closure Evidence reporting flag + CLI test** ✅
-    - Purpose: add reporting-only observability for closure evidence (no semantics change)
-    - Done:
-      - `closure_evidence_v2(events)` pure helper in `rcx_pi/replay_cli.py`
-      - `--print-closure-evidence` CLI flag (reporting only, deterministic JSON)
-      - `tests/test_closure_evidence_cli.py` with subprocess CLI tests
-      - Uses existing `independent_encounter/` fixtures
-      - Output: `{"v":1,"counts":{...},"evidence":[...],"evidence_count":N}`
-    - Non-goal: no termination policy, no engine behavior change
+_(No active items.)_
 
 ---
 

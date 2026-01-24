@@ -2,6 +2,8 @@
 
 Status: VECTOR (design-only, no implementation allowed)
 
+**Note:** A reporting-only tool (`--print-closure-evidence` CLI flag, `closure_evidence_v2()` helper) has been implemented as a separate NEXT item. That tool uses the IndependentEncounter.v0.md detection rule to compute closure evidence from traces. This VECTOR document defines the `evidence.closure` **event vocabulary** for trace emission, which remains design-only and unimplemented.
+
 This document defines the trace-level vocabulary for "closure evidence" events: observable signals that closure has become unavoidable, without implying any termination directive.
 
 ---
