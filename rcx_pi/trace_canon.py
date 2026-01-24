@@ -262,6 +262,11 @@ class ExecutionEngine:
         """True if execution is stalled."""
         return self._status == ExecutionStatus.STALLED
 
+    @property
+    def current_value_hash(self) -> str | None:
+        """Current value hash (for post-condition assertions)."""
+        return self._current_value_hash
+
     def stall(self, pattern_id: str, value: Any) -> None:
         """
         Stall execution due to pattern mismatch.
@@ -344,3 +349,66 @@ class ExecutionEngine:
         self._status = ExecutionStatus.ACTIVE
         self._stall_reason = None
         self._current_value_hash = None
+
+    # --- Consume API (consumes trace events during replay) ---
+
+    def consume_stall(self, pattern_id: str, value_hash_from_trace: str) -> None:
+        """
+        Consume execution.stall event from trace.
+
+        Precondition: status == ACTIVE
+        Postcondition: status == STALLED, value_hash stored
+
+        Unlike stall(), this takes a hash directly (no value to hash).
+        Used for replay mode where we're consuming a recorded trace.
+        """
+        if not self._enabled:
+            return
+        if self._status != ExecutionStatus.ACTIVE:
+            raise RuntimeError(f"Cannot replay stall: status is {self._status}, expected ACTIVE")
+
+        self._current_value_hash = value_hash_from_trace
+        self._stall_reason = pattern_id
+        self._status = ExecutionStatus.STALLED
+
+    def consume_fix(self, rule_id: str, target_hash: str) -> None:
+        """
+        Consume execution.fix event from trace.
+
+        Precondition: status == STALLED, target_hash matches current value_hash
+
+        Unlike fix(), this is a validation step for replay (no return value needed).
+        """
+        if not self._enabled:
+            return
+        if self._status != ExecutionStatus.STALLED:
+            raise RuntimeError(f"Cannot replay fix: status is {self._status}, expected STALLED")
+
+        if target_hash != self._current_value_hash:
+            raise RuntimeError(
+                f"Replay fix target mismatch: expected {self._current_value_hash}, got {target_hash}"
+            )
+        # Fix is validated; actual transformation would be applied by real execution
+
+    def consume_fixed(self, rule_id: str, before_hash: str, after_hash: str) -> None:
+        """
+        Consume execution.fixed event from trace.
+
+        Precondition: status == STALLED, before_hash matches current value_hash
+        Postcondition: status == ACTIVE, value_hash updated to after_hash
+
+        Unlike fixed(), this takes after_hash directly (no value to hash).
+        """
+        if not self._enabled:
+            return
+        if self._status != ExecutionStatus.STALLED:
+            raise RuntimeError(f"Cannot replay fixed: status is {self._status}, expected STALLED")
+
+        if before_hash != self._current_value_hash:
+            raise RuntimeError(
+                f"Replay fixed before_hash mismatch: expected {self._current_value_hash}, got {before_hash}"
+            )
+
+        self._status = ExecutionStatus.ACTIVE
+        self._stall_reason = None
+        self._current_value_hash = after_hash

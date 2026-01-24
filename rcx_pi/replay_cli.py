@@ -8,13 +8,73 @@ from typing import Any, Dict, List, Mapping
 
 from rcx_pi.trace_canon import canon_event_json, canon_events
 
+
+def execution_summary_v2(events: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    """
+    Compute a pure execution summary for v2 traces.
+
+    This is REPORTING ONLY: does not affect semantics, does not import ExecutionEngine.
+    Derives all state from the event stream itself.
+
+    Returns None if no v2 execution events exist.
+
+    Summary schema:
+    {
+        "v": 2,
+        "counts": {"stall": <int>, "fix": <int>, "fixed": <int>},
+        "final_status": "ACTIVE" | "STALLED",
+        "final_value_hash": <str | null>
+    }
+    """
+    # Filter to v2 execution events only
+    exec_events = [
+        e for e in events
+        if e.get("v") == 2 and str(e.get("type", "")).startswith("execution.")
+    ]
+
+    if not exec_events:
+        return None
+
+    stall_count = 0
+    fix_count = 0
+    fixed_count = 0
+
+    # Derive final status/hash from the event stream
+    status = "ACTIVE"
+    current_hash: str | None = None
+
+    for ev in exec_events:
+        ev_type = ev.get("type")
+        mu = ev.get("mu") or {}
+
+        if ev_type == "execution.stall":
+            stall_count += 1
+            status = "STALLED"
+            current_hash = mu.get("value_hash", current_hash)
+
+        elif ev_type == "execution.fix":
+            fix_count += 1
+            # status remains STALLED, hash unchanged
+
+        elif ev_type == "execution.fixed":
+            fixed_count += 1
+            status = "ACTIVE"
+            current_hash = mu.get("after_hash", current_hash)
+
+    return {
+        "v": 2,
+        "counts": {"stall": stall_count, "fix": fix_count, "fixed": fixed_count},
+        "final_status": status,
+        "final_value_hash": current_hash,
+    }
+
 # v2 execution event types
 _EXECUTION_STALL = "execution.stall"
 _EXECUTION_FIX = "execution.fix"
 _EXECUTION_FIXED = "execution.fixed"
 
 
-def _validate_v2_execution_sequence(events: List[Dict[str, Any]]) -> None:
+def validate_v2_execution_sequence(events: List[Dict[str, Any]]) -> None:
     """
     Validate v2 execution event sequence (trace-consumption only).
 
@@ -148,6 +208,11 @@ def replay_main(argv: List[str] | None = None) -> int:
         action="store_true",
         help="Fail if the input trace is not already canonical JSONL (byte-identical to canonical form).",
     )
+    ap.add_argument(
+        "--print-exec-summary",
+        action="store_true",
+        help="Print v2 execution summary JSON to stdout (reporting only).",
+    )
 
     args = ap.parse_args(argv)
 
@@ -175,7 +240,7 @@ def replay_main(argv: List[str] | None = None) -> int:
 
         # Validate v2 execution event sequence (if present)
         try:
-            _validate_v2_execution_sequence(raw_events)
+            validate_v2_execution_sequence(raw_events)
         except ValueError as e:
             print(f"REPLAY_EXECUTION_ERROR: {e}", file=sys.stderr)
             return 1
@@ -197,6 +262,12 @@ def replay_main(argv: List[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+
+    # Optional: print v2 execution summary (reporting only)
+    if args.print_exec_summary:
+        summary = execution_summary_v2(raw_events)
+        if summary is not None:
+            print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
 
     return 0
 

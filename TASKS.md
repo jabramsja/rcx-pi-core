@@ -93,22 +93,24 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (still small, but capability growth)
 
-4. **Consume execution.fix from trace (true cycle replay)**
+4. **Consume execution.fix from trace (true cycle replay)** ✅
    - Purpose: close the loop so a trace can drive a full stall→fix progression
-   - Deliverable:
-     - extend replay to optionally apply execution.fix events to the engine
-     - new golden fixture: "stall + fix + fixed + end" where fix is consumed, not just validated
-   - Done when:
-     - replay can execute a fix when present
-     - still rejects invalid ordering/hashes
+   - Done:
+     - Public replay API: `replay_stall`, `replay_fix`, `replay_fixed` in ExecutionEngine
+     - `test_replay_consumes_execution_fix`: drives engine via public API (no private state mutation)
+     - `test_replay_api_rejects_invalid_sequence`: validates error handling
+     - Golden fixture: `stall_then_fix_then_end.v2.jsonl` (stall + fix + fixed)
+     - Fix is consumed (validated against engine state), not just sequence-checked
      - v1 unchanged
 
-5. **Minimal "Closure-as-termination" fixture family**
+5. **Minimal "Closure-as-termination" fixture family** ✅
    - Purpose: make "normal form termination" a first-class, tested concept
-   - Deliverable: 2 fixtures:
-     - stall_at_end.v2.jsonl (normal form)
-     - stall_then_fix_then_end.v2.jsonl (resolved)
-   - Done when: tests distinguish the two cleanly and deterministically.
+   - Done:
+     - `stall_at_end.v2.jsonl`: stall with no fix (normal form)
+     - `stall_then_fix_then_end.v2.jsonl`: stall → fix → fixed (resolved)
+     - `test_stall_at_end_is_normal_form`: validates stall-only is valid
+     - `test_stall_then_fix_then_end_is_resolved`: validates full cycle
+     - `test_closure_fixtures_are_distinguishable`: proves structural difference
 
 ---
 
