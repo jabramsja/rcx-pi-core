@@ -54,51 +54,25 @@ def main() -> int:
         ["rcx-program-descriptor", "--schema"],
         _py_m("rcx_pi.program_descriptor_cli", "--schema"),
     )
-    r = _run(cmd_desc_schema, cwd=repo_root)
-    if r.returncode != 0:
-        failures.append(f"program-descriptor --schema failed:\n{r.stderr.strip()}")
-    else:
-        raw = r.stdout
-        lines = [ln for ln in raw.splitlines() if ln.strip() != ""]
-        line = lines[0] if lines else ""
-        if line:
-            try:
-                run_schema_triplet(
-                    cmd_desc_schema,
-                    cwd=repo_root,
-                    expected_tag="rcx-program-descriptor.v1",
-                )
-            except Exception as e:
-                failures.append(f"--schema output failed strict parse: {line!r} ({e})")
-                line = ""
-                # NOTE: replaced invalid 'continue' (not inside a loop)
-        if "rcx-program-descriptor.v1" not in line:
-            failures.append(f"program-descriptor --schema unexpected output: {line!r}")
-
+    try:
+        run_schema_triplet(
+            cmd_desc_schema, cwd=repo_root, expected_tag="rcx-program-descriptor.v1"
+        )
+    except AssertionError as e:
+        failures.append(
+            f"program-descriptor --schema failed strict parse/tag check: {e}"
+        )
     # 2) program run: schema + sample run
     cmd_run_schema = _best_cmd(
         ["rcx-program-run", "--schema"],
         _py_m("rcx_pi.program_run_cli", "--schema"),
     )
-    r = _run(cmd_run_schema, cwd=repo_root)
-    if r.returncode != 0:
-        failures.append(f"program-run --schema failed:\n{r.stderr.strip()}")
-    else:
-        raw = r.stdout
-        lines = [ln for ln in raw.splitlines() if ln.strip() != ""]
-        line = lines[0] if lines else ""
-        if line:
-            try:
-                run_schema_triplet(
-                    cmd_run_schema, cwd=repo_root, expected_tag="rcx-program-run.v1"
-                )
-            except Exception as e:
-                failures.append(f"--schema output failed strict parse: {line!r} ({e})")
-                line = ""
-                # NOTE: replaced invalid 'continue' (not inside a loop)
-        if "rcx-program-run.v1" not in line:
-            failures.append(f"program-run --schema unexpected output: {line!r}")
-
+    try:
+        run_schema_triplet(
+            cmd_run_schema, cwd=repo_root, expected_tag="rcx-program-run.v1"
+        )
+    except AssertionError as e:
+        failures.append(f"program-run --schema failed strict parse/tag check: {e}")
     cmd_run = _best_cmd(
         ["rcx-program-run", "succ-list", "[1,2,3]"],
         _py_m("rcx_pi.program_run_cli", "succ-list", "[1,2,3]"),
@@ -128,25 +102,12 @@ def main() -> int:
         ["rcx-world-trace", "--schema"],
         _py_m("rcx_pi.worlds.world_trace_cli", "--schema"),
     )
-    r = _run(cmd_trace_schema, cwd=repo_root)
-    if r.returncode != 0:
-        failures.append(f"world-trace --schema failed:\n{r.stderr.strip()}")
-    else:
-        raw = r.stdout
-        lines = [ln for ln in raw.splitlines() if ln.strip() != ""]
-        line = lines[0] if lines else ""
-        if line:
-            try:
-                run_schema_triplet(
-                    cmd_trace_schema, cwd=repo_root, expected_tag="rcx-world-trace.v1"
-                )
-            except Exception as e:
-                failures.append(f"--schema output failed strict parse: {line!r} ({e})")
-                line = ""
-                # NOTE: was 'continue' in generator output; replaced to keep module-valid syntax
-        if line and "rcx-world-trace.v1" not in line:
-            failures.append(f"world-trace --schema unexpected output: {line!r}")
-
+    try:
+        run_schema_triplet(
+            cmd_trace_schema, cwd=repo_root, expected_tag="rcx-world-trace.v1"
+        )
+    except AssertionError as e:
+        failures.append(f"world-trace --schema failed strict parse/tag check: {e}")
     cmd_trace = _best_cmd(
         ["rcx-world-trace", "pingpong", "ping", "--max-steps", "6"],
         _py_m("rcx_pi.worlds.world_trace_cli", "pingpong", "ping", "--max-steps", "6"),
