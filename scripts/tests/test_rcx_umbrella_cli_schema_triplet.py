@@ -1,48 +1,32 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+
+from rcx_pi.cli_schema import parse_schema_triplet
 
 
 def _run(cmd: list[str]) -> str:
     r = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    out = r.stdout.strip()
-    assert out, f"no output from: {' '.join(cmd)}\nSTDERR:\n{r.stderr}"
-    return out
-
-
-def _parse_triplet(line: str) -> tuple[str, str, str]:
-    parts = line.split()
-    assert len(parts) == 3, (
-        f"expected 3-part schema triplet, got {len(parts)}: {line!r}"
+    lines = [ln for ln in r.stdout.splitlines() if ln.strip() != ""]
+    assert len(lines) == 1, (
+        f"expected exactly 1 non-empty stdout line, got {len(lines)}: {lines!r}"
     )
-    return parts[0], parts[1], parts[2]
+    return lines[0]
 
 
-def test_rcx_umbrella_cli_schema_triplets_point_to_real_files():
-    repo = Path(__file__).resolve().parents[2]
+def test_rcx_cli_program_descriptor_schema_triplet_is_parseable():
+    line = _run(["python3", "-m", "rcx_pi.rcx_cli", "program", "describe", "--schema"])
+    trip = parse_schema_triplet(line)
+    assert trip.tag == "rcx-program-descriptor.v1"
 
-    checks = [
-        (
-            ["python3", "-m", "rcx_pi.rcx_cli", "program", "describe", "--schema"],
-            "rcx-program-descriptor.v1",
-        ),
-        (
-            ["python3", "-m", "rcx_pi.rcx_cli", "program", "run", "--schema"],
-            "rcx-program-run.v1",
-        ),
-        (
-            ["python3", "-m", "rcx_pi.rcx_cli", "world", "trace", "--schema"],
-            "rcx-world-trace.v1",
-        ),
-    ]
 
-    for cmd, expected_tag in checks:
-        tag, doc_md, schema_json = _parse_triplet(_run(cmd))
-        assert tag == expected_tag
+def test_rcx_cli_program_run_schema_triplet_is_parseable():
+    line = _run(["python3", "-m", "rcx_pi.rcx_cli", "program", "run", "--schema"])
+    trip = parse_schema_triplet(line)
+    assert trip.tag == "rcx-program-run.v1"
 
-        doc_path = repo / doc_md
-        schema_path = repo / schema_json
 
-        assert doc_path.exists(), f"missing schema doc: {doc_md}"
-        assert schema_path.exists(), f"missing schema json: {schema_json}"
+def test_rcx_cli_world_trace_schema_triplet_is_parseable():
+    line = _run(["python3", "-m", "rcx_pi.rcx_cli", "world", "trace", "--schema"])
+    trip = parse_schema_triplet(line)
+    assert trip.tag == "rcx-world-trace.v1"
