@@ -1,25 +1,17 @@
 from __future__ import annotations
 
-import subprocess
-
-from rcx_pi.cli_schema import parse_schema_triplet
-
-
-def _py(cmd: list[str]) -> str:
-    r = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    lines = [ln for ln in r.stdout.splitlines() if ln.strip() != ""]
-    assert len(lines) == 1, (
-        f"expected exactly 1 non-empty stdout line, got {len(lines)}: {lines!r}"
-    )
-    return lines[0]
+from rcx_pi.cli_schema_run import run_schema_triplet
 
 
 def test_python_entrypoints_schema_triplets_are_parseable():
-    lines = [
-        _py(["python3", "rcx_pi/program_descriptor_cli.py", "--schema"]),
-        _py(["python3", "rcx_pi/program_run_cli.py", "--schema"]),
-        _py(["python3", "-m", "rcx_pi.worlds.world_trace_cli", "--schema"]),
-        _py(
+    # These are intentionally python-only entrypoints (CI/python-only gate).
+    results = [
+        run_schema_triplet(["python3", "rcx_pi/program_descriptor_cli.py", "--schema"]),
+        run_schema_triplet(["python3", "rcx_pi/program_run_cli.py", "--schema"]),
+        run_schema_triplet(
+            ["python3", "-m", "rcx_pi.worlds.world_trace_cli", "--schema"]
+        ),
+        run_schema_triplet(
             [
                 "python3",
                 "scripts/snapshot_merge.py",
@@ -31,8 +23,9 @@ def test_python_entrypoints_schema_triplets_are_parseable():
             ]
         ),
     ]
-    for line in lines:
-        trip = parse_schema_triplet(line)
+
+    for res in results:
+        trip = res.trip
         assert trip.tag.endswith(".v1")
         assert trip.doc_md.startswith("docs/") and trip.doc_md.endswith(".md")
         assert trip.schema_json.startswith(
