@@ -1,5 +1,9 @@
 # Changelog
 
+
+## Unreleased
+
+- Schema-triplet canonicalization: added `rcx_pi/cli_schema_run.py` as the single source of truth and updated CLI smoke + tests to route schema checks through the canonical runner (PRs #59–#62).
 All notable changes to RCX-Ω are documented in this file.
 
 Format:
