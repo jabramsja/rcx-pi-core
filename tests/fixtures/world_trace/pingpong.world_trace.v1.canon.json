@@ -1,0 +1,92 @@
+{
+  "classification": {
+    "kind": "limit_cycle",
+    "period": 2
+  },
+  "max_steps": 6,
+  "meta": {
+    "determinism": {
+      "inputs_hash": "8c6f049d31e682b746ac5faa5e23729be0d07cb841d48006d601ce04e5db1487"
+    },
+    "schema": "rcx-world-trace.v1",
+    "tool": "world_trace_cli"
+  },
+  "orbit": {
+    "invariants": {
+      "is_cycle": true,
+      "is_fixed_point": false,
+      "unique_states": 2
+    },
+    "kind": "limit_cycle",
+    "period": 2,
+    "states": [
+      "ping",
+      "pong",
+      "ping",
+      "pong",
+      "ping",
+      "pong",
+      "ping"
+    ]
+  },
+  "schema": "rcx-world-trace.v1",
+  "schema_doc": "docs/world_trace_json_schema.md",
+  "seed": "ping",
+  "stats": {
+    "has_cycle": true,
+    "kind": "limit_cycle",
+    "orbit_len": 7,
+    "period": 2,
+    "trace_len": 7,
+    "unique_states": 2
+  },
+  "trace": [
+    {
+      "state": "ping",
+      "step": 0
+    },
+    {
+      "delta": {
+        "changed": true
+      },
+      "state": "pong",
+      "step": 1
+    },
+    {
+      "delta": {
+        "changed": true
+      },
+      "state": "ping",
+      "step": 2
+    },
+    {
+      "delta": {
+        "changed": true
+      },
+      "state": "pong",
+      "step": 3
+    },
+    {
+      "delta": {
+        "changed": true
+      },
+      "state": "ping",
+      "step": 4
+    },
+    {
+      "delta": {
+        "changed": true
+      },
+      "state": "pong",
+      "step": 5
+    },
+    {
+      "delta": {
+        "changed": true
+      },
+      "state": "ping",
+      "step": 6
+    }
+  ],
+  "world": "pingpong"
+}
