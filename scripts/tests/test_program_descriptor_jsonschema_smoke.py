@@ -50,7 +50,7 @@ def _discover_candidates(repo_root: Path) -> list[str]:
 
 def test_program_descriptor_jsonschema_smoke():
     repo_root = Path(__file__).resolve().parents[2]
-    schema_path = repo_root / "docs" / "program_descriptor_schema.json"
+    schema_path = repo_root / "docs" / "schemas" / "program_descriptor_schema.json"
     assert schema_path.exists(), f"missing schema: {schema_path}"
     schema = json.loads(schema_path.read_text())
 
