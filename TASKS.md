@@ -128,6 +128,39 @@ without importing semantics from the host language?
 
 ---
 
+## Lobe: Minimal Native Execution Primitive
+
+### NOW (blocking)
+
+8. **Minimal Native Execution Primitive (v0)**
+   - Deliverable: `docs/MinimalNativeExecutionPrimitive.v0.md`
+   - Purpose: Answer the Boundary Question above
+   - DONE criteria:
+     - Doc defines the smallest host-independent loop for Stall→Fix→Trace→Closure
+     - Invariants are explicit and testable
+     - Non-goals are enumerated (no scope creep)
+     - No new architecture proposed (uses existing primitives)
+     - Doc reviewed and merged
+
+9. **Doc coherence pass (NOW-A)**
+   - Purpose: Align terminology across docs
+   - DONE criteria:
+     - `MinimalNativeExecutionPrimitive.v0.md` aligned with `StallFixExecution.v0.md`
+     - No CLOSE opcode language (normal form is detected, not commanded)
+     - Terminology consistent: `reduction.*` = observability, `execution.*` = state transitions
+     - v0 explicitly marked as replay-only, single-value, STALL/FIX only
+
+10. **Gate wiring verification (NOW-B)**
+    - Purpose: Confirm existing gates are correctly wired (no new capability)
+    - DONE criteria:
+      - v1 gates untouched and green (no regression)
+      - v2 gates only run when `RCX_TRACE_V2=1` and/or `RCX_EXECUTION_V0=1`
+      - Fixtures live in intended folders (`traces/` for v1, `traces_v2/` for v2)
+      - Clean repo clone produces no tracked diffs after `pytest`
+      - CI green on dev branch
+
+---
+
 ## Sink (Unknown / Deferred)
 
 - Full RCX bytecode VM bootstrap
