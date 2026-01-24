@@ -13,6 +13,11 @@ If CI is not green, the change does not exist.
 
 ## CI (Green Gate)
 
+
+### CLI schema-triplet contract
+
+All `--schema` emitters are validated via the canonical runner at `rcx_pi/cli_schema_run.py` (single source of truth for executing schema commands and strict-parsing the schema-triplet output).
+
 Before you open a PR, run the local gate:
 
     make green

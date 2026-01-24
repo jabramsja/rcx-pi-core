@@ -162,3 +162,5 @@ Features complete:
 ✔ succ-list named program
 
 This file is the stable kernel definition for downstream RCX-Ω layers.
+
+Note: CLI `--schema` output is enforced via the canonical schema-triplet runner (`rcx_pi/cli_schema_run.py`) to prevent drift across emitters and consumers.

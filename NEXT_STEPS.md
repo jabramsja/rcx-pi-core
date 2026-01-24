@@ -9,6 +9,12 @@ This document reflects **actual completed work**, not aspirational state.
 
 ## Current status (verified, green)
 
+
+### Schema-triplet canon (current)
+
+- The canonical runner is `rcx_pi/cli_schema_run.py` (execute `--schema` commands + strict-parse the schema-triplet output).
+- Use it anywhere a script or test needs to validate schema output, rather than duplicating parsing logic.
+
 - `dev` is PR-only with required checks
 - CI policy is canonical and enforced
 - `green_gate` is authoritative
