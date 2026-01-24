@@ -34,7 +34,7 @@ def test_snapshot_merge_rejects_mismatched_program_rules(tmp_path: Path):
     assert "program.rules" in (r.stderr + r.stdout)
 
 
-def test_snapshot_merge_deterministic_union(tmp_path: Path):
+def test_snapshot_merge_deterministic_union_same_inputs(tmp_path: Path):
     a = FIX / "snapshot_rcx_core_v1.json"
     b = FIX / "snapshot_rcx_core_v1.json"
     out1 = tmp_path / "m1.json"
@@ -50,3 +50,37 @@ def test_snapshot_merge_deterministic_union(tmp_path: Path):
     assert m["world"] == "rcx_core"
     assert m["state"]["trace"] == []
     assert m["state"]["step_counter"] == 0
+    assert m["state"]["current"] is None
+
+
+def test_snapshot_merge_union_semantics_baseline_plus_variant(tmp_path: Path):
+    a = FIX / "snapshot_rcx_core_v1.json"
+    b = FIX / "snapshot_rcx_core_v1_variant.json"
+    out = tmp_path / "merged.json"
+
+    subprocess.check_call([str(ROOT / "scripts" / "snapshot_merge.py"), str(a), str(b), "--out", str(out)])
+    m = _load(out)
+
+    assert m["schema"] == "rcx.snapshot.v1"
+    assert m["world"] == "rcx_core"
+
+    # Fresh-start invariants
+    assert m["state"]["trace"] == []
+    assert m["state"]["step_counter"] == 0
+    assert m["state"]["current"] is None
+
+    # Union semantics (the point of the tool)
+    ra = set(m["state"]["ra"])
+    lobes = set(m["state"]["lobes"])
+    sink = set(m["state"]["sink"])
+
+    assert "[null,a]" in ra
+    assert "[null,b]" in ra
+
+    assert "[inf,a]" in lobes
+    assert "[inf,b]" in lobes
+    assert "[omega,[a,b]]" in lobes
+    assert "[omega,[b,c]]" in lobes
+
+    assert "[paradox,a]" in sink
+    assert "[paradox,b]" in sink
