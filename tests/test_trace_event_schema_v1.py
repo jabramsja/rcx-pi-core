@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -16,12 +18,7 @@ def _load_schema() -> dict:
 
 
 def test_trace_event_schema_v1_accepts_canonical_event() -> None:
-    try:
-        import jsonschema  # type: ignore
-    except Exception as e:  # pragma: no cover
-        raise AssertionError(
-            "Missing dependency: jsonschema. Install it (dev/test deps) to validate schemas."
-        ) from e
+    jsonschema = pytest.importorskip("jsonschema")
 
     from rcx_pi.trace_canon import canon_event
 
@@ -37,25 +34,16 @@ def test_trace_event_schema_v1_accepts_canonical_event() -> None:
         }
     )
 
-    # Validate using Draft 2020-12
     jsonschema.Draft202012Validator.check_schema(schema)
     jsonschema.validate(instance=ev, schema=schema)
 
 
 def test_trace_event_schema_v1_rejects_extra_top_level_keys() -> None:
-    try:
-        import jsonschema  # type: ignore
-    except Exception as e:  # pragma: no cover
-        raise AssertionError(
-            "Missing dependency: jsonschema. Install it (dev/test deps) to validate schemas."
-        ) from e
+    jsonschema = pytest.importorskip("jsonschema")
 
     schema = _load_schema()
     bad = {"v": 1, "type": "trace.start", "i": 0, "extra": 123}
 
     jsonschema.Draft202012Validator.check_schema(schema)
-    try:
+    with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=bad, schema=schema)
-    except jsonschema.ValidationError:
-        return
-    raise AssertionError("Expected schema validation to fail for extra top-level keys.")
