@@ -79,10 +79,25 @@ If a task is not listed here, it is NOT to be implemented.
    - Deliverable: update mapping to include new v2 observability events (as "debug-only")
    - Done: PR #81 merged, doc now references v2 debug-only opcodes
 
-### VECTOR
+### NOW (VECTOR #6 Promoted)
 
-6. **Stall/Fix → Closure-on-second-demand execution loop (true engine loop)**
-   - This is capability growth. No implementation until explicitly promoted.
+6. **Stall/Fix Execution Semantics (v0)** — APPROVED, IN PROGRESS
+   - Design doc: `docs/StallFixExecution.v0.md` ✅
+   - Feature flag: `RCX_EXECUTION_V0=1` (off by default)
+   - Decisions: Q1=A (Rule ID only), Q2=A (serialize stalls), Q3=A (whole value stalls)
+   - Phases:
+     - **Phase 1: Schema + Validation** ✅
+       - v2 schema extended with execution.stall, execution.fix, execution.fixed
+       - ExecutionEngine class in trace_canon.py
+       - value_hash() for deterministic references
+     - **Phase 2: Golden Fixture + Tests** ✅
+       - `tests/fixtures/traces_v2/stall_fix.v2.jsonl`
+       - Execution engine tests in test_replay_gate_v2.py
+     - **Phase 3: Integration** — NEXT
+       - Wire ExecutionEngine into reduction path
+       - Pattern match failure → STALL (when execution mode enabled)
+       - Fix event → FIX transformation
+   - Success: stall/fix fixture passes diff-empty, all CI green
 
 ---
 

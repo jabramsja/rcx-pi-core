@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Dict, Iterable, List, Mapping, Tuple, Union
@@ -9,8 +10,16 @@ TRACE_EVENT_V2 = 2
 
 # Feature flag: set RCX_TRACE_V2=1 to enable v2 observability events
 RCX_TRACE_V2_ENABLED = os.environ.get("RCX_TRACE_V2", "0") == "1"
+
+# Feature flag: set RCX_EXECUTION_V0=1 to enable v0 execution semantics
+RCX_EXECUTION_V0_ENABLED = os.environ.get("RCX_EXECUTION_V0", "0") == "1"
+
 TRACE_EVENT_V = TRACE_EVENT_V1  # default for backwards compat
 TRACE_EVENT_KEY_ORDER: Tuple[str, ...] = ("v", "type", "i", "t", "mu", "meta")
+
+# Valid v2 event types
+V2_OBSERVABILITY_TYPES = frozenset(["reduction.stall", "reduction.applied", "reduction.normal"])
+V2_EXECUTION_TYPES = frozenset(["execution.stall", "execution.fix", "execution.fixed"])
 
 Json = Union[None, bool, int, float, str, List["Json"], Dict[str, "Json"]]
 
@@ -118,6 +127,22 @@ def canon_event_json(ev: Mapping[str, Any]) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
 
 
+def value_hash(mu: Any) -> str:
+    """
+    Compute deterministic hash of a value for trace references.
+    Uses canonical JSON serialization to ensure determinism.
+    Returns first 16 hex chars of SHA-256.
+    """
+    # Wrap in a minimal event structure for canonicalization
+    canonical = json.dumps(
+        _deep_sort_json(mu) if isinstance(mu, (dict, list)) else mu,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
 def _motif_depth(m: Any) -> int:
     """Compute structural depth of a motif (for compact trace references)."""
     if not hasattr(m, "structure"):
@@ -181,3 +206,141 @@ class TraceObserver:
         """Reset observer state."""
         self._events = []
         self._index = 0
+
+
+# --- Execution Engine (v0) ---
+# Feature flag: RCX_EXECUTION_V0=1
+
+
+class ExecutionStatus:
+    """Execution state for a value."""
+
+    ACTIVE = "active"
+    STALLED = "stalled"
+    TERMINAL = "terminal"
+
+
+class ExecutionEngine:
+    """
+    Minimal execution engine for Stall/Fix loop (v0).
+
+    Tracks single value through stall/fix cycle:
+    - ACTIVE: value is being reduced
+    - STALLED: pattern match failed, awaiting fix
+    - TERMINAL: value reached normal form
+
+    Feature flag: RCX_EXECUTION_V0=1 must be set to enable.
+    """
+
+    def __init__(self, enabled: bool = None) -> None:
+        self._enabled = enabled if enabled is not None else RCX_EXECUTION_V0_ENABLED
+        self._events: List[Dict[str, Any]] = []
+        self._index: int = 0
+        self._status: str = ExecutionStatus.ACTIVE
+        self._stall_reason: str = None
+        self._current_value_hash: str = None
+
+    def _emit(self, event_type: str, t: str = None, mu: Any = None) -> None:
+        """Emit an execution event."""
+        if not self._enabled:
+            return
+        ev: Dict[str, Any] = {"v": TRACE_EVENT_V2, "type": event_type, "i": self._index}
+        if t is not None:
+            ev["t"] = t
+        if mu is not None:
+            ev["mu"] = _deep_sort_json(mu) if isinstance(mu, (dict, list)) else mu
+        self._events.append(ev)
+        self._index += 1
+
+    @property
+    def status(self) -> str:
+        """Current execution status."""
+        return self._status
+
+    @property
+    def is_stalled(self) -> bool:
+        """True if execution is stalled."""
+        return self._status == ExecutionStatus.STALLED
+
+    def stall(self, pattern_id: str, value: Any) -> None:
+        """
+        Stall execution due to pattern mismatch.
+
+        Precondition: status == ACTIVE
+        Postcondition: status == STALLED
+        """
+        if not self._enabled:
+            return
+        if self._status != ExecutionStatus.ACTIVE:
+            raise RuntimeError(f"Cannot stall: status is {self._status}, expected ACTIVE")
+
+        self._current_value_hash = value_hash(value)
+        self._stall_reason = pattern_id
+        self._status = ExecutionStatus.STALLED
+
+        self._emit(
+            "execution.stall",
+            mu={"pattern_id": pattern_id, "value_hash": self._current_value_hash},
+        )
+
+    def fix(self, rule_id: str, target_hash: str) -> bool:
+        """
+        Apply fix from trace event.
+
+        Precondition: status == STALLED, target_hash matches current value
+        Returns: True if fix was valid and applied
+
+        Note: Actual transformation is done by caller; this just validates and records.
+        """
+        if not self._enabled:
+            return True
+        if self._status != ExecutionStatus.STALLED:
+            raise RuntimeError(f"Cannot fix: status is {self._status}, expected STALLED")
+
+        if target_hash != self._current_value_hash:
+            raise RuntimeError(
+                f"Fix target mismatch: expected {self._current_value_hash}, got {target_hash}"
+            )
+
+        return True
+
+    def fixed(self, rule_id: str, before_hash: str, after_value: Any) -> None:
+        """
+        Confirm fix was applied, transition back to ACTIVE.
+
+        Precondition: status == STALLED
+        Postcondition: status == ACTIVE
+        """
+        if not self._enabled:
+            return
+        if self._status != ExecutionStatus.STALLED:
+            raise RuntimeError(f"Cannot confirm fix: status is {self._status}, expected STALLED")
+
+        after_hash = value_hash(after_value)
+        self._emit(
+            "execution.fixed",
+            t=rule_id,
+            mu={"after_hash": after_hash, "before_hash": before_hash},
+        )
+
+        self._status = ExecutionStatus.ACTIVE
+        self._stall_reason = None
+        self._current_value_hash = after_hash
+
+    def terminate(self) -> None:
+        """Mark execution as terminal (normal form reached)."""
+        if not self._enabled:
+            return
+        self._status = ExecutionStatus.TERMINAL
+
+    def get_events(self) -> List[Dict[str, Any]]:
+        """Return collected execution events (canonicalized)."""
+        return [canon_event(ev) for ev in self._events]
+
+    def reset(self) -> None:
+        """Reset execution state."""
+        self._events = []
+        self._index = 0
+        self._status = ExecutionStatus.ACTIVE
+        self._stall_reason = None
+        self._current_value_hash = None

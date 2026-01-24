@@ -1,6 +1,6 @@
 # Stall/Fix Execution Semantics (v0)
 
-**Status: DESIGN DOCUMENT — Requires approval before implementation.**
+**Status: APPROVED FOR IMPLEMENTATION**
 
 This document defines execution semantics for the Stall → Fix loop. It is the promotion path for VECTOR #6.
 
@@ -347,36 +347,28 @@ Golden fixture must:
 
 ---
 
-## 12. Open Questions
-
-These require decision before implementation:
+## 12. Design Decisions (Approved)
 
 ### Q1: Transform Specification
 
-How is the transformation in `execution.fix` specified?
-- **Option A**: Rule ID only (look up rule, apply it)
-- **Option B**: Explicit before/after values
-- **Option C**: Transformation DSL
+**Decision: Option A — Rule ID only**
 
-**Recommendation**: Option A (rule ID) for v0. Keeps traces small, rules are already defined.
+The transformation in `execution.fix` is specified by rule ID. Look up rule, apply it.
+No before/after payloads, no DSL in v0.
 
 ### Q2: Multiple Stalls
 
-What if reduction would stall multiple times before reaching fix?
-- **Option A**: One stall at a time (serialize)
-- **Option B**: Batch stalls, batch fixes
-- **Option C**: Defer to v1
+**Decision: Option A — One stall at a time (serialize)**
 
-**Recommendation**: Option A for v0. Single-value focus.
+If reduction would stall multiple times, process one stall, apply fix, then continue.
+Batch stalls deferred.
 
 ### Q3: Partial Reduction
 
-If a compound value has one part that stalls, what happens to other parts?
-- **Option A**: Whole value stalls
-- **Option B**: Partial reduction continues
-- **Option C**: Defer to v1
+**Decision: Option A — Whole value stalls**
 
-**Recommendation**: Option A for v0. Simplest semantics.
+If any part of a compound value would stall, the whole value stalls.
+Partial reduction deferred.
 
 ---
 
@@ -395,9 +387,9 @@ VECTOR #6 is considered complete when:
 
 ## Version
 
-Document version: v0 (draft)
+Document version: v0
 Last updated: 2026-01-24
-Status: AWAITING APPROVAL
+Status: APPROVED FOR IMPLEMENTATION
 Dependencies:
 - `docs/BytecodeMapping.v0.md`
 - `docs/StallFixObservability.v0.md`
