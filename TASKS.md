@@ -65,6 +65,7 @@ The Python replay semantics are now locked. This freeze means:
 
 5. **Bytecode / VM mapping draft**
    - Deliverable: mapping of trace events → bytecode ops
+   - Prerequisite: add stall/fix trace events (currently untraced: no-match stalls, null/inf register fixes)
 
 6. **Meta-circular readiness definition**
    - Deliverable: explicit self-hosting criteria (v1)
