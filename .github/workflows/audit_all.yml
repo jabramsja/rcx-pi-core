@@ -5,6 +5,9 @@ on: [push, pull_request]
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONHASHSEED: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -13,20 +16,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
 
       - name: Install package + test deps
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install -U pip
-          python -m pip install -e ".[test]"
+          python -m pip install ".[test]"
 
       - name: Run audit_all.sh
         shell: bash
         run: |
           set -euo pipefail
-          # Reset egg-info changes from pip install -e (tracked but modified by install)
-          git checkout -- rcx_pi_core.egg-info/ || true
-          git clean -f rcx_pi_core.egg-info/ || true
           chmod +x tools/audit_all.sh
-          PYTHONHASHSEED=0 tools/audit_all.sh
+          tools/audit_all.sh

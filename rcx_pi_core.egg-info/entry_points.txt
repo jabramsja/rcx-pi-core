@@ -1,6 +1,0 @@
-[console_scripts]
-rcx = rcx_pi.rcx_cli:main
-rcx-cli = rcx_pi.rcx_cli:main
-rcx-program-descriptor = rcx_pi.program_descriptor_cli:main
-rcx-program-run = rcx_pi.program_run_cli:main
-rcx-world-trace = rcx_pi.worlds.world_trace_cli:main
