@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ----
+# macOS bash session-save quirks: prevent "unbound variable" crashes
+# ----
+export HISTTIMEFORMAT="${HISTTIMEFORMAT:-}"
+export size="${size:-}"
+
+echo "== 0) Repo clean =="
+test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --porcelain; exit 1; }
+
+echo "== 1) Full suite (hash-seeded) =="
+PYTHONHASHSEED=0 pytest -q
+test -z "$(git status --porcelain)" || { echo "Dirty after pytest"; git status --porcelain; exit 1; }
+
+echo "== 2) IndependentEncounter tests only =="
+PYTHONHASHSEED=0 pytest -q -k 'independent_encounter'
+
+echo "== 3) Enginenews tests only =="
+PYTHONHASHSEED=0 pytest -q -k 'enginenews'
+
+echo "== 4) Anti-cheat scans =="
+echo "-- no private attr access in tests/"
+! grep -RInE '\._[a-zA-Z0-9]+' tests/ || { echo "Found private attr access in tests/"; exit 1; }
+
+echo "-- no underscored imports from rcx_pi in tests/"
+! grep -RInE 'from rcx_pi\..* import _' tests/ || { echo "Found underscored import from rcx_pi in tests/"; exit 1; }
+
+echo "== 5) Fixture size check (all v2 jsonl) =="
+find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do
+  n="$(wc -l < "$f" | tr -d ' ')"
+  printf "%-80s %s lines\n" "$f" "$n"
+done
+
+echo "== 6) CLI exec-summary spot-check (enginenews fixtures) =="
+fixtures=(
+  tests/fixtures/traces_v2/enginenews_spec_v0/progressive_refinement.v2.jsonl
+  tests/fixtures/traces_v2/enginenews_spec_v0/stall_pressure.v2.jsonl
+  tests/fixtures/traces_v2/enginenews_spec_v0/multi_cycle.v2.jsonl
+  tests/fixtures/traces_v2/enginenews_spec_v0/idempotent_cycle.v2.jsonl
+)
+
+for f in "${fixtures[@]}"; do
+  echo "== $f =="
+
+  out="$(
+    PYTHONHASHSEED=0 python3 -m rcx_pi.rcx_cli replay \
+      --trace "$f" --check-canon --print-exec-summary 2>&1
+  )"
+
+  echo "$out"
+
+  printf '%s' "$out" | python3 -c '
+import json, sys
+s = sys.stdin.read().strip()
+lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+candidate = next((ln for ln in reversed(lines) if ln.startswith("{") and ln.endswith("}")), None)
+assert candidate, "No JSON line found:\n" + s
+j = json.loads(candidate)
+assert j["v"] == 2
+assert set(j["counts"].keys()) == {"stall","fix","fixed"}
+assert j["final_status"] in ("ACTIVE","STALLED")
+print("OK:", j["final_status"], j["counts"])
+'
+done
+
+echo "✅ audit_all pass"
