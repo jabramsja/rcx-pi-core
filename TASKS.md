@@ -45,7 +45,11 @@ If a task is not listed here, it is NOT to be implemented.
 - ExecutionEngine + value_hash() + _motif_to_json()
 - Record Mode v0 (execution → trace for stall/fix events)
 - Minimal Native Execution Primitive doc (Boundary Question answered)
-- v2 replay validation (_validate_v2_execution_sequence)
+- v2 replay validation (validate_v2_execution_sequence)
+- Anti-theater guardrails:
+  - `--print-exec-summary` CLI flag + `execution_summary_v2()` pure helper
+  - `test_cli_print_exec_summary_end_to_end` (subprocess CLI test)
+  - `tools/audit_exec_summary.sh` (non-test reality anchor)
 
 ---
 
@@ -96,7 +100,8 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 4. **Consume execution.fix from trace (true cycle replay)** ✅
    - Purpose: close the loop so a trace can drive a full stall→fix progression
    - Done:
-     - Public replay API: `replay_stall`, `replay_fix`, `replay_fixed` in ExecutionEngine
+     - Public consume API: `consume_stall`, `consume_fix`, `consume_fixed` in ExecutionEngine
+     - Public getter: `current_value_hash` for post-condition assertions
      - `test_replay_consumes_execution_fix`: drives engine via public API (no private state mutation)
      - `test_replay_api_rejects_invalid_sequence`: validates error handling
      - Golden fixture: `stall_then_fix_then_end.v2.jsonl` (stall + fix + fixed)
