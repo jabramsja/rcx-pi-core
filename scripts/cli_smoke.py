@@ -7,6 +7,7 @@ import subprocess
 import sys
 from typing import List, Optional
 from rcx_pi.cli_schema import parse_schema_triplet
+from rcx_pi.cli_schema_run import run_schema_triplet
 
 
 def _which(cmd: str) -> Optional[str]:
@@ -62,7 +63,11 @@ def main() -> int:
         line = lines[0] if lines else ""
         if line:
             try:
-                parse_schema_triplet(line)
+                run_schema_triplet(
+                    cmd_desc_schema,
+                    cwd=repo_root,
+                    expected_tag="rcx-program-descriptor.v1",
+                )
             except Exception as e:
                 failures.append(f"--schema output failed strict parse: {line!r} ({e})")
                 line = ""
@@ -84,7 +89,9 @@ def main() -> int:
         line = lines[0] if lines else ""
         if line:
             try:
-                parse_schema_triplet(line)
+                run_schema_triplet(
+                    cmd_run_schema, cwd=repo_root, expected_tag="rcx-program-run.v1"
+                )
             except Exception as e:
                 failures.append(f"--schema output failed strict parse: {line!r} ({e})")
                 line = ""
@@ -130,7 +137,9 @@ def main() -> int:
         line = lines[0] if lines else ""
         if line:
             try:
-                parse_schema_triplet(line)
+                run_schema_triplet(
+                    cmd_trace_schema, cwd=repo_root, expected_tag="rcx-world-trace.v1"
+                )
             except Exception as e:
                 failures.append(f"--schema output failed strict parse: {line!r} ({e})")
                 line = ""
