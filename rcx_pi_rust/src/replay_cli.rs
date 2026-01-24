@@ -1,5 +1,9 @@
 //! Replay CLI matching Python's replay_cli.py (frozen semantics v1).
 //! Bit-for-bit compatible with Python output.
+//!
+//! IMPORTANT: This is a MIRROR of frozen Python v1 semantics, not authoritative.
+//! Python (`rcx_pi/replay_cli.py`) remains the canonical reference implementation.
+//! Any semantic changes must originate in Python; Rust must follow.
 
 use crate::trace_canon::{canon_jsonl, read_jsonl};
 use std::fs;

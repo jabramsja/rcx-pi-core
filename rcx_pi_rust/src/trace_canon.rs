@@ -1,5 +1,8 @@
 //! Trace event canonicalization matching Python's trace_canon.py.
 //! Frozen semantics (v1) - bit-for-bit compatible with Python output.
+//!
+//! IMPORTANT: This is a MIRROR of frozen Python v1 semantics, not authoritative.
+//! Python (`rcx_pi/trace_canon.py`) remains the canonical reference implementation.
 
 use crate::json_value::JsonValue;
 
