@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "rcx-trace-event.v2.json",
-  "title": "RCX Trace Event (v2) - Observability Extension",
-  "description": "Extends v1 with stall/fix observability events. v2 events are opt-in and do not affect v1 replay gates.",
+  "title": "RCX Trace Event (v2) - Observability and Execution Extension",
+  "description": "Extends v1 with observability and execution events. v2 events are opt-in and do not affect v1 replay gates. Observability types (debug-only): reduction.stall, reduction.applied, reduction.normal. Execution types (RCX_EXECUTION_V0=1): execution.stall, execution.fix, execution.fixed.",
   "type": "object",
   "additionalProperties": false,
   "required": ["v", "type", "i"],
@@ -11,12 +11,12 @@
     "type": {
       "type": "string",
       "minLength": 1,
-      "description": "Event type. v2 types: reduction.stall, reduction.applied, reduction.normal"
+      "description": "Event type. Observability: reduction.stall, reduction.applied, reduction.normal. Execution: execution.stall, execution.fix, execution.fixed."
     },
     "i": { "type": "integer", "minimum": 0 },
-    "t": { "type": "string", "minLength": 1, "description": "Tag (e.g. rule_id for reduction.applied)" },
+    "t": { "type": "string", "minLength": 1, "description": "Tag (e.g. rule_id for reduction.applied or execution.fix)" },
     "mu": {
-      "description": "Optional payload. For v2: {reason, rule_id, before_depth, after_depth}",
+      "description": "Optional payload. Observability: {reason, rule_id, before_depth, after_depth}. Execution: {pattern_id, value_hash, rule_id, before_hash, after_hash}.",
       "type": ["null", "boolean", "integer", "number", "string", "array", "object"]
     },
     "meta": {
