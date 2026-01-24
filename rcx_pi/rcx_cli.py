@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+
+# RCX_REPLAY_FASTPATH_V1
+# Keep umbrella CLI stable: only import replay when explicitly invoked.
+# Do NOT rely on sys being imported elsewhere.
+if __name__ == "__main__":
+    _sys = __import__("sys")
+    if len(_sys.argv) > 1 and _sys.argv[1] == "replay":
+        from rcx_pi.replay_cli import replay_main  # local import on purpose
+
+        raise SystemExit(replay_main(_sys.argv[2:]))
 """
 rcx_cli.py
 
@@ -22,12 +32,14 @@ All remaining arguments are forwarded verbatim.
 # When invoked as a module (python -m rcx_pi.rcx_cli), this block is harmless.
 if __package__ is None or __package__ == "":
     import sys
+
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
 import sys
+from rcx_pi.replay_cli import replay_main
 from typing import List
 
 
@@ -54,6 +66,10 @@ examples:
 def _help(code: int = 0) -> int:
     print(HELP)
     return code
+
+
+def _cmd_replay(argv: list[str]) -> int:
+    return replay_main(argv)
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -107,3 +123,12 @@ def main(argv: List[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _rcx_dispatch(argv: list[str]) -> int:
+    if not argv:
+        return 2
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "replay":
+        return _cmd_replay(rest)
+    return 2
