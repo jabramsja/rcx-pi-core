@@ -12,13 +12,27 @@ Example:
 
 ### Canonical helper
 
-The canonical formatter for this output is:
+The canonical formatter and parser live in:
 
 - rcx_pi/cli_schema.py
   - schema_triplet(tag, doc_md, schema_json) -> str
   - print_schema_triplet(tag, doc_md, schema_json) -> None
+  - parse_schema_triplet(line) -> SchemaTriplet
+  - parse_schema_triplet_tuple(line) -> (tag, doc_md, schema_json)
 
-CLIs should route `--schema` output through print_schema_triplet(...) to keep formatting stable across refactors.
+CLIs should route `--schema` output through `print_schema_triplet(...)` to keep formatting stable across refactors.
+
+### Strictness rules
+
+This contract is intentionally strict (tests enforce it):
+
+- Exactly one non-empty stdout line.
+- Exactly three fields separated by single spaces.
+- No leading/trailing whitespace.
+- No tabs or embedded whitespace inside any field.
+- Paths are repo-relative and follow conventions:
+  - doc: `docs/*.md`
+  - schema: `docs/schemas/*.json`
 
 ### Covered emitters
 
