@@ -1,0 +1,2 @@
+{"v":2,"type":"reduction.applied","i":0,"t":"add.zero","mu":{"after_depth":3,"before_depth":4,"rule_id":"add.zero"}}
+{"v":2,"type":"reduction.normal","i":1,"mu":{"reason":"no_rule_matched"}}

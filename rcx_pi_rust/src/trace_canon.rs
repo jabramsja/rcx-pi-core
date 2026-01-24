@@ -6,8 +6,9 @@
 
 use crate::json_value::JsonValue;
 
-/// Trace event schema version.
-pub const TRACE_EVENT_V: i64 = 1;
+/// Trace event schema versions.
+pub const TRACE_EVENT_V1: i64 = 1;
+pub const TRACE_EVENT_V2: i64 = 2;
 
 /// Canonical key order for trace events.
 pub const TRACE_EVENT_KEY_ORDER: &[&str] = &["v", "type", "i", "t", "mu", "meta"];
@@ -30,16 +31,16 @@ pub fn canon_event(ev: &JsonValue) -> Result<CanonEvent, String> {
         _ => return Err("event must be an object".to_string()),
     };
 
-    // v: required, must be 1
+    // v: required, must be 1 or 2
     let v = match obj.get("v") {
         Some(JsonValue::Number(n)) => {
             let v = *n as i64;
-            if v != TRACE_EVENT_V {
-                return Err(format!("event.v must be {}, got {}", TRACE_EVENT_V, v));
+            if v != TRACE_EVENT_V1 && v != TRACE_EVENT_V2 {
+                return Err(format!("event.v must be {} or {}, got {}", TRACE_EVENT_V1, TRACE_EVENT_V2, v));
             }
             v
         }
-        None => TRACE_EVENT_V, // default
+        None => TRACE_EVENT_V1, // default
         _ => return Err("event.v must be an integer".to_string()),
     };
 

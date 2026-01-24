@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rcx-trace-event.v2.json",
+  "title": "RCX Trace Event (v2) - Observability Extension",
+  "description": "Extends v1 with stall/fix observability events. v2 events are opt-in and do not affect v1 replay gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "type", "i"],
+  "properties": {
+    "v": { "type": "integer", "const": 2 },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Event type. v2 types: reduction.stall, reduction.applied, reduction.normal"
+    },
+    "i": { "type": "integer", "minimum": 0 },
+    "t": { "type": "string", "minLength": 1, "description": "Tag (e.g. rule_id for reduction.applied)" },
+    "mu": {
+      "description": "Optional payload. For v2: {reason, rule_id, before_depth, after_depth}",
+      "type": ["null", "boolean", "integer", "number", "string", "array", "object"]
+    },
+    "meta": {
+      "description": "Optional metadata: object only (canonicalized with deep sort).",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

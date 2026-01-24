@@ -32,6 +32,10 @@ STRUCT_TAG = compression.marker(24)  # “generic structural lobe”
 class PureRules(PatternMatcher):
     """Pure reduction rules without naming."""
 
+    def _emit_applied(self, rule_id: str, before: Motif, after: Motif) -> None:
+        if self._observer:
+            self._observer.applied(rule_id, before, after)
+
     def reduce(self, m: Motif) -> Motif:
         # --- trivial / already-normal cases ----
         if not isinstance(m, Motif):
@@ -55,11 +59,14 @@ class PureRules(PatternMatcher):
 
                 # 0 + b -> b
                 if isinstance(a, Motif) and a.is_void():
+                    self._emit_applied("add.zero", m, b)
                     return b
 
                 # succ(n) + b -> succ(n + b)
                 if isinstance(a, Motif) and a.is_successor_pure():
-                    return μ(a.head().add(b))
+                    result = μ(a.head().add(b))
+                    self._emit_applied("add.succ", m, result)
+                    return result
 
             # mult(a,b) encoded as μ(MULT, a, b)
             if head.structurally_equal(MULT) and len(m.structure) >= 3:
@@ -67,11 +74,14 @@ class PureRules(PatternMatcher):
 
                 # 0 * b -> 0
                 if isinstance(a, Motif) and a.is_void():
+                    self._emit_applied("mult.zero", m, VOID)
                     return VOID
 
                 # succ(n) * b -> b + (n * b)
                 if isinstance(a, Motif) and a.is_successor_pure():
-                    return b.add(a.head().mult(b))
+                    result = b.add(a.head().mult(b))
+                    self._emit_applied("mult.succ", m, result)
+                    return result
 
             # pred pattern encoded as μ(PRED, x)
             if head.structurally_equal(PRED) and len(m.structure) >= 2:
@@ -79,10 +89,13 @@ class PureRules(PatternMatcher):
                 if isinstance(arg, Motif):
                     # pred(0) -> 0
                     if arg.is_zero_pure():
+                        self._emit_applied("pred.zero", m, arg)
                         return arg
                     # pred(succ(n)) -> n
                     if arg.is_successor_pure():
-                        return arg.head()
+                        result = arg.head()
+                        self._emit_applied("pred.succ", m, result)
+                        return result
 
             # ----- closure activation -----
             # activation encoded as μ(ACTIVATION, func, arg)
@@ -97,15 +110,21 @@ class PureRules(PatternMatcher):
                         if len(func.structure) >= 2:
                             projection = func.structure[1]
                             # PatternMatcher.apply_projection (inherited)
-                            return self.apply_projection(projection, arg)
+                            result = self.apply_projection(projection, arg)
+                            self._emit_applied("activation", m, result)
+                            return result
 
             # ----- meta-classification: classify(target) -----
             # μ(CLASSIFY, target)
             if head.structurally_equal(CLASSIFY) and len(m.structure) >= 2:
                 target = m.structure[1]
-                return self._classify_target(target)
+                result = self._classify_target(target)
+                self._emit_applied("classify", m, result)
+                return result
 
         # Nothing matched → normal form
+        if self._observer:
+            self._observer.normal()
         return m
 
     # =======================================================================
