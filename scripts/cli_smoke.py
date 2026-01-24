@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from typing import List, Optional
+from rcx_pi.cli_schema import parse_schema_triplet
 
 
 def _which(cmd: str) -> Optional[str]:
@@ -56,7 +57,15 @@ def main() -> int:
     if r.returncode != 0:
         failures.append(f"program-descriptor --schema failed:\n{r.stderr.strip()}")
     else:
-        line = r.stdout.strip().splitlines()[0].strip() if r.stdout.strip() else ""
+        raw = r.stdout
+        lines = [ln for ln in raw.splitlines() if ln.strip() != ""]
+        line = lines[0] if lines else ""
+        if line:
+            try:
+                parse_schema_triplet(line)
+            except Exception as e:
+                failures.append(f"--schema output failed strict parse: {line!r} ({e})")
+                continue
         if "rcx-program-descriptor.v1" not in line:
             failures.append(f"program-descriptor --schema unexpected output: {line!r}")
 
@@ -69,7 +78,15 @@ def main() -> int:
     if r.returncode != 0:
         failures.append(f"program-run --schema failed:\n{r.stderr.strip()}")
     else:
-        line = r.stdout.strip().splitlines()[0].strip() if r.stdout.strip() else ""
+        raw = r.stdout
+        lines = [ln for ln in raw.splitlines() if ln.strip() != ""]
+        line = lines[0] if lines else ""
+        if line:
+            try:
+                parse_schema_triplet(line)
+            except Exception as e:
+                failures.append(f"--schema output failed strict parse: {line!r} ({e})")
+                continue
         if "rcx-program-run.v1" not in line:
             failures.append(f"program-run --schema unexpected output: {line!r}")
 
@@ -106,7 +123,15 @@ def main() -> int:
     if r.returncode != 0:
         failures.append(f"world-trace --schema failed:\n{r.stderr.strip()}")
     else:
-        line = r.stdout.strip().splitlines()[0].strip() if r.stdout.strip() else ""
+        raw = r.stdout
+        lines = [ln for ln in raw.splitlines() if ln.strip() != ""]
+        line = lines[0] if lines else ""
+        if line:
+            try:
+                parse_schema_triplet(line)
+            except Exception as e:
+                failures.append(f"--schema output failed strict parse: {line!r} ({e})")
+                continue
         if "rcx-world-trace.v1" not in line:
             failures.append(f"world-trace --schema unexpected output: {line!r}")
 
