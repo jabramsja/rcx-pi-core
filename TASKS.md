@@ -107,6 +107,27 @@ If a task is not listed here, it is NOT to be implemented.
 
 ---
 
+## Boundary Question (Unanswered)
+
+What is the smallest, host-independent execution primitive that RCX must possess
+such that a structural program can cause new structure to emerge only via
+Stall → Fix → Trace → Closure, and in no other way?
+
+This question defines the boundary between substrate completion and
+Sink-level capability growth. Anything beyond answering this question
+requires explicit promotion.
+
+**Operational restatement:**
+
+What is the minimal native execution loop that can:
+(a) detect a true stall,
+(b) apply a structurally justified fix,
+(c) record that as a trace event, and
+(d) make closure unavoidable on second independent encounter,
+without importing semantics from the host language?
+
+---
+
 ## Sink (Unknown / Deferred)
 
 - Full RCX bytecode VM bootstrap
