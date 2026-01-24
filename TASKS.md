@@ -30,27 +30,15 @@
 - Trace canonicalization helper (`rcx_pi/trace_canon.py`)
 - Replay CLI skeleton (python-only) (`python -m rcx_pi.rcx_cli replay ...`)
 - Replay idempotence gate: trace → replay → tracked diff empty (`tests/test_replay_gate_idempotent.py`)
+- Entropy sealing contract (`EntropyBudget.md`) - RNG, timestamps, hash ordering, floats sealed
+- Golden trace fixtures (`tests/fixtures/traces/*.v1.jsonl`) - minimal, multi-event, nested payload
+- Replay gate runs all fixtures; CI enforces determinism
 
 ---
 
 ## Lobe: Deterministic Trace Core (v1)
 
-### NOW (blocking)
-
-1. **Entropy sealing checklist + tests**
-   - Deliverable: `docs/EntropyBudget.md`
-   - Covers: RNG seeds, hash ordering, filesystem order, locale/time, floats
-   - Done when: each entropy source is sealed or explicitly allowed
-
-2. **Golden trace fixtures**
-   - Deliverable: `tests/fixtures/traces/*.jsonl`
-   - Done when: fixtures replay cleanly and are used by replay gate
-
-### NEXT
-
-3. **Replay gate: trace → replay → diff empty (CI enforcement)**
-   - Deliverable: CI gate enforcing deterministic replay
-   - Done when: CI fails on any tracked diff
+**Status: NOW/NEXT complete. VECTOR blocked on semantic freeze.**
 
 ### VECTOR (intentionally deferred)
 
