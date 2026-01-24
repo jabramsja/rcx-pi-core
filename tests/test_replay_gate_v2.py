@@ -628,8 +628,12 @@ def test_replay_consumes_execution_fix() -> None:
     Replay can drive ExecutionEngine through stall→fix→fixed cycle via public API.
     The execution.fix event is consumed (validated against engine state), not just sequence-checked.
 
-    Uses public replay_* methods: consume_stall, consume_fix, consume_fixed.
+    Uses public consume_* methods: consume_stall, consume_fix, consume_fixed.
     Test will fail if these methods break (no private state mutation).
+
+    Post-condition assertions use public getters to prevent no-op cheating:
+    - After consume_stall: current_value_hash == stall.value_hash
+    - After consume_fixed: current_value_hash == fixed.after_hash
     """
     from rcx_pi.trace_canon import ExecutionEngine, ExecutionStatus
     import json
@@ -637,8 +641,11 @@ def test_replay_consumes_execution_fix() -> None:
     fixture = _repo_root() / "tests" / "fixtures" / "traces_v2" / "stall_then_fix_then_end.v2.jsonl"
     events = [json.loads(ln) for ln in fixture.read_text().strip().split("\n") if ln.strip()]
 
-    # Drive engine through the trace using public replay API
+    # Drive engine through the trace using public consume API
     engine = ExecutionEngine(enabled=True)
+
+    # Track expected hash for post-condition assertions
+    expected_hash = None
 
     for ev in events:
         ev_type = ev["type"]
@@ -646,15 +653,30 @@ def test_replay_consumes_execution_fix() -> None:
 
         if ev_type == "execution.stall":
             engine.consume_stall(mu["pattern_id"], mu["value_hash"])
+            expected_hash = mu["value_hash"]
+            # Post-condition: hash is captured
+            assert engine.current_value_hash == expected_hash, \
+                f"After stall: expected hash {expected_hash}, got {engine.current_value_hash}"
+            assert engine.is_stalled, "After stall: engine should be stalled"
 
         elif ev_type == "execution.fix":
             engine.consume_fix(ev.get("t", ""), mu["target_hash"])
+            # Post-condition: hash unchanged (fix validates, doesn't transform)
+            assert engine.current_value_hash == expected_hash, \
+                f"After fix: hash should be unchanged"
 
         elif ev_type == "execution.fixed":
             engine.consume_fixed(ev.get("t", ""), mu["before_hash"], mu["after_hash"])
+            expected_hash = mu["after_hash"]
+            # Post-condition: hash updated to after_hash
+            assert engine.current_value_hash == expected_hash, \
+                f"After fixed: expected hash {expected_hash}, got {engine.current_value_hash}"
+            assert not engine.is_stalled, "After fixed: engine should not be stalled"
 
-    # After consuming all events, engine should be active
+    # After consuming all events, engine should be active with final hash
     assert engine.status == ExecutionStatus.ACTIVE, "Engine should be active after consuming fix"
+    assert engine.current_value_hash == events[-1]["mu"]["after_hash"], \
+        "Final hash should match last fixed.after_hash"
 
 
 def test_replay_api_rejects_invalid_sequence() -> None:
@@ -731,3 +753,70 @@ def test_stall_fix_v2_fixture_is_canonical() -> None:
     # Also validate execution sequence
     events = [json.loads(ln) for ln in fixture.read_text().strip().split("\n") if ln.strip()]
     validate_v2_execution_sequence(events)  # Should not raise
+
+
+# --- CLI execution summary end-to-end test (anti-theater check) ---
+
+
+def test_cli_print_exec_summary_end_to_end() -> None:
+    """
+    End-to-end anti-theater check via PUBLIC CLI.
+
+    Runs the CLI with --print-exec-summary and asserts semantics (not strings).
+    This proves the CLI path actually processes v2 execution events correctly.
+
+    Fixtures tested:
+    - stall_then_fix_then_end.v2.jsonl: ends ACTIVE, counts stall=1 fix=1 fixed=1
+    - stall_at_end.v2.jsonl: ends STALLED, counts stall=1 fix=0 fixed=0
+    """
+    import json
+
+    root = _repo_root()
+
+    def run_cli_with_summary(fixture_path: Path) -> dict:
+        """Run CLI replay with --print-exec-summary and parse the JSON output."""
+        result = subprocess.run(
+            [
+                "python3",
+                "-m",
+                "rcx_pi.rcx_cli",
+                "replay",
+                "--trace",
+                str(fixture_path),
+                "--check-canon",
+                "--print-exec-summary",
+            ],
+            cwd=str(root),
+            env={**os.environ, "PYTHONHASHSEED": "0"},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"CLI replay failed for {fixture_path.name}:\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+        # Parse the JSON line from stdout
+        lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+        assert len(lines) == 1, f"Expected exactly one JSON line, got {len(lines)}: {lines}"
+        return json.loads(lines[0])
+
+    # Test fixture 1: stall → fix → fixed (ends ACTIVE)
+    stall_then_fix = root / "tests" / "fixtures" / "traces_v2" / "stall_then_fix_then_end.v2.jsonl"
+    s1 = run_cli_with_summary(stall_then_fix)
+
+    assert s1.get("v") == 2, f"Expected v=2, got {s1.get('v')}"
+    assert s1["counts"] == {"stall": 1, "fix": 1, "fixed": 1}, f"Wrong counts: {s1['counts']}"
+    assert s1["final_status"] == "ACTIVE", f"Expected ACTIVE, got {s1['final_status']}"
+    assert isinstance(s1.get("final_value_hash"), str) and len(s1["final_value_hash"]) > 0, \
+        f"Expected non-empty hash string, got {s1.get('final_value_hash')}"
+
+    # Test fixture 2: stall only (ends STALLED - normal form termination)
+    stall_at_end = root / "tests" / "fixtures" / "traces_v2" / "stall_at_end.v2.jsonl"
+    s2 = run_cli_with_summary(stall_at_end)
+
+    assert s2.get("v") == 2, f"Expected v=2, got {s2.get('v')}"
+    assert s2["counts"] == {"stall": 1, "fix": 0, "fixed": 0}, f"Wrong counts: {s2['counts']}"
+    assert s2["final_status"] == "STALLED", f"Expected STALLED, got {s2['final_status']}"
+    assert isinstance(s2.get("final_value_hash"), str) and len(s2["final_value_hash"]) > 0, \
+        f"Expected non-empty hash string, got {s2.get('final_value_hash')}"

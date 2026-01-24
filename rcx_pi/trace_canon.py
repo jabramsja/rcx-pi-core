@@ -262,6 +262,11 @@ class ExecutionEngine:
         """True if execution is stalled."""
         return self._status == ExecutionStatus.STALLED
 
+    @property
+    def current_value_hash(self) -> str | None:
+        """Current value hash (for post-condition assertions)."""
+        return self._current_value_hash
+
     def stall(self, pattern_id: str, value: Any) -> None:
         """
         Stall execution due to pattern mismatch.
