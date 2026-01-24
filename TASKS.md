@@ -74,12 +74,10 @@ If a task is not listed here, it is NOT to be implemented.
      - `tests/test_replay_gate_v2.py`
    - Done: v2 gate passes, v1 gate untouched
 
-### NEXT
-
-5. **Bytecode mapping v0 alignment pass**
+5. **Bytecode mapping v0 alignment pass** ✅
    - Input: `BytecodeMapping.v0.md`
    - Deliverable: update mapping to include new v2 observability events (as "debug-only")
-   - Done when: mapping doc reflects reality and constraints
+   - Done: PR #81 merged, doc now references v2 debug-only opcodes
 
 ### VECTOR
 
