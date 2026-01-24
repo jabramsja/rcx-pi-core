@@ -7,10 +7,11 @@ import sys
 USAGE = "usage: freeze_core_mu.py <baseline.mu> <mutated.mu>"
 
 FROZEN_LHS = [
-    r'^\[omega,.*\]\s*->',
-    r'^\[expand,.*\]\s*->',
-    r'^\[collapse\]\s*->',
+    r"^\[omega,.*\]\s*->",
+    r"^\[expand,.*\]\s*->",
+    r"^\[collapse\]\s*->",
 ]
+
 
 def extract_frozen_lines(text: str) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -25,13 +26,14 @@ def extract_frozen_lines(text: str) -> dict[str, str]:
                 break
     return out
 
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(USAGE, file=sys.stderr)
         return 2
 
     base = Path(sys.argv[1])
-    mut  = Path(sys.argv[2])
+    mut = Path(sys.argv[2])
 
     bt = base.read_text(encoding="utf-8", errors="replace")
     mt = mut.read_text(encoding="utf-8", errors="replace")
@@ -71,8 +73,11 @@ def main() -> int:
             new_lines.append(base_frozen[lhs])
 
     mut.write_text("".join(new_lines), encoding="utf-8")
-    print(f"OK: froze core rules into {mut} (replaced={replaced}, appended_missing={len(missing)})")
+    print(
+        f"OK: froze core rules into {mut} (replaced={replaced}, appended_missing={len(missing)})"
+    )
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -219,13 +219,39 @@ def main(argv: List[str]) -> int:
                 "input": {"nodes": in_nodes, "depth": in_depth},
                 "result": {"nodes": out_nodes, "depth": out_depth},
             },
-            "steps": derived_steps if derived_steps else [{"i": 0, "nodes": in_nodes, "depth": in_depth, "delta_nodes": 0, "delta_depth": 0}],
+            "steps": derived_steps
+            if derived_steps
+            else [
+                {
+                    "i": 0,
+                    "nodes": in_nodes,
+                    "depth": in_depth,
+                    "delta_nodes": 0,
+                    "delta_depth": 0,
+                }
+            ],
         }
-        print(json.dumps(maybe_add_schema_fields(payload, kind='trace'), indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                maybe_add_schema_fields(payload, kind="trace"), indent=2, sort_keys=True
+            )
+        )
         return 0
 
     # Human output (tests expect "result:" and "steps:")
-    for s in (derived_steps if derived_steps else [{"i": 0, "nodes": in_nodes, "depth": in_depth, "delta_nodes": 0, "delta_depth": 0}]):
+    for s in (
+        derived_steps
+        if derived_steps
+        else [
+            {
+                "i": 0,
+                "nodes": in_nodes,
+                "depth": in_depth,
+                "delta_nodes": 0,
+                "delta_depth": 0,
+            }
+        ]
+    ):
         print(
             f"{s['i']:03d}: nodes={s['nodes']:+d} depth={s['depth']:+d} "
             f"(Δn={s['delta_nodes']:+d}, Δd={s['delta_depth']:+d})"

@@ -5,7 +5,11 @@ import argparse
 from typing import Any, Dict, List
 
 from rcx_pi.worlds_probe import probe_world
-from rcx_pi.worlds.worlds_evolve import rank_worlds, SPEC_PRESETS, DEFAULT_CANDIDATE_WORLDS
+from rcx_pi.worlds.worlds_evolve import (
+    rank_worlds,
+    SPEC_PRESETS,
+    DEFAULT_CANDIDATE_WORLDS,
+)
 from rcx_pi.worlds.worlds_diff import diff_world_against_spec, format_diff_report
 
 # ---------------------------------------------------------------------------
@@ -64,6 +68,7 @@ def _print_fingerprint(fp: Dict[str, Any], explain: bool = False) -> None:
 
     print()
 
+
 def _print_explain(fp: Dict[str, Any]) -> None:
     print("\nExplain:")
 
@@ -83,7 +88,7 @@ def _print_explain(fp: Dict[str, Any]) -> None:
         print("  dispatch (world -> seeds):")
         for world in sorted(by_world.keys()):
             print(f"    {world}:")
-            for (mu, reason) in by_world[world]:
+            for mu, reason in by_world[world]:
                 if reason:
                     print(f"      - {mu}  (reason: {reason})")
                 else:
@@ -117,6 +122,7 @@ def _print_explain(fp: Dict[str, Any]) -> None:
             mu = o.get("mu", "?")
             orbit_obj = o.get("orbit")
             print(f"    {mu}: {orbit_obj}")
+
 
 def _print_promote_report(spec_name: str, max_steps: int) -> None:
     from rcx_pi.specs.triad_plus_routes import TRIAD_PLUS_ROUTE_OVERRIDES
@@ -153,7 +159,10 @@ def _print_promote_report(spec_name: str, max_steps: int) -> None:
 
     print()
 
-def _print_indented_block(text: str, indent: str = "    ", max_blank_run: int = 1) -> None:
+
+def _print_indented_block(
+    text: str, indent: str = "    ", max_blank_run: int = 1
+) -> None:
     """
     Print a block with indentation, collapsing long blank runs.
     """
@@ -172,10 +181,9 @@ def _print_indented_block(text: str, indent: str = "    ", max_blank_run: int = 
 # Main logic
 # ---------------------------------------------------------------------------
 
+
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="RCX-π runtime / world probe"
-    )
+    parser = argparse.ArgumentParser(description="RCX-π runtime / world probe")
     parser.add_argument(
         "--explain",
         action="store_true",
@@ -210,7 +218,7 @@ def _parse_args() -> argparse.Namespace:
         "--seed",
         dest="seeds",
         nargs="+",
-        help="Mu seeds to classify (e.g. \"[null,a]\" \"[inf,a]\").",
+        help='Mu seeds to classify (e.g. "[null,a]" "[inf,a]").',
     )
     parser.add_argument(
         "--max-steps",
@@ -235,7 +243,7 @@ def main() -> None:
             )
         _print_promote_report(args.spec, max_steps=args.max_steps)
         return
-   
+
     # Mode 1: spec dashboard over explicit worlds (with optional probing)
     if args.spec and args.worlds:
         _print_ranked_worlds_dashboard(args.spec, args.worlds)
@@ -318,7 +326,7 @@ def main() -> None:
                 "You must provide --seed when using --world.\n"
                 "Example:\n"
                 "  python3 rcx_runtime.py --world rcx_core "
-                "--seed \"[null,a]\" \"[inf,a]\""
+                '--seed "[null,a]" "[inf,a]"'
             )
         fp = probe_world(args.world, args.seeds, max_steps=args.max_steps)
         _print_fingerprint(fp, explain=args.explain)
@@ -330,17 +338,17 @@ def main() -> None:
         "Examples:\n"
         "  # Direct world probe\n"
         "  python3 rcx_runtime.py --world rcx_core "
-        "--seed \"[null,a]\" \"[inf,a]\" \"[paradox,a]\" \"[omega,[a,b]]\"\n\n"
+        '--seed "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]"\n\n'
         "  # Let a spec pick the best world from defaults and probe it\n"
         "  python3 rcx_runtime.py --spec core "
-        "--seed \"[null,a]\" \"[inf,a]\" \"[paradox,a]\" \"[omega,[a,b]]\"\n\n"
+        '--seed "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]"\n\n'
         "  # Spec dashboard over explicit worlds\n"
         "  python3 rcx_runtime.py --spec core "
         "--worlds rcx_core vars_demo pingpong news paradox_1over0\n\n"
         "  # Spec dashboard + probe top world on given seeds\n"
         "  python3 rcx_runtime.py --spec core "
         "--worlds rcx_core vars_demo pingpong news paradox_1over0 "
-        "--seed \"[null,a]\" \"[inf,a]\" \"[paradox,a]\" \"[omega,[a,b]]\"\n"
+        '--seed "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]"\n'
     )
 
 

@@ -1,5 +1,6 @@
 from rcx_pi.worlds_probe import score_world, spec_from_world
 
+
 def test_vars_demo_matches_rcx_core_spec():
     seeds = [
         "[null,a]",

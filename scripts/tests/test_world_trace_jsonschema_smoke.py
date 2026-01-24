@@ -27,7 +27,7 @@ def test_world_trace_output_validates_against_jsonschema():
         capture_output=True,
         text=True,
     )
-    assert r.returncode == 0, (r.stdout + "\n" + r.stderr)
+    assert r.returncode == 0, r.stdout + "\n" + r.stderr
 
     # Ensure it's valid JSON (sanity)
     data = json.loads(r.stdout)
@@ -41,4 +41,4 @@ def test_world_trace_output_validates_against_jsonschema():
         capture_output=True,
         text=True,
     )
-    assert v.returncode == 0, (v.stdout + "\n" + v.stderr)
+    assert v.returncode == 0, v.stdout + "\n" + v.stderr

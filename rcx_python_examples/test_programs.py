@@ -8,9 +8,10 @@ from rcx_pi.programs import (
 )
 from rcx_pi.programs import wrap_program, is_program_block, seq, PROGRAM_TAG, SEQ_TAG
 import pytest
+
 pytest.skip(
-    "legacy RCX-π program API; kept for reference only",
-    allow_module_level=True)
+    "legacy RCX-π program API; kept for reference only", allow_module_level=True
+)
 
 pytest.skip(
     "Legacy program-block API (wrap_program/seq/PROGRAM_TAG/SEQ_TAG) "
@@ -34,6 +35,7 @@ def activate(func: Motif, arg: Motif) -> Motif:
 
 
 # ---------- helpers ----------
+
 
 def motif_to_int(m: Motif):
     """Convert Peano motif to Python int (if pure Peano)."""

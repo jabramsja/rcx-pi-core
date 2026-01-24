@@ -90,7 +90,9 @@ def run_omega(seed: Any, *, max_steps: int = 64) -> OmegaRun:
         if ky in seen:
             mu = seen[ky]
             period = i - mu
-            classification = "fixed_point" if (period == 1 and mu == i - 1) else "limit_cycle"
+            classification = (
+                "fixed_point" if (period == 1 and mu == i - 1) else "limit_cycle"
+            )
             return OmegaRun(
                 seed=seed,
                 orbit=orbit,
@@ -113,7 +115,9 @@ def run_omega(seed: Any, *, max_steps: int = 64) -> OmegaRun:
     )
 
 
-def omega_run_to_json(run: OmegaRun, *, include_meta: bool = False, include_steps: bool = False) -> Dict[str, Any]:
+def omega_run_to_json(
+    run: OmegaRun, *, include_meta: bool = False, include_steps: bool = False
+) -> Dict[str, Any]:
     """
     JSON object suitable for piping into analyze_cli.
 

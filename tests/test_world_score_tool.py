@@ -11,7 +11,9 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 def test_world_score_list_trace(tmp_path: Path):
     t = tmp_path / "t.json"
-    t.write_text(json.dumps([{"state": "a"}, {"state": "b"}, {"state": "c"}]), encoding="utf-8")
+    t.write_text(
+        json.dumps([{"state": "a"}, {"state": "b"}, {"state": "c"}]), encoding="utf-8"
+    )
     p = _run(["bash", "scripts/world_score.sh", str(t), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
@@ -23,7 +25,10 @@ def test_world_score_list_trace(tmp_path: Path):
 
 def test_world_score_embedded_steps(tmp_path: Path):
     t = tmp_path / "t.json"
-    t.write_text(json.dumps({"steps": [{"state": 1}, {"state": 2}], "halt_reason": "completed"}), encoding="utf-8")
+    t.write_text(
+        json.dumps({"steps": [{"state": 1}, {"state": 2}], "halt_reason": "completed"}),
+        encoding="utf-8",
+    )
     p = _run(["bash", "scripts/world_score.sh", str(t), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
@@ -33,7 +38,9 @@ def test_world_score_embedded_steps(tmp_path: Path):
 
 def test_world_score_loop_detection(tmp_path: Path):
     t = tmp_path / "t.json"
-    t.write_text(json.dumps([{"state": "a"}, {"state": "b"}, {"state": "a"}]), encoding="utf-8")
+    t.write_text(
+        json.dumps([{"state": "a"}, {"state": "b"}, {"state": "a"}]), encoding="utf-8"
+    )
     p = _run(["bash", "scripts/world_score.sh", str(t), "--json", "--loop"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)

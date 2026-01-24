@@ -21,12 +21,14 @@ from rcx_omega.trace import trace_reduce, TraceResult
 
 class Observer(Protocol):
     """Read-only observer of evaluation."""
+
     def observe(self, trace: TraceResult) -> None: ...
 
 
 @dataclass
 class CollectingObserver:
     """Simple observer that records traces."""
+
     traces: List[TraceResult]
 
     def observe(self, trace: TraceResult) -> None:

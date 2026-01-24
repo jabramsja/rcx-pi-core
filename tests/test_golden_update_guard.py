@@ -1,7 +1,13 @@
 import os
 
+
 def test_goldens_update_requires_explicit_ack():
-    update = os.getenv("RCX_UPDATE_GOLDENS", "").strip().lower() in {"1", "true", "yes", "on"}
+    update = os.getenv("RCX_UPDATE_GOLDENS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     if not update:
         return
 

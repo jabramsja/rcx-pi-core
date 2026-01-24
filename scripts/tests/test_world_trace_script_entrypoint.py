@@ -15,4 +15,4 @@ def test_world_trace_script_entrypoint_help_smoke():
         capture_output=True,
         text=True,
     )
-    assert r.returncode == 0, (r.stdout + "\n" + r.stderr)
+    assert r.returncode == 0, r.stdout + "\n" + r.stderr

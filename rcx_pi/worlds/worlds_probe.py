@@ -14,9 +14,7 @@ from .worlds_composite import probe_triad_router
 # Expected line shape (from the Rust classify_cli):
 #   input: [null,a] → route: Some(Ra)
 #   input: [something] → route: None
-_INPUT_LINE_RE = re.compile(
-    r"input:\s+(.+?)\s+→ route:\s+(?:Some\((\w+)\)|None)"
-)
+_INPUT_LINE_RE = re.compile(r"input:\s+(.+?)\s+→ route:\s+(?:Some\((\w+)\)|None)")
 
 
 def _parse_routes(out: str, seeds: List[str]) -> List[Dict[str, str]]:
@@ -51,6 +49,7 @@ def _parse_routes(out: str, seeds: List[str]) -> List[Dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Public API: probe_world
 # ---------------------------------------------------------------------------
+
 
 def _probe_godel_liar(seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
     """
@@ -123,15 +122,11 @@ def _probe_godel_liar(seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
     }
 
 
-def _probe_rcx_triad_router(
-        seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
+def _probe_rcx_triad_router(seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
     return probe_triad_router(seeds, max_steps=max_steps)
 
 
-def probe_world(world: str,
-                seeds: List[str],
-                max_steps: int = 20) -> Dict[str,
-                                             Any]:
+def probe_world(world: str, seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
     """
     Probe a world for a set of Mu seeds.
 
@@ -240,11 +235,15 @@ def probe_world(world: str,
         "raw_output": out,
     }
 
+
 # ---------------------------------------------------------------------------
 # Legacy-compatible wrappers (used by older demos)
 # ---------------------------------------------------------------------------
 
-def spec_from_world(world: str, seeds: List[str], max_steps: int = 20) -> Dict[str, str]:
+
+def spec_from_world(
+    world: str, seeds: List[str], max_steps: int = 20
+) -> Dict[str, str]:
     """
     Build a spec dict {mu -> route} by probing a world on the given seeds.
     Matches the older demo API shape.
@@ -253,7 +252,9 @@ def spec_from_world(world: str, seeds: List[str], max_steps: int = 20) -> Dict[s
     return {row["mu"]: row["route"] for row in fp["routes"]}
 
 
-def score_world(world: str, spec: Dict[str, str], max_steps: int = 20) -> Dict[str, Any]:
+def score_world(
+    world: str, spec: Dict[str, str], max_steps: int = 20
+) -> Dict[str, Any]:
     """
     Score a world against a spec {mu -> desired_route}.
     Returns an older-demo-friendly dict.
@@ -268,13 +269,11 @@ def score_world(world: str, spec: Dict[str, str], max_steps: int = 20) -> Dict[s
         mu = row["mu"]
         actual = row["route"]
         desired = spec.get(mu, "None")
-        ok = (actual == desired)
+        ok = actual == desired
         if ok:
             correct += 1
         else:
-            mismatches.append(
-                {"mu": mu, "desired": desired, "actual": actual}
-            )
+            mismatches.append({"mu": mu, "desired": desired, "actual": actual})
 
     total = len(seeds) if seeds else 0
     accuracy = (correct / total) if total else 1.0
@@ -289,7 +288,9 @@ def score_world(world: str, spec: Dict[str, str], max_steps: int = 20) -> Dict[s
     }
 
 
-def compare_worlds(world_a: str, world_b: str, seeds: List[str], max_steps: int = 20) -> Dict[str, Any]:
+def compare_worlds(
+    world_a: str, world_b: str, seeds: List[str], max_steps: int = 20
+) -> Dict[str, Any]:
     """
     Compare two worlds on the same seeds.
     Returns the dict shape your worlds_compare_demo.py expects.

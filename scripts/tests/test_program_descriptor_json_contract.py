@@ -45,6 +45,7 @@ def _discover_candidates(repo_root: Path) -> list[str]:
             seen.add(c)
     return out
 
+
 def test_program_descriptor_json_contract():
     repo_root = Path(__file__).resolve().parents[2]
     candidates = _discover_candidates(repo_root)
@@ -56,13 +57,17 @@ def test_program_descriptor_json_contract():
             last = r
             break
 
-    assert last is not None, f"Could not resolve any candidate program for contract. Tried: {candidates[:30]}"
+    assert last is not None, (
+        f"Could not resolve any candidate program for contract. Tried: {candidates[:30]}"
+    )
 
     data = json.loads(last.stdout)
 
     required = {"schema", "schema_doc", "program", "descriptor"}
     missing = required - set(data.keys())
-    assert not missing, f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
+    assert not missing, (
+        f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
+    )
 
     allowed = required | {"ok", "warnings", "meta"}
     extra = set(data.keys()) - allowed

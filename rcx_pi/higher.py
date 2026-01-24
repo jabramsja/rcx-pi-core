@@ -85,9 +85,7 @@ def peano_factorial(n_val: int, ev: Optional[PureEvaluator] = None) -> Motif:
     return acc
 
 
-def peano_sum(
-        ints: Iterable[int],
-        ev: Optional[PureEvaluator] = None) -> Motif:
+def peano_sum(ints: Iterable[int], ev: Optional[PureEvaluator] = None) -> Motif:
     """
     Sum a list of Python ints as Peano motifs.
 

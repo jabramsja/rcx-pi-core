@@ -28,7 +28,11 @@ class DiffReport:
 
     def by_expected(self) -> Dict[str, List[Mismatch]]:
         buckets: Dict[str, List[Mismatch]] = {
-            "Ra": [], "Lobe": [], "Sink": [], "None": []}
+            "Ra": [],
+            "Lobe": [],
+            "Sink": [],
+            "None": [],
+        }
         for m in self.mismatches:
             buckets.setdefault(m.expected, []).append(m)
         return buckets
@@ -81,10 +85,7 @@ def format_diff_report(report: DiffReport, *, limit: int | None = None) -> str:
     Pretty-print the report for CLI/debug output.
     """
     lines: List[str] = []
-    lines.append(
-        f"=== Diff: world='{
-            report.world}' vs spec='{
-            report.spec_name}' ===")
+    lines.append(f"=== Diff: world='{report.world}' vs spec='{report.spec_name}' ===")
     lines.append(
         f"Summary: {report.matches}/{report.total} "
         f"(accuracy={report.accuracy:.3f}), mismatches={len(report.mismatches)}"
@@ -93,8 +94,7 @@ def format_diff_report(report: DiffReport, *, limit: int | None = None) -> str:
         return "\n".join(lines)
 
     lines.append("")
-    show = report.mismatches if limit is None else report.mismatches[: max(
-        0, limit)]
+    show = report.mismatches if limit is None else report.mismatches[: max(0, limit)]
     for m in show:
         lines.append(f"✗ {m.mu:<32} expected={m.expected:<4} got={m.got:<4}")
 

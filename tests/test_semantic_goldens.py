@@ -85,7 +85,9 @@ def _assert_matches_golden(name: str, data: dict):
         return
 
     expected = _read_json(path)
-    assert data == expected, f"Golden mismatch for {name}. To update intentionally: RCX_UPDATE_GOLDENS=1 pytest -q"
+    assert data == expected, (
+        f"Golden mismatch for {name}. To update intentionally: RCX_UPDATE_GOLDENS=1 pytest -q"
+    )
 
 
 def _semantic_trace_or_error(expr: str) -> dict:

@@ -9,6 +9,7 @@ GATES = [
     ["./scripts/check_orbit_all.sh"],
 ]
 
+
 def run(cmd: list[str], check: bool = True) -> int:
     print("+", " ".join(cmd))
     p = subprocess.run(cmd, text=True)
@@ -16,9 +17,11 @@ def run(cmd: list[str], check: bool = True) -> int:
         raise SystemExit(p.returncode)
     return p.returncode
 
+
 def out(cmd: list[str]) -> str:
     print("+", " ".join(cmd))
     return subprocess.check_output(cmd, text=True).strip()
+
 
 def main() -> None:
     root = out(["git", "rev-parse", "--show-toplevel"])
@@ -31,6 +34,7 @@ def main() -> None:
         run(gate)
 
     print(f"OK: {BASE} synced; deterministic gates green")
+
 
 if __name__ == "__main__":
     main()

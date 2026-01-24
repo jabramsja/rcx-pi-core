@@ -5,6 +5,7 @@ import os, subprocess, sys, time
 
 BASE = os.environ.get("RCX_BASE", "dev")
 
+
 def run(cmd: list[str], check: bool = True) -> int:
     print("+", " ".join(cmd))
     p = subprocess.run(cmd, text=True)
@@ -12,12 +13,15 @@ def run(cmd: list[str], check: bool = True) -> int:
         raise SystemExit(p.returncode)
     return p.returncode
 
+
 def out(cmd: list[str]) -> str:
     print("+", " ".join(cmd))
     return subprocess.check_output(cmd, text=True).strip()
 
+
 def pr_state(pr: str) -> str:
     return out(["gh", "pr", "view", pr, "--json", "state", "--jq", ".state"])
+
 
 def wait_checks(pr: str, timeout_s: int = 900) -> None:
     # gh: --fail-fast requires --watch. This call blocks until checks finish.
@@ -30,6 +34,7 @@ def wait_checks(pr: str, timeout_s: int = 900) -> None:
             raise SystemExit("Timed out waiting for checks to pass.")
         time.sleep(5)
 
+
 def wait_merged(pr: str, timeout_s: int = 900) -> None:
     deadline = time.time() + timeout_s
     while True:
@@ -40,6 +45,7 @@ def wait_merged(pr: str, timeout_s: int = 900) -> None:
         if time.time() > deadline:
             raise SystemExit("Timed out waiting for PR to merge.")
         time.sleep(5)
+
 
 def main() -> None:
     if len(sys.argv) != 2:
@@ -63,7 +69,10 @@ def main() -> None:
         run(["gh", "pr", "ready", pr], check=False)
 
         # enable auto-merge; non-fatal if already merged/enabled/etc
-        run(["gh", "pr", "merge", pr, "--auto", "--merge", "--delete-branch"], check=False)
+        run(
+            ["gh", "pr", "merge", pr, "--auto", "--merge", "--delete-branch"],
+            check=False,
+        )
 
         wait_merged(pr)
 
@@ -73,6 +82,7 @@ def main() -> None:
     run(["./scripts/check_orbit_all.sh"])
 
     print(f"OK: PR{pr} merged; {BASE} synced; deterministic gates green")
+
 
 if __name__ == "__main__":
     main()

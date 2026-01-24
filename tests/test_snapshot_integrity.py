@@ -31,7 +31,9 @@ def _parse_sha256sums(text: str) -> dict[str, str]:
         if len(sha) != 64:
             raise AssertionError(f"Bad sha256 length for {name}: {sha!r}")
         if not name.endswith(".state"):
-            raise AssertionError(f"Unexpected file in SHA256SUMS (must be .state): {name}")
+            raise AssertionError(
+                f"Unexpected file in SHA256SUMS (must be .state): {name}"
+            )
         if name in m:
             raise AssertionError(f"Duplicate entry in SHA256SUMS: {name}")
         m[name] = sha
@@ -39,8 +41,12 @@ def _parse_sha256sums(text: str) -> dict[str, str]:
 
 
 def test_rust_snapshots_sha256_locked():
-    assert SNAP_DIR.is_dir(), "Not found in provided corpus/output: rcx_pi_rust/snapshots/"
-    assert SUMS.is_file(), "Not found in provided corpus/output: rcx_pi_rust/snapshots/SHA256SUMS"
+    assert SNAP_DIR.is_dir(), (
+        "Not found in provided corpus/output: rcx_pi_rust/snapshots/"
+    )
+    assert SUMS.is_file(), (
+        "Not found in provided corpus/output: rcx_pi_rust/snapshots/SHA256SUMS"
+    )
 
     expected = _parse_sha256sums(SUMS.read_text(encoding="utf-8"))
 
@@ -52,6 +58,6 @@ def test_rust_snapshots_sha256_locked():
         assert got == exp_sha, f"Snapshot drift: {name} sha256={got} expected={exp_sha}"
 
     # Ensure no extra snapshots exist without being tracked in SHA256SUMS.
-    actual = {p.name for p in SNAP_DIR.glob('*.state') if p.is_file()}
+    actual = {p.name for p in SNAP_DIR.glob("*.state") if p.is_file()}
     extra = sorted(actual - set(expected.keys()))
     assert not extra, f"Untracked snapshot(s) present (add to SHA256SUMS): {extra}"

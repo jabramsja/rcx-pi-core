@@ -35,8 +35,7 @@ def _run_rust_example(args: List[str]) -> Tuple[int, str]:
 # ---------------------------------------------------------------------------
 
 
-def classify_with_world(
-        world_name: str, mu_terms: List[str]) -> Tuple[int, str]:
+def classify_with_world(world_name: str, mu_terms: List[str]) -> Tuple[int, str]:
     """
     Ask the Rust classify_cli example to classify a list of Mu terms under a world.
 
@@ -124,10 +123,10 @@ def parse_orbit_output(text: str) -> Dict[str, Any]:
         line = line.strip()
         if line.startswith("[ω] seed:"):
             # e.g. "[ω] seed: ping"
-            seed = line[len("[ω] seed:"):].strip()
+            seed = line[len("[ω] seed:") :].strip()
         elif line.startswith("[ω] max steps:"):
             # e.g. "[ω] max steps: 12"
-            value = line[len("[ω] max steps:"):].strip()
+            value = line[len("[ω] max steps:") :].strip()
             try:
                 max_steps = int(value)
             except ValueError:
@@ -155,7 +154,7 @@ def parse_orbit_output(text: str) -> Dict[str, Any]:
     for line in lines:
         line = line.strip()
         if line.startswith("[ω] classification:"):
-            classification_raw = line[len("[ω] classification:"):].strip()
+            classification_raw = line[len("[ω] classification:") :].strip()
             break
 
     # 4) derive coarse "kind" + period from the classification string

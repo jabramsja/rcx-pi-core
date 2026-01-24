@@ -2,8 +2,11 @@
 
 from rcx_pi import num, motif_to_int, new_evaluator, list_from_py
 from rcx_pi.programs import (
-    OP_PUSH_CONST, OP_ADD, OP_HALT,
-    make_instr, bytecode_closure,
+    OP_PUSH_CONST,
+    OP_ADD,
+    OP_HALT,
+    make_instr,
+    bytecode_closure,
 )
 
 
@@ -18,12 +21,14 @@ def test_bytecode_add():
     n2 = num(2)
     n3 = num(3)
 
-    bc = list_from_py([
-        make_instr(OP_PUSH_CONST, n2),
-        make_instr(OP_PUSH_CONST, n3),
-        make_instr(OP_ADD, n2),   # arg ignored
-        make_instr(OP_HALT, n3),   # arg ignored
-    ])
+    bc = list_from_py(
+        [
+            make_instr(OP_PUSH_CONST, n2),
+            make_instr(OP_PUSH_CONST, n3),
+            make_instr(OP_ADD, n2),  # arg ignored
+            make_instr(OP_HALT, n3),  # arg ignored
+        ]
+    )
 
     assert motif_to_int(run(bc)) == 5
 
@@ -52,17 +57,19 @@ def test_bytecode_build_list_and_head():
     n2 = num(2)
     n3 = num(3)
 
-    bc = list_from_py([
-        make_instr(OP_PUSH_NIL, 0),     # arg ignored
-        make_instr(OP_PUSH_CONST, n3),
-        make_instr(OP_CONS, 0),
-        make_instr(OP_PUSH_CONST, n2),
-        make_instr(OP_CONS, 0),
-        make_instr(OP_PUSH_CONST, n1),
-        make_instr(OP_CONS, 0),
-        make_instr(OP_HEAD, 0),
-        make_instr(OP_HALT, 0),
-    ])
+    bc = list_from_py(
+        [
+            make_instr(OP_PUSH_NIL, 0),  # arg ignored
+            make_instr(OP_PUSH_CONST, n3),
+            make_instr(OP_CONS, 0),
+            make_instr(OP_PUSH_CONST, n2),
+            make_instr(OP_CONS, 0),
+            make_instr(OP_PUSH_CONST, n1),
+            make_instr(OP_CONS, 0),
+            make_instr(OP_HEAD, 0),
+            make_instr(OP_HALT, 0),
+        ]
+    )
 
     prog = bytecode_closure(bc)
     ev = PureEvaluator()
@@ -88,10 +95,12 @@ def test_bytecode_add_with_initial_stack():
     # Program:
     #   OP_ADD  (consume two numbers from initial stack)
     #   OP_HALT
-    bc = list_from_py([
-        make_instr(OP_ADD, 0),   # arg ignored
-        make_instr(OP_HALT, 0),  # arg ignored
-    ])
+    bc = list_from_py(
+        [
+            make_instr(OP_ADD, 0),  # arg ignored
+            make_instr(OP_HALT, 0),  # arg ignored
+        ]
+    )
 
     prog = bytecode_closure(bc)
     ev = PureEvaluator()

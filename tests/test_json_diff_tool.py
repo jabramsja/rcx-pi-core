@@ -33,10 +33,24 @@ def test_json_diff_detects_change(tmp_path: Path):
 def test_json_diff_ignore_optional_keys(tmp_path: Path):
     a = tmp_path / "a.json"
     b = tmp_path / "b.json"
-    a.write_text(json.dumps({"result": {"x": 1}, "schema_version": "1.0.0"}), encoding="utf-8")
-    b.write_text(json.dumps({"schema_version": "9.9.9", "result": {"x": 1}}), encoding="utf-8")
+    a.write_text(
+        json.dumps({"result": {"x": 1}, "schema_version": "1.0.0"}), encoding="utf-8"
+    )
+    b.write_text(
+        json.dumps({"schema_version": "9.9.9", "result": {"x": 1}}), encoding="utf-8"
+    )
 
-    p = _run(["bash", "scripts/json_diff.sh", str(a), str(b), "--ignore", "schema_version", "--quiet"])
+    p = _run(
+        [
+            "bash",
+            "scripts/json_diff.sh",
+            str(a),
+            str(b),
+            "--ignore",
+            "schema_version",
+            "--quiet",
+        ]
+    )
     assert p.returncode == 0
 
 
@@ -47,5 +61,7 @@ def test_json_diff_only_scope(tmp_path: Path):
     b.write_text(json.dumps({"result": {"x": 1}, "seed": "bbb"}), encoding="utf-8")
 
     # Compare only result; seed difference ignored.
-    p = _run(["bash", "scripts/json_diff.sh", str(a), str(b), "--only", "result", "--quiet"])
+    p = _run(
+        ["bash", "scripts/json_diff.sh", str(a), str(b), "--only", "result", "--quiet"]
+    )
     assert p.returncode == 0

@@ -195,13 +195,11 @@ def _has_program_marker(m: Motif) -> bool:
         # program-ish
         if len(children) >= 2:
             has_value_like = any(
-                isinstance(
-                    ch,
-                    Motif) and _is_pure_data_value(ch) for ch in children)
+                isinstance(ch, Motif) and _is_pure_data_value(ch) for ch in children
+            )
             has_nonvalue_like = any(
-                isinstance(
-                    ch,
-                    Motif) and not _is_pure_data_value(ch) for ch in children)
+                isinstance(ch, Motif) and not _is_pure_data_value(ch) for ch in children
+            )
             if has_value_like and has_nonvalue_like:
                 return True
 

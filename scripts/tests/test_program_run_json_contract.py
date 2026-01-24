@@ -30,7 +30,9 @@ def test_program_run_json_contract():
 
     required = {"schema", "schema_doc", "program", "input", "output", "ok"}
     missing = required - set(data.keys())
-    assert not missing, f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
+    assert not missing, (
+        f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
+    )
 
     assert data["schema"] == "rcx-program-run.v1"
     assert data["program"] == program

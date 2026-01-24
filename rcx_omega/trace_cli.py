@@ -8,8 +8,10 @@ This shim preserves:
 
 while the implementation lives in the organized Ω layout.
 """
+
 from rcx_omega.cli.trace_cli import main  # noqa: F401
 
 if __name__ == "__main__":
-  import sys
-  raise SystemExit(main(sys.argv))
+    import sys
+
+    raise SystemExit(main(sys.argv))

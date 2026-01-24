@@ -80,8 +80,7 @@ class PatternMatcher:
         if len(p.structure) != len(v.structure):
             return False
 
-        return all(self._match(a, b, env)
-                   for a, b in zip(p.structure, v.structure))
+        return all(self._match(a, b, env) for a, b in zip(p.structure, v.structure))
 
     # ----- binding substitution -----
 

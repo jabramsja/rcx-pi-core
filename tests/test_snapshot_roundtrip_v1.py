@@ -2,12 +2,14 @@ import hashlib
 import subprocess
 from pathlib import Path
 
+
 def sha256_file(p: Path) -> str:
     h = hashlib.sha256()
     with p.open("rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
 
 def find_snapdir(repo: Path) -> Path:
     """
@@ -21,7 +23,10 @@ def find_snapdir(repo: Path) -> Path:
         return a
     if b.exists():
         return b
-    raise AssertionError("No snapshots dir found at ./snapshots or ./rcx_pi_rust/snapshots")
+    raise AssertionError(
+        "No snapshots dir found at ./snapshots or ./rcx_pi_rust/snapshots"
+    )
+
 
 def parse_sha256sums(p: Path) -> dict[str, str]:
     m: dict[str, str] = {}
@@ -36,6 +41,7 @@ def parse_sha256sums(p: Path) -> dict[str, str]:
         m[fname] = sha
     return m
 
+
 def test_snapshot_v1_sha256sum_matches_repo_lockfile():
     repo = Path(__file__).resolve().parents[1]
     sd = find_snapdir(repo)
@@ -49,6 +55,7 @@ def test_snapshot_v1_sha256sum_matches_repo_lockfile():
     st = sd / "state_demo.state"
     assert st.exists(), f"Missing {st}"
     assert sha256_file(st) == expected["state_demo.state"]
+
 
 def test_snapshot_roundtrip_demo_runs_and_mentions_restore():
     repo = Path(__file__).resolve().parents[1]

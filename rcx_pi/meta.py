@@ -67,8 +67,7 @@ def _has_program_marker(m: Motif) -> bool:
         return True
 
     # Recurse into children
-    return any(isinstance(c, Motif) and _has_program_marker(c)
-               for c in m.structure)
+    return any(isinstance(c, Motif) and _has_program_marker(c) for c in m.structure)
 
 
 def _contains_data_number(m: Motif, inside_prog: bool = False) -> bool:

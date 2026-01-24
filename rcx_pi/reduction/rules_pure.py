@@ -92,8 +92,7 @@ class PureRules(PatternMatcher):
                 if isinstance(func, Motif) and func.structure:
                     fhead = func.structure[0]
                     # closure encoded as μ(CLOSURE, projection)
-                    if isinstance(fhead,
-                                  Motif) and fhead.structurally_equal(CLOSURE):
+                    if isinstance(fhead, Motif) and fhead.structurally_equal(CLOSURE):
                         # projection is second element of closure
                         if len(func.structure) >= 2:
                             projection = func.structure[1]
@@ -164,9 +163,7 @@ class PureRules(PatternMatcher):
                 return True
 
         for child in m.structure:
-            if isinstance(
-                    child,
-                    Motif) and self._contains_program_marker(child):
+            if isinstance(child, Motif) and self._contains_program_marker(child):
                 return True
 
         return False
@@ -180,9 +177,7 @@ class PureRules(PatternMatcher):
             return True
 
         for child in m.structure:
-            if isinstance(
-                    child,
-                    Motif) and self._contains_number_substructure(child):
+            if isinstance(child, Motif) and self._contains_number_substructure(child):
                 return True
 
         return False

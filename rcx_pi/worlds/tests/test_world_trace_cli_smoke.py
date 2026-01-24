@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
+
 def run(args):
     # Run as a module so rcx_pi imports always resolve correctly.
     return subprocess.run(
@@ -13,6 +14,7 @@ def run(args):
         stderr=subprocess.PIPE,
         text=True,
     )
+
 
 def test_world_trace_cli_help_smoke():
     r = run(["--help"])
@@ -24,6 +26,7 @@ def test_world_trace_cli_help_smoke():
     assert "world_trace_cli" in joined
     for flag in ("--max-steps", "--json", "--pretty", "--raw"):
         assert flag in joined
+
 
 def test_world_trace_cli_rejects_obviously_bad_input():
     r = run(["trace", "--file", "definitely-not-a-real-file.mu"])

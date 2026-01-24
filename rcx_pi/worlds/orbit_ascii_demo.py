@@ -6,8 +6,7 @@ from rcx_pi.worlds_bridge import orbit_with_world_parsed
 
 def main() -> None:
     if len(sys.argv) < 3:
-        print(
-            "usage: python3 -m rcx_pi.orbit_ascii_demo WORLD SEED [MAX_STEPS]")
+        print("usage: python3 -m rcx_pi.orbit_ascii_demo WORLD SEED [MAX_STEPS]")
         print("example: python3 -m rcx_pi.orbit_ascii_demo pingpong ping 12")
         sys.exit(1)
 

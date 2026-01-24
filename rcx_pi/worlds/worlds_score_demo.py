@@ -23,11 +23,21 @@ def main():
 
     print("\n=== score rcx_core against its own spec ===")
     core_score = score_world("rcx_core", desired_routes, 20)
-    pprint({k: core_score[k] for k in ("world", "accuracy", "correct", "total", "mismatches")})
+    pprint(
+        {
+            k: core_score[k]
+            for k in ("world", "accuracy", "correct", "total", "mismatches")
+        }
+    )
 
     print("\n=== score vars_demo against rcx_core spec ===")
     vars_score = score_world("vars_demo", desired_routes, 20)
-    pprint({k: vars_score[k] for k in ("world", "accuracy", "correct", "total", "mismatches")})
+    pprint(
+        {
+            k: vars_score[k]
+            for k in ("world", "accuracy", "correct", "total", "mismatches")
+        }
+    )
 
 
 if __name__ == "__main__":

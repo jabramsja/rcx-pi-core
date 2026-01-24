@@ -68,8 +68,7 @@ def world_to_dict(world: JsonWorld) -> Dict[str, Any]:
     """
     Convert a JsonWorld back to a plain dict (for json.dump).
     """
-    return {"rules": [{"pattern": r.pattern, "action": r.action}
-                      for r in world.rules]}
+    return {"rules": [{"pattern": r.pattern, "action": r.action} for r in world.rules]}
 
 
 def load_world_json(path: str | Path) -> JsonWorld:

@@ -64,7 +64,9 @@ def test_program_descriptor_resolves_some_known_program():
             last = r
             break
 
-    assert last is not None, f"Could not resolve any candidate program. Tried: {candidates[:20]}"
+    assert last is not None, (
+        f"Could not resolve any candidate program. Tried: {candidates[:20]}"
+    )
 
     data = json.loads(last.stdout)
 

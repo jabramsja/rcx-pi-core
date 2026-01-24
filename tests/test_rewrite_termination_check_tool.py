@@ -11,7 +11,9 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 def test_term_check_list_trace_infers_steps(tmp_path: Path):
     t = tmp_path / "t.json"
-    t.write_text(json.dumps([{"state": "a"}, {"state": "b"}, {"state": "c"}]), encoding="utf-8")
+    t.write_text(
+        json.dumps([{"state": "a"}, {"state": "b"}, {"state": "c"}]), encoding="utf-8"
+    )
     p = _run(["bash", "scripts/rewrite_termination_check.sh", str(t), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
@@ -20,7 +22,10 @@ def test_term_check_list_trace_infers_steps(tmp_path: Path):
 
 def test_term_check_embedded_steps(tmp_path: Path):
     t = tmp_path / "t.json"
-    t.write_text(json.dumps({"trace": [{"x": 1}, {"x": 2}], "halt_reason": "completed"}), encoding="utf-8")
+    t.write_text(
+        json.dumps({"trace": [{"x": 1}, {"x": 2}], "halt_reason": "completed"}),
+        encoding="utf-8",
+    )
     p = _run(["bash", "scripts/rewrite_termination_check.sh", str(t), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
@@ -31,7 +36,16 @@ def test_term_check_embedded_steps(tmp_path: Path):
 def test_term_check_max_steps_violation(tmp_path: Path):
     t = tmp_path / "t.json"
     t.write_text(json.dumps([1, 2, 3, 4]), encoding="utf-8")
-    p = _run(["bash", "scripts/rewrite_termination_check.sh", str(t), "--json", "--max-steps", "3"])
+    p = _run(
+        [
+            "bash",
+            "scripts/rewrite_termination_check.sh",
+            str(t),
+            "--json",
+            "--max-steps",
+            "3",
+        ]
+    )
     assert p.returncode == 1
     obj = json.loads(p.stdout)
     assert obj["violation"]["kind"] == "max_steps"
@@ -39,8 +53,12 @@ def test_term_check_max_steps_violation(tmp_path: Path):
 
 def test_term_check_loop_detection(tmp_path: Path):
     t = tmp_path / "t.json"
-    t.write_text(json.dumps([{"state": "a"}, {"state": "b"}, {"state": "a"}]), encoding="utf-8")
-    p = _run(["bash", "scripts/rewrite_termination_check.sh", str(t), "--json", "--loop"])
+    t.write_text(
+        json.dumps([{"state": "a"}, {"state": "b"}, {"state": "a"}]), encoding="utf-8"
+    )
+    p = _run(
+        ["bash", "scripts/rewrite_termination_check.sh", str(t), "--json", "--loop"]
+    )
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["loop_detected"] is True

@@ -45,9 +45,9 @@ def test_godel_liar_summary_counts():
     summary = fp["summary"]
     counts = summary["counts"]
 
-    assert counts["Ra"] == 3     # 3 stable fixed-point truth-objects
-    assert counts["Lobe"] == 2     # 2 oscillatory paradox seeds
-    assert counts["Sink"] == 2     # 2 collapse conditions
+    assert counts["Ra"] == 3  # 3 stable fixed-point truth-objects
+    assert counts["Lobe"] == 2  # 2 oscillatory paradox seeds
+    assert counts["Sink"] == 2  # 2 collapse conditions
     assert counts["None"] == 0
 
 

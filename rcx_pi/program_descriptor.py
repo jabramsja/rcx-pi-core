@@ -50,7 +50,9 @@ def _resolve_mu_program(program: str, cwd_base: Path) -> Path:
     candidates.append((repo_root / "mu_programs" / f"{name}.mu").resolve())
 
     # 4) current location (your layout)
-    candidates.append((repo_root / "rcx_pi_rust" / "mu_programs" / f"{name}.mu").resolve())
+    candidates.append(
+        (repo_root / "rcx_pi_rust" / "mu_programs" / f"{name}.mu").resolve()
+    )
 
     for c in candidates:
         if c.exists() and c.is_file():

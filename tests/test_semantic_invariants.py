@@ -79,13 +79,27 @@ def _semantic_trace_snapshot(expr: str) -> str:
 
     # Prefer stable subset if available
     keep = {}
-    for k in ("input", "expr", "result", "summary", "schema_version", "schema", "version", "steps", "events", "trace"):
+    for k in (
+        "input",
+        "expr",
+        "result",
+        "summary",
+        "schema_version",
+        "schema",
+        "version",
+        "steps",
+        "events",
+        "trace",
+    ):
         if k in prim:
             keep[k] = prim[k]
     if keep:
         prim = keep
 
-    return json.dumps(prim, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"
+    return (
+        json.dumps(prim, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        + "\n"
+    )
 
 
 def test_semantic_trace_is_deterministic_for_canonical_expression():

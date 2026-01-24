@@ -57,7 +57,7 @@ def parse_motif(text: str):
     node, c2 = _parse_mu_expr(c)
     c2 = c2.skip_ws()
     if not c2.eof():
-        raise ValueError(f"Trailing junk at pos {c2.i}: {c2.s[c2.i:]!r}")
+        raise ValueError(f"Trailing junk at pos {c2.i}: {c2.s[c2.i :]!r}")
     return node
 
 

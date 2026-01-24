@@ -13,5 +13,18 @@ def test_clean_print_requires_summary_file(tmp_path: Path):
     work = tmp_path / "work.log"
 
     # Command does nothing and does not create summary -> should fail
-    p = _run(["bash", "scripts/clean_print.sh", "--summary", str(summary), "--work", str(work), "--", "bash", "-lc", "true"])
+    p = _run(
+        [
+            "bash",
+            "scripts/clean_print.sh",
+            "--summary",
+            str(summary),
+            "--work",
+            str(work),
+            "--",
+            "bash",
+            "-lc",
+            "true",
+        ]
+    )
     assert p.returncode == 1

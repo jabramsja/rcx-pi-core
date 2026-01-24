@@ -45,7 +45,9 @@ def _detect_kind(payload: Dict[str, Any]) -> str:
         return k
     if isinstance(payload.get("steps"), list):
         return "trace"
-    if isinstance(payload.get("classification"), dict) or isinstance(payload.get("orbit"), list):
+    if isinstance(payload.get("classification"), dict) or isinstance(
+        payload.get("orbit"), list
+    ):
         return "omega"
     return "unknown"
 
@@ -105,7 +107,9 @@ def _omega_classification_summary(payload: Dict[str, Any]) -> str:
 
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(add_help=True)
-    ap.add_argument("--stdin", action="store_true", help="Read JSON from stdin (default)")
+    ap.add_argument(
+        "--stdin", action="store_true", help="Read JSON from stdin (default)"
+    )
     ap.add_argument("--file", type=str, default=None, help="Read JSON from file path")
     args = ap.parse_args(argv[1:])
 
@@ -113,7 +117,11 @@ def main(argv: List[str]) -> int:
         print("analyze_cli: --stdin and --file are mutually exclusive", file=sys.stderr)
         return 2
 
-    raw = _read_text_from_file(Path(args.file)) if args.file is not None else _read_text_from_stdin()
+    raw = (
+        _read_text_from_file(Path(args.file))
+        if args.file is not None
+        else _read_text_from_stdin()
+    )
     payload = _load_json(raw)
     kind = _detect_kind(payload)
 

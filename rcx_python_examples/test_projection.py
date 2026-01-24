@@ -27,6 +27,7 @@ from rcx_pi.projection import (
 
 # ---------- utility: small pair type for this demo ----------
 
+
 def pair(a: Motif, b: Motif) -> Motif:
     """
     Encode a 2-tuple (a, b) as a plain μ(a, b) node.
@@ -79,6 +80,7 @@ def pair_motif_to_ints(m: Motif) -> tuple[int | None, int | None]:
 
 # ---------- swap closure (x, y) -> (y, x) via structural projection ----------
 
+
 def make_swap_closure() -> Motif:
     """
     Build a closure that, when activated on a pair (x, y),
@@ -118,11 +120,11 @@ if __name__ == "__main__":
 
     result = ev.reduce(expr)
 
-    print("\nResult pair motif:    ", result,
-          " => ", pair_motif_to_ints(result))
+    print("\nResult pair motif:    ", result, " => ", pair_motif_to_ints(result))
 
 
 # ---------- pytest: minimal projection sanity check ----------
+
 
 def test_swap_projection_basic():
     ev = PureEvaluator()

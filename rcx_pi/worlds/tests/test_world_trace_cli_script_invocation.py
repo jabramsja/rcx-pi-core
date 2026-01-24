@@ -15,7 +15,7 @@ def test_world_trace_cli_runs_as_script_help():
         capture_output=True,
         text=True,
     )
-    assert r.returncode == 0, (r.stdout + "\n" + r.stderr)
+    assert r.returncode == 0, r.stdout + "\n" + r.stderr
 
 
 def test_world_trace_cli_runs_as_module_help():
@@ -27,4 +27,4 @@ def test_world_trace_cli_runs_as_module_help():
         capture_output=True,
         text=True,
     )
-    assert r.returncode == 0, (r.stdout + "\n" + r.stderr)
+    assert r.returncode == 0, r.stdout + "\n" + r.stderr

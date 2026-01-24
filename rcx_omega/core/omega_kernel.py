@@ -13,6 +13,7 @@ from typing import Optional, Protocol, Any
 
 class OmegaLayer(Protocol):
     """Ω layers operate on π motifs/evaluator without mutating π."""
+
     def step(self, x: Any) -> Any: ...
 
 
@@ -22,6 +23,7 @@ class OmegaPlan:
     A minimal planning container for Ω experiments.
     This is intentionally boring: structure first, power later.
     """
+
     name: str
     notes: str = ""
     enabled: bool = False

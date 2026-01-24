@@ -26,6 +26,7 @@ import rcx_pi
 # Small helpers
 # ---------------------------------------------------------------------------
 
+
 def bench_add(iterations: int) -> float:
     """
     Benchmark Peano addition using rcx_pi.add over Motif numbers.
@@ -71,7 +72,8 @@ def bench_swap_ends(iterations: int, list_len: int) -> float:
 
     if out_list[0] != list_len - 1 or out_list[-1] != 0:
         raise RuntimeError(
-            f"swap_ends sanity check failed: expected ends swapped, got {out_list}")
+            f"swap_ends sanity check failed: expected ends swapped, got {out_list}"
+        )
 
     start = time.perf_counter()
     cur = xs
@@ -104,11 +106,11 @@ def run_bench(fn, *, repeats: int = 5, **kwargs) -> None:
 # CLI entry
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="RCX-π micro-benchmarks (current API)")
+    parser = argparse.ArgumentParser(description="RCX-π micro-benchmarks (current API)")
     parser.add_argument(
         "--repeats",
         type=int,

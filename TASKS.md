@@ -1,6 +1,6 @@
 # RCX-π TASKS (CANONICAL MASTER LIST)
 
-This file enumerates **all known tasks** for the RCX-π repository.
+This file enumerates **all known tasks** for the RCX-π repository.  
 Tasks are never deleted. Status changes only.
 
 RCX-π is a **finished minimal kernel**.  
@@ -99,155 +99,82 @@ Worlds:
 **Status:** ✅ DONE
 
 ### D1. Python
-- ✅ 217 tests passing
 - ✅ Kernel invariants
 - ✅ Contract tests
+- ✅ Orbit artifact regression coverage
 
 ### D2. Rust
 - ✅ classify / repl / orbit / snapshot examples
 - ✅ State save & restore
+- ✅ Snapshot integrity verification
 
 ### D3. Repo-wide green gate
 - ✅ `scripts/green_gate.sh`
 - ✅ Python syntax check
-- ✅ Full pytest
+- ✅ Full pytest suite
 - ✅ Rust example suite
 - ✅ Canonical health signal
 
+### D4. Orbit artifact determinism (NEW)
+- ✅ SVG normalization test (Graphviz comment stripping)
+- ✅ Orbit SVG idempotence verification
+- ✅ Orbit DOT / index fixture stability
+- ✅ Orbit artifact re-run produces byte-identical outputs
+
+### D5. Orbit provenance semantics (NEW)
+- ✅ Provenance schema validated
+- ✅ Supports state entries as strings or `{i, mu}` objects
+- ✅ Semantic linkage enforced: `state[i-1] → state[i]`
+- ✅ Backward compatibility for `from/to` vs `pattern/template`
+
 ---
 
-## E. DOCUMENTATION
+## E. TOOLING & WORKFLOWS
 
-### E1. README.md
+**Status:** ✅ DONE
+
+- ✅ Deterministic CI gates for all orbit artifacts
+- ✅ Manual-safe PR merge flow (no auto-merge dependency)
+- ✅ Rebase-before-merge enforcement
+- ✅ `scripts/merge_pr_clean.sh` for canonical PR hygiene
+
+---
+
+## F. DOCUMENTATION
+
+**Status:** 🟡 PARTIAL / IN PROGRESS
+
+### F1. README.md
 - ✅ Mentions `green_gate.sh` as authoritative
 - ✅ `run_all.py` marked legacy
 
-### E2. README_BOOTSTRAP.md
+### F2. README_BOOTSTRAP.md
 - ✅ AI onboarding guide
 - ✅ Repo mental model
 - ✅ World semantics
 
-### E3. Kernel snapshot
-- ✅ rcx-pi-green-002 documented
-- ✅ Features frozen
-- ✅ Test status recorded
-
-### E4. Legacy helpers
-- 🟡 `rcx_python_examples/run_all.py`
-- 🟡 Kept for historical reference
-- 🟡 Not used as a gate
+### F3. Spine & governance docs
+- 🟡 RCX minimal spine manifest alignment
+- 🟡 NEXT_STEPS.md reconciliation
+- 🟡 CHANGELOG.md backfill for recent gate additions
 
 ---
 
-## F. TOOLING EXTENSIONS
+## G. EXPLICITLY OUT OF SCOPE
 
-
-- ✅ JSON diff / inspection
-**Status:** 🟡 OPTIONAL
-- ✅ World auto-documentation
-- ✅ JSON diff / inspection
-- ✅ Rule precedence visualization
+- 🚫 Kernel mutation
+- 🚫 Self-modifying evaluator
+- 🚫 Non-deterministic execution
+- 🚫 Heuristic or probabilistic rewrite rules
 
 ---
 
-## G. CONTRACT EXTENSIONS
+## H. NEXT TRACKED WORK (NOT STARTED)
 
-**Status:** 🟡 OPTIONAL
-- ✅ Rewrite termination contracts
-- ✅ Snapshot integrity checks
-- ✅ CI hook for `green_gate.sh`
-
----
-
-## H. MUTATION & EVOLUTION TOOLS
-
-**Status:** ⏸ DEFERRED
-
-- ⬜ Rule mutation sandbox (isolated)
-- ✅ World scoring metrics
-- ⬜ Orbit visualization
+- ⏸ Documentation consolidation pass
+- ⏸ Optional visualization tooling (read-only)
+- ⏸ External consumer packaging (wheel / crate)
 
 ---
 
-## I. RCX-Ω / META-CIRCULAR LAYERS
-
-**Status:** 🚫 OUT OF SCOPE (TRACKED)
-
-- ⬜ Self-hosting evaluator
-- ⬜ Motif-defined evaluator
-- ⬜ Meta-projection layers
-- ⬜ Observer curvature modeling
-- ⬜ Emergent world generation
-
----
-
-## GLOBAL RULES
-
-- Kernel is immutable
-- Green gate is law
-- New behavior = new layer
-- Tests override docs
-- Docs override ideas
-- No experimental code enters core
-
----
-
-**Current kernel:** `rcx-pi-green-002`  
-**Green status:** VERIFIED
-**Freeze tag (dev):** `rcx-freeze-verified-2026-01-12` → `18c2dad` (2026-01-12)
-------------------------------------------------------------
-Governance & Execution Rails (Binding)
-
-All RCX-Ω work is governed by:
-
-  docs/RCX_OMEGA_GOVERNANCE.md
-
-This document defines:
-- The Frozen / Staging / Vector zones
-- The NOW / NEXT / VECTOR queues
-- Readiness-detected promotion rules (including self-hosting)
-- Execution discipline and conflict resolution
-
-If there is any ambiguity:
-- Governance overrides enthusiasm
-- Tests override documentation
-- Repo state overrides conversation state
-------------------------------------------------------------
-
-
-## NEXT BLOCKER (do this before anything else)
-**Serialization + full state snapshot**
-
-**Status:** ✅ Ra-for-now (implemented + locked by tests/fixtures)
-- Proof: docs/fixtures/snapshot_rcx_core_v1.json + replay->engine_run fixture + orbit/provenance gates (green)
-
-
-- Proof: docs/fixtures/snapshot_rcx_core_v1.json + snapshot roundtrip + integrity tests (green)
-
-
-Rationale:
-- Required for reproducibility
-- Required for orbit visualization
-- Required for mutation / evolution
-- Required for RCX-Ω later
-
-No new evolutionary features should land before this exists.
-## CI / Tooling — DONE (locked)
-
-Completed and enforced as of 2026-01-14T01:07:44Z:
-
-- Branch protection on `dev` (PR-only; direct pushes blocked)
-- Required checks on PRs: `green-gate`, `test`
-- `CI_POLICY.md` added (canonical definition of GREEN)
-- Local gate: `make green` (runs `scripts/green_gate_local.sh`)
-- Nightly drift detection: scheduled `rcx-green-gate` on `dev`
-
-**Policy:** These items are frozen. Reopening requires an explicit governance decision.
-
-## Open tasks
-- [x] engine_run versioning hygiene: checker accepts schema as alias; emitter includes schema_version (keeps schema)
-
-- [ ] Decide next engineering milestone (pick one):
-  - [ ] orbit JSON v1: add optional per-step rewrite provenance (rule idx / matched pattern)
-  - [x] engine run JSON: export {ra,lobes,sink,trace} as schema v1
-  - [ ] orbit explorer UI stub: read rcx.orbit.v1 JSON and render timeline
+**End of file.**

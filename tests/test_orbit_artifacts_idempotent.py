@@ -24,7 +24,9 @@ def test_build_orbit_artifacts_is_idempotent_for_tracked_files():
     # Baseline (tracked-only)
     before_status = _git_status_tracked_only()
     before_diff = _git_diff_names()
-    assert before_diff == "", f"Repo already has tracked diffs before test:\n{before_diff}"
+    assert before_diff == "", (
+        f"Repo already has tracked diffs before test:\n{before_diff}"
+    )
 
     # Run twice to catch churn
     _run(["bash", "scripts/build_orbit_artifacts.sh"])
@@ -34,7 +36,9 @@ def test_build_orbit_artifacts_is_idempotent_for_tracked_files():
     after_status = _git_status_tracked_only()
     after_diff = _git_diff_names()
 
-    assert after_diff == "", f"Tracked files changed after build_orbit_artifacts.sh:\n{after_diff}"
+    assert after_diff == "", (
+        f"Tracked files changed after build_orbit_artifacts.sh:\n{after_diff}"
+    )
     assert after_status == before_status, (
         "Tracked working tree status changed after build_orbit_artifacts.sh.\n"
         f"before:\n{before_status}\n\nafter:\n{after_status}"

@@ -36,7 +36,9 @@ def _read_text_from_stdin() -> str:
     return sys.stdin.read().strip()
 
 
-def _resolve_input(motif_arg: Optional[str], *, use_stdin: bool, file_path: Optional[str]) -> str:
+def _resolve_input(
+    motif_arg: Optional[str], *, use_stdin: bool, file_path: Optional[str]
+) -> str:
     sources = sum([1 if use_stdin else 0, 1 if file_path else 0, 1 if motif_arg else 0])
     if sources != 1:
         raise SystemExit("Provide exactly one input source: motif OR --stdin OR --file")
@@ -52,7 +54,9 @@ def _resolve_input(motif_arg: Optional[str], *, use_stdin: bool, file_path: Opti
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("motif", nargs="?", help="Motif text, e.g. μ(μ())")
-    parser.add_argument("--json", action="store_true", help="Emit JSON only (pipe-friendly)")
+    parser.add_argument(
+        "--json", action="store_true", help="Emit JSON only (pipe-friendly)"
+    )
     parser.add_argument(
         "--trace",
         action="store_true",
@@ -60,7 +64,9 @@ def main(argv: List[str]) -> int:
     )
     parser.add_argument("--max-steps", type=int, default=64, help="ω cap")
     parser.add_argument("--stdin", action="store_true", help="Read motif from stdin")
-    parser.add_argument("--file", type=str, default=None, help="Read motif from file path")
+    parser.add_argument(
+        "--file", type=str, default=None, help="Read motif from file path"
+    )
     args = parser.parse_args(argv[1:])
 
     src = _resolve_input(args.motif, use_stdin=args.stdin, file_path=args.file)
@@ -68,8 +74,14 @@ def main(argv: List[str]) -> int:
     run = run_omega(seed, max_steps=args.max_steps)
 
     if args.json:
-        payload = omega_run_to_json(run, include_meta=False, include_steps=bool(args.trace))
-        print(json.dumps(maybe_add_schema_fields(payload, kind='omega'), indent=2, sort_keys=True))
+        payload = omega_run_to_json(
+            run, include_meta=False, include_steps=bool(args.trace)
+        )
+        print(
+            json.dumps(
+                maybe_add_schema_fields(payload, kind="omega"), indent=2, sort_keys=True
+            )
+        )
         return 0
 
     # tiny human mode

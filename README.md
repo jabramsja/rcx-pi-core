@@ -56,6 +56,37 @@ If `run_all.py` finishes without red errors — **RCX-π Core is healthy.**
 
 ---
 
+## ✅ Current Stable Capabilities (Layered)
+
+The following capabilities are **stable, deterministic, and enforced by gate**.
+All are implemented **outside the frozen kernel** as tools, fixtures, or validation layers.
+
+- **Deterministic orbit artifact generation**
+  - `scripts/build_orbit_artifacts.sh` is idempotent for tracked files
+  - Re-running does not dirty the working tree
+
+- **Orbit provenance semantics**
+  - Provenance entries are validated against emitted state transitions
+  - Supports legacy (`from`/`to`) and current (`pattern`/`template`) schemas
+  - State entries may be strings or structured objects (`{"i":…, "mu":…}`)
+
+- **Graphviz SVG normalization**
+  - Version-specific metadata is stripped
+  - SVG fixtures are stable across Graphviz versions
+
+- **Snapshot + replay integrity**
+  - Orbit, replay, and snapshot fixtures are schema-locked
+  - Rust and Python paths agree on emitted structure
+
+### Maintainer workflow helper (optional)
+
+For repositories where auto-merge is disabled, a helper script is available:
+
+    scripts/merge_pr_clean.sh <PR_NUMBER>
+
+This performs a clean base sync, head rebase, gate verification, manual merge,
+and post-merge sync. Repository policy remains unchanged.
+
 ## 🔒 Green Gate (Canonical Health Check)
 
 The **only supported correctness gate** for this repository is:

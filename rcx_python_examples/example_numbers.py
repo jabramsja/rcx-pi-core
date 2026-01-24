@@ -7,6 +7,7 @@ from rcx_pi import μ, VOID, UNIT, PureEvaluator
 
 # ---------- helpers ----------
 
+
 def motif_to_int(m):
     """Convert Peano motif to Python int for readable output."""
     if m.is_zero_pure():

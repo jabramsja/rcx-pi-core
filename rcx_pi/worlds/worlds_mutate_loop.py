@@ -32,8 +32,8 @@ def mutate_world_file(base_world: str, gen: int) -> str:
     src_path = _mu_path(base_world)
     if not os.path.exists(src_path):
         raise FileNotFoundError(
-            f"No .mu file found for world {
-                base_world!r} at {src_path}")
+            f"No .mu file found for world {base_world!r} at {src_path}"
+        )
 
     mutant_name = f"{base_world}__g{gen}"
     dst_path = _mu_path(mutant_name)
@@ -113,10 +113,7 @@ def evolve(world: str, spec_name: str, generations: int) -> None:
 
         # Simple hill-climbing: keep strictly better mutants
         if mutant_score.accuracy > current_score.accuracy:
-            print(
-                f"  ✓ Improvement! Replacing {
-                    current_world!r} with {
-                    mutant_world!r}")
+            print(f"  ✓ Improvement! Replacing {current_world!r} with {mutant_world!r}")
             current_world = mutant_world
             current_score = mutant_score
         else:
@@ -136,10 +133,13 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("\nUsage:")
         print(
-            "  python3 -m rcx_pi.worlds.worlds_mutate_loop <world> <spec> [generations]")
+            "  python3 -m rcx_pi.worlds.worlds_mutate_loop <world> <spec> [generations]"
+        )
         print("\nExamples:")
         print("  python3 -m rcx_pi.worlds.worlds_mutate_loop rcx_core core 30")
-        print("  python3 -m rcx_pi.worlds.worlds_mutate_loop paradox_1over0 paradox_1over0 50\n")
+        print(
+            "  python3 -m rcx_pi.worlds.worlds_mutate_loop paradox_1over0 paradox_1over0 50\n"
+        )
         sys.exit(1)
 
     world_arg = sys.argv[1]

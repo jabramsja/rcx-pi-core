@@ -29,7 +29,16 @@ def _run_trace_json(expr: str) -> str:
     except subprocess.CalledProcessError as e:
         # 2) fallback: omega_cli --trace (some repos use this)
         try:
-            return _run([sys.executable, "-m", "rcx_omega.cli.omega_cli", "--trace", "--json", expr])
+            return _run(
+                [
+                    sys.executable,
+                    "-m",
+                    "rcx_omega.cli.omega_cli",
+                    "--trace",
+                    "--json",
+                    expr,
+                ]
+            )
         except subprocess.CalledProcessError:
             # raise the original error but include stderr for visibility
             raise AssertionError(
@@ -65,4 +74,6 @@ def test_trace_json_has_stable_top_level_contract():
     }
 
     present = candidate_keys.intersection(trace.keys())
-    assert present, f"Trace JSON missing expected top-level markers. Keys={sorted(trace.keys())}"
+    assert present, (
+        f"Trace JSON missing expected top-level markers. Keys={sorted(trace.keys())}"
+    )

@@ -28,6 +28,7 @@ from rcx_pi import (
 # Peano number invariants
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("n", range(0, 16))
 def test_peano_roundtrip(n: int) -> None:
     m = num(n)
@@ -61,14 +62,18 @@ def test_addition_grid(a: int, b: int) -> None:
 # List invariants
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("py_list", [
-    [],
-    [0],
-    [1],
-    [0, 1],
-    [1, 2, 3],
-    [5, 0, 7, 9],
-])
+
+@pytest.mark.parametrize(
+    "py_list",
+    [
+        [],
+        [0],
+        [1],
+        [0, 1],
+        [1, 2, 3],
+        [5, 0, 7, 9],
+    ],
+)
 def test_list_roundtrip(py_list) -> None:
     m = list_from_py(py_list)
     assert is_list_motif(m)
