@@ -1,0 +1,27 @@
+{
+  "$id": "rcx-trace-stream.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "event_schema": {
+      "const": "docs/schemas/rcx-trace-event.v1.json"
+    },
+    "format": {
+      "const": "jsonl"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "format",
+    "event_schema",
+    "notes"
+  ],
+  "title": "RCX Trace Stream (v1)",
+  "type": "object"
+}

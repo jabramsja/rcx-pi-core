@@ -1,0 +1,44 @@
+{
+  "$id": "rcx-trace-event.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "i": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "meta": {
+      "description": "Optional metadata; keep deterministic.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "mu": {
+      "description": "Optional mu payload; shape can be refined later.",
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
+    "t": {
+      "description": "Optional stable tag; no timestamps in v1.",
+      "type": "string"
+    },
+    "type": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "v": {
+      "const": 1
+    }
+  },
+  "required": [
+    "v",
+    "type",
+    "i"
+  ],
+  "title": "RCX Trace Event (v1)",
+  "type": "object"
+}
