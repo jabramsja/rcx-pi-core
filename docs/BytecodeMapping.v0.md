@@ -16,7 +16,7 @@ This document defines the mapping from frozen trace event schema (v1) to a minim
 
 ## 2. Non-Goals
 
-1. **Stall/Fix/Closure semantics**: These are NOT traced in v1 schema. Reserved for future trace schema extension.
+1. **Stall/Fix/Closure execution semantics**: Core engine loop is NOT implemented in v0. v2 observability events are debug-only.
 2. **Optimization**: Performance is not a v0 concern; correctness and determinism first.
 3. **Meta-circular bootstrap**: Self-hosting requires bytecode → bytecode compilation (out of scope).
 4. **Code generation**: v0 is replay-only; no synthesis of new traces.
@@ -87,14 +87,30 @@ artifacts: {
 
 ### Reserved Opcodes (Not Implemented in v0)
 
-These opcodes are reserved for future trace schema extension. They MUST NOT be implemented or emitted until the corresponding trace events are defined:
+These opcodes are reserved for future execution semantics. They MUST NOT be implemented until explicitly promoted from VECTOR:
 
-| Reserved Opcode | Blocked By |
-|-----------------|------------|
-| `STALL` | No stall trace events in v1 schema |
-| `FIX` | No fix trace events in v1 schema |
-| `ROUTE` | No bucket-routing trace events in v1 schema |
-| `CLOSE` | No closure trace events in v1 schema |
+| Reserved Opcode | Status | Notes |
+|-----------------|--------|-------|
+| `STALL` | Reserved | v2 observability available (`reduction.stall`) but execution semantics blocked |
+| `FIX` | Reserved | v2 observability available (`reduction.applied`) but execution semantics blocked |
+| `ROUTE` | Reserved | No bucket-routing execution in v0 |
+| `CLOSE` | Reserved | No closure execution in v0 |
+
+### Debug-Only Opcodes (v2 Observability)
+
+These opcodes are for **debug/observability only** and do NOT affect v1 replay semantics. They are gated by `RCX_TRACE_V2=1` environment variable:
+
+| Debug Opcode | v2 Event Type | Description |
+|--------------|---------------|-------------|
+| `DBG_STALL` | `reduction.stall` | Log pattern match failure (no state change) |
+| `DBG_APPLIED` | `reduction.applied` | Log rule application with rule_id, before/after depth |
+| `DBG_NORMAL` | `reduction.normal` | Log normal form reached (no rule matched) |
+
+These debug opcodes:
+- Do NOT modify VM state
+- Do NOT affect canonical output
+- Are stripped when `RCX_TRACE_V2=0` (default)
+- Reference: `docs/StallFixObservability.v0.md`, `docs/schemas/rcx-trace-event.v2.json`
 
 ---
 
@@ -169,27 +185,42 @@ This VM MUST comply with `EntropyBudget.md`:
 
 The VM MUST halt with explicit error on:
 
-1. **Schema violation**: event.v != 1, missing required fields, invalid types
+1. **Schema violation**: event.v not in {1, 2}, missing required fields, invalid types
 2. **Contiguity violation**: event.i != expected
-3. **Unmappable event type**: Any type not in {trace.start, step, trace.end}
+3. **Unmappable v1 event type**: Any v1 type not in {trace.start, step, trace.end}
 4. **Entropy leak**: Any non-deterministic operation detected
+
+Note: v2 events (reduction.stall, reduction.applied, reduction.normal) are debug-only and do not cause halt.
 
 Error messages MUST identify the failing event index and reason.
 
 ---
 
-## 7. Untraced Semantics (Explicitly Deferred)
+## 7. Observability vs Execution Semantics
 
-The following RCX semantics are NOT represented in v1 trace schema and are blocked from v0 VM implementation:
+### v2 Observability (Debug-Only, Implemented)
+
+The following are now OBSERVABLE via v2 trace events but do NOT have execution semantics in v0:
+
+| Semantic | v2 Event | Status | Notes |
+|----------|----------|--------|-------|
+| **Stall** (no-match) | `reduction.stall` | Observable | Pattern match failure logged, no state change |
+| **Applied** (rule fired) | `reduction.applied` | Observable | Rule ID + depth refs logged, no state change |
+| **Normal** (no rule) | `reduction.normal` | Observable | Normal form logged, no state change |
+
+Reference: `docs/StallFixObservability.v0.md`, `docs/schemas/rcx-trace-event.v2.json`
+
+### Execution Semantics (Blocked, VECTOR)
+
+The following execution semantics are NOT implemented in v0 and require explicit VECTOR promotion:
 
 | Semantic | Status | Unblock Condition |
 |----------|--------|-------------------|
-| **Stall** (no-match) | UNTRACED | Add stall trace event type to schema |
-| **Fix** (null/inf register) | UNTRACED | Add fix trace event type to schema |
-| **Closure** (gate completion) | UNTRACED | Add closure trace event type to schema |
-| **Bucket routing** | UNTRACED | Add routing trace event type to schema |
+| **Stall → Fix loop** | BLOCKED | VECTOR #6 promotion |
+| **Bucket routing** | BLOCKED | VECTOR #6 promotion |
+| **Closure completion** | BLOCKED | VECTOR #6 promotion |
 
-These are documented in TASKS.md VECTOR #5 as prerequisites.
+These are documented in TASKS.md VECTOR #6.
 
 ---
 
@@ -207,7 +238,10 @@ A conforming v0 VM implementation MUST:
 
 ## Version
 
-Document version: v0
+Document version: v0.1 (aligned with v2 observability)
 Last updated: 2026-01-24
-Trace schema reference: docs/schemas/rcx-trace-event.v1.json
-Entropy contract reference: EntropyBudget.md
+Trace schema references:
+- v1 (replay): `docs/schemas/rcx-trace-event.v1.json`
+- v2 (observability): `docs/schemas/rcx-trace-event.v2.json`
+Observability reference: `docs/StallFixObservability.v0.md`
+Entropy contract reference: `EntropyBudget.md`
