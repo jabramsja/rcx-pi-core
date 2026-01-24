@@ -128,11 +128,25 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
        - deterministic results (pure helper run twice)
        - replay/validation acceptance via `validate_v2_execution_sequence()` on execution-only subsequence
 
+7. **Enginenews spec stress-test harness** ✅
+   - Purpose: adversarially exercise PUBLIC CLI replay using valid v2 execution traces
+   - Done:
+     - Added fixtures under `tests/fixtures/traces_v2/enginenews_spec_v0/`
+       - progressive_refinement.v2.jsonl (stall → fix → fixed, ACTIVE)
+       - stall_pressure.v2.jsonl (stall only, STALLED)
+       - multi_cycle.v2.jsonl (multiple stall/fixed cycles, ACTIVE)
+       - idempotent_cycle.v2.jsonl (idempotent fix, STALLED)
+     - Added `tests/test_enginenews_spec_v0.py`:
+       - CLI subprocess tests (--check-canon, --print-exec-summary)
+       - Metrics computed from events only (stall_density, fix_efficacy, closure_evidence)
+       - Determinism assertion (run CLI twice, compare JSON)
+     - No engine access, no private attributes, no mocking
+
 ---
 
 ## VECTOR (design-first, defer implementation unless you promote)
 
-7. **"Second independent encounter" semantics** ✅
+8. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
    - Done:
      - "Independent" defined: same (value_hash, pattern_id) with no intervening reduction
@@ -142,7 +156,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Conservative reset on execution.fixed
      - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
 
-8. **Bytecode VM mapping v1 (upgrade from v0)** ✅
+9. **Bytecode VM mapping v1 (upgrade from v0)** ✅
    - Deliverable: `docs/BytecodeMapping.v1.md`
    - Done:
      - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
@@ -150,6 +164,14 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Opcode table: semantic placeholders (0x10-0x41), not ABI commitment
      - Registers authoritative during execution, trace authoritative for validation
      - Execution loop: ACTIVE → STALL → (optional FIX) → FIXED → ACTIVE
+
+10. **Enginenews spec mapping v0** ✅
+    - Deliverable: `docs/EnginenewsSpecMapping.v0.md`
+    - Done:
+      - Minimal motif set (news.pending, news.refined, news.cycling, news.terminal)
+      - Metrics defined from events only: counts, stall_density, fix_efficacy, closure_evidence
+      - Explicit non-goal: no ROUTE/CLOSE, no termination policy
+      - CLI contract documented (--check-canon, --print-exec-summary)
 
 ---
 

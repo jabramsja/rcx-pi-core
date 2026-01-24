@@ -1,0 +1,3 @@
+{"v":2,"type":"execution.stall","i":0,"mu":{"pattern_id":"news.terminal","value_hash":"hash_stable"}}
+{"v":2,"type":"execution.fixed","i":1,"mu":{"after_hash":"hash_stable","before_hash":"hash_stable","rule_id":"noop"}}
+{"v":2,"type":"execution.stall","i":2,"mu":{"pattern_id":"news.terminal","value_hash":"hash_stable"}}
