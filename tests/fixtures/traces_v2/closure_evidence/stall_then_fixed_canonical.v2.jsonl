@@ -1,0 +1,2 @@
+{"v":2,"type":"execution.stall","i":0,"mu":{"pattern_id":"pA","value_hash":"hash_v1"}}
+{"v":2,"type":"execution.fixed","i":1,"mu":{"after_hash":"hash_v2","before_hash":"hash_v1","rule_id":"r1"}}
