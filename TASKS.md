@@ -34,6 +34,8 @@ If a task is not listed here, it is NOT to be implemented.
 
 ## Ra (Resolved / Merged)
 
+Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests.
+
 - Deterministic trace core (v1) complete
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
@@ -42,7 +44,7 @@ If a task is not listed here, it is NOT to be implemented.
 - Rust replay acceleration bit-for-bit compatible
 - v2 trace schema + observability events (RCX_TRACE_V2=1)
 - Stall/Fix execution semantics v0 (RCX_EXECUTION_V0=1)
-- ExecutionEngine + value_hash() + _motif_to_json()
+- ExecutionEngine + value_hash(); motif serialization (_motif_to_json) is test infrastructure only
 - Record Mode v0 (execution → trace for stall/fix events)
 - Minimal Native Execution Primitive doc (Boundary Question answered)
 - v2 replay validation (validate_v2_execution_sequence)
