@@ -1,0 +1,32 @@
+name: Audit All
+
+on: [push, pull_request]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install package + test deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e ".[test]"
+
+      - name: Run audit_all.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reset egg-info changes from pip install -e (tracked but modified by install)
+          git checkout -- rcx_pi_core.egg-info/ || true
+          git clean -f rcx_pi_core.egg-info/ || true
+          chmod +x tools/audit_all.sh
+          PYTHONHASHSEED=0 tools/audit_all.sh
