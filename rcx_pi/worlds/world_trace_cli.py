@@ -119,7 +119,9 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print("rcx-world-trace.v1 docs/world_trace_json_schema.md")
+        print(
+            "rcx-world-trace.v1 docs/world_trace_json_schema.md docs/schemas/world_trace_json_schema.json"
+        )
         return 0
 
     if not args.world or not args.seed:
