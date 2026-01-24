@@ -45,7 +45,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 ## Ra (Resolved / Merged)
 
-Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests.
+Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
 - Deterministic trace core (v1) complete
 - Replay semantics frozen (v1)
@@ -63,6 +63,14 @@ Items here are implemented and verified under current invariants. Changes requir
   - `--print-exec-summary` CLI flag + `execution_summary_v2()` pure helper
   - `test_cli_print_exec_summary_end_to_end` (subprocess CLI test)
   - `tools/audit_exec_summary.sh` (non-test reality anchor)
+- Trace Reading Primer (`docs/TraceReadingPrimer.v0.md`)
+- Record→Replay Gate (`test_record_replay_gate_end_to_end`)
+- Flag Discipline Contract (`docs/Flags.md`)
+- Consume execution.fix from trace (true cycle replay)
+- Closure-as-termination fixture family (`stall_at_end.v2.jsonl`, `stall_then_fix_then_end.v2.jsonl`)
+- IndependentEncounter pathological fixtures + tests
+- Enginenews spec stress-test harness (`tests/test_enginenews_spec_v0.py`)
+- CI audit gate (`tools/audit_all.sh` + `.github/workflows/audit_all.yml`)
 
 ---
 
@@ -79,93 +87,19 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NOW (empty by design; only populated if an invariant is broken)
 
-1. **Trace Reading Primer (for humans)** ✅
-   - Deliverable: `docs/TraceReadingPrimer.v0.md`
-   - Done:
-     - v1 vs v2 event types documented
-     - Verb table: START/STALL/FIXED/END
-     - Hash fields explained (value_hash, before_hash, after_hash)
-     - 2 annotated examples with validation walkthrough
-     - 60-second method checklist
-
-2. **Record→Replay Gate (single command, end-to-end)** ✅
-   - Deliverable: `test_record_replay_gate_end_to_end` in test_replay_gate_v2.py
-   - Run: `PYTHONHASHSEED=0 pytest tests/test_replay_gate_v2.py::test_record_replay_gate_end_to_end -v`
-   - Done:
-     - Runs record mode on tiny input
-     - Writes temp trace
-     - Runs replay --check-canon + v2 validation
-     - Re-runs record mode, asserts bit-for-bit identical
-
-3. **Flag Discipline Contract** ✅
-   - Deliverable: `docs/Flags.md`
-   - Done:
-     - RCX_TRACE_V2=1: observability only
-     - RCX_EXECUTION_V0=1: execution/record only
-     - PYTHONHASHSEED=0: determinism
-     - Default OFF invariant documented
-     - Flag combinations table
+_(No active items.)_
 
 ---
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-4. **Consume execution.fix from trace (true cycle replay)** ✅
-   - Purpose: close the loop so a trace can drive a full stall→fix progression
-   - Done:
-     - Public consume API: `consume_stall`, `consume_fix`, `consume_fixed` in ExecutionEngine
-     - Public getter: `current_value_hash` for post-condition assertions
-     - `test_replay_consumes_execution_fix`: drives engine via public API (no private state mutation)
-     - `test_replay_api_rejects_invalid_sequence`: validates error handling
-     - Golden fixture: `stall_then_fix_then_end.v2.jsonl` (stall + fix + fixed)
-     - Fix is consumed (validated against engine state), not just sequence-checked
-     - v1 unchanged
-
-5. **Minimal "Closure-as-termination" fixture family** ✅
-   - Purpose: make "normal form termination" a first-class, tested concept
-   - Done:
-     - `stall_at_end.v2.jsonl`: stall with no fix (normal form)
-     - `stall_then_fix_then_end.v2.jsonl`: stall → fix → fixed (resolved)
-     - `test_stall_at_end_is_normal_form`: validates stall-only is valid
-     - `test_stall_then_fix_then_end_is_resolved`: validates full cycle
-     - `test_closure_fixtures_are_distinguishable`: proves structural difference
-
-6. **IndependentEncounter pathological fixtures + tests** ✅
-   - Purpose: lock the edge-case semantics from `docs/IndependentEncounter.v0.md` into minimal, deterministic fixtures
-   - Done:
-     - Added minimal v2 fixtures under `tests/fixtures/traces_v2/independent_encounter/`
-     - Added pytest coverage asserting:
-       - closure evidence behavior per the doc's normative examples
-       - deterministic results (pure helper run twice)
-       - replay/validation acceptance via `validate_v2_execution_sequence()` on execution-only subsequence
-
-7. **Enginenews spec stress-test harness** ✅
-   - Purpose: adversarially exercise PUBLIC CLI replay using valid v2 execution traces
-   - Done:
-     - Added fixtures under `tests/fixtures/traces_v2/enginenews_spec_v0/`
-       - progressive_refinement.v2.jsonl (stall → fix → fixed, ACTIVE)
-       - stall_pressure.v2.jsonl (stall only, STALLED)
-       - multi_cycle.v2.jsonl (multiple stall/fixed cycles, ACTIVE)
-       - idempotent_cycle.v2.jsonl (idempotent fix, STALLED)
-     - Added `tests/test_enginenews_spec_v0.py`:
-       - CLI subprocess tests (--check-canon, --print-exec-summary)
-       - Metrics computed from events only (stall_density, fix_efficacy, closure_evidence)
-       - Determinism assertion (run CLI twice, compare JSON)
-     - No engine access, no private attributes, no mocking
-
-8. **CI: run tools/audit_all.sh as required gate** ✅
-   - Purpose: make the repo provably "not a house of cards" via CI
-   - Done:
-     - Added `.github/workflows/audit_all.yml`
-     - Runs on push and pull_request
-     - Executes `tools/audit_all.sh` with PYTHONHASHSEED=0
-     - Covers: pytest, anti-cheat scans, fixture size checks, CLI spot-checks
+_(No active items.)_
 
 ---
 
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
-8. **"Second independent encounter" semantics** ✅
+9. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
    - Done:
      - "Independent" defined: same (value_hash, pattern_id) with no intervening reduction
@@ -175,7 +109,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Conservative reset on execution.fixed
      - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
 
-9. **Bytecode VM mapping v1 (upgrade from v0)** ✅
+10. **Bytecode VM mapping v1 (upgrade from v0)** ✅
    - Deliverable: `docs/BytecodeMapping.v1.md`
    - Done:
      - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
@@ -184,7 +118,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Registers authoritative during execution, trace authoritative for validation
      - Execution loop: ACTIVE → STALL → (optional FIX) → FIXED → ACTIVE
 
-10. **Enginenews spec mapping v0** ✅
+11. **Enginenews spec mapping v0** ✅
     - Deliverable: `docs/EnginenewsSpecMapping.v0.md`
     - Done:
       - Minimal motif set (news.pending, news.refined, news.cycling, news.terminal)
