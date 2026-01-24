@@ -10,8 +10,19 @@ def _repo_root() -> Path:
 
 
 def _git_diff_tracked_names(cwd: Path) -> str:
+    """
+    Return tracked diffs, excluding build/install byproducts that can be touched during CI.
+    """
     r = subprocess.run(
-        ["git", "diff", "--name-only"],
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "--",
+            ".",
+            ":(exclude)rcx_pi_core.egg-info/PKG-INFO",
+            ":(exclude)rcx_pi_core.egg-info/SOURCES.txt",
+        ],
         cwd=str(cwd),
         capture_output=True,
         text=True,
