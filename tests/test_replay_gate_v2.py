@@ -189,3 +189,113 @@ def test_execution_engine_integration_with_pattern_matching() -> None:
     assert len(events) == 1
     assert events[0]["type"] == "execution.stall"
     assert events[0]["mu"]["pattern_id"] == "projection.pattern_mismatch"
+
+
+# --- Negative tests for replay validation (NOW-C) ---
+
+
+def test_replay_validation_rejects_fix_without_stall() -> None:
+    """
+    Replay validation must HALT_ERR if execution.fix appears without prior stall.
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    import pytest
+
+    # execution.fix without preceding execution.stall
+    bad_trace = [
+        {"v": 2, "type": "execution.fix", "i": 0, "t": "rule", "mu": {"target_hash": "abc123"}},
+    ]
+    with pytest.raises(ValueError, match="fix without stall"):
+        _validate_v2_execution_sequence(bad_trace)
+
+
+def test_replay_validation_rejects_fixed_without_stall() -> None:
+    """
+    Replay validation must HALT_ERR if execution.fixed appears without prior stall.
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    import pytest
+
+    # execution.fixed without preceding execution.stall
+    bad_trace = [
+        {"v": 2, "type": "execution.fixed", "i": 0, "t": "rule", "mu": {"before_hash": "abc", "after_hash": "def"}},
+    ]
+    with pytest.raises(ValueError, match="fixed without stall"):
+        _validate_v2_execution_sequence(bad_trace)
+
+
+def test_replay_validation_rejects_mismatched_fix_hash() -> None:
+    """
+    Replay validation must HALT_ERR if execution.fix target_hash doesn't match stall value_hash.
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    import pytest
+
+    # execution.fix with wrong target_hash
+    bad_trace = [
+        {"v": 2, "type": "execution.stall", "i": 0, "mu": {"pattern_id": "p1", "value_hash": "correct_hash"}},
+        {"v": 2, "type": "execution.fix", "i": 1, "t": "rule", "mu": {"target_hash": "wrong_hash"}},
+    ]
+    with pytest.raises(ValueError, match="target_hash mismatch"):
+        _validate_v2_execution_sequence(bad_trace)
+
+
+def test_replay_validation_rejects_mismatched_fixed_hash() -> None:
+    """
+    Replay validation must HALT_ERR if execution.fixed before_hash doesn't match stall value_hash.
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    import pytest
+
+    # execution.fixed with wrong before_hash
+    bad_trace = [
+        {"v": 2, "type": "execution.stall", "i": 0, "mu": {"pattern_id": "p1", "value_hash": "correct_hash"}},
+        {"v": 2, "type": "execution.fixed", "i": 1, "t": "rule", "mu": {"before_hash": "wrong_hash", "after_hash": "new"}},
+    ]
+    with pytest.raises(ValueError, match="before_hash mismatch"):
+        _validate_v2_execution_sequence(bad_trace)
+
+
+def test_replay_validation_rejects_double_stall() -> None:
+    """
+    Replay validation must HALT_ERR if execution.stall appears while already stalled.
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+    import pytest
+
+    # Two stalls without intervening fixed
+    bad_trace = [
+        {"v": 2, "type": "execution.stall", "i": 0, "mu": {"pattern_id": "p1", "value_hash": "hash1"}},
+        {"v": 2, "type": "execution.stall", "i": 1, "mu": {"pattern_id": "p2", "value_hash": "hash2"}},
+    ]
+    with pytest.raises(ValueError, match="double stall"):
+        _validate_v2_execution_sequence(bad_trace)
+
+
+def test_replay_validation_accepts_stall_at_trace_end() -> None:
+    """
+    Replay validation must accept stall without fix at trace end (normal form termination).
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+
+    # Stall at end of trace = normal form, should NOT raise
+    valid_trace = [
+        {"v": 2, "type": "execution.stall", "i": 0, "mu": {"pattern_id": "p1", "value_hash": "hash1"}},
+    ]
+    # Should not raise
+    _validate_v2_execution_sequence(valid_trace)
+
+
+def test_replay_validation_accepts_valid_stall_fix_cycle() -> None:
+    """
+    Replay validation must accept valid stall → fixed sequence.
+    """
+    from rcx_pi.replay_cli import _validate_v2_execution_sequence
+
+    # Valid cycle: stall → fixed (fix is optional)
+    valid_trace = [
+        {"v": 2, "type": "execution.stall", "i": 0, "mu": {"pattern_id": "p1", "value_hash": "abc123"}},
+        {"v": 2, "type": "execution.fixed", "i": 1, "t": "rule", "mu": {"before_hash": "abc123", "after_hash": "def456"}},
+    ]
+    # Should not raise
+    _validate_v2_execution_sequence(valid_trace)
