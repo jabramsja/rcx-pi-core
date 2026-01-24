@@ -34,6 +34,8 @@ If a task is not listed here, it is NOT to be implemented.
 
 ## Ra (Resolved / Merged)
 
+Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests.
+
 - Deterministic trace core (v1) complete
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
@@ -42,10 +44,14 @@ If a task is not listed here, it is NOT to be implemented.
 - Rust replay acceleration bit-for-bit compatible
 - v2 trace schema + observability events (RCX_TRACE_V2=1)
 - Stall/Fix execution semantics v0 (RCX_EXECUTION_V0=1)
-- ExecutionEngine + value_hash() + _motif_to_json()
+- ExecutionEngine + value_hash(); motif serialization (_motif_to_json) is test infrastructure only
 - Record Mode v0 (execution → trace for stall/fix events)
 - Minimal Native Execution Primitive doc (Boundary Question answered)
-- v2 replay validation (_validate_v2_execution_sequence)
+- v2 replay validation (validate_v2_execution_sequence)
+- Anti-theater guardrails:
+  - `--print-exec-summary` CLI flag + `execution_summary_v2()` pure helper
+  - `test_cli_print_exec_summary_end_to_end` (subprocess CLI test)
+  - `tools/audit_exec_summary.sh` (non-test reality anchor)
 
 ---
 
@@ -96,7 +102,8 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 4. **Consume execution.fix from trace (true cycle replay)** ✅
    - Purpose: close the loop so a trace can drive a full stall→fix progression
    - Done:
-     - Public replay API: `replay_stall`, `replay_fix`, `replay_fixed` in ExecutionEngine
+     - Public consume API: `consume_stall`, `consume_fix`, `consume_fixed` in ExecutionEngine
+     - Public getter: `current_value_hash` for post-condition assertions
      - `test_replay_consumes_execution_fix`: drives engine via public API (no private state mutation)
      - `test_replay_api_rejects_invalid_sequence`: validates error handling
      - Golden fixture: `stall_then_fix_then_end.v2.jsonl` (stall + fix + fixed)
@@ -112,25 +119,59 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - `test_stall_then_fix_then_end_is_resolved`: validates full cycle
      - `test_closure_fixtures_are_distinguishable`: proves structural difference
 
+6. **IndependentEncounter pathological fixtures + tests** ✅
+   - Purpose: lock the edge-case semantics from `docs/IndependentEncounter.v0.md` into minimal, deterministic fixtures
+   - Done:
+     - Added minimal v2 fixtures under `tests/fixtures/traces_v2/independent_encounter/`
+     - Added pytest coverage asserting:
+       - closure evidence behavior per the doc's normative examples
+       - deterministic results (pure helper run twice)
+       - replay/validation acceptance via `validate_v2_execution_sequence()` on execution-only subsequence
+
+7. **Enginenews spec stress-test harness** ✅
+   - Purpose: adversarially exercise PUBLIC CLI replay using valid v2 execution traces
+   - Done:
+     - Added fixtures under `tests/fixtures/traces_v2/enginenews_spec_v0/`
+       - progressive_refinement.v2.jsonl (stall → fix → fixed, ACTIVE)
+       - stall_pressure.v2.jsonl (stall only, STALLED)
+       - multi_cycle.v2.jsonl (multiple stall/fixed cycles, ACTIVE)
+       - idempotent_cycle.v2.jsonl (idempotent fix, STALLED)
+     - Added `tests/test_enginenews_spec_v0.py`:
+       - CLI subprocess tests (--check-canon, --print-exec-summary)
+       - Metrics computed from events only (stall_density, fix_efficacy, closure_evidence)
+       - Determinism assertion (run CLI twice, compare JSON)
+     - No engine access, no private attributes, no mocking
+
 ---
 
 ## VECTOR (design-first, defer implementation unless you promote)
 
-6. **"Second independent encounter" semantics**
+8. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
-   - Defines:
-     - what counts as "independent"
-     - how it's tracked (hash lineage? ancestry bookkeeping? tokenization?)
-     - what event signals closure becomes unavoidable
-   - Done when: you can implement later without re-arguing definitions.
+   - Done:
+     - "Independent" defined: same (value_hash, pattern_id) with no intervening reduction
+     - Tracking: stall_memory map, cleared on any value transition
+     - Closure signal: second stall at same (v, p) implies normal form
+     - Minimal state: last_stall[(pattern_id)] = value_hash
+     - Conservative reset on execution.fixed
+     - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
 
-7. **Bytecode VM mapping v1 (upgrade from v0)**
-   - Deliverable: `BytecodeMapping.v1.md`
-   - Includes:
-     - how MATCH/REDUCE/STALL/FIX map to ops
-     - what state lives in registers vs trace
-     - determinism constraints carried forward
-   - Done when: it's implementable but still deferred.
+9. **Bytecode VM mapping v1 (upgrade from v0)** ✅
+   - Deliverable: `docs/BytecodeMapping.v1.md`
+   - Done:
+     - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
+     - Bytecode ops: OP_MATCH, OP_REDUCE, OP_STALL, OP_FIX, OP_FIXED
+     - Opcode table: semantic placeholders (0x10-0x41), not ABI commitment
+     - Registers authoritative during execution, trace authoritative for validation
+     - Execution loop: ACTIVE → STALL → (optional FIX) → FIXED → ACTIVE
+
+10. **Enginenews spec mapping v0** ✅
+    - Deliverable: `docs/EnginenewsSpecMapping.v0.md`
+    - Done:
+      - Minimal motif set (news.pending, news.refined, news.cycling, news.terminal)
+      - Metrics defined from events only: counts, stall_density, fix_efficacy, closure_evidence
+      - Explicit non-goal: no ROUTE/CLOSE, no termination policy
+      - CLI contract documented (--check-canon, --print-exec-summary)
 
 ---
 

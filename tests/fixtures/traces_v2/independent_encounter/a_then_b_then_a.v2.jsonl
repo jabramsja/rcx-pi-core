@@ -1,0 +1,3 @@
+{"v":2,"type":"reduction.stall","i":0,"mu":{"pattern_id":101,"value_hash":"aaaaaaaaaaaaaaaa"}}
+{"v":2,"type":"reduction.stall","i":1,"mu":{"pattern_id":202,"value_hash":"aaaaaaaaaaaaaaaa"}}
+{"v":2,"type":"reduction.stall","i":2,"mu":{"pattern_id":101,"value_hash":"aaaaaaaaaaaaaaaa"}}

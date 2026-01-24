@@ -2,7 +2,7 @@
 
 **Status: DESIGN DOCUMENT — No code changes.**
 
-This document defines explicit, measurable criteria for meta-circular readiness. It consolidates and extends `self_hosting_milestones.md` and `self_hosting_readiness_gates.md` into a single authoritative definition for v1.
+This document defines explicit, measurable criteria for meta-circular readiness. It is the single authoritative definition for v1.
 
 ---
 
@@ -179,12 +179,10 @@ The following are explicitly forbidden in meta-circular v1:
 
 ---
 
-## 8. Relationship to Milestones
+## 8. Milestone Status
 
-This document corresponds to milestones from `self_hosting_milestones.md`:
-
-| Milestone | Status | This Doc |
-|-----------|--------|----------|
+| Milestone | Status | Notes |
+|-----------|--------|-------|
 | M0. Host baseline | PASS | — |
 | M1. Determinism contracts | PASS | Gates 1-3 |
 | M2. VM spec on paper | PASS | Gate 4 (BytecodeMapping.v0.md) |
@@ -206,5 +204,3 @@ Dependencies:
 - `docs/BytecodeMapping.v0.md`
 - `docs/StallFixObservability.v0.md`
 - `EntropyBudget.md`
-- `self_hosting_milestones.md`
-- `self_hosting_readiness_gates.md`

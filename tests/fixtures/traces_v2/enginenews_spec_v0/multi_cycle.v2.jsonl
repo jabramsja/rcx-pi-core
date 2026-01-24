@@ -1,0 +1,4 @@
+{"v":2,"type":"execution.stall","i":0,"mu":{"pattern_id":"news.cycling","value_hash":"hash_v1"}}
+{"v":2,"type":"execution.fixed","i":1,"mu":{"after_hash":"hash_v2","before_hash":"hash_v1","rule_id":"step1"}}
+{"v":2,"type":"execution.stall","i":2,"mu":{"pattern_id":"news.cycling","value_hash":"hash_v2"}}
+{"v":2,"type":"execution.fixed","i":3,"mu":{"after_hash":"hash_v3","before_hash":"hash_v2","rule_id":"step2"}}

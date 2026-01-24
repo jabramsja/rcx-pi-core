@@ -1,10 +1,42 @@
 # Changelog
 
+All notable changes to RCX are documented in this file.
 
 ## Unreleased
 
 - Schema-triplet canonicalization: added `rcx_pi/cli_schema_run.py` as the single source of truth and updated CLI smoke + tests to route schema checks through the canonical runner (PRs #59–#62).
-All notable changes to RCX-Ω are documented in this file.
+
+## 2026-01-24
+
+### Runtime
+- **v2 Execution Semantics (RCX_EXECUTION_V0=1)**
+  - ExecutionEngine with stall/fix/fixed state machine
+  - Public consume API: `consume_stall`, `consume_fix`, `consume_fixed`
+  - Public getter: `current_value_hash` for post-condition assertions
+  - `value_hash()` for deterministic value references
+  - Record Mode v0: execution → trace for stall/fix events
+
+### Tooling
+- **Anti-theater guardrails**
+  - `--print-exec-summary` CLI flag for v2 execution summary
+  - `execution_summary_v2()` pure helper (derives state from events only)
+  - `tools/audit_exec_summary.sh` non-test reality anchor
+  - `test_cli_print_exec_summary_end_to_end` subprocess CLI test
+
+### Docs
+- `docs/TraceReadingPrimer.v0.md` - Human-readable trace guide
+- `docs/Flags.md` - Flag discipline contract
+- `docs/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
+- Removed `NEXT_STEPS.md` (redundant with TASKS.md)
+
+### Tests
+- v2 replay validation (`validate_v2_execution_sequence`)
+- Record→Replay gate end-to-end determinism test
+- Closure-as-termination fixture family (stall_at_end, stall_then_fix_then_end)
+
+### Process
+- TASKS.md is now the single canonical task tracker
+- All v2 work gated by feature flags (default OFF)
 
 Format:
 - Date (YYYY-MM-DD)

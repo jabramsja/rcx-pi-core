@@ -1,0 +1,3 @@
+{"v":2,"type":"reduction.stall","i":0,"mu":{"pattern_id":303,"value_hash":"eeeeeeeeeeeeeeee"}}
+{"v":2,"type":"execution.fix","i":1,"mu":{"target_hash":"eeeeeeeeeeeeeeee","note":"intent-only; does not reset stall memory"}}
+{"v":2,"type":"reduction.stall","i":2,"mu":{"pattern_id":303,"value_hash":"eeeeeeeeeeeeeeee"}}

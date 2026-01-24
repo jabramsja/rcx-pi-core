@@ -10,8 +10,7 @@ This document records:
 It is no longer a live roadmap.
 Ongoing work must follow:
 - CI_POLICY.md
-- TASKS.md
-- NEXT_STEPS.md (if present)
+- TASKS.md (single canonical task tracker)
 
 Kernel remains frozen.
 Layered growth only.
@@ -86,9 +85,11 @@ How to brief a new AI session:
 Then paste any file(s) that AI must edit.
 
 Roadmap:
-short-term: serialization, auto-doc
-mid-term: visual orbit exploration, rule mutation tools
-long-term: self-hosting/meta-circular RCX core
+See TASKS.md for current work items.
+Historical roadmap (bootstrap-era):
+- short-term: serialization, auto-doc (DONE)
+- mid-term: visual orbit exploration, rule mutation tools (DONE - orbit artifacts)
+- long-term: self-hosting/meta-circular RCX core (VECTOR/SINK)
 
 Remember:
 RCX-π is the minimal organism spine. We will build higher RCX layers on top.

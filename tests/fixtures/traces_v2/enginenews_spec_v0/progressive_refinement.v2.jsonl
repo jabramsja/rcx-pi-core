@@ -1,0 +1,3 @@
+{"v":2,"type":"execution.stall","i":0,"mu":{"pattern_id":"news.item","value_hash":"hash_pending_001"}}
+{"v":2,"type":"execution.fix","i":1,"mu":{"target_hash":"hash_pending_001"}}
+{"v":2,"type":"execution.fixed","i":2,"mu":{"after_hash":"hash_refined_001","before_hash":"hash_pending_001","rule_id":"refine"}}
