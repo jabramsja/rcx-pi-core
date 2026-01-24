@@ -25,5 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Reset egg-info changes from pip install -e (tracked but modified by install)
+          git checkout -- rcx_pi_core.egg-info/ || true
           chmod +x tools/audit_all.sh
           PYTHONHASHSEED=0 tools/audit_all.sh
