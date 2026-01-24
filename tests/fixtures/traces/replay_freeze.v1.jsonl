@@ -1,0 +1,4 @@
+{"v":1,"type":"trace.start","i":0,"t":"replay-freeze-v1","mu":{"seed":"void","config":{"depth":3,"mode":"strict"}},"meta":{"contract":"replay-semantics-v1","frozen":true}}
+{"v":1,"type":"step","i":1,"mu":{"state":{"a":1,"b":2,"c":{"nested":true,"values":[1,2,3]}},"delta":{"changed":["a","c"]}},"meta":{"origin":"test"}}
+{"v":1,"type":"step","i":2,"mu":{"state":{"a":2,"b":2,"c":{"nested":true,"values":[4,5,6]}},"delta":{"changed":["a","c.values"]}},"meta":{"origin":"test"}}
+{"v":1,"type":"trace.end","i":3,"mu":{"final_state":"stable","steps":3},"meta":{"contract":"replay-semantics-v1","validated":true}}

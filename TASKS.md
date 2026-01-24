@@ -33,17 +33,40 @@
 - Entropy sealing contract (`EntropyBudget.md`) - RNG, timestamps, hash ordering, floats sealed
 - Golden trace fixtures (`tests/fixtures/traces/*.v1.jsonl`) - minimal, multi-event, nested payload
 - Replay gate runs all fixtures; CI enforces determinism
+- Comprehensive freeze fixture (`replay_freeze.v1.jsonl`) - contiguity, nested mu, metadata
+
+---
+
+## Replay Semantics Frozen (v1)
+
+**Status: FROZEN as of 2026-01-24**
+
+The Python replay semantics are now locked. This freeze means:
+
+1. **Replay definition locked**: canonical trace JSONL → deterministic replay → zero tracked diff (CI enforced)
+2. **Trace event schema v1 locked**: `docs/schemas/rcx-trace-event.v1.json`
+3. **Entropy contract locked**: `EntropyBudget.md`
+4. **Golden fixtures validate behavior**: `tests/fixtures/traces/*.v1.jsonl`
+
+**Constraints on future work:**
+- Rust replay acceleration is permitted as a **performance layer only**
+- No new execution models
+- No semantic divergence from Python replay
+- Rust must be **bit-for-bit compatible** with frozen replay semantics
 
 ---
 
 ## Lobe: Deterministic Trace Core (v1)
 
-**Status: NOW/NEXT complete. VECTOR blocked on semantic freeze.**
+**Status: Complete. Replay semantics frozen.**
 
-### VECTOR (intentionally deferred)
+### NOW
 
 4. **Rust replay acceleration layer**
-   - Blocked on: python replay semantics frozen
+   - Constraint: performance layer only, bit-for-bit compatible with Python replay
+   - Deliverable: Rust implementation matching `rcx_pi/replay_cli.py` semantics
+
+### VECTOR (intentionally deferred)
 
 5. **Bytecode / VM mapping draft**
    - Deliverable: mapping of trace events → bytecode ops
