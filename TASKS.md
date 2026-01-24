@@ -1,94 +1,100 @@
 # RCX Task List (Canonical)
 
+This file is the single source of truth for authorized work.
+If a task is not listed here, it is NOT to be implemented.
+
 ---
 
 ## North Star (Keep This True)
 
-1. RCX VM is not a “runner”. It is a substrate where **structure is the primitive**.
-2. “Code = data” means execution is graph/mu transformation, not host-language semantics.
+1. RCX VM is not a "runner". It is a substrate where **structure is the primitive**.
+2. "Code = data" means execution is graph/mu transformation, not host-language semantics.
 3. **Stall → Fix → Trace → Closure** is the native engine loop; everything else must serve it.
 4. Closures/gates must be **explicit, deterministic, and measurable** (fixtures + replay).
-5. Emergence must be attributable to RCX dynamics, not “Python did it”.
+5. Emergence must be attributable to RCX dynamics, not "Python did it".
 6. Host languages are scaffolding only; their assumptions must not leak into semantics.
 7. Buckets (r_null / r_inf / r_a / lobes / sink) are **native routing states**, not metaphors.
 8. Seeds must be minimal (void/empty) and growth must be structurally justified.
 9. Determinism is a hard invariant: same seed + rules ⇒ same trace/fixtures.
-10. A “program” is a pressure vessel: seed + allowable gates + thresholds + observation outputs.
-11. Enginenews-like specs are target workloads to prove: “does ω/closure actually emerge?”
-12. Every task must answer: “Does this reduce host smuggling and increase native emergence?”
+10. A "program" is a pressure vessel: seed + allowable gates + thresholds + observation outputs.
+11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
+12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
+
+---
+
+## Governance (Non-Negotiable)
+
+- Do not add new subsystems, execution models, or architectures without explicit approval.
+- Do not create "new tests" to bypass a failing test; fix the failing test or the code.
+- Do not leave broken files/tests behind and add replacements.
+- Minimize file creation. Prefer editing existing files.
+- v1 replay semantics are frozen. Any new observability must be v2 and gated.
 
 ---
 
 ## Ra (Resolved / Merged)
 
-- Canonical schema-triplet runner (`rcx_pi/cli_schema_run.py`)
-- CLI schema emitters unified and idempotent
-- Orbit artifact idempotence gate stabilized
-- Schema-flag tests refactored to canonical runner
-- cli_smoke schema checks fully canonical
-- Canonical trace event contract (v1) (`docs/schemas/rcx-trace-event.v1.json`)
-- Trace canonicalization helper (`rcx_pi/trace_canon.py`)
-- Replay CLI skeleton (python-only) (`python -m rcx_pi.rcx_cli replay ...`)
-- Replay idempotence gate: trace → replay → tracked diff empty (`tests/test_replay_gate_idempotent.py`)
-- Entropy sealing contract (`EntropyBudget.md`) - RNG, timestamps, hash ordering, floats sealed
-- Golden trace fixtures (`tests/fixtures/traces/*.v1.jsonl`) - minimal, multi-event, nested payload
-- Replay gate runs all fixtures; CI enforces determinism
-- Comprehensive freeze fixture (`replay_freeze.v1.jsonl`) - contiguity, nested mu, metadata
-- Rust replay acceleration (`rcx_pi_rust/examples/replay_cli.rs`) - bit-for-bit compatible with Python
-- Bytecode mapping design doc (`docs/BytecodeMapping.v0.md`) - VECTOR #5 deliverable
-- Meta-circular readiness definition (`docs/MetaCircularReadiness.v1.md`) - VECTOR #6 deliverable
+- Deterministic trace core (v1) complete
+- Replay semantics frozen (v1)
+- Entropy sealing contract in place
+- Golden fixtures in place
+- Replay gate + CI enforcement in place
+- Rust replay acceleration bit-for-bit compatible
 
 ---
 
-## Replay Semantics Frozen (v1)
+## Lobe: Stall/Fix Observability (v2, non-breaking)
 
-**Status: FROZEN as of 2026-01-24**
+### NOW (blocking)
 
-The Python replay semantics are now locked. This freeze means:
+1. **Write Stall/Fix Observability design doc** ✅
+   - Deliverable: `docs/StallFixObservability.v0.md`
+   - Done: doc in PR #80
 
-1. **Replay definition locked**: canonical trace JSONL → deterministic replay → zero tracked diff (CI enforced)
-2. **Trace event schema v1 locked**: `docs/schemas/rcx-trace-event.v1.json`
-3. **Entropy contract locked**: `EntropyBudget.md`
-4. **Golden fixtures validate behavior**: `tests/fixtures/traces/*.v1.jsonl`
+2. **Implement v2 trace schema (alongside v1)** ✅
+   - Deliverables:
+     - `docs/schemas/rcx-trace-event.v2.json`
+     - v2 canonicalizer updates in `trace_canon.py`
+   - Done: schema created, canonicalizer accepts v=1 or v=2
 
-**Constraints on future work:**
-- Rust replay acceleration is permitted as a **performance layer only**
-- No new execution models
-- No semantic divergence from Python replay
-- Rust must be **bit-for-bit compatible** with frozen replay semantics
+3. **Emit v2 events (flagged) for:** ✅
+   - reduction.stall (pattern match failed)
+   - reduction.applied (rule transformed value)
+   - reduction.normal (no rule matched)
+   - Deliverables:
+     - Feature flag: `RCX_TRACE_V2=1` (off by default)
+     - Instrumentation in `pattern_matching.py` and `rules_pure.py`
+   - Done:
+     - With flag OFF: v1 fixtures unchanged (bit-for-bit)
+     - With flag ON: v2 events appear as expected
+
+4. **Add minimal v2 fixtures + gate (separate from v1)** ✅
+   - Deliverables:
+     - `tests/fixtures/traces_v2/observer.v2.jsonl`
+     - `tests/test_replay_gate_v2.py`
+   - Done: v2 gate passes, v1 gate untouched
+
+### NEXT
+
+5. **Bytecode mapping v0 alignment pass**
+   - Input: `BytecodeMapping.v0.md`
+   - Deliverable: update mapping to include new v2 observability events (as "debug-only")
+   - Done when: mapping doc reflects reality and constraints
+
+### VECTOR
+
+6. **Stall/Fix → Closure-on-second-demand execution loop (true engine loop)**
+   - This is capability growth. No implementation until explicitly promoted.
 
 ---
 
-## Lobe: Deterministic Trace Core (v1)
+## Meta-circular Readiness (Docs only)
 
-**Status: Complete. Replay semantics frozen. Rust acceleration shipped.**
+### NOW
 
-### VECTOR (design docs complete, implementation blocked)
-
-5. **Bytecode / VM mapping draft** — DESIGN COMPLETE
-   - Deliverable: `docs/BytecodeMapping.v0.md`
-   - Implementation blocked: requires stall/fix trace events (currently untraced)
-
-6. **Meta-circular readiness definition** — DESIGN COMPLETE
-   - Deliverable: `docs/MetaCircularReadiness.v1.md`
-   - Gates 1-4 PASS, Gate 5 BLOCKED (requires stall/fix trace events)
-
----
-
-## Decision Point: Scope Expansion
-
-**Status: PAUSED as of 2026-01-24**
-
-VECTOR design docs are complete. The next implementation step requires **scope expansion**:
-
-1. **Add stall trace event type** to schema (no-match stalls)
-2. **Add fix trace event type** to schema (null/inf register fixes)
-3. **Implement reference interpreter** with v0 opcodes
-4. **Create opcode golden fixtures**
-
-This crosses the "semantic freeze" boundary. Proceeding requires explicit approval.
-
-**Current freeze:** Replay semantics v1 remain frozen. New trace event types would extend (not replace) the schema.
+7. **MetaCircularReadiness.v1.md review pass**
+   - Deliverable: ensure it references the current frozen invariants and v2 observability plan
+   - Done when: doc aligns with current repo state
 
 ---
 
