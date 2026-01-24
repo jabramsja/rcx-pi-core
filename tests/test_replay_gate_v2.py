@@ -155,3 +155,37 @@ def test_value_hash_deterministic() -> None:
     assert value_hash(42) == value_hash(42)
     assert value_hash("test") == value_hash("test")
     assert value_hash(None) == value_hash(None)
+
+
+def test_execution_engine_integration_with_pattern_matching() -> None:
+    """
+    ExecutionEngine integrates with PatternMatcher for stall tracking.
+    When pattern match fails and execution_engine is provided, stall() is called.
+    """
+    from rcx_pi.trace_canon import ExecutionEngine, ExecutionStatus
+    from rcx_pi.reduction.pattern_matching import PatternMatcher, PROJECTION
+    from rcx_pi.core.motif import Motif, μ
+
+    # Without execution engine - no state tracking
+    pm_no_engine = PatternMatcher()
+    # Create a projection that won't match
+    proj = μ(PROJECTION, μ(μ()), μ())  # pattern: μ(μ()), body: μ()
+    value = μ(μ(μ()))  # different structure, won't match
+    result = pm_no_engine.apply_projection(proj, value)
+    assert result is value, "Value should be returned unchanged on mismatch"
+
+    # With execution engine - stall tracking enabled
+    engine = ExecutionEngine(enabled=True)
+    pm_with_engine = PatternMatcher(execution_engine=engine)
+
+    # Same projection/value that won't match
+    result = pm_with_engine.apply_projection(proj, value)
+    assert result is value, "Value should still be returned unchanged"
+    assert engine.status == ExecutionStatus.STALLED, "Engine should be stalled after pattern mismatch"
+    assert engine.is_stalled
+
+    # Verify stall event was emitted
+    events = engine.get_events()
+    assert len(events) == 1
+    assert events[0]["type"] == "execution.stall"
+    assert events[0]["mu"]["pattern_id"] == "projection.pattern_mismatch"

@@ -1,6 +1,16 @@
 # rcx_pi/reduction/pattern_matching.py
 from ..core.motif import Motif, μ
 
+
+def _motif_to_json(m):
+    """Convert a Motif to JSON-serializable form for deterministic hashing."""
+    if not isinstance(m, Motif):
+        return m
+    if not m.structure:
+        return {"_void": True}
+    return {"_struct": [_motif_to_json(c) for c in m.structure]}
+
+
 # Marker depths (structural symbols)
 PROJECTION = μ(μ(μ(μ(μ(μ(μ()))))))  # 6-deep marker
 CLOSURE = μ(μ(μ(μ(μ()))))  # 4-deep marker
@@ -50,8 +60,9 @@ def is_act(m):
 class PatternMatcher:
     """Pure structural projection engine — no strings anywhere."""
 
-    def __init__(self, observer=None):
+    def __init__(self, observer=None, execution_engine=None):
         self._observer = observer
+        self._execution_engine = execution_engine
 
     def apply_projection(self, proj, value):
         """Apply a PROJECTION(pattern, body) to a value motif."""
@@ -66,6 +77,11 @@ class PatternMatcher:
             # pattern did not match; return value unchanged
             if self._observer:
                 self._observer.stall("pattern_mismatch")
+            # Execution mode: track stall state (RCX_EXECUTION_V0=1)
+            if self._execution_engine:
+                # Convert value to JSON-serializable form for hashing
+                value_repr = _motif_to_json(value) if hasattr(value, 'structure') else value
+                self._execution_engine.stall("projection.pattern_mismatch", value_repr)
             return value
 
         return self._apply(body, bindings)
