@@ -9,6 +9,91 @@ from typing import Any, Dict, List, Mapping
 from rcx_pi.trace_canon import canon_event_json, canon_events
 
 
+def closure_evidence_v2(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Compute closure evidence from v2 trace events.
+
+    This is REPORTING ONLY: does not affect semantics, does not import ExecutionEngine.
+    Derives all state from the event stream itself per IndependentEncounter.v0.md:
+
+    - Track stall_memory[pattern_id] = (value_hash, first_seen_at)
+    - On stall(v, p) at index i:
+        - If stall_memory[p] has value_hash == v: closure evidence for (v, p)
+        - Else: set stall_memory[p] = (v, i)
+    - On execution.fixed(before_hash=b):
+        - Clear stall_memory entries where value_hash == b (conservative reset)
+
+    Handles both execution.stall and reduction.stall as equivalent stall signals.
+
+    Returns:
+    {
+        "v": 1,
+        "counts": {"stall": int, "fix": int, "fixed": int},
+        "evidence": [{"pattern_id": str, "value_hash": str, "first_seen_at": int, "trigger_at": int}, ...],
+        "evidence_count": int
+    }
+    """
+    # stall_memory[pattern_id] = (value_hash, first_seen_at_index)
+    stall_memory: Dict[str, tuple[str, int]] = {}
+    evidence: List[Dict[str, Any]] = []
+
+    stall_count = 0
+    fix_count = 0
+    fixed_count = 0
+
+    for idx, ev in enumerate(events):
+        ev_type = ev.get("type", "")
+        mu = ev.get("mu") or {}
+
+        # Count execution events
+        if ev_type == "execution.stall" or ev_type == "reduction.stall":
+            stall_count += 1
+        elif ev_type == "execution.fix":
+            fix_count += 1
+        elif ev_type == "execution.fixed":
+            fixed_count += 1
+
+        # Handle fixed: conservative reset
+        if ev_type == "execution.fixed":
+            before_hash = mu.get("before_hash")
+            if isinstance(before_hash, str):
+                to_del = [p for p, (v, _) in stall_memory.items() if v == before_hash]
+                for p in to_del:
+                    del stall_memory[p]
+            continue
+
+        # Handle stall events (both execution.stall and reduction.stall)
+        if ev_type in ("execution.stall", "reduction.stall"):
+            value_hash = mu.get("value_hash")
+            pattern_id = mu.get("pattern_id")
+            if value_hash is None or pattern_id is None:
+                continue
+
+            pattern_key = str(pattern_id)
+            prev = stall_memory.get(pattern_key)
+
+            if prev is not None and prev[0] == value_hash:
+                # Second independent encounter - closure evidence
+                evidence.append({
+                    "pattern_id": pattern_key,
+                    "value_hash": value_hash,
+                    "first_seen_at": prev[1],
+                    "trigger_at": idx,
+                })
+            else:
+                stall_memory[pattern_key] = (value_hash, idx)
+
+    # Sort evidence deterministically by (pattern_id, value_hash)
+    evidence.sort(key=lambda e: (e["pattern_id"], e["value_hash"]))
+
+    return {
+        "v": 1,
+        "counts": {"stall": stall_count, "fix": fix_count, "fixed": fixed_count},
+        "evidence": evidence,
+        "evidence_count": len(evidence),
+    }
+
+
 def execution_summary_v2(events: List[Dict[str, Any]]) -> Dict[str, Any] | None:
     """
     Compute a pure execution summary for v2 traces.
@@ -213,6 +298,11 @@ def replay_main(argv: List[str] | None = None) -> int:
         action="store_true",
         help="Print v2 execution summary JSON to stdout (reporting only).",
     )
+    ap.add_argument(
+        "--print-closure-evidence",
+        action="store_true",
+        help="Print closure evidence JSON to stdout (reporting only).",
+    )
 
     args = ap.parse_args(argv)
 
@@ -268,6 +358,11 @@ def replay_main(argv: List[str] | None = None) -> int:
         summary = execution_summary_v2(raw_events)
         if summary is not None:
             print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+
+    # Optional: print closure evidence (reporting only)
+    if args.print_closure_evidence:
+        evidence = closure_evidence_v2(raw_events)
+        print(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
 
     return 0
 
