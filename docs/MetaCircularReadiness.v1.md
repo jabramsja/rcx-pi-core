@@ -63,7 +63,7 @@ These gates MUST be passed before meta-circular work begins. Each gate is binary
 | Minimal bytecode program runs deterministically | — | BLOCKED |
 | Opcode semantics covered by fixtures | — | BLOCKED |
 
-**Blocker**: Gate 5 requires stall/fix trace events (currently untraced). See TASKS.md VECTOR #5 prerequisite.
+**Blocker**: Gate 5 requires stall/fix execution semantics. Note: v2 observability events (`reduction.stall`, `reduction.applied`, `reduction.normal`) now exist for debugging, but execution semantics (the actual Stall → Fix → Closure loop) remain blocked. See TASKS.md VECTOR #6.
 
 ---
 
@@ -85,15 +85,17 @@ The v1 meta-circular subset is intentionally minimal. It includes ONLY:
 
 | Component | Reason |
 |-----------|--------|
-| **Stall semantics** | Not traced in v1 schema |
-| **Fix semantics** | Not traced in v1 schema |
-| **Closure semantics** | Not traced in v1 schema |
-| **Bucket routing** | Not traced in v1 schema |
-| **Rule matching** | Requires stall/fix to be observable |
+| **Stall execution** | v2 observability exists (`reduction.stall`), but execution semantics blocked (VECTOR #6) |
+| **Fix execution** | v2 observability exists (`reduction.applied`), but execution semantics blocked (VECTOR #6) |
+| **Closure semantics** | Requires Stall → Fix loop execution |
+| **Bucket routing** | Requires execution semantics |
+| **Rule matching execution** | Observable via v2 events, but execution blocked |
 | **Pattern evaluation** | Requires closure semantics |
 | **Self-modifying behavior** | Requires meta loop stability first |
 | **Performance optimization** | Correctness before speed |
 | **Concurrency** | Forbidden by EntropyBudget.md |
+
+**Note on v2 Observability**: Stall/fix events are now OBSERVABLE via v2 trace events (`reduction.stall`, `reduction.applied`, `reduction.normal`) gated by `RCX_TRACE_V2=1`. These are debug-only and do NOT provide execution semantics. See `docs/StallFixObservability.v0.md`.
 
 ---
 
@@ -134,9 +136,10 @@ Before attempting meta-circular execution:
 - [x] Gate 2: Replay Determinism
 - [x] Gate 3: Entropy Sealing
 - [x] Gate 4: Bytecode Mapping (v0)
-- [ ] Gate 5: Reference Interpreter (BLOCKED on stall/fix trace events)
+- [x] v2 Observability (stall/fix observable, debug-only)
+- [ ] Gate 5: Reference Interpreter (BLOCKED on execution semantics, VECTOR #6)
 
-**Current Status**: Gates 1-4 PASS. Gate 5 BLOCKED.
+**Current Status**: Gates 1-4 PASS. v2 observability complete. Gate 5 BLOCKED pending VECTOR #6 promotion.
 
 ---
 
@@ -144,13 +147,20 @@ Before attempting meta-circular execution:
 
 To unblock Gate 5 and proceed to meta-circular implementation:
 
-1. **Add stall trace event type** to v1 schema (or v2 extension)
-2. **Add fix trace event type** to v1 schema (or v2 extension)
-3. **Implement reference interpreter** with v0 opcodes
-4. **Create golden fixtures** for opcode semantics
-5. **Pass determinism gate** for interpreter output
+### Completed (v2 Observability)
 
-These are documented in TASKS.md as VECTOR #5 prerequisites.
+1. ✅ **Add stall trace event type** — `reduction.stall` in v2 schema
+2. ✅ **Add fix trace event type** — `reduction.applied` in v2 schema
+3. ✅ **v2 fixtures and gate** — `tests/fixtures/traces_v2/`, `tests/test_replay_gate_v2.py`
+
+### Blocked (Execution Semantics, VECTOR #6)
+
+4. **Implement Stall → Fix → Closure execution loop** — requires VECTOR #6 promotion
+5. **Implement reference interpreter** with v0 opcodes — depends on (4)
+6. **Create golden fixtures** for opcode semantics — depends on (5)
+7. **Pass determinism gate** for interpreter output — depends on (6)
+
+The execution semantics are documented in TASKS.md VECTOR #6.
 
 ---
 
@@ -178,7 +188,8 @@ This document corresponds to milestones from `self_hosting_milestones.md`:
 | M0. Host baseline | PASS | — |
 | M1. Determinism contracts | PASS | Gates 1-3 |
 | M2. VM spec on paper | PASS | Gate 4 (BytecodeMapping.v0.md) |
-| M3. Reference interpreter | BLOCKED | Gate 5 |
+| M2.5. Observability (v2) | PASS | v2 trace events (debug-only) |
+| M3. Reference interpreter | BLOCKED | Gate 5 (requires VECTOR #6) |
 | M4. Organism extraction | NOT STARTED | — |
 | M5. Seeded self-host loop | NOT STARTED | — |
 | M6. Meta-circular attempt | NOT STARTED | Section 4 success criteria |
@@ -187,11 +198,13 @@ This document corresponds to milestones from `self_hosting_milestones.md`:
 
 ## Version
 
-Document version: v1
+Document version: v1.1 (updated for v2 observability)
 Last updated: 2026-01-24
 Dependencies:
-- `docs/schemas/rcx-trace-event.v1.json`
+- `docs/schemas/rcx-trace-event.v1.json` (replay, frozen)
+- `docs/schemas/rcx-trace-event.v2.json` (observability)
 - `docs/BytecodeMapping.v0.md`
+- `docs/StallFixObservability.v0.md`
 - `EntropyBudget.md`
 - `self_hosting_milestones.md`
 - `self_hosting_readiness_gates.md`
