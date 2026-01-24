@@ -1,44 +1,23 @@
 {
-  "$id": "rcx-trace-event.v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rcx-trace-event.v1.json",
+  "title": "RCX Trace Event (v1)",
+  "type": "object",
   "additionalProperties": false,
+  "required": ["v", "type", "i"],
   "properties": {
-    "i": {
-      "minimum": 0,
-      "type": "integer"
+    "v": { "type": "integer", "const": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "i": { "type": "integer", "minimum": 0 },
+    "t": { "type": "string", "minLength": 1 },
+    "mu": {
+      "description": "Optional payload: JSON-ish (object/array/primitives).",
+      "type": ["null", "boolean", "integer", "number", "string", "array", "object"]
     },
     "meta": {
-      "description": "Optional metadata; keep deterministic.",
-      "type": [
-        "object",
-        "null"
-      ]
-    },
-    "mu": {
-      "description": "Optional mu payload; shape can be refined later.",
-      "type": [
-        "object",
-        "string",
-        "null"
-      ]
-    },
-    "t": {
-      "description": "Optional stable tag; no timestamps in v1.",
-      "type": "string"
-    },
-    "type": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "v": {
-      "const": 1
+      "description": "Optional metadata: object only (canonicalized with deep sort).",
+      "type": "object",
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "v",
-    "type",
-    "i"
-  ],
-  "title": "RCX Trace Event (v1)",
-  "type": "object"
+  }
 }
