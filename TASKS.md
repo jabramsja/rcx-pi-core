@@ -178,3 +178,21 @@ Worlds:
 ---
 
 **End of file.**
+
+## Lobe: Self-hosting/meta-circular milestone map (design-only)
+
+### NOW (design-only)
+
+1. **Milestone map doc (v1)**
+   - Deliverable: `docs/self_hosting_milestones.md`
+   - Done when: milestones M0–M6 are written with explicit exit criteria + non-goals.
+
+2. **Readiness gates doc (v1)**
+   - Deliverable: `docs/self_hosting_readiness_gates.md`
+   - Done when: Gates A–F are defined as measurable/testable criteria.
+
+### NEXT (design-only)
+
+3. **Bytecode/VM responsibilities mapping draft (v1)**
+   - Deliverable: a mapping section inside `docs/self_hosting_milestones.md` (or a follow-on doc)
+   - Done when: each current Python/Rust component is categorized as “VM eventual” vs “tooling stays host-side”.
