@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, Iterable, List, Mapping, Tuple, Union
 
 TRACE_EVENT_V1 = 1
 TRACE_EVENT_V2 = 2
+
+# Feature flag: set RCX_TRACE_V2=1 to enable v2 observability events
+RCX_TRACE_V2_ENABLED = os.environ.get("RCX_TRACE_V2", "0") == "1"
 TRACE_EVENT_V = TRACE_EVENT_V1  # default for backwards compat
 TRACE_EVENT_KEY_ORDER: Tuple[str, ...] = ("v", "type", "i", "t", "mu", "meta")
 
@@ -127,13 +131,20 @@ class TraceObserver:
     """
     Minimal observer for v2 trace events (stall/fix observability).
     Emits v2 events interleaved with v1 events, sharing contiguous indices.
+
+    Feature flag: Set RCX_TRACE_V2=1 to enable event emission.
+    When disabled (default), observer methods are no-ops.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enabled: bool = None) -> None:
         self._events: List[Dict[str, Any]] = []
         self._index: int = 0
+        # Use explicit enabled flag, or fall back to env var
+        self._enabled = enabled if enabled is not None else RCX_TRACE_V2_ENABLED
 
     def _emit(self, event_type: str, t: str = None, mu: Any = None) -> None:
+        if not self._enabled:
+            return
         ev: Dict[str, Any] = {"v": TRACE_EVENT_V2, "type": event_type, "i": self._index}
         if t is not None:
             ev["t"] = t
