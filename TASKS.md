@@ -34,6 +34,7 @@
 - Golden trace fixtures (`tests/fixtures/traces/*.v1.jsonl`) - minimal, multi-event, nested payload
 - Replay gate runs all fixtures; CI enforces determinism
 - Comprehensive freeze fixture (`replay_freeze.v1.jsonl`) - contiguity, nested mu, metadata
+- Rust replay acceleration (`rcx_pi_rust/examples/replay_cli.rs`) - bit-for-bit compatible with Python
 
 ---
 
@@ -58,13 +59,7 @@ The Python replay semantics are now locked. This freeze means:
 
 ## Lobe: Deterministic Trace Core (v1)
 
-**Status: Complete. Replay semantics frozen.**
-
-### NOW
-
-4. **Rust replay acceleration layer**
-   - Constraint: performance layer only, bit-for-bit compatible with Python replay
-   - Deliverable: Rust implementation matching `rcx_pi/replay_cli.py` semantics
+**Status: Complete. Replay semantics frozen. Rust acceleration shipped.**
 
 ### VECTOR (intentionally deferred)
 
