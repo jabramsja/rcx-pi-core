@@ -299,3 +299,162 @@ def test_replay_validation_accepts_valid_stall_fix_cycle() -> None:
     ]
     # Should not raise
     _validate_v2_execution_sequence(valid_trace)
+
+
+# --- Record Mode v0 Tests ---
+
+
+def test_record_mode_stall_then_fix() -> None:
+    """
+    Record mode: PatternMatcher emits execution.stall on mismatch,
+    then execution.fixed when a later pattern matches the same value.
+
+    This tests the inverse of replay: actual reduction → trace.
+    """
+    from rcx_pi.trace_canon import ExecutionEngine, ExecutionStatus, value_hash
+    from rcx_pi.reduction.pattern_matching import (
+        PatternMatcher,
+        PROJECTION,
+        PATTERN_VAR_MARKER,
+        _motif_to_json,
+    )
+    from rcx_pi.core.motif import Motif, μ
+
+    engine = ExecutionEngine(enabled=True)
+    pm = PatternMatcher(execution_engine=engine)
+
+    # Value: μ(μ())
+    value = μ(μ())
+    value_repr = _motif_to_json(value)
+    value_h = value_hash(value_repr)
+
+    # Projection 1: pattern that won't match (expects μ(μ(μ())))
+    non_matching_pattern = μ(μ(μ()))
+    proj_fail = μ(PROJECTION, non_matching_pattern, μ())
+
+    # Apply projection that fails → stall
+    result1 = pm.apply_projection(proj_fail, value)
+    assert result1 is value, "Value unchanged on mismatch"
+    assert engine.is_stalled, "Engine should be stalled"
+    assert engine._current_value_hash == value_h
+
+    # Projection 2: pattern that matches (expects μ(X)) with variable X
+    var_x = μ(PATTERN_VAR_MARKER, μ())  # pattern variable
+    matching_pattern = μ(var_x)  # matches μ(anything)
+    proj_match = μ(PROJECTION, matching_pattern, μ())  # body = μ()
+
+    # Apply projection that matches → fixed
+    result2 = pm.apply_projection(proj_match, value)
+    assert result2.structurally_equal(μ()), "Should transform to μ()"
+    assert not engine.is_stalled, "Engine should be active after fix"
+    assert engine.status == ExecutionStatus.ACTIVE
+
+    # Verify events
+    events = engine.get_events()
+    assert len(events) == 2, f"Expected 2 events, got {len(events)}"
+
+    # Event 0: execution.stall
+    assert events[0]["type"] == "execution.stall"
+    assert events[0]["mu"]["pattern_id"] == "projection.pattern_mismatch"
+    assert events[0]["mu"]["value_hash"] == value_h
+
+    # Event 1: execution.fixed
+    assert events[1]["type"] == "execution.fixed"
+    assert events[1]["t"] == "projection.match"
+    assert events[1]["mu"]["before_hash"] == value_h
+    result_repr = _motif_to_json(μ())
+    assert events[1]["mu"]["after_hash"] == value_hash(result_repr)
+
+
+def test_record_mode_no_fixed_without_stall() -> None:
+    """
+    Record mode: execution.fixed is NOT emitted if there was no prior stall.
+    Normal reductions (pattern matches on first try) do not emit fixed.
+    """
+    from rcx_pi.trace_canon import ExecutionEngine
+    from rcx_pi.reduction.pattern_matching import (
+        PatternMatcher,
+        PROJECTION,
+        PATTERN_VAR_MARKER,
+    )
+    from rcx_pi.core.motif import μ
+
+    engine = ExecutionEngine(enabled=True)
+    pm = PatternMatcher(execution_engine=engine)
+
+    # Value: μ(μ())
+    value = μ(μ())
+
+    # Projection that matches immediately (no stall first)
+    var_x = μ(PATTERN_VAR_MARKER, μ())
+    matching_pattern = μ(var_x)
+    proj = μ(PROJECTION, matching_pattern, μ())
+
+    # Apply - matches first time, no stall
+    result = pm.apply_projection(proj, value)
+    assert result.structurally_equal(μ())
+
+    # No events should be emitted - no stall, so no fixed
+    events = engine.get_events()
+    assert len(events) == 0, f"Expected 0 events (no stall), got {len(events)}: {events}"
+
+
+def test_record_mode_fixture_matches_generated_trace() -> None:
+    """
+    Record mode: generated trace matches the golden fixture.
+    This verifies determinism: same input → same trace.
+    """
+    from pathlib import Path
+    import json
+    from rcx_pi.trace_canon import ExecutionEngine, value_hash, canon_event_json
+    from rcx_pi.reduction.pattern_matching import (
+        PatternMatcher,
+        PROJECTION,
+        PATTERN_VAR_MARKER,
+        _motif_to_json,
+    )
+    from rcx_pi.core.motif import μ
+
+    engine = ExecutionEngine(enabled=True)
+    pm = PatternMatcher(execution_engine=engine)
+
+    # Reproduce the exact scenario from the fixture
+    value = μ(μ())
+
+    # First: mismatch → stall
+    non_matching_pattern = μ(μ(μ()))
+    proj_fail = μ(PROJECTION, non_matching_pattern, μ())
+    pm.apply_projection(proj_fail, value)
+
+    # Second: match → fixed
+    var_x = μ(PATTERN_VAR_MARKER, μ())
+    matching_pattern = μ(var_x)
+    proj_match = μ(PROJECTION, matching_pattern, μ())
+    pm.apply_projection(proj_match, value)
+
+    # Serialize events to canonical JSONL
+    events = engine.get_events()
+    generated = "".join(canon_event_json(ev) + "\n" for ev in events)
+
+    # Load fixture
+    fixture_path = Path(__file__).parent / "fixtures" / "traces_v2" / "record_mode.v2.jsonl"
+    expected = fixture_path.read_text(encoding="utf-8")
+
+    assert generated == expected, f"Generated trace differs from fixture:\nGenerated:\n{generated}\nExpected:\n{expected}"
+
+
+def test_record_mode_replay_validates() -> None:
+    """
+    Record mode fixture passes replay validation.
+    """
+    root = _repo_root()
+    fixture = root / "tests" / "fixtures" / "traces_v2" / "record_mode.v2.jsonl"
+
+    result = subprocess.run(
+        ["python3", "-m", "rcx_pi.rcx_cli", "replay", "--trace", str(fixture), "--check-canon"],
+        cwd=str(root),
+        env={**os.environ, "PYTHONHASHSEED": "0"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"Record mode fixture failed replay validation:\n{result.stderr}"

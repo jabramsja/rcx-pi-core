@@ -1,5 +1,6 @@
 # rcx_pi/reduction/pattern_matching.py
 from ..core.motif import Motif, μ
+from ..trace_canon import value_hash
 
 
 def _motif_to_json(m):
@@ -84,7 +85,18 @@ class PatternMatcher:
                 self._execution_engine.stall("projection.pattern_mismatch", value_repr)
             return value
 
-        return self._apply(body, bindings)
+        # Pattern matched - apply substitution
+        result = self._apply(body, bindings)
+
+        # Record mode: if engine is stalled for this value, emit fixed
+        if self._execution_engine and self._execution_engine.is_stalled:
+            value_repr = _motif_to_json(value) if hasattr(value, 'structure') else value
+            value_h = value_hash(value_repr)
+            if value_h == self._execution_engine._current_value_hash:
+                result_repr = _motif_to_json(result) if hasattr(result, 'structure') else result
+                self._execution_engine.fixed("projection.match", value_h, result_repr)
+
+        return result
 
     # ----- structural matching -----
 

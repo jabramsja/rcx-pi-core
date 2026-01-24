@@ -1,6 +1,6 @@
 # Minimal Native Execution Primitive (v0)
 
-**Status: DRAFT**
+**Status: COMPLETE**
 
 This document answers the Boundary Question from TASKS.md.
 

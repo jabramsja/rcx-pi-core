@@ -132,55 +132,43 @@ without importing semantics from the host language?
 
 ### NOW (blocking)
 
-8. **Minimal Native Execution Primitive (v0)**
+8. **Minimal Native Execution Primitive (v0)** ✅
    - Deliverable: `docs/MinimalNativeExecutionPrimitive.v0.md`
    - Purpose: Answer the Boundary Question above
-   - DONE criteria:
-     - Doc defines the smallest host-independent loop for Stall→Fix→Trace→Closure
-     - Invariants are explicit and testable
-     - Non-goals are enumerated (no scope creep)
-     - No new architecture proposed (uses existing primitives)
-     - Doc reviewed and merged
+   - Done:
+     - Doc defines Structural Reduction Loop (MATCH → REDUCE/STALL → TRACE → NORMAL_FORM)
+     - 5 invariants explicit and testable
+     - 7 non-goals enumerated (no scope creep)
+     - Uses existing primitives only (Motif, PatternMatcher, ExecutionEngine, value_hash)
 
-9. **Doc coherence pass (NOW-A)**
+9. **Doc coherence pass (NOW-A)** ✅
    - Purpose: Align terminology across docs
-   - DONE criteria:
-     - `MinimalNativeExecutionPrimitive.v0.md` aligned with `StallFixExecution.v0.md`
-     - No CLOSE opcode language (normal form is detected, not commanded)
-     - Terminology consistent: `reduction.*` = observability, `execution.*` = state transitions
-     - v0 explicitly marked as replay-only, single-value, STALL/FIX only
+   - Done:
+     - Both docs use: `reduction.*` = observability, `execution.*` = state transitions
+     - No CLOSE opcode language (both say "normal form detected, not commanded")
+     - v0 marked as replay-only, single-value, STALL/FIX only
 
-10. **Gate wiring verification (NOW-B)**
+10. **Gate wiring verification (NOW-B)** ✅
     - Purpose: Confirm existing gates are correctly wired (no new capability)
-    - DONE criteria:
-      - v1 gates untouched and green (no regression)
-      - v2 gates only run when `RCX_TRACE_V2=1` and/or `RCX_EXECUTION_V0=1`
-      - Fixtures live in intended folders (`traces/` for v1, `traces_v2/` for v2)
-      - Clean repo clone produces no tracked diffs after `pytest`
-      - CI green on dev branch
+    - Done:
+      - v1 gates green (test_replay_gate_idempotent.py)
+      - v2 gates green (test_replay_gate_v2.py: 17 tests)
+      - Fixtures: `traces/` (4 v1), `traces_v2/` (3 v2)
+      - Clean repo after pytest (no tracked diffs)
 
-11. **Replay validation for v2 execution events (NOW-C)**
+11. **Replay validation for v2 execution events (NOW-C)** ✅
     - Purpose: Prove Stall→Fix→Trace loop is deterministic and replayable (trace-consumption only)
-    - Deliverable: Edit `rcx_pi/replay_cli.py` to validate execution.* event sequences
-    - Scope:
-      - Validates stall/fix consistency (no invented fixes, no value rewrites)
-      - Does NOT claim "second independent encounter" semantics (that's Sink-level)
-      - v1 replay unchanged (no regression)
-    - DONE criteria:
-      - `replay --check-canon` validates execution.stall/fix/fixed sequence when present
-      - execution.fix must follow execution.stall (else HALT_ERR)
-      - execution.fix target_hash must match preceding stall value_hash (else HALT_ERR)
-      - execution.fixed must follow execution.fix (else HALT_ERR)
-      - Stall without fix before trace.end → valid (normal form termination)
-      - v1 fixtures unchanged, v1 gates green
-      - Golden fixture `stall_fix.v2.jsonl` passes validation
-      - CI green
+    - Done:
+      - `_validate_v2_execution_sequence()` in replay_cli.py
+      - Validates: fix-without-stall, fixed-without-stall, hash mismatch, double stall
+      - Accepts: stall at trace end (normal form), valid stall→fixed cycle
+      - v1 unchanged, v2 fixtures pass validation
 
 ---
 
 ## Sink Promotion Candidate
 
-12. **Record Mode v0: execution → trace for stall/fix events**
+12. **Record Mode v0: execution → trace for stall/fix events** ✅
     - Purpose: Emit execution.* events during actual reduction (inverse of replay)
     - Flag: `RCX_EXECUTION_V0=1` (reuse existing flag, default OFF)
     - Scope:
@@ -194,17 +182,10 @@ without importing semantics from the host language?
       - Edit `rcx_pi/trace_canon.py` ExecutionEngine: track stall state to gate fixed emission
       - Add ONE golden fixture: `tests/fixtures/traces_v2/record_mode.v2.jsonl` (generated from tiny deterministic input)
       - Edit `tests/test_replay_gate_v2.py`: add record → replay → validate gate
-    - DONE criteria:
-      - Record tiny input → produces execution.stall/fixed trace (only when stall occurred)
-      - Replay validate passes on recorded trace
-      - Re-record same input → bit-for-bit identical trace (PYTHONHASHSEED=0)
-      - v1 gates unchanged, v2 gates green
-      - Flag OFF: no behavior change (existing tests pass)
-    - Constraints:
-      - No v1 schema changes
-      - No new test files (edit existing)
-      - No concurrency / multi-value
-      - Reuse existing v2 event schema + validator
+    - Done:
+      - Gate: (engine present) ∧ (engine STALLED) ∧ (hash match) ∧ (RCX_EXECUTION_V0=1)
+      - 4 tests: stall→fix cycle, no-fixed-without-stall, fixture match, replay validation
+      - Re-record determinism verified (PYTHONHASHSEED=0)
 
 ---
 

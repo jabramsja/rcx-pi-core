@@ -1,0 +1,2 @@
+{"v":2,"type":"execution.stall","i":0,"mu":{"pattern_id":"projection.pattern_mismatch","value_hash":"6e28e861511cd677"}}
+{"v":2,"type":"execution.fixed","i":1,"t":"projection.match","mu":{"after_hash":"d0bebd790075c05f","before_hash":"6e28e861511cd677"}}
