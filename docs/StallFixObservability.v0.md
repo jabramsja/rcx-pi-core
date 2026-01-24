@@ -1,6 +1,6 @@
 # Stall/Fix Trace Observability (v0)
 
-**Status: DESIGN NOTE — Not approved for implementation**
+**Status: APPROVED FOR IMPLEMENTATION**
 
 This document defines trace event types to make existing stall/fix-like behavior OBSERVABLE without changing execution semantics.
 
@@ -98,8 +98,8 @@ Emitted when a reduction rule successfully applies and transforms a value.
 **Optional fields**:
 | Field | Type | Description |
 |-------|------|-------------|
-| `t` | string | Rule tag (e.g. `"add.zero"`, `"activation"`, `"classify"`) |
-| `mu` | object | Before/after summary (if cheap to compute) |
+| `t` | string | Rule ID (e.g. `"add.zero"`, `"activation"`, `"classify"`) |
+| `mu` | object | `{"rule_id": "...", "before_depth": N, "after_depth": M}` |
 | `meta` | object | `{"file": "...", "line": N}` |
 
 ---
@@ -122,9 +122,7 @@ All new event types must satisfy `EntropyBudget.md`:
 
 ## 4. Schema Approach
 
-**Recommendation: (A) Schema v2 draft living alongside v1**
-
-**Justification**:
+**Decision: (A) Schema v2 draft living alongside v1**
 
 1. **v1 replay gates remain untouched** — existing fixtures and CI gates do not see v2 events
 2. **Single schema evolution path** — v2 extends v1 with new event types, same structure
@@ -132,29 +130,40 @@ All new event types must satisfy `EntropyBudget.md`:
 4. **Future-compatible** — when stall/fix kernel semantics are provided, v2 is already in place
 5. **Minimal tooling change** — same canonicalization, same JSONL format, just new event types
 
-**Alternative rejected**: (B) "observer trace stream" would require parallel infrastructure and create file sprawl.
+---
+
+## 5. Interleaving Strategy
+
+**Decision**: v2 events interleaved in main trace with contiguous `i`.
+
+- v1 and v2 events share the same index sequence
+- Existing v1-only fixtures remain unchanged
+- New traces with observability have interleaved v1+v2 events
+- v1 replay gates continue to run on v1-only fixtures (untouched)
 
 ---
 
-## 5. Implementation Plan (pending approval)
+## 6. Payload Strategy
 
-If approved, implementation would:
+**Decision**: Include `rule_id` + before/after depth references (not full payloads).
 
-1. Add `v2` constant to `trace_canon.py` (alongside existing `v1`)
-2. Add optional `observer` parameter to reduction functions
-3. Emit events to observer callback (if provided)
+| Field | Description |
+|-------|-------------|
+| `rule_id` | String identifier for the rule (e.g. `"add.zero"`, `"activation"`) |
+| `before_depth` | Integer depth of input motif structure |
+| `after_depth` | Integer depth of output motif structure |
+
+This keeps overhead minimal while providing auditability.
+
+---
+
+## 7. Implementation Plan
+
+1. Extend `trace_canon.py` to accept `v=1` or `v=2` (same canonicalization rules)
+2. Add `TraceObserver` class for optional instrumentation
+3. Modify `rules_pure.py` and `pattern_matching.py` to accept optional observer
 4. Create ONE fixture: `tests/fixtures/traces/observer.v2.jsonl`
-5. Add ONE test that validates observer events (separate from v1 replay gate)
-
-**Estimated diff**: ~50-80 lines across 2-3 files.
-
----
-
-## 6. Open Questions
-
-1. Should `reduction.applied` include the transformed value in `mu`, or is that too expensive?
-2. Should observer events be emitted to a separate stream, or interleaved with v1 events?
-3. What is the maximum acceptable overhead for observer instrumentation?
+5. v1 replay gate remains untouched
 
 ---
 
@@ -162,4 +171,4 @@ If approved, implementation would:
 
 Document version: v0
 Last updated: 2026-01-24
-Status: Awaiting review. Not approved for implementation.
+Status: APPROVED FOR IMPLEMENTATION

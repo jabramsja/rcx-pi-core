@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, List, Mapping, Tuple, Union
 
-TRACE_EVENT_V = 1
+TRACE_EVENT_V1 = 1
+TRACE_EVENT_V2 = 2
+TRACE_EVENT_V = TRACE_EVENT_V1  # default for backwards compat
 TRACE_EVENT_KEY_ORDER: Tuple[str, ...] = ("v", "type", "i", "t", "mu", "meta")
 
 Json = Union[None, bool, int, float, str, List["Json"], Dict[str, "Json"]]
@@ -48,9 +50,9 @@ def canon_event(ev: Mapping[str, Any]) -> Dict[str, Any]:
     if not isinstance(ev, Mapping):
         raise TypeError(f"event must be a mapping, got {type(ev)}")
 
-    v = ev.get("v", TRACE_EVENT_V)
-    if v != TRACE_EVENT_V:
-        raise ValueError(f"event.v must be {TRACE_EVENT_V}, got {v!r}")
+    v = ev.get("v", TRACE_EVENT_V1)
+    if v not in (TRACE_EVENT_V1, TRACE_EVENT_V2):
+        raise ValueError(f"event.v must be {TRACE_EVENT_V1} or {TRACE_EVENT_V2}, got {v!r}")
 
     typ = ev.get("type")
     if not isinstance(typ, str) or not typ.strip():
@@ -76,7 +78,7 @@ def canon_event(ev: Mapping[str, Any]) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {}
     # Stable key order (dict insertion order)
-    out["v"] = TRACE_EVENT_V
+    out["v"] = v
     out["type"] = typ
     out["i"] = i
     if t is not None:
@@ -110,3 +112,61 @@ def canon_event_json(ev: Mapping[str, Any]) -> str:
     """
     obj = canon_event(ev)
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
+
+
+def _motif_depth(m: Any) -> int:
+    """Compute structural depth of a motif (for compact trace references)."""
+    if not hasattr(m, "structure"):
+        return 0
+    if not m.structure:
+        return 1
+    return 1 + max(_motif_depth(c) for c in m.structure)
+
+
+class TraceObserver:
+    """
+    Minimal observer for v2 trace events (stall/fix observability).
+    Emits v2 events interleaved with v1 events, sharing contiguous indices.
+    """
+
+    def __init__(self) -> None:
+        self._events: List[Dict[str, Any]] = []
+        self._index: int = 0
+
+    def _emit(self, event_type: str, t: str = None, mu: Any = None) -> None:
+        ev: Dict[str, Any] = {"v": TRACE_EVENT_V2, "type": event_type, "i": self._index}
+        if t is not None:
+            ev["t"] = t
+        if mu is not None:
+            ev["mu"] = mu
+        self._events.append(ev)
+        self._index += 1
+
+    def stall(self, reason: str = "pattern_mismatch") -> None:
+        """Emit reduction.stall event."""
+        self._emit("reduction.stall", mu={"reason": reason})
+
+    def normal(self) -> None:
+        """Emit reduction.normal event."""
+        self._emit("reduction.normal", mu={"reason": "no_rule_matched"})
+
+    def applied(self, rule_id: str, before: Any, after: Any) -> None:
+        """Emit reduction.applied event with rule_id and depth refs."""
+        self._emit(
+            "reduction.applied",
+            t=rule_id,
+            mu={
+                "after_depth": _motif_depth(after),
+                "before_depth": _motif_depth(before),
+                "rule_id": rule_id,
+            },
+        )
+
+    def get_events(self) -> List[Dict[str, Any]]:
+        """Return collected events (canonicalized)."""
+        return [canon_event(ev) for ev in self._events]
+
+    def reset(self) -> None:
+        """Reset observer state."""
+        self._events = []
+        self._index = 0

@@ -50,6 +50,9 @@ def is_act(m):
 class PatternMatcher:
     """Pure structural projection engine — no strings anywhere."""
 
+    def __init__(self, observer=None):
+        self._observer = observer
+
     def apply_projection(self, proj, value):
         """Apply a PROJECTION(pattern, body) to a value motif."""
         if not is_proj(proj):
@@ -61,6 +64,8 @@ class PatternMatcher:
         bindings = {}
         if not self._match(pattern, value, bindings):
             # pattern did not match; return value unchanged
+            if self._observer:
+                self._observer.stall("pattern_mismatch")
             return value
 
         return self._apply(body, bindings)
