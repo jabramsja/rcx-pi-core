@@ -14,19 +14,19 @@ def _run(cmd: list[str]) -> str:
     return lines[0]
 
 
-def test_rcx_program_descriptor_schema_triplet_is_parseable():
-    line = _run(["rcx-program-descriptor", "--schema"])
+def test_rcx_cli_program_descriptor_schema_triplet_is_parseable():
+    line = _run(["python3", "-m", "rcx_pi.rcx_cli", "program", "describe", "--schema"])
     trip = parse_schema_triplet(line)
     assert trip.tag == "rcx-program-descriptor.v1"
 
 
-def test_rcx_program_run_schema_triplet_is_parseable():
-    line = _run(["rcx-program-run", "--schema"])
+def test_rcx_cli_program_run_schema_triplet_is_parseable():
+    line = _run(["python3", "-m", "rcx_pi.rcx_cli", "program", "run", "--schema"])
     trip = parse_schema_triplet(line)
     assert trip.tag == "rcx-program-run.v1"
 
 
-def test_rcx_world_trace_schema_triplet_is_parseable():
-    line = _run(["rcx-world-trace", "--schema"])
+def test_rcx_cli_world_trace_schema_triplet_is_parseable():
+    line = _run(["python3", "-m", "rcx_pi.rcx_cli", "world", "trace", "--schema"])
     trip = parse_schema_triplet(line)
     assert trip.tag == "rcx-world-trace.v1"
