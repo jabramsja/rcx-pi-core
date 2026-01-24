@@ -43,32 +43,33 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 def test_replay_is_idempotent_for_tracked_files(tmp_path: Path) -> None:
     """
     Determinism gate (v1):
-    Running replay on a fixed fixture must not change any tracked files.
+    Running replay on each fixture must not change any tracked files.
     Output is allowed only to explicit --out (typically untracked temp paths).
     """
     root = _repo_root()
+    fixtures_dir = root / "tests" / "fixtures" / "traces"
+    fixtures = sorted(fixtures_dir.glob("*.v1.jsonl"))
+    assert fixtures, f"No fixtures found in {fixtures_dir}"
 
     before = _git_diff_tracked_names(root)
     assert before == "", f"Repo already has tracked diffs before test:\n{before}"
 
-    trace = root / "tests" / "fixtures" / "traces" / "minimal.v1.jsonl"
-    assert trace.exists(), f"Missing fixture: {trace}"
+    for trace in fixtures:
+        out = tmp_path / f"{trace.stem}.canon.jsonl"
+        r = _run(
+            [
+                "python3",
+                "-m",
+                "rcx_pi.rcx_cli",
+                "replay",
+                "--trace",
+                str(trace),
+                "--out",
+                str(out),
+            ],
+            root,
+        )
+        assert r.returncode == 0, f"Fixture {trace.name} failed:\n{r.stdout or ''}\n{r.stderr or ''}"
 
-    out = tmp_path / "canon.jsonl"
-    r = _run(
-        [
-            "python3",
-            "-m",
-            "rcx_pi.rcx_cli",
-            "replay",
-            "--trace",
-            str(trace),
-            "--out",
-            str(out),
-        ],
-        root,
-    )
-    assert r.returncode == 0, (r.stdout or "") + "\n" + (r.stderr or "")
-
-    after = _git_diff_tracked_names(root)
-    assert after == "", f"Replay changed tracked files (forbidden):\n{after}"
+        after = _git_diff_tracked_names(root)
+        assert after == "", f"Replay of {trace.name} changed tracked files (forbidden):\n{after}"
