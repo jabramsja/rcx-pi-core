@@ -36,10 +36,12 @@ def merge_snapshots(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
         if a.get(k) != b.get(k):
             raise ValueError(f"mismatch: {k}: {a.get(k)!r} vs {b.get(k)!r}")
 
-    a_rules = (((a.get("program") or {}).get("rules")) or [])
-    b_rules = (((b.get("program") or {}).get("rules")) or [])
+    a_rules = ((a.get("program") or {}).get("rules")) or []
+    b_rules = ((b.get("program") or {}).get("rules")) or []
     if a_rules != b_rules:
-        raise ValueError("mismatch: program.rules (merge requires identical program rules in v1)")
+        raise ValueError(
+            "mismatch: program.rules (merge requires identical program rules in v1)"
+        )
 
     a_state = a.get("state") or {}
     b_state = b.get("state") or {}
@@ -48,9 +50,13 @@ def merge_snapshots(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
         v = st.get(key)
         return list(v) if isinstance(v, list) else []
 
-    merged_state: Dict[str, Any] = dict(a_state)  # base (doesn't matter much; we overwrite key fields)
+    merged_state: Dict[str, Any] = dict(
+        a_state
+    )  # base (doesn't matter much; we overwrite key fields)
     for key in ("ra", "lobes", "sink", "null_reg", "inf_reg"):
-        merged_state[key] = _uniq_sorted(get_list(a_state, key) + get_list(b_state, key))
+        merged_state[key] = _uniq_sorted(
+            get_list(a_state, key) + get_list(b_state, key)
+        )
 
     # v1 rule: merged snapshot is a "fresh start" (not a stitched timeline)
     merged_state["current"] = None
@@ -67,12 +73,25 @@ def merge_snapshots(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def main(argv: List[str]) -> int:
-    ap = argparse.ArgumentParser(description="Merge two rcx.snapshot.v1 JSON files deterministically (tool-layer).")
+    ap = argparse.ArgumentParser(
+        description="Merge two rcx.snapshot.v1 JSON files deterministically (tool-layer)."
+    )
+
+    ap.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print snapshot schema tag + schema doc path + schema json path and exit.",
+    )
     ap.add_argument("a", type=Path)
     ap.add_argument("b", type=Path)
     ap.add_argument("-o", "--out", type=Path, required=True)
     args = ap.parse_args(argv)
 
+    if args.schema:
+        print(
+            "rcx.snapshot.v1 docs/snapshot_json_schema.md docs/schemas/rcx.snapshot.v1.schema.json"
+        )
+        return 0
     a = _load_json(args.a)
     b = _load_json(args.b)
 

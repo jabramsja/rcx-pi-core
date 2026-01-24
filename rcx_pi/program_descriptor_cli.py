@@ -28,7 +28,9 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print(f"{SCHEMA} {SCHEMA_DOC}")
+        print(
+            "rcx-program-descriptor.v1 docs/program_descriptor_schema.md docs/schemas/program_descriptor_schema.json"
+        )
         return 0
 
     if not args.program:

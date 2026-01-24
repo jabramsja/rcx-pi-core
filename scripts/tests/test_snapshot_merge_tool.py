@@ -26,7 +26,13 @@ def test_snapshot_merge_rejects_mismatched_program_rules(tmp_path: Path):
 
     out = tmp_path / "out.json"
     r = subprocess.run(
-        [str(ROOT / "scripts" / "snapshot_merge.py"), str(ap), str(bp), "--out", str(out)],
+        [
+            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(ap),
+            str(bp),
+            "--out",
+            str(out),
+        ],
         capture_output=True,
         text=True,
     )
@@ -40,8 +46,24 @@ def test_snapshot_merge_deterministic_union_same_inputs(tmp_path: Path):
     out1 = tmp_path / "m1.json"
     out2 = tmp_path / "m2.json"
 
-    subprocess.check_call([str(ROOT / "scripts" / "snapshot_merge.py"), str(a), str(b), "--out", str(out1)])
-    subprocess.check_call([str(ROOT / "scripts" / "snapshot_merge.py"), str(a), str(b), "--out", str(out2)])
+    subprocess.check_call(
+        [
+            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(a),
+            str(b),
+            "--out",
+            str(out1),
+        ]
+    )
+    subprocess.check_call(
+        [
+            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(a),
+            str(b),
+            "--out",
+            str(out2),
+        ]
+    )
 
     assert out1.read_text(encoding="utf-8") == out2.read_text(encoding="utf-8")
 
@@ -58,7 +80,9 @@ def test_snapshot_merge_union_semantics_baseline_plus_variant(tmp_path: Path):
     b = FIX / "snapshot_rcx_core_v1_variant.json"
     out = tmp_path / "merged.json"
 
-    subprocess.check_call([str(ROOT / "scripts" / "snapshot_merge.py"), str(a), str(b), "--out", str(out)])
+    subprocess.check_call(
+        [str(ROOT / "scripts" / "snapshot_merge.py"), str(a), str(b), "--out", str(out)]
+    )
     m = _load(out)
 
     assert m["schema"] == "rcx.snapshot.v1"

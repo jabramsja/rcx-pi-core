@@ -53,7 +53,9 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.schema:
-        print(f"{SCHEMA} {SCHEMA_DOC}")
+        print(
+            "rcx-program-run.v1 docs/program_run_schema.md docs/schemas/program_run_schema.json"
+        )
         return 0
 
     if args.list:
