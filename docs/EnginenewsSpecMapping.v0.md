@@ -1,6 +1,13 @@
 # Enginenews Spec Mapping v0
 
-Status: VECTOR (design-first, no code changes to engine)
+Status: COMPLETE (design + stress test harness)
+
+**Implementation status:**
+- ✅ Design doc complete (`docs/EnginenewsSpecMapping.v0.md`)
+- ✅ Stress test harness: `tests/test_enginenews_spec_v0.py` (18 tests)
+- ✅ Fixtures: progressive_refinement, stall_pressure, multi_cycle, idempotent_cycle
+- ✅ Metrics: stall_density, fix_efficacy, closure_evidence_count
+- ✅ CLI contract verified: `--check-canon`, `--print-exec-summary`
 
 This document defines a minimal "enginenews" motif set and describes intended behavior purely in terms of TRACE EVIDENCE. It serves as a stress-test specification for the RCX v2 replay pipeline.
 
