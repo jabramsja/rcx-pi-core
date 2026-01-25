@@ -2,6 +2,8 @@
 
 Quick reference for bytecode-related files.
 
+**Architecture Note (2026-01-25):** Per `docs/RCXKernel.v0.md`, pattern matching (OP_MATCH) and rule application (OP_REDUCE) are **seed responsibility**, not kernel primitives. The kernel provides only: hash, stall detect, trace, dispatch. Seeds define matching semantics. This means v1c may evolve differently than originally planned.
+
 ## File Map
 
 | What | Where |

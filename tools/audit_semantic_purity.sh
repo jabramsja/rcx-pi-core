@@ -299,6 +299,264 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
+# 9. Structural Purity Guardrails
+# -----------------------------------------------------------------------------
+echo "== 9. Structural Purity: Programming IN RCX =="
+
+echo "Checking structural purity guardrail functions exist..."
+
+if [ -f "rcx_pi/mu_type.py" ]; then
+    # Check that has_callable exists
+    if grep -q "def has_callable" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ has_callable() detector defined"
+    else
+        echo "  ERROR: has_callable() detector missing"
+        FAILED=1
+    fi
+
+    # Check that assert_no_callables exists
+    if grep -q "def assert_no_callables" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ assert_no_callables() guardrail defined"
+    else
+        echo "  ERROR: assert_no_callables() guardrail missing"
+        FAILED=1
+    fi
+
+    # Check that assert_seed_pure exists
+    if grep -q "def assert_seed_pure" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ assert_seed_pure() seed validator defined"
+    else
+        echo "  ERROR: assert_seed_pure() seed validator missing"
+        FAILED=1
+    fi
+
+    # Check that assert_handler_pure exists
+    if grep -q "def assert_handler_pure" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ assert_handler_pure() handler wrapper defined"
+    else
+        echo "  ERROR: assert_handler_pure() handler wrapper missing"
+        FAILED=1
+    fi
+
+    # Check that validate_kernel_boundary exists
+    if grep -q "def validate_kernel_boundary" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ validate_kernel_boundary() primitive validator defined"
+    else
+        echo "  ERROR: validate_kernel_boundary() primitive validator missing"
+        FAILED=1
+    fi
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 10. Kernel Purity (when kernel.py exists)
+# -----------------------------------------------------------------------------
+echo "== 10. Kernel Purity: No Host Logic in Kernel =="
+
+if [ -f "rcx_pi/kernel.py" ]; then
+    echo "Checking kernel.py for structural purity..."
+
+    # No lambdas in kernel (except in comments)
+    if grep -n "lambda" rcx_pi/kernel.py 2>/dev/null | grep -v "#" | grep -v '"""' | grep -v "'''" ; then
+        echo "  WARNING: Lambda found in kernel.py"
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "  ✓ No lambdas in kernel.py"
+    fi
+
+    # All handlers should be wrapped with assert_handler_pure
+    # (Check for handler registration without wrapping)
+    if grep -n "handlers\[" rcx_pi/kernel.py 2>/dev/null | grep -v "assert_handler_pure" | grep -v "#"; then
+        echo "  WARNING: Possibly unwrapped handler registration in kernel.py"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+else
+    echo "  (kernel.py not yet created - will check when it exists)"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 11. Seed Purity (when seeds/ directory exists)
+# -----------------------------------------------------------------------------
+echo "== 11. Seed Purity: Seeds as Pure Mu =="
+
+if [ -d "seeds" ]; then
+    echo "Checking seeds/ directory..."
+
+    # Seeds should be JSON files
+    SEED_COUNT=$(ls -1 seeds/*.json 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$SEED_COUNT" -gt 0 ]; then
+        echo "  Found $SEED_COUNT seed JSON files"
+
+        # Validate each seed is valid JSON
+        for seed in seeds/*.json; do
+            if ! python3 -c "import json; json.load(open('$seed'))" 2>/dev/null; then
+                echo "  ERROR: Seed $seed is not valid JSON"
+                FAILED=1
+            fi
+        done
+
+        if [ $FAILED -eq 0 ]; then
+            echo "  ✓ All seeds are valid JSON"
+        fi
+    else
+        echo "  (No seed JSON files yet)"
+    fi
+
+    # No .py files in seeds/ (seeds should be data, not code)
+    PY_COUNT=$(ls -1 seeds/*.py 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$PY_COUNT" -gt 0 ]; then
+        echo "  WARNING: Found Python files in seeds/ - seeds should be pure Mu (JSON)"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+else
+    echo "  (seeds/ directory not yet created - will check when it exists)"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 12. Python Equality in Kernel (Anti-Coercion)
+# -----------------------------------------------------------------------------
+echo "== 12. Python Equality: No == on Mu Values =="
+
+echo "Checking for Python == used on Mu values in kernel code..."
+
+if [ -f "rcx_pi/kernel.py" ]; then
+    # Look for == that might be comparing Mu values (not hashes)
+    # Allowed: hash1 == hash2 (strings)
+    # Forbidden: mu1 == mu2 (should use mu_equal)
+    if grep -n " == " rcx_pi/kernel.py 2>/dev/null | grep -v "hash" | grep -v "#" | grep -v "str" ; then
+        echo "  WARNING: Possible Python == on non-hash values in kernel.py"
+        echo "  Use mu_equal() for Mu comparison, not Python =="
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "  ✓ No suspicious == usage in kernel.py"
+    fi
+else
+    echo "  (kernel.py not yet created - will check when it exists)"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 13. isinstance Dispatch in Kernel
+# -----------------------------------------------------------------------------
+echo "== 13. isinstance Dispatch: No Host Type Dispatch =="
+
+echo "Checking for isinstance used for dispatch in kernel code..."
+
+if [ -f "rcx_pi/kernel.py" ]; then
+    # isinstance is OK in guardrails (marked with # guardrail)
+    # isinstance is NOT OK for dispatch logic
+    if grep -n "isinstance" rcx_pi/kernel.py 2>/dev/null | grep -v "# guardrail" | grep -v "#.*isinstance"; then
+        echo "  WARNING: isinstance found in kernel.py without # guardrail marker"
+        echo "  isinstance should only be used in guardrails, not for dispatch"
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "  ✓ No isinstance dispatch in kernel.py"
+    fi
+else
+    echo "  (kernel.py not yet created - will check when it exists)"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 14. Bare Except Clauses
+# -----------------------------------------------------------------------------
+echo "== 14. Bare Except: No Swallowed Validation Errors =="
+
+echo "Checking for bare except clauses that might swallow validation errors..."
+
+# Check kernel and mu_type for bare excepts
+for file in rcx_pi/kernel.py rcx_pi/mu_type.py; do
+    if [ -f "$file" ]; then
+        if grep -n "except:" "$file" 2>/dev/null | grep -v "# intentional"; then
+            echo "  WARNING: Bare 'except:' in $file (may swallow validation errors)"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+        if grep -n "except Exception:" "$file" 2>/dev/null | grep -v "# intentional"; then
+            echo "  WARNING: Broad 'except Exception:' in $file"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+done
+
+if [ $WARNINGS -eq 0 ]; then
+    echo "  ✓ No bare except clauses found"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 15. Guardrail Mocking in Tests
+# -----------------------------------------------------------------------------
+echo "== 15. Test Integrity: No Guardrail Mocking =="
+
+echo "Checking for tests that mock guardrail functions..."
+
+MOCK_PATTERNS=(
+    "@patch.*mu_type.assert_mu"
+    "@patch.*mu_type.is_mu"
+    "@patch.*mu_type.validate_mu"
+    "@patch.*mu_type.assert_seed_pure"
+    "@patch.*mu_type.mu_equal"
+)
+
+for pattern in "${MOCK_PATTERNS[@]}"; do
+    if grep -r "$pattern" tests/ 2>/dev/null; then
+        echo "  ERROR: Found mock of guardrail function: $pattern"
+        echo "  Tests must not mock guardrails - this creates false positives"
+        FAILED=1
+    fi
+done
+
+if [ $FAILED -eq 0 ]; then
+    echo "  ✓ No guardrail mocking in tests"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 16. Bootstrap Markers
+# -----------------------------------------------------------------------------
+echo "== 16. Bootstrap Markers: Temporary Python Code =="
+
+echo "Checking for BOOTSTRAP markers in Python code..."
+
+BOOTSTRAP_COUNT=$(grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | wc -l | tr -d ' ')
+if [ "$BOOTSTRAP_COUNT" -gt 0 ]; then
+    echo "  Found $BOOTSTRAP_COUNT BOOTSTRAP markers (temporary Python code)"
+    echo "  These must be removed for true self-hosting (Phase 3)"
+    grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | head -5
+else
+    echo "  ✓ No BOOTSTRAP markers found (or Phase 3 complete)"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 17. mu_equal Usage (Anti-Coercion)
+# -----------------------------------------------------------------------------
+echo "== 17. mu_equal: Structural Equality Function =="
+
+echo "Checking mu_equal() exists and is used for Mu comparison..."
+
+if [ -f "rcx_pi/mu_type.py" ]; then
+    if grep -q "def mu_equal" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ mu_equal() function defined"
+    else
+        echo "  ERROR: mu_equal() function missing from mu_type.py"
+        FAILED=1
+    fi
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo "=== Semantic Purity Audit Summary ==="
@@ -311,7 +569,16 @@ echo "  4. Trace serialization: JSON-portable types"
 echo "  5. Opcodes: Language-agnostic enum"
 echo "  6. Value hash: Deterministic SHA-256"
 echo "  7. Reserved opcodes: ROUTE/CLOSE blocked, STALL/FIX/FIXED implemented (v1b)"
-echo "  8. Mu type: Validation guardrails for self-hosting"
+echo "  8. Mu type: Basic validation guardrails"
+echo "  9. Structural purity: Programming IN RCX guardrails"
+echo "  10. Kernel purity: No host logic (when kernel.py exists)"
+echo "  11. Seed purity: Seeds as pure Mu (when seeds/ exists)"
+echo "  12. Python equality: No == on Mu values (use mu_equal)"
+echo "  13. isinstance dispatch: No host type dispatch in kernel"
+echo "  14. Bare except: No swallowed validation errors"
+echo "  15. Test integrity: No guardrail mocking"
+echo "  16. Bootstrap markers: Temporary Python code tracked"
+echo "  17. mu_equal: Structural equality function exists"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then

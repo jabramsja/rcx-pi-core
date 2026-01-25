@@ -1,166 +1,79 @@
-RCX-π Kernel Overview (tag: rcx-pi-green-002)
-Status: 238 passed, 1 skipped (verified via green_gate.sh)
-Layer: Core RCX-π minimal, stable baseline
-Purpose: A self-consistent execution nucleus for RCX, from which higher layers can grow.
+# RCX-π Kernel Overview
 
-This document describes exactly what exists today and is verified by tests.
-This is now the canonical ground truth snapshot.
+**Status: LEGACY - See `docs/RCXKernel.v0.md` for current architecture**
 
-⸻
+---
 
-	1.	Motifs
+## Historical Context
 
-Everything in RCX-π is a Motif (μ-tree).
-μ(…) is the single constructor.
-VOID = zero / base.
-UNIT = trivial Motif.
+This document described the original RCX-π kernel based on:
+- PureEvaluator with closures stored in `meta["fn"]`
+- Motif-encoded bytecode VM
+- Projection system with pattern matching built into the kernel
 
-All structure (numbers, lists, closures, bytecode, projections) is encoded through nested Motifs.
-There are no other primitives.
+This architecture has been superseded by a simpler design where:
+- The kernel has only 4 primitives (hash, stall detect, trace, dispatch)
+- Pattern matching is seed responsibility, not kernel
+- Seeds are pure Mu (no Python functions)
+- Self-hosting is achieved via EVAL_SEED
 
-⸻
+---
 
-	2.	Evaluator
+## Current Architecture
 
-PureEvaluator executes Motifs and hosted programs.
+See `docs/RCXKernel.v0.md` for the new kernel specification:
 
-Key features:
-• reduce motifs structurally
-• run closures stored inside meta[“fn”]
-• list helpers (ensure_list, head, tail, cons, nil)
+**Kernel Primitives (4 only):**
+- `compute_identity(mu)` - SHA-256 of canonical JSON
+- `detect_stall(before, after)` - Compare hashes
+- `record_trace(entry)` - Append to history
+- `gate_dispatch(event, context)` - Route to seed handlers
 
-Evaluator is the execution engine of RCX-π.
+**NOT kernel primitives:**
+- Pattern matching (seed responsibility)
+- Projection application (seed responsibility)
+- Rule selection (seed responsibility)
 
-⸻
+**Key insight:** The kernel is maximally dumb. Seeds define all semantics.
 
-	3.	Numbers (Peano over VOID)
+---
 
-num(n) builds successors:
-0 = VOID
-1 = μ()
-2 = μ(μ())
-3 = μ(μ(μ()))
-…
+## Why the Change
 
-motif_to_int converts back to integer.
-add(a,b) performs integer add with re-encoding.
+The original architecture had Python closures (`meta["fn"]`) embedded in motifs. This violated structural purity - we were programming ABOUT RCX, not IN RCX.
 
-All number tests pass.
+The new architecture ensures:
+1. Seeds are pure Mu (JSON-compatible, no Python functions)
+2. The evaluator (EVAL_SEED) is itself structure
+3. Self-hosting proves emergence from structure alone
 
-⸻
+---
 
-	4.	Lists
+## Legacy Code
 
-Encoded as CONS(h,t) motif spines ending in NIL/VOID.
+The following modules implement the legacy architecture and remain for backward compatibility with existing tests:
 
-Round-trip API:
-list_from_py([1,2,3]) → motif
-py_from_list(motif)   → [1,2,3]
+| Module | Purpose | Status |
+|--------|---------|--------|
+| `core/motif.py` | Motif object | Still used |
+| `engine/evaluator_pure.py` | Closure-based evaluator | Legacy |
+| `programs.py` | Hosted closures (swap, dup, etc.) | Legacy |
+| `bytecode_vm.py` | Bytecode VM with v1b opcodes | Being evolved |
 
-is_list_motif verifies shape only.
-This is pure structural — no Python lists stored inside motif.
+---
 
-⸻
+## Migration Path
 
-	5.	Hosted Programs (closures)
+1. New kernel code goes in `rcx_pi/kernel.py` (when created)
+2. Seeds go in `seeds/` directory as JSON files
+3. Legacy tests continue to pass
+4. New tests use the new architecture
 
-Programs are Motifs with meta[“fn”] = (ev,arg)->Motif.
+---
 
-Built-ins currently included:
+## References
 
-swap_xy_closure       swap first two list elements
-dup_x_closure         duplicate head
-rotate_xyz_closure    [x,y,z] → [y,z,x]
-swap_ends_xyz_closure swap first+last
-reverse_list_closure  reverse list
-append_lists_closure  append two lists
-
-Composition layer:
-
-seq_closure(p,q)      run p then q
-map_closure(f)        map f over motif list
-add1_closure          Peano increment
-
-⸻
-
-	6.	Bytecode VM
-
-Motif-encoded stack machine.
-
-Opcodes:
-OP_PUSH_CONST
-OP_ADD
-OP_HALT
-OP_PUSH_NIL
-OP_CONS
-OP_HEAD
-OP_TAIL
-
-make_instr(op,arg) encodes instruction.
-bytecode_closure(list_of_instr) builds runnable program.
-
-Works as tested:
-Push → Push → Add → Halt → returns result.
-
-⸻
-
-	7.	Projection System
-
-Pattern matching on Motif structure.
-
-Exports:
-var_x, var_y
-make_projection_closure(pattern,body)
-activate(func,arg)
-
-Demo case in test_projection.py reproduces structural swap (x,y)->(y,x).
-Projection output decoded using pair_motif_to_ints.
-
-Projection is stable, test-verified.
-
-⸻
-
-	8.	Program Registry
-
-register_program(name,program)
-get_program(name)
-
-Allows lookup and running programs by human-readable identifier.
-
-Registry tests pass.
-
-⸻
-
-	9.	First Named RCX Program
-
-succ-list = map(add1)
-Transforms:
-[0,1,2,3] → [1,2,3,4]
-
-Marked with meta[“rcx_name”] = “succ-list”.
-Demonstrated in demo_rcx_pi.py.
-
-This is the first fully named/registered RCX layer program.
-
-⸻
-
-	10.	Kernel Snapshot Summary
-
-Current state: rcx-pi-green-002
-Test status: 238 passed, 1 skipped
-
-Features complete:
-✔ Motif core
-✔ Evaluator
-✔ Peano numbers
-✔ Structural lists
-✔ Program closures
-✔ Map/Seq composition
-✔ Bytecode interpreter
-✔ Projection matching
-✔ Program registry
-✔ succ-list named program
-
-This file is the stable kernel definition for downstream RCX-Ω layers.
-
-Note: CLI `--schema` output is enforced via the canonical schema-triplet runner (`rcx_pi/cli_schema_run.py`) to prevent drift across emitters and consumers.
+- `docs/RCXKernel.v0.md` - New kernel specification
+- `docs/StructuralPurity.v0.md` - Guardrails for Mu purity
+- `docs/MuType.v0.md` - The universal data type
+- `Why_RCX_PI_VM_EXISTS.md` - Alignment document
