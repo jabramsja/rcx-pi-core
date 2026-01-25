@@ -2,6 +2,32 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-25
+
+### Tooling
+- **Rule Motif Observability v0** (PR #108)
+  - `rules --print-rule-motifs` CLI command
+  - `rule_motifs_v0()` pure helper returning all 8 rule motifs
+  - `emit_rule_loaded_events()` generates v2 JSONL (`rule.loaded` events)
+  - `RULE_IDS` canonical list for anti-drift testing
+  - 11 subprocess CLI tests
+
+- **Rule Motif Validation Gate v0** (PR #111)
+  - `rules --check-rule-motifs` CLI command
+  - `rules --check-rule-motifs-from <path>` for custom validation
+  - `validate_rule_motifs_v0()` pure helper with validation rules:
+    - Structure, id uniqueness, variable binding, host leakage, canonicalization
+  - 16 subprocess CLI tests (positive + negative cases)
+
+- **Trace Canon Helper v1** (PR #66)
+  - `canon_jsonl()` function for JSONL serialization
+  - 7 tests in `test_trace_canon_v1.py`
+  - v2 event support (accepts both v1 and v2 events)
+
+### Docs
+- Updated `docs/RuleAsMotif.v0.md` to reflect implementation status
+- Updated `docs/cli_quickstart.md` with rules commands
+
 ## Unreleased
 
 - Schema-triplet canonicalization: added `rcx_pi/cli_schema_run.py` as the single source of truth and updated CLI smoke + tests to route schema checks through the canonical runner (PRs #59–#62).
