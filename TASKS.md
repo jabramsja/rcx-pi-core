@@ -86,6 +86,12 @@ Items here are implemented and verified under current invariants. Changes requir
   - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
   - `assert_handler_pure()`, `validate_kernel_boundary()`
   - `tools/audit_semantic_purity.sh` extended with checks 9-11
+- RCX Kernel Phase 1 (`rcx_pi/kernel.py`, `docs/RCXKernel.v0.md`, 47 tests)
+- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/EVAL_SEED.v0.md`, 71 tests):
+  - Core operations: `match`, `substitute`, `apply_projection`, `step`
+  - Only special form: `{"var": "x"}` (variable binding)
+  - Kernel handlers: step, stall, init
+  - Answer: EVAL_SEED is tractable (~200 lines)
 
 ---
 
@@ -119,11 +125,20 @@ _(No active items.)_
       - Audit passes (17 checks)
     - **Ready for Phase 2**
 
-21. **RCX Kernel Phase 2: EVAL_SEED (Python)** (ready to start)
-    - Scope:
-      - Write EVAL_SEED logic in Python to understand complexity
-      - Define: structural equality, projection application, dispatch
-      - Answer: "Is EVAL_SEED tractable?"
+21. **RCX Kernel Phase 2: EVAL_SEED (Python)** ✅ (complete)
+    - Design doc: `docs/EVAL_SEED.v0.md`
+    - Implementation: `rcx_pi/eval_seed.py`
+    - Tests: `tests/test_eval_seed_v0.py` (71 tests)
+    - Done:
+      - `match(pattern, input)` - structural pattern matching
+      - `substitute(body, bindings)` - variable substitution
+      - `apply_projection(projection, input)` - match + substitute
+      - `step(projections, input)` - select and apply first matching
+      - `{"var": "x"}` is the only special form (matches anything, binds)
+      - Kernel handlers: step, stall, init
+      - Peano numeral countdown works (pure structural)
+    - Answer: **Yes, EVAL_SEED is tractable** (~200 lines, O(n) complexity)
+    - **Ready for Phase 3**
 
 22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** (awaiting Phase 2)
     - Scope:
