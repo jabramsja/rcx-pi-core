@@ -80,6 +80,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Enginenews Spec v0 (stress test harness, 18 tests in `test_enginenews_spec_v0.py`, 4 fixtures)
 - Bytecode VM v0 (replay-only, 10 opcodes, 47 tests in `test_bytecode_vm_v0.py`, `tools/audit_bytecode.sh`)
 - Bytecode VM v1a (OP_STALL execution, v1a registers RS/RP/RH, closure detection, 61 tests)
+- Bytecode VM v1b (OP_FIX/OP_FIXED execution, RF register, stall_memory clearing, 78 tests)
 
 ---
 
@@ -102,25 +103,9 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-19. **Bytecode VM v1b: OP_FIX/OP_FIXED execution** (promoted from VECTOR #10 v1)
+19. **Bytecode VM v1b: OP_FIX/OP_FIXED execution** ✅ (promoted from VECTOR #10 v1)
     - Design doc: `docs/BytecodeMapping.v1.md`
-    - Promotion rationale:
-      - Builds on v1a (STALL) to complete stall→fix→active cycle
-      - FIX/FIXED are the resolution side of the execution loop
-      - Enables full execution testing without ROUTE/CLOSE complexity
-    - Scope (minimal):
-      - Add RF (pending_fix_target_hash) register to BytecodeVM
-      - Implement OP_FIX: validate RS==STALLED && target_hash==RH, set RF, emit execution.fix
-      - Implement OP_FIXED: validate RS==STALLED, compute after_hash, emit execution.fixed, set RS=ACTIVE
-      - Constraint: OP_FIX optional (OP_FIXED valid with or without prior OP_FIX)
-      - Clear stall_memory on value transition (per IndependentEncounter.v0.md)
-    - Deliverables:
-      - Update `rcx_pi/bytecode_vm.py` with OP_FIX/OP_FIXED execution
-      - Tests for OP_FIX/OP_FIXED in `tests/test_bytecode_vm_v0.py`
-      - Update `tools/audit_bytecode.sh` (FIX no longer reserved)
-    - Non-goals (v1b scope):
-      - No ROUTE/CLOSE opcodes (blocked)
-      - No full execution loop orchestration (v1c)
+    - **Archived to Ra**: Implementation complete (78 tests, RF register, stall_memory clearing)
 
 18. **Bytecode VM v1a: OP_STALL execution** ✅ (promoted from VECTOR #10 v1)
     - Design doc: `docs/BytecodeMapping.v1.md`
@@ -151,15 +136,17 @@ _(No active items.)_
       - Minimal instruction set: 10 opcodes (INIT, LOAD_EVENT, CANON_EVENT, etc.)
       - Event → opcode mapping (trace.start, step, trace.end)
       - Fail-loud on unmappable events
-      - Reserved opcodes blocked (STALL, FIX, ROUTE, CLOSE)
       - Implementation: `rcx_pi/bytecode_vm.py`, 47 tests, `tools/audit_bytecode.sh`
-    - v1 Done (execution - design only, not implemented):
-      - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
-      - Bytecode ops: OP_MATCH, OP_REDUCE, OP_STALL, OP_FIX, OP_FIXED
-      - Opcode table: semantic placeholders (0x10-0x41), not ABI commitment
-      - Registers authoritative during execution, trace authoritative for validation
-      - Execution loop: ACTIVE → STALL → (optional FIX) → FIXED → ACTIVE
-    - **v0 Archived to Ra**: NEXT #17 complete (v1 remains design-only)
+    - v1 Partial (execution opcodes) - **IMPLEMENTED v1a/v1b**:
+      - v1a: OP_STALL (stall declaration, closure detection)
+      - v1b: OP_FIX/OP_FIXED (stall resolution, value transition)
+      - Registers: RS (status), RP (pattern), RH (hash), RF (fix target)
+      - Reserved: ROUTE/CLOSE remain blocked
+    - v1 Remaining (execution loop) - **NOT IMPLEMENTED**:
+      - OP_MATCH, OP_REDUCE (pattern matching, rule application)
+      - Execution loop orchestration
+      - R0 (actual value storage)
+    - **Archived to Ra**: v0 (NEXT #17), v1a (NEXT #18), v1b (NEXT #19)
 
 11. **Enginenews spec mapping v0** ✅
     - Deliverable: `docs/EnginenewsSpecMapping.v0.md`
