@@ -772,7 +772,13 @@ echo ""
 echo "== 19. Host Debt: Threshold Check =="
 
 # Count ALL host debt markers
-DEBT_THRESHOLD=10  # Maximum allowed debt markers before FAIL
+# DEBT POLICY:
+# - Phase 2: Threshold = current debt (can't ADD new debt)
+# - Phase 3: Threshold = 0 (must eliminate all debt)
+#
+# Current debt is in match() and substitute() - acknowledged scaffolding.
+# To add ANY new debt, you must first reduce existing debt.
+DEBT_THRESHOLD=5  # Phase 2 ceiling - equal to current debt
 
 echo "Counting all @host_* debt markers..."
 
@@ -798,13 +804,20 @@ echo ""
 
 if [ "$TOTAL_DEBT" -gt "$DEBT_THRESHOLD" ]; then
     echo "  ERROR: Debt exceeds threshold ($TOTAL_DEBT > $DEBT_THRESHOLD)"
-    echo "  You must reduce debt before adding more, or explicitly raise the threshold"
+    echo "  POLICY: To add new debt, you must first reduce existing debt."
+    echo "  The threshold tracks current acknowledged debt, not a 'budget'."
     FAILED=1
+elif [ "$TOTAL_DEBT" -eq "$DEBT_THRESHOLD" ] && [ "$TOTAL_DEBT" -gt 0 ]; then
+    echo "  AT CEILING: $TOTAL_DEBT markers = threshold (no room for new debt)"
+    echo "  To add new debt, first eliminate existing debt."
+    echo "  Phase 3 goal: threshold = 0"
+    WARNINGS=$((WARNINGS + 1))
 elif [ "$TOTAL_DEBT" -gt 0 ]; then
-    echo "  WARNING: $TOTAL_DEBT debt markers remain (Phase 3 goal: zero)"
+    echo "  BELOW CEILING: $TOTAL_DEBT markers < $DEBT_THRESHOLD threshold"
+    echo "  (This shouldn't happen - threshold should equal current debt)"
     WARNINGS=$((WARNINGS + 1))
 else
-    echo "  ✓ No debt markers - self-hosting ready!"
+    echo "  ✓ ZERO debt markers - self-hosting ready!"
 fi
 
 echo ""
