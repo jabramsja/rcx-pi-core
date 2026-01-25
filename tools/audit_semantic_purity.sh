@@ -559,6 +559,369 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
+# 18. Host Smuggling Detection (Comprehensive)
+# -----------------------------------------------------------------------------
+echo "== 18. Host Smuggling: Comprehensive Detection =="
+
+# 18a. Host Arithmetic in eval_seed.py
+echo ""
+echo "  18a. Host Arithmetic (+, -, *, /, % on values):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    # Look for arithmetic on variables (not in comments, not in strings, not in docstrings)
+    # Pattern: variable + variable or variable + number (actual arithmetic)
+    ARITH_HITS=$(grep -nE "=[[:space:]]*[a-z_]+[[:space:]]*[\+\-\*/%][[:space:]]*[a-z_0-9]+" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v '"""' | \
+        grep -v "WARNINGS" | \
+        grep -v "@host" || true)
+    if [ -n "$ARITH_HITS" ]; then
+        echo "    WARNING: Possible host arithmetic found:"
+        echo "$ARITH_HITS" | head -5 | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No obvious host arithmetic in eval_seed.py"
+    fi
+fi
+
+# 18b. Host Builtins in eval_seed.py
+echo ""
+echo "  18b. Host Builtins (len, sorted, sum, max, min, abs, round):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    BUILTIN_HITS=$(grep -nE "\b(len|sorted|sum|max|min|abs|round|enumerate|zip|map|filter|reduce)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" || true)
+    if [ -n "$BUILTIN_HITS" ]; then
+        echo "    WARNING: Host builtins found (should be structural):"
+        echo "$BUILTIN_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No suspicious host builtins in eval_seed.py"
+    fi
+fi
+
+# 18c. Host String Operations
+echo ""
+echo "  18c. Host String Ops (.split, .join, .format, .replace, .strip):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    STRING_HITS=$(grep -nE "\.(split|join|format|replace|strip|upper|lower|startswith|endswith)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" || true)
+    if [ -n "$STRING_HITS" ]; then
+        echo "    WARNING: Host string operations found:"
+        echo "$STRING_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No host string operations in eval_seed.py"
+    fi
+fi
+
+# 18d. Host Mutation
+echo ""
+echo "  18d. Host Mutation (.append, .pop, .extend, .clear, del, []=):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    MUTATION_HITS=$(grep -nE "\.(append|pop|extend|clear|insert|remove)\s*\(|del\s+[a-z]|\[[a-z_]+\]\s*=" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v "__slots__" || true)
+    if [ -n "$MUTATION_HITS" ]; then
+        echo "    WARNING: Host mutation found (RCX should be immutable):"
+        echo "$MUTATION_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No host mutation in eval_seed.py"
+    fi
+fi
+
+# 18e. Host Comparison for Logic
+echo ""
+echo "  18e. Host Comparison (<, >, <=, >= for logic, not validation):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    # This is tricky - < > are OK for validation, not for logic
+    COMPARE_HITS=$(grep -nE "[a-z_]+\s*[<>]=?\s*[a-z_0-9]+" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v "# validation" | \
+        grep -v "# guardrail" | \
+        grep -v "@host" || true)
+    if [ -n "$COMPARE_HITS" ]; then
+        echo "    INFO: Possible host comparison (review if logic vs validation):"
+        echo "$COMPARE_HITS" | head -3 | while read line; do echo "      $line"; done
+        # Don't increment warnings - needs manual review
+    else
+        echo "    ✓ No obvious host comparison in eval_seed.py"
+    fi
+fi
+
+# 18f. Host Control Flow for Logic
+echo ""
+echo "  18f. Host Control Flow (if/elif with value-based decisions):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    CONTROL_HITS=$(grep -nE "if\s+[a-z_]+\s*==\s*[0-9'\"]" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v "NO_MATCH" || true)
+    if [ -n "$CONTROL_HITS" ]; then
+        echo "    INFO: Possible host control flow (value-based if):"
+        echo "$CONTROL_HITS" | head -3 | while read line; do echo "      $line"; done
+    else
+        echo "    ✓ No obvious value-based control flow in eval_seed.py"
+    fi
+fi
+
+# 18g. Host set() operations
+echo ""
+echo "  18g. Host set() Operations (should be structural comparison):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    SET_HITS=$(grep -nE "\bset\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | grep -v "@host" || true)
+    if [ -n "$SET_HITS" ]; then
+        echo "    WARNING: Host set() found:"
+        echo "$SET_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No set() operations in eval_seed.py"
+    fi
+fi
+
+# 18h. Host any()/all() aggregation
+echo ""
+echo "  18h. Host any()/all() Aggregation:"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    AGG_HITS=$(grep -nE "\b(any|all)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | grep -v "@host" || true)
+    if [ -n "$AGG_HITS" ]; then
+        echo "    WARNING: Host aggregation found:"
+        echo "$AGG_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No any()/all() in eval_seed.py"
+    fi
+fi
+
+# 18i. List/Dict comprehensions (host iteration)
+echo ""
+echo "  18i. Host Comprehensions (list/dict iteration):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    COMP_HITS=$(grep -nE "\[.*for.*in.*\]|\{.*:.*for.*in.*\}" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | grep -v "@host" || true)
+    if [ -n "$COMP_HITS" ]; then
+        echo "    WARNING: Host comprehensions found:"
+        echo "$COMP_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No comprehensions in eval_seed.py"
+    fi
+fi
+
+# 18j. Host-specific libraries (itertools, functools, os, sys, etc.)
+echo ""
+echo "  18j. Host Libraries (itertools, functools, os, sys, random, datetime):"
+SEED_FILES="rcx_pi/eval_seed.py rcx_pi/kernel.py"
+LIB_HITS=""
+for f in $SEED_FILES; do
+    if [ -f "$f" ]; then
+        hits=$(grep -nE "^import (itertools|functools|os|sys|random|datetime|collections)|^from (itertools|functools|os|sys|random|datetime|collections)" "$f" 2>/dev/null || true)
+        if [ -n "$hits" ]; then
+            LIB_HITS="$LIB_HITS$f: $hits\n"
+        fi
+    fi
+done
+if [ -n "$LIB_HITS" ]; then
+    echo "    WARNING: Host-specific libraries imported:"
+    echo -e "$LIB_HITS" | while read line; do [ -n "$line" ] && echo "      $line"; done
+    WARNINGS=$((WARNINGS + 1))
+else
+    echo "    ✓ No host-specific library imports in kernel/seed code"
+fi
+
+# 18k. Non-deterministic behavior (random, time, uuid, etc.)
+echo ""
+echo "  18k. Non-Deterministic Operations (random, time.time, uuid, datetime.now):"
+for f in $SEED_FILES; do
+    if [ -f "$f" ]; then
+        NONDET_HITS=$(grep -nE "random\.|time\.time|uuid\.|datetime\.now|os\.urandom" "$f" 2>/dev/null | \
+            grep -v "^[[:space:]]*#" || true)
+        if [ -n "$NONDET_HITS" ]; then
+            echo "    ERROR: Non-deterministic operation in $f:"
+            echo "$NONDET_HITS" | while read line; do echo "      $line"; done
+            FAILED=1
+        fi
+    fi
+done
+if [ $FAILED -eq 0 ]; then
+    echo "    ✓ No non-deterministic operations in kernel/seed code"
+fi
+
+# 18l. Debug statements (print, pdb, breakpoint)
+echo ""
+echo "  18l. Debug Statements (print, pdb, breakpoint, logging):"
+for f in $SEED_FILES; do
+    if [ -f "$f" ]; then
+        DEBUG_HITS=$(grep -nE "^\s*print\s*\(|^\s*pdb\.|^\s*breakpoint\s*\(|^\s*logging\." "$f" 2>/dev/null || true)
+        if [ -n "$DEBUG_HITS" ]; then
+            echo "    WARNING: Debug statements in $f:"
+            echo "$DEBUG_HITS" | while read line; do echo "      $line"; done
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+done
+if [ $WARNINGS -eq 0 ]; then
+    echo "    ✓ No debug statements in kernel/seed code"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 19. Host Debt Threshold (Anti-Boiling-Frog Guardrail)
+# -----------------------------------------------------------------------------
+echo "== 19. Host Debt: Threshold Check =="
+
+# Count ALL debt markers (host operations + deferred reviews)
+# DEBT POLICY (RATCHET):
+# - Threshold is a CEILING that can only go DOWN, never up
+# - When debt is reduced, threshold MUST be lowered to match
+# - To add new debt, you must first reduce existing debt below threshold
+# - Deferred reviews ("PHASE 3 REVIEW") count as debt to prevent silent accumulation
+#
+# UPDATE THIS when debt is paid down:
+# - Phase 2 start: 5 host + 1 review = 6
+# - After Phase 3: 0 (self-hosting complete)
+DEBT_THRESHOLD=6  # <-- RATCHET: Lower this as debt is paid, never raise it
+
+echo "Counting all debt markers..."
+
+# Host operation debt (@host_* decorators)
+RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+ARITHMETIC_COUNT=$(grep -rE "^[[:space:]]*@host_arithmetic" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+BUILTIN_COUNT=$(grep -rE "^[[:space:]]*@host_builtin" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+MUTATION_COUNT=$(grep -rE "^[[:space:]]*@host_mutation" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+COMPARISON_COUNT=$(grep -rE "^[[:space:]]*@host_comparison" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+STRING_COUNT=$(grep -rE "^[[:space:]]*@host_string_op" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+
+HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT))
+
+# Deferred review debt (PHASE 3 REVIEW markers)
+# These are items we've consciously deferred but MUST address - they're debt too
+REVIEW_COUNT=$(grep -rE "PHASE [0-9]+ REVIEW:" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+
+TOTAL_DEBT=$((HOST_DEBT + REVIEW_COUNT))
+
+echo "  Host operation debt (@host_* decorators):"
+echo "    @host_recursion:  $RECURSION_COUNT"
+echo "    @host_arithmetic: $ARITHMETIC_COUNT"
+echo "    @host_builtin:    $BUILTIN_COUNT"
+echo "    @host_mutation:   $MUTATION_COUNT"
+echo "    @host_comparison: $COMPARISON_COUNT"
+echo "    @host_string_op:  $STRING_COUNT"
+echo "    ─────────────────────"
+echo "    Host subtotal:    $HOST_DEBT"
+echo ""
+echo "  Deferred review debt (PHASE N REVIEW markers):"
+echo "    Review markers:   $REVIEW_COUNT"
+echo "    ─────────────────────"
+echo "    TOTAL DEBT:       $TOTAL_DEBT (threshold: $DEBT_THRESHOLD)"
+echo ""
+
+if [ "$TOTAL_DEBT" -gt "$DEBT_THRESHOLD" ]; then
+    echo "  ERROR: Debt exceeds threshold ($TOTAL_DEBT > $DEBT_THRESHOLD)"
+    echo "  POLICY: To add new debt, you must first reduce existing debt."
+    echo "  The threshold is a RATCHET - it can only go down, never up."
+    FAILED=1
+elif [ "$TOTAL_DEBT" -lt "$DEBT_THRESHOLD" ]; then
+    echo "  DEBT REDUCED! Current ($TOTAL_DEBT) < threshold ($DEBT_THRESHOLD)"
+    echo "  ACTION REQUIRED: Lower DEBT_THRESHOLD in audit_semantic_purity.sh to $TOTAL_DEBT"
+    echo "  (The ratchet must be tightened when debt is paid)"
+    FAILED=1  # Force update of threshold
+elif [ "$TOTAL_DEBT" -eq "$DEBT_THRESHOLD" ] && [ "$TOTAL_DEBT" -gt 0 ]; then
+    echo "  AT CEILING: $TOTAL_DEBT markers = threshold (no room for new debt)"
+    echo "  To add new debt, first eliminate existing debt."
+    echo "  When debt is paid, threshold MUST be lowered (ratchet)."
+    WARNINGS=$((WARNINGS + 1))
+else
+    echo "  ✓ ZERO debt markers - self-hosting ready!"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 20. Guardrail Coverage (New File Detection)
+# -----------------------------------------------------------------------------
+echo "== 20. Guardrail Coverage: New File Detection =="
+
+echo "Checking for Python files in rcx_pi/ not covered by audits..."
+
+# List of files we explicitly audit
+AUDITED_FILES="eval_seed.py kernel.py mu_type.py"
+
+# Find all .py files in rcx_pi/ (excluding __pycache__)
+ALL_PY_FILES=$(find rcx_pi -maxdepth 1 -name "*.py" -type f 2>/dev/null | xargs -I{} basename {} | sort)
+
+UNAUDITED=""
+for f in $ALL_PY_FILES; do
+    # Skip __init__.py
+    if [ "$f" = "__init__.py" ]; then
+        continue
+    fi
+
+    # Check if it's in our audited list or is legacy/infrastructure
+    case "$f" in
+        # Explicitly audited (self-hosting critical)
+        eval_seed.py|kernel.py|mu_type.py)
+            ;;
+        # Legacy/infrastructure - not self-hosting critical
+        bytecode_vm.py|programs.py|rcx_cli.py)
+            ;;
+        trace_*.py|rule_motifs*.py|replay*.py|execution*.py)
+            ;;
+        # Utilities and CLI tools
+        api.py|bench.py|cli_schema*.py|higher.py|listutils.py|meta.py|pretty.py)
+            ;;
+        program_*.py|projection.py|self_host.py|test_worlds_probe.py|worlds_json.py|worlds_bridge.py|worlds_probe.py)
+            ;;
+        *)
+            # New file - needs review
+            UNAUDITED="$UNAUDITED $f"
+            ;;
+    esac
+done
+
+if [ -n "$UNAUDITED" ]; then
+    echo "  WARNING: New files found that may need audit coverage:"
+    for f in $UNAUDITED; do
+        echo "    - rcx_pi/$f"
+    done
+    echo "  Action: Add to AUDITED_FILES list or mark as legacy/infrastructure"
+    WARNINGS=$((WARNINGS + 1))
+else
+    echo "  ✓ All logic files in rcx_pi/ are covered by audits"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 21. Self-Hosting Readiness Checklist
+# -----------------------------------------------------------------------------
+echo "== 21. Self-Hosting Readiness Checklist =="
+
+echo ""
+echo "  Pre-merge checklist for kernel/seed changes:"
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ □ No new @host_* markers without reducing existing debt        │"
+echo "  │ □ No Python-specific optimizations (use simple abstractions)   │"
+echo "  │ □ No new imports from itertools/functools/os/sys/random        │"
+echo "  │ □ No print/pdb/breakpoint left in code                         │"
+echo "  │ □ All new functions reviewed for host operations               │"
+echo "  │ □ Non-deterministic behavior explicitly wrapped                │"
+echo "  │ □ Tests don't mask host dependencies                           │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+echo ""
+echo "  Reviewer questions for PRs touching rcx_pi/kernel.py or eval_seed.py:"
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ 1. Could this logic be expressed as projections?               │"
+echo "  │ 2. Does this use Python iteration where kernel loop would do?  │"
+echo "  │ 3. Does this add host computation without a debt marker?       │"
+echo "  │ 4. Does this increase the debt count?                          │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+echo ""
+
+echo ""
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo "=== Semantic Purity Audit Summary ==="
@@ -581,6 +944,10 @@ echo "  14. Bare except: No swallowed validation errors"
 echo "  15. Test integrity: No guardrail mocking"
 echo "  16. Bootstrap markers: Temporary Python code tracked"
 echo "  17. mu_equal: Structural equality function exists"
+echo "  18. Host smuggling: Comprehensive (arithmetic, builtins, mutation, set, any/all, comprehensions, libraries, non-det, debug)"
+echo "  19. Host debt: Threshold check (current debt vs maximum allowed)"
+echo "  20. Guardrail coverage: New file detection (ensures no unaudited code)"
+echo "  21. Self-hosting checklist: Pre-merge and reviewer guidelines"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then

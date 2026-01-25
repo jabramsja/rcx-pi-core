@@ -1,0 +1,106 @@
+name: PR Verification Reminder
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'rcx_pi/kernel.py'
+      - 'rcx_pi/eval_seed.py'
+      - 'rcx_pi/mu_type.py'
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for sensitive file changes
+        id: check
+        run: |
+          # Get list of changed files
+          CHANGED=$(gh pr diff ${{ github.event.pull_request.number }} --name-only || echo "")
+
+          KERNEL_CHANGED=false
+          EVAL_SEED_CHANGED=false
+          MU_TYPE_CHANGED=false
+
+          if echo "$CHANGED" | grep -q "rcx_pi/kernel.py"; then
+            KERNEL_CHANGED=true
+          fi
+          if echo "$CHANGED" | grep -q "rcx_pi/eval_seed.py"; then
+            EVAL_SEED_CHANGED=true
+          fi
+          if echo "$CHANGED" | grep -q "rcx_pi/mu_type.py"; then
+            MU_TYPE_CHANGED=true
+          fi
+
+          echo "kernel=$KERNEL_CHANGED" >> $GITHUB_OUTPUT
+          echo "eval_seed=$EVAL_SEED_CHANGED" >> $GITHUB_OUTPUT
+          echo "mu_type=$MU_TYPE_CHANGED" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post verification reminder
+        if: steps.check.outputs.kernel == 'true' || steps.check.outputs.eval_seed == 'true' || steps.check.outputs.mu_type == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const kernelChanged = '${{ steps.check.outputs.kernel }}' === 'true';
+            const evalSeedChanged = '${{ steps.check.outputs.eval_seed }}' === 'true';
+            const muTypeChanged = '${{ steps.check.outputs.mu_type }}' === 'true';
+
+            let files = [];
+            if (kernelChanged) files.push('`rcx_pi/kernel.py`');
+            if (evalSeedChanged) files.push('`rcx_pi/eval_seed.py`');
+            if (muTypeChanged) files.push('`rcx_pi/mu_type.py`');
+
+            const body = `## 🔍 Verification Agents Recommended
+
+            This PR modifies sensitive files: ${files.join(', ')}
+
+            **Before merging, please run:**
+
+            ### Verifier Agent
+            \`\`\`
+            # In Claude Code session:
+            Spawn a verifier agent to check ${files.join(' ')}
+            \`\`\`
+
+            ### Adversary Agent (for significant changes)
+            \`\`\`
+            # In Claude Code session:
+            Spawn an adversary agent to attack ${files.join(' ')}
+            \`\`\`
+
+            ### Checklist
+            - [ ] Verifier agent report reviewed
+            - [ ] No new debt without reducing existing debt
+            - [ ] Lambda calculus guardrails intact
+            - [ ] Determinism preserved
+
+            ---
+            *This is an automated reminder. See \`tools/agents/\` for agent prompts.*`;
+
+            // Check if we already posted a reminder
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingReminder = comments.data.find(c =>
+              c.body.includes('Verification Agents Recommended') &&
+              c.user.type === 'Bot'
+            );
+
+            if (!existingReminder) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
