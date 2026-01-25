@@ -772,13 +772,15 @@ echo ""
 echo "== 19. Host Debt: Threshold Check =="
 
 # Count ALL host debt markers
-# DEBT POLICY:
-# - Phase 2: Threshold = current debt (can't ADD new debt)
-# - Phase 3: Threshold = 0 (must eliminate all debt)
+# DEBT POLICY (RATCHET):
+# - Threshold is a CEILING that can only go DOWN, never up
+# - When debt is reduced, threshold MUST be lowered to match
+# - To add new debt, you must first reduce existing debt below threshold
 #
-# Current debt is in match() and substitute() - acknowledged scaffolding.
-# To add ANY new debt, you must first reduce existing debt.
-DEBT_THRESHOLD=5  # Phase 2 ceiling - equal to current debt
+# UPDATE THIS when debt is paid down:
+# - Phase 2 start: 5 (match + substitute scaffolding)
+# - After Phase 3: 0 (self-hosting complete)
+DEBT_THRESHOLD=5  # <-- RATCHET: Lower this as debt is paid, never raise it
 
 echo "Counting all @host_* debt markers..."
 
@@ -805,16 +807,17 @@ echo ""
 if [ "$TOTAL_DEBT" -gt "$DEBT_THRESHOLD" ]; then
     echo "  ERROR: Debt exceeds threshold ($TOTAL_DEBT > $DEBT_THRESHOLD)"
     echo "  POLICY: To add new debt, you must first reduce existing debt."
-    echo "  The threshold tracks current acknowledged debt, not a 'budget'."
+    echo "  The threshold is a RATCHET - it can only go down, never up."
     FAILED=1
+elif [ "$TOTAL_DEBT" -lt "$DEBT_THRESHOLD" ]; then
+    echo "  DEBT REDUCED! Current ($TOTAL_DEBT) < threshold ($DEBT_THRESHOLD)"
+    echo "  ACTION REQUIRED: Lower DEBT_THRESHOLD in audit_semantic_purity.sh to $TOTAL_DEBT"
+    echo "  (The ratchet must be tightened when debt is paid)"
+    FAILED=1  # Force update of threshold
 elif [ "$TOTAL_DEBT" -eq "$DEBT_THRESHOLD" ] && [ "$TOTAL_DEBT" -gt 0 ]; then
     echo "  AT CEILING: $TOTAL_DEBT markers = threshold (no room for new debt)"
     echo "  To add new debt, first eliminate existing debt."
-    echo "  Phase 3 goal: threshold = 0"
-    WARNINGS=$((WARNINGS + 1))
-elif [ "$TOTAL_DEBT" -gt 0 ]; then
-    echo "  BELOW CEILING: $TOTAL_DEBT markers < $DEBT_THRESHOLD threshold"
-    echo "  (This shouldn't happen - threshold should equal current debt)"
+    echo "  When debt is paid, threshold MUST be lowered (ratchet)."
     WARNINGS=$((WARNINGS + 1))
 else
     echo "  ✓ ZERO debt markers - self-hosting ready!"
