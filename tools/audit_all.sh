@@ -26,6 +26,9 @@ PYTHONHASHSEED=0 pytest -q tests/test_bytecode_vm_v0.py
 echo "== 3.2) Bytecode VM v0 audit =="
 ./tools/audit_bytecode.sh
 
+echo "== 3.3) Semantic purity audit (self-hosting readiness) =="
+./tools/audit_semantic_purity.sh
+
 echo "== 4) Anti-cheat scans =="
 echo "-- no private attr access in tests/"
 ! grep -RInE '\._[a-zA-Z0-9]+' tests/ || { echo "Found private attr access in tests/"; exit 1; }
