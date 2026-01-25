@@ -241,6 +241,11 @@ class ExecutionEngine:
     - STALLED: pattern match failed, awaiting fix
     - TERMINAL: value reached normal form
 
+    Second Independent Encounter (v1):
+    Tracks stall memory to detect closure (normal form).
+    When the same (value_hash, pattern_id) stalls twice with no intervening
+    reduction that changes the value, closure becomes unavoidable.
+
     Feature flag: RCX_EXECUTION_V0=1 must be set to enable.
     """
 
@@ -251,6 +256,11 @@ class ExecutionEngine:
         self._status: str = ExecutionStatus.ACTIVE
         self._stall_reason: str = None
         self._current_value_hash: str = None
+        # Second Independent Encounter: stall memory tracking
+        # Maps pattern_id -> value_hash at most recent stall
+        self._stall_memory: Dict[str, str] = {}
+        # Closure evidence: list of (value_hash, pattern_id) tuples where closure was detected
+        self._closure_evidence: List[Dict[str, str]] = []
 
     def _emit(self, event_type: str, t: str = None, mu: Any = None) -> None:
         """Emit an execution event."""
@@ -279,15 +289,73 @@ class ExecutionEngine:
         """Current value hash (for post-condition assertions)."""
         return self._current_value_hash
 
-    def stall(self, pattern_id: str, value: Any) -> None:
+    @property
+    def closure_evidence(self) -> List[Dict[str, str]]:
+        """
+        List of closure evidence detected via second independent encounter.
+        Each entry: {"value_hash": ..., "pattern_id": ..., "reason": "second_independent_stall"}
+        """
+        return list(self._closure_evidence)
+
+    @property
+    def has_closure(self) -> bool:
+        """True if any closure evidence has been detected."""
+        return len(self._closure_evidence) > 0
+
+    def check_second_independent_encounter(self, pattern_id: str, vh: str) -> bool:
+        """
+        Check if this stall is a second independent encounter.
+        Returns True if closure is detected.
+
+        Per IndependentEncounter.v0.md:
+        - If stall_memory[pattern_id] == value_hash, this is second independent encounter
+        - Otherwise, record stall_memory[pattern_id] = value_hash
+
+        This is a public method for testing and observability purposes.
+        """
+        if pattern_id in self._stall_memory and self._stall_memory[pattern_id] == vh:
+            # Second independent encounter detected
+            self._closure_evidence.append({
+                "value_hash": vh,
+                "pattern_id": pattern_id,
+                "reason": "second_independent_stall",
+            })
+            return True
+        # Record this stall
+        self._stall_memory[pattern_id] = vh
+        return False
+
+    def clear_stall_memory_for_value(self, before_hash: str) -> None:
+        """
+        Clear stall memory entries where stored value matches before_hash.
+
+        Per IndependentEncounter.v0.md:
+        - On execution.fixed, clear entries where value_hash == before_hash
+        - This prevents false closure detection after a value transition
+
+        This is a public method for testing and observability purposes.
+        """
+        patterns_to_clear = [
+            p for p, vh in self._stall_memory.items() if vh == before_hash
+        ]
+        for p in patterns_to_clear:
+            del self._stall_memory[p]
+
+    def stall(self, pattern_id: str, value: Any) -> bool:
         """
         Stall execution due to pattern mismatch.
 
         Precondition: status == ACTIVE
         Postcondition: status == STALLED
+
+        Returns: True if closure was detected (second independent encounter)
+
+        Second Independent Encounter:
+        If the same (value_hash, pattern_id) has stalled before with no
+        intervening reduction, closure becomes unavoidable.
         """
         if not self._enabled:
-            return
+            return False
         if self._status != ExecutionStatus.ACTIVE:
             raise RuntimeError(f"Cannot stall: status is {self._status}, expected ACTIVE")
 
@@ -295,10 +363,17 @@ class ExecutionEngine:
         self._stall_reason = pattern_id
         self._status = ExecutionStatus.STALLED
 
+        # Check for second independent encounter
+        closure_detected = self.check_second_independent_encounter(
+            pattern_id, self._current_value_hash
+        )
+
         self._emit(
             "execution.stall",
             mu={"pattern_id": pattern_id, "value_hash": self._current_value_hash},
         )
+
+        return closure_detected
 
     def fix(self, rule_id: str, target_hash: str) -> bool:
         """
@@ -327,6 +402,10 @@ class ExecutionEngine:
 
         Precondition: status == STALLED
         Postcondition: status == ACTIVE
+
+        Second Independent Encounter:
+        Clears stall memory entries where value_hash == before_hash.
+        This prevents false closure detection after a value transition.
         """
         if not self._enabled:
             return
@@ -339,6 +418,9 @@ class ExecutionEngine:
             t=rule_id,
             mu={"after_hash": after_hash, "before_hash": before_hash},
         )
+
+        # Clear stall memory for entries matching before_hash
+        self.clear_stall_memory_for_value(before_hash)
 
         self._status = ExecutionStatus.ACTIVE
         self._stall_reason = None
@@ -361,27 +443,34 @@ class ExecutionEngine:
         self._status = ExecutionStatus.ACTIVE
         self._stall_reason = None
         self._current_value_hash = None
+        self._stall_memory = {}
+        self._closure_evidence = []
 
     # --- Consume API (consumes trace events during replay) ---
 
-    def consume_stall(self, pattern_id: str, value_hash_from_trace: str) -> None:
+    def consume_stall(self, pattern_id: str, value_hash_from_trace: str) -> bool:
         """
         Consume execution.stall event from trace.
 
         Precondition: status == ACTIVE
         Postcondition: status == STALLED, value_hash stored
 
+        Returns: True if closure was detected (second independent encounter)
+
         Unlike stall(), this takes a hash directly (no value to hash).
         Used for replay mode where we're consuming a recorded trace.
         """
         if not self._enabled:
-            return
+            return False
         if self._status != ExecutionStatus.ACTIVE:
             raise RuntimeError(f"Cannot replay stall: status is {self._status}, expected ACTIVE")
 
         self._current_value_hash = value_hash_from_trace
         self._stall_reason = pattern_id
         self._status = ExecutionStatus.STALLED
+
+        # Check for second independent encounter
+        return self.check_second_independent_encounter(pattern_id, value_hash_from_trace)
 
     def consume_fix(self, rule_id: str, target_hash: str) -> None:
         """
@@ -410,6 +499,9 @@ class ExecutionEngine:
         Postcondition: status == ACTIVE, value_hash updated to after_hash
 
         Unlike fixed(), this takes after_hash directly (no value to hash).
+
+        Second Independent Encounter:
+        Clears stall memory entries where value_hash == before_hash.
         """
         if not self._enabled:
             return
@@ -420,6 +512,9 @@ class ExecutionEngine:
             raise RuntimeError(
                 f"Replay fixed before_hash mismatch: expected {self._current_value_hash}, got {before_hash}"
             )
+
+        # Clear stall memory for entries matching before_hash
+        self.clear_stall_memory_for_value(before_hash)
 
         self._status = ExecutionStatus.ACTIVE
         self._stall_reason = None

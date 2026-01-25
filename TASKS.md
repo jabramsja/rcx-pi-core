@@ -97,7 +97,20 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-_(No active items.)_
+16. **Second Independent Encounter Implementation** (promoted from VECTOR #9)
+    - Deliverable: Stall memory tracking + closure signal detection in ExecutionEngine
+    - Implementation:
+      - `_stall_memory: Dict[str, str]` mapping pattern_id → value_hash
+      - `_closure_evidence: List[Dict]` tracks detected closures
+      - `_check_second_independent_encounter()` detects second stall at same (v, p)
+      - `_clear_stall_memory_for_value()` clears entries on execution.fixed
+      - `closure_evidence` and `has_closure` properties for API access
+      - `stall()` and `consume_stall()` now return bool (closure detected)
+    - Tests: `tests/test_second_independent_encounter.py` (15 tests)
+      - All 8 pathological scenarios from IndependentEncounter.v0.md
+      - Replay mode tests
+      - API tests
+    - Promotion rationale: Design doc complete, semantics locked, scope bounded
 
 ---
 
@@ -112,6 +125,7 @@ _(No active items.)_
      - Minimal state: last_stall[(pattern_id)] = value_hash
      - Conservative reset on execution.fixed
      - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
+   - **Promoted to NEXT #16**: Second Independent Encounter Implementation
 
 10. **Bytecode VM mapping v1 (upgrade from v0)** ✅
    - Deliverable: `docs/BytecodeMapping.v1.md`
