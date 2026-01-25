@@ -559,18 +559,171 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
-# 18. Host Recursion Debt (Anti-Momentum Guardrail)
+# 18. Host Smuggling Detection (Comprehensive)
 # -----------------------------------------------------------------------------
-echo "== 18. Host Recursion: Debt Tracking =="
+echo "== 18. Host Smuggling: Comprehensive Detection =="
+
+# 18a. Host Arithmetic in eval_seed.py
+echo ""
+echo "  18a. Host Arithmetic (+, -, *, /, % on values):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    # Look for arithmetic on variables (not in comments, not in strings, not in docstrings)
+    # Pattern: variable + variable or variable + number (actual arithmetic)
+    ARITH_HITS=$(grep -nE "=[[:space:]]*[a-z_]+[[:space:]]*[\+\-\*/%][[:space:]]*[a-z_0-9]+" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v '"""' | \
+        grep -v "WARNINGS" | \
+        grep -v "@host" || true)
+    if [ -n "$ARITH_HITS" ]; then
+        echo "    WARNING: Possible host arithmetic found:"
+        echo "$ARITH_HITS" | head -5 | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No obvious host arithmetic in eval_seed.py"
+    fi
+fi
+
+# 18b. Host Builtins in eval_seed.py
+echo ""
+echo "  18b. Host Builtins (len, sorted, sum, max, min, abs, round):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    BUILTIN_HITS=$(grep -nE "\b(len|sorted|sum|max|min|abs|round|enumerate|zip|map|filter|reduce)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" || true)
+    if [ -n "$BUILTIN_HITS" ]; then
+        echo "    WARNING: Host builtins found (should be structural):"
+        echo "$BUILTIN_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No suspicious host builtins in eval_seed.py"
+    fi
+fi
+
+# 18c. Host String Operations
+echo ""
+echo "  18c. Host String Ops (.split, .join, .format, .replace, .strip):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    STRING_HITS=$(grep -nE "\.(split|join|format|replace|strip|upper|lower|startswith|endswith)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" || true)
+    if [ -n "$STRING_HITS" ]; then
+        echo "    WARNING: Host string operations found:"
+        echo "$STRING_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No host string operations in eval_seed.py"
+    fi
+fi
+
+# 18d. Host Mutation
+echo ""
+echo "  18d. Host Mutation (.append, .pop, .extend, .clear, del, []=):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    MUTATION_HITS=$(grep -nE "\.(append|pop|extend|clear|insert|remove)\s*\(|del\s+[a-z]|\[[a-z_]+\]\s*=" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v "__slots__" || true)
+    if [ -n "$MUTATION_HITS" ]; then
+        echo "    WARNING: Host mutation found (RCX should be immutable):"
+        echo "$MUTATION_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No host mutation in eval_seed.py"
+    fi
+fi
+
+# 18e. Host Comparison for Logic
+echo ""
+echo "  18e. Host Comparison (<, >, <=, >= for logic, not validation):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    # This is tricky - < > are OK for validation, not for logic
+    COMPARE_HITS=$(grep -nE "[a-z_]+\s*[<>]=?\s*[a-z_0-9]+" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v "# validation" | \
+        grep -v "# guardrail" | \
+        grep -v "@host" || true)
+    if [ -n "$COMPARE_HITS" ]; then
+        echo "    INFO: Possible host comparison (review if logic vs validation):"
+        echo "$COMPARE_HITS" | head -3 | while read line; do echo "      $line"; done
+        # Don't increment warnings - needs manual review
+    else
+        echo "    ✓ No obvious host comparison in eval_seed.py"
+    fi
+fi
+
+# 18f. Host Control Flow for Logic
+echo ""
+echo "  18f. Host Control Flow (if/elif with value-based decisions):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    CONTROL_HITS=$(grep -nE "if\s+[a-z_]+\s*==\s*[0-9'\"]" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | \
+        grep -v "NO_MATCH" || true)
+    if [ -n "$CONTROL_HITS" ]; then
+        echo "    INFO: Possible host control flow (value-based if):"
+        echo "$CONTROL_HITS" | head -3 | while read line; do echo "      $line"; done
+    else
+        echo "    ✓ No obvious value-based control flow in eval_seed.py"
+    fi
+fi
+
+# 18g. Host set() operations
+echo ""
+echo "  18g. Host set() Operations (should be structural comparison):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    SET_HITS=$(grep -nE "\bset\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | grep -v "@host" || true)
+    if [ -n "$SET_HITS" ]; then
+        echo "    WARNING: Host set() found:"
+        echo "$SET_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No set() operations in eval_seed.py"
+    fi
+fi
+
+# 18h. Host any()/all() aggregation
+echo ""
+echo "  18h. Host any()/all() Aggregation:"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    AGG_HITS=$(grep -nE "\b(any|all)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | grep -v "@host" || true)
+    if [ -n "$AGG_HITS" ]; then
+        echo "    WARNING: Host aggregation found:"
+        echo "$AGG_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No any()/all() in eval_seed.py"
+    fi
+fi
+
+# 18i. List/Dict comprehensions (host iteration)
+echo ""
+echo "  18i. Host Comprehensions (list/dict iteration):"
+if [ -f "rcx_pi/eval_seed.py" ]; then
+    COMP_HITS=$(grep -nE "\[.*for.*in.*\]|\{.*:.*for.*in.*\}" rcx_pi/eval_seed.py 2>/dev/null | \
+        grep -v "^[[:space:]]*#" | grep -v "@host" || true)
+    if [ -n "$COMP_HITS" ]; then
+        echo "    WARNING: Host comprehensions found:"
+        echo "$COMP_HITS" | while read line; do echo "      $line"; done
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "    ✓ No comprehensions in eval_seed.py"
+    fi
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 19. Host Recursion Debt (Anti-Momentum Guardrail)
+# -----------------------------------------------------------------------------
+echo "== 19. Host Recursion: Debt Tracking =="
 
 echo "Checking for @host_recursion markers (Python recursion that should become RCX iteration)..."
 
 # Only count actual decorator usage (line starts with @host_recursion after whitespace)
-HOST_RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ 2>/dev/null | wc -l | tr -d ' ')
+# Exclude __pycache__ and .pyc files
+HOST_RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$HOST_RECURSION_COUNT" -gt 0 ]; then
     echo "  Found $HOST_RECURSION_COUNT @host_recursion sites (debt to eliminate)"
     echo "  These MUST be replaced with kernel iteration before self-hosting:"
-    grep -rnE "^[[:space:]]*@host_recursion" rcx_pi/ 2>/dev/null | while read line; do
+    grep -rnE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | while read line; do
         echo "    $line"
     done
     echo ""
@@ -605,7 +758,8 @@ echo "  14. Bare except: No swallowed validation errors"
 echo "  15. Test integrity: No guardrail mocking"
 echo "  16. Bootstrap markers: Temporary Python code tracked"
 echo "  17. mu_equal: Structural equality function exists"
-echo "  18. Host recursion: Debt tracking (must be zero for Phase 3)"
+echo "  18. Host smuggling: Comprehensive detection (arithmetic, builtins, strings, mutation, set, any/all, comprehensions)"
+echo "  19. Host recursion: Debt tracking (must be zero for Phase 3)"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then

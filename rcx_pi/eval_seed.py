@@ -52,13 +52,112 @@ def host_recursion(reason: str):
             ...
     """
     def decorator(func):
-        # Mark the function so audits can find it
         func._host_recursion = True
         func._host_recursion_reason = reason
-        # Also register with bootstrap tracking
         mark_bootstrap(
             f"host_recursion:{func.__name__}",
             f"Host recursion: {reason}"
+        )
+        return func
+    return decorator
+
+
+def host_arithmetic(reason: str):
+    """
+    Mark code as using host arithmetic (+, -, *, /, %).
+
+    This is a debt marker. Arithmetic should be Peano numerals or
+    structural operations in pure RCX.
+
+    Args:
+        reason: Why this host arithmetic exists and how it will be eliminated.
+    """
+    def decorator(func):
+        func._host_arithmetic = True
+        func._host_arithmetic_reason = reason
+        mark_bootstrap(
+            f"host_arithmetic:{func.__name__}",
+            f"Host arithmetic: {reason}"
+        )
+        return func
+    return decorator
+
+
+def host_comparison(reason: str):
+    """
+    Mark code as using host comparison (<, >, <=, >=).
+
+    This is a debt marker. Comparison should be structural in pure RCX.
+
+    Args:
+        reason: Why this host comparison exists and how it will be eliminated.
+    """
+    def decorator(func):
+        func._host_comparison = True
+        func._host_comparison_reason = reason
+        mark_bootstrap(
+            f"host_comparison:{func.__name__}",
+            f"Host comparison: {reason}"
+        )
+        return func
+    return decorator
+
+
+def host_builtin(reason: str):
+    """
+    Mark code as using host builtins (len, sorted, sum, max, min, etc.).
+
+    This is a debt marker. These operations should be structural in pure RCX.
+
+    Args:
+        reason: Why this host builtin exists and how it will be eliminated.
+    """
+    def decorator(func):
+        func._host_builtin = True
+        func._host_builtin_reason = reason
+        mark_bootstrap(
+            f"host_builtin:{func.__name__}",
+            f"Host builtin: {reason}"
+        )
+        return func
+    return decorator
+
+
+def host_string_op(reason: str):
+    """
+    Mark code as using host string operations (.split, .join, .format, etc.).
+
+    This is a debt marker. String ops should be structural (list of chars) in pure RCX.
+
+    Args:
+        reason: Why this host string op exists and how it will be eliminated.
+    """
+    def decorator(func):
+        func._host_string_op = True
+        func._host_string_op_reason = reason
+        mark_bootstrap(
+            f"host_string_op:{func.__name__}",
+            f"Host string op: {reason}"
+        )
+        return func
+    return decorator
+
+
+def host_mutation(reason: str):
+    """
+    Mark code as using host mutation (.append, .pop, del, []=).
+
+    This is a debt marker. RCX is immutable - each step produces new structure.
+
+    Args:
+        reason: Why this host mutation exists and how it will be eliminated.
+    """
+    def decorator(func):
+        func._host_mutation = True
+        func._host_mutation_reason = reason
+        mark_bootstrap(
+            f"host_mutation:{func.__name__}",
+            f"Host mutation: {reason}"
         )
         return func
     return decorator
@@ -157,8 +256,14 @@ def get_var_name(mu: Mu) -> str:
 
 @host_recursion(
     "Recursive tree traversal for pattern matching. "
-    "Phase 3: express as iterative projections where kernel loop provides recursion."
+    "Phase 3: express as iterative projections where kernel loop provides recursion. "
+    "Also uses: len() for size checks, zip() for pairing, dict mutation for bindings."
 )
+@host_builtin(
+    "len() for size, zip() for pairing, set() for key comparison, "
+    "any() for aggregation, 'in' for membership, .items()/.keys() for iteration"
+)
+@host_mutation("bindings[k] = v to accumulate variable bindings")
 def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """
     Match pattern against input, returning bindings or NO_MATCH.
