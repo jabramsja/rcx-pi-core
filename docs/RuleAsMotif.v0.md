@@ -1,6 +1,10 @@
 # Rule-as-Motif Representation v0
 
-Status: VECTOR (design-only, no implementation allowed)
+Status: IMPLEMENTED (observability + validation)
+
+**Implementation status:**
+- ✅ Rule Motif Observability v0 (`rules --print-rule-motifs`, `rule_motifs_v0()`)
+- ✅ Rule Motif Validation Gate v0 (`rules --check-rule-motifs`, `validate_rule_motifs_v0()`)
 
 This document defines the minimal representation of an RCX reduction rule as a motif, such that rules become first-class structural data that the VM can match, inspect, and (eventually) apply.
 
@@ -147,9 +151,10 @@ The reduction rule `succ(n) + b → succ(n + b)`:
 
 Following the project principle:
 
-- **v0 (this document)**: Define what a rule looks like as data.
-- **Future NEXT**: Add trace events showing rule motifs being matched (observability).
-- **Later NEXT**: Implement structural pattern matching on rule motifs (mechanics).
+- **v0 (this document)**: Define what a rule looks like as data. ✅
+- **NEXT #14**: Emit `rule.loaded` trace events via `rules --print-rule-motifs`. ✅
+- **NEXT #15**: Validate rule motifs via `rules --check-rule-motifs`. ✅
+- **Future NEXT**: Implement structural pattern matching on rule motifs (mechanics).
 
 No mechanics without prior observability. No implementation without prior design.
 
@@ -167,19 +172,19 @@ No mechanics without prior observability. No implementation without prior design
 
 ---
 
-## Promotion Gates (VECTOR → NEXT)
+## Promotion Gates (VECTOR → NEXT) ✅ PASSED
 
-To promote this design to NEXT for implementation:
+All gates passed for observability implementation:
 
-1. **Representation locked**: The JSON structure for rule motifs is finalized.
+1. **Representation locked**: ✅ The JSON structure for rule motifs is finalized.
 
-2. **Examples validated**: At least 3 existing reduction rules (add.zero, add.succ, pred.zero) have been manually translated to rule motifs and verified structurally sound.
+2. **Examples validated**: ✅ All 8 rules from rules_pure.py translated to rule motifs (add.zero, add.succ, mult.zero, mult.succ, pred.zero, pred.succ, activation, classify).
 
-3. **value_hash tested**: Rule motif examples produce deterministic hashes under PYTHONHASHSEED=0.
+3. **value_hash tested**: ✅ Rule motifs produce deterministic output under PYTHONHASHSEED=0 (verified by 11 + 16 CLI tests).
 
-4. **Scope bounded**: First implementation is read-only: parse rule motifs, emit to trace, no matching.
+4. **Scope bounded**: ✅ Implementation is read-only: emit to trace, validate structure, no matching.
 
-5. **Observability first**: First NEXT item must be "emit rule motif to trace on load" before "match rule motif against value."
+5. **Observability first**: ✅ `rules --print-rule-motifs` emits `rule.loaded` events; `rules --check-rule-motifs` validates invariants.
 
 ---
 
@@ -198,8 +203,12 @@ These items remain in SINK until this VECTOR is promoted and implemented:
 ## Version
 
 Document version: v0
-Last updated: 2026-01-24
-Status: VECTOR (design-only)
+Last updated: 2026-01-25
+Status: IMPLEMENTED (observability + validation)
+Implementation:
+- `rcx_pi/rule_motifs_v0.py` (RULE_IDS, rule_motifs_v0, validate_rule_motifs_v0)
+- `tests/test_rule_motifs_cli.py` (11 tests)
+- `tests/test_rule_motif_validation_cli.py` (16 tests)
 Dependencies:
 - `docs/MinimalNativeExecutionPrimitive.v0.md`
 - `docs/BytecodeMapping.v1.md`

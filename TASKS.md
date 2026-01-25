@@ -73,6 +73,8 @@ Items here are implemented and verified under current invariants. Changes requir
 - CI audit gate (`tools/audit_all.sh` + `.github/workflows/audit_all.yml`)
 - Closure Evidence reporting flag + CLI test (`--print-closure-evidence`, `closure_evidence_v2()`)
 - Rule Motif Observability v0 (`rcx_pi/rule_motifs_v0.py`, `rules --print-rule-motifs`, 11 CLI tests)
+- Rule Motif Validation Gate v0 (`validate_rule_motifs_v0()`, `rules --check-rule-motifs`, 16 CLI tests)
+- Trace canon helper v1 (`canon_jsonl()`, 7 tests in `test_trace_canon_v1.py`)
 
 ---
 
@@ -95,16 +97,7 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-15. **Rule Motif Validation Gate v0** ✅ (follows from VECTOR #13, NEXT #14)
-    - Deliverable: `validate_rule_motifs_v0()` + `rules --check-rule-motifs` CLI
-    - Done:
-      - `validate_rule_motifs_v0(rule_motifs)` pure helper returning validation report
-      - Validation rules: structure, id uniqueness, variable binding, host leakage, canonicalization
-      - CLI: `python3 -m rcx_pi.rcx_cli rules --check-rule-motifs`
-      - CLI: `python3 -m rcx_pi.rcx_cli rules --check-rule-motifs-from <path>`
-      - Output: `{"v":1,"rule_count":N,"ok":true/false,"errors":[...]}`
-      - 16 subprocess CLI tests (positive + negative cases)
-    - Non-goals: no matching, no application, no engine changes
+_(No active items.)_
 
 ---
 

@@ -31,6 +31,12 @@ rcx program run succ-list --input-file /tmp/input.json --pretty
 rcx world trace pingpong ping --max-steps 12 --pretty
 rcx trace pingpong ping --max-steps 6 --pretty
 
+### Rules (Rule motif observability + validation)
+
+rcx rules --print-rule-motifs          # Emit rule.loaded v2 trace events as JSONL
+rcx rules --check-rule-motifs          # Validate built-in rule motifs
+rcx rules --check-rule-motifs-from FILE  # Validate rule motifs from JSON file
+
 ## Direct tools
 
 rcx-program-descriptor --schema
