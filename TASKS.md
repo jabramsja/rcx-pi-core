@@ -72,6 +72,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Enginenews spec stress-test harness (`tests/test_enginenews_spec_v0.py`)
 - CI audit gate (`tools/audit_all.sh` + `.github/workflows/audit_all.yml`)
 - Closure Evidence reporting flag + CLI test (`--print-closure-evidence`, `closure_evidence_v2()`)
+- Rule Motif Observability v0 (`rcx_pi/rule_motifs_v0.py`, `rules --print-rule-motifs`, 11 CLI tests)
 
 ---
 
@@ -94,17 +95,7 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-14. **Rule Motif Observability v0** ✅ (promoted from VECTOR #13)
-    - Deliverable: `rcx_pi/rule_motifs_v0.py` + `rules --print-rule-motifs` CLI
-    - Done:
-      - `rule_motifs_v0()` pure helper returning all rule motifs
-      - `RULE_IDS` canonical list for anti-drift testing
-      - `emit_rule_loaded_events()` generates v2 JSONL
-      - CLI: `python3 -m rcx_pi.rcx_cli rules --print-rule-motifs`
-      - Output: `{"v":2,"type":"rule.loaded","i":N,"mu":{"rule":{...}}}`
-      - 11 subprocess CLI tests (schema, determinism, coverage, JSON validity)
-      - Anti-drift test: emitted IDs must match `RULE_IDS` exactly
-    - Non-goals: no matching, no application, no engine changes
+_(No active items.)_
 
 ---
 
