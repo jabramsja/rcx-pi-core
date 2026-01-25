@@ -767,27 +767,128 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
-# 19. Host Recursion Debt (Anti-Momentum Guardrail)
+# 19. Host Debt Threshold (Anti-Boiling-Frog Guardrail)
 # -----------------------------------------------------------------------------
-echo "== 19. Host Recursion: Debt Tracking =="
+echo "== 19. Host Debt: Threshold Check =="
 
-echo "Checking for @host_recursion markers (Python recursion that should become RCX iteration)..."
+# Count ALL host debt markers
+DEBT_THRESHOLD=10  # Maximum allowed debt markers before FAIL
 
-# Only count actual decorator usage (line starts with @host_recursion after whitespace)
-# Exclude __pycache__ and .pyc files
-HOST_RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$HOST_RECURSION_COUNT" -gt 0 ]; then
-    echo "  Found $HOST_RECURSION_COUNT @host_recursion sites (debt to eliminate)"
-    echo "  These MUST be replaced with kernel iteration before self-hosting:"
-    grep -rnE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | while read line; do
-        echo "    $line"
-    done
-    echo ""
-    echo "  Phase 3 goal: zero @host_recursion markers"
+echo "Counting all @host_* debt markers..."
+
+RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+ARITHMETIC_COUNT=$(grep -rE "^[[:space:]]*@host_arithmetic" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+BUILTIN_COUNT=$(grep -rE "^[[:space:]]*@host_builtin" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+MUTATION_COUNT=$(grep -rE "^[[:space:]]*@host_mutation" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+COMPARISON_COUNT=$(grep -rE "^[[:space:]]*@host_comparison" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+STRING_COUNT=$(grep -rE "^[[:space:]]*@host_string_op" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+
+TOTAL_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT))
+
+echo "  Debt breakdown:"
+echo "    @host_recursion:  $RECURSION_COUNT"
+echo "    @host_arithmetic: $ARITHMETIC_COUNT"
+echo "    @host_builtin:    $BUILTIN_COUNT"
+echo "    @host_mutation:   $MUTATION_COUNT"
+echo "    @host_comparison: $COMPARISON_COUNT"
+echo "    @host_string_op:  $STRING_COUNT"
+echo "    ─────────────────────"
+echo "    TOTAL:            $TOTAL_DEBT (threshold: $DEBT_THRESHOLD)"
+echo ""
+
+if [ "$TOTAL_DEBT" -gt "$DEBT_THRESHOLD" ]; then
+    echo "  ERROR: Debt exceeds threshold ($TOTAL_DEBT > $DEBT_THRESHOLD)"
+    echo "  You must reduce debt before adding more, or explicitly raise the threshold"
+    FAILED=1
+elif [ "$TOTAL_DEBT" -gt 0 ]; then
+    echo "  WARNING: $TOTAL_DEBT debt markers remain (Phase 3 goal: zero)"
     WARNINGS=$((WARNINGS + 1))
 else
-    echo "  ✓ No @host_recursion markers (debt paid or never incurred)"
+    echo "  ✓ No debt markers - self-hosting ready!"
 fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 20. Guardrail Coverage (New File Detection)
+# -----------------------------------------------------------------------------
+echo "== 20. Guardrail Coverage: New File Detection =="
+
+echo "Checking for Python files in rcx_pi/ not covered by audits..."
+
+# List of files we explicitly audit
+AUDITED_FILES="eval_seed.py kernel.py mu_type.py"
+
+# Find all .py files in rcx_pi/ (excluding __pycache__)
+ALL_PY_FILES=$(find rcx_pi -maxdepth 1 -name "*.py" -type f 2>/dev/null | xargs -I{} basename {} | sort)
+
+UNAUDITED=""
+for f in $ALL_PY_FILES; do
+    # Skip __init__.py
+    if [ "$f" = "__init__.py" ]; then
+        continue
+    fi
+
+    # Check if it's in our audited list or is legacy/infrastructure
+    case "$f" in
+        # Explicitly audited (self-hosting critical)
+        eval_seed.py|kernel.py|mu_type.py)
+            ;;
+        # Legacy/infrastructure - not self-hosting critical
+        bytecode_vm.py|programs.py|rcx_cli.py)
+            ;;
+        trace_*.py|rule_motifs*.py|replay*.py|execution*.py)
+            ;;
+        # Utilities and CLI tools
+        api.py|bench.py|cli_schema*.py|higher.py|listutils.py|meta.py|pretty.py)
+            ;;
+        program_*.py|projection.py|self_host.py|test_worlds_probe.py|worlds_json.py|worlds_bridge.py|worlds_probe.py)
+            ;;
+        *)
+            # New file - needs review
+            UNAUDITED="$UNAUDITED $f"
+            ;;
+    esac
+done
+
+if [ -n "$UNAUDITED" ]; then
+    echo "  WARNING: New files found that may need audit coverage:"
+    for f in $UNAUDITED; do
+        echo "    - rcx_pi/$f"
+    done
+    echo "  Action: Add to AUDITED_FILES list or mark as legacy/infrastructure"
+    WARNINGS=$((WARNINGS + 1))
+else
+    echo "  ✓ All logic files in rcx_pi/ are covered by audits"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# 21. Self-Hosting Readiness Checklist
+# -----------------------------------------------------------------------------
+echo "== 21. Self-Hosting Readiness Checklist =="
+
+echo ""
+echo "  Pre-merge checklist for kernel/seed changes:"
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ □ No new @host_* markers without reducing existing debt        │"
+echo "  │ □ No Python-specific optimizations (use simple abstractions)   │"
+echo "  │ □ No new imports from itertools/functools/os/sys/random        │"
+echo "  │ □ No print/pdb/breakpoint left in code                         │"
+echo "  │ □ All new functions reviewed for host operations               │"
+echo "  │ □ Non-deterministic behavior explicitly wrapped                │"
+echo "  │ □ Tests don't mask host dependencies                           │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+echo ""
+echo "  Reviewer questions for PRs touching rcx_pi/kernel.py or eval_seed.py:"
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ 1. Could this logic be expressed as projections?               │"
+echo "  │ 2. Does this use Python iteration where kernel loop would do?  │"
+echo "  │ 3. Does this add host computation without a debt marker?       │"
+echo "  │ 4. Does this increase the debt count?                          │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+echo ""
 
 echo ""
 
@@ -815,7 +916,9 @@ echo "  15. Test integrity: No guardrail mocking"
 echo "  16. Bootstrap markers: Temporary Python code tracked"
 echo "  17. mu_equal: Structural equality function exists"
 echo "  18. Host smuggling: Comprehensive (arithmetic, builtins, mutation, set, any/all, comprehensions, libraries, non-det, debug)"
-echo "  19. Host recursion: Debt tracking (must be zero for Phase 3)"
+echo "  19. Host debt: Threshold check (current debt vs maximum allowed)"
+echo "  20. Guardrail coverage: New file detection (ensures no unaudited code)"
+echo "  21. Self-hosting checklist: Pre-merge and reviewer guidelines"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then
