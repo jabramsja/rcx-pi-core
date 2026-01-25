@@ -1,100 +1,83 @@
-Guardrail / Alignment Note (Please Acknowledge)
+# Guardrail / Alignment Note (Please Acknowledge)
 
-RCX is being built as a native structural substrate, not as a simulation on top of a host language. Python and Rust exist only as scaffolding to seal determinism, entropy, and trace semantics; they are not the target runtime. RCX programs (e.g. RCXEngineNew / EngineNews-like specs) are VECTOR workloads that must eventually run honestly on the RCX VM and may legitimately fail to produce claimed structures. Do not implement VM semantics, bytecode, μ-rewrite execution, or EngineNews logic unless explicitly instructed. Do not introduce new subsystems, execution models, abstractions, files, tests, or documentation beyond what is listed in TASKS.md. All work must stay within the current NOW scope, preserve existing invariants, keep CI green, and refine or tighten what exists rather than replacing it. When intent is ambiguous, stop and ask before acting.
+RCX is being built as a native structural substrate, not as a simulation on top of a host language. Python exists only as scaffolding to bootstrap the kernel; it is not the target runtime. The goal is self-hosting: RCX must run RCX to prove emergence honestly.
 
+## Current Direction (2026-01-25)
 
+We are building:
+1. **Minimal Kernel** (Python, ~30 lines) - just plumbing: hash, stall detect, trace, dispatch
+2. **EVAL_SEED** - the evaluator written AS structure (Mu projections)
+3. **Application Seeds** - like EngineeNews, run on top of EVAL_SEED
 
-Add these process guardrails and follow them strictly:
+Key specs:
+- `docs/RCXKernel.v0.md` - Kernel architecture
+- `docs/StructuralPurity.v0.md` - Guardrails for programming IN RCX
+- `docs/MuType.v0.md` - The universal data type
 
+The kernel doesn't know how to match patterns or apply projections. Seeds define all semantics. This keeps the kernel maximally general.
 
+---
 
-PROCESS / HYGIENE RULES (non-negotiable)
+## PROCESS / HYGIENE RULES (non-negotiable)
 
+1. **Do not proliferate files.**
+   - If something fails, FIX the existing file.
+   - Do NOT create "v2", "new", "alt", "fixed", "final" copies.
+   - One file per concept unless explicitly approved.
 
+2. **Do not duplicate tests.**
+   - If a test fails because reality changed, update the existing test OR the implementation.
+   - Never "solve" a failing test by adding a new test that passes.
+   - Never leave broken/unused tests behind.
 
-1\) Do not proliferate files.
+3. **Minimal change surface.**
+   - Prefer the smallest patch that makes the suite green.
+   - No refactors "while you're in there" unless required for the NOW deliverable.
 
-&nbsp;  - If something fails, FIX the existing file.
+4. **Changes must be explainable in one sentence.**
+   - Every commit message should describe exactly what invariant it locks.
+   - If you can't explain the change simply, you're probably expanding scope.
 
-&nbsp;  - Do NOT create “v2”, “new”, “alt”, “fixed”, “final”, “really\_final” copies.
+5. **Determinism discipline.**
+   - Do not introduce new entropy sources.
+   - See `EntropyBudget.md` for the full entropy sealing contract.
 
-&nbsp;  - One file per concept unless explicitly approved.
+6. **Repo cleanliness is law.**
+   - Never leave tracked diffs around during tests.
+   - If a gate checks for tracked diffs, stage/commit intentionally or revert.
 
+7. **TASKS.md is the scope boundary.**
+   - Only implement items listed in TASKS.md unless explicitly told otherwise.
+   - No new frameworks, subsystems, or directories without approval.
 
+8. **PR policy.**
+   - Keep PRs tight: only the files required for the deliverable.
+   - Ensure `pytest` is green locally before pushing.
+   - Prefer squash merge + delete branch.
 
-2\) Do not duplicate tests.
+---
 
-&nbsp;  - If a test fails because reality changed, update the existing test OR the implementation.
+## Structural Purity (Critical)
 
-&nbsp;  - Never “solve” a failing test by adding a new test that passes.
+We must program IN RCX (using Mu/structure) not ABOUT RCX (using Python constructs).
 
-&nbsp;  - Never leave broken/unused tests behind.
+**Guardrails enforced:**
+- `assert_mu()` - validates all kernel boundary crossings
+- `assert_seed_pure()` - validates seeds contain no Python functions
+- `assert_handler_pure()` - wraps handlers to enforce Mu in, Mu out
+- `tools/audit_semantic_purity.sh` - static analysis for violations
 
+If we accidentally use Python features (lambda, isinstance logic, etc.), we're simulating emergence, not proving it.
 
+---
 
-3\) Minimal change surface.
+## What This Is All About
 
-&nbsp;  - Prefer the smallest patch that makes the suite green.
+RCX exists so that claims about emergence can be tested honestly, without importing structure from the host language.
 
-&nbsp;  - No refactors “while you’re in there” unless required for the NOW deliverable.
+Self-hosting is required because:
+- If Python runs RCX, emergence might be a Python artifact
+- If RCX runs RCX, emergence comes from structure alone
+- The evaluator (EVAL_SEED) must itself be structure (Mu)
 
-
-
-4\) Changes must be explainable in one sentence.
-
-&nbsp;  - Every commit message should describe exactly what invariant it locks.
-
-&nbsp;  - If you can’t explain the change simply, you’re probably expanding scope.
-
-
-
-5\) Determinism discipline.
-
-&nbsp;  - Do not introduce new entropy sources.
-
-&nbsp;  - If you must touch anything related to ordering, time, randomness, hashing, filesystem traversal, or floating point behavior, call it out explicitly.
-
-
-
-6\) Repo cleanliness is law.
-
-&nbsp;  - Never leave tracked diffs around during tests.
-
-&nbsp;  - If a gate checks for tracked diffs, stage/commit intentionally or revert; don’t “work around” the gate.
-
-
-
-7\) TASKS.md is the scope boundary.
-
-&nbsp;  - Only implement NOW items unless explicitly told otherwise.
-
-&nbsp;  - No new frameworks, subsystems, CLIs, docs trees, or directories without approval.
-
-
-
-8\) PR policy.
-
-&nbsp;  - Keep PRs tight: only the files required for the deliverable.
-
-&nbsp;  - Ensure `pytest` is green locally before pushing.
-
-&nbsp;  - Prefer squash merge + delete branch (same as we’ve been doing).
-
-
-
-If you accept these, proceed with NOW #1: draft docs/EntropyBudget.md as a contract (SEALED / FORBIDDEN / ALLOWED WITH justification), with no new code/tests yet.
-
-### Entropy Source Policy (Canonical)
-
-**Randomness (RNG)**
-Use of ambient randomness (`random`, unseeded RNGs) is **FORBIDDEN** in all deterministic execution paths, including trace generation, replay, golden fixtures, and CI gates. Randomness may be **EXPLICITLY ALLOWED** only in sandbox or experimental worlds that are clearly labeled and never exercised by determinism gates. Any future deterministic use of randomness must be fully sealed by explicit seeding from declared inputs and recorded in trace metadata so replay is exact.
-
-**Timestamps / Wall-Clock Time**
-Wall-clock time (e.g. `datetime.now()`) is **NON-DETERMINISTIC** and must not influence replay-sensitive outputs. Timestamp fields may exist for human inspection, but they must be **STRIPPED or NORMALIZED** during canonicalization before comparison, replay gates, or golden fixture validation. Time is informational only, never semantic.
-
-**Hash Ordering (PYTHONHASHSEED)**
-CI runs must enforce `PYTHONHASHSEED=0` to eliminate environment-dependent hash ordering. This is a **SEALED REQUIREMENT**. Additionally, all iteration over unordered collections (dicts, sets) that affect trace output must use explicit, deterministic ordering (e.g. `sorted(...)`). Determinism must not rely solely on environment configuration.
-
-**General Rule**
-If an entropy source cannot be sealed, normalized, or made replayable, it is not permitted in deterministic RCX execution paths. Any exception must be explicitly documented and scoped outside the trace/replay contract.
-
+See `Why_RCX_PI_VM_EXISTS.md` for the full alignment document.

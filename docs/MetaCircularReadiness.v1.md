@@ -194,13 +194,34 @@ The following are explicitly forbidden in meta-circular v1:
 
 ---
 
+## 9. New Kernel Architecture (2026-01-25)
+
+The new kernel design in `docs/RCXKernel.v0.md` provides a cleaner path to self-hosting:
+
+**Key Changes:**
+- Kernel has only 4 primitives: `compute_identity`, `detect_stall`, `record_trace`, `gate_dispatch`
+- Pattern matching is **seed responsibility**, not kernel
+- Seeds are pure Mu (no Python functions)
+- Self-hosting = EVAL_SEED runs EVAL_SEED
+
+**Impact on this document:**
+- Gate 5 (Reference Interpreter) may be superseded by the new kernel + EVAL_SEED approach
+- M4/M5/M6 milestones align with kernel Phases 2-4 in TASKS.md
+- The blocked execution semantics are now addressed via seed design, not bytecode opcodes
+
+See `docs/RCXKernel.v0.md` and `docs/StructuralPurity.v0.md` for the current architecture.
+
+---
+
 ## Version
 
-Document version: v1.1 (updated for v2 observability)
-Last updated: 2026-01-24
+Document version: v1.2 (added kernel architecture reference)
+Last updated: 2026-01-25
 Dependencies:
 - `docs/schemas/rcx-trace-event.v1.json` (replay, frozen)
 - `docs/schemas/rcx-trace-event.v2.json` (observability)
 - `docs/BytecodeMapping.v0.md`
 - `docs/StallFixObservability.v0.md`
+- `docs/RCXKernel.v0.md` (new architecture)
+- `docs/StructuralPurity.v0.md` (guardrails)
 - `EntropyBudget.md`

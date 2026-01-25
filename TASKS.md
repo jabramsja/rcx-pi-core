@@ -81,6 +81,11 @@ Items here are implemented and verified under current invariants. Changes requir
 - Bytecode VM v0 (replay-only, 10 opcodes, 47 tests in `test_bytecode_vm_v0.py`, `tools/audit_bytecode.sh`)
 - Bytecode VM v1a (OP_STALL execution, v1a registers RS/RP/RH, closure detection, 61 tests)
 - Bytecode VM v1b (OP_FIX/OP_FIXED execution, RF register, stall_memory clearing, 78 tests)
+- Mu Type v0 (`rcx_pi/mu_type.py`, `docs/MuType.v0.md`, 58 tests)
+- Structural Purity Guardrails v0 (`docs/StructuralPurity.v0.md`, 32 additional tests):
+  - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
+  - `assert_handler_pure()`, `validate_kernel_boundary()`
+  - `tools/audit_semantic_purity.sh` extended with checks 9-11
 
 ---
 
@@ -103,6 +108,32 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
+20. **RCX Kernel Phase 1: Minimal Kernel** (awaiting promotion from VECTOR #14)
+    - Design doc: `docs/RCXKernel.v0.md`
+    - Scope:
+      - Implement 4 primitives in `rcx_pi/kernel.py`
+      - Main loop (hash → dispatch → stall check → trace → repeat)
+      - Tests for each primitive
+    - Promotion blocker: Resolve open questions in RCXKernel.v0.md
+
+21. **RCX Kernel Phase 2: EVAL_SEED (Python)** (awaiting Phase 1)
+    - Scope:
+      - Write EVAL_SEED logic in Python to understand complexity
+      - Define: structural equality, projection application, dispatch
+      - Answer: "Is EVAL_SEED tractable?"
+
+22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** (awaiting Phase 2)
+    - Scope:
+      - Translate EVAL_SEED logic to Mu projections
+      - Verify Python-EVAL and Mu-EVAL produce same results
+      - Store as `seeds/eval.v1.json`
+
+23. **RCX Kernel Phase 4: Self-Hosting** (awaiting Phase 3)
+    - Scope:
+      - Mu-EVAL runs Mu-EVAL
+      - Compare traces: Python→EVAL vs EVAL→EVAL
+      - If identical, self-hosting achieved
+
 19. **Bytecode VM v1b: OP_FIX/OP_FIXED execution** ✅ (promoted from VECTOR #10 v1)
     - Design doc: `docs/BytecodeMapping.v1.md`
     - **Archived to Ra**: Implementation complete (78 tests, RF register, stall_memory clearing)
@@ -118,6 +149,27 @@ _(No active items.)_
 ---
 
 ## VECTOR (design-only; semantics locked, no implementation allowed)
+
+14. **RCX Kernel v0** ✅ (design complete)
+    - Deliverable: `docs/RCXKernel.v0.md`
+    - Semantic question: "What is the minimal kernel that supports self-hosting?"
+    - Done:
+      - 4 kernel primitives: compute_identity, detect_stall, record_trace, gate_dispatch
+      - apply_projection is NOT kernel - seeds define matching semantics
+      - Seed hierarchy: EVAL_SEED (evaluator) → Application Seeds (EngineeNews, etc.)
+      - Bootstrap sequence: Python → Kernel → EVAL_SEED → EVAL_SEED runs itself
+      - Self-hosting required to prove emergence (not simulate it)
+    - Ready for promotion to NEXT
+
+15. **Structural Purity v0** ✅ (design + implementation complete)
+    - Deliverable: `docs/StructuralPurity.v0.md`
+    - Semantic question: "How do we ensure we program IN RCX, not ABOUT RCX?"
+    - Done:
+      - Guardrail functions: `assert_seed_pure()`, `assert_handler_pure()`, etc.
+      - Boundary definition: Python only at 4 kernel primitives
+      - Audit script extended with checks 9-11
+      - 32 tests for guardrail functions
+    - **Archived to Ra**: Implementation complete
 
 9. **"Second independent encounter" semantics** ✅
    - Deliverable: `docs/IndependentEncounter.v0.md`
@@ -195,5 +247,5 @@ _(No active items.)_
 ## SINK (ideas parked; may not advance without explicit promotion decision)
 
 - Multi-value/concurrent execution
-- Full VM bootstrap / meta-circular execution (partial: rule-as-motif promoted to VECTOR #13)
 - Performance-first optimizations
+- ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)

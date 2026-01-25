@@ -3,12 +3,19 @@
 
 ### Development Rules (Enforced)
 
-- RCX-π kernel is **frozen**
 - All changes go through PRs
 - CI green is mandatory (`green-gate` + `test`)
-- Development proceeds by **layering**, not kernel mutation
+- Development proceeds by **layering**, not arbitrary mutation
+- Structural purity enforced: program IN RCX, not ABOUT RCX
 
 If CI is not green, the change does not exist.
+
+### Current Direction
+
+Building a minimal self-hosting kernel. See:
+- `docs/RCXKernel.v0.md` - Kernel architecture (4 primitives, seeds define semantics)
+- `docs/StructuralPurity.v0.md` - Guardrails for Mu purity
+- `TASKS.md` - Canonical task tracker
 
 
 ## CI (Green Gate)
