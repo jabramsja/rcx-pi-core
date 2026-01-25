@@ -259,6 +259,46 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
+# 8. Mu Type Guardrails
+# -----------------------------------------------------------------------------
+echo "== 8. Mu Type: Self-Hosting Readiness =="
+
+echo "Checking Mu type validation module exists..."
+
+if [ -f "rcx_pi/mu_type.py" ]; then
+    echo "  ✓ mu_type.py exists"
+
+    # Check that is_mu function exists
+    if grep -q "def is_mu" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ is_mu() validation function defined"
+    else
+        echo "  ERROR: is_mu() validation function missing"
+        FAILED=1
+    fi
+
+    # Check that assert_mu function exists
+    if grep -q "def assert_mu" rcx_pi/mu_type.py 2>/dev/null; then
+        echo "  ✓ assert_mu() guardrail function defined"
+    else
+        echo "  ERROR: assert_mu() guardrail function missing"
+        FAILED=1
+    fi
+
+    # Check for NaN/Infinity rejection in is_mu
+    if grep -E "float\('inf'\)|float\('-inf'\)|!= value" rcx_pi/mu_type.py >/dev/null 2>&1; then
+        echo "  ✓ is_mu() rejects NaN/Infinity"
+    else
+        echo "  WARNING: is_mu() may not reject NaN/Infinity"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+else
+    echo "  ERROR: rcx_pi/mu_type.py not found (Mu type validation required)"
+    FAILED=1
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo "=== Semantic Purity Audit Summary ==="
@@ -271,6 +311,7 @@ echo "  4. Trace serialization: JSON-portable types"
 echo "  5. Opcodes: Language-agnostic enum"
 echo "  6. Value hash: Deterministic SHA-256"
 echo "  7. Reserved opcodes: ROUTE/CLOSE blocked, STALL/FIX/FIXED implemented (v1b)"
+echo "  8. Mu type: Validation guardrails for self-hosting"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then
