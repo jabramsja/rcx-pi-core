@@ -366,10 +366,12 @@ if [ -f "rcx_pi/kernel.py" ]; then
     fi
 
     # All handlers should be wrapped with assert_handler_pure
-    # (Check for handler registration without wrapping)
-    if grep -n "handlers\[" rcx_pi/kernel.py 2>/dev/null | grep -v "assert_handler_pure" | grep -v "#"; then
+    # (Check for handler ASSIGNMENT without wrapping - reads are OK)
+    if grep -n "_handlers\[.*\] =" rcx_pi/kernel.py 2>/dev/null | grep -v "assert_handler_pure" | grep -v "# wrapped"; then
         echo "  WARNING: Possibly unwrapped handler registration in kernel.py"
         WARNINGS=$((WARNINGS + 1))
+    else
+        echo "  ✓ Handler registration uses assert_handler_pure"
     fi
 else
     echo "  (kernel.py not yet created - will check when it exists)"

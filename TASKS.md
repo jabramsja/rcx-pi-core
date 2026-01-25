@@ -108,15 +108,18 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-20. **RCX Kernel Phase 1: Minimal Kernel** (awaiting promotion from VECTOR #14)
+20. **RCX Kernel Phase 1: Minimal Kernel** ✅ (complete)
     - Design doc: `docs/RCXKernel.v0.md`
-    - Scope:
-      - Implement 4 primitives in `rcx_pi/kernel.py`
-      - Main loop (hash → dispatch → stall check → trace → repeat)
-      - Tests for each primitive
-    - Promotion blocker: Resolve open questions in RCXKernel.v0.md
+    - Implementation: `rcx_pi/kernel.py`
+    - Tests: `tests/test_kernel_v0.py` (47 tests)
+    - Done:
+      - 4 primitives: `compute_identity`, `detect_stall`, `record_trace`, `gate_dispatch`
+      - Kernel class with `step()` and `run()` main loop
+      - All handlers wrapped with `assert_handler_pure`
+      - Audit passes (17 checks)
+    - **Ready for Phase 2**
 
-21. **RCX Kernel Phase 2: EVAL_SEED (Python)** (awaiting Phase 1)
+21. **RCX Kernel Phase 2: EVAL_SEED (Python)** (ready to start)
     - Scope:
       - Write EVAL_SEED logic in Python to understand complexity
       - Define: structural equality, projection application, dispatch
