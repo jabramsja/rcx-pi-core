@@ -78,6 +78,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Second Independent Encounter v0 (stall memory tracking, closure signal detection, 25 tests)
 - Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
 - Enginenews Spec v0 (stress test harness, 18 tests in `test_enginenews_spec_v0.py`, 4 fixtures)
+- Bytecode VM v0 (replay-only, 10 opcodes, 47 tests in `test_bytecode_vm_v0.py`, `tools/audit_bytecode.sh`)
 
 ---
 
@@ -100,32 +101,11 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-17. **Bytecode VM v0 Implementation** (promoted from VECTOR #10)
+_(No active items.)_
+
+17. **Bytecode VM v0 Implementation** ✅ (promoted from VECTOR #10)
     - Design doc: `docs/BytecodeMapping.v0.md`
-    - Promotion rationale:
-      - v0 is replay-only (validates opcodes, doesn't execute)
-      - De-risks v1 by proving opcode→trace mapping is correct
-      - No execution semantics changes; pure observability
-      - Bounded scope: 10 opcodes, 4 golden fixtures, ~26 tests
-    - Deliverables:
-      - `rcx_pi/bytecode_vm.py` - BytecodeVM class with state model + opcode execution
-      - `--check-bytecode` CLI flag - validate opcodes during replay
-      - `--emit-bytecode` CLI flag - print opcode sequence (debug)
-      - `tests/test_bytecode_vm_v0.py` - unit tests for all opcodes
-      - `tests/fixtures/bytecode/*.golden` - golden opcode sequences
-      - `tools/audit_bytecode.sh` - anti-cheat scan
-    - Guardrails:
-      - Golden bytecode fixtures (determinism proof)
-      - Round-trip test (trace → VM → trace identical to canon_jsonl)
-      - Opcode validation gate (--check-bytecode fails on invalid)
-      - Replay compatibility (existing v1/v2 tests pass)
-      - Opcode coverage audit (each of 10 opcodes has ≥1 test)
-      - Reserved opcode guard (STALL/FIX/ROUTE/CLOSE blocked in v0)
-    - Non-goals (v0 scope):
-      - No Stall/Fix/Closure execution (reserved opcodes blocked)
-      - No bucket routing (ROUTE opcode blocked)
-      - No performance optimization
-      - No meta-circular bootstrap
+    - **Archived to Ra**: Implementation complete (47 tests, `tools/audit_bytecode.sh`)
 
 ---
 
@@ -144,18 +124,19 @@ _(No active items.)_
 
 10. **Bytecode VM mapping v0/v1** ✅
     - Deliverables: `docs/BytecodeMapping.v0.md` (replay-only), `docs/BytecodeMapping.v1.md` (execution)
-    - v0 Done (replay-only):
+    - v0 Done (replay-only) - **IMPLEMENTED**:
       - Minimal instruction set: 10 opcodes (INIT, LOAD_EVENT, CANON_EVENT, etc.)
       - Event → opcode mapping (trace.start, step, trace.end)
       - Fail-loud on unmappable events
       - Reserved opcodes blocked (STALL, FIX, ROUTE, CLOSE)
-    - v1 Done (execution - design only):
+      - Implementation: `rcx_pi/bytecode_vm.py`, 47 tests, `tools/audit_bytecode.sh`
+    - v1 Done (execution - design only, not implemented):
       - Register-centric model: R0 (value), RH (hash), RP (pattern), RS (status), RF (fix target)
       - Bytecode ops: OP_MATCH, OP_REDUCE, OP_STALL, OP_FIX, OP_FIXED
       - Opcode table: semantic placeholders (0x10-0x41), not ABI commitment
       - Registers authoritative during execution, trace authoritative for validation
       - Execution loop: ACTIVE → STALL → (optional FIX) → FIXED → ACTIVE
-    - **Promoted to NEXT #17**: Bytecode VM v0 Implementation (replay-only first, v1 execution later)
+    - **v0 Archived to Ra**: NEXT #17 complete (v1 remains design-only)
 
 11. **Enginenews spec mapping v0** ✅
     - Deliverable: `docs/EnginenewsSpecMapping.v0.md`
