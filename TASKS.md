@@ -87,11 +87,17 @@ Items here are implemented and verified under current invariants. Changes requir
   - `assert_handler_pure()`, `validate_kernel_boundary()`
   - `tools/audit_semantic_purity.sh` extended with checks 9-11
 - RCX Kernel Phase 1 (`rcx_pi/kernel.py`, `docs/RCXKernel.v0.md`, 47 tests)
-- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/EVAL_SEED.v0.md`, 71 tests):
+- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/EVAL_SEED.v0.md`, 125 tests):
   - Core operations: `match`, `substitute`, `apply_projection`, `step`
   - Only special form: `{"var": "x"}` (variable binding)
   - Kernel handlers: step, stall, init
   - Answer: EVAL_SEED is tractable (~200 lines)
+  - Adversary tests: 43 attack tests in `test_eval_seed_adversary.py`
+- Verification Agent Infrastructure (`tools/agents/`):
+  - Verifier agent: read-only audit against North Star invariants
+  - Adversary agent: red team attack testing
+  - PR verification reminder workflow (auto-comment on sensitive file changes)
+  - RATCHET debt policy: threshold can only decrease, never increase
 
 ---
 
