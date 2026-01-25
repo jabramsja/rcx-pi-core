@@ -20,6 +20,12 @@ PYTHONHASHSEED=0 pytest -q -k 'independent_encounter'
 echo "== 3) Enginenews tests only =="
 PYTHONHASHSEED=0 pytest -q -k 'enginenews'
 
+echo "== 3.1) Bytecode VM v0 tests =="
+PYTHONHASHSEED=0 pytest -q tests/test_bytecode_vm_v0.py
+
+echo "== 3.2) Bytecode VM v0 audit =="
+./tools/audit_bytecode.sh
+
 echo "== 4) Anti-cheat scans =="
 echo "-- no private attr access in tests/"
 ! grep -RInE '\._[a-zA-Z0-9]+' tests/ || { echo "Found private attr access in tests/"; exit 1; }

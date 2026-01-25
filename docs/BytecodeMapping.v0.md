@@ -1,6 +1,15 @@
 # RCX Bytecode Mapping (v0)
 
-**Status: DESIGN DOCUMENT — No code changes.**
+**Status: IMPLEMENTED**
+
+**Implementation status:**
+- ✅ Design doc complete (`docs/BytecodeMapping.v0.md`)
+- ✅ BytecodeVM class: `rcx_pi/bytecode_vm.py`
+- ✅ Tests: `tests/test_bytecode_vm_v0.py` (47 tests)
+- ✅ Audit script: `tools/audit_bytecode.sh`
+- ✅ All 10 v0 opcodes implemented with full test coverage
+- ✅ Golden round-trip tests pass (4 v1 fixtures)
+- ✅ Reserved opcode guard in place (STALL/FIX/ROUTE/CLOSE blocked)
 
 This document defines the mapping from frozen trace event schema (v1) to a minimal bytecode VM sufficient for deterministic replay. It does NOT extend the trace schema or add new execution semantics.
 
