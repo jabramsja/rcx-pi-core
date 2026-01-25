@@ -127,6 +127,18 @@ def canon_event_json(ev: Mapping[str, Any]) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
 
 
+def canon_jsonl(events: Iterable[Mapping[str, Any]]) -> str:
+    """
+    Serialize canonical events to JSONL (one event per line, newline-terminated).
+    """
+    canon = canon_events(events)
+    lines = [
+        json.dumps(e, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
+        for e in canon
+    ]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def value_hash(mu: Any) -> str:
     """
     Compute deterministic hash of a value for trace references.
