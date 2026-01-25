@@ -24,9 +24,20 @@ All notable changes to RCX are documented in this file.
   - 7 tests in `test_trace_canon_v1.py`
   - v2 event support (accepts both v1 and v2 events)
 
+### Runtime
+- **Second Independent Encounter v0** (NEXT #16)
+  - Stall memory tracking: `_stall_memory` maps pattern_id → value_hash
+  - Closure signal detection: `_check_second_independent_encounter()`
+  - Memory clearing on `execution.fixed`: `_clear_stall_memory_for_value()`
+  - Public API: `closure_evidence`, `has_closure` properties
+  - `stall()` and `consume_stall()` now return bool (closure detected)
+  - 15 tests in `test_second_independent_encounter.py`
+  - All 8 pathological scenarios from IndependentEncounter.v0.md tested
+
 ### Docs
 - Updated `docs/RuleAsMotif.v0.md` to reflect implementation status
 - Updated `docs/cli_quickstart.md` with rules commands
+- Updated `docs/IndependentEncounter.v0.md` to IMPLEMENTED status
 
 ## Unreleased
 

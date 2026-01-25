@@ -1,6 +1,13 @@
 # Independent Encounter Semantics v0
 
-Status: VECTOR (design-first, no code changes)
+Status: IMPLEMENTED
+
+**Implementation status:**
+- ✅ Stall memory tracking (`_stall_memory: Dict[str, str]`)
+- ✅ Closure signal detection (`_check_second_independent_encounter()`)
+- ✅ Memory clearing on `execution.fixed` (`_clear_stall_memory_for_value()`)
+- ✅ Public API: `closure_evidence`, `has_closure` properties
+- ✅ All 8 pathological scenarios tested (`tests/test_second_independent_encounter.py`)
 
 This document defines the "second independent encounter" rule and how it is tracked using existing RCX-π v2 execution/trace concepts.
 
@@ -209,3 +216,24 @@ Second independent encounter occurs at time t2 for (v, p) if:
 
 - execution.stall(v, p) occurred before at t1
 - between t1 and t2 there was no execution.fixed that changed v
+
+---
+
+## Implementation
+
+Document version: v0
+Last updated: 2026-01-25
+Status: IMPLEMENTED
+
+Implementation:
+- `rcx_pi/trace_canon.py` (ExecutionEngine with stall memory tracking)
+- `tests/test_second_independent_encounter.py` (15 tests covering all 8 scenarios)
+
+Key methods:
+- `_stall_memory`: Dict mapping pattern_id → value_hash
+- `_closure_evidence`: List of closure evidence entries
+- `_check_second_independent_encounter()`: Detects second stall at same (v, p)
+- `_clear_stall_memory_for_value()`: Clears entries on execution.fixed
+- `closure_evidence` property: Returns list of detected closures
+- `has_closure` property: True if any closure detected
+- `stall()` / `consume_stall()`: Now return bool indicating closure detection
