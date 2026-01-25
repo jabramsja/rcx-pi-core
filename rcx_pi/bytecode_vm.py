@@ -1,8 +1,9 @@
 """
-RCX Bytecode VM v0/v1a - Replay + STALL execution.
+RCX Bytecode VM v0/v1b - Replay + STALL/FIX/FIXED execution.
 
 v0: Replay-only bytecode execution for v1 trace events.
-v1a: Adds OP_STALL execution (first step toward full execution semantics).
+v1a: Adds OP_STALL execution (stall declaration).
+v1b: Adds OP_FIX/OP_FIXED execution (stall resolution).
 
 Design docs:
 - docs/BytecodeMapping.v0.md (replay)
@@ -41,7 +42,7 @@ class ExecutionStatus(Enum):
 
 class Opcode(Enum):
     """
-    Bytecode opcodes for v0 replay + v1a execution.
+    Bytecode opcodes for v0 replay + v1b execution.
 
     v0 opcodes (implemented):
     - INIT through HALT_ERR: Core replay operations
@@ -49,8 +50,12 @@ class Opcode(Enum):
     v1a opcodes (implemented):
     - STALL: Execution stall (pattern match failed)
 
-    Reserved opcodes (NOT implemented until v1b+):
-    - FIX, ROUTE, CLOSE: Blocked until explicit promotion
+    v1b opcodes (implemented):
+    - FIX: Declare fix target (optional, must match current value_hash)
+    - FIXED: Complete fix (value transition, return to ACTIVE)
+
+    Reserved opcodes (NOT implemented until v1c+):
+    - ROUTE, CLOSE: Blocked until explicit promotion
 
     Debug opcodes (v2 observability only):
     - DBG_STALL, DBG_APPLIED, DBG_NORMAL: No state change, gated by RCX_TRACE_V2
@@ -67,10 +72,13 @@ class Opcode(Enum):
     HALT_OK = auto()
     HALT_ERR = auto()
 
-    # Reserved opcodes (v1+ only, blocked in v0)
-    # These are defined for documentation but must not be executed
-    STALL = auto()
-    FIX = auto()
+    # Execution opcodes (v1+)
+    # These are defined for documentation and now implemented
+    STALL = auto()   # v1a: Declare no reduction available
+    FIX = auto()     # v1b: Declare fix target (optional)
+    FIXED = auto()   # v1b: Complete fix with value transition
+
+    # Reserved opcodes (v1c+ only, blocked until promotion)
     ROUTE = auto()
     CLOSE = auto()
 
@@ -80,9 +88,9 @@ class Opcode(Enum):
     DBG_NORMAL = auto()
 
 
-# Reserved opcodes that must not be executed until v1b+
-# Note: STALL was removed in v1a (now implemented)
-RESERVED_OPCODES = frozenset([Opcode.FIX, Opcode.ROUTE, Opcode.CLOSE])
+# Reserved opcodes that must not be executed until v1c+
+# Note: STALL removed in v1a, FIX removed in v1b (now implemented)
+RESERVED_OPCODES = frozenset([Opcode.ROUTE, Opcode.CLOSE])
 
 # Valid v1 event types for replay
 V1_EVENT_TYPES = frozenset(["trace.start", "step", "trace.end"])
@@ -122,20 +130,21 @@ class BytecodeVMError(Exception):
 
 class BytecodeVM:
     """
-    Bytecode VM for v0 replay + v1a execution.
+    Bytecode VM for v0 replay + v1b execution.
 
     State model (per BytecodeMapping.v0.md section 3 + v1.md):
     - mu_store: Map from event index to mu payload
-    - buckets: Routing state (declared but not modified in v0/v1a)
+    - buckets: Routing state (declared but not modified in v0/v1b)
     - cursor: Current position and phase
     - artifacts: Output accumulator and error state
 
-    v1a registers (per BytecodeMapping.v1.md):
+    v1 registers (per BytecodeMapping.v1.md):
     - RS: Execution status (ACTIVE or STALLED)
     - RP: Current pattern_id being matched
     - RH: Current value_hash
+    - RF: Pending fix target hash (v1b, optional)
 
-    v0 is replay-only. v1a adds OP_STALL execution.
+    v0 is replay-only. v1a adds OP_STALL. v1b adds OP_FIX/OP_FIXED.
     """
 
     def __init__(self, enabled: bool = None) -> None:
@@ -153,10 +162,11 @@ class BytecodeVM:
         self.cursor = Cursor()
         self.artifacts = Artifacts()
 
-        # v1a registers (per BytecodeMapping.v1.md)
+        # v1 registers (per BytecodeMapping.v1.md)
         self._rs: ExecutionStatus = ExecutionStatus.ACTIVE  # RS: status
         self._rp: Optional[str] = None  # RP: pattern_id
         self._rh: Optional[str] = None  # RH: value_hash
+        self._rf: Optional[str] = None  # RF: pending_fix_target_hash (v1b)
 
         # Second Independent Encounter tracking (for closure detection)
         self._stall_memory: Dict[str, str] = {}  # pattern_id -> value_hash
@@ -197,7 +207,7 @@ class BytecodeVM:
         """List of executed instructions (for debugging/golden comparison)."""
         return list(self._instructions)
 
-    # --- v1a Register Properties ---
+    # --- v1 Register Properties ---
 
     @property
     def execution_status(self) -> ExecutionStatus:
@@ -213,6 +223,11 @@ class BytecodeVM:
     def value_hash(self) -> Optional[str]:
         """RH register: Current value_hash."""
         return self._rh
+
+    @property
+    def fix_target_hash(self) -> Optional[str]:
+        """RF register: Pending fix target hash (v1b, set by OP_FIX)."""
+        return self._rf
 
     @property
     def closure_evidence(self) -> List[Dict[str, str]]:
@@ -234,10 +249,11 @@ class BytecodeVM:
         self._current_event = None
         self._canonical_event = None
         self._instructions = []
-        # v1a state
+        # v1 state
         self._rs = ExecutionStatus.ACTIVE
         self._rp = None
         self._rh = None
+        self._rf = None  # v1b
         self._stall_memory = {}
         self._closure_evidence = []
 
@@ -343,7 +359,7 @@ class BytecodeVM:
         self.artifacts.error = msg
         self._record(Opcode.HALT_ERR, message=msg)
 
-    # --- v1a Execution Opcodes ---
+    # --- v1 Execution Opcodes ---
 
     def op_stall(self, pattern_id: str, value_hash: str) -> bool:
         """
@@ -404,11 +420,11 @@ class BytecodeVM:
 
     def simulate_fix_for_test(self) -> None:
         """
-        Test infrastructure: Simulate a FIX resolving a STALL.
+        Test infrastructure: Simulate a FIX resolving a STALL without value change.
 
-        This is a placeholder until OP_FIX is implemented in v1b.
-        Resets RS from STALLED to ACTIVE, simulating a successful fix.
-        Only for testing second independent encounter detection.
+        Use this for testing second independent encounter detection where the
+        value stays the same. For tests that need actual value transitions,
+        use op_fixed() instead.
 
         NOTE: This does NOT clear stall_memory (per IndependentEncounter.v0.md,
         stall memory is only cleared on value transition, not on fix).
@@ -418,6 +434,84 @@ class BytecodeVM:
                 "simulate_fix_for_test: Cannot fix when not STALLED"
             )
         self._rs = ExecutionStatus.ACTIVE
+
+    # --- v1b Execution Opcodes ---
+
+    def op_fix(self, target_hash: str) -> None:
+        """
+        OP_FIX: Declare intent to fix a stalled value.
+
+        Per BytecodeMapping.v1.md:
+        - Allowed only when RS == STALLED
+        - Requires target_hash == RH (must match current value)
+        - Sets RF = target_hash
+        - Emits execution.fix(target_hash=RF)
+        - Does NOT change R0/RH
+
+        This is an optional step before OP_FIXED. The VM can go directly
+        from STALL to FIXED without OP_FIX.
+        """
+        # Constraint: must be stalled
+        if self._rs != ExecutionStatus.STALLED:
+            raise BytecodeVMError(
+                f"OP_FIX: Cannot fix when not STALLED (status={self._rs.name})"
+            )
+
+        # Constraint: target_hash must match current RH
+        if target_hash != self._rh:
+            raise BytecodeVMError(
+                f"OP_FIX: target_hash mismatch (target={target_hash}, RH={self._rh})"
+            )
+
+        # Set RF register
+        self._rf = target_hash
+
+        # Record instruction
+        self._record(Opcode.FIX, target_hash=target_hash)
+
+    def op_fixed(self, after_value: Any, after_hash: str) -> None:
+        """
+        OP_FIXED: Complete a fix by transitioning to a new value.
+
+        Per BytecodeMapping.v1.md:
+        - Allowed only when RS == STALLED
+        - If RF is set, it must equal RH (validated by OP_FIX)
+        - Computes after_hash from after_value (caller provides both)
+        - Emits execution.fixed(before_hash=RH, after_hash=after_hash)
+        - Sets R0 = after_value; RH = after_hash
+        - Sets RS = ACTIVE
+        - Clears RF
+        - Clears stall_memory (value transition per IndependentEncounter.v0.md)
+
+        Note: The after_hash is provided by the caller to maintain determinism.
+        The VM trusts that after_hash is correctly computed from after_value.
+        """
+        # Constraint: must be stalled
+        if self._rs != ExecutionStatus.STALLED:
+            raise BytecodeVMError(
+                f"OP_FIXED: Cannot complete fix when not STALLED (status={self._rs.name})"
+            )
+
+        # If RF is set (OP_FIX was called), verify it matches RH
+        if self._rf is not None and self._rf != self._rh:
+            raise BytecodeVMError(
+                f"OP_FIXED: RF/RH mismatch (RF={self._rf}, RH={self._rh})"
+            )
+
+        # Capture before_hash
+        before_hash = self._rh
+
+        # Update registers
+        # Note: R0 (value) is conceptual - we track RH (hash) for validation
+        self._rh = after_hash
+        self._rs = ExecutionStatus.ACTIVE
+        self._rf = None  # Clear fix target
+
+        # Clear stall_memory on value transition (per IndependentEncounter.v0.md)
+        self._stall_memory.clear()
+
+        # Record instruction
+        self._record(Opcode.FIXED, before_hash=before_hash, after_hash=after_hash)
 
     # --- Event Type Mapping ---
 

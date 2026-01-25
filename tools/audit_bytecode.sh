@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Bytecode VM v0/v1a anti-cheat audit script
+# Bytecode VM v0/v1b anti-cheat audit script
 #
 # Checks for:
 # 1. Private attribute access in tests (._foo)
-# 2. Reserved opcode execution logic (FIX/ROUTE/CLOSE blocked; STALL implemented in v1a)
+# 2. Reserved opcode execution logic (ROUTE/CLOSE blocked; STALL/FIX/FIXED implemented)
 # 3. Hardcoded hashes or mocked VM internals
-# 4. Opcode coverage (10 v0 opcodes + v1a STALL)
+# 4. Opcode coverage (10 v0 opcodes + v1a STALL + v1b FIX/FIXED)
 
 set -e
 
@@ -14,7 +14,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-echo "=== Bytecode VM v0 Audit ==="
+echo "=== Bytecode VM v0/v1b Audit ==="
 echo ""
 
 FAILED=0
@@ -30,10 +30,10 @@ fi
 echo "  Done (warnings above are advisory)"
 echo ""
 
-# 2. Reserved opcode guard - FIX/ROUTE/CLOSE must not have execution logic
-# Note: STALL was promoted in v1a and is now implemented
+# 2. Reserved opcode guard - ROUTE/CLOSE must not have execution logic
+# Note: STALL promoted in v1a, FIX/FIXED promoted in v1b
 echo "Checking reserved opcode guard..."
-for op in fix route close; do
+for op in route close; do
     if grep -n "def op_${op}" rcx_pi/bytecode_vm.py 2>/dev/null | grep -v "Reserved" | grep -v "#"; then
         echo "ERROR: Reserved opcode ${op} has execution method (not yet promoted)"
         echo "  Reserved opcodes must not be implemented until promoted from VECTOR"
@@ -47,8 +47,22 @@ else
     echo "ERROR: STALL opcode should be implemented (v1a)"
     FAILED=1
 fi
+# Verify FIX is implemented (v1b)
+if grep -q "def op_fix" rcx_pi/bytecode_vm.py 2>/dev/null; then
+    echo "  ✓ FIX opcode implemented (v1b)"
+else
+    echo "ERROR: FIX opcode should be implemented (v1b)"
+    FAILED=1
+fi
+# Verify FIXED is implemented (v1b)
+if grep -q "def op_fixed" rcx_pi/bytecode_vm.py 2>/dev/null; then
+    echo "  ✓ FIXED opcode implemented (v1b)"
+else
+    echo "ERROR: FIXED opcode should be implemented (v1b)"
+    FAILED=1
+fi
 if [ $FAILED -eq 0 ]; then
-    echo "  No reserved opcode execution logic found (FIX/ROUTE/CLOSE blocked)"
+    echo "  No reserved opcode execution logic found (ROUTE/CLOSE blocked)"
 fi
 echo ""
 
@@ -78,11 +92,12 @@ if [ $FAILED -eq 0 ]; then
 fi
 echo ""
 
-# 5. Opcode coverage check (v0 + v1a STALL)
+# 5. Opcode coverage check (v0 + v1a STALL + v1b FIX/FIXED)
 echo "Checking opcode coverage..."
 V0_OPCODES="INIT LOAD_EVENT CANON_EVENT STORE_MU EMIT_CANON ADVANCE SET_PHASE ASSERT_CONTIGUOUS HALT_OK HALT_ERR"
 V1A_OPCODES="STALL"
-ALL_OPCODES="$V0_OPCODES $V1A_OPCODES"
+V1B_OPCODES="FIX FIXED"
+ALL_OPCODES="$V0_OPCODES $V1A_OPCODES $V1B_OPCODES"
 MISSING_COVERAGE=""
 for op in $ALL_OPCODES; do
     # Check for either Opcode.NAME or op_name pattern
@@ -95,7 +110,7 @@ if [ -n "$MISSING_COVERAGE" ]; then
     echo "ERROR: Missing test coverage for opcodes:$MISSING_COVERAGE"
     FAILED=1
 else
-    echo "  All v0 opcodes (10) + v1a STALL have test coverage"
+    echo "  All v0 opcodes (10) + v1a STALL + v1b FIX/FIXED have test coverage"
 fi
 echo ""
 
@@ -106,7 +121,7 @@ if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
     FAILED=1
 else
     # Check for required classes
-    for cls in BytecodeVM Opcode Phase; do
+    for cls in BytecodeVM Opcode Phase ExecutionStatus; do
         if ! grep -q "class $cls" rcx_pi/bytecode_vm.py; then
             echo "ERROR: Missing class $cls in bytecode_vm.py"
             FAILED=1
@@ -122,8 +137,8 @@ if [ ! -f "tests/test_bytecode_vm_v0.py" ]; then
     echo "ERROR: tests/test_bytecode_vm_v0.py not found"
     FAILED=1
 else
-    # Check for test classes (v0 + v1a)
-    TEST_CLASSES="TestOpcodeInit TestEventMappingTraceStart TestGoldenRoundTrip TestRejection TestReservedOpcodeGuard TestOpcodeStall TestV1aRegisters"
+    # Check for test classes (v0 + v1a + v1b)
+    TEST_CLASSES="TestOpcodeInit TestEventMappingTraceStart TestGoldenRoundTrip TestRejection TestReservedOpcodeGuard TestOpcodeStall TestV1aRegisters TestOpcodeFix TestOpcodeFixed TestV1bRegisters"
     for cls in $TEST_CLASSES; do
         if ! grep -q "class $cls" tests/test_bytecode_vm_v0.py; then
             echo "WARNING: Missing test class $cls"
@@ -136,9 +151,9 @@ echo ""
 # Final result
 echo "=== Audit Result ==="
 if [ $FAILED -eq 0 ]; then
-    echo "PASS: Bytecode VM v0/v1a audit passed"
+    echo "PASS: Bytecode VM v0/v1b audit passed"
     exit 0
 else
-    echo "FAIL: Bytecode VM v0/v1a audit failed"
+    echo "FAIL: Bytecode VM v0/v1b audit failed"
     exit 1
 fi

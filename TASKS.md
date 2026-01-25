@@ -79,6 +79,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
 - Enginenews Spec v0 (stress test harness, 18 tests in `test_enginenews_spec_v0.py`, 4 fixtures)
 - Bytecode VM v0 (replay-only, 10 opcodes, 47 tests in `test_bytecode_vm_v0.py`, `tools/audit_bytecode.sh`)
+- Bytecode VM v1a (OP_STALL execution, v1a registers RS/RP/RH, closure detection, 61 tests)
 
 ---
 
@@ -101,27 +102,29 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-18. **Bytecode VM v1a: OP_STALL execution** (promoted from VECTOR #10 v1)
+19. **Bytecode VM v1b: OP_FIX/OP_FIXED execution** (promoted from VECTOR #10 v1)
     - Design doc: `docs/BytecodeMapping.v1.md`
     - Promotion rationale:
-      - Incremental approach: implement one execution opcode at a time
-      - STALL is the simplest execution opcode (no value transformation)
-      - De-risks v1b/v1c (FIX/FIXED) by validating execution model first
-      - Integrates with existing ExecutionEngine stall tracking
+      - Builds on v1a (STALL) to complete stall→fix→active cycle
+      - FIX/FIXED are the resolution side of the execution loop
+      - Enables full execution testing without ROUTE/CLOSE complexity
     - Scope (minimal):
-      - Add RS (status) register to BytecodeVM
-      - Add RP (pattern_id) and RH (value_hash) registers
-      - Implement OP_STALL: emit execution.stall, set RS=STALLED
-      - Constraint: no double-stall (STALL while STALLED is error)
-      - Integration with Second Independent Encounter detection
+      - Add RF (pending_fix_target_hash) register to BytecodeVM
+      - Implement OP_FIX: validate RS==STALLED && target_hash==RH, set RF, emit execution.fix
+      - Implement OP_FIXED: validate RS==STALLED, compute after_hash, emit execution.fixed, set RS=ACTIVE
+      - Constraint: OP_FIX optional (OP_FIXED valid with or without prior OP_FIX)
+      - Clear stall_memory on value transition (per IndependentEncounter.v0.md)
     - Deliverables:
-      - Update `rcx_pi/bytecode_vm.py` with OP_STALL execution
-      - Tests for OP_STALL in `tests/test_bytecode_vm_v0.py`
-      - Update `tools/audit_bytecode.sh` (STALL no longer reserved)
-    - Non-goals (v1a scope):
-      - No FIX/FIXED opcodes (v1b)
+      - Update `rcx_pi/bytecode_vm.py` with OP_FIX/OP_FIXED execution
+      - Tests for OP_FIX/OP_FIXED in `tests/test_bytecode_vm_v0.py`
+      - Update `tools/audit_bytecode.sh` (FIX no longer reserved)
+    - Non-goals (v1b scope):
       - No ROUTE/CLOSE opcodes (blocked)
-      - No full execution loop (v1c)
+      - No full execution loop orchestration (v1c)
+
+18. **Bytecode VM v1a: OP_STALL execution** ✅ (promoted from VECTOR #10 v1)
+    - Design doc: `docs/BytecodeMapping.v1.md`
+    - **Archived to Ra**: Implementation complete (61 tests, v1a registers, closure detection)
 
 17. **Bytecode VM v0 Implementation** ✅ (promoted from VECTOR #10)
     - Design doc: `docs/BytecodeMapping.v0.md`
