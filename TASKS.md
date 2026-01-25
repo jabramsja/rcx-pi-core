@@ -95,7 +95,16 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-_(No active items.)_
+15. **Rule Motif Validation Gate v0** ✅ (follows from VECTOR #13, NEXT #14)
+    - Deliverable: `validate_rule_motifs_v0()` + `rules --check-rule-motifs` CLI
+    - Done:
+      - `validate_rule_motifs_v0(rule_motifs)` pure helper returning validation report
+      - Validation rules: structure, id uniqueness, variable binding, host leakage, canonicalization
+      - CLI: `python3 -m rcx_pi.rcx_cli rules --check-rule-motifs`
+      - CLI: `python3 -m rcx_pi.rcx_cli rules --check-rule-motifs-from <path>`
+      - Output: `{"v":1,"rule_count":N,"ok":true/false,"errors":[...]}`
+      - 16 subprocess CLI tests (positive + negative cases)
+    - Non-goals: no matching, no application, no engine changes
 
 ---
 
