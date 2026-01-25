@@ -559,6 +559,30 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
+# 18. Host Recursion Debt (Anti-Momentum Guardrail)
+# -----------------------------------------------------------------------------
+echo "== 18. Host Recursion: Debt Tracking =="
+
+echo "Checking for @host_recursion markers (Python recursion that should become RCX iteration)..."
+
+# Only count actual decorator usage (line starts with @host_recursion after whitespace)
+HOST_RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ 2>/dev/null | wc -l | tr -d ' ')
+if [ "$HOST_RECURSION_COUNT" -gt 0 ]; then
+    echo "  Found $HOST_RECURSION_COUNT @host_recursion sites (debt to eliminate)"
+    echo "  These MUST be replaced with kernel iteration before self-hosting:"
+    grep -rnE "^[[:space:]]*@host_recursion" rcx_pi/ 2>/dev/null | while read line; do
+        echo "    $line"
+    done
+    echo ""
+    echo "  Phase 3 goal: zero @host_recursion markers"
+    WARNINGS=$((WARNINGS + 1))
+else
+    echo "  ✓ No @host_recursion markers (debt paid or never incurred)"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo "=== Semantic Purity Audit Summary ==="
@@ -581,6 +605,7 @@ echo "  14. Bare except: No swallowed validation errors"
 echo "  15. Test integrity: No guardrail mocking"
 echo "  16. Bootstrap markers: Temporary Python code tracked"
 echo "  17. mu_equal: Structural equality function exists"
+echo "  18. Host recursion: Debt tracking (must be zero for Phase 3)"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then

@@ -16,7 +16,52 @@ from __future__ import annotations
 
 from typing import Any
 
-from rcx_pi.mu_type import Mu, assert_mu, is_mu
+from rcx_pi.mu_type import Mu, assert_mu, is_mu, mark_bootstrap
+
+
+# =============================================================================
+# HOST RECURSION DEBT TRACKING
+# =============================================================================
+#
+# Functions marked with @host_recursion are using Python's call stack
+# instead of RCX kernel iteration. This is TEMPORARY scaffolding.
+#
+# Each @host_recursion site MUST:
+# 1. Document WHY it exists
+# 2. Have a projection-based equivalent planned
+# 3. Be eliminated before self-hosting is complete
+#
+# The audit (tools/audit_semantic_purity.sh) counts these sites.
+# Phase 3 goal: zero @host_recursion markers.
+# =============================================================================
+
+
+def host_recursion(reason: str):
+    """
+    Mark a function as using host recursion (Python call stack).
+
+    This is a debt marker. The function works, but it's doing computation
+    that should eventually be done by RCX kernel iteration.
+
+    Args:
+        reason: Why this host recursion exists and how it will be eliminated.
+
+    Usage:
+        @host_recursion("Tree traversal - will become iterative projections in Phase 3")
+        def substitute(body, bindings):
+            ...
+    """
+    def decorator(func):
+        # Mark the function so audits can find it
+        func._host_recursion = True
+        func._host_recursion_reason = reason
+        # Also register with bootstrap tracking
+        mark_bootstrap(
+            f"host_recursion:{func.__name__}",
+            f"Host recursion: {reason}"
+        )
+        return func
+    return decorator
 
 
 # =============================================================================
@@ -110,6 +155,10 @@ def get_var_name(mu: Mu) -> str:
     return mu["var"]
 
 
+@host_recursion(
+    "Recursive tree traversal for pattern matching. "
+    "Phase 3: express as iterative projections where kernel loop provides recursion."
+)
 def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """
     Match pattern against input, returning bindings or NO_MATCH.
@@ -211,6 +260,11 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     return NO_MATCH
 
 
+@host_recursion(
+    "Recursive tree traversal for variable substitution. "
+    "Phase 3: express as iterative projections - each step replaces one var site, "
+    "kernel loop provides recursion until stall (no more var sites)."
+)
 def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """
     Substitute variable sites in body with bound values.
