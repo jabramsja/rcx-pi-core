@@ -44,7 +44,7 @@ from typing import List
 
 
 HELP = """\
-usage: rcx <program|world|trace> ...
+usage: rcx <program|world|trace|rules> ...
 
 RCX umbrella CLI (routes to program descriptor, program run, and world trace tools).
 
@@ -53,6 +53,7 @@ commands:
   program run        Delegate to: python -m rcx_pi.program_run_cli ...
   world trace        Delegate to: python -m rcx_pi.worlds.world_trace_cli ...
   trace              Alias for:   world trace
+  rules              Rule motif observability (--print-rule-motifs)
 
 examples:
   python3 -m rcx_pi.rcx_cli program describe --schema
@@ -60,6 +61,7 @@ examples:
   python3 -m rcx_pi.rcx_cli program run succ-list "[1,2,3]" --pretty
   python3 -m rcx_pi.rcx_cli world trace pingpong ping --max-steps 12 --pretty
   python3 -m rcx_pi.rcx_cli trace pingpong ping --max-steps 6 --pretty
+  python3 -m rcx_pi.rcx_cli rules --print-rule-motifs
 """
 
 
@@ -116,6 +118,12 @@ def main(argv: List[str] | None = None) -> int:
 
         print(f"rcx: unknown world subcommand: {sub!r}", file=sys.stderr)
         return _help(2)
+
+    if top == "rules":
+        rest = argv[1:]
+        from rcx_pi.rule_motifs_v0 import rules_main
+
+        return int(rules_main(rest))
 
     print(f"rcx: unknown command: {top!r}", file=sys.stderr)
     return _help(2)
