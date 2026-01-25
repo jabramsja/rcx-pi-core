@@ -1,12 +1,13 @@
 """
-Tests for RCX Bytecode VM v0.
+Tests for RCX Bytecode VM v0/v1a.
 
 Covers:
-- Opcode unit tests (each of 10 v0 opcodes)
+- Opcode unit tests (10 v0 opcodes + v1a OP_STALL)
 - Event mapping tests (trace.start, step, trace.end, unknown)
 - Golden round-trip tests (v1 fixtures)
 - Rejection tests (bad index, unknown type, schema violation, phase error)
-- Reserved opcode guard tests
+- Reserved opcode guard tests (FIX/ROUTE/CLOSE blocked, STALL implemented)
+- v1a OP_STALL tests (execution, closure detection)
 """
 
 import json
@@ -16,6 +17,7 @@ from pathlib import Path
 from rcx_pi.bytecode_vm import (
     BytecodeVM,
     BytecodeVMError,
+    ExecutionStatus,
     Opcode,
     Phase,
     RESERVED_OPCODES,
@@ -418,18 +420,183 @@ class TestRejection:
 
 
 class TestReservedOpcodeGuard:
-    """Tests that reserved opcodes are blocked in v0."""
+    """Tests that reserved opcodes are blocked (v1a: STALL is now implemented)."""
 
     def test_reserved_opcodes_defined(self):
-        """Verify reserved opcodes are in the blocked set."""
-        assert Opcode.STALL in RESERVED_OPCODES
+        """Verify reserved opcodes are in the blocked set (v1a: STALL removed)."""
+        assert Opcode.STALL not in RESERVED_OPCODES  # v1a: STALL is implemented
         assert Opcode.FIX in RESERVED_OPCODES
         assert Opcode.ROUTE in RESERVED_OPCODES
         assert Opcode.CLOSE in RESERVED_OPCODES
 
     def test_reserved_opcodes_count(self):
-        """Verify exactly 4 reserved opcodes."""
-        assert len(RESERVED_OPCODES) == 4
+        """Verify exactly 3 reserved opcodes (v1a: STALL removed)."""
+        assert len(RESERVED_OPCODES) == 3
+
+    def test_stall_is_implemented(self):
+        """Verify STALL opcode exists and is not reserved (v1a)."""
+        assert hasattr(Opcode, "STALL")
+        assert Opcode.STALL not in RESERVED_OPCODES
+
+
+# --- v1a OP_STALL Tests ---
+
+
+class TestOpcodeStall:
+    """Tests for OP_STALL opcode (v1a execution)."""
+
+    def test_stall_sets_status_to_stalled(self):
+        """OP_STALL sets RS register to STALLED."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert vm.execution_status == ExecutionStatus.STALLED
+
+    def test_stall_sets_registers(self):
+        """OP_STALL sets RP and RH registers."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        vm.op_stall(pattern_id="pattern_abc", value_hash="hash_xyz")
+        assert vm.pattern_id == "pattern_abc"
+        assert vm.value_hash == "hash_xyz"
+
+    def test_stall_records_instruction(self):
+        """OP_STALL records instruction with args."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        stall_insts = [i for i in vm.instructions if i.opcode == Opcode.STALL]
+        assert len(stall_insts) == 1
+        assert stall_insts[0].args["pattern_id"] == "p1"
+        assert stall_insts[0].args["value_hash"] == "h1"
+
+    def test_double_stall_raises_error(self):
+        """Cannot stall while already STALLED (constraint from v1 doc)."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert vm.execution_status == ExecutionStatus.STALLED
+
+        with pytest.raises(BytecodeVMError, match="double-stall"):
+            vm.op_stall(pattern_id="p2", value_hash="h2")
+
+    def test_stall_returns_false_on_first_encounter(self):
+        """First stall at (pattern_id, value_hash) returns False (no closure)."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        result = vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert result is False
+        assert not vm.has_closure
+
+
+class TestSecondIndependentEncounterVM:
+    """Tests for closure detection via second independent encounter in VM."""
+
+    def test_second_stall_same_pattern_value_detects_closure(self):
+        """Second stall at same (pattern_id, value_hash) detects closure."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        # First stall
+        result1 = vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert result1 is False
+        assert not vm.has_closure
+
+        # Simulate a fix resolving the stall (placeholder for OP_FIX in v1b)
+        vm.simulate_fix_for_test()
+
+        # Second stall at same (p1, h1) - should detect closure
+        result2 = vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert result2 is True
+        assert vm.has_closure
+        assert len(vm.closure_evidence) == 1
+        assert vm.closure_evidence[0]["pattern_id"] == "p1"
+        assert vm.closure_evidence[0]["value_hash"] == "h1"
+        assert vm.closure_evidence[0]["reason"] == "second_independent_stall"
+
+    def test_different_value_no_closure(self):
+        """Stall at different value_hash does not detect closure."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.simulate_fix_for_test()
+
+        result = vm.op_stall(pattern_id="p1", value_hash="h2")  # Different hash
+        assert result is False
+        assert not vm.has_closure
+
+    def test_different_pattern_no_closure(self):
+        """Stall at different pattern_id does not detect closure."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.simulate_fix_for_test()
+
+        result = vm.op_stall(pattern_id="p2", value_hash="h1")  # Different pattern
+        assert result is False
+        assert not vm.has_closure
+
+    def test_stall_memory_tracks_per_pattern(self):
+        """Stall memory tracks value_hash per pattern_id."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        # Stall at p1 with h1
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.simulate_fix_for_test()
+
+        # Stall at p2 with h2 (different pattern)
+        vm.op_stall(pattern_id="p2", value_hash="h2")
+        vm.simulate_fix_for_test()
+
+        # Stall at p1 with h1 again - should detect closure for p1
+        result = vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert result is True
+        assert len(vm.closure_evidence) == 1
+        assert vm.closure_evidence[0]["pattern_id"] == "p1"
+
+
+class TestV1aRegisters:
+    """Tests for v1a register properties."""
+
+    def test_initial_execution_status_is_active(self):
+        """Initial RS register is ACTIVE."""
+        vm = BytecodeVM(enabled=True)
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+
+    def test_initial_pattern_id_is_none(self):
+        """Initial RP register is None."""
+        vm = BytecodeVM(enabled=True)
+        assert vm.pattern_id is None
+
+    def test_initial_value_hash_is_none(self):
+        """Initial RH register is None."""
+        vm = BytecodeVM(enabled=True)
+        assert vm.value_hash is None
+
+    def test_reset_clears_v1a_state(self):
+        """Reset clears v1a registers and stall memory."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        assert vm.execution_status == ExecutionStatus.STALLED
+        assert vm.pattern_id == "p1"
+
+        vm.reset()
+
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+        assert vm.pattern_id is None
+        assert vm.value_hash is None
+        assert not vm.has_closure
 
 
 # --- Determinism Tests ---
