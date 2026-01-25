@@ -771,19 +771,21 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "== 19. Host Debt: Threshold Check =="
 
-# Count ALL host debt markers
+# Count ALL debt markers (host operations + deferred reviews)
 # DEBT POLICY (RATCHET):
 # - Threshold is a CEILING that can only go DOWN, never up
 # - When debt is reduced, threshold MUST be lowered to match
 # - To add new debt, you must first reduce existing debt below threshold
+# - Deferred reviews ("PHASE 3 REVIEW") count as debt to prevent silent accumulation
 #
 # UPDATE THIS when debt is paid down:
-# - Phase 2 start: 5 (match + substitute scaffolding)
+# - Phase 2 start: 5 host + 1 review = 6
 # - After Phase 3: 0 (self-hosting complete)
-DEBT_THRESHOLD=5  # <-- RATCHET: Lower this as debt is paid, never raise it
+DEBT_THRESHOLD=6  # <-- RATCHET: Lower this as debt is paid, never raise it
 
-echo "Counting all @host_* debt markers..."
+echo "Counting all debt markers..."
 
+# Host operation debt (@host_* decorators)
 RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 ARITHMETIC_COUNT=$(grep -rE "^[[:space:]]*@host_arithmetic" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 BUILTIN_COUNT=$(grep -rE "^[[:space:]]*@host_builtin" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
@@ -791,9 +793,15 @@ MUTATION_COUNT=$(grep -rE "^[[:space:]]*@host_mutation" rcx_pi/ --include="*.py"
 COMPARISON_COUNT=$(grep -rE "^[[:space:]]*@host_comparison" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 STRING_COUNT=$(grep -rE "^[[:space:]]*@host_string_op" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 
-TOTAL_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT))
+HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT))
 
-echo "  Debt breakdown:"
+# Deferred review debt (PHASE 3 REVIEW markers)
+# These are items we've consciously deferred but MUST address - they're debt too
+REVIEW_COUNT=$(grep -rE "PHASE [0-9]+ REVIEW:" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+
+TOTAL_DEBT=$((HOST_DEBT + REVIEW_COUNT))
+
+echo "  Host operation debt (@host_* decorators):"
 echo "    @host_recursion:  $RECURSION_COUNT"
 echo "    @host_arithmetic: $ARITHMETIC_COUNT"
 echo "    @host_builtin:    $BUILTIN_COUNT"
@@ -801,7 +809,12 @@ echo "    @host_mutation:   $MUTATION_COUNT"
 echo "    @host_comparison: $COMPARISON_COUNT"
 echo "    @host_string_op:  $STRING_COUNT"
 echo "    ─────────────────────"
-echo "    TOTAL:            $TOTAL_DEBT (threshold: $DEBT_THRESHOLD)"
+echo "    Host subtotal:    $HOST_DEBT"
+echo ""
+echo "  Deferred review debt (PHASE N REVIEW markers):"
+echo "    Review markers:   $REVIEW_COUNT"
+echo "    ─────────────────────"
+echo "    TOTAL DEBT:       $TOTAL_DEBT (threshold: $DEBT_THRESHOLD)"
 echo ""
 
 if [ "$TOTAL_DEBT" -gt "$DEBT_THRESHOLD" ]; then
