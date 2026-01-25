@@ -76,6 +76,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Rule Motif Validation Gate v0 (`validate_rule_motifs_v0()`, `rules --check-rule-motifs`, 16 CLI tests)
 - Trace canon helper v1 (`canon_jsonl()`, 7 tests in `test_trace_canon_v1.py`)
 - Second Independent Encounter v0 (stall memory tracking, closure signal detection, 25 tests)
+- Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
 
 ---
 
@@ -140,6 +141,7 @@ _(No active items.)_
       - 5 normative examples (SHOULD/SHOULD NOT emit)
       - Future promotion checklist
     - Non-goal: no engine termination directive, no ROUTE opcode, no implementation
+    - **Archived to Ra**: Design complete, reporting tool implemented (`--print-closure-evidence`, `closure_evidence_v2()`)
 
 13. **Rule-as-Motif representation v0** ✅ (promoted from SINK: "Full VM bootstrap / meta-circular execution")
     - Deliverable: `docs/RuleAsMotif.v0.md`
