@@ -1,13 +1,14 @@
 """
-Tests for RCX Bytecode VM v0/v1a.
+Tests for RCX Bytecode VM v0/v1b.
 
 Covers:
-- Opcode unit tests (10 v0 opcodes + v1a OP_STALL)
+- Opcode unit tests (10 v0 opcodes + v1a OP_STALL + v1b OP_FIX/OP_FIXED)
 - Event mapping tests (trace.start, step, trace.end, unknown)
 - Golden round-trip tests (v1 fixtures)
 - Rejection tests (bad index, unknown type, schema violation, phase error)
-- Reserved opcode guard tests (FIX/ROUTE/CLOSE blocked, STALL implemented)
+- Reserved opcode guard tests (ROUTE/CLOSE blocked, STALL/FIX/FIXED implemented)
 - v1a OP_STALL tests (execution, closure detection)
+- v1b OP_FIX/OP_FIXED tests (stall resolution, value transition)
 """
 
 import json
@@ -420,23 +421,30 @@ class TestRejection:
 
 
 class TestReservedOpcodeGuard:
-    """Tests that reserved opcodes are blocked (v1a: STALL is now implemented)."""
+    """Tests that reserved opcodes are blocked (v1b: STALL/FIX/FIXED now implemented)."""
 
     def test_reserved_opcodes_defined(self):
-        """Verify reserved opcodes are in the blocked set (v1a: STALL removed)."""
-        assert Opcode.STALL not in RESERVED_OPCODES  # v1a: STALL is implemented
-        assert Opcode.FIX in RESERVED_OPCODES
+        """Verify reserved opcodes are in the blocked set (v1b: only ROUTE/CLOSE)."""
+        assert Opcode.STALL not in RESERVED_OPCODES  # v1a: implemented
+        assert Opcode.FIX not in RESERVED_OPCODES     # v1b: implemented
         assert Opcode.ROUTE in RESERVED_OPCODES
         assert Opcode.CLOSE in RESERVED_OPCODES
 
     def test_reserved_opcodes_count(self):
-        """Verify exactly 3 reserved opcodes (v1a: STALL removed)."""
-        assert len(RESERVED_OPCODES) == 3
+        """Verify exactly 2 reserved opcodes (v1b: only ROUTE/CLOSE)."""
+        assert len(RESERVED_OPCODES) == 2
 
     def test_stall_is_implemented(self):
         """Verify STALL opcode exists and is not reserved (v1a)."""
         assert hasattr(Opcode, "STALL")
         assert Opcode.STALL not in RESERVED_OPCODES
+
+    def test_fix_fixed_are_implemented(self):
+        """Verify FIX and FIXED opcodes exist and are not reserved (v1b)."""
+        assert hasattr(Opcode, "FIX")
+        assert hasattr(Opcode, "FIXED")
+        assert Opcode.FIX not in RESERVED_OPCODES
+        assert Opcode.FIXED not in RESERVED_OPCODES
 
 
 # --- v1a OP_STALL Tests ---
@@ -597,6 +605,207 @@ class TestV1aRegisters:
         assert vm.pattern_id is None
         assert vm.value_hash is None
         assert not vm.has_closure
+
+
+# --- v1b OP_FIX Tests ---
+
+
+class TestOpcodeFix:
+    """Tests for OP_FIX opcode (v1b execution)."""
+
+    def test_fix_requires_stalled_status(self):
+        """OP_FIX raises error if not STALLED."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        with pytest.raises(BytecodeVMError, match="Cannot fix when not STALLED"):
+            vm.op_fix(target_hash="h1")
+
+    def test_fix_requires_matching_target_hash(self):
+        """OP_FIX raises error if target_hash != RH."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        with pytest.raises(BytecodeVMError, match="target_hash mismatch"):
+            vm.op_fix(target_hash="wrong_hash")
+
+    def test_fix_sets_rf_register(self):
+        """OP_FIX sets RF register to target_hash."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        assert vm.fix_target_hash is None
+        vm.op_fix(target_hash="h1")
+        assert vm.fix_target_hash == "h1"
+
+    def test_fix_does_not_change_status(self):
+        """OP_FIX leaves RS as STALLED (doesn't complete fix)."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.op_fix(target_hash="h1")
+
+        assert vm.execution_status == ExecutionStatus.STALLED
+
+    def test_fix_records_instruction(self):
+        """OP_FIX records instruction with target_hash."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.op_fix(target_hash="h1")
+
+        fix_instr = [i for i in vm.instructions if i.opcode == Opcode.FIX]
+        assert len(fix_instr) == 1
+        assert fix_instr[0].args["target_hash"] == "h1"
+
+
+class TestOpcodeFixed:
+    """Tests for OP_FIXED opcode (v1b execution)."""
+
+    def test_fixed_requires_stalled_status(self):
+        """OP_FIXED raises error if not STALLED."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        with pytest.raises(BytecodeVMError, match="Cannot complete fix when not STALLED"):
+            vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+
+    def test_fixed_sets_status_to_active(self):
+        """OP_FIXED transitions RS from STALLED to ACTIVE."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        assert vm.execution_status == ExecutionStatus.STALLED
+        vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+
+    def test_fixed_updates_value_hash(self):
+        """OP_FIXED updates RH to after_hash."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        assert vm.value_hash == "h1"
+        vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+        assert vm.value_hash == "h2"
+
+    def test_fixed_clears_rf_register(self):
+        """OP_FIXED clears RF register."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.op_fix(target_hash="h1")
+
+        assert vm.fix_target_hash == "h1"
+        vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+        assert vm.fix_target_hash is None
+
+    def test_fixed_clears_stall_memory(self):
+        """OP_FIXED clears stall_memory (value transition per IndependentEncounter.v0.md)."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        # stall_memory should have p1 -> h1
+        vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+
+        # After FIXED, stall at same pattern should NOT detect closure
+        # because stall_memory was cleared
+        vm.op_stall(pattern_id="p1", value_hash="h2")
+        vm.op_fixed(after_value={"another": "value"}, after_hash="h3")
+
+        # Stall again - first encounter after value transition
+        result = vm.op_stall(pattern_id="p1", value_hash="h3")
+        assert result is False  # Not closure, first encounter at this value
+
+    def test_fixed_without_prior_fix(self):
+        """OP_FIXED works without OP_FIX (fix is optional)."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+
+        # Go directly to FIXED without FIX
+        vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+        assert vm.value_hash == "h2"
+
+    def test_fixed_records_instruction(self):
+        """OP_FIXED records instruction with before_hash and after_hash."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.op_fixed(after_value={"new": "value"}, after_hash="h2")
+
+        fixed_instr = [i for i in vm.instructions if i.opcode == Opcode.FIXED]
+        assert len(fixed_instr) == 1
+        assert fixed_instr[0].args["before_hash"] == "h1"
+        assert fixed_instr[0].args["after_hash"] == "h2"
+
+
+class TestFixFixedSequence:
+    """Tests for OP_FIX + OP_FIXED sequence."""
+
+    def test_full_stall_fix_fixed_cycle(self):
+        """Complete STALL -> FIX -> FIXED cycle."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        # STALL
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        assert vm.execution_status == ExecutionStatus.STALLED
+        assert vm.value_hash == "h1"
+
+        # FIX
+        vm.op_fix(target_hash="h1")
+        assert vm.execution_status == ExecutionStatus.STALLED
+        assert vm.fix_target_hash == "h1"
+
+        # FIXED
+        vm.op_fixed(after_value={"fixed": "value"}, after_hash="h2")
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+        assert vm.value_hash == "h2"
+        assert vm.fix_target_hash is None
+
+    def test_multiple_stall_fix_cycles(self):
+        """Multiple STALL -> FIXED cycles in sequence."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+
+        # First cycle
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.op_fixed(after_value={"v": 1}, after_hash="h2")
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+
+        # Second cycle
+        vm.op_stall(pattern_id="p2", value_hash="h2")
+        vm.op_fix(target_hash="h2")
+        vm.op_fixed(after_value={"v": 2}, after_hash="h3")
+        assert vm.execution_status == ExecutionStatus.ACTIVE
+        assert vm.value_hash == "h3"
+
+
+class TestV1bRegisters:
+    """Tests for v1b register properties."""
+
+    def test_initial_fix_target_hash_is_none(self):
+        """Initial RF register is None."""
+        vm = BytecodeVM(enabled=True)
+        assert vm.fix_target_hash is None
+
+    def test_reset_clears_rf(self):
+        """Reset clears RF register."""
+        vm = BytecodeVM(enabled=True)
+        vm.op_init()
+        vm.op_stall(pattern_id="p1", value_hash="h1")
+        vm.op_fix(target_hash="h1")
+
+        assert vm.fix_target_hash == "h1"
+        vm.reset()
+        assert vm.fix_target_hash is None
 
 
 # --- Determinism Tests ---

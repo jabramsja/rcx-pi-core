@@ -220,8 +220,8 @@ echo "== 7. Reserved Opcode Discipline =="
 
 echo "Verifying reserved opcodes remain unimplemented..."
 
-# Note: STALL is implemented in v1a, FIX/ROUTE/CLOSE remain blocked
-RESERVED_OPS="FIX ROUTE CLOSE"
+# Note: STALL implemented in v1a, FIX/FIXED in v1b, ROUTE/CLOSE remain blocked
+RESERVED_OPS="ROUTE CLOSE"
 for op in $RESERVED_OPS; do
     op_lower=$(echo "$op" | tr '[:upper:]' '[:lower:]')
     if grep -n "def op_${op_lower}" rcx_pi/bytecode_vm.py 2>/dev/null | grep -v "Reserved"; then
@@ -238,8 +238,23 @@ else
     FAILED=1
 fi
 
+# Verify FIX/FIXED are implemented (v1b)
+if grep -q "def op_fix" rcx_pi/bytecode_vm.py 2>/dev/null; then
+    echo "  ✓ FIX opcode implemented (v1b)"
+else
+    echo "  ERROR: FIX opcode should be implemented (v1b)"
+    FAILED=1
+fi
+
+if grep -q "def op_fixed" rcx_pi/bytecode_vm.py 2>/dev/null; then
+    echo "  ✓ FIXED opcode implemented (v1b)"
+else
+    echo "  ERROR: FIXED opcode should be implemented (v1b)"
+    FAILED=1
+fi
+
 if [ $FAILED -eq 0 ]; then
-    echo "  ✓ Reserved opcodes (FIX/ROUTE/CLOSE) remain unimplemented"
+    echo "  ✓ Reserved opcodes (ROUTE/CLOSE) remain unimplemented"
 fi
 echo ""
 
@@ -255,7 +270,7 @@ echo "  3. Bytecode VM: No non-portable builtins"
 echo "  4. Trace serialization: JSON-portable types"
 echo "  5. Opcodes: Language-agnostic enum"
 echo "  6. Value hash: Deterministic SHA-256"
-echo "  7. Reserved opcodes: FIX/ROUTE/CLOSE blocked, STALL implemented (v1a)"
+echo "  7. Reserved opcodes: ROUTE/CLOSE blocked, STALL/FIX/FIXED implemented (v1b)"
 echo ""
 
 if [ $FAILED -eq 0 ] && [ $WARNINGS -eq 0 ]; then
