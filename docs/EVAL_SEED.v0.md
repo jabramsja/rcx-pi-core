@@ -20,6 +20,39 @@ We're NOT building a Lisp interpreter. We're building something simpler:
 - Input = Mu
 - If pattern matches input, produce body (with substitutions)
 
+## NOT Lambda Calculus (Critical Invariant)
+
+EVAL_SEED must NOT implement lambda calculus. The distinction:
+
+| Lambda Calculus | RCX Structural |
+|-----------------|----------------|
+| `λx.body` (abstraction) | No abstractions - projections are data |
+| `(f arg)` (application) | No application - projections are matched |
+| Binding scopes | No scopes - variables are flat names |
+| Closures capture environment | No closures - substitution is immediate |
+| Higher-order (functions as args) | First-order only (values, not projections) |
+| Y-combinator possible | Y-combinator impossible |
+
+**Why this matters:**
+- Lambda calculus is Turing-complete via self-application
+- RCX emergence comes from STRUCTURE, not computation
+- If we accidentally implement λ-calc, we've smuggled in host semantics
+
+**Guardrails:**
+1. `{"var": "x"}` is a MARKER, not a binder - it says "fill this hole"
+2. Variables bind to VALUES, never to patterns or projections
+3. No variable can reference itself (no recursive bindings)
+4. Substitution is immediate and complete (no delayed evaluation)
+
+**Test:** Can you write the Y-combinator? If yes, we've failed.
+```
+Y = λf.(λx.f(x x))(λx.f(x x))
+```
+In RCX: No. There's no way to apply a projection to itself because:
+- Projections are selected by the kernel, not "called"
+- Variables can't bind projections
+- There's no `(x x)` self-application
+
 ## Core Operations
 
 ### 1. Structural Match

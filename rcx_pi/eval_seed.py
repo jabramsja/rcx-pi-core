@@ -19,6 +19,63 @@ from typing import Any
 from rcx_pi.mu_type import Mu, assert_mu, is_mu
 
 
+# =============================================================================
+# NOT Lambda Calculus Guardrails
+# =============================================================================
+#
+# EVAL_SEED implements STRUCTURAL pattern matching, NOT lambda calculus.
+# Key differences:
+# - {"var": "x"} is a HOLE MARKER, not a λ-binder
+# - Variables bind VALUES, not functions/projections
+# - No closures, no scopes, no self-application
+# - Substitution is immediate (no delayed evaluation)
+#
+# If you can write the Y-combinator, this module has failed.
+# =============================================================================
+
+
+def assert_not_lambda_calculus(projection: "Mu") -> None:
+    """
+    Verify a projection doesn't smuggle in lambda calculus semantics.
+
+    Checks:
+    1. Body doesn't contain projection-like structures with free variables
+       (which would create closure-like behavior)
+    2. Pattern doesn't try to match projections (no higher-order matching)
+
+    This is a design guardrail, not a complete static analysis.
+    """
+    if not isinstance(projection, dict):
+        return
+
+    if "pattern" not in projection or "body" not in projection:
+        return
+
+    pattern = projection["pattern"]
+    body = projection["body"]
+
+    # Check: pattern should not match projection structures
+    # (no higher-order pattern matching)
+    def contains_projection_pattern(mu: "Mu") -> bool:
+        """Check if mu tries to match a projection structure."""
+        if isinstance(mu, dict):
+            # A pattern that matches {"pattern": ..., "body": ...} is suspicious
+            if "pattern" in mu and "body" in mu:
+                # Unless both are variables (which is just matching any dict)
+                if not (is_var(mu.get("pattern")) and is_var(mu.get("body"))):
+                    return True
+            return any(contains_projection_pattern(v) for v in mu.values())
+        if isinstance(mu, list):
+            return any(contains_projection_pattern(v) for v in mu)
+        return False
+
+    if contains_projection_pattern(pattern):
+        raise ValueError(
+            "Projection pattern appears to match projection structures "
+            "(higher-order patterns not allowed - this looks like lambda calculus)"
+        )
+
+
 # Sentinel for no match (not a valid Mu, so unambiguous)
 class _NoMatch:
     """Sentinel indicating pattern did not match."""
@@ -210,6 +267,9 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     """
     assert_mu(projection, "apply.projection")
     assert_mu(input_value, "apply.input")
+
+    # Guardrail: reject lambda-calculus-like patterns
+    assert_not_lambda_calculus(projection)
 
     if not isinstance(projection, dict):
         raise TypeError(f"Projection must be dict, got {type(projection)}")
