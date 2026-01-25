@@ -708,6 +708,62 @@ if [ -f "rcx_pi/eval_seed.py" ]; then
     fi
 fi
 
+# 18j. Host-specific libraries (itertools, functools, os, sys, etc.)
+echo ""
+echo "  18j. Host Libraries (itertools, functools, os, sys, random, datetime):"
+SEED_FILES="rcx_pi/eval_seed.py rcx_pi/kernel.py"
+LIB_HITS=""
+for f in $SEED_FILES; do
+    if [ -f "$f" ]; then
+        hits=$(grep -nE "^import (itertools|functools|os|sys|random|datetime|collections)|^from (itertools|functools|os|sys|random|datetime|collections)" "$f" 2>/dev/null || true)
+        if [ -n "$hits" ]; then
+            LIB_HITS="$LIB_HITS$f: $hits\n"
+        fi
+    fi
+done
+if [ -n "$LIB_HITS" ]; then
+    echo "    WARNING: Host-specific libraries imported:"
+    echo -e "$LIB_HITS" | while read line; do [ -n "$line" ] && echo "      $line"; done
+    WARNINGS=$((WARNINGS + 1))
+else
+    echo "    ✓ No host-specific library imports in kernel/seed code"
+fi
+
+# 18k. Non-deterministic behavior (random, time, uuid, etc.)
+echo ""
+echo "  18k. Non-Deterministic Operations (random, time.time, uuid, datetime.now):"
+for f in $SEED_FILES; do
+    if [ -f "$f" ]; then
+        NONDET_HITS=$(grep -nE "random\.|time\.time|uuid\.|datetime\.now|os\.urandom" "$f" 2>/dev/null | \
+            grep -v "^[[:space:]]*#" || true)
+        if [ -n "$NONDET_HITS" ]; then
+            echo "    ERROR: Non-deterministic operation in $f:"
+            echo "$NONDET_HITS" | while read line; do echo "      $line"; done
+            FAILED=1
+        fi
+    fi
+done
+if [ $FAILED -eq 0 ]; then
+    echo "    ✓ No non-deterministic operations in kernel/seed code"
+fi
+
+# 18l. Debug statements (print, pdb, breakpoint)
+echo ""
+echo "  18l. Debug Statements (print, pdb, breakpoint, logging):"
+for f in $SEED_FILES; do
+    if [ -f "$f" ]; then
+        DEBUG_HITS=$(grep -nE "^\s*print\s*\(|^\s*pdb\.|^\s*breakpoint\s*\(|^\s*logging\." "$f" 2>/dev/null || true)
+        if [ -n "$DEBUG_HITS" ]; then
+            echo "    WARNING: Debug statements in $f:"
+            echo "$DEBUG_HITS" | while read line; do echo "      $line"; done
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    fi
+done
+if [ $WARNINGS -eq 0 ]; then
+    echo "    ✓ No debug statements in kernel/seed code"
+fi
+
 echo ""
 
 # -----------------------------------------------------------------------------
@@ -758,7 +814,7 @@ echo "  14. Bare except: No swallowed validation errors"
 echo "  15. Test integrity: No guardrail mocking"
 echo "  16. Bootstrap markers: Temporary Python code tracked"
 echo "  17. mu_equal: Structural equality function exists"
-echo "  18. Host smuggling: Comprehensive detection (arithmetic, builtins, strings, mutation, set, any/all, comprehensions)"
+echo "  18. Host smuggling: Comprehensive (arithmetic, builtins, mutation, set, any/all, comprehensions, libraries, non-det, debug)"
 echo "  19. Host recursion: Debt tracking (must be zero for Phase 3)"
 echo ""
 
