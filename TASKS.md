@@ -94,7 +94,17 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-_(No active items.)_
+14. **Rule Motif Observability v0** ✅ (promoted from VECTOR #13)
+    - Deliverable: `rcx_pi/rule_motifs_v0.py` + `rules --print-rule-motifs` CLI
+    - Done:
+      - `rule_motifs_v0()` pure helper returning all rule motifs
+      - `RULE_IDS` canonical list for anti-drift testing
+      - `emit_rule_loaded_events()` generates v2 JSONL
+      - CLI: `python3 -m rcx_pi.rcx_cli rules --print-rule-motifs`
+      - Output: `{"v":2,"type":"rule.loaded","i":N,"mu":{"rule":{...}}}`
+      - 11 subprocess CLI tests (schema, determinism, coverage, JSON validity)
+      - Anti-drift test: emitted IDs must match `RULE_IDS` exactly
+    - Non-goals: no matching, no application, no engine changes
 
 ---
 
@@ -138,7 +148,7 @@ _(No active items.)_
       - Future promotion checklist
     - Non-goal: no engine termination directive, no ROUTE opcode, no implementation
 
-13. **Rule-as-Motif representation v0** (promoted from SINK: "Full VM bootstrap / meta-circular execution")
+13. **Rule-as-Motif representation v0** ✅ (promoted from SINK: "Full VM bootstrap / meta-circular execution")
     - Deliverable: `docs/RuleAsMotif.v0.md`
     - Semantic question: "What is the minimal representation of an RCX reduction rule as a motif, such that rules become first-class structural data?"
     - Promotion rationale:
@@ -159,6 +169,7 @@ _(No active items.)_
       - No rule compilation to bytecode
       - No rule ordering/priority
       - No implementation
+    - **Promoted to NEXT #14**: Rule Motif Observability v0
 
 ---
 
