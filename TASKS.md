@@ -128,14 +128,12 @@ _(No active items.)_
       - Explicit non-goal: no ROUTE/CLOSE, no termination policy
       - CLI contract documented (--check-canon, --print-exec-summary)
 
-12. **Closure Evidence Events v0** (promoted from SINK: "ROUTE/CLOSE opcodes")
+12. **Closure Evidence Events v0** ✅ (promoted from SINK: "ROUTE/CLOSE opcodes")
     - Deliverable: `docs/ClosureEvidence.v0.md`
-    - Semantic question: "What trace evidence should exist when closure becomes unavoidable, without implying termination?"
-    - Promotion rationale: IndependentEncounter.v0.md constrains closure detection to emit trace evidence only; this spec defines the evidence vocabulary.
-    - Scope:
+    - Done:
       - Event vocabulary: `evidence.closure` with value_hash, pattern_id, reason
       - Alignment with IndependentEncounter.v0.md detection rule
-      - Normative examples (SHOULD/SHOULD NOT emit)
+      - 5 normative examples (SHOULD/SHOULD NOT emit)
       - Future promotion checklist
     - Non-goal: no engine termination directive, no ROUTE opcode, no implementation
 
