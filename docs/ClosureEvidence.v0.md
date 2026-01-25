@@ -1,8 +1,15 @@
 # Closure Evidence Events v0
 
-Status: VECTOR (design-only, no implementation allowed)
+Status: COMPLETE (design + reporting tool)
 
-**Note:** A reporting-only tool (`--print-closure-evidence` CLI flag, `closure_evidence_v2()` helper) has been implemented as a separate NEXT item. That tool uses the IndependentEncounter.v0.md detection rule to compute closure evidence from traces. This VECTOR document defines the `evidence.closure` **event vocabulary** for trace emission, which remains design-only and unimplemented.
+**Implementation status:**
+- ✅ Design doc complete (`docs/ClosureEvidence.v0.md`)
+- ✅ Event vocabulary defined (`evidence.closure` with value_hash, pattern_id, reason)
+- ✅ Reporting tool: `--print-closure-evidence` CLI flag, `closure_evidence_v2()` helper
+- ✅ Detection logic: `ExecutionEngine.closure_evidence` property (via Second Independent Encounter)
+- ✅ Tests: `test_closure_evidence_cli.py`, `test_independent_encounter_pathologies.py`
+
+**Note:** The reporting tool computes closure evidence from traces after execution. Direct emission of `evidence.closure` events into traces during execution remains a future option but is not required for v0.
 
 This document defines the trace-level vocabulary for "closure evidence" events: observable signals that closure has become unavoidable, without implying any termination directive.
 
