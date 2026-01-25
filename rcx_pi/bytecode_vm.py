@@ -1,10 +1,12 @@
 """
-RCX Bytecode VM v0 - Replay-only bytecode execution.
+RCX Bytecode VM v0/v1a - Replay + STALL execution.
 
-This module implements a minimal bytecode VM sufficient for deterministic replay
-of v1 trace events. It does NOT implement execution semantics (stall/fix/route).
+v0: Replay-only bytecode execution for v1 trace events.
+v1a: Adds OP_STALL execution (first step toward full execution semantics).
 
-Design doc: docs/BytecodeMapping.v0.md
+Design docs:
+- docs/BytecodeMapping.v0.md (replay)
+- docs/BytecodeMapping.v1.md (execution)
 
 Feature flag: RCX_BYTECODE_V0=1 to enable bytecode validation during replay.
 """
@@ -24,22 +26,31 @@ RCX_BYTECODE_V0_ENABLED = os.environ.get("RCX_BYTECODE_V0", "0") == "1"
 
 
 class Phase(Enum):
-    """VM execution phase."""
+    """VM execution phase (trace-level)."""
     START = auto()
     RUNNING = auto()
     END = auto()
     HALTED = auto()
 
 
+class ExecutionStatus(Enum):
+    """VM execution status (value-level, per BytecodeMapping.v1.md)."""
+    ACTIVE = auto()    # Value is being reduced
+    STALLED = auto()   # Pattern match failed, awaiting fix
+
+
 class Opcode(Enum):
     """
-    Bytecode opcodes for v0 replay.
+    Bytecode opcodes for v0 replay + v1a execution.
 
     v0 opcodes (implemented):
     - INIT through HALT_ERR: Core replay operations
 
-    Reserved opcodes (NOT implemented in v0):
-    - STALL, FIX, ROUTE, CLOSE: Blocked until VECTOR promotion
+    v1a opcodes (implemented):
+    - STALL: Execution stall (pattern match failed)
+
+    Reserved opcodes (NOT implemented until v1b+):
+    - FIX, ROUTE, CLOSE: Blocked until explicit promotion
 
     Debug opcodes (v2 observability only):
     - DBG_STALL, DBG_APPLIED, DBG_NORMAL: No state change, gated by RCX_TRACE_V2
@@ -69,8 +80,9 @@ class Opcode(Enum):
     DBG_NORMAL = auto()
 
 
-# Reserved opcodes that must not be executed in v0
-RESERVED_OPCODES = frozenset([Opcode.STALL, Opcode.FIX, Opcode.ROUTE, Opcode.CLOSE])
+# Reserved opcodes that must not be executed until v1b+
+# Note: STALL was removed in v1a (now implemented)
+RESERVED_OPCODES = frozenset([Opcode.FIX, Opcode.ROUTE, Opcode.CLOSE])
 
 # Valid v1 event types for replay
 V1_EVENT_TYPES = frozenset(["trace.start", "step", "trace.end"])
@@ -110,22 +122,26 @@ class BytecodeVMError(Exception):
 
 class BytecodeVM:
     """
-    Minimal bytecode VM for v0 replay.
+    Bytecode VM for v0 replay + v1a execution.
 
-    State model (per BytecodeMapping.v0.md section 3):
+    State model (per BytecodeMapping.v0.md section 3 + v1.md):
     - mu_store: Map from event index to mu payload
-    - buckets: Routing state (declared but not modified in v0)
+    - buckets: Routing state (declared but not modified in v0/v1a)
     - cursor: Current position and phase
     - artifacts: Output accumulator and error state
 
-    v0 is replay-only: it validates and canonicalizes trace events,
-    but does not implement execution semantics (stall/fix/route).
+    v1a registers (per BytecodeMapping.v1.md):
+    - RS: Execution status (ACTIVE or STALLED)
+    - RP: Current pattern_id being matched
+    - RH: Current value_hash
+
+    v0 is replay-only. v1a adds OP_STALL execution.
     """
 
     def __init__(self, enabled: bool = None) -> None:
         self._enabled = enabled if enabled is not None else RCX_BYTECODE_V0_ENABLED
 
-        # State model
+        # State model (v0)
         self.mu_store: Dict[int, Any] = {}
         self.buckets: Dict[str, List] = {
             "r_null": [],
@@ -136,6 +152,15 @@ class BytecodeVM:
         }
         self.cursor = Cursor()
         self.artifacts = Artifacts()
+
+        # v1a registers (per BytecodeMapping.v1.md)
+        self._rs: ExecutionStatus = ExecutionStatus.ACTIVE  # RS: status
+        self._rp: Optional[str] = None  # RP: pattern_id
+        self._rh: Optional[str] = None  # RH: value_hash
+
+        # Second Independent Encounter tracking (for closure detection)
+        self._stall_memory: Dict[str, str] = {}  # pattern_id -> value_hash
+        self._closure_evidence: List[Dict[str, str]] = []
 
         # Internal state for opcode execution (exposed via properties for testing)
         self._current_event: Optional[Dict[str, Any]] = None
@@ -172,8 +197,36 @@ class BytecodeVM:
         """List of executed instructions (for debugging/golden comparison)."""
         return list(self._instructions)
 
+    # --- v1a Register Properties ---
+
+    @property
+    def execution_status(self) -> ExecutionStatus:
+        """RS register: Current execution status (ACTIVE or STALLED)."""
+        return self._rs
+
+    @property
+    def pattern_id(self) -> Optional[str]:
+        """RP register: Current pattern_id being matched."""
+        return self._rp
+
+    @property
+    def value_hash(self) -> Optional[str]:
+        """RH register: Current value_hash."""
+        return self._rh
+
+    @property
+    def closure_evidence(self) -> List[Dict[str, str]]:
+        """List of closure evidence detected via second independent encounter."""
+        return list(self._closure_evidence)
+
+    @property
+    def has_closure(self) -> bool:
+        """True if any closure evidence has been detected."""
+        return len(self._closure_evidence) > 0
+
     def reset(self) -> None:
         """Reset VM to initial state."""
+        # v0 state
         self.mu_store = {}
         self.buckets = {k: [] for k in self.buckets}
         self.cursor = Cursor()
@@ -181,6 +234,12 @@ class BytecodeVM:
         self._current_event = None
         self._canonical_event = None
         self._instructions = []
+        # v1a state
+        self._rs = ExecutionStatus.ACTIVE
+        self._rp = None
+        self._rh = None
+        self._stall_memory = {}
+        self._closure_evidence = []
 
     # --- Opcode Execution ---
 
@@ -283,6 +342,82 @@ class BytecodeVM:
         self.cursor.phase = Phase.HALTED
         self.artifacts.error = msg
         self._record(Opcode.HALT_ERR, message=msg)
+
+    # --- v1a Execution Opcodes ---
+
+    def op_stall(self, pattern_id: str, value_hash: str) -> bool:
+        """
+        OP_STALL: Declare no reduction is available for (value_hash, pattern_id).
+
+        Per BytecodeMapping.v1.md:
+        - Emits execution.stall with (value_hash=RH, pattern_id=RP)
+        - Sets RS = STALLED
+        - Constraint: Cannot stall while already STALLED (double-stall error)
+
+        Second Independent Encounter (per IndependentEncounter.v0.md):
+        - If same (value_hash, pattern_id) stalled before, closure is detected
+
+        Returns:
+            True if closure was detected (second independent encounter)
+        """
+        # Constraint: no double-stall
+        if self._rs == ExecutionStatus.STALLED:
+            raise BytecodeVMError(
+                f"OP_STALL: Cannot stall while already STALLED (double-stall at pattern_id={pattern_id})"
+            )
+
+        # Set registers
+        self._rp = pattern_id
+        self._rh = value_hash
+        self._rs = ExecutionStatus.STALLED
+
+        # Check for second independent encounter (closure detection)
+        closure_detected = self._check_second_independent_encounter(pattern_id, value_hash)
+
+        # Record instruction
+        self._record(Opcode.STALL, pattern_id=pattern_id, value_hash=value_hash)
+
+        return closure_detected
+
+    def _check_second_independent_encounter(self, pattern_id: str, value_hash: str) -> bool:
+        """
+        Check if this stall is a second independent encounter.
+
+        Per IndependentEncounter.v0.md:
+        - If stall_memory[pattern_id] == value_hash, this is second independent encounter
+        - Otherwise, record stall_memory[pattern_id] = value_hash
+
+        Returns:
+            True if closure is detected
+        """
+        if pattern_id in self._stall_memory and self._stall_memory[pattern_id] == value_hash:
+            # Second independent encounter detected
+            self._closure_evidence.append({
+                "value_hash": value_hash,
+                "pattern_id": pattern_id,
+                "reason": "second_independent_stall",
+            })
+            return True
+        # Record this stall
+        self._stall_memory[pattern_id] = value_hash
+        return False
+
+    def simulate_fix_for_test(self) -> None:
+        """
+        Test infrastructure: Simulate a FIX resolving a STALL.
+
+        This is a placeholder until OP_FIX is implemented in v1b.
+        Resets RS from STALLED to ACTIVE, simulating a successful fix.
+        Only for testing second independent encounter detection.
+
+        NOTE: This does NOT clear stall_memory (per IndependentEncounter.v0.md,
+        stall memory is only cleared on value transition, not on fix).
+        """
+        if self._rs != ExecutionStatus.STALLED:
+            raise BytecodeVMError(
+                "simulate_fix_for_test: Cannot fix when not STALLED"
+            )
+        self._rs = ExecutionStatus.ACTIVE
 
     # --- Event Type Mapping ---
 

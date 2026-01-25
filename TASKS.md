@@ -101,7 +101,27 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-_(No active items.)_
+18. **Bytecode VM v1a: OP_STALL execution** (promoted from VECTOR #10 v1)
+    - Design doc: `docs/BytecodeMapping.v1.md`
+    - Promotion rationale:
+      - Incremental approach: implement one execution opcode at a time
+      - STALL is the simplest execution opcode (no value transformation)
+      - De-risks v1b/v1c (FIX/FIXED) by validating execution model first
+      - Integrates with existing ExecutionEngine stall tracking
+    - Scope (minimal):
+      - Add RS (status) register to BytecodeVM
+      - Add RP (pattern_id) and RH (value_hash) registers
+      - Implement OP_STALL: emit execution.stall, set RS=STALLED
+      - Constraint: no double-stall (STALL while STALLED is error)
+      - Integration with Second Independent Encounter detection
+    - Deliverables:
+      - Update `rcx_pi/bytecode_vm.py` with OP_STALL execution
+      - Tests for OP_STALL in `tests/test_bytecode_vm_v0.py`
+      - Update `tools/audit_bytecode.sh` (STALL no longer reserved)
+    - Non-goals (v1a scope):
+      - No FIX/FIXED opcodes (v1b)
+      - No ROUTE/CLOSE opcodes (blocked)
+      - No full execution loop (v1c)
 
 17. **Bytecode VM v0 Implementation** ✅ (promoted from VECTOR #10)
     - Design doc: `docs/BytecodeMapping.v0.md`
