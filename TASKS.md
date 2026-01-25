@@ -77,6 +77,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Trace canon helper v1 (`canon_jsonl()`, 7 tests in `test_trace_canon_v1.py`)
 - Second Independent Encounter v0 (stall memory tracking, closure signal detection, 25 tests)
 - Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
+- Enginenews Spec v0 (stress test harness, 18 tests in `test_enginenews_spec_v0.py`, 4 fixtures)
 
 ---
 
@@ -132,6 +133,7 @@ _(No active items.)_
       - Metrics defined from events only: counts, stall_density, fix_efficacy, closure_evidence
       - Explicit non-goal: no ROUTE/CLOSE, no termination policy
       - CLI contract documented (--check-canon, --print-exec-summary)
+    - **Archived to Ra**: Stress test harness implemented (`test_enginenews_spec_v0.py`, 18 tests, 4 fixtures)
 
 12. **Closure Evidence Events v0** ✅ (promoted from SINK: "ROUTE/CLOSE opcodes")
     - Deliverable: `docs/ClosureEvidence.v0.md`
