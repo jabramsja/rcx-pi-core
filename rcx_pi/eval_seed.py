@@ -14,6 +14,7 @@ See docs/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from rcx_pi.mu_type import Mu, assert_mu, is_mu, mark_bootstrap
@@ -62,47 +63,6 @@ def host_recursion(reason: str):
     return decorator
 
 
-def host_arithmetic(reason: str):
-    """
-    Mark code as using host arithmetic (+, -, *, /, %).
-
-    This is a debt marker. Arithmetic should be Peano numerals or
-    structural operations in pure RCX.
-
-    Args:
-        reason: Why this host arithmetic exists and how it will be eliminated.
-    """
-    def decorator(func):
-        func._host_arithmetic = True
-        func._host_arithmetic_reason = reason
-        mark_bootstrap(
-            f"host_arithmetic:{func.__name__}",
-            f"Host arithmetic: {reason}"
-        )
-        return func
-    return decorator
-
-
-def host_comparison(reason: str):
-    """
-    Mark code as using host comparison (<, >, <=, >=).
-
-    This is a debt marker. Comparison should be structural in pure RCX.
-
-    Args:
-        reason: Why this host comparison exists and how it will be eliminated.
-    """
-    def decorator(func):
-        func._host_comparison = True
-        func._host_comparison_reason = reason
-        mark_bootstrap(
-            f"host_comparison:{func.__name__}",
-            f"Host comparison: {reason}"
-        )
-        return func
-    return decorator
-
-
 def host_builtin(reason: str):
     """
     Mark code as using host builtins (len, sorted, sum, max, min, etc.).
@@ -118,26 +78,6 @@ def host_builtin(reason: str):
         mark_bootstrap(
             f"host_builtin:{func.__name__}",
             f"Host builtin: {reason}"
-        )
-        return func
-    return decorator
-
-
-def host_string_op(reason: str):
-    """
-    Mark code as using host string operations (.split, .join, .format, etc.).
-
-    This is a debt marker. String ops should be structural (list of chars) in pure RCX.
-
-    Args:
-        reason: Why this host string op exists and how it will be eliminated.
-    """
-    def decorator(func):
-        func._host_string_op = True
-        func._host_string_op_reason = reason
-        mark_bootstrap(
-            f"host_string_op:{func.__name__}",
-            f"Host string op: {reason}"
         )
         return func
     return decorator
@@ -175,6 +115,15 @@ def host_mutation(reason: str):
 # - Substitution is immediate (no delayed evaluation)
 #
 # If you can write the Y-combinator, this module has failed.
+# =============================================================================
+#
+# PHASE 3 REVIEW: assert_not_lambda_calculus
+# ------------------------------------------
+# This runtime guardrail is debatable:
+# - PRO: Defense-in-depth, catches bad projections at API boundary
+# - CON: Tests prove same thing, uses host recursion itself (ironic)
+# - DECISION: Keep for now, review in Phase 3
+# - OPTIONS: (1) Delete if tests suffice, (2) Rewrite non-recursively
 # =============================================================================
 
 
@@ -334,8 +283,6 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             for k, v in sub_bindings.items():
                 if k in bindings:
                     # Same variable bound twice - must be same value
-                    # Use JSON comparison for structural equality
-                    import json
                     if json.dumps(bindings[k], sort_keys=True) != json.dumps(v, sort_keys=True):
                         return NO_MATCH
                 bindings[k] = v
@@ -355,7 +302,6 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             # Merge bindings
             for k, v in sub_bindings.items():
                 if k in bindings:
-                    import json
                     if json.dumps(bindings[k], sort_keys=True) != json.dumps(v, sort_keys=True):
                         return NO_MATCH
                 bindings[k] = v
