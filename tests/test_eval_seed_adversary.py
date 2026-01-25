@@ -27,7 +27,7 @@ class TestDeepNestingLimits:
     This is a DoS vector but not a security exploit.
     """
 
-    def _deep_nest(self, depth: int, value='bottom'):
+    def make_deep_nest(self, depth: int, value='bottom'):
         """Create a deeply nested structure."""
         result = value
         for _ in range(depth):
@@ -36,8 +36,8 @@ class TestDeepNestingLimits:
 
     def test_moderate_nesting_works(self):
         """Moderate nesting (100 levels) should work."""
-        pattern = self._deep_nest(100, {'var': 'x'})
-        value = self._deep_nest(100, 'found')
+        pattern = self.make_deep_nest(100, {'var': 'x'})
+        value = self.make_deep_nest(100, 'found')
 
         result = match(pattern, value)
         assert result == {'x': 'found'}
@@ -49,8 +49,8 @@ class TestDeepNestingLimits:
         implementation uses Python's call stack, which has limits.
         Phase 3 should convert to iterative projections.
         """
-        pattern = self._deep_nest(500, {'var': 'x'})
-        value = self._deep_nest(500, 'found')
+        pattern = self.make_deep_nest(500, {'var': 'x'})
+        value = self.make_deep_nest(500, 'found')
 
         # Document the current behavior - RecursionError
         with pytest.raises(RecursionError):
@@ -58,7 +58,7 @@ class TestDeepNestingLimits:
 
     def test_substitute_deep_nesting_causes_recursion_error(self):
         """Deep nesting in substitute also causes RecursionError."""
-        body = self._deep_nest(500, {'var': 'x'})
+        body = self.make_deep_nest(500, {'var': 'x'})
         bindings = {'x': 'replacement'}
 
         with pytest.raises(RecursionError):
