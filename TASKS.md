@@ -75,6 +75,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Rule Motif Observability v0 (`rcx_pi/rule_motifs_v0.py`, `rules --print-rule-motifs`, 11 CLI tests)
 - Rule Motif Validation Gate v0 (`validate_rule_motifs_v0()`, `rules --check-rule-motifs`, 16 CLI tests)
 - Trace canon helper v1 (`canon_jsonl()`, 7 tests in `test_trace_canon_v1.py`)
+- Second Independent Encounter v0 (stall memory tracking, closure signal detection, 25 tests)
 
 ---
 
@@ -97,20 +98,7 @@ _(No active items.)_
 
 ## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
 
-16. **Second Independent Encounter Implementation** (promoted from VECTOR #9)
-    - Deliverable: Stall memory tracking + closure signal detection in ExecutionEngine
-    - Implementation:
-      - `_stall_memory: Dict[str, str]` mapping pattern_id → value_hash
-      - `_closure_evidence: List[Dict]` tracks detected closures
-      - `_check_second_independent_encounter()` detects second stall at same (v, p)
-      - `_clear_stall_memory_for_value()` clears entries on execution.fixed
-      - `closure_evidence` and `has_closure` properties for API access
-      - `stall()` and `consume_stall()` now return bool (closure detected)
-    - Tests: `tests/test_second_independent_encounter.py` (15 tests)
-      - All 8 pathological scenarios from IndependentEncounter.v0.md
-      - Replay mode tests
-      - API tests
-    - Promotion rationale: Design doc complete, semantics locked, scope bounded
+_(No active items.)_
 
 ---
 
