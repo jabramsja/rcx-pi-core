@@ -16,7 +16,7 @@ from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 
-STRUCTURAL_PROOF_PROMPT = Path(".claude/agents/structural-proof.md").read_text()
+STRUCTURAL_PROOF_PROMPT = Path("tools/agents/structural_proof_prompt.md").read_text()
 
 
 async def run_structural_proof(claim: str) -> str:

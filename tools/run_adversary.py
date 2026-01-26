@@ -15,7 +15,7 @@ from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 
-ADVERSARY_PROMPT = Path(".claude/agents/adversary.md").read_text()
+ADVERSARY_PROMPT = Path("tools/agents/adversary_prompt.md").read_text()
 
 
 async def run_adversary(files: list[str]) -> str:

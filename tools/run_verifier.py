@@ -16,7 +16,7 @@ from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 
-VERIFIER_PROMPT = Path(".claude/agents/verifier.md").read_text()
+VERIFIER_PROMPT = Path("tools/agents/verifier_prompt.md").read_text()
 
 
 async def run_verifier(files: list[str]) -> str:
