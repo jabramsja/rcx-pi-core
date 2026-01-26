@@ -97,9 +97,20 @@ def resolve_lookups(state: Mu, bindings: Mu) -> Mu:
 
     focus = state.get("focus")
     if isinstance(focus, dict) and "lookup" in focus and "in" in focus:
-        # Resolve the lookup
+        # Resolve the lookup - validate types to prevent type confusion attacks
         name = focus["lookup"]
         lookup_bindings = focus["in"]
+
+        # Type validation (adversary finding: non-string names silently fail)
+        if not isinstance(name, str):
+            raise TypeError(
+                f"Lookup name must be str, got {type(name).__name__}: {name}"
+            )
+        if lookup_bindings is not None and not isinstance(lookup_bindings, dict):
+            raise TypeError(
+                f"Lookup bindings must be dict or null, got {type(lookup_bindings).__name__}"
+            )
+
         try:
             value = lookup_binding(name, lookup_bindings)
             return {
