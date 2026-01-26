@@ -333,7 +333,7 @@ This aligns with the Expert agent's estimate of 10-15 projections.
   - `tests/structural/test_apply_mu_grounding.py` - 27 structural tests
   - `tests/test_apply_mu_fuzzer.py` - 12 property-based tests (Hypothesis)
 - Shared utility: `apply_mu()` in `tests/conftest.py`
-- Agent review: verifier=APPROVE, adversary=VULNERABLE (known limitations), expert=ACCEPTABLE
+- Agent review: verifier=APPROVE, adversary=HARDENED, expert=ACCEPTABLE
 
 ### Phase 5: Self-Hosting ✅ COMPLETE
 - `rcx_pi/step_mu.py`: `apply_mu()`, `step_mu()`, `run_mu()`
