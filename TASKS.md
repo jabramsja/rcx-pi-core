@@ -154,14 +154,15 @@ _(No active items.)_
     - **Blocker discovered**: `deep_step` needed
       - Current `step()` only matches at root level
       - Nested reducible expressions (e.g., `{head:1, tail:{op:append,...}}`) not found
-      - See `prototypes/linked_list_append.json` for concrete example
-    - **Solution path**: Work-stack approach (pure structural)
-      - Express tree traversal as explicit Mu state (focus + context stack)
+    - **Solution implemented**: Work-stack approach (pure structural)
+      - Express tree traversal as explicit Mu state (focus + context stack + phase)
+      - Three-phase state machine: traverse/ascending/root_check
       - No host recursion - kernel loop provides iteration
-      - Design doc needed: `docs/DeepStep.v0.md`
-    - **Prototype verified**: Linked list append works with 2 projections
-      - Proves finite projections can handle variable-length data
-      - Requires `deep_step` to find nested reducible nodes
+      - Design doc: `docs/DeepStep.v0.md`
+    - **Prototype working**: `prototypes/test_deep_eval_v0.py`
+      - 4 tests pass: wrap/unwrap, single reduction, append([1],[2]), append([1,2],[3,4])
+      - Proves finite projections can handle variable-length nested reductions
+      - Next: integrate into `rcx_pi/eval_seed.py` or keep as separate deep_step
 
 23. **RCX Kernel Phase 4: Self-Hosting** (awaiting Phase 3)
     - Scope:
