@@ -1,4 +1,4 @@
-
+# CLI Schema Triplet Contract
 
 ## Schema triplet contract (v1)
 

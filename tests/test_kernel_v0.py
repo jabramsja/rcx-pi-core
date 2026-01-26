@@ -2,7 +2,7 @@
 Tests for RCX Kernel v0.
 
 Tests the 4 kernel primitives and the main loop.
-See docs/RCXKernel.v0.md for specification.
+See docs/core/RCXKernel.v0.md for specification.
 """
 
 import pytest

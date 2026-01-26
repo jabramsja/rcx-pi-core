@@ -80,7 +80,7 @@
 |------|-------|
 | [Flags.md](cli/Flags.md) | RCX Feature Flags |
 | [cli_quickstart.md](cli/cli_quickstart.md) | RCX CLI Quickstart |
-| [cli_schema.md](cli/cli_schema.md) | cli schema |
+| [cli_schema.md](cli/cli_schema.md) | CLI Schema Triplet Contract |
 | [orbit_viz_dot.md](cli/orbit_viz_dot.md) | Orbit visualization (DOT) from engine_run JSON (v1) |
 | [orbit_viz_svg.md](cli/orbit_viz_svg.md) | Orbit visualization (SVG) from DOT fixture (v1) |
 

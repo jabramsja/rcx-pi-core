@@ -4,7 +4,7 @@ Rule Motif Validation CLI Tests.
 Tests the `rules --check-rule-motifs` CLI flag using subprocess calls only.
 All assertions are based on PUBLIC interface output, no engine internals.
 
-See docs/RuleAsMotif.v0.md for spec.
+See docs/execution/RuleAsMotif.v0.md for spec.
 """
 from __future__ import annotations
 
