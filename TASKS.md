@@ -168,7 +168,8 @@ These are "scaffolding debt" - the kernel for-loop is Python, but operations are
 
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
-*(All design items complete and implemented - see Ra section)*
+**Active designs:**
+- Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 
 **Completed designs (now in Ra):**
 - RCX Kernel v0 (`docs/core/RCXKernel.v0.md`)
