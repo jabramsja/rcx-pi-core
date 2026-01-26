@@ -2,17 +2,24 @@
 
 RCX is being built as a native structural substrate, not as a simulation on top of a host language. Python exists only as scaffolding to bootstrap the kernel; it is not the target runtime. The goal is self-hosting: RCX must run RCX to prove emergence honestly.
 
-## Current Direction (2026-01-25)
+## Current Status (2026-01-26)
 
-We are building:
-1. **Minimal Kernel** (Python, ~30 lines) - just plumbing: hash, stall detect, trace, dispatch
-2. **EVAL_SEED** - the evaluator written AS structure (Mu projections)
-3. **Application Seeds** - like EngineeNews, run on top of EVAL_SEED
+**Phase 5 Complete:** Algorithmic self-hosting achieved.
+- Match/substitute algorithms expressed as Mu projections
+- `step_mu()` uses `match_mu()` + `subst_mu()` (Mu projections, not Python recursion)
+- 53 fuzzer tests with 10,000+ random examples verify parity
+
+**Architecture:**
+1. **Minimal Kernel** (`rcx_pi/selfhost/kernel.py`) - 4 primitives: hash, stall detect, trace, dispatch
+2. **EVAL_SEED** (`rcx_pi/selfhost/eval_seed.py`) - Core operations: match, substitute, step
+3. **Self-Hosting** (`rcx_pi/selfhost/match_mu.py`, `subst_mu.py`, `step_mu.py`) - Mu projections
+4. **Seeds** (`seeds/match.v1.json`, `seeds/subst.v1.json`) - Pure Mu projection definitions
 
 Key specs:
-- `docs/core/RCXKernel.v0.md` - Kernel architecture
+- `docs/core/RCXKernel.v0.md` - Kernel architecture (4 primitives)
+- `docs/core/SelfHosting.v0.md` - Self-hosting design and security hardening
 - `docs/core/StructuralPurity.v0.md` - Guardrails for programming IN RCX
-- `docs/core/MuType.v0.md` - The universal data type
+- `docs/core/MuType.v0.md` - The universal data type (JSON-compatible)
 
 The kernel doesn't know how to match patterns or apply projections. Seeds define all semantics. This keeps the kernel maximally general.
 
@@ -73,7 +80,7 @@ If we accidentally use Python features (lambda, isinstance logic, etc.), we're s
 
 ## Verification Agents
 
-Four agents assist with code review (available via Task tool or CI workflows):
+Eight agents assist with code review (available via Task tool or CI workflows):
 
 | Agent | Purpose |
 |-------|---------|
@@ -81,8 +88,16 @@ Four agents assist with code review (available via Task tool or CI workflows):
 | **adversary** | Red team attack testing (edge cases, type confusion) |
 | **expert** | Code quality review, identifies unnecessary complexity |
 | **structural-proof** | Demands concrete Mu projections for structural claims |
+| **grounding** | Converts claims into executable pytest tests |
+| **fuzzer** | Property-based testing with 1000+ random inputs (Hypothesis) |
+| **translator** | Explains code in plain English for founder review |
+| **visualizer** | Draws Mu structures as Mermaid diagrams |
 
-**Usage**: These run automatically on PRs touching kernel/eval_seed files.
+**Mandatory for all PRs:** verifier, adversary, expert, structural-proof (4 agents)
+**For core code:** Add grounding, fuzzer (6 agents)
+**For founder review:** Add translator, visualizer (8 agents)
+
+See `docs/agents/AgentRig.v0.md` for full agent rig documentation.
 CI workflows: `.github/workflows/agent_*.yml`
 
 ---

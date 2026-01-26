@@ -2,6 +2,13 @@
 
 This file is read by Claude Code at session start. It contains project-specific instructions.
 
+## Current Status (2026-01-26)
+
+**Phase 5 Complete:** Self-hosting achieved. Match/substitute algorithms are Mu projections.
+- Core self-hosting: `rcx_pi/selfhost/` (mu_type, kernel, eval_seed, match_mu, subst_mu, step_mu)
+- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`
+- 53 fuzzer tests, 10,000+ random examples verify parity
+
 ## Pre-Push Checklist
 
 **BEFORE pushing or creating a PR, run these agents locally (uses Max subscription):**
@@ -9,10 +16,15 @@ This file is read by Claude Code at session start. It contains project-specific 
 1. **Verifier** - Check North Star invariants
 2. **Adversary** - Red team for vulnerabilities
 3. **Expert** - Code quality review
+4. **Structural-proof** - Verify Mu projection claims
 
-To run: Ask Claude Code to "run verifier/adversary/expert on [files]"
+**For core kernel/seed code, also run:**
+5. **Grounding** - Write executable tests
+6. **Fuzzer** - Property-based testing (Hypothesis)
 
-## Agent Summary
+To run: Ask Claude Code to "run verifier/adversary/expert/structural-proof on [files]"
+
+## Agent Summary (8 agents)
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
@@ -20,6 +32,12 @@ To run: Ask Claude Code to "run verifier/adversary/expert on [files]"
 | adversary | Security/attack surface analysis | New modules, security-sensitive code |
 | expert | Code quality, simplification | Complex code, before major refactors |
 | structural-proof | Verify Mu projection claims | When claiming "pure structural" |
+| grounding | Convert claims to executable tests | Core kernel/seed code |
+| fuzzer | Property-based testing (1000+ inputs) | Core kernel/seed code |
+| translator | Plain English explanation | On request (founder review) |
+| visualizer | Mermaid diagrams of Mu structures | On request (founder review) |
+
+See `docs/agents/AgentRig.v0.md` for full agent rig documentation.
 
 ## Cost Model
 
@@ -39,9 +57,11 @@ To run: Ask Claude Code to "run verifier/adversary/expert on [files]"
 ## Key Files
 
 - `TASKS.md` - Canonical task list, single source of truth
-- `docs/` - Design specs (read before modifying related code)
+- `docs/core/` - Core design specs (RCXKernel, EVAL_SEED, SelfHosting, MuType)
+- `docs/agents/AgentRig.v0.md` - Agent rig documentation
 - `tools/pre-commit-check.sh` - Quick guardrails
 - `tools/debt_dashboard.sh` - Host debt inventory
+- `rcx_pi/selfhost/` - Core self-hosting implementation
 
 ## North Star Invariants
 
