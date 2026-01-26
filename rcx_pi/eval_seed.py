@@ -47,7 +47,10 @@ def host_recursion(reason: str):
     Args:
         reason: Why this host recursion exists and how it will be eliminated.
 
-    Usage: ``@host_recursion("reason...")`` before function definition.
+    Usage:
+        @host_recursion("Tree traversal - will become iterative projections in Phase 3")
+        def substitute(body, bindings):
+            ...
     """
     def decorator(func):
         func._host_recursion = True
@@ -412,62 +415,6 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
     return input_value
 
 
-@host_recursion(
-    "Deep tree traversal to find reducible sub-expressions. "
-    "Phase 4: express as iterative projections using work-stack approach - "
-    "each step processes one node, work-stack tracks remaining nodes to visit."
-)
-def deep_step(projections: list[Mu], input_value: Mu) -> Mu:
-    """
-    Apply projections deeply - find first matching sub-expression and reduce it.
-
-    Unlike step() which only matches at the root, deep_step recursively
-    descends into the structure to find the first reducible sub-expression.
-
-    This is necessary for recursive data structures like linked lists where
-    projections produce nested structures containing further reducible terms.
-
-    Example:
-        append([1,2], []) produces {head:1, tail:{op:append, xs:[2], ys:[]}}
-        step() would stall (root is {head:..., tail:...}, not {op:append,...})
-        deep_step() finds the nested {op:append} and reduces it
-
-    Args:
-        projections: List of projections to try.
-        input_value: The value to transform.
-
-    Returns:
-        Value with first matching sub-expression reduced, or input if no match.
-    """
-    assert_mu(input_value, "deep_step.input")
-
-    # Try to match at this level first
-    result = step(projections, input_value)
-    if result is not input_value:
-        # Match found at this level (step returns new value, not identity)
-        return result
-
-    # No match at root - recurse into structure
-    if isinstance(input_value, dict):
-        for key in input_value:
-            child_result = deep_step(projections, input_value[key])
-            if child_result is not input_value[key]:
-                # Child was reduced - return new dict with updated child
-                return {k: (child_result if k == key else v)
-                        for k, v in input_value.items()}
-
-    elif isinstance(input_value, list):
-        for i, elem in enumerate(input_value):
-            child_result = deep_step(projections, elem)
-            if child_result is not elem:
-                # Element was reduced - return new list with updated element
-                return [child_result if j == i else e
-                        for j, e in enumerate(input_value)]
-
-    # No match anywhere - return input unchanged (stall)
-    return input_value
-
-
 # =============================================================================
 # Kernel Handlers
 # =============================================================================
@@ -491,29 +438,6 @@ def create_step_handler(projections: list[Mu]):
         return step(projections, context["mu"])
 
     return step_handler
-
-
-def create_deep_step_handler(projections: list[Mu]):
-    """
-    Create a deep step handler for the kernel with given projections.
-
-    Unlike step_handler which only matches at root, deep_step_handler
-    finds and reduces the first matching sub-expression anywhere in the tree.
-
-    Args:
-        projections: List of projections to use.
-
-    Returns:
-        Handler function for "deep_step" event.
-    """
-    def deep_step_handler(context: Mu) -> Mu:
-        """Handle deep_step event: apply projections deeply to current value."""
-        assert_mu(context, "deep_step_handler.context")
-        if not isinstance(context, dict) or "mu" not in context:
-            raise KeyError("deep_step_handler context must have 'mu' key")
-        return deep_step(projections, context["mu"])
-
-    return deep_step_handler
 
 
 def create_stall_handler():

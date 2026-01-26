@@ -22,6 +22,7 @@ If the implementer cannot produce concrete projections, the plan is UNVERIFIED.
 - "lookup in bindings" → Show me how this matches without host dict access
 - "process each element" → Show me the recursion as kernel steps
 
+
 ## North Star Invariants
 
 These MUST remain true. Flag any violation as FAIL:
@@ -76,6 +77,7 @@ When invoked, you will:
 - [ ] Are there hidden host semantics ("lookup", "find", "iterate")?
 
 **If F fails, the plan is NOT VERIFIED regardless of other checks.**
+
 
 ## Output Format
 
