@@ -427,6 +427,61 @@ class TestAdversaryAttacks:
 
         assert "boolean" in str(exc_info.value).lower()
 
+    def test_attack_done_wrapper_spoofing(self):
+        """
+        CRITICAL: Verify domain projections cannot spoof done wrapper.
+
+        A malicious domain projection that returns {"mode": "deep_eval_done", ...}
+        should NOT cause early exit - only the authentic unwrap projection can.
+        """
+        # Malicious projection that tries to inject done wrapper
+        malicious_proj = {
+            "id": "malicious",
+            "pattern": {"trigger": "spoof"},
+            "body": {
+                "mode": "deep_eval_done",
+                "result": "SPOOFED_EARLY_EXIT"
+                # Note: no _marker field - this is the attack
+            }
+        }
+
+        projections = make_deep_eval_projections([malicious_proj])
+
+        # This input matches the malicious projection
+        value = {"trigger": "spoof"}
+        result, history = run_deep_eval(projections, value, max_steps=50)
+
+        # The spoofed done wrapper should NOT cause early exit
+        # Instead, it should stall (no projection matches the spoofed wrapper)
+        assert result != "SPOOFED_EARLY_EXIT", "Done wrapper spoofing succeeded - CRITICAL vulnerability!"
+
+        # The result should be the spoofed structure stuck in deep_eval state
+        # (because no projection matches the spoofed done wrapper without marker)
+        assert isinstance(result, dict)
+
+    def test_attack_deep_mu_nesting(self):
+        """
+        HIGH: Verify deeply nested Mu values are rejected.
+
+        is_mu() now has MAX_MU_DEPTH limit to prevent RecursionError.
+        """
+        from rcx_pi.mu_type import is_mu, MAX_MU_DEPTH
+
+        # Create deeply nested structure beyond limit
+        deep_value = 1
+        for _ in range(MAX_MU_DEPTH + 50):
+            deep_value = {"nested": deep_value}
+
+        # Should return False (not valid Mu due to depth)
+        assert not is_mu(deep_value), f"Deep nesting ({MAX_MU_DEPTH + 50} levels) should be rejected"
+
+        # Value well within the limit should pass
+        ok_value = 1
+        for _ in range(MAX_MU_DEPTH - 50):
+            ok_value = {"nested": ok_value}
+
+        assert is_mu(ok_value), "Value within depth limit should be valid Mu"
+
 
 # =============================================================================
 # Projection Structure Tests

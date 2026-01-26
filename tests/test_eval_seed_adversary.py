@@ -35,34 +35,44 @@ class TestDeepNestingLimits:
         return result
 
     def test_moderate_nesting_works(self):
-        """Moderate nesting (100 levels) should work."""
-        pattern = self.make_deep_nest(100, {'var': 'x'})
-        value = self.make_deep_nest(100, 'found')
+        """Moderate nesting (within MAX_MU_DEPTH) should work."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        # Use depth well within the limit
+        depth = min(100, MAX_MU_DEPTH - 50)
+        pattern = self.make_deep_nest(depth, {'var': 'x'})
+        value = self.make_deep_nest(depth, 'found')
 
         result = match(pattern, value)
         assert result == {'x': 'found'}
 
-    def test_deep_nesting_causes_recursion_error(self):
-        """Deep nesting (500+ levels) causes RecursionError.
+    def test_deep_nesting_rejected_as_invalid_mu(self):
+        """Deep nesting (beyond MAX_MU_DEPTH) is rejected as invalid Mu.
 
-        This documents a known limitation. The current recursive
-        implementation uses Python's call stack, which has limits.
-        Phase 3 should convert to iterative projections.
+        The is_mu() function now has a depth limit (MAX_MU_DEPTH=200) to
+        prevent RecursionError attacks. Values exceeding this depth are
+        rejected with TypeError rather than crashing.
         """
-        pattern = self.make_deep_nest(500, {'var': 'x'})
-        value = self.make_deep_nest(500, 'found')
+        from rcx_pi.mu_type import MAX_MU_DEPTH
 
-        # Document the current behavior - RecursionError
-        with pytest.raises(RecursionError):
+        pattern = self.make_deep_nest(MAX_MU_DEPTH + 50, {'var': 'x'})
+        value = self.make_deep_nest(MAX_MU_DEPTH + 50, 'found')
+
+        # Deep values are now rejected as invalid Mu (TypeError)
+        with pytest.raises(TypeError) as exc_info:
             match(pattern, value)
+        assert "must be a Mu" in str(exc_info.value)
 
-    def test_substitute_deep_nesting_causes_recursion_error(self):
-        """Deep nesting in substitute also causes RecursionError."""
-        body = self.make_deep_nest(500, {'var': 'x'})
+    def test_substitute_deep_nesting_rejected_as_invalid_mu(self):
+        """Deep nesting in substitute also rejected as invalid Mu."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        body = self.make_deep_nest(MAX_MU_DEPTH + 50, {'var': 'x'})
         bindings = {'x': 'replacement'}
 
-        with pytest.raises(RecursionError):
+        with pytest.raises(TypeError) as exc_info:
             substitute(body, bindings)
+        assert "must be a Mu" in str(exc_info.value)
 
 
 # =============================================================================

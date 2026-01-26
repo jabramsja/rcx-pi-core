@@ -34,6 +34,10 @@ from rcx_pi.mu_type import Mu, assert_mu, mu_equal
 MAX_HISTORY = 500        # Cap history to prevent memory exhaustion (Attack 17)
 MAX_CONTEXT_DEPTH = 100  # Cap context depth to prevent stack-like overflow (Attack 7)
 
+# Internal marker for done wrapper - prevents spoofing by domain projections
+# This value is checked by the runner to verify authentic completion
+DONE_MARKER = "__deep_eval_internal_done__"
+
 
 # =============================================================================
 # Deep Eval State Machine Projections
@@ -85,6 +89,7 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
 
     # 2. ROOT_CHECK without changes -> UNWRAP (done!)
     # Return a "done" wrapper that no projection matches (causes stall)
+    # SECURITY: Include internal marker to prevent spoofing by domain projections
     projections.append({
         "id": "unwrap",
         "pattern": {
@@ -96,6 +101,7 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
         },
         "body": {
             "mode": "deep_eval_done",
+            "_marker": DONE_MARKER,  # Internal marker - runner checks this
             "result": {"var": "result"}
         }
     })
@@ -395,8 +401,10 @@ def run_deep_eval(
             else:
                 print(f"Result: {json.dumps(next_val, indent=2)}")
 
-        # Check for done wrapper
-        if isinstance(next_val, dict) and next_val.get("mode") == "deep_eval_done":
+        # Check for done wrapper with internal marker (prevents spoofing)
+        if (isinstance(next_val, dict) and
+            next_val.get("mode") == "deep_eval_done" and
+            next_val.get("_marker") == DONE_MARKER):
             if debug:
                 print("DONE!")
             return next_val["result"], history
@@ -406,7 +414,10 @@ def run_deep_eval(
         current = next_val
 
     # If we stalled without done wrapper, extract result if possible
-    if isinstance(current, dict) and current.get("mode") == "deep_eval_done":
+    # Check for internal marker to prevent spoofing
+    if (isinstance(current, dict) and
+        current.get("mode") == "deep_eval_done" and
+        current.get("_marker") == DONE_MARKER):
         return current["result"], history
 
     return current, history

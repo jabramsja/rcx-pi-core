@@ -17,8 +17,13 @@ from typing import Any
 # Type alias for documentation (Python's type system can't express recursive JSON)
 Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 
+# Maximum nesting depth for Mu validation (prevents RecursionError attacks)
+# Set conservatively below Python's default recursion limit (~1000)
+# to account for stack frames used by comprehensions
+MAX_MU_DEPTH = 200
 
-def is_mu(value: Any, _seen: set[int] | None = None) -> bool:
+
+def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
     """
     Check if a value is a valid Mu (JSON-compatible).
 
@@ -33,14 +38,20 @@ def is_mu(value: Any, _seen: set[int] | None = None) -> bool:
     Args:
         value: The value to check.
         _seen: Internal parameter for cycle detection. Do not pass.
+        _depth: Internal parameter for depth tracking. Do not pass.
 
     Returns:
         True if value is a valid Mu, False otherwise.
 
     Note:
         Circular references are detected and rejected (return False).
+        Deep nesting beyond MAX_MU_DEPTH is rejected (return False).
         This prevents infinite recursion/stack overflow attacks.
     """
+    # Depth limit check (prevents RecursionError attacks)
+    if _depth > MAX_MU_DEPTH:
+        return False
+
     if value is None:
         return True
     # Check bool before int (bool is subclass of int in Python)
@@ -65,11 +76,11 @@ def is_mu(value: Any, _seen: set[int] | None = None) -> bool:
         _seen = _seen | {value_id}  # Create new set to avoid mutation issues
 
     if isinstance(value, list):
-        return all(is_mu(item, _seen) for item in value)
+        return all(is_mu(item, _seen, _depth + 1) for item in value)
     if isinstance(value, dict):
         return (
             all(isinstance(k, str) for k in value.keys()) and
-            all(is_mu(v, _seen) for v in value.values())
+            all(is_mu(v, _seen, _depth + 1) for v in value.values())
         )
     # Anything else (function, class, object, bytes, set, tuple, etc.) is not a Mu
     return False
