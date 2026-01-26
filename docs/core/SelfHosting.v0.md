@@ -365,6 +365,27 @@ The adversary agent identified these attack vectors. Mitigations:
 | Variable site ambiguity | Well-formed input assumption + validation |
 | Match/substitute interleaving | Explicit mode field in state |
 
+## Security Hardening (PR #149)
+
+Additional attack vectors addressed in security hardening pass:
+
+| Attack | Mitigation |
+|--------|------------|
+| Resource exhaustion (cascading calls) | Global step budget: MAX_PROJECTION_STEPS=50,000 |
+| Deep nesting DoS | MAX_MU_DEPTH=200 limit |
+| Wide structure DoS | MAX_MU_WIDTH=1,000 limit |
+| Circular reference infinite loop | Cycle detection in normalize/denormalize |
+| Cross-thread budget contamination | Thread-local budget via `threading.local()` |
+| Empty variable name edge case | Explicit rejection with ValueError |
+| Hostile unicode edge cases | Tested with emoji, RTL, zero-width, homoglyphs |
+
+**Test Coverage:**
+- `tests/test_selfhost_fuzzer.py`: 53 tests, 10,000+ random examples
+- `TestMatchMuParity`: match_mu == eval_seed.match (1,000 examples)
+- `TestSubstMuParity`: subst_mu == eval_seed.substitute (1,200 examples)
+- `TestNearLimitStress`: boundary testing at depth 190-200, width 900-1000
+- All tests use `deadline=5000` to prevent infinite hangs
+
 ## Success Criteria
 
 Phase 4a-4d complete:
