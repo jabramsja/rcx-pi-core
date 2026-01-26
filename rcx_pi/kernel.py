@@ -10,7 +10,7 @@ The kernel provides exactly 4 primitives:
 The kernel is "dumb" - it doesn't know how to match patterns or apply
 projections. Seeds define all semantics via handlers.
 
-See docs/RCXKernel.v0.md for the full specification.
+See docs/core/RCXKernel.v0.md for the full specification.
 """
 
 from __future__ import annotations

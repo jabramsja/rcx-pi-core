@@ -13,8 +13,8 @@ If CI is not green, the change does not exist.
 ### Current Direction
 
 Building a minimal self-hosting kernel. See:
-- `docs/RCXKernel.v0.md` - Kernel architecture (4 primitives, seeds define semantics)
-- `docs/StructuralPurity.v0.md` - Guardrails for Mu purity
+- `docs/core/RCXKernel.v0.md` - Kernel architecture (4 primitives, seeds define semantics)
+- `docs/core/StructuralPurity.v0.md` - Guardrails for Mu purity
 - `TASKS.md` - Canonical task tracker
 
 
@@ -137,7 +137,7 @@ Examples:
   - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --json`
 
 ## CLI Quickstart
-See `docs/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
+See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
 
 <!-- protection smoke: 2026-01-13T23:02:14Z -->
 

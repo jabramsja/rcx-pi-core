@@ -59,7 +59,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if args.schema:
         print_schema_triplet(
-            "rcx-program-run.v1", "docs/program_run_schema.md", SCHEMA_JSON
+            "rcx-program-run.v1", "docs/schemas/program_run_schema.md", SCHEMA_JSON
         )
         return 0
 

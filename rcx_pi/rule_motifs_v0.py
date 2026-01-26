@@ -4,7 +4,7 @@ Rule Motifs v0 - Observability-only rule representations.
 This module provides static rule motif definitions for all rules in rules_pure.py.
 It emits rule.loaded v2 trace events. No execution semantics, no matching, no application.
 
-See docs/RuleAsMotif.v0.md for the design specification.
+See docs/execution/RuleAsMotif.v0.md for the design specification.
 """
 from __future__ import annotations
 

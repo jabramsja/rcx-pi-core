@@ -9,7 +9,7 @@ The key insight is that tree traversal is expressed as explicit Mu state
 (focus + context stack + phase), with no host recursion - the kernel loop
 provides the iteration.
 
-See docs/DeepStep.v0.md for the design.
+See docs/execution/DeepStep.v0.md for the design.
 
 HOST DEBT INVENTORY:
   - @host_builtin: run_deep_eval (range for iteration loop)

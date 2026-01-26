@@ -9,7 +9,7 @@ This module implements the core operations needed to evaluate projections:
 
 The only special form is {"var": "<name>"} which matches anything and binds.
 
-See docs/EVAL_SEED.v0.md for specification.
+See docs/core/EVAL_SEED.v0.md for specification.
 """
 
 from __future__ import annotations

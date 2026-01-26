@@ -9,7 +9,7 @@ from rcx_pi.api import run_named_list_program
 
 
 SCHEMA = "rcx-program-run.v1"
-SCHEMA_DOC = "docs/program_run_schema.md"
+SCHEMA_DOC = "docs/schemas/program_run_schema.md"
 
 
 def _utc_now_z() -> str:

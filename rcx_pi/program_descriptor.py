@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 SCHEMA_TAG = "rcx-program-descriptor.v1"
-SCHEMA_DOC = "docs/program_descriptor_schema.md"
+SCHEMA_DOC = "docs/schemas/program_descriptor_schema.md"
 
 
 def _find_repo_root(start: Path) -> Optional[Path]:
