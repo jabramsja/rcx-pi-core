@@ -129,9 +129,9 @@ class TestSeedLoading:
     def test_seed_has_meta(self):
         """Seed has metadata section."""
         seed = load_eval_seed()
-        assert "_meta" in seed
-        assert "version" in seed["_meta"]
-        assert "name" in seed["_meta"]
+        assert "meta" in seed
+        assert "version" in seed["meta"]
+        assert "name" in seed["meta"]
 
     def test_seed_has_projections(self):
         """Seed has projections array."""

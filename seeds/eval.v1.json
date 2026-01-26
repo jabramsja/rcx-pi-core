@@ -1,5 +1,5 @@
 {
-  "_meta": {
+  "meta": {
     "version": "1.0.0",
     "name": "EVAL_SEED",
     "description": "Deep evaluation projections for RCX work-stack machine",
