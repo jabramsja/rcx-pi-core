@@ -46,6 +46,37 @@ def clear_projection_cache() -> None:
 
 
 # =============================================================================
+# Variable Name Validation
+# =============================================================================
+
+
+def _check_empty_var_names(value: Mu, context: str) -> None:
+    """
+    Check for empty variable names in a Mu structure.
+
+    This ensures parity with eval_seed.py which rejects empty var names.
+
+    Args:
+        value: The Mu value to check.
+        context: Context for error message (e.g., "pattern", "body").
+
+    Raises:
+        ValueError: If an empty variable name is found.
+    """
+    if isinstance(value, dict):
+        # Check if this is a variable site with empty name
+        if set(value.keys()) == {"var"} and isinstance(value.get("var"), str):
+            if value["var"] == "":
+                raise ValueError(f"Variable name cannot be empty in {context}: {{'var': ''}}")
+        # Recurse into dict values
+        for v in value.values():
+            _check_empty_var_names(v, context)
+    elif isinstance(value, list):
+        for item in value:
+            _check_empty_var_names(item, context)
+
+
+# =============================================================================
 # Dict Normalization
 # =============================================================================
 
@@ -356,6 +387,9 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
     """
     assert_mu(pattern, "match_mu.pattern")
     assert_mu(value, "match_mu.value")
+
+    # Validate no empty variable names (parity with eval_seed.py)
+    _check_empty_var_names(pattern, "pattern")
 
     # Normalize inputs to head/tail structures
     norm_pattern = normalize_for_match(pattern)

@@ -76,6 +76,101 @@ class TestDeepNestingLimits:
 
 
 # =============================================================================
+# Width Limits (Resource Exhaustion Prevention)
+# =============================================================================
+
+
+class TestWidthLimits:
+    """Tests for width (breadth) limits on lists and dicts.
+
+    HARDENED: Wide structures (1M+ keys) could exhaust memory during validation.
+    MAX_MU_WIDTH prevents this attack vector.
+    """
+
+    def test_list_within_width_limit_accepted(self):
+        """Lists within MAX_MU_WIDTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        # Use width well within the limit
+        width = min(100, MAX_MU_WIDTH - 100)
+        value = list(range(width))
+
+        assert is_mu(value) is True
+
+    def test_list_exceeding_width_limit_rejected(self):
+        """Lists exceeding MAX_MU_WIDTH are rejected."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        value = list(range(MAX_MU_WIDTH + 1))
+
+        assert is_mu(value) is False
+
+    def test_dict_within_width_limit_accepted(self):
+        """Dicts within MAX_MU_WIDTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        width = min(100, MAX_MU_WIDTH - 100)
+        value = {f"key{i}": i for i in range(width)}
+
+        assert is_mu(value) is True
+
+    def test_dict_exceeding_width_limit_rejected(self):
+        """Dicts exceeding MAX_MU_WIDTH are rejected."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        value = {f"key{i}": i for i in range(MAX_MU_WIDTH + 1)}
+
+        assert is_mu(value) is False
+
+    def test_wide_structure_in_match_rejected(self):
+        """Wide structures are rejected at match() boundary."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        pattern = {'var': 'x'}
+        value = list(range(MAX_MU_WIDTH + 1))
+
+        with pytest.raises(TypeError, match="must be a Mu"):
+            match(pattern, value)
+
+
+# =============================================================================
+# Trace Size Limits (Memory Exhaustion Prevention)
+# =============================================================================
+
+
+class TestTraceLimits:
+    """Tests for trace size limits.
+
+    HARDENED: Unbounded trace growth could exhaust memory in long-running
+    evaluations. MAX_TRACE_ENTRIES prevents this attack vector.
+    """
+
+    def test_trace_within_limit_works(self):
+        """Recording traces within limit works normally."""
+        from rcx_pi.kernel import record_trace, MAX_TRACE_ENTRIES
+
+        trace = []
+        # Record a modest number of entries
+        for i in range(min(100, MAX_TRACE_ENTRIES - 1)):
+            record_trace(trace, {"step": i})
+
+        assert len(trace) == min(100, MAX_TRACE_ENTRIES - 1)
+
+    def test_trace_exceeding_limit_raises(self):
+        """Exceeding trace limit raises RuntimeError."""
+        from rcx_pi.kernel import record_trace, MAX_TRACE_ENTRIES
+
+        trace = []
+        # Fill to limit
+        for i in range(MAX_TRACE_ENTRIES):
+            record_trace(trace, {"step": i})
+
+        # One more should raise
+        with pytest.raises(RuntimeError, match="Trace size limit exceeded"):
+            record_trace(trace, {"step": "overflow"})
+
+
+# =============================================================================
 # Dict Subclass Isolation
 # =============================================================================
 
@@ -214,10 +309,14 @@ class TestBoolIntCoercionPrevention:
 class TestSpecialVariableNames:
     """Tests for edge case variable names."""
 
-    def test_empty_string_var_name(self):
-        """Empty string is a valid variable name."""
-        result = match({'var': ''}, 42)
-        assert result == {'': 42}
+    def test_empty_string_var_name_rejected(self):
+        """Empty string variable name is rejected.
+
+        HARDENED: Empty variable names cause confusing error messages and
+        debugging difficulty. They are now rejected with ValueError.
+        """
+        with pytest.raises(ValueError, match="cannot be empty"):
+            match({'var': ''}, 42)
 
     def test_var_named_var(self):
         """'var' is a valid variable name (no collision)."""

@@ -27,6 +27,10 @@ from .mu_type import (
     mark_bootstrap,
 )
 
+# Maximum trace entries to prevent memory exhaustion
+# With max_steps=1000 default, this provides 10x headroom
+MAX_TRACE_ENTRIES = 10000
+
 
 # =============================================================================
 # Kernel Primitives
@@ -86,9 +90,16 @@ def record_trace(trace: list, entry: Mu) -> None:
 
     Raises:
         TypeError: If entry is not a valid Mu.
+        RuntimeError: If trace size limit exceeded.
     """
     # Guardrail: validate entry is Mu
     assert_mu(entry, "record_trace entry")  # guardrail
+    # Guardrail: prevent memory exhaustion
+    if len(trace) >= MAX_TRACE_ENTRIES:
+        raise RuntimeError(
+            f"Trace size limit exceeded ({MAX_TRACE_ENTRIES} entries). "
+            f"Possible infinite loop or resource exhaustion attack."
+        )
     trace.append(entry)
 
 

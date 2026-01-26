@@ -21,6 +21,7 @@ from .match_mu import (
     denormalize_from_match,
     dict_to_bindings,
     bindings_to_dict,
+    _check_empty_var_names,
 )
 
 
@@ -206,6 +207,9 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
         KeyError: If a variable in body is not in bindings.
     """
     assert_mu(body, "subst_mu.body")
+
+    # Validate no empty variable names (parity with eval_seed.py)
+    _check_empty_var_names(body, "body")
 
     # Check if body is already in head/tail form (structural dict)
     # If so, we shouldn't denormalize it back to a list

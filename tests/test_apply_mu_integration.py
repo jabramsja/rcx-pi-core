@@ -352,17 +352,22 @@ class TestApplyMuAdversarialEdgeCases:
 
         assert py_result == mu_result == {"wrapped": deep_value}
 
-    def test_empty_string_variable_name(self):
-        """Variable name can be empty string (edge case)."""
+    def test_empty_string_variable_name_rejected(self):
+        """Empty variable names are rejected (security hardening).
+
+        HARDENED: Empty variable names cause confusing error messages.
+        Both Python and Mu paths now reject them with ValueError.
+        """
         proj = {
             "pattern": {"var": ""},
             "body": {"result": {"var": ""}}
         }
 
-        py_result = apply_projection(proj, "value")
-        mu_result = apply_mu(proj, "value")
+        with pytest.raises(ValueError, match="cannot be empty"):
+            apply_projection(proj, "value")
 
-        assert py_result == mu_result == {"result": "value"}
+        with pytest.raises(ValueError, match="cannot be empty"):
+            apply_mu(proj, "value")
 
     def test_unicode_variable_name(self):
         """Variable names can be unicode."""
