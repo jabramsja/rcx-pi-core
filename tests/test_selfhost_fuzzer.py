@@ -799,7 +799,7 @@ class TestTypePreservation:
 class TestLimitEnforcement:
     """Tests for width/depth limit enforcement."""
 
-    def _build_deep_structure(self, depth):
+    def build_deep_structure(self, depth):
         """Build deeply nested dict structure."""
         result = "leaf"
         for _ in range(depth):
@@ -810,7 +810,7 @@ class TestLimitEnforcement:
     @settings(max_examples=20, deadline=5000)
     def test_is_mu_rejects_too_deep(self, depth):
         """is_mu rejects structures exceeding MAX_MU_DEPTH."""
-        structure = self._build_deep_structure(depth)
+        structure = self.build_deep_structure(depth)
         assert not is_mu(structure), f"is_mu accepted depth {depth} > {MAX_MU_DEPTH}"
 
     @given(st.integers(min_value=MAX_MU_WIDTH + 1, max_value=MAX_MU_WIDTH + 100))
@@ -831,7 +831,7 @@ class TestLimitEnforcement:
     @settings(max_examples=50, deadline=5000)
     def test_is_mu_accepts_within_depth_limit(self, depth):
         """is_mu accepts structures within MAX_MU_DEPTH."""
-        structure = self._build_deep_structure(depth)
+        structure = self.build_deep_structure(depth)
         assert is_mu(structure), f"is_mu rejected valid depth {depth} <= {MAX_MU_DEPTH}"
 
     @given(st.integers(min_value=1, max_value=min(100, MAX_MU_WIDTH)))
