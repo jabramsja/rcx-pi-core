@@ -104,6 +104,14 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - **Why:** AI can lie to you, but cannot lie to 1000 random CPU-generated inputs
 - **Verdict:** ROBUST / FRAGILE / BROKEN
 
+### 9. Visualizer (`visualizer.md`)
+- **Model:** Haiku (cheap, run often)
+- **Purpose:** Draw Mu structures as Mermaid diagrams
+- **Focus:** Visual lie detection - linked lists show chains, Python lists show blobs
+- **Why:** Founder can't read code but CAN look at a picture
+- **Red flag:** Any red "blob" node = Python list smuggled in
+- **Output:** Mermaid diagram (renders in GitHub, VS Code, etc.)
+
 ## Key Design Decisions
 
 ### Intelligence Balance
@@ -167,6 +175,7 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 | `.claude/agents/grounding.md` | Test writer config |
 | `.claude/agents/translator.md` | Plain English explainer config |
 | `.claude/agents/fuzzer.md` | Chaos monkey / property-based testing |
+| `.claude/agents/visualizer.md` | Mermaid diagram generator |
 | `tools/contraband.sh` | Dumb linter (no AI) |
 
 ## History
@@ -181,3 +190,4 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 | 2026-01-26 | Created contraband.sh linter |
 | 2026-01-26 | Added fuzzer agent (Hypothesis property-based testing) |
 | 2026-01-26 | Documented Trusted Kernel architecture |
+| 2026-01-26 | Added visualizer agent (Mermaid diagrams) |
