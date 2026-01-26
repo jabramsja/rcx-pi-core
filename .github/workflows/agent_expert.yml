@@ -3,9 +3,7 @@ name: Agent Expert
 on:
   pull_request:
     paths:
-      - 'rcx_pi/kernel.py'
-      - 'rcx_pi/eval_seed.py'
-      - 'rcx_pi/mu_type.py'
+      - 'rcx_pi/**/*.py'
 
 jobs:
   review:
@@ -33,7 +31,7 @@ jobs:
       - name: Get changed files
         id: changed
         run: |
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^rcx_pi/(kernel|eval_seed|mu_type)\.py$' | tr '\n' ' ')
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^rcx_pi/.*\.py$' | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Run expert agent
