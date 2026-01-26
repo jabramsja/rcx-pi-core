@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from typing import Any, Callable
 
 from .mu_type import (
@@ -109,19 +110,21 @@ class _ProjectionStepBudget:
         return self._total_steps
 
 
-# Global budget instance (thread-local would be better for true concurrency)
-_STEP_BUDGET = _ProjectionStepBudget()
+# Thread-local storage for step budget
+# Each thread gets its own budget instance to support concurrent execution
+_BUDGET_STORAGE = threading.local()
 
 
 def get_step_budget() -> _ProjectionStepBudget:
-    """Get the global projection step budget."""
-    return _STEP_BUDGET
+    """Get the thread-local projection step budget."""
+    if not hasattr(_BUDGET_STORAGE, 'budget'):
+        _BUDGET_STORAGE.budget = _ProjectionStepBudget()
+    return _BUDGET_STORAGE.budget
 
 
 def reset_step_budget() -> None:
-    """Reset the global step budget (for testing)."""
-    global _STEP_BUDGET
-    _STEP_BUDGET = _ProjectionStepBudget()
+    """Reset the thread-local step budget (for testing)."""
+    _BUDGET_STORAGE.budget = _ProjectionStepBudget()
 
 
 # =============================================================================

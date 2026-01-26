@@ -313,6 +313,110 @@ class TestGlobalStepBudget:
 
         budget.stop()
 
+    def test_nested_calls_exhaust_budget(self):
+        """Nested match/subst calls can exhaust the global budget.
+
+        This stress test verifies that cascading calls eventually hit the
+        global step limit, preventing resource exhaustion attacks where
+        individual calls stay under their local limit but total exceeds safe bounds.
+        """
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.match_mu import match_mu
+        from rcx_pi.subst_mu import subst_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        # Set a very low limit to trigger exhaustion
+        budget.start(limit=100)
+
+        # Complex patterns/bodies that consume more steps per call
+        complex_pattern = {
+            "a": {"var": "x"},
+            "b": {"var": "y"},
+            "c": [{"var": "z"}, 1, 2]
+        }
+        complex_value = {
+            "a": 1,
+            "b": 2,
+            "c": [3, 1, 2]
+        }
+        complex_body = {
+            "result": [{"var": "x"}, {"var": "y"}],
+            "nested": {"inner": {"var": "z"}}
+        }
+        complex_bindings = {"x": 10, "y": 20, "z": 30}
+
+        exhausted = False
+        try:
+            # Keep calling until budget exhausted
+            for _ in range(1000):  # Should exhaust well before this
+                match_mu(complex_pattern, complex_value)
+                subst_mu(complex_body, complex_bindings)
+        except RuntimeError as e:
+            if "step limit exceeded" in str(e):
+                exhausted = True
+
+        budget.stop()
+
+        # The budget should have been exhausted
+        assert exhausted, "Budget was not exhausted - limit may not be enforced"
+
+    def test_budget_thread_isolation(self):
+        """Budget is thread-local - each thread has its own budget.
+
+        This verifies the thread-safety fix where _STEP_BUDGET uses
+        threading.local() instead of a global singleton.
+        """
+        import threading
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+
+        results = {}
+        errors = []
+
+        def thread_work(thread_id, limit):
+            try:
+                reset_step_budget()
+                budget = get_step_budget()
+                budget.start(limit=limit)
+
+                # Consume some steps
+                budget.consume(limit // 2)
+
+                # Record the budget state
+                results[thread_id] = {
+                    "total": budget.get_total(),
+                    "remaining": budget.get_remaining(),
+                    "limit": limit
+                }
+
+                budget.stop()
+            except Exception as e:
+                errors.append((thread_id, str(e)))
+
+        # Start multiple threads with different limits
+        threads = []
+        for i in range(5):
+            limit = (i + 1) * 1000
+            t = threading.Thread(target=thread_work, args=(i, limit))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        # Check no errors occurred
+        assert not errors, f"Thread errors: {errors}"
+
+        # Each thread should have its own budget (different totals based on limit)
+        for i in range(5):
+            expected_limit = (i + 1) * 1000
+            expected_consumed = expected_limit // 2
+            assert results[i]["total"] == expected_consumed, \
+                f"Thread {i}: expected {expected_consumed} consumed, got {results[i]['total']}"
+            assert results[i]["limit"] == expected_limit, \
+                f"Thread {i}: expected limit {expected_limit}, got {results[i]['limit']}"
+
 
 # =============================================================================
 # Dict Subclass Isolation
