@@ -153,9 +153,9 @@ def rule_motifs_v0() -> List[Dict[str, Any]]:
 def _deep_sort(obj: Any) -> Any:
     """Recursively sort dict keys for deterministic JSON output."""
     if isinstance(obj, dict):
-        return {k: _deep_sort(v) for k, v in sorted(obj.items())}
+        return {k: _deep_sort(v) for k, v in sorted(obj.items())}  # AST_OK: infra
     if isinstance(obj, list):
-        return [_deep_sort(item) for item in obj]
+        return [_deep_sort(item) for item in obj]  # AST_OK: infra
     return obj
 
 
@@ -363,7 +363,7 @@ def validate_rule_motifs_v0(rule_motifs: List[Dict[str, Any]]) -> Dict[str, Any]
             pass  # Already caught above
 
     # Sort errors deterministically
-    errors.sort(key=lambda e: (e["rule_id"], e["code"], e["detail"]))
+    errors.sort(key=lambda e: (e["rule_id"], e["code"], e["detail"]))  # AST_OK: infra
 
     return {
         "v": 1,

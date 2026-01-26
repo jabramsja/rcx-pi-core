@@ -23,7 +23,7 @@ def one_nonempty_stdout_line(stdout: str) -> str:
     Raises AssertionError with a helpful message if stdout is empty
     or contains multiple non-empty lines.
     """
-    lines = [ln for ln in stdout.splitlines() if ln.strip() != ""]
+    lines = [ln for ln in stdout.splitlines() if ln.strip() != ""]  # AST_OK: infra
     assert len(lines) == 1, (
         f"expected exactly 1 non-empty stdout line, got {len(lines)}: {lines!r}"
     )

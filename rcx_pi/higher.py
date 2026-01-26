@@ -57,7 +57,7 @@ def peano_list(ints: Iterable[int]) -> Motif:
 
     This is just a structural convenience, not a canonical list encoding.
     """
-    motifs = [num(i) for i in ints]
+    motifs = [num(i) for i in ints]  # AST_OK: infra
     return μ(*motifs)
 
 

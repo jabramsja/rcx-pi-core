@@ -37,7 +37,7 @@ def _deep_sort_json(x: Any) -> Any:
             out[str(k)] = _deep_sort_json(x[k])
         return out
     if isinstance(x, list):
-        return [_deep_sort_json(v) for v in x]
+        return [_deep_sort_json(v) for v in x]  # AST_OK: infra
     return x
 
 
@@ -108,10 +108,10 @@ def canon_events(events: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     Canonicalize a sequence of events and enforce contiguous index ordering by `i`.
     We do NOT renumber; we assert correctness to catch drift early.
     """
-    out: List[Dict[str, Any]] = [canon_event(ev) for ev in events]
+    out: List[Dict[str, Any]] = [canon_event(ev) for ev in events]  # AST_OK: infra
     if out:
         expected = list(range(len(out)))
-        got = [e["i"] for e in out]
+        got = [e["i"] for e in out]  # AST_OK: infra
         if got != expected:
             raise ValueError(
                 f"event.i must be contiguous 0..n-1 in-order; got {got}, expected {expected}"
@@ -132,7 +132,7 @@ def canon_jsonl(events: Iterable[Mapping[str, Any]]) -> str:
     Serialize canonical events to JSONL (one event per line, newline-terminated).
     """
     canon = canon_events(events)
-    lines = [
+    lines = [  # AST_OK: infra
         json.dumps(e, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
         for e in canon
     ]
@@ -212,7 +212,7 @@ class TraceObserver:
 
     def get_events(self) -> List[Dict[str, Any]]:
         """Return collected events (canonicalized)."""
-        return [canon_event(ev) for ev in self._events]
+        return [canon_event(ev) for ev in self._events]  # AST_OK: infra
 
     def reset(self) -> None:
         """Reset observer state."""
@@ -335,7 +335,7 @@ class ExecutionEngine:
 
         This is a public method for testing and observability purposes.
         """
-        patterns_to_clear = [
+        patterns_to_clear = [  # AST_OK: infra
             p for p, vh in self._stall_memory.items() if vh == before_hash
         ]
         for p in patterns_to_clear:
@@ -434,7 +434,7 @@ class ExecutionEngine:
 
     def get_events(self) -> List[Dict[str, Any]]:
         """Return collected execution events (canonicalized)."""
-        return [canon_event(ev) for ev in self._events]
+        return [canon_event(ev) for ev in self._events]  # AST_OK: infra
 
     def reset(self) -> None:
         """Reset execution state."""

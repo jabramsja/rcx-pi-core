@@ -3,10 +3,18 @@ Pytest configuration for RCX tests.
 
 Provides:
 - Projection coverage tracking (enable with RCX_PROJECTION_COVERAGE=1)
+- Skips tests that require optional modules (rcx_omega, scripts)
 """
 
 import os
 import pytest
+
+# Skip tests that require optional modules not present in this repo
+collect_ignore = [
+    "test_semantic_goldens.py",     # requires rcx_omega
+    "test_semantic_invariants.py",  # requires rcx_omega
+    "test_normalize_graphviz_svg.py",  # requires scripts module
+]
 
 
 def pytest_configure(config):

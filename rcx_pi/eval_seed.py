@@ -345,11 +345,11 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
 
     # List - recursively substitute
     if isinstance(body, list):
-        return [substitute(elem, bindings) for elem in body]
+        return [substitute(elem, bindings) for elem in body]  # AST_OK: bootstrap - subst_mu replaces this
 
     # Dict - recursively substitute values
     if isinstance(body, dict):
-        return {k: substitute(v, bindings) for k, v in body.items()}
+        return {k: substitute(v, bindings) for k, v in body.items()}  # AST_OK: bootstrap - subst_mu replaces this
 
     # Should not reach here
     raise TypeError(f"Invalid body type: {type(body)}")

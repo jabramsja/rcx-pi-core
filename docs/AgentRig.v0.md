@@ -57,6 +57,13 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - **Blocks:** `eval()`, `exec()`, `globals()`, `locals()`, `pickle`, metaclass dunders
 - **Run:** Before any AI agent
 
+### 1b. AST Police (`tools/ast_police.py`)
+- **Type:** Python AST parser (no AI)
+- **Purpose:** Catch what grep misses (set literals, multiline tricks, aliasing)
+- **Blocks:** Set comprehensions, walrus operator, yield, async, dangerous builtins via alias
+- **Allows:** Key comparison sets `{"head", "tail"}`, lines marked `# AST_OK:`
+- **Why:** Grep reads text. AST reads grammar. Can't fool grammar.
+
 ### 2. Expert (`expert.md`)
 - **Model:** Sonnet
 - **Purpose:** Write code, identify complexity, suggest simplifications
@@ -176,7 +183,8 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 | `.claude/agents/translator.md` | Plain English explainer config |
 | `.claude/agents/fuzzer.md` | Chaos monkey / property-based testing |
 | `.claude/agents/visualizer.md` | Mermaid diagram generator |
-| `tools/contraband.sh` | Dumb linter (no AI) |
+| `tools/contraband.sh` | Dumb regex linter (no AI) |
+| `tools/ast_police.py` | AST-based linter (catches what grep misses) |
 
 ## History
 
@@ -191,3 +199,4 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 | 2026-01-26 | Added fuzzer agent (Hypothesis property-based testing) |
 | 2026-01-26 | Documented Trusted Kernel architecture |
 | 2026-01-26 | Added visualizer agent (Mermaid diagrams) |
+| 2026-01-26 | Added ast_police.py (catches what grep misses) |
