@@ -1,12 +1,18 @@
 name: Agent Verifier
 
+# Manual trigger only - run locally by default to save API costs
+# Use: Actions > Agent Verifier > Run workflow
 on:
-  pull_request:
-    paths:
-      - 'rcx_pi/**/*.py'
-      - 'prototypes/**/*.py'
-      - 'tests/**/*.py'
-      - 'seeds/**/*.json'
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 'Files to verify (space-separated, or leave empty for all)'
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number to comment on (optional)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -20,7 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed for git diff
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,43 +43,45 @@ jobs:
           pip install claude-agent-sdk
           pip install ".[test]"
 
-      - name: Get changed files
-        id: changed
+      - name: Determine files to check
+        id: files
         run: |
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^(rcx_pi|prototypes|tests)/.*\.py$|^seeds/.*\.json$' | tr '\n' ' ')
-          echo "files=$FILES" >> $GITHUB_OUTPUT
+          if [ -n "${{ inputs.files }}" ]; then
+            echo "files=${{ inputs.files }}" >> $GITHUB_OUTPUT
+          else
+            # Default: all Python files in core directories
+            FILES=$(find rcx_pi prototypes tests -name "*.py" 2>/dev/null | tr '\n' ' ')
+            echo "files=$FILES" >> $GITHUB_OUTPUT
+          fi
 
       - name: Run verifier agent
         id: verify
-        if: steps.changed.outputs.files != ''
+        if: steps.files.outputs.files != ''
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          python tools/run_verifier.py ${{ steps.changed.outputs.files }} 2>&1 | tee /tmp/verifier_output.txt
+          python tools/run_verifier.py ${{ steps.files.outputs.files }} 2>&1 | tee /tmp/verifier_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
       - name: Post PR comment
-        if: always() && steps.changed.outputs.files != ''
+        if: always() && inputs.pr_number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f /tmp/verifier_output.txt ]; then
-            # Extract the report section (between === lines)
             REPORT=$(cat /tmp/verifier_output.txt | sed -n '/^====/,/^====/p' | tail -n +2 | head -n -1)
 
             if [ -z "$REPORT" ]; then
               REPORT=$(tail -50 /tmp/verifier_output.txt)
             fi
 
-            # Determine status emoji
             if [ "${{ steps.verify.outputs.exit_code }}" = "0" ]; then
               STATUS="✅ **VERIFIER PASSED**"
             else
               STATUS="❌ **VERIFIER FAILED**"
             fi
 
-            # Post comment
-            gh pr comment ${{ github.event.pull_request.number }} --body "## 🔍 Verifier Agent Report
+            gh pr comment ${{ inputs.pr_number }} --body "## 🔍 Verifier Agent Report
 
 $STATUS
 
@@ -87,5 +95,15 @@ $REPORT
 </details>
 
 ---
-*Automated review by RCX Verifier Agent*"
+*Manual review by RCX Verifier Agent*"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Verifier Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f /tmp/verifier_output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/verifier_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi

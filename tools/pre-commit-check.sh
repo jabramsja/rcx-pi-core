@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Pre-commit quick checks for RCX
-# Install: cp tools/pre-commit-check.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# STANDARD WORKFLOW (saves API costs):
+# 1. Run this script before committing: ./tools/pre-commit-check.sh
+# 2. Run agents locally (uses your subscription): python tools/run_verifier.py <files>
+# 3. Push - CI runs fast checks (tests, audit) - FREE
+# 4. CI agents are manual-trigger only - use GitHub Actions UI when needed
+#
+# Install as git hook:
+#   cp tools/pre-commit-check.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
 # Or run manually: ./tools/pre-commit-check.sh
 
 set -euo pipefail
