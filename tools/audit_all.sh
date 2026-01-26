@@ -30,11 +30,14 @@ echo "== 3.3) Semantic purity audit (self-hosting readiness) =="
 ./tools/audit_semantic_purity.sh
 
 echo "== 4) Anti-cheat scans =="
-echo "-- no private attr access in tests/"
-! grep -RInE '\._[a-zA-Z0-9]+' tests/ || { echo "Found private attr access in tests/"; exit 1; }
+echo "-- no private attr access in tests/ or prototypes/"
+! grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ || { echo "Found private attr access"; exit 1; }
 
-echo "-- no underscored imports from rcx_pi in tests/"
-! grep -RInE 'from rcx_pi\..* import _' tests/ || { echo "Found underscored import from rcx_pi in tests/"; exit 1; }
+echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
+! grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ || { echo "Found underscored import from rcx_pi"; exit 1; }
+
+echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
+! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 5) Fixture size check (all v2 jsonl) =="
 find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do

@@ -29,6 +29,10 @@ If a task is not listed here, it is NOT to be implemented.
 - Do not leave broken files/tests behind and add replacements.
 - Minimize file creation. Prefer editing existing files.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
+- **Pre-commit doc review**: Before committing changes to `rcx_pi/`, `prototypes/`, or `seeds/`:
+  1. Read relevant docs in `docs/` (e.g., EVAL_SEED.v0.md, DeepStep.v0.md)
+  2. Update docs if implementation differs from spec
+  3. Update TASKS.md status if completing/progressing items
 
 ---
 
@@ -114,7 +118,52 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NOW (empty by design; only populated if an invariant is broken)
 
-_(No active items.)_
+### Agent Findings (PR #131) ✅ ADDRESSED
+
+24. **Verifier Findings: DeepStep Prototype** ✅
+    - [x] Add test for `append([1,2], None)` - `test_append_empty_ys`
+    - [x] Add `@host_builtin`, `@host_iteration` decorators to test utilities
+    - [x] Add `assert_mu()` validation on inputs entering projection system
+    - [x] Add HOST DEBT INVENTORY comment header
+
+25. **Adversary Findings: Critical Vulnerabilities** ✅
+    - [x] Attack 14: Phase state injection - context validation added
+    - [x] Attack 15: Machine state injection - phase/changed type validation
+    - [x] Add resource limits: MAX_HISTORY=500, MAX_CONTEXT_DEPTH=100
+    - [x] Add 6 adversary attack tests to prototype
+    - Note: Attack 3 (meta-circular) deferred - not applicable to current prototype scope
+
+### QoL Improvements (Infrastructure)
+
+26. **Agent Reports as PR Comments**
+    - Post agent findings directly on PR as comments
+    - Better visibility than digging through CI logs
+    - Requires: GitHub Actions workflow updates with `gh pr comment`
+
+27. **Debt Dashboard**
+    - Centralized tracking of `@host_*` markers
+    - Show debt count trends over time
+    - Auto-generate from grep + git history
+
+28. **Pre-commit Local Checks**
+    - Run quick audit checks before push
+    - Catch guardrail violations early
+    - Use pre-commit hook or similar
+
+29. **Projection Test Coverage**
+    - Ensure every projection has explicit test
+    - Track which projections have been exercised
+    - Add coverage reporting for projection matching
+
+30. **Agent Memory Across Sessions**
+    - Store agent findings in structured format (JSON/markdown)
+    - Reference previous findings in subsequent runs
+    - Detect regressions (previously-fixed issues reappearing)
+
+31. **Trace Visualization**
+    - Simple trace viewer (CLI or web)
+    - Show state transitions visually
+    - Help debug complex nested reductions
 
 ---
 
@@ -154,14 +203,15 @@ _(No active items.)_
     - **Blocker discovered**: `deep_step` needed
       - Current `step()` only matches at root level
       - Nested reducible expressions (e.g., `{head:1, tail:{op:append,...}}`) not found
-      - See `prototypes/linked_list_append.json` for concrete example
-    - **Solution path**: Work-stack approach (pure structural)
-      - Express tree traversal as explicit Mu state (focus + context stack)
+    - **Solution implemented**: Work-stack approach (pure structural)
+      - Express tree traversal as explicit Mu state (focus + context stack + phase)
+      - Three-phase state machine: traverse/ascending/root_check
       - No host recursion - kernel loop provides iteration
-      - Design doc needed: `docs/DeepStep.v0.md`
-    - **Prototype verified**: Linked list append works with 2 projections
-      - Proves finite projections can handle variable-length data
-      - Requires `deep_step` to find nested reducible nodes
+      - Design doc: `docs/DeepStep.v0.md`
+    - **Prototype working**: `prototypes/test_deep_eval_v0.py`
+      - 4 tests pass: wrap/unwrap, single reduction, append([1],[2]), append([1,2],[3,4])
+      - Proves finite projections can handle variable-length nested reductions
+      - Next: integrate into `rcx_pi/eval_seed.py` or keep as separate deep_step
 
 23. **RCX Kernel Phase 4: Self-Hosting** (awaiting Phase 3)
     - Scope:

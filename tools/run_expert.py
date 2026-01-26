@@ -16,7 +16,7 @@ from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 
-EXPERT_PROMPT = Path(".claude/agents/expert.md").read_text()
+EXPERT_PROMPT = Path("tools/agents/expert_prompt.md").read_text()
 
 
 async def run_expert(files: list[str]) -> str:

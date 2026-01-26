@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'rcx_pi/**/*.py'
+      - 'prototypes/**/*.py'
+      - 'tests/**/*.py'
+      - 'seeds/**/*.json'
 
 jobs:
   verify:
@@ -12,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for git diff
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,7 +36,7 @@ jobs:
       - name: Get changed files
         id: changed
         run: |
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^rcx_pi/.*\.py$' | tr '\n' ' ')
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^(rcx_pi|prototypes|tests)/.*\.py$|^seeds/.*\.json$' | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Run verifier agent

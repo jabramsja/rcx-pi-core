@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'rcx_pi/**/*.py'
+      - 'prototypes/**/*.py'
+      - 'tests/**/*.py'
+      - 'seeds/**/*.json'
       - 'docs/EVAL_SEED.v0.md'
       - 'docs/RCXKernel.v0.md'
       - 'docs/StructuralPurity.v0.md'
@@ -16,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for structural analysis
 
       - name: Set up Python
         uses: actions/setup-python@v5
