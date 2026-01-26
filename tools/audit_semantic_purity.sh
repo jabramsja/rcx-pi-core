@@ -24,6 +24,23 @@ FAILED=0
 WARNINGS=0
 
 # -----------------------------------------------------------------------------
+# Locate selfhost core files (may be in rcx_pi/selfhost/ or rcx_pi/)
+# This supports both the new subpackage structure and the legacy layout
+# -----------------------------------------------------------------------------
+if [ -f "rcx_pi/selfhost/mu_type.py" ]; then
+    MU_TYPE_FILE="rcx_pi/selfhost/mu_type.py"
+    KERNEL_FILE="rcx_pi/selfhost/kernel.py"
+    EVAL_SEED_FILE="rcx_pi/selfhost/eval_seed.py"
+    echo "Using selfhost subpackage layout"
+else
+    MU_TYPE_FILE="$MU_TYPE_FILE"
+    KERNEL_FILE="$KERNEL_FILE"
+    EVAL_SEED_FILE="$EVAL_SEED_FILE"
+    echo "Using legacy layout"
+fi
+echo ""
+
+# -----------------------------------------------------------------------------
 # 1. Semantic Purity: No Python-specific types in trace fixtures
 # -----------------------------------------------------------------------------
 echo "== 1. Semantic Purity: Trace Fixtures =="
@@ -265,11 +282,11 @@ echo "== 8. Mu Type: Self-Hosting Readiness =="
 
 echo "Checking Mu type validation module exists..."
 
-if [ -f "rcx_pi/mu_type.py" ]; then
-    echo "  ✓ mu_type.py exists"
+if [ -f "$MU_TYPE_FILE" ]; then
+    echo "  ✓ mu_type.py exists (at $MU_TYPE_FILE)"
 
     # Check that is_mu function exists
-    if grep -q "def is_mu" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def is_mu" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ is_mu() validation function defined"
     else
         echo "  ERROR: is_mu() validation function missing"
@@ -277,7 +294,7 @@ if [ -f "rcx_pi/mu_type.py" ]; then
     fi
 
     # Check that assert_mu function exists
-    if grep -q "def assert_mu" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def assert_mu" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ assert_mu() guardrail function defined"
     else
         echo "  ERROR: assert_mu() guardrail function missing"
@@ -285,14 +302,14 @@ if [ -f "rcx_pi/mu_type.py" ]; then
     fi
 
     # Check for NaN/Infinity rejection in is_mu
-    if grep -E "float\('inf'\)|float\('-inf'\)|!= value" rcx_pi/mu_type.py >/dev/null 2>&1; then
+    if grep -E "float\('inf'\)|float\('-inf'\)|!= value" "$MU_TYPE_FILE" >/dev/null 2>&1; then
         echo "  ✓ is_mu() rejects NaN/Infinity"
     else
         echo "  WARNING: is_mu() may not reject NaN/Infinity"
         WARNINGS=$((WARNINGS + 1))
     fi
 else
-    echo "  ERROR: rcx_pi/mu_type.py not found (Mu type validation required)"
+    echo "  ERROR: mu_type.py not found (Mu type validation required)"
     FAILED=1
 fi
 
@@ -305,9 +322,9 @@ echo "== 9. Structural Purity: Programming IN RCX =="
 
 echo "Checking structural purity guardrail functions exist..."
 
-if [ -f "rcx_pi/mu_type.py" ]; then
+if [ -f "$MU_TYPE_FILE" ]; then
     # Check that has_callable exists
-    if grep -q "def has_callable" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def has_callable" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ has_callable() detector defined"
     else
         echo "  ERROR: has_callable() detector missing"
@@ -315,7 +332,7 @@ if [ -f "rcx_pi/mu_type.py" ]; then
     fi
 
     # Check that assert_no_callables exists
-    if grep -q "def assert_no_callables" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def assert_no_callables" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ assert_no_callables() guardrail defined"
     else
         echo "  ERROR: assert_no_callables() guardrail missing"
@@ -323,7 +340,7 @@ if [ -f "rcx_pi/mu_type.py" ]; then
     fi
 
     # Check that assert_seed_pure exists
-    if grep -q "def assert_seed_pure" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def assert_seed_pure" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ assert_seed_pure() seed validator defined"
     else
         echo "  ERROR: assert_seed_pure() seed validator missing"
@@ -331,7 +348,7 @@ if [ -f "rcx_pi/mu_type.py" ]; then
     fi
 
     # Check that assert_handler_pure exists
-    if grep -q "def assert_handler_pure" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def assert_handler_pure" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ assert_handler_pure() handler wrapper defined"
     else
         echo "  ERROR: assert_handler_pure() handler wrapper missing"
@@ -339,7 +356,7 @@ if [ -f "rcx_pi/mu_type.py" ]; then
     fi
 
     # Check that validate_kernel_boundary exists
-    if grep -q "def validate_kernel_boundary" rcx_pi/mu_type.py 2>/dev/null; then
+    if grep -q "def validate_kernel_boundary" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ validate_kernel_boundary() primitive validator defined"
     else
         echo "  ERROR: validate_kernel_boundary() primitive validator missing"
@@ -354,11 +371,11 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "== 10. Kernel Purity: No Host Logic in Kernel =="
 
-if [ -f "rcx_pi/kernel.py" ]; then
-    echo "Checking kernel.py for structural purity..."
+if [ -f "$KERNEL_FILE" ]; then
+    echo "Checking kernel.py for structural purity (at $KERNEL_FILE)..."
 
     # No lambdas in kernel (except in comments)
-    if grep -n "lambda" rcx_pi/kernel.py 2>/dev/null | grep -v "#" | grep -v '"""' | grep -v "'''" ; then
+    if grep -n "lambda" "$KERNEL_FILE" 2>/dev/null | grep -v "#" | grep -v '"""' | grep -v "'''" ; then
         echo "  WARNING: Lambda found in kernel.py"
         WARNINGS=$((WARNINGS + 1))
     else
@@ -367,7 +384,7 @@ if [ -f "rcx_pi/kernel.py" ]; then
 
     # All handlers should be wrapped with assert_handler_pure
     # (Check for handler ASSIGNMENT without wrapping - reads are OK)
-    if grep -n "_handlers\[.*\] =" rcx_pi/kernel.py 2>/dev/null | grep -v "assert_handler_pure" | grep -v "# wrapped"; then
+    if grep -n "_handlers\[.*\] =" "$KERNEL_FILE" 2>/dev/null | grep -v "assert_handler_pure" | grep -v "# wrapped"; then
         echo "  WARNING: Possibly unwrapped handler registration in kernel.py"
         WARNINGS=$((WARNINGS + 1))
     else
@@ -426,11 +443,11 @@ echo "== 12. Python Equality: No == on Mu Values =="
 
 echo "Checking for Python == used on Mu values in kernel code..."
 
-if [ -f "rcx_pi/kernel.py" ]; then
+if [ -f "$KERNEL_FILE" ]; then
     # Look for == that might be comparing Mu values (not hashes)
     # Allowed: hash1 == hash2 (strings)
     # Forbidden: mu1 == mu2 (should use mu_equal)
-    if grep -n " == " rcx_pi/kernel.py 2>/dev/null | grep -v "hash" | grep -v "#" | grep -v "str" ; then
+    if grep -n " == " "$KERNEL_FILE" 2>/dev/null | grep -v "hash" | grep -v "#" | grep -v "str" ; then
         echo "  WARNING: Possible Python == on non-hash values in kernel.py"
         echo "  Use mu_equal() for Mu comparison, not Python =="
         WARNINGS=$((WARNINGS + 1))
@@ -450,10 +467,10 @@ echo "== 13. isinstance Dispatch: No Host Type Dispatch =="
 
 echo "Checking for isinstance used for dispatch in kernel code..."
 
-if [ -f "rcx_pi/kernel.py" ]; then
+if [ -f "$KERNEL_FILE" ]; then
     # isinstance is OK in guardrails (marked with # guardrail)
     # isinstance is NOT OK for dispatch logic
-    if grep -n "isinstance" rcx_pi/kernel.py 2>/dev/null | grep -v "# guardrail" | grep -v "#.*isinstance"; then
+    if grep -n "isinstance" "$KERNEL_FILE" 2>/dev/null | grep -v "# guardrail" | grep -v "#.*isinstance"; then
         echo "  WARNING: isinstance found in kernel.py without # guardrail marker"
         echo "  isinstance should only be used in guardrails, not for dispatch"
         WARNINGS=$((WARNINGS + 1))
@@ -474,7 +491,7 @@ echo "== 14. Bare Except: No Swallowed Validation Errors =="
 echo "Checking for bare except clauses that might swallow validation errors..."
 
 # Check kernel and mu_type for bare excepts
-for file in rcx_pi/kernel.py rcx_pi/mu_type.py; do
+for file in "$KERNEL_FILE" rcx_pi/mu_type.py; do
     if [ -f "$file" ]; then
         if grep -n "except:" "$file" 2>/dev/null | grep -v "# intentional"; then
             echo "  WARNING: Bare 'except:' in $file (may swallow validation errors)"
@@ -547,8 +564,8 @@ echo "== 17. mu_equal: Structural Equality Function =="
 
 echo "Checking mu_equal() exists and is used for Mu comparison..."
 
-if [ -f "rcx_pi/mu_type.py" ]; then
-    if grep -q "def mu_equal" rcx_pi/mu_type.py 2>/dev/null; then
+if [ -f "$MU_TYPE_FILE" ]; then
+    if grep -q "def mu_equal" "$MU_TYPE_FILE" 2>/dev/null; then
         echo "  ✓ mu_equal() function defined"
     else
         echo "  ERROR: mu_equal() function missing from mu_type.py"
@@ -566,10 +583,10 @@ echo "== 18. Host Smuggling: Comprehensive Detection =="
 # 18a. Host Arithmetic in eval_seed.py
 echo ""
 echo "  18a. Host Arithmetic (+, -, *, /, % on values):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
+if [ -f "$EVAL_SEED_FILE" ]; then
     # Look for arithmetic on variables (not in comments, not in strings, not in docstrings)
     # Pattern: variable + variable or variable + number (actual arithmetic)
-    ARITH_HITS=$(grep -nE "=[[:space:]]*[a-z_]+[[:space:]]*[\+\-\*/%][[:space:]]*[a-z_0-9]+" rcx_pi/eval_seed.py 2>/dev/null | \
+    ARITH_HITS=$(grep -nE "=[[:space:]]*[a-z_]+[[:space:]]*[\+\-\*/%][[:space:]]*[a-z_0-9]+" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | \
         grep -v '"""' | \
         grep -v "WARNINGS" | \
@@ -586,8 +603,8 @@ fi
 # 18b. Host Builtins in eval_seed.py
 echo ""
 echo "  18b. Host Builtins (len, sorted, sum, max, min, abs, round):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    BUILTIN_HITS=$(grep -nE "\b(len|sorted|sum|max|min|abs|round|enumerate|zip|map|filter|reduce)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    BUILTIN_HITS=$(grep -nE "\b(len|sorted|sum|max|min|abs|round|enumerate|zip|map|filter|reduce)\s*\(" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" || true)
     if [ -n "$BUILTIN_HITS" ]; then
         echo "    WARNING: Host builtins found (should be structural):"
@@ -601,8 +618,8 @@ fi
 # 18c. Host String Operations
 echo ""
 echo "  18c. Host String Ops (.split, .join, .format, .replace, .strip):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    STRING_HITS=$(grep -nE "\.(split|join|format|replace|strip|upper|lower|startswith|endswith)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    STRING_HITS=$(grep -nE "\.(split|join|format|replace|strip|upper|lower|startswith|endswith)\s*\(" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" || true)
     if [ -n "$STRING_HITS" ]; then
         echo "    WARNING: Host string operations found:"
@@ -616,8 +633,8 @@ fi
 # 18d. Host Mutation
 echo ""
 echo "  18d. Host Mutation (.append, .pop, .extend, .clear, del, []=):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    MUTATION_HITS=$(grep -nE "\.(append|pop|extend|clear|insert|remove)\s*\(|del\s+[a-z]|\[[a-z_]+\]\s*=" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    MUTATION_HITS=$(grep -nE "\.(append|pop|extend|clear|insert|remove)\s*\(|del\s+[a-z]|\[[a-z_]+\]\s*=" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | \
         grep -v "__slots__" || true)
     if [ -n "$MUTATION_HITS" ]; then
@@ -632,9 +649,9 @@ fi
 # 18e. Host Comparison for Logic
 echo ""
 echo "  18e. Host Comparison (<, >, <=, >= for logic, not validation):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
+if [ -f "$EVAL_SEED_FILE" ]; then
     # This is tricky - < > are OK for validation, not for logic
-    COMPARE_HITS=$(grep -nE "[a-z_]+\s*[<>]=?\s*[a-z_0-9]+" rcx_pi/eval_seed.py 2>/dev/null | \
+    COMPARE_HITS=$(grep -nE "[a-z_]+\s*[<>]=?\s*[a-z_0-9]+" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | \
         grep -v "# validation" | \
         grep -v "# guardrail" | \
@@ -651,8 +668,8 @@ fi
 # 18f. Host Control Flow for Logic
 echo ""
 echo "  18f. Host Control Flow (if/elif with value-based decisions):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    CONTROL_HITS=$(grep -nE "if\s+[a-z_]+\s*==\s*[0-9'\"]" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    CONTROL_HITS=$(grep -nE "if\s+[a-z_]+\s*==\s*[0-9'\"]" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | \
         grep -v "NO_MATCH" || true)
     if [ -n "$CONTROL_HITS" ]; then
@@ -666,8 +683,8 @@ fi
 # 18g. Host set() operations
 echo ""
 echo "  18g. Host set() Operations (should be structural comparison):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    SET_HITS=$(grep -nE "\bset\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    SET_HITS=$(grep -nE "\bset\s*\(" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | grep -v "@host" || true)
     if [ -n "$SET_HITS" ]; then
         echo "    WARNING: Host set() found:"
@@ -681,8 +698,8 @@ fi
 # 18h. Host any()/all() aggregation
 echo ""
 echo "  18h. Host any()/all() Aggregation:"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    AGG_HITS=$(grep -nE "\b(any|all)\s*\(" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    AGG_HITS=$(grep -nE "\b(any|all)\s*\(" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | grep -v "@host" || true)
     if [ -n "$AGG_HITS" ]; then
         echo "    WARNING: Host aggregation found:"
@@ -696,8 +713,8 @@ fi
 # 18i. List/Dict comprehensions (host iteration)
 echo ""
 echo "  18i. Host Comprehensions (list/dict iteration):"
-if [ -f "rcx_pi/eval_seed.py" ]; then
-    COMP_HITS=$(grep -nE "\[.*for.*in.*\]|\{.*:.*for.*in.*\}" rcx_pi/eval_seed.py 2>/dev/null | \
+if [ -f "$EVAL_SEED_FILE" ]; then
+    COMP_HITS=$(grep -nE "\[.*for.*in.*\]|\{.*:.*for.*in.*\}" "$EVAL_SEED_FILE" 2>/dev/null | \
         grep -v "^[[:space:]]*#" | grep -v "@host" || true)
     if [ -n "$COMP_HITS" ]; then
         echo "    WARNING: Host comprehensions found:"
@@ -711,7 +728,7 @@ fi
 # 18j. Host-specific libraries (itertools, functools, os, sys, etc.)
 echo ""
 echo "  18j. Host Libraries (itertools, functools, os, sys, random, datetime):"
-SEED_FILES="rcx_pi/eval_seed.py rcx_pi/kernel.py"
+SEED_FILES="$EVAL_SEED_FILE $KERNEL_FILE"
 LIB_HITS=""
 for f in $SEED_FILES; do
     if [ -f "$f" ]; then
@@ -912,7 +929,7 @@ echo "  │ □ Non-deterministic behavior explicitly wrapped                │
 echo "  │ □ Tests don't mask host dependencies                           │"
 echo "  └─────────────────────────────────────────────────────────────────┘"
 echo ""
-echo "  Reviewer questions for PRs touching rcx_pi/kernel.py or eval_seed.py:"
+echo "  Reviewer questions for PRs touching "$KERNEL_FILE" or eval_seed.py:"
 echo "  ┌─────────────────────────────────────────────────────────────────┐"
 echo "  │ 1. Could this logic be expressed as projections?               │"
 echo "  │ 2. Does this use Python iteration where kernel loop would do?  │"
