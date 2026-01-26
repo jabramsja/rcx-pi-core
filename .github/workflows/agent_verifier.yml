@@ -2,10 +2,8 @@ name: Agent Verifier
 
 # Manual trigger only - run locally by default to save API costs
 # Use: Actions > Agent Verifier > Run workflow
-# Note: push/pull_request triggers with skip job to prevent "failure" status emails
+# Or: gh workflow run agent_verifier.yml
 on:
-  push:
-  pull_request:
   workflow_dispatch:
     inputs:
       files:
@@ -22,16 +20,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  # This job runs on push/pull_request to show "success" instead of "failure"
-  skip-notice:
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Agent workflows are manual-only. Use Actions > Agent Verifier > Run workflow."
-
   verify:
-    # Only run on manual dispatch
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
