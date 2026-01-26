@@ -266,13 +266,13 @@ def make_deep_eval_projections(domain_projections):
 
 def host_builtin(func):
     """Decorator marking functions that use Python builtins (reversed, range, etc.)."""
-    func._host_debt = "builtin"
+    func.host_debt_marker = "builtin"
     return func
 
 
 def host_iteration(func):
     """Decorator marking functions that use Python iteration (while, for)."""
-    func._host_debt = "iteration"
+    func.host_debt_marker = "iteration"
     return func
 
 
