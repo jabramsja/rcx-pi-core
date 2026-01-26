@@ -1,0 +1,162 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "SUBST_SEED",
+    "description": "Variable substitution as Mu projections for Phase 4 self-hosting",
+    "doc": "docs/SelfHosting.v0.md",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "No host recursion - kernel loop provides iteration",
+      "Deterministic: same input -> same output",
+      "Traverses body, replaces var sites with bound values"
+    ]
+  },
+  "projections": [
+    {
+      "id": "subst.done",
+      "description": "Context empty, phase is result -> return final result",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "result"},
+        "bindings": {"var": "_b"},
+        "context": null
+      },
+      "body": {
+        "mode": "subst_done",
+        "result": {"var": "result"}
+      }
+    },
+    {
+      "id": "subst.ascend",
+      "description": "Both head and tail done -> reconstruct parent",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "tail_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "tail_done",
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        }
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"head": {"var": "head_result"}, "tail": {"var": "tail_result"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "outer"}
+      }
+    },
+    {
+      "id": "subst.sibling",
+      "description": "Head done -> move to tail",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "head_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "head_done",
+            "tail": {"var": "tail"}
+          },
+          "tail": {"var": "outer"}
+        }
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "tail"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "tail_done",
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        }
+      }
+    },
+    {
+      "id": "subst.var",
+      "description": "Variable site -> replace with looked up value",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": {"var": "name"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"lookup": {"var": "name"}, "in": {"var": "b"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.descend",
+      "description": "Descend into head/tail structure",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"head": {"var": "h"}, "tail": {"var": "t"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "h"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "head_done",
+            "tail": {"var": "t"}
+          },
+          "tail": {"var": "ctx"}
+        }
+      }
+    },
+    {
+      "id": "subst.primitive",
+      "description": "Primitive value (not var, not head/tail) -> already a result",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "val"},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "val"},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.wrap",
+      "description": "Entry point - wrap raw subst request into state (must be last)",
+      "pattern": {
+        "subst": {
+          "body": {"var": "body"},
+          "bindings": {"var": "bindings"}
+        }
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "body"},
+        "bindings": {"var": "bindings"},
+        "context": null
+      }
+    }
+  ]
+}
