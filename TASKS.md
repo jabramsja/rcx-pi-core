@@ -203,18 +203,21 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
       - Translate EVAL_SEED logic to Mu projections
       - Verify Python-EVAL and Mu-EVAL produce same results
       - Store as `seeds/eval.v1.json`
-    - **Blocker discovered**: `deep_step` needed
-      - Current `step()` only matches at root level
-      - Nested reducible expressions (e.g., `{head:1, tail:{op:append,...}}`) not found
-    - **Solution implemented**: Work-stack approach (pure structural)
-      - Express tree traversal as explicit Mu state (focus + context stack + phase)
+    - **Blocker resolved**: `deep_eval` module implemented
+      - `rcx_pi/deep_eval.py` - production module (24 tests passing)
+      - Work-stack approach: explicit Mu state (focus + context + phase)
       - Three-phase state machine: traverse/ascending/root_check
       - No host recursion - kernel loop provides iteration
       - Design doc: `docs/DeepStep.v0.md`
-    - **Prototype working**: `prototypes/test_deep_eval_v0.py`
-      - 4 tests pass: wrap/unwrap, single reduction, append([1],[2]), append([1,2],[3,4])
-      - Proves finite projections can handle variable-length nested reductions
-      - Next: integrate into `rcx_pi/eval_seed.py` or keep as separate deep_step
+    - Done:
+      - [x] `make_deep_eval_projections()` - creates traversal projections
+      - [x] `validate_deep_eval_state()` - state validation for security
+      - [x] `run_deep_eval()` - runner with validation
+      - [x] `deep_eval()` - convenience wrapper
+      - [x] 24 tests (8 core + 6 adversary + 10 validation)
+    - Next:
+      - [ ] Create `seeds/eval.v1.json` as Mu projections
+      - [ ] Verify Python-EVAL and Mu-EVAL produce identical results
 
 23. **RCX Kernel Phase 4: Self-Hosting** (awaiting Phase 3)
     - Scope:

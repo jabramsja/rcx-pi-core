@@ -1,6 +1,6 @@
 # DeepStep Specification v0
 
-Status: PROTOTYPE WORKING (see `prototypes/test_deep_eval_v0.py`)
+Status: PRODUCTION (promoted from prototype to `rcx_pi/deep_eval.py`)
 
 ## Purpose
 
@@ -366,11 +366,13 @@ These can be added in later versions.
 4. Write concrete projections (actual Mu JSON)
 5. Implement and test
 
-## Prototype Status
+## Implementation Status
 
-**Implementation**: `prototypes/test_deep_eval_v0.py`
+**Production module**: `rcx_pi/deep_eval.py`
+**Tests**: `tests/test_deep_eval_v0.py` (24 tests)
+**Prototype reference**: `prototypes/test_deep_eval_v0.py`
 
-### Test Results (11 tests passing)
+### Test Results (24 tests passing)
 
 **Functional Tests (5):**
 - `test_wrap_unwrap` - Value unchanged when no projections match
@@ -418,7 +420,9 @@ The projection logic itself is pure Mu - no host dependencies.
 
 ## References
 
-- `prototypes/test_deep_eval_v0.py` - Working prototype
-- `docs/EVAL_SEED.v0.md` - Current EVAL_SEED spec
+- `rcx_pi/deep_eval.py` - Production module
+- `tests/test_deep_eval_v0.py` - Production tests (24 tests)
+- `prototypes/test_deep_eval_v0.py` - Original prototype
+- `docs/EVAL_SEED.v0.md` - EVAL_SEED spec
 - Zipper data structure - functional tree navigation
 - Abstract machines (SECD, CEK) - stack-based evaluation
