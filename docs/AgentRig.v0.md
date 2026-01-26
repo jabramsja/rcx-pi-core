@@ -96,6 +96,14 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - **Detects:** Scope creep, oversimplification, deviation from request
 - **Verdict:** MATCHES_INTENT / DEVIATES / NEEDS_DISCUSSION
 
+### 8. Fuzzer (`fuzzer.md`)
+- **Model:** Sonnet
+- **Purpose:** Property-based testing with 1000+ random inputs
+- **Focus:** Roundtrip properties, parity, idempotency, no-crash
+- **Tool:** Uses Python `hypothesis` library
+- **Why:** AI can lie to you, but cannot lie to 1000 random CPU-generated inputs
+- **Verdict:** ROBUST / FRAGILE / BROKEN
+
 ## Key Design Decisions
 
 ### Intelligence Balance
@@ -117,6 +125,13 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - Structural-Proof must generate runnable code, not just text traces
 - Grounding must write actual pytest tests
 - Text can lie. Code that crashes doesn't lie.
+
+### The Trusted Kernel Architecture
+- **The Law (Kernel):** `eval_seed.py` contains `step()`, `match()`, `substitute()`
+- **The Lawyers (Claude):** Claude writes JSON projections (data)
+- **The Rule:** Claude writes DATA. Kernel executes DATA. If kernel crashes, Claude lied.
+- **Enforcement:** Kernel files should be treated as read-only after initial bootstrap
+- This architecture makes it mathematically impossible for Claude to smuggle host semantics - JSON simply doesn't support Python features
 
 ## Usage
 
@@ -151,6 +166,7 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 | `.claude/agents/structural-proof.md` | Proof demander config |
 | `.claude/agents/grounding.md` | Test writer config |
 | `.claude/agents/translator.md` | Plain English explainer config |
+| `.claude/agents/fuzzer.md` | Chaos monkey / property-based testing |
 | `tools/contraband.sh` | Dumb linter (no AI) |
 
 ## History
@@ -163,3 +179,5 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 | 2026-01-26 | Added translator agent (plain English) |
 | 2026-01-26 | Enhanced structural-proof with "No Hallucination" rule |
 | 2026-01-26 | Created contraband.sh linter |
+| 2026-01-26 | Added fuzzer agent (Hypothesis property-based testing) |
+| 2026-01-26 | Documented Trusted Kernel architecture |
