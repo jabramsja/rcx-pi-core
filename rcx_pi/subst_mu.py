@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rcx_pi.mu_type import Mu, assert_mu
+from rcx_pi.mu_type import Mu, assert_mu, mu_equal
 from rcx_pi.eval_seed import step
 from rcx_pi.match_mu import (
     normalize_for_match,
@@ -160,8 +160,8 @@ def run_subst_projections(
         # Take a step
         next_state = step(projections, state)
 
-        # Check for stall (no change)
-        if next_state == state:
+        # Check for stall (no change) - use mu_equal to avoid Python type coercion
+        if mu_equal(next_state, state):
             return state, i, True
 
         state = next_state
