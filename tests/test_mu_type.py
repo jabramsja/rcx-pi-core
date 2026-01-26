@@ -194,6 +194,103 @@ class TestIsMu:
         assert is_mu(b) is False
 
 
+# =============================================================================
+# Depth and Width Limit Tests (Resource Exhaustion Prevention)
+# =============================================================================
+
+
+class TestDepthLimits:
+    """Tests for MAX_MU_DEPTH enforcement."""
+
+    def test_depth_within_limit_accepted(self):
+        """Structures within MAX_MU_DEPTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        # Build nested structure: {"a": {"a": {"a": ... }}}
+        depth = MAX_MU_DEPTH - 10  # Well within limit
+        value = "leaf"
+        for _ in range(depth):
+            value = {"a": value}
+
+        assert is_mu(value) is True
+
+    def test_depth_at_limit_accepted(self):
+        """Structures exactly at MAX_MU_DEPTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        value = "leaf"
+        for _ in range(MAX_MU_DEPTH):
+            value = {"a": value}
+
+        assert is_mu(value) is True
+
+    def test_depth_exceeding_limit_rejected(self):
+        """Structures exceeding MAX_MU_DEPTH are rejected."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        value = "leaf"
+        for _ in range(MAX_MU_DEPTH + 1):
+            value = {"a": value}
+
+        assert is_mu(value) is False
+
+    def test_deep_list_nesting_rejected(self):
+        """Deeply nested lists are also rejected."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        value = "leaf"
+        for _ in range(MAX_MU_DEPTH + 1):
+            value = [value]
+
+        assert is_mu(value) is False
+
+    def test_deep_nesting_in_assert_mu_raises(self):
+        """assert_mu raises TypeError for too-deep structures."""
+        from rcx_pi.mu_type import MAX_MU_DEPTH
+
+        value = "leaf"
+        for _ in range(MAX_MU_DEPTH + 10):
+            value = {"nested": value}
+
+        with pytest.raises(TypeError, match="must be a Mu"):
+            assert_mu(value, "deep value")
+
+
+class TestWidthLimits:
+    """Tests for MAX_MU_WIDTH enforcement."""
+
+    def test_width_within_limit_accepted(self):
+        """Lists/dicts within MAX_MU_WIDTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        width = min(100, MAX_MU_WIDTH - 100)
+        assert is_mu(list(range(width))) is True
+        assert is_mu({f"k{i}": i for i in range(width)}) is True
+
+    def test_width_at_limit_accepted(self):
+        """Lists/dicts exactly at MAX_MU_WIDTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        assert is_mu(list(range(MAX_MU_WIDTH))) is True
+        assert is_mu({f"k{i}": i for i in range(MAX_MU_WIDTH)}) is True
+
+    def test_width_exceeding_limit_rejected(self):
+        """Lists/dicts exceeding MAX_MU_WIDTH are rejected."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        assert is_mu(list(range(MAX_MU_WIDTH + 1))) is False
+        assert is_mu({f"k{i}": i for i in range(MAX_MU_WIDTH + 1)}) is False
+
+    def test_nested_wide_structure_rejected(self):
+        """Wide structures nested inside are also rejected."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        wide_list = list(range(MAX_MU_WIDTH + 1))
+        nested = {"data": wide_list}
+
+        assert is_mu(nested) is False
+
+
 class TestValidateMu:
     """Tests for validate_mu() - JSON round-trip validation."""
 
