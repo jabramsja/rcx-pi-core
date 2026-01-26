@@ -16,6 +16,7 @@ from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import NO_MATCH, _NoMatch, step
+from .kernel import get_step_budget
 
 
 # =============================================================================
@@ -46,11 +47,42 @@ def clear_projection_cache() -> None:
 
 
 # =============================================================================
+# Variable Name Validation
+# =============================================================================
+
+
+def _check_empty_var_names(value: Mu, context: str) -> None:
+    """
+    Check for empty variable names in a Mu structure.
+
+    This ensures parity with eval_seed.py which rejects empty var names.
+
+    Args:
+        value: The Mu value to check.
+        context: Context for error message (e.g., "pattern", "body").
+
+    Raises:
+        ValueError: If an empty variable name is found.
+    """
+    if isinstance(value, dict):
+        # Check if this is a variable site with empty name
+        if set(value.keys()) == {"var"} and isinstance(value.get("var"), str):
+            if value["var"] == "":
+                raise ValueError(f"Variable name cannot be empty in {context}: {{'var': ''}}")
+        # Recurse into dict values
+        for v in value.values():
+            _check_empty_var_names(v, context)
+    elif isinstance(value, list):
+        for item in value:
+            _check_empty_var_names(item, context)
+
+
+# =============================================================================
 # Dict Normalization
 # =============================================================================
 
 
-def normalize_for_match(value: Mu) -> Mu:
+def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Normalize a Mu value for structural matching.
 
@@ -60,6 +92,13 @@ def normalize_for_match(value: Mu) -> Mu:
     Dict: {"a": 1, "b": 2} -> linked list of [key, value] pairs
     List: [1, 2, 3] -> {"head": 1, "tail": {"head": 2, "tail": {...}}}
     KV-pair: ["a", 1] -> {"head": "a", "tail": {"head": 1, "tail": null}}
+
+    Args:
+        value: The Mu value to normalize.
+        _seen: Internal parameter for cycle detection. Do not pass.
+
+    Raises:
+        ValueError: If circular reference detected.
     """
     if value is None:
         return None
@@ -67,19 +106,28 @@ def normalize_for_match(value: Mu) -> Mu:
     if isinstance(value, (bool, int, float, str)):
         return value
 
+    # Cycle detection for compound types
+    if isinstance(value, (list, dict)):
+        if _seen is None:
+            _seen = set()
+        value_id = id(value)
+        if value_id in _seen:
+            raise ValueError("Circular reference detected in normalize_for_match")
+        _seen = _seen | {value_id}
+
     if isinstance(value, list):
         # Convert Python list to linked list
         result: Mu = None
         for elem in reversed(value):
-            result = {"head": normalize_for_match(elem), "tail": result}
+            result = {"head": normalize_for_match(elem, _seen), "tail": result}
         return result
 
     if isinstance(value, dict):
         # Check if already normalized (has head/tail structure only)
         if set(value.keys()) == {"head", "tail"}:
             return {
-                "head": normalize_for_match(value["head"]),
-                "tail": normalize_for_match(value["tail"])
+                "head": normalize_for_match(value["head"], _seen),
+                "tail": normalize_for_match(value["tail"], _seen)
             }
 
         # Check for variable site - don't normalize
@@ -93,7 +141,7 @@ def normalize_for_match(value: Mu) -> Mu:
             # Key-value pair as linked list: [key, value]
             kv_pair: Mu = {
                 "head": key,
-                "tail": {"head": normalize_for_match(value[key]), "tail": None}
+                "tail": {"head": normalize_for_match(value[key], _seen), "tail": None}
             }
             result = {"head": kv_pair, "tail": result}
         return result
@@ -130,15 +178,23 @@ def is_dict_linked_list(value: Mu) -> bool:
 
     This checks every element, not just the first, to avoid misidentifying
     lists like [['', None], None] as dicts.
+
+    Includes cycle detection to prevent infinite loops on circular structures.
     """
     if not isinstance(value, dict):
         return False
     if set(value.keys()) != {"head", "tail"}:
         return False
 
-    # Check ALL elements are valid kv-pairs
+    # Check ALL elements are valid kv-pairs (with cycle detection)
+    visited: set[int] = set()
     current = value
     while current is not None:
+        node_id = id(current)
+        if node_id in visited:
+            return False  # Circular structure - not a valid dict encoding
+        visited.add(node_id)
+
         if not isinstance(current, dict):
             return False
         if set(current.keys()) != {"head", "tail"}:
@@ -149,11 +205,18 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
-def denormalize_from_match(value: Mu) -> Mu:
+def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
 
     Reverses the normalization done by normalize_for_match.
+
+    Args:
+        value: The normalized Mu value to denormalize.
+        _seen: Internal parameter for cycle detection. Do not pass.
+
+    Raises:
+        ValueError: If circular reference detected.
     """
     if value is None:
         return None
@@ -161,8 +224,17 @@ def denormalize_from_match(value: Mu) -> Mu:
     if isinstance(value, (bool, int, float, str)):
         return value
 
+    # Cycle detection for compound types
+    if isinstance(value, (list, dict)):
+        if _seen is None:
+            _seen = set()
+        value_id = id(value)
+        if value_id in _seen:
+            raise ValueError("Circular reference detected in denormalize_from_match")
+        _seen = _seen | {value_id}
+
     if isinstance(value, list):
-        return [denormalize_from_match(elem) for elem in value]  # AST_OK: bootstrap - denormalization
+        return [denormalize_from_match(elem, _seen) for elem in value]  # AST_OK: bootstrap - denormalization
 
     if isinstance(value, dict):
         # Check if it's a linked list (head/tail structure)
@@ -174,19 +246,29 @@ def denormalize_from_match(value: Mu) -> Mu:
                 # It's a dict encoded as linked list of kv-pairs
                 result = {}
                 current = value
+                visited: set[int] = set()  # Track visited nodes in linked list
                 while current is not None:
+                    node_id = id(current)
+                    if node_id in visited:
+                        raise ValueError("Circular reference in linked list during denormalization")
+                    visited.add(node_id)
                     kv = current["head"]
                     key = kv["head"]
                     val = kv["tail"]["head"]
-                    result[key] = denormalize_from_match(val)
+                    result[key] = denormalize_from_match(val, _seen)
                     current = current["tail"]
                 return result
             else:
                 # It's a regular linked list (Python list encoding)
                 result = []
                 current = value
+                visited: set[int] = set()  # Track visited nodes in linked list
                 while current is not None:
-                    result.append(denormalize_from_match(current["head"]))
+                    node_id = id(current)
+                    if node_id in visited:
+                        raise ValueError("Circular reference in linked list during denormalization")
+                    visited.add(node_id)
+                    result.append(denormalize_from_match(current["head"], _seen))
                     current = current["tail"]
                 return result
 
@@ -195,7 +277,7 @@ def denormalize_from_match(value: Mu) -> Mu:
             return value
 
         # Regular dict (shouldn't happen after normalization)
-        return {k: denormalize_from_match(v) for k, v in value.items()}  # AST_OK: bootstrap
+        return {k: denormalize_from_match(v, _seen) for k, v in value.items()}  # AST_OK: bootstrap
 
     return value
 
@@ -269,13 +351,21 @@ def run_match_projections(
     """
     Run match projections until done or stall.
 
+    Reports steps to the global step budget for cross-call resource accounting.
+
     Returns:
         (final_state, steps_taken, is_stall)
+
+    Raises:
+        RuntimeError: If global step budget exceeded.
     """
+    budget = get_step_budget()
     state = initial_state
     for i in range(max_steps):
         # Check if done
         if is_match_done(state):
+            # Report steps consumed to global budget
+            budget.consume(i)
             return state, i, False
 
         # Take a step
@@ -283,11 +373,15 @@ def run_match_projections(
 
         # Check for stall (no change) - use mu_equal to avoid Python type coercion
         if mu_equal(next_state, state):
+            # Report steps consumed to global budget
+            budget.consume(i)
             return state, i, True
 
         state = next_state
 
     # Max steps exceeded - treat as stall
+    # Report steps consumed to global budget
+    budget.consume(max_steps)
     return state, max_steps, True
 
 
@@ -306,6 +400,9 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
     """
     assert_mu(pattern, "match_mu.pattern")
     assert_mu(value, "match_mu.value")
+
+    # Validate no empty variable names (parity with eval_seed.py)
+    _check_empty_var_names(pattern, "pattern")
 
     # Normalize inputs to head/tail structures
     norm_pattern = normalize_for_match(pattern)

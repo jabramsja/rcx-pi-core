@@ -422,16 +422,17 @@ class TestDepthBoundaries:
 class TestEdgeCasesNotCovered:
     """Additional edge cases from grounding analysis."""
 
-    def test_empty_string_variable_name(self):
-        """Empty string as variable name."""
-        # This may be valid or invalid depending on design
+    def test_empty_string_variable_name_rejected(self):
+        """Empty string variable name is rejected (security hardening).
+
+        HARDENED: Empty variable names cause confusing error messages.
+        They are now rejected with ValueError.
+        """
         pattern = {"var": ""}
         value = 42
 
-        bindings = match_mu(pattern, value)
-        # If it succeeds, the binding should be under empty key
-        if bindings is not NO_MATCH:
-            assert bindings[""] == 42
+        with pytest.raises(ValueError, match="cannot be empty"):
+            match_mu(pattern, value)
 
     def test_numeric_string_keys(self):
         """Dict keys that look like numbers."""

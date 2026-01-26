@@ -197,10 +197,17 @@ def is_var(mu: Mu) -> bool:
 
 
 def get_var_name(mu: Mu) -> str:
-    """Extract variable name from {"var": "<name>"}."""
+    """Extract variable name from {"var": "<name>"}.
+
+    Raises:
+        ValueError: If not a variable site or if variable name is empty.
+    """
     if not is_var(mu):
         raise ValueError(f"Not a variable site: {mu}")
-    return mu["var"]
+    name = mu["var"]
+    if not name:
+        raise ValueError("Variable name cannot be empty: {'var': ''}")
+    return name
 
 
 @host_recursion(

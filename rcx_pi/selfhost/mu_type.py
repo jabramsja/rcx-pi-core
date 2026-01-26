@@ -22,6 +22,10 @@ Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 # to account for stack frames used by comprehensions
 MAX_MU_DEPTH = 200
 
+# Maximum width (number of elements) for lists/dicts (prevents resource exhaustion)
+# A dict/list with 1M keys could exhaust memory during validation
+MAX_MU_WIDTH = 1000
+
 
 def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
     """
@@ -81,8 +85,14 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
         _seen = _seen | {value_id}  # Create new set to avoid mutation issues
 
     if value_type is list:
+        # Width limit check (prevents resource exhaustion attacks)
+        if len(value) > MAX_MU_WIDTH:
+            return False
         return all(is_mu(item, _seen, _depth + 1) for item in value)
     if value_type is dict:
+        # Width limit check (prevents resource exhaustion attacks)
+        if len(value) > MAX_MU_WIDTH:
+            return False
         return (
             all(type(k) is str for k in value.keys()) and
             all(is_mu(v, _seen, _depth + 1) for v in value.values())

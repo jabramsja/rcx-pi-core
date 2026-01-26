@@ -76,6 +76,349 @@ class TestDeepNestingLimits:
 
 
 # =============================================================================
+# Width Limits (Resource Exhaustion Prevention)
+# =============================================================================
+
+
+class TestWidthLimits:
+    """Tests for width (breadth) limits on lists and dicts.
+
+    HARDENED: Wide structures (1M+ keys) could exhaust memory during validation.
+    MAX_MU_WIDTH prevents this attack vector.
+    """
+
+    def test_list_within_width_limit_accepted(self):
+        """Lists within MAX_MU_WIDTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        # Use width well within the limit
+        width = min(100, MAX_MU_WIDTH - 100)
+        value = list(range(width))
+
+        assert is_mu(value) is True
+
+    def test_list_exceeding_width_limit_rejected(self):
+        """Lists exceeding MAX_MU_WIDTH are rejected."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        value = list(range(MAX_MU_WIDTH + 1))
+
+        assert is_mu(value) is False
+
+    def test_dict_within_width_limit_accepted(self):
+        """Dicts within MAX_MU_WIDTH are accepted."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        width = min(100, MAX_MU_WIDTH - 100)
+        value = {f"key{i}": i for i in range(width)}
+
+        assert is_mu(value) is True
+
+    def test_dict_exceeding_width_limit_rejected(self):
+        """Dicts exceeding MAX_MU_WIDTH are rejected."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        value = {f"key{i}": i for i in range(MAX_MU_WIDTH + 1)}
+
+        assert is_mu(value) is False
+
+    def test_wide_structure_in_match_rejected(self):
+        """Wide structures are rejected at match() boundary."""
+        from rcx_pi.mu_type import MAX_MU_WIDTH
+
+        pattern = {'var': 'x'}
+        value = list(range(MAX_MU_WIDTH + 1))
+
+        with pytest.raises(TypeError, match="must be a Mu"):
+            match(pattern, value)
+
+
+# =============================================================================
+# Trace Size Limits (Memory Exhaustion Prevention)
+# =============================================================================
+
+
+class TestTraceLimits:
+    """Tests for trace size limits.
+
+    HARDENED: Unbounded trace growth could exhaust memory in long-running
+    evaluations. MAX_TRACE_ENTRIES prevents this attack vector.
+    """
+
+    def test_trace_within_limit_works(self):
+        """Recording traces within limit works normally."""
+        from rcx_pi.kernel import record_trace, MAX_TRACE_ENTRIES
+
+        trace = []
+        # Record a modest number of entries
+        for i in range(min(100, MAX_TRACE_ENTRIES - 1)):
+            record_trace(trace, {"step": i})
+
+        assert len(trace) == min(100, MAX_TRACE_ENTRIES - 1)
+
+    def test_trace_exceeding_limit_raises(self):
+        """Exceeding trace limit raises RuntimeError."""
+        from rcx_pi.kernel import record_trace, MAX_TRACE_ENTRIES
+
+        trace = []
+        # Fill to limit
+        for i in range(MAX_TRACE_ENTRIES):
+            record_trace(trace, {"step": i})
+
+        # One more should raise
+        with pytest.raises(RuntimeError, match="Trace size limit exceeded"):
+            record_trace(trace, {"step": "overflow"})
+
+
+# =============================================================================
+# Global Step Budget (Cross-Call Resource Accounting)
+# =============================================================================
+
+
+class TestGlobalStepBudget:
+    """Tests for global projection step budget.
+
+    HARDENED: Individual match_mu/subst_mu calls have local max_steps limits,
+    but cascading calls could bypass these. The global step budget tracks
+    cumulative steps across all calls to prevent resource exhaustion.
+    """
+
+    def test_budget_tracking_basic(self):
+        """Budget tracks cumulative steps."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        assert budget.is_active()
+        assert budget.get_total() == 0
+
+        budget.consume(100)
+        assert budget.get_total() == 100
+
+        budget.consume(50)
+        assert budget.get_total() == 150
+
+        budget.stop()
+        assert not budget.is_active()
+
+    def test_budget_enforces_limit(self):
+        """Budget raises RuntimeError when limit exceeded."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget, MAX_PROJECTION_STEPS
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        # Consume most of the budget
+        budget.consume(MAX_PROJECTION_STEPS - 100)
+
+        # Exceeding should raise
+        with pytest.raises(RuntimeError, match="Global projection step limit exceeded"):
+            budget.consume(200)
+
+        budget.stop()
+
+    def test_budget_inactive_allows_unlimited(self):
+        """When budget is not active, consume() does nothing."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget, MAX_PROJECTION_STEPS
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        # Don't call start()
+        assert not budget.is_active()
+
+        # Should not raise even with huge value
+        budget.consume(MAX_PROJECTION_STEPS * 10)
+
+    def test_budget_custom_limit(self):
+        """Budget can be started with custom limit."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start(limit=500)
+
+        budget.consume(400)  # OK
+
+        with pytest.raises(RuntimeError, match="Global projection step limit exceeded"):
+            budget.consume(200)  # Over 500 limit
+
+        budget.stop()
+
+    def test_match_mu_reports_to_budget(self):
+        """match_mu reports steps consumed to global budget."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.match_mu import match_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        initial_total = budget.get_total()
+
+        # Perform a match
+        pattern = {"a": {"var": "x"}, "b": {"var": "y"}}
+        value = {"a": 1, "b": 2}
+        match_mu(pattern, value)
+
+        # Budget should have increased
+        assert budget.get_total() > initial_total
+
+        budget.stop()
+
+    def test_subst_mu_reports_to_budget(self):
+        """subst_mu reports steps consumed to global budget."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.subst_mu import subst_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        initial_total = budget.get_total()
+
+        # Perform a substitution
+        body = {"result": {"var": "x"}}
+        bindings = {"x": 42}
+        subst_mu(body, bindings)
+
+        # Budget should have increased
+        assert budget.get_total() > initial_total
+
+        budget.stop()
+
+    def test_cascading_calls_accumulate(self):
+        """Multiple match/subst calls accumulate in budget."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.match_mu import match_mu
+        from rcx_pi.subst_mu import subst_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+
+        # Multiple operations
+        for _ in range(10):
+            match_mu({"var": "x"}, 42)
+            subst_mu({"val": {"var": "x"}}, {"x": 1})
+
+        # Budget should reflect cumulative steps
+        total = budget.get_total()
+        assert total > 0
+
+        budget.stop()
+
+    def test_nested_calls_exhaust_budget(self):
+        """Nested match/subst calls can exhaust the global budget.
+
+        This stress test verifies that cascading calls eventually hit the
+        global step limit, preventing resource exhaustion attacks where
+        individual calls stay under their local limit but total exceeds safe bounds.
+        """
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.match_mu import match_mu
+        from rcx_pi.subst_mu import subst_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        # Set a very low limit to trigger exhaustion
+        budget.start(limit=100)
+
+        # Complex patterns/bodies that consume more steps per call
+        complex_pattern = {
+            "a": {"var": "x"},
+            "b": {"var": "y"},
+            "c": [{"var": "z"}, 1, 2]
+        }
+        complex_value = {
+            "a": 1,
+            "b": 2,
+            "c": [3, 1, 2]
+        }
+        complex_body = {
+            "result": [{"var": "x"}, {"var": "y"}],
+            "nested": {"inner": {"var": "z"}}
+        }
+        complex_bindings = {"x": 10, "y": 20, "z": 30}
+
+        exhausted = False
+        try:
+            # Keep calling until budget exhausted
+            for _ in range(1000):  # Should exhaust well before this
+                match_mu(complex_pattern, complex_value)
+                subst_mu(complex_body, complex_bindings)
+        except RuntimeError as e:
+            if "step limit exceeded" in str(e):
+                exhausted = True
+
+        budget.stop()
+
+        # The budget should have been exhausted
+        assert exhausted, "Budget was not exhausted - limit may not be enforced"
+
+    def test_budget_thread_isolation(self):
+        """Budget is thread-local - each thread has its own budget.
+
+        This verifies the thread-safety fix where _STEP_BUDGET uses
+        threading.local() instead of a global singleton.
+        """
+        import threading
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+
+        results = {}
+        errors = []
+
+        def thread_work(thread_id, limit):
+            try:
+                reset_step_budget()
+                budget = get_step_budget()
+                budget.start(limit=limit)
+
+                # Consume some steps
+                budget.consume(limit // 2)
+
+                # Record the budget state
+                results[thread_id] = {
+                    "total": budget.get_total(),
+                    "remaining": budget.get_remaining(),
+                    "limit": limit
+                }
+
+                budget.stop()
+            except Exception as e:
+                errors.append((thread_id, str(e)))
+
+        # Start multiple threads with different limits
+        threads = []
+        for i in range(5):
+            limit = (i + 1) * 1000
+            t = threading.Thread(target=thread_work, args=(i, limit))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        # Check no errors occurred
+        assert not errors, f"Thread errors: {errors}"
+
+        # Each thread should have its own budget (different totals based on limit)
+        for i in range(5):
+            expected_limit = (i + 1) * 1000
+            expected_consumed = expected_limit // 2
+            assert results[i]["total"] == expected_consumed, \
+                f"Thread {i}: expected {expected_consumed} consumed, got {results[i]['total']}"
+            assert results[i]["limit"] == expected_limit, \
+                f"Thread {i}: expected limit {expected_limit}, got {results[i]['limit']}"
+
+
+# =============================================================================
 # Dict Subclass Isolation
 # =============================================================================
 
@@ -214,10 +557,14 @@ class TestBoolIntCoercionPrevention:
 class TestSpecialVariableNames:
     """Tests for edge case variable names."""
 
-    def test_empty_string_var_name(self):
-        """Empty string is a valid variable name."""
-        result = match({'var': ''}, 42)
-        assert result == {'': 42}
+    def test_empty_string_var_name_rejected(self):
+        """Empty string variable name is rejected.
+
+        HARDENED: Empty variable names cause confusing error messages and
+        debugging difficulty. They are now rejected with ValueError.
+        """
+        with pytest.raises(ValueError, match="cannot be empty"):
+            match({'var': ''}, 42)
 
     def test_var_named_var(self):
         """'var' is a valid variable name (no collision)."""
@@ -390,6 +737,74 @@ class TestCircularReferenceHandling:
 
         # is_mu detects the cycle and returns False
         assert is_mu(circular) is False
+
+    def test_circular_dict_in_normalize_raises(self):
+        """Circular dict in normalize_for_match raises ValueError.
+
+        Defense-in-depth: even if is_mu check is bypassed, normalize
+        detects cycles and raises rather than infinite looping.
+        """
+        from rcx_pi.match_mu import normalize_for_match
+
+        circular = {'a': None}
+        circular['a'] = circular
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(circular)
+
+    def test_circular_list_in_normalize_raises(self):
+        """Circular list in normalize_for_match raises ValueError."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        circular = [1, 2, None]
+        circular[2] = circular
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(circular)
+
+    def test_circular_in_denormalize_raises(self):
+        """Circular structure in denormalize_from_match raises ValueError.
+
+        Defense-in-depth: if a circular structure somehow emerges during
+        projection execution, denormalize detects it.
+        """
+        from rcx_pi.match_mu import denormalize_from_match
+
+        # Create a circular linked list structure
+        circular = {"head": 1, "tail": None}
+        circular["tail"] = circular
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            denormalize_from_match(circular)
+
+    def test_circular_in_is_dict_linked_list_returns_false(self):
+        """Circular structure in is_dict_linked_list returns False (not infinite loop).
+
+        This function is called during denormalization to detect dict encodings.
+        A circular structure should return False, not hang.
+        """
+        from rcx_pi.match_mu import is_dict_linked_list, is_kv_pair_linked
+
+        # Create a circular linked list that looks like a dict encoding
+        # Each element needs to look like a kv-pair for is_kv_pair_linked to pass
+        kv_pair = {"head": "key", "tail": {"head": "value", "tail": None}}
+        circular = {"head": kv_pair, "tail": None}
+        circular["tail"] = circular  # Create cycle
+
+        # Should return False (circular), not hang
+        assert is_dict_linked_list(circular) is False
+
+    def test_nested_circular_in_normalize_raises(self):
+        """Circular reference nested inside a valid structure is detected."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        # Circular dict nested inside a list
+        circular = {'a': None}
+        circular['a'] = circular
+        nested = [1, 2, circular]
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(nested)
 
 
 # =============================================================================

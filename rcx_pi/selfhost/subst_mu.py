@@ -16,11 +16,13 @@ from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import step
+from .kernel import get_step_budget
 from .match_mu import (
     normalize_for_match,
     denormalize_from_match,
     dict_to_bindings,
     bindings_to_dict,
+    _check_empty_var_names,
 )
 
 
@@ -156,13 +158,21 @@ def run_subst_projections(
     """
     Run substitute projections until done or stall.
 
+    Reports steps to the global step budget for cross-call resource accounting.
+
     Returns:
         (final_state, steps_taken, is_stall)
+
+    Raises:
+        RuntimeError: If global step budget exceeded.
     """
+    budget = get_step_budget()
     state = initial_state
     for i in range(max_steps):
         # Check if done
         if is_subst_done(state):
+            # Report steps consumed to global budget
+            budget.consume(i)
             return state, i, False
 
         # Resolve any lookup markers before taking a step
@@ -173,11 +183,15 @@ def run_subst_projections(
 
         # Check for stall (no change) - use mu_equal to avoid Python type coercion
         if mu_equal(next_state, state):
+            # Report steps consumed to global budget
+            budget.consume(i)
             return state, i, True
 
         state = next_state
 
     # Max steps exceeded - treat as stall
+    # Report steps consumed to global budget
+    budget.consume(max_steps)
     return state, max_steps, True
 
 
@@ -206,6 +220,9 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
         KeyError: If a variable in body is not in bindings.
     """
     assert_mu(body, "subst_mu.body")
+
+    # Validate no empty variable names (parity with eval_seed.py)
+    _check_empty_var_names(body, "body")
 
     # Check if body is already in head/tail form (structural dict)
     # If so, we shouldn't denormalize it back to a list
