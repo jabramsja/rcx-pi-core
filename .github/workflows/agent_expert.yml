@@ -8,6 +8,10 @@ on:
       - 'tests/**/*.py'
       - 'seeds/**/*.json'
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -40,8 +44,48 @@ jobs:
           echo "files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Run expert agent
+        id: review
         if: steps.changed.outputs.files != ''
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          python tools/run_expert.py ${{ steps.changed.outputs.files }}
+          python tools/run_expert.py ${{ steps.changed.outputs.files }} 2>&1 | tee /tmp/expert_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      - name: Post PR comment
+        if: always() && steps.changed.outputs.files != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f /tmp/expert_output.txt ]; then
+            # Extract the report section
+            REPORT=$(cat /tmp/expert_output.txt | sed -n '/^====/,/^====/p' | tail -n +2 | head -n -1)
+
+            if [ -z "$REPORT" ]; then
+              REPORT=$(tail -50 /tmp/expert_output.txt)
+            fi
+
+            # Determine status emoji
+            if [ "${{ steps.review.outputs.exit_code }}" = "0" ]; then
+              STATUS="✅ **EXPERT REVIEW PASSED**"
+            else
+              STATUS="💡 **EXPERT SUGGESTIONS** (review recommended)"
+            fi
+
+            # Post comment
+            gh pr comment ${{ github.event.pull_request.number }} --body "## 🧠 Expert Agent Report
+
+$STATUS
+
+<details>
+<summary>Full Report</summary>
+
+\`\`\`
+$REPORT
+\`\`\`
+
+</details>
+
+---
+*Automated code review by RCX Expert Agent*"
+          fi

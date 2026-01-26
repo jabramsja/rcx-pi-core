@@ -135,20 +135,20 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ### QoL Improvements (Infrastructure)
 
-26. **Agent Reports as PR Comments**
-    - Post agent findings directly on PR as comments
-    - Better visibility than digging through CI logs
-    - Requires: GitHub Actions workflow updates with `gh pr comment`
+26. **Agent Reports as PR Comments** ✅
+    - All 4 agent workflows now post findings as PR comments
+    - Collapsible report sections with status emoji
+    - Uses `gh pr comment` with GITHUB_TOKEN permissions
 
-27. **Debt Dashboard**
-    - Centralized tracking of `@host_*` markers
-    - Show debt count trends over time
-    - Auto-generate from grep + git history
+27. **Debt Dashboard** ✅
+    - `tools/debt_dashboard.sh` - shows all host debt markers
+    - Human-readable and JSON output modes
+    - Tracks core (rcx_pi/) vs prototype debt separately
 
-28. **Pre-commit Local Checks**
-    - Run quick audit checks before push
-    - Catch guardrail violations early
-    - Use pre-commit hook or similar
+28. **Pre-commit Local Checks** ✅
+    - `tools/pre-commit-check.sh` - quick guardrail checks
+    - Install: `cp tools/pre-commit-check.sh .git/hooks/pre-commit`
+    - Checks: private attrs, underscore imports, JSON keys, syntax, bare except
 
 29. **Projection Test Coverage**
     - Ensure every projection has explicit test
