@@ -19,7 +19,7 @@ rcx-program-run = "rcx_pi.program_run_cli:main"
 rcx-world-trace = "rcx_pi.worlds.world_trace_cli:main"
 
 [tool.setuptools]
-packages = ["rcx_pi", "rcx_pi.core", "rcx_pi.engine", "rcx_pi.reduction", "rcx_pi.utils", "rcx_pi.worlds"]
+packages = ["rcx_pi", "rcx_pi.core", "rcx_pi.engine", "rcx_pi.reduction", "rcx_pi.specs", "rcx_pi.utils", "rcx_pi.worlds"]
 
 [project.optional-dependencies]
 test = ["pytest", "jsonschema"]
