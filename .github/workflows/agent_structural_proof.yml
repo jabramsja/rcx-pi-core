@@ -1,0 +1,39 @@
+name: Agent Structural Proof
+
+on:
+  pull_request:
+    paths:
+      - 'rcx_pi/kernel.py'
+      - 'rcx_pi/eval_seed.py'
+      - 'docs/EVAL_SEED.v0.md'
+      - 'docs/RCXKernel.v0.md'
+      - 'docs/StructuralPurity.v0.md'
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js (required for Claude Agent SDK)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          pip install claude-agent-sdk
+          pip install ".[test]"
+
+      - name: Run structural proof agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python tools/run_structural_proof.py "Verify that any structural claims in the PR can be backed by concrete Mu projections"
