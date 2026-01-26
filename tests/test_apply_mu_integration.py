@@ -22,39 +22,9 @@ See docs/core/SelfHosting.v0.md for design.
 import pytest
 
 from rcx_pi.eval_seed import apply_projection, match, substitute, NO_MATCH
-from rcx_pi.match_mu import match_mu
-from rcx_pi.subst_mu import subst_mu
 
-
-def apply_mu(projection: dict, input_value) -> object:
-    """
-    Apply a projection using Mu-based match and substitute.
-
-    This is the integration point - uses match_mu for matching
-    and subst_mu for substitution, proving they work together.
-
-    Args:
-        projection: Dict with "pattern" and "body" keys.
-        input_value: The value to transform.
-
-    Returns:
-        Transformed value if pattern matched, NO_MATCH otherwise.
-    """
-    if not isinstance(projection, dict):
-        raise TypeError(f"Projection must be dict, got {type(projection)}")
-    if "pattern" not in projection or "body" not in projection:
-        raise KeyError("Projection must have 'pattern' and 'body' keys")
-
-    pattern = projection["pattern"]
-    body = projection["body"]
-
-    # Use Mu-based match
-    bindings = match_mu(pattern, input_value)
-    if bindings is NO_MATCH:
-        return NO_MATCH
-
-    # Use Mu-based substitute
-    return subst_mu(body, bindings)
+# Import shared apply_mu from conftest (avoids duplication)
+from conftest import apply_mu
 
 
 class TestApplyMuParitySimple:
