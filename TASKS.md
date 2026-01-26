@@ -150,20 +150,23 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
     - Install: `cp tools/pre-commit-check.sh .git/hooks/pre-commit`
     - Checks: private attrs, underscore imports, JSON keys, syntax, bare except
 
-29. **Projection Test Coverage**
-    - Ensure every projection has explicit test
-    - Track which projections have been exercised
-    - Add coverage reporting for projection matching
+29. **Projection Test Coverage** ✅
+    - `rcx_pi/projection_coverage.py` - tracks projection matches
+    - Enable: `RCX_PROJECTION_COVERAGE=1 pytest`
+    - Integrated into step() function, reports at end of test run
+    - `tools/projection_coverage.py` for standalone reports
 
-30. **Agent Memory Across Sessions**
-    - Store agent findings in structured format (JSON/markdown)
-    - Reference previous findings in subsequent runs
-    - Detect regressions (previously-fixed issues reappearing)
+30. **Agent Memory Across Sessions** ✅
+    - `tools/agent_memory.py` - store/list/fix findings
+    - Stores findings in `.agent_memory/` (gitignored)
+    - Supports regression checking for fixed issues
+    - Usage: `python tools/agent_memory.py store verifier "message" --file x.py`
 
-31. **Trace Visualization**
-    - Simple trace viewer (CLI or web)
-    - Show state transitions visually
-    - Help debug complex nested reductions
+31. **Trace Visualization** ✅
+    - `tools/trace_viewer.py` - CLI trace viewer
+    - Shows state transitions with box-drawing characters
+    - Supports compact mode, filtering, limiting
+    - Usage: `python tools/trace_viewer.py trace.jsonl --compact`
 
 ---
 

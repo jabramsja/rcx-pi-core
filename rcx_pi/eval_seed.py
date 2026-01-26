@@ -404,12 +404,25 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
     """
+    from rcx_pi.projection_coverage import coverage
+
     assert_mu(input_value, "step.input")
 
+    if coverage.is_enabled():
+        coverage.record_step()
+
     for proj in projections:
+        # Get projection ID for coverage tracking
+        proj_id = proj.get("id", f"proj_{id(proj)}") if isinstance(proj, dict) else f"proj_{id(proj)}"
+
         result = apply_projection(proj, input_value)
         if result is not NO_MATCH:
+            if coverage.is_enabled():
+                coverage.record_match(proj_id, input_value, result)
             return result
+        else:
+            if coverage.is_enabled():
+                coverage.record_no_match(proj_id)
 
     # No match - return input unchanged (stall)
     return input_value
