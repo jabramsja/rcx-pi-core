@@ -71,6 +71,22 @@ If we accidentally use Python features (lambda, isinstance logic, etc.), we're s
 
 ---
 
+## Verification Agents
+
+Four agents assist with code review (available via Task tool or CI workflows):
+
+| Agent | Purpose |
+|-------|---------|
+| **verifier** | Read-only audit against North Star invariants |
+| **adversary** | Red team attack testing (edge cases, type confusion) |
+| **expert** | Code quality review, identifies unnecessary complexity |
+| **structural-proof** | Demands concrete Mu projections for structural claims |
+
+**Usage**: These run automatically on PRs touching kernel/eval_seed files.
+CI workflows: `.github/workflows/agent_*.yml`
+
+---
+
 ## What This Is All About
 
 RCX exists so that claims about emergence can be tested honestly, without importing structure from the host language.

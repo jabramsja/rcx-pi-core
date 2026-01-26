@@ -53,18 +53,25 @@ Use the stable wrapper script (no PYTHONPATH required):
 This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 
 
-## 🌱 Core Components
+## Core Components
+
+### Current Architecture (Phase 2 Complete)
 
 | Module | Purpose |
 |-------|---------|
-| `core/motif.py` | Defines the `Motif` object and constructor `μ(...)` |
-| `rules_pure.py` | Pure rewrite rules (no semantics baked in) |
-| `engine/evaluator_pure.py` | Structural evaluator + reduction engine |
-| `programs.py` | Reusable structural closures (swap, dup, rotate, etc.) |
-| `utils.py` | Peano helpers: `num(n)`, `motif_to_int`, decode to tuples |
-| `run_all.py` | Runs **all demos + tests** in one command |
+| `rcx_pi/kernel.py` | Minimal kernel (4 primitives: identity, stall, trace, dispatch) |
+| `rcx_pi/eval_seed.py` | EVAL_SEED evaluator (match, substitute, apply_projection, step) |
+| `rcx_pi/mu_type.py` | Mu type validation and guardrails |
 
-If `run_all.py` finishes without red errors — **RCX-π Core is healthy.**
+### Legacy (still present for backward compatibility)
+
+| Module | Purpose |
+|-------|---------|
+| `core/motif.py` | Motif object and `μ(...)` constructor |
+| `engine/evaluator_pure.py` | Closure-based evaluator (legacy) |
+| `bytecode_vm.py` | Bytecode VM with v1b opcodes |
+
+Run `pytest` to verify health. See `TASKS.md` for current phase status.
 
 ---
 

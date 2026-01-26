@@ -87,24 +87,27 @@ It is part of the claim.
 
 ⸻
 
-6. Why This Is Deferred Right Now
+6. Current State (Updated 2026-01-25)
 
-The current phase of RCX focuses on:
-	•	Deterministic trace semantics
-	•	Replayable execution
-	•	Entropy sealing
-	•	Canonical trace contracts
+**Completed:**
+- Deterministic trace semantics (v1 frozen)
+- Replayable execution (replay gates enforced)
+- Entropy sealing (EntropyBudget.md contract)
+- Canonical trace contracts
+- Minimal Kernel (4 primitives: identity, stall, trace, dispatch)
+- EVAL_SEED Phase 2 (Python implementation: match, substitute, step)
+- Bytecode VM v0/v1a/v1b (replay + execution opcodes)
 
-Until these are frozen:
-	•	No RCX program can be trusted
-	•	VM bytecode would be premature
-	•	Meta-circular execution would be dishonest
+**In Progress:**
+- EVAL_SEED Phase 3: Express EVAL_SEED as Mu projections (not Python)
+- Key blocker: `deep_step` - need to traverse nested structures without host recursion
+- Solution path: work-stack approach (pure structural, no Python call stack)
 
-Therefore:
+**Awaiting:**
+- Phase 4: Self-hosting (Mu-EVAL runs Mu-EVAL)
+- Application seeds (EngineeNews runs on self-hosted EVAL)
 
-RCX programs like EngineNews are intentionally VECTOR, not NOW.
-
-This is discipline, not avoidance.
+The foundation is now solid. Self-hosting is the next milestone.
 
 ⸻
 

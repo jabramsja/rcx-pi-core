@@ -146,11 +146,22 @@ _(No active items.)_
     - Answer: **Yes, EVAL_SEED is tractable** (~200 lines, O(n) complexity)
     - **Ready for Phase 3**
 
-22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** (awaiting Phase 2)
+22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** (in progress)
     - Scope:
       - Translate EVAL_SEED logic to Mu projections
       - Verify Python-EVAL and Mu-EVAL produce same results
       - Store as `seeds/eval.v1.json`
+    - **Blocker discovered**: `deep_step` needed
+      - Current `step()` only matches at root level
+      - Nested reducible expressions (e.g., `{head:1, tail:{op:append,...}}`) not found
+      - See `prototypes/linked_list_append.json` for concrete example
+    - **Solution path**: Work-stack approach (pure structural)
+      - Express tree traversal as explicit Mu state (focus + context stack)
+      - No host recursion - kernel loop provides iteration
+      - Design doc needed: `docs/DeepStep.v0.md`
+    - **Prototype verified**: Linked list append works with 2 projections
+      - Proves finite projections can handle variable-length data
+      - Requires `deep_step` to find nested reducible nodes
 
 23. **RCX Kernel Phase 4: Self-Hosting** (awaiting Phase 3)
     - Scope:
