@@ -578,3 +578,115 @@ class TestKernelIntegration:
                 f"Hash discontinuity at step {i}: "
                 f"{trace[i]['after_hash']} != {trace[i + 1]['before_hash']}"
             )
+
+
+# =============================================================================
+# Kernel Boundary Tests (Grounding requirement)
+# =============================================================================
+
+
+class TestKernelBoundaries:
+    """Tests for kernel boundary conditions.
+
+    These tests verify behavior at the edges of valid input ranges,
+    ensuring robust handling of edge cases.
+    """
+
+    def test_trace_limit_enforced(self):
+        """MAX_TRACE_ENTRIES limit is enforced by record_trace."""
+        from rcx_pi.kernel import MAX_TRACE_ENTRIES
+
+        trace = []
+        # Fill to limit
+        for i in range(MAX_TRACE_ENTRIES):
+            record_trace(trace, {"step": i})
+
+        # One more should raise
+        with pytest.raises(RuntimeError, match="Trace size limit exceeded"):
+            record_trace(trace, {"step": "overflow"})
+
+    def test_trace_at_limit_minus_one(self):
+        """Trace at limit-1 can accept one more entry."""
+        from rcx_pi.kernel import MAX_TRACE_ENTRIES
+
+        trace = []
+        for i in range(MAX_TRACE_ENTRIES - 1):
+            record_trace(trace, {"step": i})
+
+        # Should succeed (exactly at limit after this)
+        record_trace(trace, {"step": "final"})
+        assert len(trace) == MAX_TRACE_ENTRIES
+
+    def test_compute_identity_empty_dict(self):
+        """Empty dict has deterministic identity."""
+        h1 = compute_identity({})
+        h2 = compute_identity({})
+        assert h1 == h2
+        assert len(h1) == 64
+
+    def test_compute_identity_empty_list(self):
+        """Empty list has deterministic identity."""
+        h1 = compute_identity([])
+        h2 = compute_identity([])
+        assert h1 == h2
+        assert len(h1) == 64
+
+    def test_compute_identity_deeply_nested(self):
+        """Deeply nested structure has valid identity."""
+        # Build 100-level deep structure
+        value = "leaf"
+        for _ in range(100):
+            value = {"nested": value}
+
+        h = compute_identity(value)
+        assert isinstance(h, str)
+        assert len(h) == 64
+
+    def test_detect_stall_hash_prefix_collision(self):
+        """Different hashes with same prefix are not stalls."""
+        # Two hashes that happen to share prefix
+        h1 = "a" * 64
+        h2 = "a" * 63 + "b"
+        assert detect_stall(h1, h2) is False
+
+    def test_gate_dispatch_empty_handler_name(self):
+        """Empty string handler name is valid if registered."""
+        def handler(ctx):
+            return {"result": "ok"}
+
+        handlers = {"": handler}
+        result = gate_dispatch(handlers, "", {"input": 1})
+        assert result == {"result": "ok"}
+
+    def test_kernel_run_zero_max_steps(self):
+        """run() with max_steps=0 returns immediately."""
+        k = create_kernel()
+
+        def identity(ctx):
+            return ctx["mu"]
+
+        k.register_handler("step", identity)
+
+        # Note: max_steps=0 means no steps taken
+        final, trace, reason = k.run({"value": 1}, max_steps=0)
+
+        # Should return without taking any steps
+        assert reason == "max_steps"
+        assert len(trace) == 0
+        assert final == {"value": 1}
+
+    def test_kernel_run_max_steps_one(self):
+        """run() with max_steps=1 takes exactly one step."""
+        k = create_kernel()
+        call_count = [0]
+
+        def counting_handler(ctx):
+            call_count[0] += 1
+            return {"value": call_count[0]}
+
+        k.register_handler("step", counting_handler)
+
+        _, trace, reason = k.run({"value": 0}, max_steps=1)
+
+        assert len(trace) == 1
+        assert call_count[0] == 1
