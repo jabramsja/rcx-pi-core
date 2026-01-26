@@ -87,7 +87,26 @@ if [ -n "$STAGED_PY" ]; then
     done
 fi
 
-# 6. Remind about doc updates
+# 6. Run contraband.sh (fast grep-based linter)
+echo "-- Running contraband check..."
+if ! ./tools/contraband.sh rcx_pi 2>/dev/null; then
+    echo "❌ Contraband check failed"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# 7. Run ast_police.py (catches what grep misses)
+if [ -n "$STAGED_PY" ]; then
+    echo "-- Running AST police on staged files..."
+    STAGED_RCX_PY=$(echo "$STAGED_PY" | grep '^rcx_pi/' || true)
+    if [ -n "$STAGED_RCX_PY" ]; then
+        if ! python3 tools/ast_police.py $STAGED_RCX_PY 2>/dev/null; then
+            echo "❌ AST police check failed"
+            ERRORS=$((ERRORS + 1))
+        fi
+    fi
+fi
+
+# 8. Remind about doc updates
 if [ -n "$STAGED_PY" ]; then
     for f in $STAGED_PY; do
         if [[ "$f" == rcx_pi/* ]] || [[ "$f" == prototypes/* ]]; then

@@ -29,6 +29,12 @@ echo "== 3.2) Bytecode VM v0 audit =="
 echo "== 3.3) Semantic purity audit (self-hosting readiness) =="
 ./tools/audit_semantic_purity.sh
 
+echo "== 3.4) Contraband check (grep-based) =="
+./tools/contraband.sh rcx_pi
+
+echo "== 3.5) AST police (catches what grep misses) =="
+python3 tools/ast_police.py
+
 echo "== 4) Anti-cheat scans =="
 echo "-- no private attr access in tests/ or prototypes/"
 ! grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ || { echo "Found private attr access"; exit 1; }
