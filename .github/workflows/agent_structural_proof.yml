@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'rcx_pi/**/*.py'
+      - 'prototypes/**/*.py'
       - 'docs/EVAL_SEED.v0.md'
       - 'docs/RCXKernel.v0.md'
       - 'docs/StructuralPurity.v0.md'
