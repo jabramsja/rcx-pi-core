@@ -81,31 +81,25 @@ class TestDeepNestingLimits:
 
 
 class TestDictSubclassIsolation:
-    """Tests for dict subclass handling.
+    """Tests for dict/list subclass rejection.
 
-    PARTIAL CONCERN: Dict subclasses currently pass is_mu and can
-    execute side effects during match. This is only exploitable if
-    an attacker controls Python types (not via JSON input).
+    HARDENED: Dict and list subclasses are now rejected by is_mu().
+    This prevents side effects from custom __getitem__/__iter__ methods.
     """
 
-    def test_dict_subclass_passes_is_mu(self):
-        """Document that dict subclasses currently pass is_mu.
-
-        This is acceptable for JSON-only input but should be
-        documented for cases where Python objects are accepted.
-        """
+    def test_dict_subclass_rejected_by_is_mu(self):
+        """Dict subclasses are rejected to prevent side effect injection."""
         class SneakyDict(dict):
             pass
 
-        # This currently passes - document the behavior
-        assert is_mu(SneakyDict({'a': 1})) is True
+        # Subclasses are now rejected
+        assert is_mu(SneakyDict({'a': 1})) is False
 
-    def test_dict_subclass_side_effects_execute(self):
-        """Document that dict subclass side effects execute during match.
+    def test_dict_subclass_side_effects_blocked(self):
+        """Dict subclass side effects are blocked because match() uses assert_mu().
 
-        If RCX only accepts JSON input (serialized/deserialized),
-        this is not exploitable. If accepting Python objects directly,
-        this could be a concern.
+        The assert_mu() guard in match() rejects subclasses before any
+        iteration occurs, preventing side effect execution.
         """
         effects = []
 
@@ -115,17 +109,31 @@ class TestDictSubclassIsolation:
                 return super().__getitem__(key)
 
         sd = SideEffectDict({'a': 1})
-        match({'a': {'var': 'x'}}, sd)
 
-        # Side effects occur during match
-        assert 'get:a' in effects
+        # is_mu rejects the subclass
+        assert is_mu(sd) is False
 
-    def test_list_subclass_passes_is_mu(self):
-        """Document that list subclasses also pass is_mu."""
+        # match() raises TypeError because assert_mu() rejects the subclass
+        import pytest
+        with pytest.raises(TypeError, match="must be a Mu"):
+            match({'a': {'var': 'x'}}, sd)
+
+        # No side effects occurred - the guard blocked iteration
+        assert effects == []
+
+    def test_list_subclass_rejected_by_is_mu(self):
+        """List subclasses are rejected to prevent side effect injection."""
         class SneakyList(list):
             pass
 
-        assert is_mu(SneakyList([1, 2, 3])) is True
+        # Subclasses are now rejected
+        assert is_mu(SneakyList([1, 2, 3])) is False
+
+    def test_exact_dict_and_list_still_pass(self):
+        """Exact dict and list types still pass is_mu."""
+        assert is_mu({'a': 1}) is True
+        assert is_mu([1, 2, 3]) is True
+        assert is_mu({'nested': [1, {'x': 2}]}) is True
 
 
 # =============================================================================

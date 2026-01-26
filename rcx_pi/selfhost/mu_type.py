@@ -65,8 +65,13 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
     if isinstance(value, str):
         return True
 
-    # For compound types (list, dict), check for circular references
-    if isinstance(value, (list, dict)):
+    # For compound types, use exact type check (not isinstance) to reject subclasses.
+    # Subclasses can have custom __getitem__/__iter__ that execute side effects,
+    # which would be a security concern if accepting Python objects directly.
+    # JSON deserialization always produces exact list/dict types, so this is safe.
+    value_type = type(value)
+
+    if value_type is list or value_type is dict:
         if _seen is None:
             _seen = set()
         value_id = id(value)
@@ -75,14 +80,14 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
             return False
         _seen = _seen | {value_id}  # Create new set to avoid mutation issues
 
-    if isinstance(value, list):
+    if value_type is list:
         return all(is_mu(item, _seen, _depth + 1) for item in value)
-    if isinstance(value, dict):
+    if value_type is dict:
         return (
-            all(isinstance(k, str) for k in value.keys()) and
+            all(type(k) is str for k in value.keys()) and
             all(is_mu(v, _seen, _depth + 1) for v in value.values())
         )
-    # Anything else (function, class, object, bytes, set, tuple, etc.) is not a Mu
+    # Anything else (function, class, object, bytes, set, tuple, subclasses, etc.) is not a Mu
     return False
 
 
