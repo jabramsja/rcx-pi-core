@@ -124,6 +124,31 @@ def is_kv_pair_linked(value: Mu) -> bool:
     return True
 
 
+def is_dict_linked_list(value: Mu) -> bool:
+    """
+    Check if value is a linked list encoding a dict (ALL elements are kv-pairs).
+
+    This checks every element, not just the first, to avoid misidentifying
+    lists like [['', None], None] as dicts.
+    """
+    if not isinstance(value, dict):
+        return False
+    if set(value.keys()) != {"head", "tail"}:
+        return False
+
+    # Check ALL elements are valid kv-pairs
+    current = value
+    while current is not None:
+        if not isinstance(current, dict):
+            return False
+        if set(current.keys()) != {"head", "tail"}:
+            return False
+        if not is_kv_pair_linked(current["head"]):
+            return False
+        current = current["tail"]
+    return True
+
+
 def denormalize_from_match(value: Mu) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
@@ -142,10 +167,10 @@ def denormalize_from_match(value: Mu) -> Mu:
     if isinstance(value, dict):
         # Check if it's a linked list (head/tail structure)
         if set(value.keys()) == {"head", "tail"}:
-            head = value["head"]
-
-            # Check if head is a key-value pair (dict encoding)
-            if is_kv_pair_linked(head):
+            # Check if ALL elements are kv-pairs (dict encoding)
+            # Must check all elements, not just first, to avoid misidentifying
+            # lists like [['', None], None] as dicts
+            if is_dict_linked_list(value):
                 # It's a dict encoded as linked list of kv-pairs
                 result = {}
                 current = value

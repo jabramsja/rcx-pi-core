@@ -212,33 +212,6 @@ def contains_head_tail(value, _seen=None):
     return False
 
 
-def contains_nested_none(value, _seen=None):
-    """Check if value contains None inside a list/dict (not at top level).
-
-    Known limitation: denormalize_from_match doesn't handle nested None
-    properly when converting from linked-list bindings format.
-    """
-    if _seen is None:
-        _seen = set()
-    if id(value) in _seen:
-        return False
-    _seen.add(id(value))
-
-    if isinstance(value, list):
-        for elem in value:
-            if elem is None:
-                return True
-            if contains_nested_none(elem, _seen):
-                return True
-    if isinstance(value, dict):
-        for v in value.values():
-            if v is None:
-                return True
-            if contains_nested_none(v, _seen):
-                return True
-    return False
-
-
 # =============================================================================
 # Property 1: Determinism
 # =============================================================================
@@ -402,8 +375,6 @@ def test_apply_mu_never_crashes_on_valid_mu(projection, value):
 def test_same_var_multiple_times_consistency(var_name, value):
     """If same variable appears multiple times in body, all get same value."""
     assume(is_mu(value))
-    # Skip values with nested None - known limitation in denormalize_from_match
-    assume(not contains_nested_none(value))
 
     # Projection that captures var and uses it 3 times
     projection = {
