@@ -391,6 +391,74 @@ class TestCircularReferenceHandling:
         # is_mu detects the cycle and returns False
         assert is_mu(circular) is False
 
+    def test_circular_dict_in_normalize_raises(self):
+        """Circular dict in normalize_for_match raises ValueError.
+
+        Defense-in-depth: even if is_mu check is bypassed, normalize
+        detects cycles and raises rather than infinite looping.
+        """
+        from rcx_pi.match_mu import normalize_for_match
+
+        circular = {'a': None}
+        circular['a'] = circular
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(circular)
+
+    def test_circular_list_in_normalize_raises(self):
+        """Circular list in normalize_for_match raises ValueError."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        circular = [1, 2, None]
+        circular[2] = circular
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(circular)
+
+    def test_circular_in_denormalize_raises(self):
+        """Circular structure in denormalize_from_match raises ValueError.
+
+        Defense-in-depth: if a circular structure somehow emerges during
+        projection execution, denormalize detects it.
+        """
+        from rcx_pi.match_mu import denormalize_from_match
+
+        # Create a circular linked list structure
+        circular = {"head": 1, "tail": None}
+        circular["tail"] = circular
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            denormalize_from_match(circular)
+
+    def test_circular_in_is_dict_linked_list_returns_false(self):
+        """Circular structure in is_dict_linked_list returns False (not infinite loop).
+
+        This function is called during denormalization to detect dict encodings.
+        A circular structure should return False, not hang.
+        """
+        from rcx_pi.match_mu import is_dict_linked_list, is_kv_pair_linked
+
+        # Create a circular linked list that looks like a dict encoding
+        # Each element needs to look like a kv-pair for is_kv_pair_linked to pass
+        kv_pair = {"head": "key", "tail": {"head": "value", "tail": None}}
+        circular = {"head": kv_pair, "tail": None}
+        circular["tail"] = circular  # Create cycle
+
+        # Should return False (circular), not hang
+        assert is_dict_linked_list(circular) is False
+
+    def test_nested_circular_in_normalize_raises(self):
+        """Circular reference nested inside a valid structure is detected."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        # Circular dict nested inside a list
+        circular = {'a': None}
+        circular['a'] = circular
+        nested = [1, 2, circular]
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(nested)
+
 
 # =============================================================================
 # Determinism Verification
