@@ -82,9 +82,9 @@ Items here are implemented and verified under current invariants. Changes requir
 - Second Independent Encounter v0 (stall memory tracking, closure signal detection, 25 tests)
 - Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
 - Enginenews Spec v0 (stress test harness, 18 tests in `test_enginenews_spec_v0.py`, 4 fixtures)
-- Bytecode VM v0 (replay-only, 10 opcodes, 47 tests in `test_bytecode_vm_v0.py`, `tools/audit_bytecode.sh`)
-- Bytecode VM v1a (OP_STALL execution, v1a registers RS/RP/RH, closure detection, 61 tests)
-- Bytecode VM v1b (OP_FIX/OP_FIXED execution, RF register, stall_memory clearing, 78 tests)
+- Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
+  - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
+  - Docs: `docs/archive/bytecode/` (archived)
 - Mu Type v0 (`rcx_pi/mu_type.py`, `docs/MuType.v0.md`, 58 tests)
 - Structural Purity Guardrails v0 (`docs/StructuralPurity.v0.md`, 32 additional tests):
   - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
@@ -250,17 +250,11 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
     - Note: Operations (match/subst) are Mu projections; execution still uses Python's step()
     - True operational self-hosting (RCX kernel runs RCX) is a Phase 6+ goal
 
-19. **Bytecode VM v1b: OP_FIX/OP_FIXED execution** ✅ (promoted from VECTOR #10 v1)
-    - Design doc: `docs/BytecodeMapping.v1.md`
-    - **Archived to Ra**: Implementation complete (78 tests, RF register, stall_memory clearing)
-
-18. **Bytecode VM v1a: OP_STALL execution** ✅ (promoted from VECTOR #10 v1)
-    - Design doc: `docs/BytecodeMapping.v1.md`
-    - **Archived to Ra**: Implementation complete (61 tests, v1a registers, closure detection)
-
-17. **Bytecode VM v0 Implementation** ✅ (promoted from VECTOR #10)
-    - Design doc: `docs/BytecodeMapping.v0.md`
-    - **Archived to Ra**: Implementation complete (47 tests, `tools/audit_bytecode.sh`)
+17-19. **Bytecode VM v0/v1a/v1b** — **ARCHIVED** (superseded by kernel + seeds)
+    - Bytecode approach abandoned in favor of kernel + EVAL_SEED
+    - Code remains in `rcx_pi/bytecode_vm.py` (legacy, not maintained)
+    - Docs moved to `docs/archive/bytecode/`
+    - Self-hosting achieved via Phase 5 instead
 
 ---
 
@@ -298,23 +292,12 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
      - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
    - **Promoted to NEXT #16**: Second Independent Encounter Implementation
 
-10. **Bytecode VM mapping v0/v1** ✅
-    - Deliverables: `docs/BytecodeMapping.v0.md` (replay-only), `docs/BytecodeMapping.v1.md` (execution)
-    - v0 Done (replay-only) - **IMPLEMENTED**:
-      - Minimal instruction set: 10 opcodes (INIT, LOAD_EVENT, CANON_EVENT, etc.)
-      - Event → opcode mapping (trace.start, step, trace.end)
-      - Fail-loud on unmappable events
-      - Implementation: `rcx_pi/bytecode_vm.py`, 47 tests, `tools/audit_bytecode.sh`
-    - v1 Partial (execution opcodes) - **IMPLEMENTED v1a/v1b**:
-      - v1a: OP_STALL (stall declaration, closure detection)
-      - v1b: OP_FIX/OP_FIXED (stall resolution, value transition)
-      - Registers: RS (status), RP (pattern), RH (hash), RF (fix target)
-      - Reserved: ROUTE/CLOSE remain blocked
-    - v1 Remaining (execution loop) - **NOT IMPLEMENTED**:
-      - OP_MATCH, OP_REDUCE (pattern matching, rule application)
-      - Execution loop orchestration
-      - R0 (actual value storage)
-    - **Archived to Ra**: v0 (NEXT #17), v1a (NEXT #18), v1b (NEXT #19)
+10. **Bytecode VM mapping v0/v1** — **ARCHIVED**
+    - **Status**: Superseded by kernel + seeds architecture
+    - Docs moved to `docs/archive/bytecode/`
+    - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
+    - v1 remaining (OP_MATCH, OP_REDUCE, execution loop) will NOT be implemented
+    - Self-hosting achieved via Phase 5 (kernel + EVAL_SEED) instead
 
 11. **Enginenews spec mapping v0** ✅
     - Deliverable: `docs/EnginenewsSpecMapping.v0.md`

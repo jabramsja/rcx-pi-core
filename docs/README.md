@@ -9,7 +9,6 @@
 |----------|-------------|
 | [core/](#core) | Core specifications - read these first |
 | [execution/](#execution) | Execution semantics and traces |
-| [bytecode/](#bytecode) | Bytecode VM documentation |
 | [schemas/](#schemas) | JSON schema definitions |
 | [cli/](#cli) | CLI tools and commands |
 | [agents/](#agents) | AI agent rig documentation |
@@ -48,17 +47,6 @@
 | [StallFixExecution.v0.md](execution/StallFixExecution.v0.md) | Stall/Fix Execution Semantics (v0) |
 | [StallFixObservability.v0.md](execution/StallFixObservability.v0.md) | Stall/Fix Trace Observability (v0) |
 | [TraceReadingPrimer.v0.md](execution/TraceReadingPrimer.v0.md) | Trace Reading Primer (v0) |
-
-## bytecode
-
-*Bytecode VM documentation*
-
-| File | Title |
-|------|-------|
-| [BytecodeExecution.v1c.md](bytecode/BytecodeExecution.v1c.md) | Bytecode Execution v1c: Value Storage (R0) |
-| [BytecodeMapping.v0.md](bytecode/BytecodeMapping.v0.md) | RCX Bytecode Mapping (v0) |
-| [BytecodeMapping.v1.md](bytecode/BytecodeMapping.v1.md) | Bytecode VM Mapping v1 |
-| [BytecodeOverview.md](bytecode/BytecodeOverview.md) | Bytecode VM Overview |
 
 ## schemas
 

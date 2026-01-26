@@ -47,23 +47,25 @@ These gates MUST be passed before meta-circular work begins. Each gate is binary
 | No RNG in deterministic paths | Code audit | PASS |
 | Dict/set iteration sealed | Explicit sorted() | PASS |
 
-### Gate 4: Bytecode Mapping (v0)
+### Gate 4: Bytecode Mapping (v0) — ARCHIVED
 
 | Criterion | Evidence | Status |
 |-----------|----------|--------|
-| Trace event → op mapping defined | `docs/BytecodeMapping.v0.md` | PASS |
-| Minimal VM state model defined | `docs/BytecodeMapping.v0.md` | PASS |
-| Reserved ops documented (stall/fix/closure) | `docs/BytecodeMapping.v0.md` | PASS |
-| Fail-loud policy defined | `docs/BytecodeMapping.v0.md` | PASS |
+| Trace event → op mapping defined | `docs/archive/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Minimal VM state model defined | `docs/archive/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Reserved ops documented (stall/fix/closure) | `docs/archive/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Fail-loud policy defined | `docs/archive/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
 
-### Gate 5: Reference Interpreter
+**Note**: Bytecode approach has been superseded by kernel + seeds architecture. See Section 9.
+
+### Gate 5: Reference Interpreter — SUPERSEDED
 
 | Criterion | Evidence | Status |
 |-----------|----------|--------|
-| Minimal bytecode program runs deterministically | — | BLOCKED |
-| Opcode semantics covered by fixtures | — | BLOCKED |
+| Minimal bytecode program runs deterministically | — | SUPERSEDED |
+| Opcode semantics covered by fixtures | — | SUPERSEDED |
 
-**Blocker**: Gate 5 requires stall/fix execution semantics. Note: v2 observability events (`reduction.stall`, `reduction.applied`, `reduction.normal`) now exist for debugging, but execution semantics (the actual Stall → Fix → Closure loop) remain blocked. See TASKS.md VECTOR #6.
+**Superseded**: Gate 5 (bytecode interpreter) has been replaced by the kernel + EVAL_SEED approach. Self-hosting is achieved via Phase 5 (`step_mu` uses `match_mu` + `subst_mu` Mu projections). See `docs/core/SelfHosting.v0.md`.
 
 ---
 
@@ -135,11 +137,11 @@ Before attempting meta-circular execution:
 - [x] Gate 1: Deterministic Trace Contract
 - [x] Gate 2: Replay Determinism
 - [x] Gate 3: Entropy Sealing
-- [x] Gate 4: Bytecode Mapping (v0)
+- [x] Gate 4: Bytecode Mapping (v0) — ARCHIVED (superseded by kernel + seeds)
 - [x] v2 Observability (stall/fix observable, debug-only)
-- [ ] Gate 5: Reference Interpreter (BLOCKED on execution semantics, VECTOR #6)
+- [x] Gate 5: Reference Interpreter — SUPERSEDED by kernel + EVAL_SEED (Phase 5 complete)
 
-**Current Status**: Gates 1-4 PASS. v2 observability complete. Gate 5 BLOCKED pending VECTOR #6 promotion.
+**Current Status**: Self-hosting achieved via kernel + seeds (Phase 5). Bytecode approach archived.
 
 ---
 
@@ -185,31 +187,38 @@ The following are explicitly forbidden in meta-circular v1:
 |-----------|--------|-------|
 | M0. Host baseline | PASS | — |
 | M1. Determinism contracts | PASS | Gates 1-3 |
-| M2. VM spec on paper | PASS | Gate 4 (BytecodeMapping.v0.md) |
+| M2. VM spec on paper | ARCHIVED | Bytecode superseded by kernel + seeds |
 | M2.5. Observability (v2) | PASS | v2 trace events (debug-only) |
-| M3. Reference interpreter | BLOCKED | Gate 5 (requires VECTOR #6) |
-| M4. Organism extraction | NOT STARTED | — |
-| M5. Seeded self-host loop | NOT STARTED | — |
-| M6. Meta-circular attempt | NOT STARTED | Section 4 success criteria |
+| M3. Reference interpreter | SUPERSEDED | Replaced by kernel + EVAL_SEED (Phase 5) |
+| M4. Organism extraction | SUPERSEDED | Replaced by Phase 4 (match/subst as Mu) |
+| M5. Seeded self-host loop | PASS | Phase 5: step_mu uses match_mu + subst_mu |
+| M6. Meta-circular attempt | PASS | Algorithmic self-hosting achieved |
 
 ---
 
-## 9. New Kernel Architecture (2026-01-25)
+## 9. Kernel + Seeds Architecture (Current)
 
-The new kernel design in `docs/RCXKernel.v0.md` provides a cleaner path to self-hosting:
+**Bytecode is archived.** The kernel + seeds architecture has replaced bytecode as the path to self-hosting.
 
-**Key Changes:**
+**Architecture:**
 - Kernel has only 4 primitives: `compute_identity`, `detect_stall`, `record_trace`, `gate_dispatch`
 - Pattern matching is **seed responsibility**, not kernel
 - Seeds are pure Mu (no Python functions)
 - Self-hosting = EVAL_SEED runs EVAL_SEED
 
-**Impact on this document:**
-- Gate 5 (Reference Interpreter) may be superseded by the new kernel + EVAL_SEED approach
-- M4/M5/M6 milestones align with kernel Phases 2-4 in TASKS.md
-- The blocked execution semantics are now addressed via seed design, not bytecode opcodes
+**Current Status (Phase 5 Complete):**
+- `rcx_pi/kernel.py` - Minimal kernel (4 primitives)
+- `rcx_pi/eval_seed.py` - EVAL_SEED evaluator
+- `rcx_pi/step_mu.py` - Self-hosting: step_mu uses match_mu + subst_mu
+- `seeds/match.v1.json`, `seeds/subst.v1.json` - Match/substitute as Mu projections
+- 33 tests proving algorithmic self-hosting
 
-See `docs/RCXKernel.v0.md` and `docs/StructuralPurity.v0.md` for the current architecture.
+**Superseded:**
+- Gates 4 and 5 (bytecode) are superseded by kernel + seeds
+- Bytecode docs moved to `docs/archive/bytecode/`
+- `rcx_pi/bytecode_vm.py` is legacy code
+
+See `docs/core/RCXKernel.v0.md`, `docs/core/SelfHosting.v0.md`, and `docs/core/StructuralPurity.v0.md`.
 
 ---
 

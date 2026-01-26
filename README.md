@@ -63,13 +63,14 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `rcx_pi/eval_seed.py` | EVAL_SEED evaluator (match, substitute, apply_projection, step) |
 | `rcx_pi/mu_type.py` | Mu type validation and guardrails |
 
-### Legacy (still present for backward compatibility)
+### Legacy / Archived (not the current approach)
 
-| Module | Purpose |
-|-------|---------|
-| `core/motif.py` | Motif object and `μ(...)` constructor |
-| `engine/evaluator_pure.py` | Closure-based evaluator (legacy) |
-| `bytecode_vm.py` | Bytecode VM with v1b opcodes |
+| Module | Purpose | Status |
+|-------|---------|--------|
+| `core/motif.py` | Motif object and `μ(...)` constructor | Legacy |
+| `engine/evaluator_pure.py` | Closure-based evaluator | Legacy |
+| `rcx_pi/bytecode_vm.py` | Bytecode VM | **ARCHIVED** - superseded by kernel + seeds |
+| `docs/archive/bytecode/` | Bytecode documentation | **ARCHIVED** |
 
 Run `pytest` to verify health. See `TASKS.md` for current phase status.
 
