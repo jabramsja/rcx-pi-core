@@ -12,6 +12,10 @@ on:
       - 'docs/StructuralPurity.v0.md'
       - 'docs/DeepStep.v0.md'
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   prove:
     runs-on: ubuntu-latest
@@ -38,7 +42,47 @@ jobs:
           pip install ".[test]"
 
       - name: Run structural proof agent
+        id: prove
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          python tools/run_structural_proof.py "Verify that any structural claims in the PR can be backed by concrete Mu projections"
+          python tools/run_structural_proof.py "Verify that any structural claims in the PR can be backed by concrete Mu projections" 2>&1 | tee /tmp/proof_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      - name: Post PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f /tmp/proof_output.txt ]; then
+            # Extract the report section
+            REPORT=$(cat /tmp/proof_output.txt | sed -n '/^====/,/^====/p' | tail -n +2 | head -n -1)
+
+            if [ -z "$REPORT" ]; then
+              REPORT=$(tail -50 /tmp/proof_output.txt)
+            fi
+
+            # Determine status emoji
+            if [ "${{ steps.prove.outputs.exit_code }}" = "0" ]; then
+              STATUS="✅ **STRUCTURAL PROOF VERIFIED**"
+            else
+              STATUS="❓ **STRUCTURAL PROOF NEEDED** (claims require concrete Mu)"
+            fi
+
+            # Post comment
+            gh pr comment ${{ github.event.pull_request.number }} --body "## 📐 Structural Proof Agent Report
+
+$STATUS
+
+<details>
+<summary>Full Report</summary>
+
+\`\`\`
+$REPORT
+\`\`\`
+
+</details>
+
+---
+*Automated structural verification by RCX Proof Agent*"
+          fi
