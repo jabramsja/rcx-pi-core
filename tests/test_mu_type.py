@@ -163,6 +163,36 @@ class TestIsMu:
         """Dict containing invalid value is not a valid Mu."""
         assert is_mu({"a": lambda x: x}) is False
 
+    # --- Circular reference detection ---
+    def test_circular_list_not_mu(self):
+        """Circular list reference is not a valid Mu (prevents stack overflow)."""
+        circular_list = [1, 2]
+        circular_list.append(circular_list)  # Creates cycle
+        assert is_mu(circular_list) is False
+
+    def test_circular_dict_not_mu(self):
+        """Circular dict reference is not a valid Mu (prevents stack overflow)."""
+        circular_dict = {"a": 1}
+        circular_dict["self"] = circular_dict  # Creates cycle
+        assert is_mu(circular_dict) is False
+
+    def test_deeply_nested_circular_not_mu(self):
+        """Deeply nested circular reference is detected."""
+        inner = {"value": 1}
+        middle = {"inner": inner}
+        outer = {"middle": middle}
+        inner["parent"] = outer  # Creates cycle: outer -> middle -> inner -> outer
+        assert is_mu(outer) is False
+
+    def test_mutual_circular_not_mu(self):
+        """Mutually circular structures are detected."""
+        a = {"name": "a"}
+        b = {"name": "b"}
+        a["other"] = b
+        b["other"] = a  # a -> b -> a cycle
+        assert is_mu(a) is False
+        assert is_mu(b) is False
+
 
 class TestValidateMu:
     """Tests for validate_mu() - JSON round-trip validation."""
@@ -367,6 +397,18 @@ class TestHasCallable:
         assert has_callable([1, 2, 3]) is False
         assert has_callable({"a": 1}) is False
         assert has_callable({"a": [1, {"b": 2}]}) is False
+
+    def test_circular_list_no_callable(self):
+        """Circular list without callable handled safely (no stack overflow)."""
+        circular_list = [1, 2]
+        circular_list.append(circular_list)  # Creates cycle
+        assert has_callable(circular_list) is False
+
+    def test_circular_dict_no_callable(self):
+        """Circular dict without callable handled safely (no stack overflow)."""
+        circular_dict = {"a": 1}
+        circular_dict["self"] = circular_dict  # Creates cycle
+        assert has_callable(circular_dict) is False
 
 
 class TestFindCallablePath:
