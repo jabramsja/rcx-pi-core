@@ -58,7 +58,7 @@ def _extract_stall_key(e: Dict[str, Any]) -> Optional[Tuple[str, int]]:
 
 def independent_encounter_closure_evidence(events: Iterable[Dict[str, Any]]) -> Set[Tuple[str, int]]:
     """
-    Pure spec mirror of docs/IndependentEncounter.v0.md (detection-only):
+    Pure spec mirror of docs/execution/IndependentEncounter.v0.md (detection-only):
 
     - Maintain stall_memory[pattern_id] = value_hash (last seen stall per pattern).
     - On reduction.stall(value_hash=v, pattern_id=p):

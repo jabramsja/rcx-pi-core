@@ -10,9 +10,9 @@ We are building:
 3. **Application Seeds** - like EngineeNews, run on top of EVAL_SEED
 
 Key specs:
-- `docs/RCXKernel.v0.md` - Kernel architecture
-- `docs/StructuralPurity.v0.md` - Guardrails for programming IN RCX
-- `docs/MuType.v0.md` - The universal data type
+- `docs/core/RCXKernel.v0.md` - Kernel architecture
+- `docs/core/StructuralPurity.v0.md` - Guardrails for programming IN RCX
+- `docs/core/MuType.v0.md` - The universal data type
 
 The kernel doesn't know how to match patterns or apply projections. Seeds define all semantics. This keeps the kernel maximally general.
 

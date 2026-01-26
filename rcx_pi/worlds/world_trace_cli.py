@@ -49,7 +49,7 @@ def _as_trace_json(
 
     out: Dict[str, Any] = {
         "schema": "rcx-world-trace.v1",
-        "schema_doc": "docs/world_trace_json_schema.md",
+        "schema_doc": "docs/schemas/world_trace_json_schema.md",
         "world": world,
         "seed": seed,
         "max_steps": max_steps,
@@ -123,7 +123,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if args.schema:
         print_schema_triplet(
-            "rcx-world-trace.v1", "docs/world_trace_json_schema.md", SCHEMA_JSON
+            "rcx-world-trace.v1", "docs/schemas/world_trace_json_schema.md", SCHEMA_JSON
         )
         return 0
 

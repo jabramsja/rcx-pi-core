@@ -4,7 +4,7 @@ Enginenews Spec v0 Stress-Test Harness.
 This module stress-tests the RCX v2 replay pipeline using PUBLIC CLI only.
 All metrics are computed from trace event lines without engine access.
 
-See docs/EnginenewsSpecMapping.v0.md for spec details.
+See docs/execution/EnginenewsSpecMapping.v0.md for spec details.
 """
 from __future__ import annotations
 

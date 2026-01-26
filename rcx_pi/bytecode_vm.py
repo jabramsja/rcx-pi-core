@@ -6,8 +6,8 @@ v1a: Adds OP_STALL execution (stall declaration).
 v1b: Adds OP_FIX/OP_FIXED execution (stall resolution).
 
 Design docs:
-- docs/BytecodeMapping.v0.md (replay)
-- docs/BytecodeMapping.v1.md (execution)
+- docs/bytecode/BytecodeMapping.v0.md (replay)
+- docs/bytecode/BytecodeMapping.v1.md (execution)
 
 Feature flag: RCX_BYTECODE_V0=1 to enable bytecode validation during replay.
 """

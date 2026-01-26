@@ -106,7 +106,18 @@ if [ -n "$STAGED_PY" ]; then
     fi
 fi
 
-# 8. Remind about doc updates
+# 8. Check docs index is up-to-date (if docs changed)
+STAGED_DOCS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^docs/.*\.md$' || true)
+if [ -n "$STAGED_DOCS" ]; then
+    echo "-- Checking docs index is up-to-date..."
+    if ! python3 tools/generate_docs_index.py --check 2>/dev/null; then
+        echo "❌ docs/README.md is out of date"
+        echo "   Run: python tools/generate_docs_index.py"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+# 9. Remind about doc updates
 if [ -n "$STAGED_PY" ]; then
     for f in $STAGED_PY; do
         if [[ "$f" == rcx_pi/* ]] || [[ "$f" == prototypes/* ]]; then

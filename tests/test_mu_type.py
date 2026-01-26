@@ -5,7 +5,7 @@ A Mu is a JSON-compatible value: the portable, host-independent data type
 for all RCX values. These tests ensure the validation functions correctly
 identify valid and invalid Mu values.
 
-See docs/MuType.v0.md for the specification.
+See docs/core/MuType.v0.md for the specification.
 """
 
 import json
@@ -354,7 +354,7 @@ class TestTracePayloadCompatibility:
 # Structural Purity Guardrail Tests
 # =============================================================================
 # These tests ensure we program IN RCX (using Mu) rather than ABOUT RCX.
-# See docs/StructuralPurity.v0.md for rationale.
+# See docs/core/StructuralPurity.v0.md for rationale.
 # =============================================================================
 
 

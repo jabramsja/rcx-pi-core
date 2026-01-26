@@ -30,7 +30,7 @@
     ]
   },
   "schema": "rcx-world-trace.v1",
-  "schema_doc": "docs/world_trace_json_schema.md",
+  "schema_doc": "docs/schemas/world_trace_json_schema.md",
   "seed": "ping",
   "stats": {
     "has_cycle": true,

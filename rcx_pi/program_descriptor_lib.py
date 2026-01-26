@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 from rcx_pi.program_descriptor import describe_program
 
 SCHEMA = "rcx-program-descriptor.v1"
-SCHEMA_DOC = "docs/program_descriptor_schema.md"
+SCHEMA_DOC = "docs/schemas/program_descriptor_schema.md"
 
 
 def _utc_now_z() -> str:

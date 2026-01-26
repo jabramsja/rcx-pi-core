@@ -35,7 +35,7 @@ def main(argv: List[str] | None = None) -> int:
     if args.schema:
         print_schema_triplet(
             "rcx-program-descriptor.v1",
-            "docs/program_descriptor_schema.md",
+            "docs/schemas/program_descriptor_schema.md",
             SCHEMA_JSON,
         )
         return 0

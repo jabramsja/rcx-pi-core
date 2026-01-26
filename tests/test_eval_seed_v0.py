@@ -2,7 +2,7 @@
 Tests for EVAL_SEED v0.
 
 Tests the core operations: match, substitute, apply, step.
-See docs/EVAL_SEED.v0.md for specification.
+See docs/core/EVAL_SEED.v0.md for specification.
 """
 
 import pytest

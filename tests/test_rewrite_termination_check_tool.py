@@ -66,7 +66,7 @@ def test_term_check_loop_detection(tmp_path: Path):
 
 
 def test_contract_doc_exists_and_has_markers():
-    p = Path("docs/RCX_REWRITE_TERMINATION_CONTRACTS.md")
+    p = Path("docs/archive/RCX_REWRITE_TERMINATION_CONTRACTS.md")
     assert p.is_file()
     txt = p.read_text(encoding="utf-8", errors="replace")
     assert "Halt reasons" in txt

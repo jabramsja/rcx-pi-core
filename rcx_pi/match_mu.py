@@ -5,7 +5,7 @@ This module implements pattern matching using Mu projections instead of
 Python recursion. It achieves parity with eval_seed.match() but uses
 the kernel loop for iteration.
 
-See docs/SelfHosting.v0.md for design.
+See docs/core/SelfHosting.v0.md for design.
 """
 
 from __future__ import annotations

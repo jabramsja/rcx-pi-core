@@ -5,7 +5,7 @@ A Mu is a JSON-compatible value: the portable, host-independent data type
 for all RCX values. This module provides validation to ensure no Python-specific
 types leak into the VM.
 
-See docs/MuType.v0.md for the full specification.
+See docs/core/MuType.v0.md for the full specification.
 """
 
 from __future__ import annotations
@@ -150,7 +150,7 @@ def mu_type_name(value: Any) -> str:
 # Structural Purity Guardrails
 # =============================================================================
 # These functions ensure we program IN RCX (using Mu) rather than ABOUT RCX
-# (using Python constructs). See docs/StructuralPurity.v0.md for rationale.
+# (using Python constructs). See docs/core/StructuralPurity.v0.md for rationale.
 # =============================================================================
 
 
