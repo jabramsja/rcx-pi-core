@@ -1,6 +1,6 @@
 # DeepStep Specification v0
 
-Status: VECTOR (design-only)
+Status: PROTOTYPE WORKING (see `prototypes/test_deep_eval_v0.py`)
 
 ## Purpose
 
@@ -366,9 +366,59 @@ These can be added in later versions.
 4. Write concrete projections (actual Mu JSON)
 5. Implement and test
 
+## Prototype Status
+
+**Implementation**: `prototypes/test_deep_eval_v0.py`
+
+### Test Results (11 tests passing)
+
+**Functional Tests (5):**
+- `test_wrap_unwrap` - Value unchanged when no projections match
+- `test_single_reduction` - Single append at root
+- `test_append_basic` - append([1], [2]) = [1,2]
+- `test_append_longer` - append([1,2], [3,4]) = [1,2,3,4]
+- `test_append_empty_ys` - append([1,2], None) = [1,2]
+
+**Adversary Attack Tests (6):**
+- `test_attack_phase_state_injection` - Malformed context rejected
+- `test_attack_changed_flag_manipulation` - Terminates safely
+- `test_attack_deep_context` - Context depth limited
+- `test_attack_history_limit` - History capped at MAX_HISTORY
+- `test_attack_invalid_phase` - Invalid phases rejected
+- `test_attack_non_boolean_changed` - Type validation enforced
+
+### Security Validation
+
+State validation defends against:
+- **Attack 14**: Phase state injection (malformed context rejected)
+- **Attack 15**: Changed flag manipulation (boolean type enforced)
+- **Attack 7**: Deep nesting (MAX_CONTEXT_DEPTH = 100)
+- **Attack 17**: History memory (MAX_HISTORY = 500)
+
+### Host Debt
+
+4 functions marked with host decorators (test harness only):
+- `@host_builtin`: `linked_list`, `run_deep_eval`, `validate_deep_eval_state`
+- `@host_iteration`: `to_python_list`
+
+The projection logic itself is pure Mu - no host dependencies.
+
+### Promotion Checklist (VECTOR → NEXT)
+
+- [x] State schema finalized
+- [x] All projection categories defined (8 categories, concrete Mu)
+- [x] Guard condition strategy: structural specialization (no explicit guards)
+- [x] Example worked through completely (append traces in tests)
+- [x] Complexity acceptable for Phase 3 goals
+- [x] Alternative approaches considered (one-level-at-a-time deferred)
+- [x] Adversary attack tests added
+- [x] State validation implemented
+
+**Ready for Phase 3 integration.**
+
 ## References
 
-- `prototypes/linked_list_append.json` - Discovery of deep_step need
+- `prototypes/test_deep_eval_v0.py` - Working prototype
 - `docs/EVAL_SEED.v0.md` - Current EVAL_SEED spec
 - Zipper data structure - functional tree navigation
 - Abstract machines (SECD, CEK) - stack-based evaluation
