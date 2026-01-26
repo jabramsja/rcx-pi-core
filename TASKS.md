@@ -102,10 +102,11 @@ Items here are implemented and verified under current invariants. Changes requir
   - Adversary agent: red team attack testing
   - PR verification reminder workflow (auto-comment on sensitive file changes)
   - RATCHET debt policy: threshold can only decrease, never increase
-- RCX Kernel Phase 4a-4d: Self-Hosting Foundation:
+- RCX Kernel Phase 4-5: Self-Hosting Complete:
   - Phase 4a: `match_mu()` as Mu projections (`seeds/match.v1.json`, 23 parity tests)
   - Phase 4b: `subst_mu()` as Mu projections (`seeds/subst.v1.json`, 17 parity tests)
   - Phase 4d: Integration tests (67 total: 28 parity + 27 grounding + 12 fuzzer)
+  - Phase 5: `step_mu()` uses match_mu + subst_mu (33 tests: 22 parity + 11 self-hosting)
   - `tests/structural/test_apply_mu_grounding.py` - direct `step()` execution tests
   - `tests/test_apply_mu_fuzzer.py` - Hypothesis property-based tests
 
@@ -225,7 +226,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
       - [x] `tests/test_eval_seed_parity.py` - 23 parity tests verifying Mu-EVAL == Python-EVAL
     - **Ready for Phase 4**
 
-23. **RCX Kernel Phase 4: Self-Hosting** ✅ (Phase 4a-4d complete)
+23. **RCX Kernel Phase 4-5: Self-Hosting** ✅ (Phase 5 complete)
     - Design doc: `docs/core/SelfHosting.v0.md`
     - Done:
       - **Phase 4a**: match as Mu projections (`seeds/match.v1.json`, 23 parity tests)
@@ -235,12 +236,19 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
         - `tests/test_apply_mu_integration.py` (28 parity tests)
         - `tests/structural/test_apply_mu_grounding.py` (27 structural tests)
         - `tests/test_apply_mu_fuzzer.py` (12 property-based tests with Hypothesis)
-      - Shared test utility: `apply_mu()` in `tests/conftest.py`
+      - **Phase 5**: EVAL_SEED runs EVAL_SEED (self-hosting achieved)
+        - `rcx_pi/step_mu.py` - step using Mu projections (apply_mu, step_mu, run_mu)
+        - `tests/test_step_mu_parity.py` - 22 parity tests
+        - `tests/test_self_hosting_v0.py` - 11 self-hosting tests including critical trace comparison
+      - Shared test utilities: `apply_mu()` in `tests/conftest.py`, `step_mu.py`
     - Known limitations (documented, by design):
       - Empty collections ([], {}) normalize to None
       - Head/tail dict structures can collide with user data
-    - Agent review: verifier=APPROVE, adversary=VULNERABLE (known limitations), expert=ACCEPTABLE
-    - **Ready for Phase 5**: Replace Python bootstrap (EVAL_SEED runs EVAL_SEED)
+      - Kernel loop still uses Python for-loop (operations self-hosted, not iteration)
+    - Agent review (Phase 5): verifier=APPROVE, adversary=VULNERABLE (known limitations), expert=COULD_SIMPLIFY
+    - **Algorithmic self-hosting achieved**: Python trace == Mu trace for all EVAL_SEED operations
+    - Note: Operations (match/subst) are Mu projections; execution still uses Python's step()
+    - True operational self-hosting (RCX kernel runs RCX) is a Phase 6+ goal
 
 19. **Bytecode VM v1b: OP_FIX/OP_FIXED execution** ✅ (promoted from VECTOR #10 v1)
     - Design doc: `docs/BytecodeMapping.v1.md`
