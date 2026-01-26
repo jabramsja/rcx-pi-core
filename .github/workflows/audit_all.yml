@@ -8,6 +8,7 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONHASHSEED: "0"
+      PYTHONPATH: "."
     steps:
       - name: Checkout
         uses: actions/checkout@v4
