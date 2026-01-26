@@ -26,8 +26,8 @@ This document answers that question.
 Code that provides **execution infrastructure** but does not determine **what operations mean**.
 
 **Criteria:**
-- Dispatches to projections but doesn't interpret projection content
-- Provides I/O (file read, JSON parse) but doesn't interpret data
+- Dispatches to projections without examining projection structure, content, or state
+- Provides I/O (file read, JSON parse) without transforming data based on content
 - Thread/resource isolation infrastructure
 
 **Examples:**
@@ -44,12 +44,11 @@ Code that provides **execution infrastructure** but does not determine **what op
 
 Code that **interprets Mu** or **determines what operations mean**.
 
-**Criteria:**
-- Traverses Mu and makes decisions based on content
-- Implements operations that should be projections
-- Uses Python conditionals to choose behavior based on Mu shape
-- Creates new Mu based on interpreting existing Mu
-- Determines termination/stall behavior
+**Definition of "interprets":** Code that examines Mu structure (type, keys, values, length) and makes decisions that affect output. This includes:
+- Type dispatch (`isinstance(value, list)`)
+- Key inspection (`"head" in value`)
+- Value comparison (`value == expected`)
+- Structure traversal (`for elem in value`)
 
 **Examples:**
 | Code | Why Semantic | Path to Structural |
@@ -72,9 +71,9 @@ Code that **interprets Mu** or **determines what operations mean**.
 
 | Marker | Count | Category | Location |
 |--------|-------|----------|----------|
-| `@host_recursion` | 3 | Semantic | eval_seed.py (match, substitute) |
-| `@host_builtin` | 2 | Semantic | eval_seed.py, deep_eval.py |
-| `@host_mutation` | 2 | Scaffolding | deep_eval.py, eval_seed.py |
+| `@host_recursion` | 2 | Semantic | eval_seed.py:213,321 (match, substitute) |
+| `@host_builtin` | 3 | Semantic | eval_seed.py:218, deep_eval.py:262,343 |
+| `@host_mutation` | 2 | Scaffolding | eval_seed.py:222, deep_eval.py:344 |
 | `@bootstrap_only` | 0 | Semantic | (deprecated marker) |
 
 **Total tracked:** 7 markers (ceiling: 9)
@@ -88,12 +87,9 @@ Code that **interprets Mu** or **determines what operations mean**.
 
 **Total bypasses:** 29 instances across 11 files
 
-The 5 `bootstrap` bypasses are semantic debt:
-- `match_mu.py:237` - denormalize list comprehension
-- `match_mu.py:280` - denormalize dict comprehension
-- `match_mu.py:431` - denormalize bindings dict comprehension
-- `eval_seed.py:355` - substitute list comprehension
-- `eval_seed.py:359` - substitute dict comprehension
+The 5 `bootstrap` bypasses are semantic debt (line numbers may drift):
+- `match_mu.py` - 3 instances (denormalize comprehensions)
+- `eval_seed.py` - 2 instances (substitute comprehensions)
 
 ### Unmarked Semantic Debt
 
@@ -108,9 +104,9 @@ The 5 `bootstrap` bypasses are semantic debt:
 | `bindings_to_dict()` | ~18 | match_mu.py | Conversion |
 | `dict_to_bindings()` | ~13 | match_mu.py | Conversion |
 
-**Total unmarked:** ~289 lines of semantic debt
+**Total unmarked:** ~289 lines of semantic debt (LOC estimates, may vary with formatting)
 
-**Note:** Cycle detection in normalize/denormalize adds ~20 lines each. Making this structural requires encoding visited set as Mu state.
+**Note:** Cycle detection in normalize/denormalize totals ~28 lines across both functions. Making this structural requires encoding visited set as Mu state.
 
 ---
 
@@ -118,7 +114,7 @@ The 5 `bootstrap` bypasses are semantic debt:
 
 ### Current State
 - **Tracked markers:** 7/9 (2 headroom)
-- **AST_OK bootstrap:** 5 (semantic debt, should count toward ceiling)
+- **AST_OK bootstrap:** 5 (semantic debt, counted separately)
 - **AST_OK infra:** 24 (scaffolding, acceptable)
 - **Unmarked semantic debt:** ~289 lines (blocking L2)
 
@@ -130,6 +126,15 @@ The 5 `bootstrap` bypasses are semantic debt:
 4. **Enhance debt_dashboard.sh** - add scaffolding vs semantic breakdown
 
 To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: bootstrap` for statements.
+
+### Enforcement Gap
+
+**Current limitation:** This document defines policy, but `debt_dashboard.sh` only counts `@host_*` markers. AST_OK bypasses and unmarked debt are not enforced by tooling. True semantic debt is ~340 lines, not 7/9.
+
+**To close this gap:**
+- Add AST_OK: bootstrap counting to debt_dashboard.sh
+- Add CI check that fails if unmarked semantic functions are added
+- Consider unified tracking (all semantic debt uses @host_* decorators)
 
 ---
 
@@ -152,15 +157,15 @@ To reach L2, all semantic debt must become projections. See `docs/core/SelfHosti
 
 When adding new code, ask:
 
-1. **Does it traverse Mu and make decisions?**
-   - Yes → Semantic debt
-   - No → Possibly scaffolding
+1. **Does it examine Mu structure and make decisions?**
+   - Examines type (`isinstance`), keys (`in`), values (`==`), or traverses (`for`) → Semantic debt
+   - Only passes Mu through without inspection → Possibly scaffolding
 
-2. **Would replacing Python with Rust change semantics?**
-   - Yes → Semantic debt (Python behavior is leaking)
-   - No → Scaffolding (implementation detail)
+2. **Could this be expressed as a Mu-to-Mu projection?**
+   - Yes but isn't yet → Semantic debt (mark with @host_*)
+   - No (requires I/O, threading, etc.) → Scaffolding
 
-The second criterion is the ultimate test. `isinstance(value, list)`, `sorted()`, `mu_equal()` all have Python-specific behavior that would differ in another host language.
+The key distinction: scaffolding is **mechanism** (how to run), semantic is **interpretation** (what Mu means).
 
 ---
 
@@ -170,9 +175,11 @@ The second criterion is the ultimate test. `isinstance(value, list)`, `sorted()`
 |----------|-----|--------|----------|
 | Scaffolding | ~150 | Acceptable | No |
 | Semantic (tracked) | ~50 | 7/9 ceiling | L2 |
-| Semantic (AST_OK) | 5 instances | Should track | L2 |
+| Semantic (AST_OK) | 5 instances | Counted separately | L2 |
 | Semantic (unmarked) | ~289 | Needs @host_* | L2 |
 
 **Total semantic debt blocking L2:** ~340 lines
 
 This debt is finite, bounded, and has a clear elimination path. Lookup and classification are structurally feasible now; normalization requires cycle detection strategy; kernel loop requires L3 design.
+
+**LOC estimates are approximate** - actual counts may vary with code formatting. Use `grep` commands in grounding tests for verification.
