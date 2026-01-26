@@ -10,7 +10,7 @@ This document formalizes the distinction between **scaffolding debt** (acceptabl
 
 Self-hosting has three levels:
 - **L1 (Algorithmic)**: Projections encode the algorithm (match/substitute as Mu) ✓ COMPLETE
-- **L2 (Operational)**: RCX executes projections (kernel loop as Mu) - NEXT
+- **L2 (Operational)**: RCX executes projections structurally - NEXT
 - **L3 (Meta-circular)**: Kernel itself is projections - FUTURE
 
 At L1, Python still runs the kernel loop. This creates ambiguity: which Python code is "acceptable scaffolding" and which is "semantic debt that smuggles emergence"?
@@ -26,21 +26,19 @@ This document answers that question.
 Code that provides **execution infrastructure** but does not determine **what operations mean**.
 
 **Criteria:**
-- Runs fixed iterations (for-loop) but doesn't decide iteration count
 - Dispatches to projections but doesn't interpret projection content
-- Tracks resources (budget, depth) but doesn't affect semantics
 - Provides I/O (file read, JSON parse) but doesn't interpret data
+- Thread/resource isolation infrastructure
 
 **Examples:**
 | Code | Why Scaffolding |
 |------|-----------------|
-| `for i in range(max_steps)` | Fixed loop, doesn't decide projection order |
 | `step(projections, state)` | Dispatches to seed, seed defines behavior |
-| `budget.consume(n)` | Resource tracking, not semantic |
 | `json.load(f)` | I/O boundary, doesn't interpret seed content |
 | `threading.local()` | Thread isolation infrastructure |
+| `budget.consume(n)` | Resource tracking (count only, not behavior) |
 
-**Key insight:** Scaffolding debt can be measured in LOC but doesn't affect emergence attribution. If we replaced Python's for-loop with Rust's, semantics would be identical.
+**Key insight:** Scaffolding debt can be measured in LOC but doesn't affect emergence attribution. If we replaced Python's dispatch with Rust's, semantics would be identical.
 
 ### 2. Semantic Debt (Must Become Structural)
 
@@ -51,6 +49,7 @@ Code that **interprets Mu** or **determines what operations mean**.
 - Implements operations that should be projections
 - Uses Python conditionals to choose behavior based on Mu shape
 - Creates new Mu based on interpreting existing Mu
+- Determines termination/stall behavior
 
 **Examples:**
 | Code | Why Semantic | Path to Structural |
@@ -60,6 +59,8 @@ Code that **interprets Mu** or **determines what operations mean**.
 | `resolve_lookups()` | Interprets `{"lookup": x, "in": y}` marker | Lookup projection |
 | `lookup_binding()` | Traverses linked list to find name | Part of lookup projection |
 | `is_dict_linked_list()` | Examines structure to classify | Classification projection |
+| `max_steps` parameter | Determines when stall occurs | Structural termination |
+| `mu_equal()` | Defines equality semantics for stall detection | Structural equality |
 
 **Key insight:** Semantic debt directly affects emergence. If Python's `isinstance(value, list)` check behaves differently, match semantics change.
 
@@ -72,22 +73,22 @@ Code that **interprets Mu** or **determines what operations mean**.
 | Marker | Count | Category | Location |
 |--------|-------|----------|----------|
 | `@host_recursion` | 3 | Semantic | eval_seed.py (match, substitute) |
-| `@host_builtin` | 2 | Mixed | eval_seed.py, deep_eval.py |
+| `@host_builtin` | 2 | Semantic | eval_seed.py, deep_eval.py |
 | `@host_mutation` | 2 | Scaffolding | deep_eval.py, eval_seed.py |
 | `@bootstrap_only` | 0 | Semantic | (deprecated marker) |
 
-**Total tracked:** 7 markers
+**Total tracked:** 7 markers (ceiling: 9)
 
 ### AST_OK Bypasses (ast_police.py)
 
 | Category | Count | Reason |
 |----------|-------|--------|
-| `# AST_OK: infra` | 23 | Infrastructure (CLI, coverage, tracing) |
-| `# AST_OK: bootstrap` | 3 | Semantic debt in selfhost modules |
+| `# AST_OK: infra` | 24 | Infrastructure (CLI, coverage, tracing) |
+| `# AST_OK: bootstrap` | 5 | Semantic debt in selfhost modules |
 
-**Total bypasses:** 26 instances
+**Total bypasses:** 29 instances across 11 files
 
-The 3 `bootstrap` bypasses are semantic debt:
+The 5 `bootstrap` bypasses are semantic debt:
 - `match_mu.py:237` - denormalize list comprehension
 - `match_mu.py:280` - denormalize dict comprehension
 - `match_mu.py:431` - denormalize bindings dict comprehension
@@ -98,72 +99,52 @@ The 3 `bootstrap` bypasses are semantic debt:
 
 | Function | Lines | File | Issue |
 |----------|-------|------|-------|
-| `normalize_for_match()` | ~65 | match_mu.py | Unmarked Python traversal |
-| `denormalize_from_match()` | ~75 | match_mu.py | Unmarked Python traversal |
-| `resolve_lookups()` | ~40 | subst_mu.py | Unmarked Mu interpretation |
-| `lookup_binding()` | ~20 | subst_mu.py | Unmarked linked list traversal |
-| `is_dict_linked_list()` | ~20 | match_mu.py | Unmarked classification |
-| `is_kv_pair_linked()` | ~20 | match_mu.py | Unmarked classification |
-| `bindings_to_dict()` | ~15 | match_mu.py | Unmarked conversion |
-| `dict_to_bindings()` | ~10 | match_mu.py | Unmarked conversion |
+| `normalize_for_match()` | ~65 | match_mu.py | Python traversal + cycle detection |
+| `denormalize_from_match()` | ~75 | match_mu.py | Python traversal + cycle detection |
+| `resolve_lookups()` | ~42 | subst_mu.py | Mu interpretation |
+| `lookup_binding()` | ~24 | subst_mu.py | Linked list traversal |
+| `is_dict_linked_list()` | ~31 | match_mu.py | Classification logic |
+| `is_kv_pair_linked()` | ~21 | match_mu.py | Classification logic |
+| `bindings_to_dict()` | ~18 | match_mu.py | Conversion |
+| `dict_to_bindings()` | ~13 | match_mu.py | Conversion |
 
-**Total unmarked:** ~265 lines of semantic debt
+**Total unmarked:** ~289 lines of semantic debt
+
+**Note:** Cycle detection in normalize/denormalize adds ~20 lines each. Making this structural requires encoding visited set as Mu state.
 
 ---
 
 ## Debt Ceiling Policy
 
 ### Current State
-- **Tracked markers:** 7 (at ceiling)
-- **AST_OK bypasses:** 26 (not tracked in ceiling)
-- **Unmarked semantic debt:** ~265 lines (not tracked)
+- **Tracked markers:** 7/9 (2 headroom)
+- **AST_OK bootstrap:** 5 (semantic debt, should count toward ceiling)
+- **AST_OK infra:** 24 (scaffolding, acceptable)
+- **Unmarked semantic debt:** ~289 lines (blocking L2)
 
-### Proposed Policy
+### Policy
 
-1. **Marker ceiling stays at 9** (current RATCHET value)
-2. **Add AST_OK tracking** - count `# AST_OK: bootstrap` separately
-3. **Mark unmarked debt** - add `# SEMANTIC_DEBT:` marker to ~265 lines
-4. **Separate dashboards:**
-   - Scaffolding debt (LOC, informational only)
-   - Semantic debt (blocking for L2 self-hosting)
+1. **Marker ceiling stays at 9** - existing `@host_*` markers
+2. **Track AST_OK: bootstrap separately** - these are semantic debt
+3. **Use existing markers** - no new marker systems needed
+4. **Enhance debt_dashboard.sh** - add scaffolding vs semantic breakdown
 
-### New Marker: `# SEMANTIC_DEBT:`
-
-For code that interprets Mu but isn't yet a projection:
-
-```python
-# SEMANTIC_DEBT: normalize - should be projection
-def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
-    ...
-```
-
-This makes semantic debt visible without requiring the full `@host_*` decorator infrastructure.
+To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: bootstrap` for statements.
 
 ---
 
-## Path to L2 (Operational Self-Hosting)
+## Path to L2
 
-To reach L2, all semantic debt must become projections:
+To reach L2, all semantic debt must become projections. See `docs/core/SelfHosting.v0.md` for phasing.
 
-### Phase 6a: Normalization as Projection
-- `normalize_for_match()` → `seeds/normalize.v1.json`
-- `denormalize_from_match()` → `seeds/denormalize.v1.json`
-- Eliminates ~140 lines of semantic debt
+**Priority order (structural-proof verified):**
 
-### Phase 6b: Lookup as Projection
-- `resolve_lookups()` → part of `seeds/subst.v1.json`
-- `lookup_binding()` → part of lookup projection
-- Eliminates ~60 lines of semantic debt
+1. **Lookup** (~66 lines) - Most straightforward, linked list traversal is native to RCX
+2. **Classification** (~52 lines) - Feasible with boolean→Mu encoding
+3. **Normalization** (~140 lines) - Main logic works, cycle detection adds complexity
+4. **Kernel loop** - L3 (meta-circular), requires structural-proof before promotion
 
-### Phase 6c: Classification as Projection
-- `is_dict_linked_list()` → classification projection
-- `is_kv_pair_linked()` → classification projection
-- Eliminates ~40 lines of semantic debt
-
-### Phase 6d: Kernel Loop as Projection
-- `run_match_projections()` for-loop → iteration projection
-- `run_subst_projections()` for-loop → iteration projection
-- Completes L2 self-hosting
+**Open problem:** Phase 6d (kernel loop as projection) requires projections that interpret projections. This is meta-circular and needs concrete structural proof before promotion to NEXT.
 
 ---
 
@@ -172,20 +153,14 @@ To reach L2, all semantic debt must become projections:
 When adding new code, ask:
 
 1. **Does it traverse Mu and make decisions?**
-   - Yes → Semantic debt, must become projection
+   - Yes → Semantic debt
    - No → Possibly scaffolding
 
-2. **Would changing it change what operations mean?**
-   - Yes → Semantic debt
-   - No → Scaffolding
-
-3. **Does it use Python's type system on Mu?**
-   - `isinstance(value, list)` → Semantic debt
-   - `isinstance(budget, int)` → Scaffolding (budget is infrastructure)
-
-4. **Would replacing Python with Rust change semantics?**
+2. **Would replacing Python with Rust change semantics?**
    - Yes → Semantic debt (Python behavior is leaking)
    - No → Scaffolding (implementation detail)
+
+The second criterion is the ultimate test. `isinstance(value, list)`, `sorted()`, `mu_equal()` all have Python-specific behavior that would differ in another host language.
 
 ---
 
@@ -193,10 +168,11 @@ When adding new code, ask:
 
 | Category | LOC | Status | Blocking |
 |----------|-----|--------|----------|
-| Scaffolding | ~200 | Acceptable | No |
-| Semantic (tracked) | ~50 | At ceiling | L2 |
-| Semantic (unmarked) | ~265 | Needs marking | L2 |
+| Scaffolding | ~150 | Acceptable | No |
+| Semantic (tracked) | ~50 | 7/9 ceiling | L2 |
+| Semantic (AST_OK) | 5 instances | Should track | L2 |
+| Semantic (unmarked) | ~289 | Needs @host_* | L2 |
 
-**Total semantic debt blocking L2:** ~315 lines
+**Total semantic debt blocking L2:** ~340 lines
 
-This debt is finite, bounded, and has a clear elimination path through Phases 6a-6d.
+This debt is finite, bounded, and has a clear elimination path. Lookup and classification are structurally feasible now; normalization requires cycle detection strategy; kernel loop requires L3 design.
