@@ -3,11 +3,11 @@ name: Agent Structural Proof
 on:
   pull_request:
     paths:
-      - 'rcx_pi/kernel.py'
-      - 'rcx_pi/eval_seed.py'
+      - 'rcx_pi/**/*.py'
       - 'docs/EVAL_SEED.v0.md'
       - 'docs/RCXKernel.v0.md'
       - 'docs/StructuralPurity.v0.md'
+      - 'docs/DeepStep.v0.md'
 
 jobs:
   prove:
