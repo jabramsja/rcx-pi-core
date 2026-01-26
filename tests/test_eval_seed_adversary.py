@@ -171,6 +171,150 @@ class TestTraceLimits:
 
 
 # =============================================================================
+# Global Step Budget (Cross-Call Resource Accounting)
+# =============================================================================
+
+
+class TestGlobalStepBudget:
+    """Tests for global projection step budget.
+
+    HARDENED: Individual match_mu/subst_mu calls have local max_steps limits,
+    but cascading calls could bypass these. The global step budget tracks
+    cumulative steps across all calls to prevent resource exhaustion.
+    """
+
+    def test_budget_tracking_basic(self):
+        """Budget tracks cumulative steps."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        assert budget.is_active()
+        assert budget.get_total() == 0
+
+        budget.consume(100)
+        assert budget.get_total() == 100
+
+        budget.consume(50)
+        assert budget.get_total() == 150
+
+        budget.stop()
+        assert not budget.is_active()
+
+    def test_budget_enforces_limit(self):
+        """Budget raises RuntimeError when limit exceeded."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget, MAX_PROJECTION_STEPS
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        # Consume most of the budget
+        budget.consume(MAX_PROJECTION_STEPS - 100)
+
+        # Exceeding should raise
+        with pytest.raises(RuntimeError, match="Global projection step limit exceeded"):
+            budget.consume(200)
+
+        budget.stop()
+
+    def test_budget_inactive_allows_unlimited(self):
+        """When budget is not active, consume() does nothing."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget, MAX_PROJECTION_STEPS
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        # Don't call start()
+        assert not budget.is_active()
+
+        # Should not raise even with huge value
+        budget.consume(MAX_PROJECTION_STEPS * 10)
+
+    def test_budget_custom_limit(self):
+        """Budget can be started with custom limit."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start(limit=500)
+
+        budget.consume(400)  # OK
+
+        with pytest.raises(RuntimeError, match="Global projection step limit exceeded"):
+            budget.consume(200)  # Over 500 limit
+
+        budget.stop()
+
+    def test_match_mu_reports_to_budget(self):
+        """match_mu reports steps consumed to global budget."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.match_mu import match_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        initial_total = budget.get_total()
+
+        # Perform a match
+        pattern = {"a": {"var": "x"}, "b": {"var": "y"}}
+        value = {"a": 1, "b": 2}
+        match_mu(pattern, value)
+
+        # Budget should have increased
+        assert budget.get_total() > initial_total
+
+        budget.stop()
+
+    def test_subst_mu_reports_to_budget(self):
+        """subst_mu reports steps consumed to global budget."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.subst_mu import subst_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+        initial_total = budget.get_total()
+
+        # Perform a substitution
+        body = {"result": {"var": "x"}}
+        bindings = {"x": 42}
+        subst_mu(body, bindings)
+
+        # Budget should have increased
+        assert budget.get_total() > initial_total
+
+        budget.stop()
+
+    def test_cascading_calls_accumulate(self):
+        """Multiple match/subst calls accumulate in budget."""
+        from rcx_pi.kernel import get_step_budget, reset_step_budget
+        from rcx_pi.match_mu import match_mu
+        from rcx_pi.subst_mu import subst_mu
+
+        reset_step_budget()
+        budget = get_step_budget()
+
+        budget.start()
+
+        # Multiple operations
+        for _ in range(10):
+            match_mu({"var": "x"}, 42)
+            subst_mu({"val": {"var": "x"}}, {"x": 1})
+
+        # Budget should reflect cumulative steps
+        total = budget.get_total()
+        assert total > 0
+
+        budget.stop()
+
+
+# =============================================================================
 # Dict Subclass Isolation
 # =============================================================================
 

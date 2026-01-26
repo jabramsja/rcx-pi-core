@@ -16,6 +16,7 @@ from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import NO_MATCH, _NoMatch, step
+from .kernel import get_step_budget
 
 
 # =============================================================================
@@ -350,13 +351,21 @@ def run_match_projections(
     """
     Run match projections until done or stall.
 
+    Reports steps to the global step budget for cross-call resource accounting.
+
     Returns:
         (final_state, steps_taken, is_stall)
+
+    Raises:
+        RuntimeError: If global step budget exceeded.
     """
+    budget = get_step_budget()
     state = initial_state
     for i in range(max_steps):
         # Check if done
         if is_match_done(state):
+            # Report steps consumed to global budget
+            budget.consume(i)
             return state, i, False
 
         # Take a step
@@ -364,11 +373,15 @@ def run_match_projections(
 
         # Check for stall (no change) - use mu_equal to avoid Python type coercion
         if mu_equal(next_state, state):
+            # Report steps consumed to global budget
+            budget.consume(i)
             return state, i, True
 
         state = next_state
 
     # Max steps exceeded - treat as stall
+    # Report steps consumed to global budget
+    budget.consume(max_steps)
     return state, max_steps, True
 
 

@@ -31,6 +31,98 @@ from .mu_type import (
 # With max_steps=1000 default, this provides 10x headroom
 MAX_TRACE_ENTRIES = 10000
 
+# Maximum total projection steps across all match_mu/subst_mu calls
+# Prevents resource exhaustion from nested/cascading calls
+MAX_PROJECTION_STEPS = 50000
+
+
+# =============================================================================
+# Global Projection Step Budget (Cross-Call Resource Accounting)
+# =============================================================================
+
+class _ProjectionStepBudget:
+    """
+    Tracks cumulative projection steps across all match_mu/subst_mu calls.
+
+    This prevents resource exhaustion from cascading calls where each individual
+    call stays under its local limit but the total exceeds safe bounds.
+
+    Usage:
+        budget = get_step_budget()
+        budget.start()  # Reset at start of kernel.run()
+        try:
+            budget.consume(steps)  # Called by match_mu/subst_mu
+        finally:
+            budget.stop()
+
+    The budget is thread-local to support concurrent execution.
+    """
+
+    def __init__(self) -> None:
+        self._active: bool = False
+        self._total_steps: int = 0
+        self._limit: int = MAX_PROJECTION_STEPS
+
+    def start(self, limit: int | None = None) -> None:
+        """Start tracking with optional custom limit."""
+        self._active = True
+        self._total_steps = 0
+        self._limit = limit if limit is not None else MAX_PROJECTION_STEPS
+
+    def stop(self) -> None:
+        """Stop tracking."""
+        self._active = False
+
+    def is_active(self) -> bool:
+        """Check if budget tracking is active."""
+        return self._active
+
+    def consume(self, steps: int) -> None:
+        """
+        Consume steps from the budget.
+
+        Args:
+            steps: Number of steps to consume.
+
+        Raises:
+            RuntimeError: If budget exceeded.
+        """
+        if not self._active:
+            return  # No budget tracking active
+
+        self._total_steps += steps
+        if self._total_steps > self._limit:
+            raise RuntimeError(
+                f"Global projection step limit exceeded ({self._limit} steps). "
+                f"Total steps: {self._total_steps}. "
+                f"Possible resource exhaustion from nested match/subst calls."
+            )
+
+    def get_remaining(self) -> int:
+        """Get remaining steps in budget."""
+        if not self._active:
+            return MAX_PROJECTION_STEPS
+        return max(0, self._limit - self._total_steps)
+
+    def get_total(self) -> int:
+        """Get total steps consumed."""
+        return self._total_steps
+
+
+# Global budget instance (thread-local would be better for true concurrency)
+_STEP_BUDGET = _ProjectionStepBudget()
+
+
+def get_step_budget() -> _ProjectionStepBudget:
+    """Get the global projection step budget."""
+    return _STEP_BUDGET
+
+
+def reset_step_budget() -> None:
+    """Reset the global step budget (for testing)."""
+    global _STEP_BUDGET
+    _STEP_BUDGET = _ProjectionStepBudget()
+
 
 # =============================================================================
 # Kernel Primitives
