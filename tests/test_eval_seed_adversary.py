@@ -353,26 +353,26 @@ class TestCallableInjectionPrevention:
 class TestCircularReferenceHandling:
     """Tests for circular reference behavior."""
 
-    def test_circular_dict_causes_recursion_error(self):
-        """Circular dict references cause RecursionError.
+    def test_circular_dict_detected_and_rejected(self):
+        """Circular dict references are detected and rejected gracefully.
 
-        This is expected - circular structures are not valid JSON
-        and cannot be represented as Mu.
+        Circular structures are not valid JSON and cannot be represented as Mu.
+        The is_mu() function detects cycles and returns False instead of
+        causing a stack overflow.
         """
         circular = {'a': None}
         circular['a'] = circular
 
-        # is_mu will recurse infinitely
-        with pytest.raises(RecursionError):
-            is_mu(circular)
+        # is_mu detects cycle and returns False (no RecursionError)
+        assert is_mu(circular) is False
 
-    def test_circular_list_causes_recursion_error(self):
-        """Circular list references also cause RecursionError."""
+    def test_circular_list_detected_and_rejected(self):
+        """Circular list references are detected and rejected gracefully."""
         circular = [1, 2, None]
         circular[2] = circular
 
-        with pytest.raises(RecursionError):
-            is_mu(circular)
+        # is_mu detects cycle and returns False (no RecursionError)
+        assert is_mu(circular) is False
 
 
 # =============================================================================

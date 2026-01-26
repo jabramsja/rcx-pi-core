@@ -18,7 +18,7 @@ from typing import Any
 Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 
 
-def is_mu(value: Any) -> bool:
+def is_mu(value: Any, _seen: set[int] | None = None) -> bool:
     """
     Check if a value is a valid Mu (JSON-compatible).
 
@@ -30,8 +30,16 @@ def is_mu(value: Any) -> bool:
     - list of Mu (JSON array)
     - dict with str keys and Mu values (JSON object)
 
+    Args:
+        value: The value to check.
+        _seen: Internal parameter for cycle detection. Do not pass.
+
     Returns:
         True if value is a valid Mu, False otherwise.
+
+    Note:
+        Circular references are detected and rejected (return False).
+        This prevents infinite recursion/stack overflow attacks.
     """
     if value is None:
         return True
@@ -45,12 +53,23 @@ def is_mu(value: Any) -> bool:
         return True
     if isinstance(value, str):
         return True
+
+    # For compound types (list, dict), check for circular references
+    if isinstance(value, (list, dict)):
+        if _seen is None:
+            _seen = set()
+        value_id = id(value)
+        if value_id in _seen:
+            # Circular reference detected - not valid Mu
+            return False
+        _seen = _seen | {value_id}  # Create new set to avoid mutation issues
+
     if isinstance(value, list):
-        return all(is_mu(item) for item in value)
+        return all(is_mu(item, _seen) for item in value)
     if isinstance(value, dict):
         return (
             all(isinstance(k, str) for k in value.keys()) and
-            all(is_mu(v) for v in value.values())
+            all(is_mu(v, _seen) for v in value.values())
         )
     # Anything else (function, class, object, bytes, set, tuple, etc.) is not a Mu
     return False
@@ -124,7 +143,7 @@ def mu_type_name(value: Any) -> str:
 # =============================================================================
 
 
-def has_callable(value: Any) -> bool:
+def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
     """
     Check if a value contains any callable (function, lambda, method).
 
@@ -132,35 +151,72 @@ def has_callable(value: Any) -> bool:
     they cannot be serialized to JSON. They represent host (Python) logic
     leaking into the Mu world.
 
+    Args:
+        value: The value to check.
+        _seen: Internal parameter for cycle detection. Do not pass.
+
     Returns:
         True if value contains a callable anywhere in its structure.
+
+    Note:
+        Circular references are handled safely (return False, no callable found
+        in the cycle since we already checked the node).
     """
     if callable(value):
         return True
+
+    # For compound types, check for circular references
+    if isinstance(value, (list, dict)):
+        if _seen is None:
+            _seen = set()
+        value_id = id(value)
+        if value_id in _seen:
+            # Already visited - no callable found on this path
+            return False
+        _seen = _seen | {value_id}
+
     if isinstance(value, list):
-        return any(has_callable(item) for item in value)
+        return any(has_callable(item, _seen) for item in value)
     if isinstance(value, dict):
-        return any(has_callable(v) for v in value.values())
+        return any(has_callable(v, _seen) for v in value.values())
     return False
 
 
-def find_callable_path(value: Any, path: str = "") -> str | None:
+def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None) -> str | None:
     """
     Find the path to the first callable in a value.
 
+    Args:
+        value: The value to search.
+        path: Current path (internal, builds up during recursion).
+        _seen: Internal parameter for cycle detection. Do not pass.
+
     Returns:
         Path string like "projections[0].handler" or None if no callable found.
+
+    Note:
+        Circular references are handled safely.
     """
     if callable(value):
         return path or "(root)"
+
+    # For compound types, check for circular references
+    if isinstance(value, (list, dict)):
+        if _seen is None:
+            _seen = set()
+        value_id = id(value)
+        if value_id in _seen:
+            return None
+        _seen = _seen | {value_id}
+
     if isinstance(value, list):
         for i, item in enumerate(value):
-            result = find_callable_path(item, f"{path}[{i}]")
+            result = find_callable_path(item, f"{path}[{i}]", _seen)
             if result:
                 return result
     if isinstance(value, dict):
         for k, v in value.items():
-            result = find_callable_path(v, f"{path}.{k}" if path else k)
+            result = find_callable_path(v, f"{path}.{k}" if path else k, _seen)
             if result:
                 return result
     return None
