@@ -28,7 +28,7 @@ from typing import Any
 
 # Global coverage state
 _coverage_enabled = False
-_coverage_data: dict[str, dict[str, Any]] = defaultdict(lambda: {
+_coverage_data: dict[str, dict[str, Any]] = defaultdict(lambda: {  # AST_OK: infra
     "hits": 0,
     "last_input": None,
     "last_output": None,
@@ -52,7 +52,7 @@ def disable():
 def reset():
     """Reset all coverage data."""
     global _coverage_data, _total_steps, _total_matches
-    _coverage_data = defaultdict(lambda: {
+    _coverage_data = defaultdict(lambda: {  # AST_OK: infra
         "hits": 0,
         "last_input": None,
         "last_output": None,
@@ -109,12 +109,12 @@ def projection_hits(projection_id: str) -> int:
 
 def get_unmatched() -> list[str]:
     """Get list of projection IDs that were tried but never matched."""
-    return [pid for pid, data in _coverage_data.items() if data["hits"] == 0]
+    return [pid for pid, data in _coverage_data.items() if data["hits"] == 0]  # AST_OK: infra
 
 
 def get_matched() -> list[str]:
     """Get list of projection IDs that were matched at least once."""
-    return [pid for pid, data in _coverage_data.items() if data["hits"] > 0]
+    return [pid for pid, data in _coverage_data.items() if data["hits"] > 0]  # AST_OK: infra
 
 
 def report() -> str:
@@ -138,7 +138,7 @@ def report() -> str:
         # Sort by hits (descending)
         sorted_projs = sorted(
             _coverage_data.items(),
-            key=lambda x: (-x[1]["hits"], x[0])
+            key=lambda x: (-x[1]["hits"], x[0])  # AST_OK: infra
         )
 
         for proj_id, data in sorted_projs:
@@ -168,7 +168,7 @@ def report_json() -> dict:
     return {
         "total_steps": _total_steps,
         "total_matches": _total_matches,
-        "projections": {
+        "projections": {  # AST_OK: infra
             pid: {
                 "hits": data["hits"],
                 "matched": data["hits"] > 0,

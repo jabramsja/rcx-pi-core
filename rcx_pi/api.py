@@ -25,7 +25,7 @@ def ints_to_peano_list(xs: List[int]) -> Motif:
     """
     Encode a Python list of ints as a motif list of Peano numbers.
     """
-    return list_from_py([num(int(x)) for x in xs])
+    return list_from_py([num(int(x)) for x in xs])  # AST_OK: infra
 
 
 def peano_list_to_ints(m: Motif) -> List[int]:

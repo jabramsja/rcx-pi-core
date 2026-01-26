@@ -243,7 +243,7 @@ class BytecodeVM:
         """Reset VM to initial state."""
         # v0 state
         self.mu_store = {}
-        self.buckets = {k: [] for k in self.buckets}
+        self.buckets = {k: [] for k in self.buckets}  # AST_OK: infra
         self.cursor = Cursor()
         self.artifacts = Artifacts()
         self._current_event = None
@@ -647,7 +647,7 @@ class BytecodeVM:
         """
         # Run to populate instructions
         self.run(events)
-        return [str(inst) for inst in self._instructions]
+        return [str(inst) for inst in self._instructions]  # AST_OK: infra
 
 
 def validate_bytecode(events: List[Dict[str, Any]]) -> Tuple[bool, str]:
@@ -675,6 +675,6 @@ def bytecode_replay(events: List[Dict[str, Any]]) -> Tuple[bool, str, List[str]]
     """
     vm = BytecodeVM(enabled=True)
     success, output = vm.run(events)
-    instructions = [str(inst) for inst in vm.instructions]
+    instructions = [str(inst) for inst in vm.instructions]  # AST_OK: infra
 
     return success, output, instructions

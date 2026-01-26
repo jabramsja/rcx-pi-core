@@ -9,7 +9,7 @@ def _motif_to_json(m):
         return m
     if not m.structure:
         return {"_void": True}
-    return {"_struct": [_motif_to_json(c) for c in m.structure]}
+    return {"_struct": [_motif_to_json(c) for c in m.structure]}  # AST_OK: infra
 
 
 # Marker depths (structural symbols)

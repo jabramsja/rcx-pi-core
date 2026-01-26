@@ -137,7 +137,7 @@ def denormalize_from_match(value: Mu) -> Mu:
         return value
 
     if isinstance(value, list):
-        return [denormalize_from_match(elem) for elem in value]
+        return [denormalize_from_match(elem) for elem in value]  # AST_OK: bootstrap - denormalization
 
     if isinstance(value, dict):
         # Check if it's a linked list (head/tail structure)
@@ -170,7 +170,7 @@ def denormalize_from_match(value: Mu) -> Mu:
             return value
 
         # Regular dict (shouldn't happen after normalization)
-        return {k: denormalize_from_match(v) for k, v in value.items()}
+        return {k: denormalize_from_match(v) for k, v in value.items()}  # AST_OK: bootstrap
 
     return value
 
@@ -306,7 +306,7 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
             bindings = final_state.get("bindings")
             raw_dict = bindings_to_dict(bindings)
             # Denormalize the bound values back to regular Python structures
-            return {k: denormalize_from_match(v) for k, v in raw_dict.items()}
+            return {k: denormalize_from_match(v) for k, v in raw_dict.items()}  # AST_OK: bootstrap
         else:
             # Explicit failure status
             return NO_MATCH
