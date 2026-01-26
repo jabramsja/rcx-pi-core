@@ -2,6 +2,44 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-26
+
+### Runtime
+- **Thread-Safe Step Budget** (PR #149)
+  - `_ProjectionStepBudget` uses `threading.local()` for thread isolation
+  - Each thread gets independent budget tracking for concurrent execution
+  - `get_step_budget()` and `reset_step_budget()` API
+
+- **Cycle Detection** (PR #149)
+  - `normalize_for_match()` detects circular references (raises ValueError)
+  - `denormalize_from_match()` detects circular references (raises ValueError)
+  - `is_dict_linked_list()` returns False on cycles instead of infinite loop
+
+- **Resource Exhaustion Guardrails** (PR #149)
+  - Global projection step budget: MAX_PROJECTION_STEPS = 50,000
+  - Mu depth limit: MAX_MU_DEPTH = 200
+  - Mu width limit: MAX_MU_WIDTH = 1,000
+  - Empty variable name rejection in match_mu/subst_mu
+
+### Tests
+- **Comprehensive Fuzzer Tests** (PR #149)
+  - `tests/test_selfhost_fuzzer.py`: 53 tests, 10,000+ random examples
+  - `TestMatchMuParity`: match_mu == eval_seed.match (1,000 examples)
+  - `TestSubstMuParity`: subst_mu == eval_seed.substitute (1,200 examples)
+  - `TestHostileUnicodeHandling`: emoji, RTL, zero-width, homoglyphs
+  - `TestNearLimitStress`: width 900-1000, depth 190-200
+  - All Hypothesis tests use deadline=5000 (prevents infinite hangs)
+
+- **Adversary Tests** (PR #149)
+  - `test_nested_calls_exhaust_budget`: verifies budget limits cascading calls
+  - `test_budget_thread_isolation`: verifies no cross-thread contamination
+  - `test_circular_in_is_dict_linked_list_returns_false`: cycle safety
+  - `test_nested_circular_in_normalize_raises`: nested cycle detection
+
+### Process
+- All 6 agents approved: verifier, adversary, expert, structural-proof, grounding, fuzzer
+- Coverage rated ROBUST by fuzzer agent
+
 ## 2026-01-25
 
 ### Tooling

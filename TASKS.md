@@ -109,6 +109,18 @@ Items here are implemented and verified under current invariants. Changes requir
   - Phase 5: `step_mu()` uses match_mu + subst_mu (33 tests: 22 parity + 11 self-hosting)
   - `tests/structural/test_apply_mu_grounding.py` - direct `step()` execution tests
   - `tests/test_apply_mu_fuzzer.py` - Hypothesis property-based tests
+- Self-Hosting Security Hardening (PR #149):
+  - Thread-safe step budget: `threading.local()` for concurrent execution safety
+  - Cycle detection in `normalize_for_match()` and `denormalize_from_match()`
+  - Global projection step budget: `_ProjectionStepBudget` class (50,000 step limit)
+  - Resource exhaustion guardrails: MAX_MU_DEPTH=200, MAX_MU_WIDTH=1000
+  - Comprehensive fuzzer tests (`tests/test_selfhost_fuzzer.py`, 53 tests, 10,000+ examples):
+    - `TestMatchMuParity`: match_mu == eval_seed.match (1,000 examples)
+    - `TestSubstMuParity`: subst_mu == eval_seed.substitute (1,200 examples)
+    - `TestHostileUnicodeHandling`: emoji, RTL, zero-width, homoglyphs
+    - `TestNearLimitStress`: width 900-1000, depth 190-200
+  - Budget exhaustion tests: nested calls, thread isolation
+  - Empty variable name rejection (parity with eval_seed.py)
 - Package Reorganization (PR #145):
   - Core self-hosting files moved to `rcx_pi/selfhost/` subpackage
   - Re-export stubs at original locations for backward compatibility
