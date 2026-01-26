@@ -114,7 +114,50 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NOW (empty by design; only populated if an invariant is broken)
 
-_(No active items.)_
+### Agent Findings (PR #131)
+
+24. **Verifier Findings: DeepStep Prototype** (blocking PR merge)
+    - [ ] Add test for `append([1,2], None)` - empty ys edge case
+    - [ ] Add `@host_recursion`, `@host_builtin` decorators to test utilities
+    - [ ] Add `assert_mu()` validation on inputs entering projection system
+
+25. **Adversary Findings: Critical Vulnerabilities** (blocking PR merge)
+    - [ ] Attack 3: Meta-circular evaluation loophole (CRITICAL) - prevent lambda calculus smuggling via meta-projections
+    - [ ] Attack 15: Machine state injection (HIGH) - prevent injection via `mode`/`phase` fields
+    - [ ] Add resource limits: max_steps, history size cap, recursion depth
+    - [ ] Add 10 adversary-generated attack tests to prototype
+
+### QoL Improvements (Infrastructure)
+
+26. **Agent Reports as PR Comments**
+    - Post agent findings directly on PR as comments
+    - Better visibility than digging through CI logs
+    - Requires: GitHub Actions workflow updates with `gh pr comment`
+
+27. **Debt Dashboard**
+    - Centralized tracking of `@host_*` markers
+    - Show debt count trends over time
+    - Auto-generate from grep + git history
+
+28. **Pre-commit Local Checks**
+    - Run quick audit checks before push
+    - Catch guardrail violations early
+    - Use pre-commit hook or similar
+
+29. **Projection Test Coverage**
+    - Ensure every projection has explicit test
+    - Track which projections have been exercised
+    - Add coverage reporting for projection matching
+
+30. **Agent Memory Across Sessions**
+    - Store agent findings in structured format (JSON/markdown)
+    - Reference previous findings in subsequent runs
+    - Detect regressions (previously-fixed issues reappearing)
+
+31. **Trace Visualization**
+    - Simple trace viewer (CLI or web)
+    - Show state transitions visually
+    - Help debug complex nested reductions
 
 ---
 

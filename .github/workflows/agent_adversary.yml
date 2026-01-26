@@ -5,6 +5,8 @@ on:
     paths:
       - 'rcx_pi/**/*.py'
       - 'prototypes/**/*.py'
+      - 'tests/**/*.py'
+      - 'seeds/**/*.json'
 
 jobs:
   attack:
@@ -34,7 +36,7 @@ jobs:
       - name: Get changed files
         id: changed
         run: |
-          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^(rcx_pi|prototypes)/.*\.py$' | tr '\n' ' ')
+          FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^(rcx_pi|prototypes|tests)/.*\.py$|^seeds/.*\.json$' | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Run adversary agent
