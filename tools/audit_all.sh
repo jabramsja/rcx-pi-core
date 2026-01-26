@@ -37,7 +37,8 @@ echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
 ! grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ || { echo "Found underscored import from rcx_pi"; exit 1; }
 
 echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
-! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+# Note: _marker is allowed in seeds/ - it's a security feature for done-wrapper spoofing prevention
+! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 5) Fixture size check (all v2 jsonl) =="
 find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do

@@ -2,6 +2,7 @@ name: Agent Verifier
 
 # Manual trigger only - run locally by default to save API costs
 # Use: Actions > Agent Verifier > Run workflow
+# Or: gh workflow run agent_verifier.yml
 on:
   workflow_dispatch:
     inputs:

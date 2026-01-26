@@ -2,6 +2,7 @@ name: Agent Expert
 
 # Manual trigger only - run locally by default to save API costs
 # Use: Actions > Agent Expert > Run workflow
+# Or: gh workflow run agent_expert.yml
 on:
   workflow_dispatch:
     inputs:

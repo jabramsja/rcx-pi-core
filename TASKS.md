@@ -198,13 +198,13 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
     - Answer: **Yes, EVAL_SEED is tractable** (~200 lines, O(n) complexity)
     - **Ready for Phase 3**
 
-22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** (in progress)
+22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** ✅ (complete)
     - Scope:
       - Translate EVAL_SEED logic to Mu projections
       - Verify Python-EVAL and Mu-EVAL produce same results
       - Store as `seeds/eval.v1.json`
     - **Blocker resolved**: `deep_eval` module implemented
-      - `rcx_pi/deep_eval.py` - production module (24 tests passing)
+      - `rcx_pi/deep_eval.py` - production module (26 tests passing)
       - Work-stack approach: explicit Mu state (focus + context + phase)
       - Three-phase state machine: traverse/ascending/root_check
       - No host recursion - kernel loop provides iteration
@@ -214,10 +214,10 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
       - [x] `validate_deep_eval_state()` - state validation for security
       - [x] `run_deep_eval()` - runner with validation
       - [x] `deep_eval()` - convenience wrapper
-      - [x] 24 tests (8 core + 6 adversary + 10 validation)
-    - Next:
-      - [ ] Create `seeds/eval.v1.json` as Mu projections
-      - [ ] Verify Python-EVAL and Mu-EVAL produce identical results
+      - [x] 26 tests (8 core + 8 adversary + 10 validation)
+      - [x] `seeds/eval.v1.json` - EVAL_SEED as pure Mu projections
+      - [x] `tests/test_eval_seed_parity.py` - 23 parity tests verifying Mu-EVAL == Python-EVAL
+    - **Ready for Phase 4**
 
 23. **RCX Kernel Phase 4: Self-Hosting** (awaiting Phase 3)
     - Scope:

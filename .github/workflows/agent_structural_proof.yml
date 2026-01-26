@@ -2,6 +2,7 @@ name: Agent Structural Proof
 
 # Manual trigger only - run locally by default to save API costs
 # Use: Actions > Agent Structural Proof > Run workflow
+# Or: gh workflow run agent_structural_proof.yml
 on:
   workflow_dispatch:
     inputs:
