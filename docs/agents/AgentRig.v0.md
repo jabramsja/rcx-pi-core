@@ -150,25 +150,66 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 
 ## Usage
 
-### Manual Workflow
-```bash
-# 1. Run contraband linter first (free, fast)
-./tools/contraband.sh
+### MANDATORY: Run ALL Agents Before Merge
 
-# 2. If pass, run agents via Claude Code Task tool
-# (Agents run automatically when you invoke them)
+**For any code change, run these agents in parallel:**
+
+| Agent | Purpose | Always Run? |
+|-------|---------|-------------|
+| **verifier** | Check RCX invariants | ✅ YES |
+| **adversary** | Red team / attack code | ✅ YES |
+| **expert** | Simplicity review | ✅ YES |
+| **structural-proof** | Verify structural claims | ✅ YES |
+| **grounding** | Write executable tests | ✅ YES (if claims made) |
+| **fuzzer** | Property-based testing | ✅ YES (for core code) |
+| **translator** | Plain English explanation | ⚠️ On request |
+| **visualizer** | Mermaid diagrams | ⚠️ On request |
+
+**Minimum for ALL changes:** verifier, adversary, expert, structural-proof (4 agents)
+**For core kernel/seed code:** Add grounding, fuzzer (6 agents)
+**For founder review:** Add translator, visualizer (8 agents)
+
+### Workflow
+
+```bash
+# 1. Run linters first (free, fast)
+./tools/contraband.sh rcx_pi
+python3 tools/ast_police.py
+
+# 2. Run ALL mandatory agents in PARALLEL via Claude Code
+# (In a single message with multiple Task tool calls)
 ```
 
 ### In Claude Code Session
-```
-# Run all reviewers in parallel on new code
-[Task: verifier] "Verify Phase 4b implementation"
-[Task: adversary] "Attack Phase 4b implementation"
-[Task: structural-proof] "Verify structural claims"
-[Task: expert] "Review for simplicity"
 
-# After approval, explain to founder
-[Task: translator] "Explain the changes in plain English"
+```
+# ALWAYS run these 4 in parallel for any code change:
+[Task: verifier] "Verify <feature> implementation"
+[Task: adversary] "Attack <feature> implementation"
+[Task: expert] "Review <feature> for simplicity"
+[Task: structural-proof] "Verify structural claims in <feature>"
+
+# For core code, also run:
+[Task: grounding] "Write tests for <feature> claims"
+[Task: fuzzer] "Property-based tests for <feature>"
+
+# For founder review:
+[Task: translator] "Explain <feature> in plain English"
+[Task: visualizer] "Draw Mu structures in <feature>"
+```
+
+### Agent Checklist (Copy for PR)
+
+```markdown
+## Agent Review
+- [ ] verifier:
+- [ ] adversary:
+- [ ] expert:
+- [ ] structural-proof:
+- [ ] grounding: (if applicable)
+- [ ] fuzzer: (if applicable)
+- [ ] translator: (on request)
+- [ ] visualizer: (on request)
 ```
 
 ## Files
