@@ -15,7 +15,9 @@ from rcx_pi.eval_seed import (
     substitute,
     apply_projection,
     step,
+    deep_step,
     create_step_handler,
+    create_deep_step_handler,
     create_stall_handler,
     create_eval_seed,
     register_eval_seed,
@@ -393,6 +395,89 @@ class TestStep:
 
 
 # =============================================================================
+# deep_step tests
+# =============================================================================
+
+
+class TestDeepStep:
+    """Tests for deep_step() - recursive descent matching."""
+
+    def test_deep_step_root_match(self):
+        """deep_step matches at root just like step."""
+        projections = [{"pattern": 1, "body": 2}]
+        assert deep_step(projections, 1) == 2
+
+    def test_deep_step_no_match_returns_input(self):
+        """No match returns input unchanged."""
+        projections = [{"pattern": 1, "body": 2}]
+        assert deep_step(projections, 99) == 99
+
+    def test_deep_step_nested_dict(self):
+        """deep_step finds match inside nested dict."""
+        projections = [{"pattern": {"op": "inc"}, "body": "found"}]
+        nested = {"a": {"b": {"op": "inc"}}}
+        result = deep_step(projections, nested)
+        assert result == {"a": {"b": "found"}}
+
+    def test_deep_step_nested_list(self):
+        """deep_step finds match inside nested list."""
+        projections = [{"pattern": {"op": "inc"}, "body": "found"}]
+        nested = [1, [2, {"op": "inc"}, 3], 4]
+        result = deep_step(projections, nested)
+        assert result == [1, [2, "found", 3], 4]
+
+    def test_deep_step_linked_list_append(self):
+        """deep_step enables linked list append."""
+        append_projections = [
+            # Base: append(null, ys) = ys
+            {
+                "pattern": {"op": "append", "xs": None, "ys": {"var": "ys"}},
+                "body": {"var": "ys"}
+            },
+            # Recursive: append({head:h, tail:t}, ys) = {head:h, tail:append(t, ys)}
+            {
+                "pattern": {
+                    "op": "append",
+                    "xs": {"head": {"var": "h"}, "tail": {"var": "t"}},
+                    "ys": {"var": "ys"}
+                },
+                "body": {
+                    "head": {"var": "h"},
+                    "tail": {"op": "append", "xs": {"var": "t"}, "ys": {"var": "ys"}}
+                }
+            }
+        ]
+
+        # append([1], [2]) should become [1, 2]
+        input_val = {
+            "op": "append",
+            "xs": {"head": 1, "tail": None},
+            "ys": {"head": 2, "tail": None}
+        }
+
+        # Run until stall
+        value = input_val
+        for _ in range(10):
+            next_val = deep_step(append_projections, value)
+            if next_val == value:
+                break
+            value = next_val
+
+        expected = {"head": 1, "tail": {"head": 2, "tail": None}}
+        assert value == expected
+
+    def test_deep_step_first_match_only(self):
+        """deep_step reduces only the first matching sub-expression."""
+        projections = [{"pattern": {"op": "x"}, "body": "replaced"}]
+        # Two matches at same level - only first should be replaced
+        nested = {"a": {"op": "x"}, "b": {"op": "x"}}
+        result = deep_step(projections, nested)
+        # Note: dict iteration order is preserved in Python 3.7+
+        # First key 'a' should be processed first
+        assert result == {"a": "replaced", "b": {"op": "x"}}
+
+
+# =============================================================================
 # Handler tests
 # =============================================================================
 
@@ -413,6 +498,21 @@ class TestHandlers:
         handler = create_step_handler(projections)
         result = handler({"mu": 99, "hash": "abc"})
         assert result == 99
+
+    def test_deep_step_handler(self):
+        """deep_step_handler extracts mu and applies projections deeply."""
+        projections = [{"pattern": {"op": "inc"}, "body": "found"}]
+        handler = create_deep_step_handler(projections)
+        nested = {"mu": {"a": {"op": "inc"}}, "hash": "abc"}
+        result = handler(nested)
+        assert result == {"a": "found"}
+
+    def test_deep_step_handler_stall(self):
+        """deep_step_handler returns mu if no match anywhere."""
+        projections = [{"pattern": {"op": "inc"}, "body": "found"}]
+        handler = create_deep_step_handler(projections)
+        result = handler({"mu": {"a": {"op": "dec"}}, "hash": "abc"})
+        assert result == {"a": {"op": "dec"}}
 
     def test_stall_handler(self):
         """stall_handler returns stalled value."""
