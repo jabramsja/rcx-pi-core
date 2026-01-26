@@ -387,11 +387,20 @@ Phase 5 complete:
 
 ## References
 
-- `docs/EVAL_SEED.v0.md` - Current EVAL_SEED spec
-- `docs/DeepStep.v0.md` - Deep traversal design
-- `rcx_pi/eval_seed.py` - Python implementation (to be replaced)
+- `docs/core/EVAL_SEED.v0.md` - Current EVAL_SEED spec
+- `docs/execution/DeepStep.v0.md` - Deep traversal design
+- `rcx_pi/selfhost/` - Core self-hosting modules:
+  - `mu_type.py` - Mu type validation and guardrails
+  - `kernel.py` - 4 kernel primitives
+  - `eval_seed.py` - EVAL_SEED evaluator (match, substitute, step)
+  - `match_mu.py` - Pattern matching as Mu projections
+  - `subst_mu.py` - Substitution as Mu projections
+  - `step_mu.py` - Self-hosting step (uses match_mu + subst_mu)
 - `rcx_pi/deep_eval.py` - Deep evaluation machinery
-- `seeds/eval.v1.json` - Phase 3 traversal projections (template)
+- `seeds/` - Mu projection definitions:
+  - `eval.v1.json` - EVAL_SEED traversal projections
+  - `match.v1.json` - Match projections (12 rules)
+  - `subst.v1.json` - Substitute projections (9 rules)
 
 ## Next Steps
 
@@ -399,12 +408,12 @@ Phase 5 complete:
 1. [x] Review this doc with agents (verifier, adversary, expert)
 2. [x] Decide on type dispatch approach - **Structure IS type**
 3. [x] Decide on dict iteration approach - **Fixed key patterns**
-4. [x] Phase 4a: match projections (`seeds/match.v1.json`, `rcx_pi/match_mu.py`)
-5. [x] Phase 4b: substitute projections (`seeds/subst.v1.json`, `rcx_pi/subst_mu.py`)
+4. [x] Phase 4a: match projections (`seeds/match.v1.json`, `rcx_pi/selfhost/match_mu.py`)
+5. [x] Phase 4b: substitute projections (`seeds/subst.v1.json`, `rcx_pi/selfhost/subst_mu.py`)
 6. [x] Phase 4d: Integration tests (67 tests across 3 test files)
 
 **Phase 5 (Self-Hosting): ✅ COMPLETE**
-7. [x] Create `apply_mu` as Mu projections (combines match + subst) - `rcx_pi/step_mu.py`
+7. [x] Create `apply_mu` as Mu projections (combines match + subst) - `rcx_pi/selfhost/step_mu.py`
 8. [x] EVAL_SEED evaluates EVAL_SEED - `test_self_hosting_complete` passes
 9. [x] Compare traces: Python→EVAL vs EVAL→EVAL - identical for all test cases
 10. [x] **Self-hosting achieved!** 33 tests verify step_mu() == step()

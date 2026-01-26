@@ -109,6 +109,18 @@ Items here are implemented and verified under current invariants. Changes requir
   - Phase 5: `step_mu()` uses match_mu + subst_mu (33 tests: 22 parity + 11 self-hosting)
   - `tests/structural/test_apply_mu_grounding.py` - direct `step()` execution tests
   - `tests/test_apply_mu_fuzzer.py` - Hypothesis property-based tests
+- Package Reorganization (PR #145):
+  - Core self-hosting files moved to `rcx_pi/selfhost/` subpackage
+  - Re-export stubs at original locations for backward compatibility
+  - Audit script updated to support both layouts
+  - Files: mu_type.py, kernel.py, eval_seed.py, match_mu.py, subst_mu.py, step_mu.py
+- QoL Infrastructure (PRs #131+):
+  - Agent reports as PR comments (verifier, adversary, expert, structural-proof)
+  - Debt dashboard (`tools/debt_dashboard.sh`)
+  - Pre-commit local checks (`tools/pre-commit-check.sh`)
+  - Projection test coverage (`rcx_pi/projection_coverage.py`)
+  - Agent memory across sessions (`tools/agent_memory.py`)
+  - Trace visualization (`tools/trace_viewer.py`)
 
 ---
 
@@ -125,221 +137,39 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NOW (empty by design; only populated if an invariant is broken)
 
-### Agent Findings (PR #131) ✅ ADDRESSED
-
-24. **Verifier Findings: DeepStep Prototype** ✅
-    - [x] Add test for `append([1,2], None)` - `test_append_empty_ys`
-    - [x] Add `@host_builtin`, `@host_iteration` decorators to test utilities
-    - [x] Add `assert_mu()` validation on inputs entering projection system
-    - [x] Add HOST DEBT INVENTORY comment header
-
-25. **Adversary Findings: Critical Vulnerabilities** ✅
-    - [x] Attack 14: Phase state injection - context validation added
-    - [x] Attack 15: Machine state injection - phase/changed type validation
-    - [x] Add resource limits: MAX_HISTORY=500, MAX_CONTEXT_DEPTH=100
-    - [x] Add 6 adversary attack tests to prototype
-    - Note: Attack 3 (meta-circular) deferred - not applicable to current prototype scope
-
-### QoL Improvements (Infrastructure)
-
-26. **Agent Reports as PR Comments** ✅
-    - All 4 agent workflows now post findings as PR comments
-    - Collapsible report sections with status emoji
-    - Uses `gh pr comment` with GITHUB_TOKEN permissions
-
-27. **Debt Dashboard** ✅
-    - `tools/debt_dashboard.sh` - shows all host debt markers
-    - Human-readable and JSON output modes
-    - Tracks core (rcx_pi/) vs prototype debt separately
-
-28. **Pre-commit Local Checks** ✅
-    - `tools/pre-commit-check.sh` - quick guardrail checks
-    - Install: `cp tools/pre-commit-check.sh .git/hooks/pre-commit`
-    - Checks: private attrs, underscore imports, JSON keys, syntax, bare except
-
-29. **Projection Test Coverage** ✅
-    - `rcx_pi/projection_coverage.py` - tracks projection matches
-    - Enable: `RCX_PROJECTION_COVERAGE=1 pytest`
-    - Integrated into step() function, reports at end of test run
-    - `tools/projection_coverage.py` for standalone reports
-
-30. **Agent Memory Across Sessions** ✅
-    - `tools/agent_memory.py` - store/list/fix findings
-    - Stores findings in `.agent_memory/` (gitignored)
-    - Supports regression checking for fixed issues
-    - Usage: `python tools/agent_memory.py store verifier "message" --file x.py`
-
-31. **Trace Visualization** ✅
-    - `tools/trace_viewer.py` - CLI trace viewer
-    - Shows state transitions with box-drawing characters
-    - Supports compact mode, filtering, limiting
-    - Usage: `python tools/trace_viewer.py trace.jsonl --compact`
+*(No active items - all invariants intact)*
 
 ---
 
-## NEXT (short, bounded follow-ups: audits, stress tests, fixture hardening)
+## NEXT (short, bounded follow-ups)
 
-20. **RCX Kernel Phase 1: Minimal Kernel** ✅ (complete)
-    - Design doc: `docs/RCXKernel.v0.md`
-    - Implementation: `rcx_pi/kernel.py`
-    - Tests: `tests/test_kernel_v0.py` (47 tests)
-    - Done:
-      - 4 primitives: `compute_identity`, `detect_stall`, `record_trace`, `gate_dispatch`
-      - Kernel class with `step()` and `run()` main loop
-      - All handlers wrapped with `assert_handler_pure`
-      - Audit passes (17 checks)
-    - **Ready for Phase 2**
+*(All Phase 1-5 items complete - see Ra section)*
 
-21. **RCX Kernel Phase 2: EVAL_SEED (Python)** ✅ (complete)
-    - Design doc: `docs/EVAL_SEED.v0.md`
-    - Implementation: `rcx_pi/eval_seed.py`
-    - Tests: `tests/test_eval_seed_v0.py` (71 tests)
-    - Done:
-      - `match(pattern, input)` - structural pattern matching
-      - `substitute(body, bindings)` - variable substitution
-      - `apply_projection(projection, input)` - match + substitute
-      - `step(projections, input)` - select and apply first matching
-      - `{"var": "x"}` is the only special form (matches anything, binds)
-      - Kernel handlers: step, stall, init
-      - Peano numeral countdown works (pure structural)
-    - Answer: **Yes, EVAL_SEED is tractable** (~200 lines, O(n) complexity)
-    - **Ready for Phase 3**
+**Future phases (not yet promoted):**
 
-22. **RCX Kernel Phase 3: EVAL_SEED (Mu)** ✅ (complete)
-    - Scope:
-      - Translate EVAL_SEED logic to Mu projections
-      - Verify Python-EVAL and Mu-EVAL produce same results
-      - Store as `seeds/eval.v1.json`
-    - **Blocker resolved**: `deep_eval` module implemented
-      - `rcx_pi/deep_eval.py` - production module (26 tests passing)
-      - Work-stack approach: explicit Mu state (focus + context + phase)
-      - Three-phase state machine: traverse/ascending/root_check
-      - No host recursion - kernel loop provides iteration
-      - Design doc: `docs/DeepStep.v0.md`
-    - Done:
-      - [x] `make_deep_eval_projections()` - creates traversal projections
-      - [x] `validate_deep_eval_state()` - state validation for security
-      - [x] `run_deep_eval()` - runner with validation
-      - [x] `deep_eval()` - convenience wrapper
-      - [x] 26 tests (8 core + 8 adversary + 10 validation)
-      - [x] `seeds/eval.v1.json` - EVAL_SEED as pure Mu projections
-      - [x] `tests/test_eval_seed_parity.py` - 23 parity tests verifying Mu-EVAL == Python-EVAL
-    - **Ready for Phase 4**
+- **Phase 6**: Self-host the kernel loop (projection selection as Mu projections)
+- **Phase 7**: Self-host iteration itself (recursion as structural transformation)
 
-23. **RCX Kernel Phase 4-5: Self-Hosting** ✅ (Phase 5 complete)
-    - Design doc: `docs/core/SelfHosting.v0.md`
-    - Done:
-      - **Phase 4a**: match as Mu projections (`seeds/match.v1.json`, 23 parity tests)
-      - **Phase 4b**: substitute as Mu projections (`seeds/subst.v1.json`, 17 parity tests)
-      - **Phase 4c**: binding lookup integrated (no separate seed needed)
-      - **Phase 4d**: Integration tests for match_mu + subst_mu (67 tests total)
-        - `tests/test_apply_mu_integration.py` (28 parity tests)
-        - `tests/structural/test_apply_mu_grounding.py` (27 structural tests)
-        - `tests/test_apply_mu_fuzzer.py` (12 property-based tests with Hypothesis)
-      - **Phase 5**: EVAL_SEED runs EVAL_SEED (self-hosting achieved)
-        - `rcx_pi/step_mu.py` - step using Mu projections (apply_mu, step_mu, run_mu)
-        - `tests/test_step_mu_parity.py` - 22 parity tests
-        - `tests/test_self_hosting_v0.py` - 11 self-hosting tests including critical trace comparison
-      - Shared test utilities: `apply_mu()` in `tests/conftest.py`, `step_mu.py`
-    - Known limitations (documented, by design):
-      - Empty collections ([], {}) normalize to None
-      - Head/tail dict structures can collide with user data
-      - Kernel loop still uses Python for-loop (operations self-hosted, not iteration)
-    - Agent review (Phase 5): verifier=APPROVE, adversary=VULNERABLE (known limitations), expert=COULD_SIMPLIFY
-    - **Algorithmic self-hosting achieved**: Python trace == Mu trace for all EVAL_SEED operations
-    - Note: Operations (match/subst) are Mu projections; execution still uses Python's step()
-    - True operational self-hosting (RCX kernel runs RCX) is a Phase 6+ goal
-
-17-19. **Bytecode VM v0/v1a/v1b** — **ARCHIVED** (superseded by kernel + seeds)
-    - Bytecode approach abandoned in favor of kernel + EVAL_SEED
-    - Code remains in `rcx_pi/bytecode_vm.py` (legacy, not maintained)
-    - Docs moved to `docs/archive/bytecode/`
-    - Self-hosting achieved via Phase 5 instead
+These are "scaffolding debt" - the kernel for-loop is Python, but operations are pure Mu.
 
 ---
 
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
-14. **RCX Kernel v0** ✅ (design complete)
-    - Deliverable: `docs/RCXKernel.v0.md`
-    - Semantic question: "What is the minimal kernel that supports self-hosting?"
-    - Done:
-      - 4 kernel primitives: compute_identity, detect_stall, record_trace, gate_dispatch
-      - apply_projection is NOT kernel - seeds define matching semantics
-      - Seed hierarchy: EVAL_SEED (evaluator) → Application Seeds (EngineeNews, etc.)
-      - Bootstrap sequence: Python → Kernel → EVAL_SEED → EVAL_SEED runs itself
-      - Self-hosting required to prove emergence (not simulate it)
-    - Ready for promotion to NEXT
+*(All design items complete and implemented - see Ra section)*
 
-15. **Structural Purity v0** ✅ (design + implementation complete)
-    - Deliverable: `docs/StructuralPurity.v0.md`
-    - Semantic question: "How do we ensure we program IN RCX, not ABOUT RCX?"
-    - Done:
-      - Guardrail functions: `assert_seed_pure()`, `assert_handler_pure()`, etc.
-      - Boundary definition: Python only at 4 kernel primitives
-      - Audit script extended with checks 9-11
-      - 32 tests for guardrail functions
-    - **Archived to Ra**: Implementation complete
+**Completed designs (now in Ra):**
+- RCX Kernel v0 (`docs/core/RCXKernel.v0.md`)
+- Structural Purity v0 (`docs/core/StructuralPurity.v0.md`)
+- Self-Hosting v0 (`docs/core/SelfHosting.v0.md`)
+- EVAL_SEED v0 (`docs/core/EVAL_SEED.v0.md`)
+- Second Independent Encounter (`docs/execution/IndependentEncounter.v0.md`)
+- Enginenews Spec Mapping (`docs/execution/EnginenewsSpecMapping.v0.md`)
+- Closure Evidence Events (`docs/execution/ClosureEvidence.v0.md`)
+- Rule-as-Motif (`docs/execution/RuleAsMotif.v0.md`)
 
-9. **"Second independent encounter" semantics** ✅
-   - Deliverable: `docs/IndependentEncounter.v0.md`
-   - Done:
-     - "Independent" defined: same (value_hash, pattern_id) with no intervening reduction
-     - Tracking: stall_memory map, cleared on any value transition
-     - Closure signal: second stall at same (v, p) implies normal form
-     - Minimal state: last_stall[(pattern_id)] = value_hash
-     - Conservative reset on execution.fixed
-     - Key invariant: detected inevitability, not policy (VM observes, doesn't decide)
-   - **Promoted to NEXT #16**: Second Independent Encounter Implementation
-
-10. **Bytecode VM mapping v0/v1** — **ARCHIVED**
-    - **Status**: Superseded by kernel + seeds architecture
-    - Docs moved to `docs/archive/bytecode/`
-    - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
-    - v1 remaining (OP_MATCH, OP_REDUCE, execution loop) will NOT be implemented
-    - Self-hosting achieved via Phase 5 (kernel + EVAL_SEED) instead
-
-11. **Enginenews spec mapping v0** ✅
-    - Deliverable: `docs/EnginenewsSpecMapping.v0.md`
-    - Done:
-      - Minimal motif set (news.pending, news.refined, news.cycling, news.terminal)
-      - Metrics defined from events only: counts, stall_density, fix_efficacy, closure_evidence
-      - Explicit non-goal: no ROUTE/CLOSE, no termination policy
-      - CLI contract documented (--check-canon, --print-exec-summary)
-    - **Archived to Ra**: Stress test harness implemented (`test_enginenews_spec_v0.py`, 18 tests, 4 fixtures)
-
-12. **Closure Evidence Events v0** ✅ (promoted from SINK: "ROUTE/CLOSE opcodes")
-    - Deliverable: `docs/ClosureEvidence.v0.md`
-    - Done:
-      - Event vocabulary: `evidence.closure` with value_hash, pattern_id, reason
-      - Alignment with IndependentEncounter.v0.md detection rule
-      - 5 normative examples (SHOULD/SHOULD NOT emit)
-      - Future promotion checklist
-    - Non-goal: no engine termination directive, no ROUTE opcode, no implementation
-    - **Archived to Ra**: Design complete, reporting tool implemented (`--print-closure-evidence`, `closure_evidence_v2()`)
-
-13. **Rule-as-Motif representation v0** ✅ (promoted from SINK: "Full VM bootstrap / meta-circular execution")
-    - Deliverable: `docs/RuleAsMotif.v0.md`
-    - Semantic question: "What is the minimal representation of an RCX reduction rule as a motif, such that rules become first-class structural data?"
-    - Promotion rationale:
-      - MetaCircularReadiness.v1.md Gate 5 is blocked; this unblocks M4 (Organism extraction)
-      - code=data principle requires rules to be structural, not host closures
-      - Advances self-hosting without requiring execution semantics changes
-      - Pure design work: defines representation, not matching or application
-      - Follows "observability precedes mechanics": define shape before behavior
-    - Scope:
-      - Rule motif structure: `{"rule": {"id": ..., "pattern": ..., "body": ...}}`
-      - Variable site representation: `{"var": "<name>"}`
-      - Canonical examples (add.zero, add.succ)
-      - Invariants: determinism, structural equality, no host leakage
-      - Promotion gates for VECTOR → NEXT
-    - Non-goals:
-      - No execution semantics (how VM applies rule motifs)
-      - No pattern matching algorithm
-      - No rule compilation to bytecode
-      - No rule ordering/priority
-      - No implementation
-    - **Promoted to NEXT #14**: Rule Motif Observability v0
+**Archived (superseded):**
+- Bytecode VM v0/v1 → `docs/archive/bytecode/`
 
 ---
 
