@@ -101,7 +101,31 @@ def check_file(filepath: str) -> List[Tuple[int, str]]:
                 "Set comprehension {x for x in ...} - non-deterministic"
             ))
 
-        # 3. Dangerous builtins (catches aliasing that grep misses)
+        # 3. List/Dict Comprehensions - forces kernel loops
+        # Grep can be bypassed with multiline: [
+        #     x for x in data
+        # ]
+        if isinstance(node, ast.ListComp):
+            violations.append((
+                node.lineno,
+                "List comprehension [x for x in ...] - use kernel loop (or # AST_OK: reason)"
+            ))
+
+        if isinstance(node, ast.DictComp):
+            violations.append((
+                node.lineno,
+                "Dict comprehension {k: v for ...} - use kernel loop (or # AST_OK: reason)"
+            ))
+
+        # 4. Lambda expressions - functional smuggling
+        # Grep catches "lambda " but not "(lambda x: x)" or multiline
+        if isinstance(node, ast.Lambda):
+            violations.append((
+                node.lineno,
+                "Lambda function - functional smuggling, use Mu projection (or # AST_OK: reason)"
+            ))
+
+        # 5. Dangerous builtins (catches aliasing that grep misses)
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
                 dangerous = {"eval", "exec", "compile", "__import__"}
