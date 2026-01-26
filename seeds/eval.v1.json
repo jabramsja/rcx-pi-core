@@ -1,0 +1,166 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "name": "EVAL_SEED",
+    "description": "Deep evaluation projections for RCX work-stack machine",
+    "doc": "docs/DeepStep.v0.md",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "No host recursion - kernel loop provides iteration",
+      "Deterministic: same input -> same output",
+      "Three-phase state machine: traverse/ascending/root_check"
+    ]
+  },
+  "projections": [
+    {
+      "id": "restart",
+      "description": "ROOT_CHECK with changes -> restart traversal",
+      "pattern": {
+        "mode": "deep_eval",
+        "phase": "root_check",
+        "focus": {"var": "f"},
+        "context": [],
+        "changed": true
+      },
+      "body": {
+        "mode": "deep_eval",
+        "phase": "traverse",
+        "focus": {"var": "f"},
+        "context": [],
+        "changed": false
+      }
+    },
+    {
+      "id": "unwrap",
+      "description": "ROOT_CHECK without changes -> done (return result)",
+      "pattern": {
+        "mode": "deep_eval",
+        "phase": "root_check",
+        "focus": {"var": "result"},
+        "context": [],
+        "changed": false
+      },
+      "body": {
+        "mode": "deep_eval_done",
+        "_marker": "__deep_eval_internal_done__",
+        "result": {"var": "result"}
+      }
+    },
+    {
+      "id": "descend.dict",
+      "description": "DESCEND into dict with head/tail structure (traverse phase only)",
+      "pattern": {
+        "mode": "deep_eval",
+        "phase": "traverse",
+        "focus": {"head": {"var": "h"}, "tail": {"var": "t"}},
+        "context": {"var": "ctx"},
+        "changed": {"var": "c"}
+      },
+      "body": {
+        "mode": "deep_eval",
+        "phase": "traverse",
+        "focus": {"var": "h"},
+        "context": [
+          {
+            "type": "dict_head",
+            "head_val": {"var": "h"},
+            "tail_val": {"var": "t"}
+          },
+          {"var": "ctx"}
+        ],
+        "changed": {"var": "c"}
+      }
+    },
+    {
+      "id": "sibling.to_tail",
+      "description": "SIBLING: After processing head, move to tail (resets to traverse)",
+      "pattern": {
+        "mode": "deep_eval",
+        "phase": {"var": "_phase"},
+        "focus": {"var": "head_result"},
+        "context": [
+          {
+            "type": "dict_head",
+            "head_val": {"var": "_h"},
+            "tail_val": {"var": "t"}
+          },
+          {"var": "outer"}
+        ],
+        "changed": {"var": "c"}
+      },
+      "body": {
+        "mode": "deep_eval",
+        "phase": "traverse",
+        "focus": {"var": "t"},
+        "context": [
+          {
+            "type": "dict_tail",
+            "head_result": {"var": "head_result"}
+          },
+          {"var": "outer"}
+        ],
+        "changed": {"var": "c"}
+      }
+    },
+    {
+      "id": "ascend.to_context",
+      "description": "ASCEND to non-empty outer context (sets ascending to block re-descent)",
+      "pattern": {
+        "mode": "deep_eval",
+        "phase": {"var": "_phase"},
+        "focus": {"var": "tail_result"},
+        "context": [
+          {
+            "type": "dict_tail",
+            "head_result": {"var": "h_res"}
+          },
+          [{"var": "first_outer"}, {"var": "rest_outer"}]
+        ],
+        "changed": {"var": "c"}
+      },
+      "body": {
+        "mode": "deep_eval",
+        "phase": "ascending",
+        "focus": {"head": {"var": "h_res"}, "tail": {"var": "tail_result"}},
+        "context": [{"var": "first_outer"}, {"var": "rest_outer"}],
+        "changed": {"var": "c"}
+      }
+    },
+    {
+      "id": "ascend.to_root",
+      "description": "ASCEND to root (empty outer context) -> root_check phase",
+      "pattern": {
+        "mode": "deep_eval",
+        "phase": {"var": "_phase"},
+        "focus": {"var": "tail_result"},
+        "context": [
+          {
+            "type": "dict_tail",
+            "head_result": {"var": "h_res"}
+          },
+          []
+        ],
+        "changed": {"var": "c"}
+      },
+      "body": {
+        "mode": "deep_eval",
+        "phase": "root_check",
+        "focus": {"head": {"var": "h_res"}, "tail": {"var": "tail_result"}},
+        "context": [],
+        "changed": {"var": "c"}
+      }
+    },
+    {
+      "id": "wrap",
+      "description": "WRAP: Entry point - wraps any value in deep_eval state (must be last)",
+      "pattern": {"var": "input"},
+      "body": {
+        "mode": "deep_eval",
+        "phase": "traverse",
+        "focus": {"var": "input"},
+        "context": [],
+        "changed": false
+      }
+    }
+  ]
+}
