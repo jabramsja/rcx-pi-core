@@ -92,6 +92,46 @@ class TestEdgeCases:
         normalized = normalize_for_match({"": 1})
         assert classify_linked_list(normalized) == "dict"
 
+
+class TestKnownLimitations:
+    """Document known limitations in list/dict classification.
+
+    FUNDAMENTAL AMBIGUITY: A list of 2-element sublists where the first
+    element is a string normalizes identically to a dict. For example:
+    - [[s, x]] normalizes the same as {s: x}
+    - [['a', 1], ['b', 2]] normalizes the same as {'a': 1, 'b': 2}
+
+    We favor the dict interpretation because dicts with various values
+    are more common than lists of 2-element sublists with string first elements.
+    """
+
+    def test_ambiguous_structure_favors_dict(self):
+        """When ambiguous, we interpret as dict (more common case)."""
+        # This list looks like a dict after normalization
+        list_form = [['a', 1]]
+        dict_form = {'a': 1}
+
+        list_norm = normalize_for_match(list_form)
+        dict_norm = normalize_for_match(dict_form)
+
+        # They normalize to identical structures
+        assert list_norm == dict_norm
+
+        # Classification favors dict interpretation
+        assert classify_linked_list(list_norm) == "dict"
+        assert classify_linked_list(dict_norm) == "dict"
+
+    def test_unambiguous_list_classified_correctly(self):
+        """Lists that don't look like dicts are classified as lists."""
+        # 3-element sublist - not a kv-pair
+        assert classify_linked_list(normalize_for_match([[1, 2, 3]])) == "list"
+
+        # Non-string first element - not a kv-pair key
+        assert classify_linked_list(normalize_for_match([[1, 2]])) == "list"
+
+        # Single element (not a kv-pair)
+        assert classify_linked_list(normalize_for_match([1, 2, 3])) == "list"
+
     def test_primitive_is_list(self):
         """Primitive values are classified as list (not head/tail)."""
         assert classify_linked_list(42) == "list"
