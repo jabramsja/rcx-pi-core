@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
-from .eval_seed import step
+from .eval_seed import step, host_builtin
 from .kernel import get_step_budget
 from .match_mu import (
     normalize_for_match,
@@ -58,6 +58,7 @@ def clear_projection_cache() -> None:
 # =============================================================================
 
 
+@host_builtin("Linked list traversal using while - will become projection in L2")
 def lookup_binding(name: str, bindings: Mu) -> Mu:
     """
     Look up a variable name in linked list bindings.
@@ -84,6 +85,7 @@ def lookup_binding(name: str, bindings: Mu) -> Mu:
     raise KeyError(f"Unbound variable: {name}")
 
 
+@host_builtin("Marker interpretation using isinstance - will become projection in L2")
 def resolve_lookups(state: Mu, bindings: Mu) -> Mu:
     """
     Resolve any lookup markers in the state.
