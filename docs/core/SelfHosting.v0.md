@@ -1,6 +1,6 @@
 # Self-Hosting Specification v0
 
-Status: **PHASE 5 COMPLETE** - Algorithmic self-hosting achieved (match/subst as Mu projections)
+Status: **PHASE 6c COMPLETE** - Type tags, iterative normalization, classification as Mu projections
 
 **Important distinction**:
 - ✓ **Algorithmic self-hosting**: match/subst ALGORITHMS are expressed as Mu projections
@@ -343,6 +343,31 @@ This aligns with the Expert agent's estimate of 10-15 projections.
 - Critical test: `test_self_hosting_complete` - Python trace == Mu trace
 - Note: Operations (match/subst) are self-hosted; kernel loop is still Python for-loop (Phase 6+ goal)
 
+### Phase 6a: Lookup as Mu Projections ✅ COMPLETE
+- Added `subst.lookup.found` and `subst.lookup.next` projections to `seeds/subst.v1.json`
+- Lookup is now structural: pattern matching with non-linear vars (same name binds same value)
+- Removed 2 `@host_builtin` decorators from `subst_mu.py`
+- 37 subst parity tests pass with structural lookup
+
+### Phase 6b: Classification as Mu Projections ✅ COMPLETE
+- Created `seeds/classify.v1.json` with 6 projections for linked list classification
+- Created `rcx_pi/selfhost/classify_mu.py` for projection-based classification
+- `denormalize_from_match()` uses `classify_linked_list()` instead of `is_dict_linked_list()`
+- Classification distinguishes dict-encoding (all kv-pairs with string keys) from list-encoding
+- Removed 2 `@host_builtin` decorators from `match_mu.py`
+- 26 tests in `tests/test_classify_mu.py`
+
+### Phase 6c: Type Tags and Iterative Normalization ✅ COMPLETE
+- **Iterative normalization**: `normalize_for_match()` and `denormalize_from_match()` converted from recursive to iterative with explicit stack
+- Removed 2 `@host_recursion` decorators from `match_mu.py`
+- **Type tags** resolve list/dict ambiguity (previously `[["a", 1]]` and `{"a": 1}` normalized identically):
+  - Lists get `_type: "list"`, dicts get `_type: "dict"` at root node
+  - `VALID_TYPE_TAGS` whitelist + `validate_type_tag()` for security
+  - New projections: `match.typed.descend`, `subst.typed.{descend,sibling,ascend}`
+- `classify_linked_list()` fast-path for type-tagged structures
+- 24 new property-based fuzzer tests (`tests/test_type_tags_fuzzer.py`)
+- All 1022 self-hosting tests pass
+
 ## Resolved Questions
 
 | Question | Resolution |
@@ -414,14 +439,16 @@ Phase 5 complete:
   - `mu_type.py` - Mu type validation and guardrails
   - `kernel.py` - 4 kernel primitives
   - `eval_seed.py` - EVAL_SEED evaluator (match, substitute, step)
-  - `match_mu.py` - Pattern matching as Mu projections
+  - `match_mu.py` - Pattern matching as Mu projections + normalization
   - `subst_mu.py` - Substitution as Mu projections
   - `step_mu.py` - Self-hosting step (uses match_mu + subst_mu)
+  - `classify_mu.py` - Linked list classification as Mu projections
 - `rcx_pi/deep_eval.py` - Deep evaluation machinery
 - `seeds/` - Mu projection definitions:
   - `eval.v1.json` - EVAL_SEED traversal projections
-  - `match.v1.json` - Match projections (12 rules)
-  - `subst.v1.json` - Substitute projections (9 rules)
+  - `match.v1.json` - Match projections (13 rules, includes typed.descend)
+  - `subst.v1.json` - Substitute projections (13 rules, includes lookup + typed)
+  - `classify.v1.json` - Classification projections (6 rules)
 
 ## Next Steps
 
@@ -439,7 +466,13 @@ Phase 5 complete:
 9. [x] Compare traces: Python→EVAL vs EVAL→EVAL - identical for all test cases
 10. [x] **Self-hosting achieved!** 33 tests verify step_mu() == step()
 
-**Phase 6+ (Future):**
+**Phase 6 (Debt Reduction): ✅ COMPLETE**
+11. [x] Phase 6a: Lookup as Mu projections (removed 2 @host_builtin)
+12. [x] Phase 6b: Classification as Mu projections (removed 2 @host_builtin)
+13. [x] Phase 6c: Iterative normalization + type tags (removed 2 @host_recursion)
+14. [x] **Debt reduced!** 15 total (11 tracked + 3 AST_OK + 1 review), down from 23
+
+**Phase 7+ (Future):**
 - Self-host the kernel loop (projection selection as Mu projections)
 - Self-host iteration itself (recursion as structural transformation)
 - These are "scaffolding debt", not required for operational self-hosting
