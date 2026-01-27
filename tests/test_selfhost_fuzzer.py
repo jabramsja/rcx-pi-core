@@ -5,7 +5,7 @@ This test suite generates 1000+ random inputs to stress-test:
 - mu_type.py: is_mu, mu_equal, assert_mu, depth/width limits
 - kernel.py: compute_identity, detect_stall, record_trace
 - match_mu.py: normalize_for_match, denormalize_from_match, match_mu
-- subst_mu.py: subst_mu, lookup_binding
+- subst_mu.py: subst_mu (lookup is now structural via projections)
 
 Run with: pytest tests/test_selfhost_fuzzer.py --hypothesis-show-statistics -v
 
@@ -57,10 +57,7 @@ from rcx_pi.match_mu import (
     bindings_to_dict,
     dict_to_bindings,
 )
-from rcx_pi.subst_mu import (
-    subst_mu,
-    lookup_binding,
-)
+from rcx_pi.subst_mu import subst_mu
 from rcx_pi.eval_seed import NO_MATCH
 
 

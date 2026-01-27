@@ -10,10 +10,8 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from typing import Any
-
 from .mu_type import Mu, assert_mu, mu_equal
-from .eval_seed import NO_MATCH, _NoMatch, step, host_recursion, host_builtin
+from .eval_seed import NO_MATCH, _NoMatch, step
 from .kernel import get_step_budget
 from .seed_integrity import load_verified_seed, get_seeds_dir
 from .classify_mu import classify_linked_list
@@ -76,12 +74,12 @@ def clear_projection_cache() -> None:
 # =============================================================================
 
 
-@host_recursion("Recursive Mu traversal - will become projection in L2")
 def _check_empty_var_names(value: Mu, context: str) -> None:
     """
-    Check for empty variable names in a Mu structure.
+    Check for empty variable names in a Mu structure (iterative).
 
     This ensures parity with eval_seed.py which rejects empty var names.
+    Uses explicit stack instead of recursion (Phase 6d).
 
     Args:
         value: The Mu value to check.
@@ -90,17 +88,23 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
     Raises:
         ValueError: If an empty variable name is found.
     """
-    if isinstance(value, dict):
-        # Check if this is a variable site with empty name
-        if set(value.keys()) == {"var"} and isinstance(value.get("var"), str):
-            if value["var"] == "":
-                raise ValueError(f"Variable name cannot be empty in {context}: {{'var': ''}}")
-        # Recurse into dict values
-        for v in value.values():
-            _check_empty_var_names(v, context)
-    elif isinstance(value, list):
-        for item in value:
-            _check_empty_var_names(item, context)
+    # Iterative traversal with explicit stack
+    stack: list[Mu] = [value]
+
+    while stack:
+        current = stack.pop()
+
+        if isinstance(current, dict):  # isinstance at boundary is scaffolding
+            # Check if this is a variable site with empty name
+            keys = set(current.keys())  # AST_OK: key comparison
+            if keys == {"var"} and isinstance(current.get("var"), str):
+                if current["var"] == "":
+                    raise ValueError(f"Variable name cannot be empty in {context}: {{'var': ''}}")
+            # Add dict values to stack for processing
+            stack.extend(current.values())
+        elif isinstance(current, list):  # isinstance at boundary is scaffolding
+            # Add list items to stack for processing
+            stack.extend(current)
 
 
 # =============================================================================
@@ -108,7 +112,7 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
 # =============================================================================
 
 
-def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
+def normalize_for_match(value: Mu) -> Mu:
     """
     Normalize a Mu value for structural matching.
 
@@ -129,7 +133,6 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
 
     Args:
         value: The Mu value to normalize.
-        _seen: Deprecated parameter, kept for backward compatibility. Ignored.
 
     Raises:
         ValueError: If circular reference detected.
@@ -362,7 +365,7 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
-def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
+def denormalize_from_match(value: Mu) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
 
@@ -379,7 +382,6 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
 
     Args:
         value: The normalized Mu value to denormalize.
-        _seen: Deprecated parameter, kept for backward compatibility. Ignored.
 
     Raises:
         ValueError: If circular reference detected.
@@ -605,18 +607,21 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
 # =============================================================================
 
 
-@host_builtin("Linked list iteration using while - will become projection in L2")
 def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
     """
     Convert linked list bindings to Python dict.
 
     Linked format: {"name": "x", "value": 42, "rest": {...}} or null
     Dict format: {"x": 42, ...}
+
+    Note: This is a boundary conversion function (Python API scaffolding),
+    not semantic debt. The projections work on linked lists; this converts
+    the result for Python callers.
     """
     result: dict[str, Mu] = {}
     current = linked
     while current is not None:
-        if not isinstance(current, dict):
+        if not isinstance(current, dict):  # isinstance at boundary is scaffolding
             raise ValueError(f"Invalid bindings structure: {current}")
         name = current.get("name")
         value = current.get("value")
@@ -627,16 +632,19 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
     return result
 
 
-@host_builtin("Dict iteration using sorted() - will become projection in L2")
 def dict_to_bindings(d: dict[str, Mu]) -> Mu:
     """
     Convert Python dict to linked list bindings.
 
     Dict format: {"x": 42, ...}
     Linked format: {"name": "x", "value": 42, "rest": {...}} or null
+
+    Note: This is a boundary conversion function (Python API scaffolding),
+    not semantic debt. Python callers provide dicts; this converts to
+    linked list format for projections. sorted() ensures determinism.
     """
     result: Mu = None
-    # Use sorted keys for determinism
+    # Use sorted keys for determinism (scaffolding for Python API boundary)
     for name in sorted(d.keys(), reverse=True):
         result = {"name": name, "value": d[name], "rest": result}
     return result
