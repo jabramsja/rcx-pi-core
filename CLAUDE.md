@@ -2,12 +2,14 @@
 
 This file is read by Claude Code at session start. It contains project-specific instructions.
 
-## Current Status (2026-01-26)
+## Current Status (2026-01-27)
 
-**Phase 5 Complete:** Self-hosting achieved. Match/substitute algorithms are Mu projections.
-- Core self-hosting: `rcx_pi/selfhost/` (mu_type, kernel, eval_seed, match_mu, subst_mu, step_mu)
-- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`
-- 53 fuzzer tests, 10,000+ random examples verify parity
+**Phase 6c Complete:** Type tags and iterative normalization.
+- Core self-hosting: `rcx_pi/selfhost/` (mu_type, kernel, eval_seed, match_mu, subst_mu, step_mu, classify_mu)
+- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`
+- Type tags (`_type: "list"` / `_type: "dict"`) resolve list/dict ambiguity
+- 77 fuzzer tests, 30,500+ random examples verify parity
+- Debt: 15 total (11 tracked + 3 AST_OK + 1 review), threshold 15
 
 ## Pre-Push Checklist
 

@@ -2,7 +2,7 @@
 
 This document formalizes the distinction between **scaffolding debt** (acceptable infrastructure) and **semantic debt** (must become structural).
 
-## Status: DESIGN (v0)
+## Status: IMPLEMENTED (v0) - Updated 2026-01-27
 
 ---
 
@@ -71,60 +71,76 @@ Code that **interprets Mu** or **determines what operations mean**.
 
 | Marker | Count | Category | Location |
 |--------|-------|----------|----------|
-| `@host_recursion` | 6 | Semantic | eval_seed.py (match, substitute), match_mu.py (normalize, denormalize, check_empty_var) |
-| `@host_builtin` | 9 | Semantic | eval_seed.py, deep_eval.py, match_mu.py (classify, convert), subst_mu.py (lookup, resolve) |
+| `@host_recursion` | 4 | Semantic | eval_seed.py (match, substitute), match_mu.py (check_empty_var) |
+| `@host_builtin` | 5 | Semantic | eval_seed.py, deep_eval.py, match_mu.py (convert) |
 | `@host_mutation` | 2 | Scaffolding | eval_seed.py, deep_eval.py |
 | `@bootstrap_only` | 0 | Semantic | (deprecated marker) |
 
-**Total tracked:** 17 markers (ceiling: 17)
+**Total tracked:** 11 markers (ceiling: 15)
+
+**Phase 6 debt reduction:**
+- Phase 6a: Removed 2 `@host_builtin` (lookup as structural)
+- Phase 6b: Removed 2 `@host_builtin` (classification as structural)
+- Phase 6c: Removed 2 `@host_recursion` (iterative normalization)
 
 ### AST_OK Bypasses (ast_police.py)
 
 | Category | Count | Reason |
 |----------|-------|--------|
 | `# AST_OK: infra` | 24 | Infrastructure (CLI, coverage, tracing) |
-| `# AST_OK: bootstrap` | 5 | Semantic debt in selfhost modules |
+| `# AST_OK: bootstrap` | 3 | Semantic debt in selfhost modules |
+| `# AST_OK: key comparison` | 5 | Type tag key set comparisons (Phase 6c) |
+| `# AST_OK: constant whitelist` | 1 | VALID_TYPE_TAGS frozenset (Phase 6c) |
 
-**Total bypasses:** 29 instances across 11 files
+**Total bypasses:** 33 instances across 12 files
 
-The 5 `bootstrap` bypasses are semantic debt (line numbers may drift):
-- `match_mu.py` - 3 instances (denormalize comprehensions)
+The 3 `bootstrap` bypasses are semantic debt (line numbers may drift):
 - `eval_seed.py` - 2 instances (substitute comprehensions)
+- `match_mu.py` - 1 instance (remaining comprehension)
 
-### Now-Marked Semantic Debt (Previously Unmarked)
+The 6 Phase 6c `AST_OK` markers are scaffolding (key comparison for type tags).
 
-These functions are now marked with `@host_recursion` or `@host_builtin` decorators:
+### Remaining Semantic Debt
+
+Functions still marked with `@host_recursion` or `@host_builtin` decorators:
 
 | Function | Marker | File | Path to Structural |
 |----------|--------|------|-------------------|
-| `normalize_for_match()` | @host_recursion | match_mu.py | Normalization projection |
-| `denormalize_from_match()` | @host_recursion | match_mu.py | Denormalization projection |
 | `_check_empty_var_names()` | @host_recursion | match_mu.py | Validation projection |
-| `resolve_lookups()` | @host_builtin | subst_mu.py | Lookup projection |
-| `lookup_binding()` | @host_builtin | subst_mu.py | Lookup projection |
-| `is_dict_linked_list()` | @host_builtin | match_mu.py | Classification projection |
-| `is_kv_pair_linked()` | @host_builtin | match_mu.py | Classification projection |
 | `bindings_to_dict()` | @host_builtin | match_mu.py | Conversion projection |
 | `dict_to_bindings()` | @host_builtin | match_mu.py | Conversion projection |
+| `match()` | @host_recursion | eval_seed.py | (already structural in match_mu) |
+| `substitute()` | @host_recursion | eval_seed.py | (already structural in subst_mu) |
 
-**Note:** Cycle detection in normalize/denormalize totals ~28 lines across both functions. Making this structural requires encoding visited set as Mu state.
+### Eliminated Semantic Debt (Phase 6)
+
+| Function | Was | Now | Phase |
+|----------|-----|-----|-------|
+| `normalize_for_match()` | @host_recursion | Iterative | 6c |
+| `denormalize_from_match()` | @host_recursion | Iterative | 6c |
+| `resolve_lookups()` | @host_builtin | Mu projection | 6a |
+| `lookup_binding()` | @host_builtin | Mu projection | 6a |
+| `is_dict_linked_list()` | @host_builtin | `classify_linked_list()` | 6b |
+| `is_kv_pair_linked()` | @host_builtin | Mu projection | 6b |
+
+**Note:** Cycle detection remains in normalize/denormalize (~28 lines) but is now inline in iterative code, not recursive.
 
 ---
 
 ## Debt Ceiling Policy
 
 ### Current State
-- **Tracked markers:** 17/17 (at ceiling)
-- **AST_OK bootstrap:** 5 (semantic debt, counted separately)
-- **AST_OK infra:** 24 (scaffolding, acceptable)
-- **Total semantic debt:** 23 (17 tracked + 5 AST_OK + 1 review)
+- **Tracked markers:** 11/15 (below ceiling)
+- **AST_OK bootstrap:** 3 (semantic debt, counted separately)
+- **AST_OK infra/key comparison:** 30 (scaffolding, acceptable)
+- **Total semantic debt:** 15 (11 tracked + 3 AST_OK + 1 review)
 
 ### Policy
 
-1. **Marker ceiling is 17** - all semantic functions now marked with `@host_*` decorators
+1. **Marker ceiling is 15** - reduced from 23 after Phase 6a/6b/6c
 2. **Track AST_OK: bootstrap separately** - these are semantic debt
 3. **Use existing markers** - no new marker systems needed
-4. **Enhance debt_dashboard.sh** - add scaffolding vs semantic breakdown
+4. **Ratchet only tightens** - threshold can only decrease, never increase
 
 To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: bootstrap` for statements.
 
@@ -156,14 +172,18 @@ To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: boots
 
 To reach L2, all semantic debt must become projections. See `docs/core/SelfHosting.v0.md` for phasing.
 
-**Priority order (structural-proof verified):**
+**Completed (Phase 6):**
 
-1. **Lookup** (~66 lines) - Most straightforward, linked list traversal is native to RCX
-2. **Classification** (~52 lines) - Feasible with boolean→Mu encoding
-3. **Normalization** (~140 lines) - Main logic works, cycle detection adds complexity
-4. **Kernel loop** - L3 (meta-circular), requires structural-proof before promotion
+1. ✅ **Lookup** (~66 lines) - Phase 6a: `subst.lookup.found`, `subst.lookup.next` projections
+2. ✅ **Classification** (~52 lines) - Phase 6b: `seeds/classify.v1.json` (6 projections)
+3. ✅ **Normalization** (~140 lines) - Phase 6c: Iterative with explicit stack + type tags
 
-**Open problem:** Phase 6d (kernel loop as projection) requires projections that interpret projections. This is meta-circular and needs concrete structural proof before promotion to NEXT.
+**Remaining:**
+
+4. **Kernel loop** - Phase 7 (meta-circular), requires structural-proof before promotion
+5. **Conversion helpers** (~40 lines) - `bindings_to_dict()`, `dict_to_bindings()`
+
+**Open problem:** Phase 7 (kernel loop as projection) requires projections that interpret projections. This is meta-circular and needs concrete structural proof before promotion to NEXT.
 
 ---
 
@@ -188,13 +208,18 @@ The key distinction: scaffolding is **mechanism** (how to run), semantic is **in
 | Category | LOC | Status | Blocking |
 |----------|-----|--------|----------|
 | Scaffolding | ~150 | Acceptable | No |
-| Semantic (tracked) | ~340 | 17/17 ceiling | L2 |
-| Semantic (AST_OK) | 5 instances | Counted separately | L2 |
+| Semantic (tracked) | ~200 | 11/15 ceiling | L2 |
+| Semantic (AST_OK) | 3 instances | Counted separately | L2 |
 | Semantic (unmarked) | 0 | All marked | L2 |
 
-**Total semantic debt blocking L2:** ~340 lines (now fully tracked)
+**Total semantic debt blocking L2:** ~200 lines (reduced from ~340 after Phase 6)
 
-This debt is finite, bounded, and has a clear elimination path. Lookup and classification are structurally feasible now; normalization requires cycle detection strategy; kernel loop requires L3 design.
+**Phase 6 debt reduction:**
+- Phase 6a: Lookup as Mu projections (~66 lines eliminated)
+- Phase 6b: Classification as Mu projections (~52 lines eliminated)
+- Phase 6c: Iterative normalization (~28 lines eliminated)
+
+This debt is finite, bounded, and has a clear elimination path. The remaining semantic debt is primarily in `eval_seed.py` (match/substitute core) and `match_mu.py` (conversion helpers). Kernel loop (Phase 7) requires L3 design.
 
 **LOC estimates are approximate** - actual counts may vary with code formatting. Use `grep` commands in grounding tests for verification.
 
@@ -226,3 +251,21 @@ A dict with keys `head` and `tail` like `{"head": "x", "tail": "y"}` is NOT misc
 3. A dict where `tail` is not another head/tail node (or null) fails this check
 
 This means user data containing `head`/`tail` keys is safe - it will be normalized as a regular dict with those keys as kv-pairs, not confused with linked list structure.
+
+### Type Tags (Phase 6c)
+
+Type tags resolve the list/dict ambiguity where `[["a", 1]]` and `{"a": 1}` would otherwise normalize to identical head/tail structures.
+
+1. **How it works:** `normalize_for_match()` adds `_type: "list"` or `_type: "dict"` to root nodes:
+   - `{"a": 1}` → `{"_type": "dict", "head": ..., "tail": ...}`
+   - `[["a", 1]]` → `{"_type": "list", "head": ..., "tail": ...}`
+
+2. **Security:** Type tags use a whitelist (`VALID_TYPE_TAGS = {"list", "dict"}`) and `validate_type_tag()` rejects unknown values.
+
+3. **Projections:** New projections handle type-tagged structures:
+   - `match.typed.descend` - descend into typed linked list
+   - `subst.typed.{descend,sibling,ascend}` - substitution with type preservation
+
+4. **Classification fast-path:** `classify_linked_list()` checks `_type` directly for type-tagged structures, avoiding full structural scan.
+
+5. **Legacy support:** Structures without `_type` still work via projection-based classification.
