@@ -186,6 +186,15 @@ Items here are implemented and verified under current invariants. Changes requir
   - Added 18 tests for empty var name rejection (parity between match_mu and subst_mu)
   - DEBT_THRESHOLD: 14 → 11 (ratchet tightened: 8 tracked + 3 AST_OK)
   - All 1036 tests pass, all 6 agents APPROVE for Phase 7 readiness
+- Kernel Loop Fuzzer Tests (pre-Phase 7):
+  - Added 11 property-based tests for apply_mu, step_mu, run_mu
+  - TestApplyMuDeterminism: 3 tests (determinism, var pattern, literal match)
+  - TestApplyMuParity: 1 test (apply_mu == apply_projection)
+  - TestStepMuDeterminism: 3 tests (determinism, empty projections, stall idempotent)
+  - TestStepMuParity: 2 tests (step_mu == step, first-match-wins)
+  - TestRunMuDeterminism: 2 tests (determinism, immediate stall)
+  - 3000+ random examples stress-test kernel loop stability
+  - Closes fuzzer gap identified by agents before Phase 7
 
 ---
 

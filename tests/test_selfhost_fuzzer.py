@@ -1,15 +1,17 @@
 """
 Property-Based Fuzzing for RCX Self-Hosting Stack using Hypothesis.
 
-This test suite generates 1000+ random inputs to stress-test:
+This test suite generates 3000+ random inputs to stress-test:
 - mu_type.py: is_mu, mu_equal, assert_mu, depth/width limits
 - kernel.py: compute_identity, detect_stall, record_trace
 - match_mu.py: normalize_for_match, denormalize_from_match, match_mu
 - subst_mu.py: subst_mu (lookup is now structural via projections)
+- step_mu.py: apply_mu, step_mu, run_mu (kernel loop)
 
 Run with: pytest tests/test_selfhost_fuzzer.py --hypothesis-show-statistics -v
 
 Phase 4d: Property-based testing to catch edge cases unit tests miss.
+Phase 6d+: Kernel loop fuzzing (apply_mu, step_mu, run_mu) for Phase 7 readiness.
 
 Requires: pip install hypothesis
 
@@ -58,7 +60,8 @@ from rcx_pi.match_mu import (
     dict_to_bindings,
 )
 from rcx_pi.subst_mu import subst_mu
-from rcx_pi.eval_seed import NO_MATCH
+from rcx_pi.step_mu import apply_mu, step_mu, run_mu
+from rcx_pi.eval_seed import NO_MATCH, apply_projection, step
 
 
 # =============================================================================
@@ -1489,3 +1492,283 @@ class TestNearLimitStress:
             deep = {"n": deep}
 
         assert not is_mu(deep), f"Depth {MAX_MU_DEPTH + 1} accepted"
+
+
+# =============================================================================
+# Apply Mu Fuzzing (Phase 6d+)
+# =============================================================================
+
+
+class TestApplyMuDeterminism:
+    """Property-based tests for apply_mu determinism."""
+
+    @given(mu_patterns(max_depth=3), mu_values(max_depth=3))
+    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_apply_mu_deterministic(self, pattern, value):
+        """apply_mu must be deterministic - same inputs give same outputs."""
+        # Skip empty var names (would raise ValueError)
+        if contains_empty_var_name(pattern) or contains_empty_var_name(value):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(pattern) or contains_empty_collection(value):
+            return
+
+        projection = {"pattern": pattern, "body": pattern}  # Identity-ish projection
+
+        # Apply twice
+        try:
+            result1 = apply_mu(projection, value)
+            result2 = apply_mu(projection, value)
+
+            if result1 is NO_MATCH:
+                assert result2 is NO_MATCH, "Determinism failure: first NO_MATCH, second matched"
+            else:
+                assert mu_equal(result1, result2), f"Determinism failure: {result1} != {result2}"
+        except (ValueError, KeyError):
+            pass  # Expected for some inputs (unbound vars, empty var names)
+
+    @given(mu_values(max_depth=3))
+    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_apply_mu_var_pattern_always_matches(self, value):
+        """A variable pattern should always match any value."""
+        if contains_empty_var_name(value):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(value):
+            return
+
+        projection = {"pattern": {"var": "x"}, "body": {"var": "x"}}
+
+        result = apply_mu(projection, value)
+
+        # Variable pattern always matches, body is identity
+        assert result is not NO_MATCH, "Variable pattern should always match"
+        assert mu_equal(result, value), f"Identity substitution failed: {result} != {value}"
+
+    @given(mu_values(max_depth=3), mu_values(max_depth=3))
+    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_apply_mu_literal_match_exact(self, value1, value2):
+        """Literal pattern only matches exact value."""
+        if contains_empty_var_name(value1) or contains_empty_var_name(value2):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(value1) or contains_empty_collection(value2):
+            return
+
+        projection = {"pattern": value1, "body": "matched"}
+
+        result = apply_mu(projection, value2)
+
+        if mu_equal(value1, value2):
+            assert result == "matched", "Equal values should match"
+        else:
+            assert result is NO_MATCH, "Different values should not match"
+
+
+class TestApplyMuParity:
+    """Property-based tests for apply_mu parity with apply_projection."""
+
+    @given(mu_patterns(max_depth=2), mu_values(max_depth=3))
+    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_apply_mu_parity_with_apply_projection(self, pattern, value):
+        """apply_mu produces same result as apply_projection."""
+        if contains_empty_var_name(pattern) or contains_empty_var_name(value):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(pattern) or contains_empty_collection(value):
+            return
+
+        projection = {"pattern": pattern, "body": pattern}
+
+        try:
+            py_result = apply_projection(projection, value)
+            mu_result = apply_mu(projection, value)
+
+            if py_result is NO_MATCH:
+                assert mu_result is NO_MATCH, (
+                    f"Parity failure: Python NO_MATCH, Mu matched\n"
+                    f"  pattern: {pattern}\n"
+                    f"  value: {value}"
+                )
+            elif mu_result is NO_MATCH:
+                assert False, (
+                    f"Parity failure: Python matched, Mu NO_MATCH\n"
+                    f"  pattern: {pattern}\n"
+                    f"  value: {value}"
+                )
+            else:
+                assert mu_equal(py_result, mu_result), (
+                    f"Parity failure:\n"
+                    f"  pattern: {pattern}\n"
+                    f"  value: {value}\n"
+                    f"  Python: {py_result}\n"
+                    f"  Mu: {mu_result}"
+                )
+        except (ValueError, KeyError):
+            pass  # Expected for some inputs
+
+
+# =============================================================================
+# Step Mu Fuzzing (Phase 6d+)
+# =============================================================================
+
+
+class TestStepMuDeterminism:
+    """Property-based tests for step_mu determinism."""
+
+    @given(st.lists(mu_patterns(max_depth=2), max_size=5), mu_values(max_depth=3))
+    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_step_mu_deterministic(self, patterns, value):
+        """step_mu must be deterministic."""
+        if contains_empty_var_name(value):
+            return
+        if any(contains_empty_var_name(p) for p in patterns):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(value):
+            return
+        if any(contains_empty_collection(p) for p in patterns):
+            return
+
+        # Create projections from patterns (identity projections)
+        projections = [{"pattern": p, "body": p} for p in patterns]
+
+        try:
+            result1 = step_mu(projections, value)
+            result2 = step_mu(projections, value)
+
+            assert mu_equal(result1, result2), f"Determinism failure: {result1} != {result2}"
+        except (ValueError, KeyError):
+            pass  # Expected for some inputs
+
+    @given(mu_values(max_depth=3))
+    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_step_mu_empty_projections_stalls(self, value):
+        """Empty projection list always stalls (returns input unchanged)."""
+        if contains_empty_var_name(value):
+            return
+
+        result = step_mu([], value)
+
+        assert mu_equal(result, value), "Empty projections should stall (return input)"
+
+    @given(st.lists(mu_patterns(max_depth=2), max_size=5), mu_values(max_depth=3))
+    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_step_mu_stall_idempotent(self, patterns, value):
+        """If step_mu stalls, repeating gives same result."""
+        if contains_empty_var_name(value):
+            return
+        if any(contains_empty_var_name(p) for p in patterns):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(value):
+            return
+        if any(contains_empty_collection(p) for p in patterns):
+            return
+
+        projections = [{"pattern": p, "body": p} for p in patterns]
+
+        try:
+            result1 = step_mu(projections, value)
+
+            # If stalled (no change), repeat should stall again
+            if mu_equal(result1, value):
+                result2 = step_mu(projections, result1)
+                assert mu_equal(result2, result1), "Stall should be stable"
+        except (ValueError, KeyError):
+            pass
+
+
+class TestStepMuParity:
+    """Property-based tests for step_mu parity with step."""
+
+    @given(st.lists(mu_patterns(max_depth=2), max_size=3), mu_values(max_depth=3))
+    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_step_mu_parity_with_step(self, patterns, value):
+        """step_mu produces same result as step."""
+        if contains_empty_var_name(value):
+            return
+        if any(contains_empty_var_name(p) for p in patterns):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(value):
+            return
+        if any(contains_empty_collection(p) for p in patterns):
+            return
+
+        projections = [{"pattern": p, "body": p} for p in patterns]
+
+        try:
+            py_result = step(projections, value)
+            mu_result = step_mu(projections, value)
+
+            assert mu_equal(py_result, mu_result), (
+                f"Parity failure:\n"
+                f"  projections: {projections}\n"
+                f"  value: {value}\n"
+                f"  Python: {py_result}\n"
+                f"  Mu: {mu_result}"
+            )
+        except (ValueError, KeyError):
+            pass  # Expected for some inputs
+
+    @given(mu_values(max_depth=3))
+    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_step_mu_first_match_wins(self, value):
+        """step_mu returns result of first matching projection."""
+        if contains_empty_var_name(value):
+            return
+
+        # Two projections that both match: variable pattern
+        # First returns "first", second returns "second"
+        projections = [
+            {"pattern": {"var": "x"}, "body": "first"},
+            {"pattern": {"var": "y"}, "body": "second"},
+        ]
+
+        result = step_mu(projections, value)
+
+        assert result == "first", "First matching projection should win"
+
+
+class TestRunMuDeterminism:
+    """Property-based tests for run_mu (kernel loop) determinism."""
+
+    @given(st.lists(mu_patterns(max_depth=2), max_size=3), mu_values(max_depth=3))
+    @settings(max_examples=300, deadline=10000, suppress_health_check=[HealthCheck.too_slow])
+    def test_run_mu_deterministic(self, patterns, value):
+        """run_mu must be deterministic."""
+        if contains_empty_var_name(value):
+            return
+        if any(contains_empty_var_name(p) for p in patterns):
+            return
+        # Skip empty collections (normalize to None, known design decision)
+        if contains_empty_collection(value):
+            return
+        if any(contains_empty_collection(p) for p in patterns):
+            return
+
+        projections = [{"pattern": p, "body": p} for p in patterns]
+
+        try:
+            result1, trace1, stall1 = run_mu(projections, value, max_steps=10)
+            result2, trace2, stall2 = run_mu(projections, value, max_steps=10)
+
+            assert mu_equal(result1, result2), "run_mu result not deterministic"
+            assert stall1 == stall2, "run_mu stall status not deterministic"
+            assert len(trace1) == len(trace2), "run_mu trace length not deterministic"
+        except (ValueError, KeyError):
+            pass
+
+    @given(mu_values(max_depth=3))
+    @settings(max_examples=200, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    def test_run_mu_empty_projections_immediate_stall(self, value):
+        """Empty projection list causes immediate stall."""
+        if contains_empty_var_name(value):
+            return
+
+        result, trace, is_stall = run_mu([], value, max_steps=10)
+
+        assert is_stall, "Empty projections should cause stall"
+        assert mu_equal(result, value), "Stall should return original value"
+        assert len(trace) == 2, "Should have initial step and stall step"
