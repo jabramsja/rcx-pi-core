@@ -127,13 +127,20 @@ The 5 `bootstrap` bypasses are semantic debt (line numbers may drift):
 
 To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: bootstrap` for statements.
 
-### Enforcement Gap
+### Enforcement Status
 
-**Current limitation:** This document defines policy, but `debt_dashboard.sh` only counts `@host_*` markers. AST_OK bypasses and unmarked debt are not enforced by tooling. True semantic debt is ~340 lines, not 7/9.
+**Implemented (PR #155):**
+- `debt_dashboard.sh` now counts AST_OK: bootstrap bypasses separately from scaffolding
+- `audit_semantic_purity.sh` includes AST_OK: bootstrap in the debt threshold (DEBT_THRESHOLD=14)
+- Dashboard shows: Tracked markers + AST_OK bootstrap = Total Semantic Debt
 
-**To close this gap:**
-- Add AST_OK: bootstrap counting to debt_dashboard.sh
-- Add CI check that fails if unmarked semantic functions are added
+**Remaining gaps:**
+- ~289 lines of unmarked semantic debt (normalize, denormalize, classify functions)
+- No CI check that fails if unmarked semantic functions are added
+- Grep pattern overcounts by ~1 (docstring examples counted as decorators)
+
+**To fully close the gap:**
+- Mark remaining semantic debt with `@host_*` decorators or `# AST_OK: bootstrap`
 - Consider unified tracking (all semantic debt uses @host_* decorators)
 
 ---
