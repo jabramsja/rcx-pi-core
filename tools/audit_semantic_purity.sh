@@ -808,8 +808,8 @@ echo "== 19. Host Debt: Threshold Check =="
 #   - subst_mu.py: +2 @host_builtin
 #   - Total: 17 tracked + 5 AST_OK + 1 review = 23
 # - After L2: 0 (semantic debt eliminated)
-DEBT_THRESHOLD=15  # <-- RATCHET: Lower this as debt is paid, never raise it
-# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c)
+DEBT_THRESHOLD=14  # <-- RATCHET: Lower this as debt is paid, never raise it
+# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163 dead code removal)
 # History: 23 → 21 (Phase 6a: lookup as Mu projections, removed 2 @host_builtin)
 #          21 → 19 (Phase 6b: classification as Mu projections, removed 2 @host_builtin)
 
