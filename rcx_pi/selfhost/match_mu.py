@@ -10,8 +10,6 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from typing import Any
-
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import NO_MATCH, _NoMatch, step
 from .kernel import get_step_budget
@@ -114,7 +112,7 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
 # =============================================================================
 
 
-def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
+def normalize_for_match(value: Mu) -> Mu:
     """
     Normalize a Mu value for structural matching.
 
@@ -135,7 +133,6 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
 
     Args:
         value: The Mu value to normalize.
-        _seen: Deprecated parameter, kept for backward compatibility. Ignored.
 
     Raises:
         ValueError: If circular reference detected.
@@ -368,7 +365,7 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
-def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
+def denormalize_from_match(value: Mu) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
 
@@ -385,7 +382,6 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
 
     Args:
         value: The normalized Mu value to denormalize.
-        _seen: Deprecated parameter, kept for backward compatibility. Ignored.
 
     Raises:
         ValueError: If circular reference detected.

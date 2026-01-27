@@ -338,6 +338,25 @@ class TestSubstEmptyVarNameRejection:
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
             subst_mu(body, {"x": 1})
 
+    def test_subst_mu_rejects_empty_var_in_nested_list(self):
+        """subst_mu rejects empty var in nested list (parity with match_mu tests)."""
+        body = [[[[{"var": ""}]]]]
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu(body, {"x": 1})
+
+    def test_subst_mu_rejects_empty_var_in_mixed_structure(self):
+        """subst_mu rejects empty var in mixed list/dict structure."""
+        body = {"items": [{"key": {"var": ""}}]}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu(body, {"x": 1})
+
+    def test_subst_mu_iterative_handles_wide_structure(self):
+        """Iterative check handles wide structures (many keys)."""
+        body = {f"key_{i}": i for i in range(50)}
+        body["bad_key"] = {"var": ""}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu(body, {"x": 1})
+
     def test_subst_mu_accepts_valid_var_names(self):
         """subst_mu accepts non-empty variable names."""
         # Single char

@@ -10,8 +10,6 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from typing import Any
-
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import step
 from .kernel import get_step_budget
