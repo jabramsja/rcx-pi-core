@@ -176,6 +176,16 @@ Items here are implemented and verified under current invariants. Changes requir
   - Updated "Phase 3" comments to "BOOTSTRAP" in eval_seed.py
   - DEBT_THRESHOLD: 15 → 14 (ratchet tightened after dead code removal)
   - All 1038 tests pass, 53 fuzzer tests pass
+- Phase 6d: Iterative Validation + Code Cleanup (PR #165):
+  - `_check_empty_var_names()` converted to iterative with explicit stack
+  - Reclassified `bindings_to_dict`/`dict_to_bindings` as boundary scaffolding
+  - Deleted `lookup_binding()` dead code from subst_mu.py (~25 lines)
+  - Removed unused `bindings` parameter from `run_subst_projections()`
+  - Removed unused `from typing import Any` imports from match_mu.py, subst_mu.py
+  - Removed deprecated `_seen` parameter from `normalize_for_match()`, `denormalize_from_match()`
+  - Added 18 tests for empty var name rejection (parity between match_mu and subst_mu)
+  - DEBT_THRESHOLD: 14 → 11 (ratchet tightened: 8 tracked + 3 AST_OK)
+  - All 1036 tests pass, all 6 agents APPROVE for Phase 7 readiness
 
 ---
 
@@ -207,7 +217,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 Note: Phase 7 requires meta-circular design. The kernel loop (for-loop selecting projections)
 is the remaining major scaffolding debt.
 
-**Debt status**: 14 total (11 tracked + 3 AST_OK bootstrap), threshold 14 (at ceiling). Next target: 12.
+**Debt status**: 11 total (8 tracked + 3 AST_OK bootstrap), threshold 11 (at ceiling). Next target: 9.
 
 ---
 

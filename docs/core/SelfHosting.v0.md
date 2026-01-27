@@ -1,6 +1,6 @@
 # Self-Hosting Specification v0
 
-Status: **PHASE 6c COMPLETE** - Type tags, iterative normalization, classification as Mu projections
+Status: **PHASE 6d COMPLETE** - Iterative validation, code cleanup, debt reduced to 11
 
 **Important distinction**:
 - ✓ **Algorithmic self-hosting**: match/subst ALGORITHMS are expressed as Mu projections

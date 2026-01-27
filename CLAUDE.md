@@ -4,12 +4,14 @@ This file is read by Claude Code at session start. It contains project-specific 
 
 ## Current Status (2026-01-27)
 
-**Phase 6c Complete:** Type tags and iterative normalization.
+**Phase 6d Complete:** Iterative validation and code cleanup.
 - Core self-hosting: `rcx_pi/selfhost/` (mu_type, kernel, eval_seed, match_mu, subst_mu, step_mu, classify_mu)
 - Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`
-- Type tags (`_type: "list"` / `_type: "dict"`) resolve list/dict ambiguity
+- `_check_empty_var_names()` now iterative with explicit stack
+- Removed deprecated `_seen` params and unused `Any` imports
 - 53 fuzzer tests, 10,000+ random examples verify parity
-- Debt: 14 total (11 tracked + 3 AST_OK), threshold 14 (at ceiling)
+- Debt: 11 total (8 tracked + 3 AST_OK), threshold 11 (at ceiling)
+- All 6 agents APPROVE stack for Phase 7 readiness
 
 ## Pre-Push Checklist
 
