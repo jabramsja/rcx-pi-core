@@ -127,10 +127,20 @@ def mu_patterns(draw, max_depth=3):
 
 
 def extract_var_names(pattern) -> set:
-    """Extract all variable names from a pattern."""
+    """Extract all variable names from a pattern.
+
+    Only extracts var sites where the name is a string (valid variable names).
+    Nested var sites like {"var": {"var": "x"}} are recursively explored.
+    """
     if isinstance(pattern, dict):
         if set(pattern.keys()) == {"var"}:
-            return {pattern["var"]}
+            var_val = pattern["var"]
+            # Only string names are valid variables; recurse into nested structures
+            if isinstance(var_val, str):
+                return {var_val}
+            else:
+                # Recurse into nested structure (e.g., {"var": {"var": "x"}})
+                return extract_var_names(var_val)
         names = set()
         for v in pattern.values():
             names |= extract_var_names(v)

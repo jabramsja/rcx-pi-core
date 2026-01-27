@@ -160,14 +160,17 @@ Items here are implemented and verified under current invariants. Changes requir
   - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
   - `resolve_lookups()` Python function deprecated (kept for backward compat)
   - 37 subst parity tests pass with structural lookup
-- Phase 6c: Normalization as Iterative:
+- Phase 6c: Normalization as Iterative + Type Tags:
   - `normalize_for_match()`: recursive → iterative with explicit stack
   - `denormalize_from_match()`: recursive → iterative with explicit stack
   - Removed 2 `@host_recursion` decorators from match_mu.py
   - Removed 2 `# AST_OK: bootstrap` comments (recursive comprehensions eliminated)
   - isinstance() at Python↔Mu boundary is scaffolding, not semantic debt
-  - DEBT_THRESHOLD: 19 → 14 (ratchet tightened)
-  - All 192 self-hosting tests pass
+  - Type tags (`_type: "list"` or `_type: "dict"`) resolve list/dict ambiguity
+  - New projections: `match.typed.descend`, `subst.typed.{descend,sibling,ascend}`
+  - Security: `VALID_TYPE_TAGS` whitelist + `validate_type_tag()` function
+  - 24 new property-based fuzzer tests (`test_type_tags_fuzzer.py`)
+  - All 1020 self-hosting tests pass
 
 ---
 

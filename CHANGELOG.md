@@ -66,14 +66,20 @@ All notable changes to RCX are documented in this file.
   - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
   - 26 tests in `tests/test_classify_mu.py`
 
-- **Phase 6c: Normalization as Iterative**
+- **Phase 6c: Normalization as Iterative + Type Tags**
   - `normalize_for_match()`: converted from recursive to iterative using explicit stack
   - `denormalize_from_match()`: converted from recursive to iterative using explicit stack
   - Removed 2 `@host_recursion` decorators from match_mu.py
   - Removed 2 `# AST_OK: bootstrap` comments (recursive comprehensions eliminated)
   - isinstance() checks at Python↔Mu boundary remain as scaffolding (not semantic debt)
-  - DEBT_THRESHOLD: 19 → 15 (ratchet tightened, 4 items removed)
-  - All 192 self-hosting tests pass
+  - **Type Tags** resolve list/dict ambiguity (previously `[["a", 1]]` and `{"a": 1}` normalized identically):
+    - Lists get `_type: "list"`, dicts get `_type: "dict"` at root node
+    - `VALID_TYPE_TAGS` whitelist + `validate_type_tag()` for security
+    - New projections: `match.typed.descend`, `subst.typed.{descend,sibling,ascend}`
+    - `classify_linked_list()` fast-path for type-tagged structures
+  - 24 new property-based fuzzer tests (`tests/test_type_tags_fuzzer.py`)
+  - All 1020 self-hosting tests pass
+  - Agent review: verifier=APPROVE, adversary=HARDENED, structural-proof=PROVEN
 
 ## 2026-01-26
 

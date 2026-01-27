@@ -24,9 +24,10 @@ from typing import Any
 # SHA256 checksums of canonical seed files.
 # Update these when seeds are intentionally modified.
 SEED_CHECKSUMS: dict[str, str] = {
-    "match.v1.json": "62068f6f87408ffd2613b4ddae71cc30dcc4c22961ae591a5023d5b9068be27e",
-    # Updated v1.1.0: added subst.lookup.found and subst.lookup.next (Phase 6a)
-    "subst.v1.json": "e373777839d944de72a564863bc624647dc0c0de49715b7c92f37a3fb7ef9802",
+    # Updated v1.1.0: added match.typed.descend for type-tagged head/tail structures
+    "match.v1.json": "e60a3f3184038147f6a065d025d8458e7a161acc8d9dde1ce6719771500bca8c",
+    # Updated v1.2.0: added subst.typed.* projections for type-tagged structures (Phase 6c)
+    "subst.v1.json": "ff2acb1450b30a078a7cd2bdd42443b07e28075569a8b095f65165e23eb69893",
     # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
     "classify.v1.json": "3216e28b2f28b8f9d2dfd2693dfecad2c2ba94783151bb4b8f920d29aa8e5cf1",
 }
@@ -39,6 +40,7 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "match.sibling",
         "match.equal",
         "match.var",
+        "match.typed.descend",  # Type-tagged head/tail (Phase 6c)
         "match.dict.descend",
         "match.wrap",  # Must be last (catch-all)
     ],
@@ -49,6 +51,9 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "subst.var",
         "subst.lookup.found",   # Phase 6a: structural lookup
         "subst.lookup.next",    # Phase 6a: structural lookup
+        "subst.typed.descend",  # Phase 6c: type-tagged structures
+        "subst.typed.sibling",  # Phase 6c: type-tagged structures
+        "subst.typed.ascend",   # Phase 6c: type-tagged structures
         "subst.descend",
         "subst.primitive",
         "subst.wrap",  # Must be last (catch-all)

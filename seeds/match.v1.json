@@ -94,6 +94,31 @@
       }
     },
     {
+      "id": "match.typed.descend",
+      "description": "Descend into type-tagged head/tail structure (requires matching _type)",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"_type": {"var": "type"}, "head": {"var": "ph"}, "tail": {"var": "pt"}},
+        "value_focus": {"_type": {"var": "type"}, "head": {"var": "vh"}, "tail": {"var": "vt"}},
+        "bindings": {"var": "b"},
+        "stack": {"var": "s"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": {"var": "ph"},
+        "value_focus": {"var": "vh"},
+        "bindings": {"var": "b"},
+        "stack": {
+          "head": {
+            "type": "pair",
+            "pattern_rest": {"var": "pt"},
+            "value_rest": {"var": "vt"}
+          },
+          "tail": {"var": "s"}
+        }
+      }
+    },
+    {
       "id": "match.dict.descend",
       "description": "Descend into head/tail structure (both pattern and value)",
       "pattern": {

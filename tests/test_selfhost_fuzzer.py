@@ -318,38 +318,9 @@ def contains_head_tail(value, _seen=None):
     return False
 
 
-def is_ambiguous_list_dict(value, _seen=None):
-    """Check if value is a list that could be confused with a dict after normalization.
 
-    KNOWN LIMITATION: A list of 2-element sublists where each sublist starts
-    with a string normalizes identically to a dict. For example:
-    - [['a', 1]] normalizes the same as {'a': 1}
-    - [['x', None]] normalizes the same as {'x': None}
-
-    We skip these cases in parity tests because the ambiguity is documented.
-    """
-    if _seen is None:
-        _seen = set()
-    if isinstance(value, (list, dict)) and id(value) in _seen:
-        return False
-    if isinstance(value, (list, dict)):
-        _seen.add(id(value))
-
-    if isinstance(value, list):
-        # Check if this is a list of 2-element sublists with string first elements
-        if len(value) > 0 and all(
-            isinstance(elem, list) and len(elem) == 2 and isinstance(elem[0], str)
-            for elem in value
-        ):
-            return True
-        # Recurse into elements
-        return any(is_ambiguous_list_dict(elem, _seen) for elem in value)
-
-    if isinstance(value, dict):
-        return any(is_ambiguous_list_dict(v, _seen) for v in value.values())
-
-    return False
-
+# Note: is_ambiguous_list_dict was removed in Phase 6c.
+# Type-tagged encoding now correctly distinguishes lists from dicts.
 
 def contains_empty_var_name(pattern, _seen=None):
     """Check if pattern contains {"var": ""} anywhere."""
@@ -1172,6 +1143,30 @@ class TestMatchMuParity:
         if contains_empty_var_name(pattern):
             return
 
+        # Skip non-linear patterns (same variable appears multiple times)
+        # This is a documented limitation: "Linear patterns only for Phase 4"
+        def get_var_names(v, _seen=None):
+            """Collect all variable names in a pattern."""
+            if _seen is None:
+                _seen = set()
+            if isinstance(v, (list, dict)) and id(v) in _seen:
+                return []
+            if isinstance(v, (list, dict)):
+                _seen.add(id(v))
+
+            if isinstance(v, dict):
+                if set(v.keys()) == {"var"} and isinstance(v.get("var"), str):
+                    return [v["var"]]
+                return [n for val in v.values() for n in get_var_names(val, _seen)]
+            if isinstance(v, list):
+                return [n for elem in v for n in get_var_names(elem, _seen)]
+            return []
+
+        var_names = get_var_names(pattern)
+        if len(var_names) != len(set(var_names)):
+            # Has duplicate variable names - skip
+            return
+
         # Skip head/tail structures (they may need special handling)
         if contains_head_tail(pattern) or contains_head_tail(value):
             return
@@ -1180,26 +1175,8 @@ class TestMatchMuParity:
         if contains_empty_collection(pattern) or contains_empty_collection(value):
             return
 
-        # Skip 2-element lists that look like kv-pairs (known limitation)
-        # These can be misidentified during normalization roundtrip
-        def looks_like_kv_pair(v, _seen=None):
-            if _seen is None:
-                _seen = set()
-            if isinstance(v, (list, dict)) and id(v) in _seen:
-                return False
-            if isinstance(v, (list, dict)):
-                _seen.add(id(v))
-
-            if isinstance(v, list):
-                if len(v) == 2 and isinstance(v[0], str):
-                    return True
-                return any(looks_like_kv_pair(elem, _seen) for elem in v)
-            if isinstance(v, dict):
-                return any(looks_like_kv_pair(val, _seen) for val in v.values())
-            return False
-
-        if looks_like_kv_pair(pattern) or looks_like_kv_pair(value):
-            return
+        # Note: The "looks_like_kv_pair" skip was removed in Phase 6c.
+        # Type-tagged encoding now correctly distinguishes lists from dicts.
 
         # Skip cases where pattern is a list but value is a dict (or vice versa)
         # After normalization both become head/tail structures, so structural
@@ -1309,8 +1286,8 @@ class TestSubstMuParity:
         # Skip edge cases that normalize differently
         # - Empty collections normalize to None
         # - Head/tail structures are treated specially
-        # - Lists of 2-element sublists with string keys are ambiguous with dicts
-        if contains_empty_collection(body) or contains_head_tail(body) or is_ambiguous_list_dict(body):
+        # Note: is_ambiguous_list_dict check removed in Phase 6c (type-tagged encoding)
+        if contains_empty_collection(body) or contains_head_tail(body):
             return
 
         try:

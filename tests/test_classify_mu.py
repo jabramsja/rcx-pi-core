@@ -93,32 +93,36 @@ class TestEdgeCases:
         assert classify_linked_list(normalized) == "dict"
 
 
-class TestKnownLimitations:
-    """Document known limitations in list/dict classification.
+class TestTypeTaggedStructures:
+    """Test that type tags resolve list/dict ambiguity (Phase 6c).
 
-    FUNDAMENTAL AMBIGUITY: A list of 2-element sublists where the first
-    element is a string normalizes identically to a dict. For example:
-    - [[s, x]] normalizes the same as {s: x}
-    - [['a', 1], ['b', 2]] normalizes the same as {'a': 1, 'b': 2}
+    PREVIOUSLY: A list of 2-element sublists where the first element is a
+    string normalized identically to a dict. For example:
+    - [[s, x]] normalized the same as {s: x}
 
-    We favor the dict interpretation because dicts with various values
-    are more common than lists of 2-element sublists with string first elements.
+    NOW (Phase 6c): Type tags distinguish lists from dicts:
+    - [[s, x]] normalizes to {"_type": "list", ...}
+    - {s: x} normalizes to {"_type": "dict", ...}
     """
 
-    def test_ambiguous_structure_favors_dict(self):
-        """When ambiguous, we interpret as dict (more common case)."""
-        # This list looks like a dict after normalization
+    def test_type_tags_resolve_ambiguity(self):
+        """Type tags distinguish previously-ambiguous structures."""
+        # This list would have been ambiguous with a dict
         list_form = [['a', 1]]
         dict_form = {'a': 1}
 
         list_norm = normalize_for_match(list_form)
         dict_norm = normalize_for_match(dict_form)
 
-        # They normalize to identical structures
-        assert list_norm == dict_norm
+        # With type tags, they are now DIFFERENT
+        assert list_norm != dict_norm
 
-        # Classification favors dict interpretation
-        assert classify_linked_list(list_norm) == "dict"
+        # Type tags correctly identify each
+        assert list_norm.get("_type") == "list"
+        assert dict_norm.get("_type") == "dict"
+
+        # Classification uses type tags
+        assert classify_linked_list(list_norm) == "list"
         assert classify_linked_list(dict_norm) == "dict"
 
     def test_unambiguous_list_classified_correctly(self):

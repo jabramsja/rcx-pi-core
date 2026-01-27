@@ -213,6 +213,7 @@ class TestProjectionIdValidation:
                 {"id": "match.sibling", "pattern": {}, "body": {}},
                 {"id": "match.equal", "pattern": {}, "body": {}},
                 {"id": "match.var", "pattern": {}, "body": {}},
+                {"id": "match.typed.descend", "pattern": {}, "body": {}},  # Phase 6c
                 {"id": "match.dict.descend", "pattern": {}, "body": {}},
             ]
         }
@@ -312,8 +313,8 @@ class TestIntegrationWithLoaders:
         clear_projection_cache()
         projections = load_match_projections()
 
-        # Should have loaded successfully
-        assert len(projections) == 6
+        # Should have loaded successfully (7 projections after Phase 6c type-tagged addition)
+        assert len(projections) == 7
         assert projections[0]["id"] == "match.done"
         assert projections[-1]["id"] == "match.wrap"
 
@@ -324,8 +325,8 @@ class TestIntegrationWithLoaders:
         clear_projection_cache()
         projections = load_subst_projections()
 
-        # Should have loaded successfully (9 projections after Phase 6a lookup additions)
-        assert len(projections) == 9
+        # Should have loaded successfully (12 projections after Phase 6c type-tagged additions)
+        assert len(projections) == 12
         assert projections[0]["id"] == "subst.done"
         assert projections[-1]["id"] == "subst.wrap"
 

@@ -114,26 +114,38 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     """
     Classify a head/tail linked list as dict-encoding or list-encoding.
 
-    This is the structural replacement for is_dict_linked_list().
-    Uses Mu projections to scan structure, with Python type validation
-    for keys (projections cannot verify Python types).
+    For type-tagged structures (Phase 6c), simply returns the _type value.
+    For legacy structures without _type, uses projection-based classification.
 
     Args:
-        value: A head/tail linked list (or null for empty).
+        value: A head/tail linked list (or null for empty), optionally type-tagged.
 
     Returns:
-        "dict" if all elements are kv-pairs with string keys (dict encoding).
+        "dict" if type-tagged as dict or all elements are kv-pairs with string keys.
         "list" otherwise (including empty list, primitives, circular).
-
-    Note:
-        Pattern matching alone cannot distinguish between string primitives
-        and other primitives (null, numbers, booleans). This function does
-        a Python type check for keys, which is acceptable debt for now.
     """
-    # Non head/tail structures are not dict-encoded
+    # Non-dict structures are not dict-encoded
     if not isinstance(value, dict):
         return "list"
-    if set(value.keys()) != {"head", "tail"}:
+
+    keys = set(value.keys())
+
+    # Phase 6c: Type-tagged structures - use the _type directly
+    if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
+        _type = value.get("_type")
+        # Security: Only accept string type tags from the whitelist
+        # Non-string or unknown types are treated as invalid (return "list")
+        if not isinstance(_type, str):
+            return "list"
+        if _type == "dict":
+            return "dict"
+        elif _type == "list":
+            return "list"
+        # Unknown string type - invalid, treat as list
+        return "list"
+
+    # Legacy: head/tail without type tag - use projection-based classification
+    if keys != {"head", "tail"}:
         return "list"
 
     # Walk the list to check:
