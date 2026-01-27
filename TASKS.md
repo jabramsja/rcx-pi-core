@@ -171,6 +171,11 @@ Items here are implemented and verified under current invariants. Changes requir
   - Security: `VALID_TYPE_TAGS` whitelist + `validate_type_tag()` function
   - 24 new property-based fuzzer tests (`test_type_tags_fuzzer.py`)
   - All 1020 self-hosting tests pass
+- Expert Review Cleanup (PR #163):
+  - Deleted `resolve_lookups()` dead code from subst_mu.py (~47 lines)
+  - Updated "Phase 3" comments to "BOOTSTRAP" in eval_seed.py
+  - DEBT_THRESHOLD: 15 → 14 (ratchet tightened after dead code removal)
+  - All 1038 tests pass, 53 fuzzer tests pass
 
 ---
 
@@ -202,7 +207,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 Note: Phase 7 requires meta-circular design. The kernel loop (for-loop selecting projections)
 is the remaining major scaffolding debt.
 
-**Debt status**: 15 total (11 tracked + 3 AST_OK bootstrap + 1 review), threshold 15. Next target: 13.
+**Debt status**: 14 total (11 tracked + 3 AST_OK bootstrap), threshold 14 (at ceiling). Next target: 12.
 
 ---
 
