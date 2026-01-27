@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
-from .eval_seed import NO_MATCH, _NoMatch, step
+from .eval_seed import NO_MATCH, _NoMatch, step, host_recursion, host_builtin
 from .kernel import get_step_budget
 
 
@@ -51,6 +51,7 @@ def clear_projection_cache() -> None:
 # =============================================================================
 
 
+@host_recursion("Recursive Mu traversal - will become projection in L2")
 def _check_empty_var_names(value: Mu, context: str) -> None:
     """
     Check for empty variable names in a Mu structure.
@@ -82,6 +83,7 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
 # =============================================================================
 
 
+@host_recursion("Recursive Mu normalization - will become projection in L2")
 def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Normalize a Mu value for structural matching.
@@ -92,6 +94,9 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     Dict: {"a": 1, "b": 2} -> linked list of [key, value] pairs
     List: [1, 2, 3] -> {"head": 1, "tail": {"head": 2, "tail": {...}}}
     KV-pair: ["a", 1] -> {"head": "a", "tail": {"head": 1, "tail": null}}
+
+    Note: Empty collections ({} and []) both normalize to null (empty linked list).
+    This is intentional - structurally they are equivalent as empty sequences.
 
     Args:
         value: The Mu value to normalize.
@@ -149,11 +154,15 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     return value
 
 
+@host_builtin("Structure classification using isinstance - will become projection in L2")
 def is_kv_pair_linked(value: Mu) -> bool:
     """
     Check if value is a key-value pair in linked list format.
 
     KV-pair format: {"head": key_string, "tail": {"head": value, "tail": null}}
+
+    Note: This checks for the SPECIFIC kv-pair structure. A dict with
+    head/tail keys but different structure is NOT classified as a kv-pair.
     """
     if not isinstance(value, dict):
         return False
@@ -172,12 +181,17 @@ def is_kv_pair_linked(value: Mu) -> bool:
     return True
 
 
+@host_builtin("Structure classification using isinstance/iteration - will become projection in L2")
 def is_dict_linked_list(value: Mu) -> bool:
     """
     Check if value is a linked list encoding a dict (ALL elements are kv-pairs).
 
     This checks every element, not just the first, to avoid misidentifying
     lists like [['', None], None] as dicts.
+
+    Note: A dict with head/tail keys like {"head": "x", "tail": "y"} that does
+    NOT follow the exact kv-pair structure will NOT be classified as a dict
+    linked list. The tail must be null or another head/tail node.
 
     Includes cycle detection to prevent infinite loops on circular structures.
     """
@@ -205,11 +219,16 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
+@host_recursion("Recursive Mu denormalization - will become projection in L2")
 def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
 
     Reverses the normalization done by normalize_for_match.
+
+    Note: An empty linked list (null) denormalizes to an empty list [],
+    not an empty dict {}. This is because we cannot distinguish which
+    empty collection it came from after normalization.
 
     Args:
         value: The normalized Mu value to denormalize.
@@ -287,6 +306,7 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
 # =============================================================================
 
 
+@host_builtin("Linked list iteration using while - will become projection in L2")
 def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
     """
     Convert linked list bindings to Python dict.
@@ -308,6 +328,7 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
     return result
 
 
+@host_builtin("Dict iteration using sorted() - will become projection in L2")
 def dict_to_bindings(d: dict[str, Mu]) -> Mu:
     """
     Convert Python dict to linked list bindings.

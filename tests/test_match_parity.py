@@ -433,3 +433,123 @@ class TestMatchParityFailures:
     def test_primitive_vs_list(self):
         """Primitive pattern doesn't match list."""
         assert_parity(42, [1, 2])
+
+
+# =============================================================================
+# Test: Head/Tail Collision (Adversary Finding V2)
+# =============================================================================
+
+
+class TestMatchParityHeadTailCollision:
+    """Test that dicts with head/tail keys are NOT misclassified as linked lists.
+
+    This addresses adversary finding V2: user data containing 'head' and 'tail'
+    keys should not be confused with the internal linked list encoding.
+    """
+
+    def test_dict_with_head_tail_keys_string_tail(self):
+        """Dict with head/tail keys where tail is a string (not a node)."""
+        # This is user data, not a linked list node
+        pattern = {"head": {"var": "h"}, "tail": {"var": "t"}}
+        value = {"head": "x", "tail": "y"}  # tail is string, not node
+        assert_parity(pattern, value)
+
+    def test_dict_with_head_tail_keys_int_tail(self):
+        """Dict with head/tail keys where tail is an int (not a node)."""
+        pattern = {"head": {"var": "h"}, "tail": {"var": "t"}}
+        value = {"head": 1, "tail": 2}
+        assert_parity(pattern, value)
+
+    def test_dict_with_head_tail_keys_list_tail(self):
+        """Dict with head/tail keys where tail is a list (not a node)."""
+        pattern = {"head": {"var": "h"}, "tail": {"var": "t"}}
+        value = {"head": "x", "tail": [1, 2, 3]}
+        assert_parity(pattern, value)
+
+    def test_dict_with_head_tail_keys_dict_wrong_shape(self):
+        """Dict with head/tail keys where tail is a dict but wrong shape."""
+        pattern = {"head": {"var": "h"}, "tail": {"var": "t"}}
+        value = {"head": "x", "tail": {"a": 1, "b": 2}}  # Not head/tail shape
+        assert_parity(pattern, value)
+
+    def test_nested_head_tail_collision(self):
+        """Nested structure with head/tail keys at multiple levels."""
+        pattern = {
+            "data": {"var": "d"},
+            "meta": {"head": {"var": "h"}, "tail": {"var": "t"}}
+        }
+        value = {
+            "data": [1, 2, 3],
+            "meta": {"head": "first", "tail": "last"}
+        }
+        assert_parity(pattern, value)
+
+
+# =============================================================================
+# Test: Empty Collection Normalization (Adversary Finding V1)
+# =============================================================================
+
+
+class TestMatchParityEmptyCollections:
+    """Test empty collection normalization behavior.
+
+    This documents adversary finding V1: {} and [] both normalize to null
+    (empty linked list). This creates a KNOWN DIFFERENCE between Python and Mu:
+
+    - Python match: {} and [] are different types, don't match each other
+    - Mu match: {} and [] both normalize to null, match the same patterns
+
+    These tests document this intentional difference rather than assert parity.
+    """
+
+    def test_empty_dict_vs_empty_list_python_differs(self):
+        """DOCUMENTED DIFFERENCE: Python says {} vs [] is NO_MATCH, Mu says match.
+
+        This is intentional: after normalization, both are empty linked lists.
+        """
+        from rcx_pi.eval_seed import match
+        from rcx_pi.match_mu import match_mu
+
+        # Python treats these as different types
+        assert match({}, []) is NO_MATCH
+        assert match([], {}) is NO_MATCH
+
+        # Mu normalizes both to null, so they match
+        assert match_mu({}, []) == {}  # Match succeeds with no bindings
+        assert match_mu([], {}) == {}
+
+    def test_var_matches_empty_dict_normalizes_to_null(self):
+        """DOCUMENTED DIFFERENCE: Variable binding of {} becomes None in Mu.
+
+        Python preserves the original {}, Mu normalizes to null.
+        """
+        from rcx_pi.eval_seed import match
+        from rcx_pi.match_mu import match_mu
+
+        # Python preserves the original structure
+        assert match({"var": "x"}, {}) == {"x": {}}
+
+        # Mu normalizes {} to null
+        assert match_mu({"var": "x"}, {}) == {"x": None}
+
+    def test_var_matches_empty_list_normalizes_to_null(self):
+        """DOCUMENTED DIFFERENCE: Variable binding of [] becomes None in Mu.
+
+        Python preserves the original [], Mu normalizes to null.
+        """
+        from rcx_pi.eval_seed import match
+        from rcx_pi.match_mu import match_mu
+
+        # Python preserves the original structure
+        assert match({"var": "x"}, []) == {"x": []}
+
+        # Mu normalizes [] to null
+        assert match_mu({"var": "x"}, []) == {"x": None}
+
+    def test_dict_with_empty_value(self):
+        """Dict with empty list value - parity maintained for nested empties."""
+        assert_parity({"items": []}, {"items": []})
+
+    def test_dict_with_empty_dict_value(self):
+        """Dict with empty dict value - parity maintained for nested empties."""
+        assert_parity({"config": {}}, {"config": {}})

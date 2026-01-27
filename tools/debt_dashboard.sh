@@ -11,24 +11,28 @@ if [ "${1:-}" = "--json" ]; then
     JSON_OUTPUT=true
 fi
 
-# Count markers
+# Count markers (uses extended regex for flexibility)
 count_markers() {
     local pattern="$1"
     local dir="$2"
     local count
-    count=$(grep -r "$pattern" "$dir" 2>/dev/null | wc -l | tr -d '[:space:]') || count=0
+    count=$(grep -rE "$pattern" "$dir" --include="*.py" 2>/dev/null | grep -v __pycache__ | wc -l | tr -d '[:space:]') || count=0
     echo "${count:-0}"
 }
 
 if [ "$JSON_OUTPUT" = true ]; then
     # JSON output for programmatic use
-    HOST_RECURSION=$(count_markers "@host_recursion" "rcx_pi/")
-    HOST_BUILTIN=$(count_markers "@host_builtin" "rcx_pi/")
-    HOST_ITERATION=$(count_markers "@host_iteration" "rcx_pi/")
-    BOOTSTRAP=$(count_markers "@bootstrap_only" "rcx_pi/")
+    # Use anchored patterns (^[[:space:]]*@) to match only actual decorators, not comments
+    HOST_RECURSION=$(count_markers "^[[:space:]]*@host_recursion" "rcx_pi/")
+    HOST_BUILTIN=$(count_markers "^[[:space:]]*@host_builtin" "rcx_pi/")
+    HOST_ITERATION=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
+    BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
+    AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
     PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
     PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
-    TOTAL=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + BOOTSTRAP))
+    TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
+    TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
 
     cat <<EOF
 {
@@ -37,10 +41,13 @@ if [ "$JSON_OUTPUT" = true ]; then
     "host_recursion": $HOST_RECURSION,
     "host_builtin": $HOST_BUILTIN,
     "host_iteration": $HOST_ITERATION,
+    "host_mutation": $HOST_MUTATION,
     "bootstrap_only": $BOOTSTRAP,
+    "ast_ok_bootstrap": $AST_OK_BOOTSTRAP,
     "prototype_builtin": $PROTO_BUILTIN,
     "prototype_iteration": $PROTO_ITERATION,
-    "total_core": $TOTAL
+    "total_tracked": $TOTAL_TRACKED,
+    "total_semantic": $TOTAL_SEMANTIC
   }
 }
 EOF
@@ -50,22 +57,38 @@ else
     echo "       RCX Host Debt Dashboard"
     echo "=============================================="
     echo ""
-    echo "Core Debt (rcx_pi/) - Must be zero for self-hosting"
+    echo "Tracked Markers (rcx_pi/) - @host_* decorators"
     echo "----------------------------------------------"
 
-    HOST_RECURSION=$(count_markers "@host_recursion" "rcx_pi/")
-    HOST_BUILTIN=$(count_markers "@host_builtin" "rcx_pi/")
-    HOST_ITERATION=$(count_markers "@host_iteration" "rcx_pi/")
-    BOOTSTRAP=$(count_markers "@bootstrap_only" "rcx_pi/")
+    # Use anchored patterns (^[[:space:]]*@) to match only actual decorators, not comments
+    HOST_RECURSION=$(count_markers "^[[:space:]]*@host_recursion" "rcx_pi/")
+    HOST_BUILTIN=$(count_markers "^[[:space:]]*@host_builtin" "rcx_pi/")
+    HOST_ITERATION=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
+    BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
 
     printf "  @host_recursion:  %3d\n" "$HOST_RECURSION"
     printf "  @host_builtin:    %3d\n" "$HOST_BUILTIN"
     printf "  @host_iteration:  %3d\n" "$HOST_ITERATION"
+    printf "  @host_mutation:   %3d\n" "$HOST_MUTATION"
     printf "  @bootstrap_only:  %3d\n" "$BOOTSTRAP"
 
-    TOTAL=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + BOOTSTRAP))
+    TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     echo "----------------------------------------------"
-    printf "  Total Core Debt:  %3d\n" "$TOTAL"
+    printf "  Total Tracked:    %3d (ceiling: 17)\n" "$TOTAL_TRACKED"
+    echo ""
+
+    echo "AST_OK Bypasses (rcx_pi/) - Statement-level semantic debt"
+    echo "----------------------------------------------"
+
+    AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
+    AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
+
+    printf "  # AST_OK: bootstrap: %3d (semantic debt)\n" "$AST_OK_BOOTSTRAP"
+    printf "  # AST_OK: infra:     %3d (scaffolding)\n" "$AST_OK_INFRA"
+    echo "----------------------------------------------"
+    TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
+    printf "  Total Semantic:   %3d (tracked + bootstrap)\n" "$TOTAL_SEMANTIC"
     echo ""
 
     echo "Prototype Debt (prototypes/) - Acceptable during development"
@@ -84,22 +107,21 @@ else
     printf "  Total Prototype:  %3d (not blocking)\n" "$PROTO_TOTAL"
     echo ""
 
-    # Show locations if there's core debt
-    if [ "$TOTAL" -gt 0 ]; then
-        echo "Core Debt Locations:"
+    # Show locations if there's semantic debt
+    if [ "$TOTAL_SEMANTIC" -gt 0 ]; then
+        echo "Semantic Debt Locations:"
         echo "----------------------------------------------"
-        grep -rn "@host_recursion\|@host_builtin\|@host_iteration\|@bootstrap_only" rcx_pi/ 2>/dev/null | head -20 || true
+        grep -rn "@host_recursion\|@host_builtin\|@host_iteration\|@host_mutation\|@bootstrap_only\|# AST_OK: bootstrap" rcx_pi/ 2>/dev/null | head -25 || true
         echo ""
     fi
 
     # Summary
     echo "=============================================="
-    if [ "$TOTAL" -eq 0 ]; then
-        echo "SELF-HOSTING READY: No core host debt!"
-    elif [ "$TOTAL" -le 5 ]; then
-        echo "ALMOST THERE: $TOTAL core dependencies remain"
+    if [ "$TOTAL_SEMANTIC" -eq 0 ]; then
+        echo "SELF-HOSTING READY: No semantic debt!"
     else
-        echo "WORK NEEDED: $TOTAL core dependencies to eliminate"
+        echo "SEMANTIC DEBT: $TOTAL_SEMANTIC (tracked: $TOTAL_TRACKED, AST_OK bootstrap: $AST_OK_BOOTSTRAP)"
+        echo "Note: ~289 lines unmarked debt not counted (see DebtCategories.v0.md)"
     fi
     echo "=============================================="
 fi
