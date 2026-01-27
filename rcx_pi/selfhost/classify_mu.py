@@ -131,7 +131,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     keys = set(value.keys())
 
     # Phase 6c: Type-tagged structures - use the _type directly
-    if keys == {"_type", "head", "tail"}:
+    if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
         _type = value.get("_type")
         # Security: Only accept string type tags from the whitelist
         # Non-string or unknown types are treated as invalid (return "list")

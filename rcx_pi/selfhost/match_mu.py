@@ -23,7 +23,7 @@ from .classify_mu import classify_linked_list
 # =============================================================================
 
 # Whitelist of valid _type values - prevents injection of unexpected types
-VALID_TYPE_TAGS = frozenset({"list", "dict"})
+VALID_TYPE_TAGS = frozenset({"list", "dict"})  # AST_OK: constant whitelist
 
 
 def validate_type_tag(tag: str, context: str = "") -> None:
@@ -200,7 +200,7 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
                 keys = set(val.keys())
 
                 # Type-tagged structure - preserve _type, normalize head/tail
-                if keys == {"_type", "head", "tail"}:
+                if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
                     stack.append(("ht_typed", val["_type"], val["tail"]))
                     stack.append(("eval", val["head"]))
                     continue
@@ -332,7 +332,7 @@ def is_dict_linked_list(value: Mu) -> bool:
     keys = set(value.keys())
 
     # Phase 6c: Type-tagged structures - check the type (with validation)
-    if keys == {"_type", "head", "tail"}:
+    if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
         _type = value.get("_type")
         # Validate if it's a string (non-string types just return False)
         if isinstance(_type, str) and _type in VALID_TYPE_TAGS:
@@ -456,7 +456,7 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
                 keys = set(val.keys())
 
                 # Type-tagged linked list (Phase 6c: fixes list/dict ambiguity)
-                if keys == {"_type", "head", "tail"}:
+                if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
                     _type = val.get("_type")
                     # Validate type tag is from whitelist (security)
                     if isinstance(_type, str):
