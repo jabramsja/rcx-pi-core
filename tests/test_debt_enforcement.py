@@ -148,13 +148,15 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     assert "TOTAL SEMANTIC DEBT:" in result.stdout
 
 
-def test_audit_semantic_purity_threshold_is_23():
-    """Verify the threshold is set to 23 as documented.
+def test_audit_semantic_purity_threshold_is_21():
+    """Verify the threshold is set to 21 as documented.
 
     Threshold history:
     - 14: Original (7 tracked + 5 AST_OK + 2 headroom)
     - 23: After marking ~289 LOC of previously unmarked semantic debt
           (17 tracked + 5 AST_OK + 1 review = 23)
+    - 21: Phase 6a lookup as Mu projections (removed 2 @host_builtin)
+          (15 tracked + 5 AST_OK + 1 review = 21)
     """
     script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
 
@@ -166,12 +168,12 @@ def test_audit_semantic_purity_threshold_is_23():
 
     assert len(threshold_lines) >= 1, "Should find DEBT_THRESHOLD assignment"
 
-    # Extract value - format: DEBT_THRESHOLD=23
+    # Extract value - format: DEBT_THRESHOLD=21
     line = threshold_lines[0]
     value = line.split("=")[1].split()[0]
 
-    assert value == "23", (
-        f"Expected DEBT_THRESHOLD=23, found {value}. "
+    assert value == "21", (
+        f"Expected DEBT_THRESHOLD=21, found {value}. "
         f"If this changed, update test to match current threshold."
     )
 

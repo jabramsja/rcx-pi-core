@@ -298,8 +298,8 @@ class TestIntegrationWithLoaders:
         clear_projection_cache()
         projections = load_subst_projections()
 
-        # Should have loaded successfully
-        assert len(projections) == 7
+        # Should have loaded successfully (9 projections after Phase 6a lookup additions)
+        assert len(projections) == 9
         assert projections[0]["id"] == "subst.done"
         assert projections[-1]["id"] == "subst.wrap"
 
