@@ -113,7 +113,7 @@ def validate_seed_structure(seed_name: str, seed: dict[str, Any]) -> None:
     projections = seed["projections"]
 
     # Meta must have required fields
-    required_meta = {"version", "name", "description"}
+    required_meta = {"version", "name", "description"}  # AST_OK: infra
     missing = required_meta - set(meta.keys())
     if missing:
         raise ValueError(f"Seed {seed_name} meta missing keys: {missing}")
@@ -127,7 +127,7 @@ def validate_seed_structure(seed_name: str, seed: dict[str, Any]) -> None:
         if not isinstance(proj, dict):
             raise ValueError(f"Seed {seed_name} projection {i} must be a dict")
 
-        required_proj = {"id", "pattern", "body"}
+        required_proj = {"id", "pattern", "body"}  # AST_OK: infra
         missing = required_proj - set(proj.keys())
         if missing:
             raise ValueError(
@@ -152,7 +152,7 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
 
     expected = EXPECTED_PROJECTION_IDS[seed_name]
     projections = seed.get("projections", [])
-    actual_ids = [p.get("id") for p in projections]
+    actual_ids = [p.get("id") for p in projections]  # AST_OK: infra
 
     # Check all expected IDs are present
     missing = set(expected) - set(actual_ids)
@@ -162,7 +162,7 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
         )
 
     # Check wrap projection is last (it's the catch-all entry point)
-    wrap_id = [eid for eid in expected if eid.endswith(".wrap")]
+    wrap_id = [eid for eid in expected if eid.endswith(".wrap")]  # AST_OK: infra
     if wrap_id:
         wrap_id = wrap_id[0]
         if actual_ids[-1] != wrap_id:
