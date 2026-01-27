@@ -11,12 +11,12 @@ if [ "${1:-}" = "--json" ]; then
     JSON_OUTPUT=true
 fi
 
-# Count markers
+# Count markers (uses extended regex for flexibility)
 count_markers() {
     local pattern="$1"
     local dir="$2"
     local count
-    count=$(grep -r "$pattern" "$dir" 2>/dev/null | wc -l | tr -d '[:space:]') || count=0
+    count=$(grep -rE "$pattern" "$dir" --include="*.py" 2>/dev/null | grep -v __pycache__ | wc -l | tr -d '[:space:]') || count=0
     echo "${count:-0}"
 }
 
@@ -27,7 +27,7 @@ if [ "$JSON_OUTPUT" = true ]; then
     HOST_ITERATION=$(count_markers "@host_iteration" "rcx_pi/")
     HOST_MUTATION=$(count_markers "@host_mutation" "rcx_pi/")
     BOOTSTRAP=$(count_markers "@bootstrap_only" "rcx_pi/")
-    AST_OK_BOOTSTRAP=$(count_markers "# AST_OK: bootstrap" "rcx_pi/")
+    AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
     PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
     PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
@@ -79,8 +79,8 @@ else
     echo "AST_OK Bypasses (rcx_pi/) - Statement-level semantic debt"
     echo "----------------------------------------------"
 
-    AST_OK_BOOTSTRAP=$(count_markers "# AST_OK: bootstrap" "rcx_pi/")
-    AST_OK_INFRA=$(count_markers "# AST_OK: infra" "rcx_pi/")
+    AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
+    AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
 
     printf "  # AST_OK: bootstrap: %3d (semantic debt)\n" "$AST_OK_BOOTSTRAP"
     printf "  # AST_OK: infra:     %3d (scaffolding)\n" "$AST_OK_INFRA"

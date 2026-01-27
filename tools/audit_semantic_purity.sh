@@ -819,7 +819,8 @@ STRING_COUNT=$(grep -rE "^[[:space:]]*@host_string_op" rcx_pi/ --include="*.py" 
 HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT))
 
 # AST_OK: bootstrap bypasses (semantic debt - must become structural)
-AST_OK_BOOTSTRAP=$(grep -rE "# AST_OK: bootstrap" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+# Pattern uses [[:space:]]* to catch spacing variations like "AST_OK:bootstrap"
+AST_OK_BOOTSTRAP=$(grep -rE "# AST_OK:[[:space:]]*bootstrap" rcx_pi/ --include="*.py" 2>/dev/null | grep -v __pycache__ | wc -l | tr -d ' ')
 
 # Deferred review debt (PHASE 3 REVIEW markers)
 # These are items we've consciously deferred but MUST address - they're debt too

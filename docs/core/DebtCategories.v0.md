@@ -129,15 +129,21 @@ To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: boots
 
 ### Enforcement Status
 
-**Implemented (PR #155):**
+**Implemented (PR #155, updated PR #156):**
 - `debt_dashboard.sh` now counts AST_OK: bootstrap bypasses separately from scaffolding
 - `audit_semantic_purity.sh` includes AST_OK: bootstrap in the debt threshold (DEBT_THRESHOLD=14)
 - Dashboard shows: Tracked markers + AST_OK bootstrap = Total Semantic Debt
+- AST_OK patterns use `[[:space:]]*` to catch spacing variations (e.g., `AST_OK:bootstrap`)
+
+**Known grep behavior:**
+- Grep counts docstring examples as decorators (e.g., line 51 of eval_seed.py)
+- Actual decorators: 7 (2 recursion + 3 builtin + 2 mutation)
+- Grep reports: 8 (includes 1 docstring example)
+- Threshold set to 14 to account for: 8 grep-counted + 5 AST_OK + 1 PHASE REVIEW
 
 **Remaining gaps:**
 - ~289 lines of unmarked semantic debt (normalize, denormalize, classify functions)
 - No CI check that fails if unmarked semantic functions are added
-- Grep pattern overcounts by ~1 (docstring examples counted as decorators)
 
 **To fully close the gap:**
 - Mark remaining semantic debt with `@host_*` decorators or `# AST_OK: bootstrap`
