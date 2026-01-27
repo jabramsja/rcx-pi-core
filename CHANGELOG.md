@@ -54,6 +54,27 @@ All notable changes to RCX are documented in this file.
   - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
   - 37 subst parity tests pass
 
+- **Phase 6b: Classification as Mu Projections**
+  - Created `seeds/classify.v1.json` with 6 projections for linked list classification
+  - Created `rcx_pi/selfhost/classify_mu.py` for projection-based classification
+  - `denormalize_from_match()` now uses `classify_linked_list()` instead of `is_dict_linked_list()`
+  - `classify.nested_not_kv`: detects when "key" position has head/tail (not a string)
+  - `classify.kv_continue`: element is valid kv-pair → continue scanning
+  - `classify.not_kv`: element is not kv-pair → classify as list
+  - Python pre-check validates: no cycles, all keys are strings (projections can't verify types)
+  - Removed 2 `@host_builtin` decorators from match_mu.py
+  - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
+  - 26 tests in `tests/test_classify_mu.py`
+
+- **Phase 6c: Normalization as Iterative**
+  - `normalize_for_match()`: converted from recursive to iterative using explicit stack
+  - `denormalize_from_match()`: converted from recursive to iterative using explicit stack
+  - Removed 2 `@host_recursion` decorators from match_mu.py
+  - Removed 2 `# AST_OK: bootstrap` comments (recursive comprehensions eliminated)
+  - isinstance() checks at Python↔Mu boundary remain as scaffolding (not semantic debt)
+  - DEBT_THRESHOLD: 19 → 15 (ratchet tightened, 4 items removed)
+  - All 192 self-hosting tests pass
+
 ## 2026-01-26
 
 ### Runtime

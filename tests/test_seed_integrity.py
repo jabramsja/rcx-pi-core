@@ -75,6 +75,13 @@ class TestChecksumVerification:
         # Should not raise
         verify_checksum("subst.v1.json", content)
 
+    def test_verify_checksum_classify_seed_valid(self):
+        """Valid classify.v1.json passes checksum."""
+        seed_path = get_seeds_dir() / "classify.v1.json"
+        content = seed_path.read_bytes()
+        # Should not raise
+        verify_checksum("classify.v1.json", content)
+
     def test_verify_checksum_tampered_fails(self):
         """Tampered content fails checksum."""
         # Start with valid content
@@ -178,6 +185,14 @@ class TestProjectionIdValidation:
         # Should not raise
         validate_projection_ids("subst.v1.json", seed)
 
+    def test_classify_seed_has_expected_ids(self):
+        """classify.v1.json has all expected projection IDs."""
+        seed_path = get_seeds_dir() / "classify.v1.json"
+        with open(seed_path) as f:
+            seed = json.load(f)
+        # Should not raise
+        validate_projection_ids("classify.v1.json", seed)
+
     def test_missing_projection_id_fails(self):
         """Seed missing expected projection ID fails."""
         seed = {
@@ -237,6 +252,15 @@ class TestVerifiedLoad:
         assert "projections" in seed
         assert seed["meta"]["name"] == "SUBST_SEED"
 
+    def test_load_classify_seed_verified(self):
+        """Load classify.v1.json with full verification."""
+        seed_path = get_seeds_dir() / "classify.v1.json"
+        seed = load_verified_seed(seed_path)
+
+        assert "meta" in seed
+        assert "projections" in seed
+        assert seed["meta"]["name"] == "CLASSIFY_SEED"
+
     def test_load_with_verify_false_skips_checks(self, tmp_path):
         """verify=False skips integrity checks."""
         # Create a seed that would fail checksum
@@ -267,8 +291,10 @@ class TestVerifyAllSeeds:
 
         assert "match.v1.json" in results
         assert "subst.v1.json" in results
+        assert "classify.v1.json" in results
         assert results["match.v1.json"] is True
         assert results["subst.v1.json"] is True
+        assert results["classify.v1.json"] is True
 
 
 # =============================================================================
@@ -303,6 +329,19 @@ class TestIntegrationWithLoaders:
         assert projections[0]["id"] == "subst.done"
         assert projections[-1]["id"] == "subst.wrap"
 
+    def test_classify_mu_loads_verified(self):
+        """classify_mu loads projections with verification."""
+        from rcx_pi.selfhost.classify_mu import load_classify_projections, clear_projection_cache
+
+        clear_projection_cache()
+        projections = load_classify_projections()
+
+        # Should have loaded successfully (6 projections for Phase 6b classification)
+        # Added classify.nested_not_kv to handle nested dict keys
+        assert len(projections) == 6
+        assert projections[0]["id"] == "classify.done"
+        assert projections[-1]["id"] == "classify.wrap"
+
 
 # =============================================================================
 # Test: Checksums Match Reality
@@ -331,6 +370,18 @@ class TestChecksumsMatchReality:
         expected = SEED_CHECKSUMS["subst.v1.json"]
         assert actual == expected, (
             f"subst.v1.json checksum mismatch!\n"
+            f"  File:     {actual}\n"
+            f"  Expected: {expected}\n"
+            f"  Update SEED_CHECKSUMS if seed was intentionally changed."
+        )
+
+    def test_classify_checksum_is_current(self):
+        """classify.v1.json checksum in SEED_CHECKSUMS matches file."""
+        seed_path = get_seeds_dir() / "classify.v1.json"
+        actual = compute_checksum(seed_path.read_bytes())
+        expected = SEED_CHECKSUMS["classify.v1.json"]
+        assert actual == expected, (
+            f"classify.v1.json checksum mismatch!\n"
             f"  File:     {actual}\n"
             f"  Expected: {expected}\n"
             f"  Update SEED_CHECKSUMS if seed was intentionally changed."

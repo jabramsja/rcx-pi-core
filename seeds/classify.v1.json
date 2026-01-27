@@ -1,0 +1,121 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "CLASSIFY_SEED",
+    "description": "Linked list classification as Mu projections for Phase 6b self-hosting",
+    "doc": "docs/SelfHosting.v0.md",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "No host recursion - kernel loop provides iteration",
+      "Deterministic: same input -> same output",
+      "Classifies linked lists as dict-encoding or list-encoding",
+      "Pre-condition: dict keys are strings (JSON constraint)"
+    ]
+  },
+  "projections": [
+    {
+      "id": "classify.done",
+      "description": "Reached end with all kv-pairs -> it's a dict encoding",
+      "pattern": {
+        "mode": "classify",
+        "phase": "scan",
+        "remaining": null,
+        "original": {"var": "orig"}
+      },
+      "body": {
+        "mode": "classify_done",
+        "type": "dict",
+        "value": {"var": "orig"}
+      }
+    },
+    {
+      "id": "classify.nested_not_kv",
+      "description": "If key position has head/tail structure, not a valid kv-pair (key must be primitive)",
+      "pattern": {
+        "mode": "classify",
+        "phase": "scan",
+        "remaining": {
+          "head": {
+            "head": {"head": {"var": "_x"}, "tail": {"var": "_y"}},
+            "tail": {"var": "_inner"}
+          },
+          "tail": {"var": "_rest"}
+        },
+        "original": {"var": "orig"}
+      },
+      "body": {
+        "mode": "classify_done",
+        "type": "list",
+        "value": {"var": "orig"}
+      }
+    },
+    {
+      "id": "classify.kv_continue",
+      "description": "Current element is kv-pair structure with primitive key -> continue scanning",
+      "pattern": {
+        "mode": "classify",
+        "phase": "scan",
+        "remaining": {
+          "head": {
+            "head": {"var": "_key"},
+            "tail": {
+              "head": {"var": "_val"},
+              "tail": null
+            }
+          },
+          "tail": {"var": "rest"}
+        },
+        "original": {"var": "orig"}
+      },
+      "body": {
+        "mode": "classify",
+        "phase": "scan",
+        "remaining": {"var": "rest"},
+        "original": {"var": "orig"}
+      }
+    },
+    {
+      "id": "classify.not_kv",
+      "description": "Current element is NOT kv-pair structure -> it's a list encoding",
+      "pattern": {
+        "mode": "classify",
+        "phase": "scan",
+        "remaining": {
+          "head": {"var": "_elem"},
+          "tail": {"var": "_rest"}
+        },
+        "original": {"var": "orig"}
+      },
+      "body": {
+        "mode": "classify_done",
+        "type": "list",
+        "value": {"var": "orig"}
+      }
+    },
+    {
+      "id": "classify.empty",
+      "description": "Empty list (null) -> classify as list (cannot distinguish empty dict)",
+      "pattern": {
+        "classify": {"list": null}
+      },
+      "body": {
+        "mode": "classify_done",
+        "type": "list",
+        "value": null
+      }
+    },
+    {
+      "id": "classify.wrap",
+      "description": "Entry point - wrap classify request into scan state (must be last)",
+      "pattern": {
+        "classify": {"list": {"var": "list"}}
+      },
+      "body": {
+        "mode": "classify",
+        "phase": "scan",
+        "remaining": {"var": "list"},
+        "original": {"var": "list"}
+      }
+    }
+  ]
+}

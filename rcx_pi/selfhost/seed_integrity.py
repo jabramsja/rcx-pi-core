@@ -27,6 +27,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "match.v1.json": "62068f6f87408ffd2613b4ddae71cc30dcc4c22961ae591a5023d5b9068be27e",
     # Updated v1.1.0: added subst.lookup.found and subst.lookup.next (Phase 6a)
     "subst.v1.json": "e373777839d944de72a564863bc624647dc0c0de49715b7c92f37a3fb7ef9802",
+    # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
+    "classify.v1.json": "3216e28b2f28b8f9d2dfd2693dfecad2c2ba94783151bb4b8f920d29aa8e5cf1",
 }
 
 # Expected projection IDs for each seed.
@@ -50,6 +52,14 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "subst.descend",
         "subst.primitive",
         "subst.wrap",  # Must be last (catch-all)
+    ],
+    "classify.v1.json": [
+        "classify.done",
+        "classify.nested_not_kv",  # Reject head/tail in key position
+        "classify.kv_continue",
+        "classify.not_kv",
+        "classify.empty",
+        "classify.wrap",  # Must be last (catch-all)
     ],
 }
 
