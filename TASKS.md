@@ -148,9 +148,26 @@ Items here are implemented and verified under current invariants. Changes requir
   - Added `subst.lookup.found` and `subst.lookup.next` projections to subst.v1.json
   - Lookup is now structural: pattern matching with non-linear vars (same name binds same value)
   - Removed 2 `@host_builtin` decorators from subst_mu.py
+- Phase 6b: Classification as Mu Projections:
+  - Created `seeds/classify.v1.json` with 6 projections for linked list classification
+  - Created `rcx_pi/selfhost/classify_mu.py` for projection-based classification
+  - `denormalize_from_match()` now uses `classify_linked_list()` instead of `is_dict_linked_list()`
+  - Classification distinguishes dict-encoding (all kv-pairs with string keys) from list-encoding
+  - Handles edge cases: nested dicts in key position, circular references, primitives
+  - Removed 2 `@host_builtin` decorators from match_mu.py (is_kv_pair_linked, is_dict_linked_list)
+  - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
+  - 26 new tests in `tests/test_classify_mu.py`
   - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
   - `resolve_lookups()` Python function deprecated (kept for backward compat)
   - 37 subst parity tests pass with structural lookup
+- Phase 6c: Normalization as Iterative:
+  - `normalize_for_match()`: recursive → iterative with explicit stack
+  - `denormalize_from_match()`: recursive → iterative with explicit stack
+  - Removed 2 `@host_recursion` decorators from match_mu.py
+  - Removed 2 `# AST_OK: bootstrap` comments (recursive comprehensions eliminated)
+  - isinstance() at Python↔Mu boundary is scaffolding, not semantic debt
+  - DEBT_THRESHOLD: 19 → 14 (ratchet tightened)
+  - All 192 self-hosting tests pass
 
 ---
 
@@ -173,16 +190,16 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-*(Phase 6a complete - see Ra section)*
+*(Phase 6a, 6b, and 6c complete - see Ra section)*
 
 **Future phases (not yet promoted):**
 
-- **Phase 6b**: Classification as Mu projections (~52 LOC)
-- **Phase 6c**: Normalization as Mu projections (~140 LOC, requires cycle detection design)
 - **Phase 7**: Self-host the kernel loop (projection selection as Mu projections)
 
-Note: Phase 6c and 7 require design work before promotion. Cycle detection in
-normalization needs Mu-native approach. Kernel loop requires meta-circular design.
+Note: Phase 7 requires meta-circular design. The kernel loop (for-loop selecting projections)
+is the remaining major scaffolding debt.
+
+**Debt status**: 15 total (11 tracked + 3 AST_OK bootstrap + 1 review), threshold 15. Next target: 13.
 
 ---
 

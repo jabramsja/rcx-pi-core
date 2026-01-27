@@ -16,6 +16,7 @@ from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import NO_MATCH, _NoMatch, step, host_recursion, host_builtin
 from .kernel import get_step_budget
 from .seed_integrity import load_verified_seed, get_seeds_dir
+from .classify_mu import classify_linked_list
 
 
 # =============================================================================
@@ -81,7 +82,6 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
 # =============================================================================
 
 
-@host_recursion("Recursive Mu normalization - will become projection in L2")
 def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Normalize a Mu value for structural matching.
@@ -96,63 +96,149 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     Note: Empty collections ({} and []) both normalize to null (empty linked list).
     This is intentional - structurally they are equivalent as empty sequences.
 
+    This function uses iterative traversal with an explicit stack (Phase 6c).
+    The isinstance() checks at the boundary are scaffolding debt, not semantic debt.
+
     Args:
         value: The Mu value to normalize.
-        _seen: Internal parameter for cycle detection. Do not pass.
+        _seen: Deprecated parameter, kept for backward compatibility. Ignored.
 
     Raises:
         ValueError: If circular reference detected.
     """
+    # Simple cases - no iteration needed
     if value is None:
         return None
-
     if isinstance(value, (bool, int, float, str)):
         return value
+    if isinstance(value, dict) and set(value.keys()) == {"var"} and isinstance(value.get("var"), str):
+        return value
 
-    # Cycle detection for compound types
-    if isinstance(value, (list, dict)):
-        if _seen is None:
-            _seen = set()
-        value_id = id(value)
-        if value_id in _seen:
-            raise ValueError("Circular reference detected in normalize_for_match")
-        _seen = _seen | {value_id}
+    # Iterative normalization using explicit stack (Phase 6c)
+    # Stack items: (operation, *data)
+    # Operations:
+    #   ("eval", val) - evaluate val and store result
+    #   ("leave", val_id) - remove val_id from path (exiting this node)
+    #   ("list_tail", elem_idx, elems_normalized, original_list) - building list
+    #   ("dict_tail", key_idx, keys, kvs_normalized, original_dict) - building dict
+    #   ("ht_head", tail_val) - head done, now process tail
+    #   ("ht_combine", head_normalized) - combine head and tail results
 
-    if isinstance(value, list):
-        # Convert Python list to linked list
-        result: Mu = None
-        for elem in reversed(value):
-            result = {"head": normalize_for_match(elem, _seen), "tail": result}
-        return result
+    # Path-based cycle detection: track current ancestors, not all visited nodes.
+    # This allows shared references (DAGs) while detecting true back-edges (cycles).
+    path: set[int] = set()
+    stack: list = [("eval", value)]
+    result: Mu = None
 
-    if isinstance(value, dict):
-        # Check if already normalized (has head/tail structure only)
-        if set(value.keys()) == {"head", "tail"}:
-            return {
-                "head": normalize_for_match(value["head"], _seen),
-                "tail": normalize_for_match(value["tail"], _seen)
-            }
+    while stack:
+        item = stack.pop()
+        op = item[0]
 
-        # Check for variable site - don't normalize
-        if set(value.keys()) == {"var"} and isinstance(value.get("var"), str):
-            return value
+        if op == "leave":
+            # Exiting this node - remove from path
+            path.discard(item[1])
+            continue
 
-        # Convert dict to sorted key-value linked list
-        # Each kv-pair becomes {"head": key, "tail": {"head": value, "tail": null}}
-        result: Mu = None
-        for key in sorted(value.keys(), reverse=True):
-            # Key-value pair as linked list: [key, value]
-            kv_pair: Mu = {
-                "head": key,
-                "tail": {"head": normalize_for_match(value[key], _seen), "tail": None}
-            }
-            result = {"head": kv_pair, "tail": result}
-        return result
+        if op == "eval":
+            val = item[1]
 
-    return value
+            # Simple cases
+            if val is None or isinstance(val, (bool, int, float, str)):
+                result = val
+                continue
+            if isinstance(val, dict) and set(val.keys()) == {"var"} and isinstance(val.get("var"), str):
+                result = val
+                continue
+
+            # Cycle detection for compound types - check if on current path
+            if isinstance(val, (list, dict)):
+                val_id = id(val)
+                if val_id in path:
+                    raise ValueError("Circular reference detected in normalize_for_match")
+                path.add(val_id)
+                # Push leave marker to remove from path when done with children
+                stack.append(("leave", val_id))
+
+            if isinstance(val, list):
+                if len(val) == 0:
+                    result = None
+                    continue
+                # Start building list from the end (last element first)
+                stack.append(("list_tail", len(val) - 1, [], val))
+                stack.append(("eval", val[-1]))
+                continue
+
+            if isinstance(val, dict):
+                keys = list(val.keys())
+
+                if set(keys) == {"head", "tail"}:
+                    # Already head/tail structure - normalize both parts
+                    # Process head first, then tail, then combine
+                    stack.append(("ht_head", val["tail"]))
+                    stack.append(("eval", val["head"]))
+                    continue
+
+                if len(keys) == 0:
+                    result = None
+                    continue
+
+                # Regular dict - convert to sorted kv linked list
+                keys = sorted(keys)
+                # Start from last key (builds list in sorted order)
+                stack.append(("dict_tail", len(keys) - 1, keys, [], val))
+                stack.append(("eval", val[keys[-1]]))
+                continue
+
+        elif op == "ht_head":
+            # Head is done (result contains head_normalized), now process tail
+            tail_val = item[1]
+            stack.append(("ht_combine", result))  # Save head result
+            stack.append(("eval", tail_val))
+
+        elif op == "ht_combine":
+            # Tail is done (result contains tail_normalized), combine with head
+            head_normalized = item[1]
+            result = {"head": head_normalized, "tail": result}
+
+        elif op == "list_tail":
+            elem_idx, elems_normalized, original_list = item[1], item[2], item[3]
+            # Add the just-computed result
+            elems_normalized.append(result)
+
+            if elem_idx == 0:
+                # All elements processed - build linked list
+                # Elements are in reverse order (last to first), which is correct
+                # for building head/tail from end to beginning
+                tail: Mu = None
+                for elem in elems_normalized:
+                    tail = {"head": elem, "tail": tail}
+                result = tail
+            else:
+                # More elements to process
+                stack.append(("list_tail", elem_idx - 1, elems_normalized, original_list))
+                stack.append(("eval", original_list[elem_idx - 1]))
+
+        elif op == "dict_tail":
+            key_idx, keys, kvs_normalized, original_dict = item[1], item[2], item[3], item[4]
+            # Build kv-pair for current key
+            key = keys[key_idx]
+            kv_pair: Mu = {"head": key, "tail": {"head": result, "tail": None}}
+            kvs_normalized.append(kv_pair)
+
+            if key_idx == 0:
+                # All keys processed - build linked list of kv-pairs
+                tail: Mu = None
+                for kv in kvs_normalized:
+                    tail = {"head": kv, "tail": tail}
+                result = tail
+            else:
+                # More keys to process
+                stack.append(("dict_tail", key_idx - 1, keys, kvs_normalized, original_dict))
+                stack.append(("eval", original_dict[keys[key_idx - 1]]))
+
+    return result
 
 
-@host_builtin("Structure classification using isinstance - will become projection in L2")
 def is_kv_pair_linked(value: Mu) -> bool:
     """
     Check if value is a key-value pair in linked list format.
@@ -179,7 +265,6 @@ def is_kv_pair_linked(value: Mu) -> bool:
     return True
 
 
-@host_builtin("Structure classification using isinstance/iteration - will become projection in L2")
 def is_dict_linked_list(value: Mu) -> bool:
     """
     Check if value is a linked list encoding a dict (ALL elements are kv-pairs).
@@ -217,7 +302,6 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
-@host_recursion("Recursive Mu denormalization - will become projection in L2")
 def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
@@ -228,75 +312,169 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     not an empty dict {}. This is because we cannot distinguish which
     empty collection it came from after normalization.
 
+    This function uses iterative traversal with an explicit stack (Phase 6c).
+    The isinstance() checks at the boundary are scaffolding debt, not semantic debt.
+
     Args:
         value: The normalized Mu value to denormalize.
-        _seen: Internal parameter for cycle detection. Do not pass.
+        _seen: Deprecated parameter, kept for backward compatibility. Ignored.
 
     Raises:
         ValueError: If circular reference detected.
     """
+    # Simple cases - no iteration needed
     if value is None:
         return None
-
     if isinstance(value, (bool, int, float, str)):
         return value
+    if isinstance(value, dict) and set(value.keys()) == {"var"}:
+        return value
 
-    # Cycle detection for compound types
-    if isinstance(value, (list, dict)):
-        if _seen is None:
-            _seen = set()
-        value_id = id(value)
-        if value_id in _seen:
-            raise ValueError("Circular reference detected in denormalize_from_match")
-        _seen = _seen | {value_id}
+    # Iterative denormalization using explicit stack (Phase 6c)
+    # Stack items: (operation, *data)
+    # Operations:
+    #   ("eval", val) - evaluate val and store result
+    #   ("leave", val_id) - remove val_id from path (exiting this node)
+    #   ("finalize_list", result_list) - set result to the populated list
+    #   ("finalize_dict", result_dict) - set result to the populated dict
+    #   ("list_elem", result_list) - append result to result_list
+    #   ("dict_kv", key, result_dict) - set result_dict[key] = result
 
-    if isinstance(value, list):
-        return [denormalize_from_match(elem, _seen) for elem in value]  # AST_OK: bootstrap - denormalization
+    # Path-based cycle detection: track current ancestors, not all visited nodes.
+    # This allows shared references (DAGs) while detecting true back-edges (cycles).
+    path: set[int] = set()
+    stack: list = [("eval", value)]
+    result: Mu = None
 
-    if isinstance(value, dict):
-        # Check if it's a linked list (head/tail structure)
-        if set(value.keys()) == {"head", "tail"}:
-            # Check if ALL elements are kv-pairs (dict encoding)
-            # Must check all elements, not just first, to avoid misidentifying
-            # lists like [['', None], None] as dicts
-            if is_dict_linked_list(value):
-                # It's a dict encoded as linked list of kv-pairs
-                result = {}
-                current = value
-                visited: set[int] = set()  # Track visited nodes in linked list
-                while current is not None:
-                    node_id = id(current)
-                    if node_id in visited:
-                        raise ValueError("Circular reference in linked list during denormalization")
-                    visited.add(node_id)
-                    kv = current["head"]
-                    key = kv["head"]
-                    val = kv["tail"]["head"]
-                    result[key] = denormalize_from_match(val, _seen)
-                    current = current["tail"]
-                return result
-            else:
-                # It's a regular linked list (Python list encoding)
-                result = []
-                current = value
-                visited: set[int] = set()  # Track visited nodes in linked list
-                while current is not None:
-                    node_id = id(current)
-                    if node_id in visited:
-                        raise ValueError("Circular reference in linked list during denormalization")
-                    visited.add(node_id)
-                    result.append(denormalize_from_match(current["head"], _seen))
-                    current = current["tail"]
-                return result
+    while stack:
+        item = stack.pop()
+        op = item[0]
 
-        # Variable site - return as-is
-        if set(value.keys()) == {"var"}:
-            return value
+        if op == "leave":
+            # Exiting this node - remove from path
+            path.discard(item[1])
+            continue
 
-        # Regular dict (shouldn't happen after normalization)
-        return {k: denormalize_from_match(v, _seen) for k, v in value.items()}  # AST_OK: bootstrap
+        if op == "eval":
+            val = item[1]
 
-    return value
+            # Simple cases
+            if val is None or isinstance(val, (bool, int, float, str)):
+                result = val
+                continue
+            if isinstance(val, dict) and set(val.keys()) == {"var"}:
+                result = val
+                continue
+
+            # Cycle detection for compound types - check if on current path
+            if isinstance(val, (list, dict)):
+                val_id = id(val)
+                if val_id in path:
+                    raise ValueError("Circular reference detected in denormalize_from_match")
+                path.add(val_id)
+                # Push leave marker to remove from path when done with children
+                stack.append(("leave", val_id))
+
+            # Python list (from external sources - rare case)
+            if isinstance(val, list):
+                if len(val) == 0:
+                    result = []
+                    continue
+                result_list: list = []
+                # Push finalize first (will be processed last)
+                stack.append(("finalize_list", result_list))
+                # Push element processing in reverse order (last element pushed first)
+                for elem in reversed(val):
+                    stack.append(("list_elem", result_list))
+                    stack.append(("eval", elem))
+                continue
+
+            # Dict
+            if isinstance(val, dict):
+                keys = set(val.keys())
+
+                # Head/tail linked list structure
+                if keys == {"head", "tail"}:
+                    # Phase 6b: Use Mu projection-based classification
+                    if classify_linked_list(val) == "dict":
+                        # Dict encoding - extract all kv-pairs
+                        result_dict: dict = {}
+                        # Push finalize first (will be processed last)
+                        stack.append(("finalize_dict", result_dict))
+
+                        # Collect kv-pairs with cycle detection
+                        kv_pairs: list = []
+                        current = val
+                        visited: set[int] = set()
+                        while current is not None:
+                            node_id = id(current)
+                            if node_id in visited:
+                                raise ValueError("Circular reference in linked list during denormalization")
+                            visited.add(node_id)
+                            kv = current["head"]
+                            key = kv["head"]
+                            val_to_process = kv["tail"]["head"]
+                            kv_pairs.append((key, val_to_process))
+                            current = current["tail"]
+
+                        # Push processing in reverse order (last kv pushed first)
+                        for key, val_to_process in reversed(kv_pairs):
+                            stack.append(("dict_kv", key, result_dict))
+                            stack.append(("eval", val_to_process))
+                        continue
+
+                    else:
+                        # List encoding - extract all elements
+                        result_list: list = []
+                        # Push finalize first (will be processed last)
+                        stack.append(("finalize_list", result_list))
+
+                        # Collect elements with cycle detection
+                        elements: list = []
+                        current = val
+                        visited: set[int] = set()
+                        while current is not None:
+                            node_id = id(current)
+                            if node_id in visited:
+                                raise ValueError("Circular reference in linked list during denormalization")
+                            visited.add(node_id)
+                            elements.append(current["head"])
+                            current = current["tail"]
+
+                        # Push processing in reverse order (last element pushed first)
+                        for elem in reversed(elements):
+                            stack.append(("list_elem", result_list))
+                            stack.append(("eval", elem))
+                        continue
+
+                # Regular dict (from external sources - rare case)
+                if len(keys) == 0:
+                    result = {}
+                    continue
+                result_dict: dict = {}
+                # Push finalize first (will be processed last)
+                stack.append(("finalize_dict", result_dict))
+                # Push kv processing in reverse order
+                for key in reversed(list(val.keys())):
+                    stack.append(("dict_kv", key, result_dict))
+                    stack.append(("eval", val[key]))
+                continue
+
+        elif op == "finalize_list":
+            result = item[1]  # The now-populated list
+
+        elif op == "finalize_dict":
+            result = item[1]  # The now-populated dict
+
+        elif op == "list_elem":
+            result_list = item[1]
+            result_list.append(result)
+
+        elif op == "dict_kv":
+            key, result_dict = item[1], item[2]
+            result_dict[key] = result
+
+    return result
 
 
 # =============================================================================

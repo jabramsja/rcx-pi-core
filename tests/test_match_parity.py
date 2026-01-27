@@ -553,3 +553,110 @@ class TestMatchParityEmptyCollections:
     def test_dict_with_empty_dict_value(self):
         """Dict with empty dict value - parity maintained for nested empties."""
         assert_parity({"config": {}}, {"config": {}})
+
+
+# =============================================================================
+# Shared References (DAG) Tests - Phase 6c
+# =============================================================================
+
+
+class TestSharedReferencesAllowed:
+    """Tests that shared references (DAGs) are allowed, not flagged as cycles.
+
+    Phase 6c introduced path-based cycle detection that distinguishes:
+    - Cycles (back-edges): Same node on current traversal path → reject
+    - Shared refs (DAGs): Same node via different paths → allow
+
+    These tests verify the fix works correctly.
+    """
+
+    def test_shared_list_in_normalize(self):
+        """Shared list reference should not trigger cycle detection."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        shared = [1, 2, 3]
+        dag = [shared, shared]  # Same object twice
+
+        # Should NOT raise ValueError
+        result = normalize_for_match(dag)
+        assert result is not None
+
+    def test_shared_dict_in_normalize(self):
+        """Shared dict reference should not trigger cycle detection."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        shared = {"x": 42}
+        dag = {"a": shared, "b": shared}  # Same object twice
+
+        # Should NOT raise ValueError
+        result = normalize_for_match(dag)
+        assert result is not None
+
+    def test_shared_empty_list_in_normalize(self):
+        """Shared empty list reference - the original bug case."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        shared = []
+        dag = [shared, shared, "literal"]
+
+        # Should NOT raise ValueError (this was the bug!)
+        result = normalize_for_match(dag)
+        assert result is not None
+
+    def test_diamond_dag_in_normalize(self):
+        """Diamond DAG pattern - shared node at multiple depths."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        leaf = {"value": 1}
+        left = {"child": leaf}
+        right = {"child": leaf}
+        root = {"left": left, "right": right}
+
+        # Should NOT raise ValueError
+        result = normalize_for_match(root)
+        assert result is not None
+
+    def test_shared_reference_in_denormalize(self):
+        """Shared reference in denormalize_from_match."""
+        from rcx_pi.match_mu import denormalize_from_match
+
+        # Manually construct a normalized structure with shared refs
+        shared = {"head": 1, "tail": {"head": 2, "tail": None}}
+        dag = {"head": shared, "tail": {"head": shared, "tail": None}}
+
+        # Should NOT raise ValueError
+        result = denormalize_from_match(dag)
+        assert result is not None
+
+    def test_true_cycle_still_detected_normalize(self):
+        """True cycles should still be detected in normalize."""
+        from rcx_pi.match_mu import normalize_for_match
+
+        cycle = {}
+        cycle["self"] = cycle
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            normalize_for_match(cycle)
+
+    def test_true_cycle_still_detected_denormalize(self):
+        """True cycles should still be detected in denormalize."""
+        from rcx_pi.match_mu import denormalize_from_match
+
+        cycle = {"head": 1, "tail": None}
+        cycle["tail"] = cycle
+
+        with pytest.raises(ValueError, match="Circular reference"):
+            denormalize_from_match(cycle)
+
+    def test_shared_ref_roundtrip(self):
+        """Shared references should survive normalize/denormalize roundtrip."""
+        from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
+
+        shared = [1, 2, 3]
+        original = [shared, shared]
+
+        normalized = normalize_for_match(original)
+        denormalized = denormalize_from_match(normalized)
+
+        # Structure should be preserved (though shared refs become copies)
+        assert denormalized == [[1, 2, 3], [1, 2, 3]]

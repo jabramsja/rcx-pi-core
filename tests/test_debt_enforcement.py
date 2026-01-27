@@ -100,16 +100,17 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
     assert result.returncode == 0
     data = json.loads(result.stdout)
 
-    # Current count should be 5 (from match_mu.py and eval_seed.py)
+    # Current count should be 3 (from match_mu.py and eval_seed.py)
+    # Phase 6c removed 2 (normalize_for_match and denormalize_from_match comprehensions)
     ast_ok_count = data["debt"]["ast_ok_bootstrap"]
 
     # Verify it's a reasonable number
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 5
-    assert ast_ok_count == 5, (
-        f"Expected 5 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    # Current expected count is 3
+    assert ast_ok_count == 3, (
+        f"Expected 3 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 
@@ -148,8 +149,8 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     assert "TOTAL SEMANTIC DEBT:" in result.stdout
 
 
-def test_audit_semantic_purity_threshold_is_21():
-    """Verify the threshold is set to 21 as documented.
+def test_audit_semantic_purity_threshold_is_15():
+    """Verify the threshold is set to 15 as documented.
 
     Threshold history:
     - 14: Original (7 tracked + 5 AST_OK + 2 headroom)
@@ -157,6 +158,10 @@ def test_audit_semantic_purity_threshold_is_21():
           (17 tracked + 5 AST_OK + 1 review = 23)
     - 21: Phase 6a lookup as Mu projections (removed 2 @host_builtin)
           (15 tracked + 5 AST_OK + 1 review = 21)
+    - 19: Phase 6b classification as Mu projections (removed 2 @host_builtin)
+          (13 tracked + 5 AST_OK + 1 review = 19)
+    - 15: Phase 6c normalization as iterative (removed 2 @host_recursion, 2 AST_OK)
+          (11 tracked + 3 AST_OK + 1 review = 15)
     """
     script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
 
@@ -168,12 +173,12 @@ def test_audit_semantic_purity_threshold_is_21():
 
     assert len(threshold_lines) >= 1, "Should find DEBT_THRESHOLD assignment"
 
-    # Extract value - format: DEBT_THRESHOLD=21
+    # Extract value - format: DEBT_THRESHOLD=15
     line = threshold_lines[0]
     value = line.split("=")[1].split()[0]
 
-    assert value == "21", (
-        f"Expected DEBT_THRESHOLD=21, found {value}. "
+    assert value == "15", (
+        f"Expected DEBT_THRESHOLD=15, found {value}. "
         f"If this changed, update test to match current threshold."
     )
 
