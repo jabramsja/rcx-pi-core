@@ -18,6 +18,32 @@ from .kernel import get_step_budget
 from .seed_integrity import load_verified_seed, get_seeds_dir
 from .classify_mu import classify_linked_list
 
+# =============================================================================
+# Type Tag Validation (Phase 6c Security)
+# =============================================================================
+
+# Whitelist of valid _type values - prevents injection of unexpected types
+VALID_TYPE_TAGS = frozenset({"list", "dict"})
+
+
+def validate_type_tag(tag: str, context: str = "") -> None:
+    """
+    Validate that a type tag is from the allowed whitelist.
+
+    Args:
+        tag: The _type value to validate.
+        context: Context for error message.
+
+    Raises:
+        ValueError: If tag is not in whitelist.
+    """
+    if tag not in VALID_TYPE_TAGS:
+        ctx_msg = f" in {context}" if context else ""
+        raise ValueError(
+            f"Invalid type tag '{tag}'{ctx_msg}. "
+            f"Valid values: {sorted(VALID_TYPE_TAGS)}"
+        )
+
 
 # =============================================================================
 # Projection Loading
@@ -86,15 +112,17 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Normalize a Mu value for structural matching.
 
-    Converts dicts and lists to head/tail linked lists so they can be
-    matched structurally via head/tail patterns.
+    Converts dicts and lists to type-tagged head/tail linked lists so they can
+    be matched structurally via head/tail patterns and denormalized unambiguously.
 
-    Dict: {"a": 1, "b": 2} -> linked list of [key, value] pairs
-    List: [1, 2, 3] -> {"head": 1, "tail": {"head": 2, "tail": {...}}}
-    KV-pair: ["a", 1] -> {"head": "a", "tail": {"head": 1, "tail": null}}
+    Dict: {"a": 1} -> {"_type": "dict", "head": {"head": "a", "tail": ...}, "tail": null}
+    List: [1, 2] -> {"_type": "list", "head": 1, "tail": {"head": 2, "tail": null}}
 
-    Note: Empty collections ({} and []) both normalize to null (empty linked list).
-    This is intentional - structurally they are equivalent as empty sequences.
+    The _type tag on the root node distinguishes lists from dicts. This resolves
+    the ambiguity where [["a", 1]] and {"a": 1} would otherwise normalize to
+    identical structures.
+
+    Note: Empty collections ({} and []) both normalize to null (no type tag needed).
 
     This function uses iterative traversal with an explicit stack (Phase 6c).
     The isinstance() checks at the boundary are scaffolding debt, not semantic debt.
@@ -169,9 +197,15 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
                 continue
 
             if isinstance(val, dict):
-                keys = list(val.keys())
+                keys = set(val.keys())
 
-                if set(keys) == {"head", "tail"}:
+                # Type-tagged structure - preserve _type, normalize head/tail
+                if keys == {"_type", "head", "tail"}:
+                    stack.append(("ht_typed", val["_type"], val["tail"]))
+                    stack.append(("eval", val["head"]))
+                    continue
+
+                if keys == {"head", "tail"}:
                     # Already head/tail structure - normalize both parts
                     # Process head first, then tail, then combine
                     stack.append(("ht_head", val["tail"]))
@@ -188,6 +222,17 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
                 stack.append(("dict_tail", len(keys) - 1, keys, [], val))
                 stack.append(("eval", val[keys[-1]]))
                 continue
+
+        elif op == "ht_typed":
+            # Type-tagged: head is done, now process tail (preserving _type)
+            _type, tail_val = item[1], item[2]
+            stack.append(("ht_typed_combine", _type, result))  # Save _type and head
+            stack.append(("eval", tail_val))
+
+        elif op == "ht_typed_combine":
+            # Type-tagged: tail is done, combine with _type and head
+            _type, head_normalized = item[1], item[2]
+            result = {"_type": _type, "head": head_normalized, "tail": result}
 
         elif op == "ht_head":
             # Head is done (result contains head_normalized), now process tail
@@ -206,12 +251,15 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
             elems_normalized.append(result)
 
             if elem_idx == 0:
-                # All elements processed - build linked list
+                # All elements processed - build linked list with type tag
                 # Elements are in reverse order (last to first), which is correct
                 # for building head/tail from end to beginning
                 tail: Mu = None
                 for elem in elems_normalized:
                     tail = {"head": elem, "tail": tail}
+                # Add type tag to root node (fixes list/dict ambiguity)
+                if tail is not None:
+                    tail["_type"] = "list"
                 result = tail
             else:
                 # More elements to process
@@ -226,10 +274,13 @@ def normalize_for_match(value: Mu, _seen: set[int] | None = None) -> Mu:
             kvs_normalized.append(kv_pair)
 
             if key_idx == 0:
-                # All keys processed - build linked list of kv-pairs
+                # All keys processed - build linked list of kv-pairs with type tag
                 tail: Mu = None
                 for kv in kvs_normalized:
                     tail = {"head": kv, "tail": tail}
+                # Add type tag to root node (fixes list/dict ambiguity)
+                if tail is not None:
+                    tail["_type"] = "dict"
                 result = tail
             else:
                 # More keys to process
@@ -269,18 +320,27 @@ def is_dict_linked_list(value: Mu) -> bool:
     """
     Check if value is a linked list encoding a dict (ALL elements are kv-pairs).
 
-    This checks every element, not just the first, to avoid misidentifying
-    lists like [['', None], None] as dicts.
-
-    Note: A dict with head/tail keys like {"head": "x", "tail": "y"} that does
-    NOT follow the exact kv-pair structure will NOT be classified as a dict
-    linked list. The tail must be null or another head/tail node.
+    Supports both type-tagged (Phase 6c) and legacy structures:
+    - Type-tagged: {"_type": "dict", "head": ..., "tail": ...}
+    - Legacy: {"head": ..., "tail": ...} where all heads are kv-pairs
 
     Includes cycle detection to prevent infinite loops on circular structures.
     """
     if not isinstance(value, dict):
         return False
-    if set(value.keys()) != {"head", "tail"}:
+
+    keys = set(value.keys())
+
+    # Phase 6c: Type-tagged structures - check the type (with validation)
+    if keys == {"_type", "head", "tail"}:
+        _type = value.get("_type")
+        # Validate if it's a string (non-string types just return False)
+        if isinstance(_type, str) and _type in VALID_TYPE_TAGS:
+            return _type == "dict"
+        return False  # Invalid type tag - not a valid dict encoding
+
+    # Legacy: head/tail without type tag
+    if keys != {"head", "tail"}:
         return False
 
     # Check ALL elements are valid kv-pairs (with cycle detection)
@@ -306,11 +366,13 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
 
-    Reverses the normalization done by normalize_for_match.
+    Reverses the normalization done by normalize_for_match. Uses the _type tag
+    on the root node to determine if a linked list represents a list or dict.
 
-    Note: An empty linked list (null) denormalizes to an empty list [],
-    not an empty dict {}. This is because we cannot distinguish which
-    empty collection it came from after normalization.
+    For legacy structures without _type tag, falls back to projection-based
+    classification (classify_linked_list).
+
+    Note: An empty linked list (null) denormalizes to None (not [] or {}).
 
     This function uses iterative traversal with an explicit stack (Phase 6c).
     The isinstance() checks at the boundary are scaffolding debt, not semantic debt.
@@ -393,7 +455,68 @@ def denormalize_from_match(value: Mu, _seen: set[int] | None = None) -> Mu:
             if isinstance(val, dict):
                 keys = set(val.keys())
 
-                # Head/tail linked list structure
+                # Type-tagged linked list (Phase 6c: fixes list/dict ambiguity)
+                if keys == {"_type", "head", "tail"}:
+                    _type = val.get("_type")
+                    # Validate type tag is from whitelist (security)
+                    if isinstance(_type, str):
+                        validate_type_tag(_type, "denormalize_from_match")
+                    if _type == "dict":
+                        # Dict encoding - extract all kv-pairs
+                        result_dict: dict = {}
+                        # Push finalize first (will be processed last)
+                        stack.append(("finalize_dict", result_dict))
+
+                        # Collect kv-pairs with cycle detection
+                        kv_pairs: list = []
+                        current = val
+                        visited: set[int] = set()
+                        while current is not None:
+                            node_id = id(current)
+                            if node_id in visited:
+                                raise ValueError("Circular reference in linked list during denormalization")
+                            visited.add(node_id)
+                            if not isinstance(current, dict) or "head" not in current:
+                                break
+                            kv = current["head"]
+                            key = kv["head"]
+                            val_to_process = kv["tail"]["head"]
+                            kv_pairs.append((key, val_to_process))
+                            current = current.get("tail")
+
+                        # Push processing in reverse order (last kv pushed first)
+                        for key, val_to_process in reversed(kv_pairs):
+                            stack.append(("dict_kv", key, result_dict))
+                            stack.append(("eval", val_to_process))
+                        continue
+
+                    elif _type == "list":
+                        # List encoding - extract all elements
+                        result_list: list = []
+                        # Push finalize first (will be processed last)
+                        stack.append(("finalize_list", result_list))
+
+                        # Collect elements with cycle detection
+                        elements: list = []
+                        current = val
+                        visited: set[int] = set()
+                        while current is not None:
+                            node_id = id(current)
+                            if node_id in visited:
+                                raise ValueError("Circular reference in linked list during denormalization")
+                            visited.add(node_id)
+                            if not isinstance(current, dict) or "head" not in current:
+                                break
+                            elements.append(current["head"])
+                            current = current.get("tail")
+
+                        # Push processing in reverse order (last element pushed first)
+                        for elem in reversed(elements):
+                            stack.append(("list_elem", result_list))
+                            stack.append(("eval", elem))
+                        continue
+
+                # Legacy head/tail linked list (no type tag)
                 if keys == {"head", "tail"}:
                     # Phase 6b: Use Mu projection-based classification
                     if classify_linked_list(val) == "dict":

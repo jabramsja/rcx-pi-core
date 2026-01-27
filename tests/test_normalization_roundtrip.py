@@ -21,6 +21,8 @@ from rcx_pi.match_mu import (
     denormalize_from_match,
     is_dict_linked_list,
     is_kv_pair_linked,
+    validate_type_tag,
+    VALID_TYPE_TAGS,
 )
 from rcx_pi.mu_type import is_mu, mu_equal
 
@@ -155,17 +157,19 @@ class TestNormalizationFormat:
     """Tests for normalization output format."""
 
     def test_list_becomes_linked_list(self):
-        """Lists become head/tail linked lists."""
+        """Lists become type-tagged head/tail linked lists."""
         normalized = normalize_for_match([1, 2, 3])
         assert isinstance(normalized, dict)
-        assert set(normalized.keys()) == {"head", "tail"}
+        assert set(normalized.keys()) == {"_type", "head", "tail"}
+        assert normalized["_type"] == "list"
         assert normalized["head"] == 1
 
     def test_dict_becomes_kv_linked_list(self):
-        """Dicts become linked lists of key-value pairs."""
+        """Dicts become type-tagged linked lists of key-value pairs."""
         normalized = normalize_for_match({"a": 1})
         assert isinstance(normalized, dict)
-        assert set(normalized.keys()) == {"head", "tail"}
+        assert set(normalized.keys()) == {"_type", "head", "tail"}
+        assert normalized["_type"] == "dict"
         # Each element is a kv-pair
         assert is_kv_pair_linked(normalized["head"])
 
@@ -250,6 +254,31 @@ class TestDenormalizationOutputValidity:
             normalized = normalize_for_match(value)
             denormalized = denormalize_from_match(normalized)
             assert is_mu(denormalized), f"Denormalized {value} is not Mu"
+
+
+class TestTypeTagValidation:
+    """Tests for _type tag whitelist validation (Phase 6c security)."""
+
+    def test_valid_type_tags_pass(self):
+        """Valid type tags pass validation."""
+        for tag in VALID_TYPE_TAGS:
+            validate_type_tag(tag)  # Should not raise
+
+    def test_invalid_type_tag_raises(self):
+        """Invalid type tags raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid type tag"):
+            validate_type_tag("unknown")
+
+    def test_invalid_type_tag_in_denormalize(self):
+        """Denormalize rejects structures with invalid type tags."""
+        malicious = {"_type": "malicious", "head": 1, "tail": None}
+        with pytest.raises(ValueError, match="Invalid type tag"):
+            denormalize_from_match(malicious)
+
+    def test_is_dict_linked_list_rejects_invalid_type(self):
+        """is_dict_linked_list returns False for invalid type tags."""
+        malicious = {"_type": "malicious", "head": 1, "tail": None}
+        assert is_dict_linked_list(malicious) is False
 
 
 # --- Helper functions ---

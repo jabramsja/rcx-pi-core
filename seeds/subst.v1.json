@@ -149,6 +149,88 @@
       }
     },
     {
+      "id": "subst.typed.descend",
+      "description": "Descend into type-tagged head/tail structure (Phase 6c)",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"_type": {"var": "ty"}, "head": {"var": "h"}, "tail": {"var": "t"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "h"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_head_done",
+            "_type": {"var": "ty"},
+            "tail": {"var": "t"}
+          },
+          "tail": {"var": "ctx"}
+        }
+      }
+    },
+    {
+      "id": "subst.typed.sibling",
+      "description": "Type-tagged: head done -> move to tail (Phase 6c)",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "head_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_head_done",
+            "_type": {"var": "ty"},
+            "tail": {"var": "tail"}
+          },
+          "tail": {"var": "outer"}
+        }
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "tail"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_tail_done",
+            "_type": {"var": "ty"},
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        }
+      }
+    },
+    {
+      "id": "subst.typed.ascend",
+      "description": "Type-tagged: both head and tail done -> reconstruct with _type (Phase 6c)",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "tail_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_tail_done",
+            "_type": {"var": "ty"},
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        }
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"_type": {"var": "ty"}, "head": {"var": "head_result"}, "tail": {"var": "tail_result"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "outer"}
+      }
+    },
+    {
       "id": "subst.descend",
       "description": "Descend into head/tail structure",
       "pattern": {
