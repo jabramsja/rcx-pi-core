@@ -14,7 +14,6 @@ from rcx_pi.subst_mu import (
     subst_mu,
     load_subst_projections,
     clear_projection_cache,
-    lookup_binding,
 )
 
 
@@ -81,46 +80,10 @@ class TestSeedLoading:
 
 
 # =============================================================================
-# Test: Binding Lookup
-# =============================================================================
-
-
-class TestBindingLookup:
-    """Test binding lookup helper."""
-
-    def test_lookup_single(self):
-        """Look up in single-binding list."""
-        bindings = {"name": "x", "value": 42, "rest": None}
-        assert lookup_binding("x", bindings) == 42
-
-    def test_lookup_multiple(self):
-        """Look up in multi-binding list."""
-        bindings = {
-            "name": "x", "value": 1, "rest": {
-                "name": "y", "value": 2, "rest": {
-                    "name": "z", "value": 3, "rest": None
-                }
-            }
-        }
-        assert lookup_binding("x", bindings) == 1
-        assert lookup_binding("y", bindings) == 2
-        assert lookup_binding("z", bindings) == 3
-
-    def test_lookup_not_found(self):
-        """Look up missing variable raises KeyError."""
-        bindings = {"name": "x", "value": 42, "rest": None}
-        with pytest.raises(KeyError, match="Unbound variable: y"):
-            lookup_binding("y", bindings)
-
-    def test_lookup_empty(self):
-        """Look up in empty bindings raises KeyError."""
-        with pytest.raises(KeyError, match="Unbound variable: x"):
-            lookup_binding("x", None)
-
-
-# =============================================================================
 # Test: Primitive Passthrough (Parity)
 # =============================================================================
+# NOTE: TestBindingLookup removed - lookup_binding() was deleted in Phase 6d
+# as lookup is now handled structurally by subst.lookup.* projections (Phase 6a)
 
 
 class TestSubstParityPrimitives:
@@ -336,3 +299,55 @@ class TestSubstErrors:
         """Unbound variable in nested structure."""
         with pytest.raises(KeyError, match="Unbound variable: missing"):
             subst_mu({"a": {"var": "missing"}}, {})
+
+
+# =============================================================================
+# Test: Empty Variable Name Rejection (Phase 6d - Iterative Implementation)
+# =============================================================================
+
+
+class TestSubstEmptyVarNameRejection:
+    """
+    Test that empty variable names are rejected by subst_mu.
+
+    The _check_empty_var_names function uses an explicit stack instead
+    of recursion (Phase 6d), so these tests verify the iterative
+    traversal works correctly.
+    """
+
+    def test_subst_mu_rejects_shallow_empty_var(self):
+        """subst_mu raises ValueError for {"var": ""} at top level."""
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu({"var": ""}, {"x": 1})
+
+    def test_subst_mu_rejects_empty_var_in_dict(self):
+        """subst_mu rejects empty var name nested in dict."""
+        body = {"a": {"var": ""}}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu(body, {"x": 1})
+
+    def test_subst_mu_rejects_empty_var_deeply_nested(self):
+        """subst_mu rejects deeply nested empty var names."""
+        body = {"a": {"b": {"c": {"d": {"var": ""}}}}}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu(body, {"x": 1})
+
+    def test_subst_mu_rejects_empty_var_in_list(self):
+        """subst_mu rejects empty var in list."""
+        body = [{"var": ""}, {"var": "x"}]
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            subst_mu(body, {"x": 1})
+
+    def test_subst_mu_accepts_valid_var_names(self):
+        """subst_mu accepts non-empty variable names."""
+        # Single char
+        result = subst_mu({"var": "x"}, {"x": 42})
+        assert result == 42
+
+        # Longer name
+        result = subst_mu({"var": "my_variable"}, {"my_variable": "hello"})
+        assert result == "hello"
+
+        # Unicode
+        result = subst_mu({"var": "变量"}, {"变量": 123})
+        assert result == 123

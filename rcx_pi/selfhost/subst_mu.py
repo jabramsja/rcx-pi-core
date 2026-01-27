@@ -52,37 +52,6 @@ def clear_projection_cache() -> None:
 
 
 # =============================================================================
-# Binding Lookup
-# =============================================================================
-
-
-def lookup_binding(name: str, bindings: Mu) -> Mu:
-    """
-    Look up a variable name in linked list bindings.
-
-    Bindings format: {"name": "x", "value": 42, "rest": {...}} or null
-
-    Args:
-        name: Variable name to look up.
-        bindings: Linked list of bindings.
-
-    Returns:
-        The bound value.
-
-    Raises:
-        KeyError: If variable is not bound.
-    """
-    current = bindings
-    while current is not None:
-        if not isinstance(current, dict):
-            raise ValueError(f"Invalid bindings structure: {current}")
-        if current.get("name") == name:
-            return current.get("value")
-        current = current.get("rest")
-    raise KeyError(f"Unbound variable: {name}")
-
-
-# =============================================================================
 # Substitute Runner
 # =============================================================================
 
@@ -106,7 +75,6 @@ def is_subst_state(state: Mu) -> bool:
 def run_subst_projections(
     projections: list[Mu],
     initial_state: Mu,
-    bindings: Mu,
     max_steps: int = 1000
 ) -> tuple[Mu, int, bool]:
     """
@@ -115,7 +83,7 @@ def run_subst_projections(
     Reports steps to the global step budget for cross-call resource accounting.
 
     As of Phase 6a, lookup is handled structurally by subst.lookup.found and
-    subst.lookup.next projections - no Python resolve_lookups() needed.
+    subst.lookup.next projections - bindings are embedded in initial_state.
 
     Returns:
         (final_state, steps_taken, is_stall)
@@ -194,10 +162,8 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Wrap input in subst request format
     initial = {"subst": {"body": norm_body, "bindings": linked_bindings}}
 
-    # Run projections
-    final_state, steps, is_stall = run_subst_projections(
-        projections, initial, linked_bindings
-    )
+    # Run projections (bindings are embedded in initial state)
+    final_state, steps, is_stall = run_subst_projections(projections, initial)
 
     # Extract result
     if is_stall:

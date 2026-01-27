@@ -660,3 +660,91 @@ class TestSharedReferencesAllowed:
 
         # Structure should be preserved (though shared refs become copies)
         assert denormalized == [[1, 2, 3], [1, 2, 3]]
+
+
+# =============================================================================
+# Empty Variable Name Rejection Tests (Phase 6d - Iterative Implementation)
+# =============================================================================
+
+
+class TestEmptyVarNameRejection:
+    """
+    Test that empty variable names are rejected by the iterative
+    _check_empty_var_names implementation (Phase 6d).
+
+    The function uses an explicit stack instead of recursion, so these
+    tests verify the iterative traversal works correctly at various depths.
+    """
+
+    def test_match_mu_rejects_shallow_empty_var(self):
+        """match_mu raises ValueError for {"var": ""} at top level."""
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu({"var": ""}, 42)
+
+    def test_match_mu_rejects_empty_var_in_dict(self):
+        """match_mu rejects empty var name nested in dict."""
+        pattern = {"a": {"var": ""}}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, {"a": 1})
+
+    def test_match_mu_rejects_empty_var_deeply_nested(self):
+        """match_mu rejects deeply nested empty var names."""
+        pattern = {"a": {"b": {"c": {"d": {"var": ""}}}}}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, {"a": {"b": {"c": {"d": 1}}}})
+
+    def test_match_mu_rejects_empty_var_in_list(self):
+        """match_mu rejects empty var in list."""
+        pattern = [{"var": ""}, {"var": "x"}]
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, [1, 2])
+
+    def test_match_mu_rejects_empty_var_in_nested_list(self):
+        """match_mu rejects empty var in nested list."""
+        pattern = [[[[{"var": ""}]]]]
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, [[[[1]]]])
+
+    def test_match_mu_rejects_empty_var_in_mixed_structure(self):
+        """match_mu rejects empty var in mixed list/dict structure."""
+        pattern = {"items": [{"key": {"var": ""}}]}
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, {"items": [{"key": "value"}]})
+
+    def test_match_mu_accepts_valid_var_names(self):
+        """match_mu accepts non-empty variable names."""
+        # Single char
+        result = match_mu({"var": "x"}, 42)
+        assert result == {"x": 42}
+
+        # Longer name
+        result = match_mu({"var": "my_variable"}, "hello")
+        assert result == {"my_variable": "hello"}
+
+        # Unicode
+        result = match_mu({"var": "变量"}, 123)
+        assert result == {"变量": 123}
+
+    def test_match_mu_accepts_deeply_nested_valid_vars(self):
+        """match_mu accepts valid vars at any depth."""
+        pattern = {"a": {"b": {"c": {"var": "deep"}}}}
+        value = {"a": {"b": {"c": "found"}}}
+        result = match_mu(pattern, value)
+        assert result == {"deep": "found"}
+
+    def test_iterative_handles_wide_structure(self):
+        """Iterative check handles wide structures (many keys)."""
+        # Build pattern with many keys, one has empty var
+        pattern = {f"key_{i}": i for i in range(50)}
+        pattern["bad_key"] = {"var": ""}
+
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, {f"key_{i}": i for i in range(51)})
+
+    def test_iterative_handles_wide_list(self):
+        """Iterative check handles wide lists (many elements)."""
+        # Build list with many elements, one has empty var
+        pattern = list(range(50)) + [{"var": ""}]
+
+        with pytest.raises(ValueError, match="Variable name cannot be empty"):
+            match_mu(pattern, list(range(51)))
