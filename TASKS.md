@@ -144,6 +144,13 @@ Items here are implemented and verified under current invariants. Changes requir
   - Projection ID verification (expected IDs present, wrap is last)
   - 27 tests in `tests/test_seed_integrity.py`
   - Security foundation: seeds now verified on load (adversary finding closed)
+- Phase 6a: Lookup as Mu Projections (PR #158):
+  - Added `subst.lookup.found` and `subst.lookup.next` projections to subst.v1.json
+  - Lookup is now structural: pattern matching with non-linear vars (same name binds same value)
+  - Removed 2 `@host_builtin` decorators from subst_mu.py
+  - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
+  - `resolve_lookups()` Python function deprecated (kept for backward compat)
+  - 37 subst parity tests pass with structural lookup
 
 ---
 
@@ -166,22 +173,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-**Phase 6a: Lookup as Mu Projections** (promoted 2026-01-27)
-
-Scope: Replace `lookup_binding()` and `resolve_lookups()` (~66 LOC) with Mu projections.
-
-Why this first:
-- Smallest semantic debt chunk (~66 LOC)
-- Linked list traversal is native to Mu (head/tail patterns)
-- No Python iteration needed - projections can recurse structurally
-- Removes 2 `@host_builtin` decorators, threshold drops 23 → 21
-
-Deliverables:
-1. Create `seeds/lookup.v1.json` with lookup projections
-2. Add `lookup_mu()` function using kernel loop
-3. Update `resolve_lookups()` to use `lookup_mu()`
-4. Parity tests: `lookup_mu(name, bindings) == lookup_binding(name, bindings)`
-5. Remove `@host_builtin` decorators from `lookup_binding()` and `resolve_lookups()`
+*(Phase 6a complete - see Ra section)*
 
 **Future phases (not yet promoted):**
 

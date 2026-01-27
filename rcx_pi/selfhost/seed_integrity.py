@@ -25,7 +25,8 @@ from typing import Any
 # Update these when seeds are intentionally modified.
 SEED_CHECKSUMS: dict[str, str] = {
     "match.v1.json": "62068f6f87408ffd2613b4ddae71cc30dcc4c22961ae591a5023d5b9068be27e",
-    "subst.v1.json": "39921134583278e9a9f1421e4928ab660c8a1e3c9a9ee7ed96f2f648b5785715",
+    # Updated v1.1.0: added subst.lookup.found and subst.lookup.next (Phase 6a)
+    "subst.v1.json": "e373777839d944de72a564863bc624647dc0c0de49715b7c92f37a3fb7ef9802",
 }
 
 # Expected projection IDs for each seed.
@@ -44,6 +45,8 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "subst.ascend",
         "subst.sibling",
         "subst.var",
+        "subst.lookup.found",   # Phase 6a: structural lookup
+        "subst.lookup.next",    # Phase 6a: structural lookup
         "subst.descend",
         "subst.primitive",
         "subst.wrap",  # Must be last (catch-all)

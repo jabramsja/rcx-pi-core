@@ -1,6 +1,6 @@
 {
   "meta": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "name": "SUBST_SEED",
     "description": "Variable substitution as Mu projections for Phase 4 self-hosting",
     "doc": "docs/SelfHosting.v0.md",
@@ -8,7 +8,8 @@
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",
       "Deterministic: same input -> same output",
-      "Traverses body, replaces var sites with bound values"
+      "Traverses body, replaces var sites with bound values",
+      "Lookup is structural (Phase 6a) - no Python resolve_lookups needed"
     ]
   },
   "projections": [
@@ -83,7 +84,7 @@
     },
     {
       "id": "subst.var",
-      "description": "Variable site -> replace with looked up value",
+      "description": "Variable site -> create lookup marker for structural resolution",
       "pattern": {
         "mode": "subst",
         "phase": "traverse",
@@ -93,8 +94,56 @@
       },
       "body": {
         "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "name"},
+        "lookup_bindings": {"var": "b"},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.lookup.found",
+      "description": "Lookup: name matches current binding -> return value as result",
+      "pattern": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": {
+          "name": {"var": "n"},
+          "value": {"var": "v"},
+          "rest": {"var": "_rest"}
+        },
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
         "phase": "result",
-        "focus": {"lookup": {"var": "name"}, "in": {"var": "b"}},
+        "focus": {"var": "v"},
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.lookup.next",
+      "description": "Lookup: name doesn't match -> continue with rest of bindings",
+      "pattern": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": {
+          "name": {"var": "_other"},
+          "value": {"var": "_v"},
+          "rest": {"var": "rest"}
+        },
+        "bindings": {"var": "b"},
+        "context": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": {"var": "rest"},
         "bindings": {"var": "b"},
         "context": {"var": "ctx"}
       }

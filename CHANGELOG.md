@@ -42,11 +42,17 @@ All notable changes to RCX are documented in this file.
   - 27 tests in `tests/test_seed_integrity.py`
   - Closes adversary finding: seeds were loaded without integrity verification
 
-### Governance
-- **Phase 6a Promoted to NEXT** (2026-01-27)
-  - Lookup as Mu projections (~66 LOC) promoted to NEXT
-  - Smallest semantic debt chunk, linked list traversal is Mu-native
-  - Will remove 2 `@host_builtin` decorators, threshold 23 → 21
+### Self-Hosting
+- **Phase 6a: Lookup as Mu Projections** (PR #158)
+  - Added `subst.lookup.found` and `subst.lookup.next` projections to subst.v1.json
+  - Lookup is now structural: pattern matching with non-linear vars
+  - `subst.var` now transitions to `phase: lookup` instead of creating marker
+  - `subst.lookup.found`: name matches current binding → return value
+  - `subst.lookup.next`: name doesn't match → continue with rest
+  - Unbound variables stall (lookup_bindings becomes null, no projection matches)
+  - Removed 2 `@host_builtin` decorators from subst_mu.py
+  - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
+  - 37 subst parity tests pass
 
 ## 2026-01-26
 

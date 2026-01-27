@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
-from .eval_seed import step, host_builtin
+from .eval_seed import step
 from .kernel import get_step_budget
 from .seed_integrity import load_verified_seed, get_seeds_dir
 from .match_mu import (
@@ -56,7 +56,6 @@ def clear_projection_cache() -> None:
 # =============================================================================
 
 
-@host_builtin("Linked list traversal using while - will become projection in L2")
 def lookup_binding(name: str, bindings: Mu) -> Mu:
     """
     Look up a variable name in linked list bindings.
@@ -83,13 +82,16 @@ def lookup_binding(name: str, bindings: Mu) -> Mu:
     raise KeyError(f"Unbound variable: {name}")
 
 
-@host_builtin("Marker interpretation using isinstance - will become projection in L2")
 def resolve_lookups(state: Mu, bindings: Mu) -> Mu:
     """
-    Resolve any lookup markers in the state.
+    LEGACY: Resolve any lookup markers in the state.
 
-    The subst.var projection creates: {"lookup": name, "in": bindings}
-    This function replaces that with the actual looked-up value.
+    NOTE: As of Phase 6a, lookup is handled by subst.lookup.found and
+    subst.lookup.next projections in subst.v1.json. This function is
+    kept for backward compatibility but is no longer called by subst_mu.
+
+    The subst.var projection used to create: {"lookup": name, "in": bindings}
+    This function would replace that with the actual looked-up value.
     """
     if not isinstance(state, dict):
         return state
@@ -160,6 +162,9 @@ def run_subst_projections(
 
     Reports steps to the global step budget for cross-call resource accounting.
 
+    As of Phase 6a, lookup is handled structurally by subst.lookup.found and
+    subst.lookup.next projections - no Python resolve_lookups() needed.
+
     Returns:
         (final_state, steps_taken, is_stall)
 
@@ -175,10 +180,7 @@ def run_subst_projections(
             budget.consume(i)
             return state, i, False
 
-        # Resolve any lookup markers before taking a step
-        state = resolve_lookups(state, bindings)
-
-        # Take a step
+        # Take a step (lookup is now handled by subst.lookup.* projections)
         next_state = step(projections, state)
 
         # Check for stall (no change) - use mu_equal to avoid Python type coercion
@@ -248,7 +250,14 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Extract result
     if is_stall:
         # Check if we stalled on a lookup (unbound variable)
+        # Phase 6a: lookup stalls when lookup_bindings is null
         if is_subst_state(final_state):
+            phase = final_state.get("phase")
+            if phase == "lookup":
+                # Stalled in lookup phase = unbound variable
+                name = final_state.get("lookup_name")
+                raise KeyError(f"Unbound variable: {name}")
+            # Legacy check for old lookup marker format (shouldn't happen now)
             focus = final_state.get("focus")
             if isinstance(focus, dict) and "lookup" in focus:
                 name = focus["lookup"]
