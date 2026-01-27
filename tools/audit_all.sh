@@ -44,7 +44,8 @@ echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
 
 echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: _marker is allowed in seeds/ - it's a security feature for done-wrapper spoofing prevention
-! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+# Note: _type is allowed in seeds/ - Phase 6c type tags for list/dict disambiguation
+! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 5) Fixture size check (all v2 jsonl) =="
 find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do
