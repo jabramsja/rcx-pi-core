@@ -154,6 +154,11 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
 
         # Check if this element is a valid kv-pair with string key
         # This is the type check that projections cannot do
+        #
+        # KNOWN LIMITATION: A list like [[s, x]] normalizes identically to {s: x}
+        # We cannot distinguish them after normalization. We favor dict interpretation
+        # because dicts with None values are more common than lists of 2-element sublists.
+        # See docs/core/DebtCategories.v0.md for documentation of this design decision.
         head = current.get("head")
         if isinstance(head, dict):
             # Could be a kv-pair: {"head": key, "tail": {"head": val, "tail": null}}
