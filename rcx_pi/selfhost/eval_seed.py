@@ -117,13 +117,11 @@ def host_mutation(reason: str):
 # If you can write the Y-combinator, this module has failed.
 # =============================================================================
 #
-# PHASE 3 REVIEW: assert_not_lambda_calculus
-# ------------------------------------------
-# This runtime guardrail is debatable:
-# - PRO: Defense-in-depth, catches bad projections at API boundary
-# - CON: Tests prove same thing, uses host recursion itself (ironic)
-# - DECISION: Keep for now, review in Phase 3
-# - OPTIONS: (1) Delete if tests suffice, (2) Rewrite non-recursively
+# BOOTSTRAP: assert_not_lambda_calculus
+# --------------------------------------
+# This runtime guardrail provides defense-in-depth against lambda calculus
+# smuggling. It uses host recursion (ironic), but the test suite also covers
+# these cases. Kept for belt-and-suspenders security at API boundary.
 # =============================================================================
 
 
@@ -212,8 +210,8 @@ def get_var_name(mu: Mu) -> str:
 
 @host_recursion(
     "Recursive tree traversal for pattern matching. "
-    "Phase 3: express as iterative projections where kernel loop provides recursion. "
-    "Also uses: len() for size checks, zip() for pairing, dict mutation for bindings."
+    "BOOTSTRAP: match_mu.py implements this as Mu projections (Phase 4a). "
+    "This function remains as the reference implementation for parity testing."
 )
 @host_builtin(
     "len() for size, zip() for pairing, set() for key comparison, "
@@ -320,8 +318,8 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 
 @host_recursion(
     "Recursive tree traversal for variable substitution. "
-    "Phase 3: express as iterative projections - each step replaces one var site, "
-    "kernel loop provides recursion until stall (no more var sites)."
+    "BOOTSTRAP: subst_mu.py implements this as Mu projections (Phase 4b). "
+    "This function remains as the reference implementation for parity testing."
 )
 def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """
