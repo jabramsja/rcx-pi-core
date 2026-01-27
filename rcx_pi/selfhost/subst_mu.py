@@ -10,13 +10,12 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import step, host_builtin
 from .kernel import get_step_budget
+from .seed_integrity import load_verified_seed, get_seeds_dir
 from .match_mu import (
     normalize_for_match,
     denormalize_from_match,
@@ -34,14 +33,13 @@ _SUBST_PROJECTIONS: list[Mu] | None = None
 
 
 def load_subst_projections() -> list[Mu]:
-    """Load substitute projections from seeds/subst.v1.json."""
+    """Load substitute projections from seeds/subst.v1.json with integrity verification."""
     global _SUBST_PROJECTIONS
     if _SUBST_PROJECTIONS is not None:
         return _SUBST_PROJECTIONS
 
-    seed_path = Path(__file__).parent.parent.parent / "seeds" / "subst.v1.json"
-    with open(seed_path) as f:
-        seed = json.load(f)
+    seed_path = get_seeds_dir() / "subst.v1.json"
+    seed = load_verified_seed(seed_path)
 
     _SUBST_PROJECTIONS = seed["projections"]
     return _SUBST_PROJECTIONS

@@ -33,6 +33,21 @@ All notable changes to RCX are documented in this file.
 - All 6 agents reviewed: verifier, adversary, expert, structural-proof, grounding, fuzzer
 - Debt now at ceiling (23/23) with clear path to L2
 
+### Security
+- **Seed Integrity Verification** (PR #157)
+  - `rcx_pi/selfhost/seed_integrity.py`: SHA256 checksum verification
+  - Validates seed structure on load (meta, projections keys required)
+  - Verifies expected projection IDs present and wrap is last
+  - `match_mu.py` and `subst_mu.py` now use `load_verified_seed()`
+  - 27 tests in `tests/test_seed_integrity.py`
+  - Closes adversary finding: seeds were loaded without integrity verification
+
+### Governance
+- **Phase 6a Promoted to NEXT** (2026-01-27)
+  - Lookup as Mu projections (~66 LOC) promoted to NEXT
+  - Smallest semantic debt chunk, linked list traversal is Mu-native
+  - Will remove 2 `@host_builtin` decorators, threshold 23 → 21
+
 ## 2026-01-26
 
 ### Runtime

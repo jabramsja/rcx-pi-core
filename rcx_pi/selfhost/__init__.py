@@ -8,6 +8,7 @@ This subpackage contains the core self-hosting implementation:
 - match_mu: Pattern matching as Mu projections
 - subst_mu: Substitution as Mu projections
 - step_mu: Self-hosting step (uses match_mu + subst_mu)
+- seed_integrity: Seed file integrity verification (checksums, structure)
 
 Architecture: Kernel (4 primitives) + Seeds (Mu projections)
 See docs/core/RCXKernel.v0.md and docs/core/SelfHosting.v0.md
