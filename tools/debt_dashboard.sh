@@ -22,11 +22,12 @@ count_markers() {
 
 if [ "$JSON_OUTPUT" = true ]; then
     # JSON output for programmatic use
-    HOST_RECURSION=$(count_markers "@host_recursion" "rcx_pi/")
-    HOST_BUILTIN=$(count_markers "@host_builtin" "rcx_pi/")
-    HOST_ITERATION=$(count_markers "@host_iteration" "rcx_pi/")
-    HOST_MUTATION=$(count_markers "@host_mutation" "rcx_pi/")
-    BOOTSTRAP=$(count_markers "@bootstrap_only" "rcx_pi/")
+    # Use anchored patterns (^[[:space:]]*@) to match only actual decorators, not comments
+    HOST_RECURSION=$(count_markers "^[[:space:]]*@host_recursion" "rcx_pi/")
+    HOST_BUILTIN=$(count_markers "^[[:space:]]*@host_builtin" "rcx_pi/")
+    HOST_ITERATION=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
+    BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
     AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
     PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
     PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
@@ -59,11 +60,12 @@ else
     echo "Tracked Markers (rcx_pi/) - @host_* decorators"
     echo "----------------------------------------------"
 
-    HOST_RECURSION=$(count_markers "@host_recursion" "rcx_pi/")
-    HOST_BUILTIN=$(count_markers "@host_builtin" "rcx_pi/")
-    HOST_ITERATION=$(count_markers "@host_iteration" "rcx_pi/")
-    HOST_MUTATION=$(count_markers "@host_mutation" "rcx_pi/")
-    BOOTSTRAP=$(count_markers "@bootstrap_only" "rcx_pi/")
+    # Use anchored patterns (^[[:space:]]*@) to match only actual decorators, not comments
+    HOST_RECURSION=$(count_markers "^[[:space:]]*@host_recursion" "rcx_pi/")
+    HOST_BUILTIN=$(count_markers "^[[:space:]]*@host_builtin" "rcx_pi/")
+    HOST_ITERATION=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
+    BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
 
     printf "  @host_recursion:  %3d\n" "$HOST_RECURSION"
     printf "  @host_builtin:    %3d\n" "$HOST_BUILTIN"
