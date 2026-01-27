@@ -815,8 +815,9 @@ BUILTIN_COUNT=$(grep -rE "^[[:space:]]*@host_builtin" rcx_pi/ --include="*.py" 2
 MUTATION_COUNT=$(grep -rE "^[[:space:]]*@host_mutation" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 COMPARISON_COUNT=$(grep -rE "^[[:space:]]*@host_comparison" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 STRING_COUNT=$(grep -rE "^[[:space:]]*@host_string_op" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+BOOTSTRAP_ONLY_COUNT=$(grep -rE "^[[:space:]]*@bootstrap_only" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 
-HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT))
+HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT + BOOTSTRAP_ONLY_COUNT))
 
 # AST_OK: bootstrap bypasses (semantic debt - must become structural)
 # Pattern uses [[:space:]]* to catch spacing variations like "AST_OK:bootstrap"
@@ -835,6 +836,7 @@ echo "    @host_builtin:    $BUILTIN_COUNT"
 echo "    @host_mutation:   $MUTATION_COUNT"
 echo "    @host_comparison: $COMPARISON_COUNT"
 echo "    @host_string_op:  $STRING_COUNT"
+echo "    @bootstrap_only:  $BOOTSTRAP_ONLY_COUNT"
 echo "    ─────────────────────"
 echo "    Host subtotal:    $HOST_DEBT"
 echo ""
