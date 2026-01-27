@@ -8,8 +8,8 @@ This file is read by Claude Code at session start. It contains project-specific 
 - Core self-hosting: `rcx_pi/selfhost/` (mu_type, kernel, eval_seed, match_mu, subst_mu, step_mu, classify_mu)
 - Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`
 - Type tags (`_type: "list"` / `_type: "dict"`) resolve list/dict ambiguity
-- 77 fuzzer tests, 30,500+ random examples verify parity
-- Debt: 15 total (11 tracked + 3 AST_OK + 1 review), threshold 15
+- 53 fuzzer tests, 10,000+ random examples verify parity
+- Debt: 14 total (11 tracked + 3 AST_OK), threshold 14 (at ceiling)
 
 ## Pre-Push Checklist
 

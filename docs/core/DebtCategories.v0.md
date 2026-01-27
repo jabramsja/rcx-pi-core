@@ -130,14 +130,14 @@ Functions still marked with `@host_recursion` or `@host_builtin` decorators:
 ## Debt Ceiling Policy
 
 ### Current State
-- **Tracked markers:** 11/15 (below ceiling)
+- **Tracked markers:** 11/14 (at ceiling)
 - **AST_OK bootstrap:** 3 (semantic debt, counted separately)
 - **AST_OK infra/key comparison:** 30 (scaffolding, acceptable)
-- **Total semantic debt:** 15 (11 tracked + 3 AST_OK + 1 review)
+- **Total semantic debt:** 14 (11 tracked + 3 AST_OK)
 
 ### Policy
 
-1. **Marker ceiling is 15** - reduced from 23 after Phase 6a/6b/6c
+1. **Marker ceiling is 14** - reduced from 23 after Phase 6a/6b/6c and PR #163 cleanup
 2. **Track AST_OK: bootstrap separately** - these are semantic debt
 3. **Use existing markers** - no new marker systems needed
 4. **Ratchet only tightens** - threshold can only decrease, never increase
@@ -208,16 +208,17 @@ The key distinction: scaffolding is **mechanism** (how to run), semantic is **in
 | Category | LOC | Status | Blocking |
 |----------|-----|--------|----------|
 | Scaffolding | ~150 | Acceptable | No |
-| Semantic (tracked) | ~200 | 11/15 ceiling | L2 |
+| Semantic (tracked) | ~200 | 11/14 ceiling | L2 |
 | Semantic (AST_OK) | 3 instances | Counted separately | L2 |
 | Semantic (unmarked) | 0 | All marked | L2 |
 
-**Total semantic debt blocking L2:** ~200 lines (reduced from ~340 after Phase 6)
+**Total semantic debt blocking L2:** ~150 lines (reduced from ~340 after Phase 6)
 
 **Phase 6 debt reduction:**
 - Phase 6a: Lookup as Mu projections (~66 lines eliminated)
 - Phase 6b: Classification as Mu projections (~52 lines eliminated)
 - Phase 6c: Iterative normalization (~28 lines eliminated)
+- PR #163: Dead code removal (`resolve_lookups()` deleted, ~47 lines)
 
 This debt is finite, bounded, and has a clear elimination path. The remaining semantic debt is primarily in `eval_seed.py` (match/substitute core) and `match_mu.py` (conversion helpers). Kernel loop (Phase 7) requires L3 design.
 
