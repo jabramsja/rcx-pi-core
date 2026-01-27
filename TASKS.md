@@ -126,6 +126,11 @@ Items here are implemented and verified under current invariants. Changes requir
   - Re-export stubs at original locations for backward compatibility
   - Audit script updated to support both layouts
   - Files: mu_type.py, kernel.py, eval_seed.py, match_mu.py, subst_mu.py, step_mu.py
+- Comprehensive Debt Tracking (PR #155):
+  - All ~289 LOC semantic debt now marked with `@host_*` decorators
+  - DEBT_THRESHOLD updated: 14 → 23 (17 tracked + 5 AST_OK + 1 review)
+  - Design decisions documented (empty collection normalization, head/tail collision)
+  - 10 new tests for edge cases (TestMatchParityHeadTailCollision, TestMatchParityEmptyCollections)
 - QoL Infrastructure (PRs #131+):
   - Agent reports as PR comments (verifier, adversary, expert, structural-proof)
   - Debt dashboard (`tools/debt_dashboard.sh`)
@@ -133,6 +138,12 @@ Items here are implemented and verified under current invariants. Changes requir
   - Projection test coverage (`rcx_pi/projection_coverage.py`)
   - Agent memory across sessions (`tools/agent_memory.py`)
   - Trace visualization (`tools/trace_viewer.py`)
+- Seed Integrity Verification (PR #157):
+  - SHA256 checksum verification for seed files (match.v1.json, subst.v1.json)
+  - Structure validation (meta, projections keys, required fields)
+  - Projection ID verification (expected IDs present, wrap is last)
+  - 27 tests in `tests/test_seed_integrity.py`
+  - Security foundation: seeds now verified on load (adversary finding closed)
 
 ---
 
@@ -155,14 +166,31 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-*(All Phase 1-5 items complete - see Ra section)*
+**Phase 6a: Lookup as Mu Projections** (promoted 2026-01-27)
+
+Scope: Replace `lookup_binding()` and `resolve_lookups()` (~66 LOC) with Mu projections.
+
+Why this first:
+- Smallest semantic debt chunk (~66 LOC)
+- Linked list traversal is native to Mu (head/tail patterns)
+- No Python iteration needed - projections can recurse structurally
+- Removes 2 `@host_builtin` decorators, threshold drops 23 → 21
+
+Deliverables:
+1. Create `seeds/lookup.v1.json` with lookup projections
+2. Add `lookup_mu()` function using kernel loop
+3. Update `resolve_lookups()` to use `lookup_mu()`
+4. Parity tests: `lookup_mu(name, bindings) == lookup_binding(name, bindings)`
+5. Remove `@host_builtin` decorators from `lookup_binding()` and `resolve_lookups()`
 
 **Future phases (not yet promoted):**
 
-- **Phase 6**: Self-host the kernel loop (projection selection as Mu projections)
-- **Phase 7**: Self-host iteration itself (recursion as structural transformation)
+- **Phase 6b**: Classification as Mu projections (~52 LOC)
+- **Phase 6c**: Normalization as Mu projections (~140 LOC, requires cycle detection design)
+- **Phase 7**: Self-host the kernel loop (projection selection as Mu projections)
 
-These are "scaffolding debt" - the kernel for-loop is Python, but operations are pure Mu.
+Note: Phase 6c and 7 require design work before promotion. Cycle detection in
+normalization needs Mu-native approach. Kernel loop requires meta-circular design.
 
 ---
 
