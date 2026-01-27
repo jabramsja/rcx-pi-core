@@ -121,7 +121,7 @@ These functions are now marked with `@host_recursion` or `@host_builtin` decorat
 
 ### Policy
 
-1. **Marker ceiling stays at 9** - existing `@host_*` markers
+1. **Marker ceiling is 17** - all semantic functions now marked with `@host_*` decorators
 2. **Track AST_OK: bootstrap separately** - these are semantic debt
 3. **Use existing markers** - no new marker systems needed
 4. **Enhance debt_dashboard.sh** - add scaffolding vs semantic breakdown
@@ -132,7 +132,7 @@ To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: boots
 
 **Implemented (PR #155, updated PR #156):**
 - `debt_dashboard.sh` now counts AST_OK: bootstrap bypasses separately from scaffolding
-- `audit_semantic_purity.sh` includes AST_OK: bootstrap in the debt threshold (DEBT_THRESHOLD=14)
+- `audit_semantic_purity.sh` includes AST_OK: bootstrap in the debt threshold (DEBT_THRESHOLD=23)
 - Dashboard shows: Tracked markers + AST_OK bootstrap = Total Semantic Debt
 - AST_OK patterns use `[[:space:]]*` to catch spacing variations (e.g., `AST_OK:bootstrap`)
 

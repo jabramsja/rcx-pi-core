@@ -2,6 +2,37 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-27
+
+### Tooling
+- **Comprehensive Debt Tracking** (PR #155)
+  - Marked ~289 LOC of previously unmarked semantic debt with `@host_*` decorators
+  - match_mu.py: 7 decorators (3 `@host_recursion`, 4 `@host_builtin`)
+  - subst_mu.py: 2 decorators (`@host_builtin`)
+  - Updated DEBT_THRESHOLD: 14 → 23 (17 tracked + 5 AST_OK + 1 review)
+  - Updated dashboard ceiling: 9 → 17
+  - All semantic debt now fully tracked (was ~289 LOC unmarked)
+
+### Tests
+- **Head/Tail Collision Tests** (PR #155)
+  - `TestMatchParityHeadTailCollision`: 5 tests verifying dicts with head/tail keys
+  - Ensures user data like `{"head": "x", "tail": "y"}` isn't misclassified as linked list
+
+- **Empty Collection Tests** (PR #155)
+  - `TestMatchParityEmptyCollections`: 5 tests documenting known difference
+  - Documents: `{}` and `[]` both normalize to `null` (intentional structural equivalence)
+  - Tests explicitly mark this as "DOCUMENTED DIFFERENCE" vs parity
+
+### Docs
+- **Design Decisions Documented** (PR #155)
+  - `docs/core/DebtCategories.v0.md`: Added "Known Design Decisions" section
+  - Empty collection normalization explained with rationale
+  - Head/tail collision handling documented
+
+### Process
+- All 6 agents reviewed: verifier, adversary, expert, structural-proof, grounding, fuzzer
+- Debt now at ceiling (23/23) with clear path to L2
+
 ## 2026-01-26
 
 ### Runtime

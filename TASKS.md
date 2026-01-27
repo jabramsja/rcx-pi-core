@@ -126,6 +126,11 @@ Items here are implemented and verified under current invariants. Changes requir
   - Re-export stubs at original locations for backward compatibility
   - Audit script updated to support both layouts
   - Files: mu_type.py, kernel.py, eval_seed.py, match_mu.py, subst_mu.py, step_mu.py
+- Comprehensive Debt Tracking (PR #155):
+  - All ~289 LOC semantic debt now marked with `@host_*` decorators
+  - DEBT_THRESHOLD updated: 14 → 23 (17 tracked + 5 AST_OK + 1 review)
+  - Design decisions documented (empty collection normalization, head/tail collision)
+  - 10 new tests for edge cases (TestMatchParityHeadTailCollision, TestMatchParityEmptyCollections)
 - QoL Infrastructure (PRs #131+):
   - Agent reports as PR comments (verifier, adversary, expert, structural-proof)
   - Debt dashboard (`tools/debt_dashboard.sh`)
