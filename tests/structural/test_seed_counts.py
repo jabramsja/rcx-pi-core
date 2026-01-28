@@ -18,10 +18,16 @@ ROOT = Path(__file__).parent.parent.parent
 SEEDS_DIR = ROOT / "seeds"
 
 # All known seed files
-ALL_SEEDS = ["match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json", "kernel.v1.json"]
+ALL_SEEDS = [
+    "match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json", "kernel.v1.json",
+    "match.v2.json", "subst.v2.json",  # Phase 7b: context passthrough
+]
 
 # Self-hosting seeds (follow naming conventions)
-SELFHOST_SEEDS = ["match.v1.json", "subst.v1.json", "classify.v1.json", "kernel.v1.json"]
+SELFHOST_SEEDS = [
+    "match.v1.json", "subst.v1.json", "classify.v1.json", "kernel.v1.json",
+    "match.v2.json", "subst.v2.json",  # Phase 7b
+]
 
 # Expected projection counts (update intentionally when seeds change)
 EXPECTED_COUNTS = {
@@ -30,6 +36,8 @@ EXPECTED_COUNTS = {
     "classify.v1.json": 6,   # Phase 6b
     "eval.v1.json": 7,       # deep_eval traversal (legacy naming)
     "kernel.v1.json": 7,     # Phase 7a (meta-circular kernel)
+    "match.v2.json": 8,      # Phase 7b: 7 + match.fail
+    "subst.v2.json": 12,     # Phase 7b: same count, added _subst_ctx
 }
 
 # Expected namespace prefixes (self-hosting seeds only)
@@ -38,6 +46,8 @@ EXPECTED_PREFIXES = {
     "subst.v1.json": "subst.",
     "classify.v1.json": "classify.",
     "kernel.v1.json": "kernel.",
+    "match.v2.json": "match.",
+    "subst.v2.json": "subst.",
 }
 
 

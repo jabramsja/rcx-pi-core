@@ -32,6 +32,10 @@ SEED_CHECKSUMS: dict[str, str] = {
     "classify.v1.json": "3216e28b2f28b8f9d2dfd2693dfecad2c2ba94783151bb4b8f920d29aa8e5cf1",
     # Phase 7a: meta-circular kernel projections (v1.0.0)
     "kernel.v1.json": "34ca5c5b32c07b897e183770c1d05f0a00b54c6c6d4559f1ba9a174671da551e",
+    # Phase 7b: match with kernel context passthrough + match.fail
+    "match.v2.json": "9f5418217d26e1ad655fb6f49bf704dd1cf7d84704841ffc65b6e904106f903b",
+    # Phase 7b: subst with kernel context passthrough
+    "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
 }
 
 # Expected projection IDs for each seed.
@@ -76,6 +80,32 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "kernel.match_fail",     # Match failed -> try next projection
         "kernel.subst_success",  # Substitution complete -> return result
         "kernel.unwrap",    # Extract final result (must be last)
+    ],
+    # Phase 7b: match with context passthrough + match.fail catch-all
+    "match.v2.json": [
+        "match.done",
+        "match.sibling",
+        "match.equal",
+        "match.var",
+        "match.typed.descend",
+        "match.dict.descend",
+        "match.fail",       # Catch-all failure (must be before wrap)
+        "match.wrap",       # Must be last (entry point)
+    ],
+    # Phase 7b: subst with context passthrough
+    "subst.v2.json": [
+        "subst.done",
+        "subst.ascend",
+        "subst.sibling",
+        "subst.var",
+        "subst.lookup.found",
+        "subst.lookup.next",
+        "subst.typed.descend",
+        "subst.typed.sibling",
+        "subst.typed.ascend",
+        "subst.descend",
+        "subst.primitive",
+        "subst.wrap",       # Must be last (entry point)
     ],
 }
 

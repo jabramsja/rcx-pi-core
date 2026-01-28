@@ -47,7 +47,8 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: _type is allowed in seeds/ - Phase 6c type tags for list/dict disambiguation
 # Note: kernel.v1.json is excluded - kernel state MUST use underscore-prefixed fields (_mode, _phase, etc.)
 #       to distinguish kernel state from domain data (see MetaCircularKernel.v0.md)
-! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+# Note: match.v2.json and subst.v2.json are excluded - they use _match_ctx/_subst_ctx for kernel integration
+! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 5) Fixture size check (all v2 jsonl) =="
 find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do

@@ -1,0 +1,318 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "SUBST_SEED_V2",
+    "description": "Variable substitution with kernel context passthrough for Phase 7b",
+    "doc": "docs/core/MetaCircularKernel.v0.md",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "No host recursion - kernel loop provides iteration",
+      "Deterministic: same input -> same output",
+      "Traverses body, replaces var sites with bound values",
+      "Lookup is structural (Phase 6a) - no Python resolve_lookups needed",
+      "_subst_ctx passes through unchanged for kernel integration"
+    ]
+  },
+  "projections": [
+    {
+      "id": "subst.done",
+      "description": "Context empty, phase is result -> return final result with kernel-compatible output",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "result"},
+        "bindings": {"var": "_b"},
+        "context": null,
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "_mode": "subst_done",
+        "_result": {"var": "result"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.ascend",
+      "description": "Both head and tail done -> reconstruct parent",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "tail_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "tail_done",
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"head": {"var": "head_result"}, "tail": {"var": "tail_result"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "outer"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.sibling",
+      "description": "Head done -> move to tail",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "head_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "head_done",
+            "tail": {"var": "tail"}
+          },
+          "tail": {"var": "outer"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "tail"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "tail_done",
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.var",
+      "description": "Variable site -> create lookup marker for structural resolution",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": {"var": "name"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "name"},
+        "lookup_bindings": {"var": "b"},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.lookup.found",
+      "description": "Lookup: name matches current binding -> return value as result",
+      "pattern": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": {
+          "name": {"var": "n"},
+          "value": {"var": "v"},
+          "rest": {"var": "_rest"}
+        },
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "v"},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.lookup.next",
+      "description": "Lookup: name doesn't match -> continue with rest of bindings",
+      "pattern": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": {
+          "name": {"var": "_other"},
+          "value": {"var": "_v"},
+          "rest": {"var": "rest"}
+        },
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": {"var": "rest"},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.typed.descend",
+      "description": "Descend into type-tagged head/tail structure (Phase 6c)",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"_type": {"var": "ty"}, "head": {"var": "h"}, "tail": {"var": "t"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "h"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_head_done",
+            "_type": {"var": "ty"},
+            "tail": {"var": "t"}
+          },
+          "tail": {"var": "c"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.typed.sibling",
+      "description": "Type-tagged: head done -> move to tail (Phase 6c)",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "head_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_head_done",
+            "_type": {"var": "ty"},
+            "tail": {"var": "tail"}
+          },
+          "tail": {"var": "outer"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "tail"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_tail_done",
+            "_type": {"var": "ty"},
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.typed.ascend",
+      "description": "Type-tagged: both head and tail done -> reconstruct with _type (Phase 6c)",
+      "pattern": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "tail_result"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "typed_tail_done",
+            "_type": {"var": "ty"},
+            "head_result": {"var": "head_result"}
+          },
+          "tail": {"var": "outer"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"_type": {"var": "ty"}, "head": {"var": "head_result"}, "tail": {"var": "tail_result"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "outer"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.descend",
+      "description": "Descend into head/tail structure",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"head": {"var": "h"}, "tail": {"var": "t"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "h"},
+        "bindings": {"var": "b"},
+        "context": {
+          "head": {
+            "type": "head_done",
+            "tail": {"var": "t"}
+          },
+          "tail": {"var": "c"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.primitive",
+      "description": "Primitive value (not var, not head/tail) -> already a result",
+      "pattern": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "val"},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"var": "val"},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "subst.wrap",
+      "description": "Entry point - wrap raw subst request into state (must be last)",
+      "pattern": {
+        "subst": {
+          "body": {"var": "body"},
+          "bindings": {"var": "bindings"}
+        },
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "traverse",
+        "focus": {"var": "body"},
+        "bindings": {"var": "bindings"},
+        "context": null,
+        "_subst_ctx": {"var": "ctx"}
+      }
+    }
+  ]
+}
