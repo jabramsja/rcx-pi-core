@@ -2,7 +2,13 @@ name: RCX Engine Run Schema Gate
 
 on:
   pull_request:
+    branches: ["dev"]
   push:
+    branches: ["dev"]
+
+concurrency:
+  group: engine-run-schema-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   engine-run-schema:

@@ -2,17 +2,23 @@ name: Rust Examples
 
 on:
   push:
+    branches: ["dev"]
     paths:
       - "rcx_pi_rust/**"
       - "scripts/green_examples.sh"
       - "scripts/green_gate.sh"
       - ".github/workflows/rust_examples.yml"
   pull_request:
+    branches: ["dev"]
     paths:
       - "rcx_pi_rust/**"
       - "scripts/green_examples.sh"
       - "scripts/green_gate.sh"
       - ".github/workflows/rust_examples.yml"
+
+concurrency:
+  group: rust-examples-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust_examples:
