@@ -3,7 +3,7 @@ name: Audit All
 on: [push, pull_request]
 
 concurrency:
-  group: audit-${{ github.workflow }}-${{ github.ref }}
+  group: audit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
