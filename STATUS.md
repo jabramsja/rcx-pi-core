@@ -8,14 +8,14 @@
 
 ```
 PHASE: 6d
-NAME: Algorithmic Self-Hosting Complete
+NAME: Algorithmic Self-Hosting Done
 ```
 
 ## Self-Hosting Levels
 
 | Level | Description | Status |
 |-------|-------------|--------|
-| **L1: Algorithmic** | match/subst algorithms are Mu projections | COMPLETE |
+| **L1: Algorithmic** | match/subst algorithms are Mu projections | DONE (iteration is Python scaffolding) |
 | **L2: Operational** | kernel loop (iteration/selection) is Mu projections | DESIGN |
 | **L3: Full Bootstrap** | RCX runs RCX with no Python | FUTURE |
 
@@ -39,7 +39,7 @@ Use this to determine what standards apply NOW vs LATER:
 
 | Condition | Status | Agent Action |
 |-----------|--------|--------------|
-| Match/subst must be Mu projections | L1 COMPLETE | REQUIRED - enforce now |
+| Match/subst must be Mu projections | L1 DONE | REQUIRED - enforce now |
 | Kernel loop must be Mu projections | L2 DESIGN | ADVISORY - note as debt, don't fail |
 | Python iteration in `step_mu` | Scaffolding | ACCEPTABLE - will be fixed in Phase 7 |
 | Python recursion in algorithms | Semantic debt | FAIL - must use projections |
