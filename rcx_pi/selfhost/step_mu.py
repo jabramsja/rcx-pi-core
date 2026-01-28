@@ -216,7 +216,7 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     kernel_projs = load_combined_kernel_projections()
 
     # Normalize domain projections to head/tail format
-    normalized_projs = [normalize_projection(p) for p in projections]
+    normalized_projs = [normalize_projection(p) for p in projections]  # AST_OK: infra - kernel bridge scaffolding
 
     # Normalize input value
     normalized_input = normalize_for_match(input_value)
