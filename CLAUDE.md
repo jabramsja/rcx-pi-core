@@ -41,7 +41,7 @@ These are the only two files that track current state. Do not duplicate status i
 
 ---
 
-## Agents (10 total)
+## Agents
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
