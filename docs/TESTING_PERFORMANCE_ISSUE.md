@@ -1,9 +1,27 @@
 # Testing Performance Issue - Handoff Document
 
 **Date:** 2026-01-28
-**Status:** BLOCKING - Tests taking 8+ minutes, getting stuck
+**Status:** RESOLVED (Option B implemented)
 
-## Problem Summary
+## Resolution Summary
+
+**9-agent review consensus:** REJECT circuit breaker proposal (violates determinism).
+**Solution implemented:** Option B - test configuration only (zero production code changes).
+
+**Changes made:**
+1. `max_depth=5` → `max_depth=3` in test generators
+2. Added `deadline=5000` to all fuzzer `@settings` decorators
+3. Reduced `max_steps` range in pathological projection tests
+4. Created `tests/stress/` for deep edge case testing (Tier 3)
+
+**Results:**
+- Bootstrap fuzzer: 18 tests pass in 4 minutes (was hanging indefinitely)
+- Fast audit: 772 tests pass in 3.5 seconds
+- Full audit: ~5-8 minutes (was 10+ minutes or stuck)
+
+---
+
+## Original Problem Summary
 
 The test suite, which used to run quickly, now takes 8+ minutes and often gets stuck. The issue is in the Hypothesis property-based fuzzer tests, specifically when testing the `run_mu()` kernel execution function.
 

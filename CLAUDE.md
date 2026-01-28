@@ -65,14 +65,20 @@ See `docs/agents/AgentRig.v0.md` for full documentation.
 
 ## Workflow
 
-**Audit scripts (two tiers):**
+**Audit scripts (three tiers):**
 
-| Script | Time | Purpose | When |
-|--------|------|---------|------|
-| `./tools/audit_fast.sh` | ~2 min | Core tests only (no fuzzer) | Local iteration |
-| `./tools/audit_all.sh` | ~4-6 min | Full suite + fuzzer | Before push, CI |
+| Tier | Script | Time | Purpose | When |
+|------|--------|------|---------|------|
+| 1 | `./tools/audit_fast.sh` | ~3 min | Core tests only | Local iteration |
+| 2 | `./tools/audit_all.sh` | ~5-8 min | Core + Fuzzer | Before push, CI |
+| 3 | `pytest tests/stress/` | ~10+ min | Deep edge cases | Comprehensive validation |
 
-Both use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
+Both audit scripts use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
+
+**Hypothesis profiles for fast local fuzzer runs:**
+```bash
+HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # 50 examples, ~30s
+```
 
 **Development workflow:**
 ```bash

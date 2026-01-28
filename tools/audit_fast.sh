@@ -5,13 +5,19 @@ set -euo pipefail
 export PYTHONHASHSEED=0
 
 # ============================================================================
-# FAST AUDIT - For local development iteration (~2 minutes)
+# FAST AUDIT - For local development iteration (~3 minutes)
 # ============================================================================
 #
-# This is the quick sanity check for local development. It runs:
+# TESTING TIERS:
+#   Tier 1: Fast Audit (this script) - Core tests, ~3 min
+#   Tier 2: Full Audit (audit_all.sh) - Core + Fuzzer, ~5-8 min
+#   Tier 3: Stress Tests (tests/stress/) - Deep edge cases, ~10+ min
+#
+# This script runs Tier 1 only:
 # - Syntax/structure checks (contraband, AST police)
 # - Core algorithm tests (match, subst, step, kernel)
-# - Skips fuzzer tests (those run in CI via audit_all.sh)
+# - Skips fuzzer tests (those run in Tier 2)
+# - Skips stress tests (those run in Tier 3)
 #
 # Use this for rapid iteration. Run audit_all.sh before pushing.
 #
@@ -19,7 +25,8 @@ export PYTHONHASHSEED=0
 #   ./tools/audit_fast.sh
 #
 # See also:
-#   ./tools/audit_all.sh  - Full audit including fuzzer (CI standard)
+#   ./tools/audit_all.sh       - Tier 2: Full audit including fuzzer
+#   pytest tests/stress/ -v    - Tier 3: Deep edge case stress tests
 # ============================================================================
 
 echo "== FAST AUDIT (local iteration) =="

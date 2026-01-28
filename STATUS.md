@@ -45,6 +45,32 @@ ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 
 The pre-commit hook checks doc consistency, debt ceiling, and warns if core code changed without STATUS.md update. See `CLAUDE.md` for full workflow details.
 
+## Testing Tiers
+
+```
+Tier 1: Fast Audit    ./tools/audit_fast.sh    ~3 min   Core tests only
+Tier 2: Full Audit    ./tools/audit_all.sh     ~5-8 min Core + Fuzzer tests
+Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
+```
+
+| Tier | What It Tests | When to Run |
+|------|---------------|-------------|
+| Tier 1 | Core algorithms, syntax, contraband | Local iteration |
+| Tier 2 | All tests including 200+ example fuzzers | Before push, CI |
+| Tier 3 | Deep nesting, wide structures, pathological inputs | Comprehensive validation |
+
+**Fuzzer Settings (fixed 2026-01-28):**
+- `max_depth=3` in test generators (prevents pathological nesting after normalization)
+- `deadline=5000` on all fuzzer tests (5 second timeout per example)
+- Stress tests use `deadline=30000-60000` for deep edge cases
+
+**For fast local iteration:**
+```bash
+HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # ~30 seconds
+```
+
+See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
+
 ## Debt Status
 
 ```

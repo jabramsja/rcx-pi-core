@@ -157,6 +157,14 @@ Items here are implemented and verified under current invariants. Changes requir
   - Removed 2 `@host_builtin` decorators from match_mu.py (is_kv_pair_linked, is_dict_linked_list)
   - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
   - 26 new tests in `tests/test_classify_mu.py`
+- Testing Tier System (2026-01-28):
+  - 9-agent review resolved fuzzer hang issue (rejected circuit breaker, chose Option B)
+  - Tier 1: `audit_fast.sh` (~3 min) - Core tests for local iteration
+  - Tier 2: `audit_all.sh` (~5-8 min) - Core + Fuzzer for CI
+  - Tier 3: `tests/stress/` (~10+ min) - Deep edge cases for comprehensive validation
+  - Fuzzer settings: `max_depth=3`, `deadline=5000` (prevents pathological nesting)
+  - Hypothesis profiles: `HYPOTHESIS_PROFILE=dev` for fast local fuzzer runs (50 examples)
+  - See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context
   - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
   - `resolve_lookups()` Python function deprecated (kept for backward compat)
   - 37 subst parity tests pass with structural lookup
