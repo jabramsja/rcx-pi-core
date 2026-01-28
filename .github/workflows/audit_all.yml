@@ -41,5 +41,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x tools/audit_all.sh
           tools/audit_all.sh

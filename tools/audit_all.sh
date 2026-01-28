@@ -16,10 +16,6 @@ set -euo pipefail
 #   ./tools/audit_all.sh
 # ============================================================================
 
-# macOS bash session-save quirks: prevent "unbound variable" crashes
-export HISTTIMEFORMAT="${HISTTIMEFORMAT:-}"
-export size="${size:-}"
-
 # Check if pytest-xdist is available for parallel execution
 # Using --dist worksteal for better load balancing (idle workers steal from busy)
 PARALLEL_FLAG=""
@@ -61,11 +57,21 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: match.v2.json and subst.v2.json are excluded - they use _match_ctx/_subst_ctx for kernel integration
 ! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
-echo "== 6) Fixture size check (all v2 jsonl) =="
-find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do
+echo "== 6) Fixture validation (v2 jsonl) =="
+# Count fixtures and verify none are empty
+FIXTURE_COUNT=0
+EMPTY_COUNT=0
+for f in $(find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 2>/dev/null | sort); do
+  FIXTURE_COUNT=$((FIXTURE_COUNT + 1))
   n="$(wc -l < "$f" | tr -d ' ')"
-  printf "%-80s %s lines\n" "$f" "$n"
+  if [ "$n" -eq 0 ]; then
+    echo "ERROR: Empty fixture: $f"
+    EMPTY_COUNT=$((EMPTY_COUNT + 1))
+  fi
 done
+echo "Validated $FIXTURE_COUNT fixtures"
+[ "$EMPTY_COUNT" -eq 0 ] || { echo "Found $EMPTY_COUNT empty fixtures"; exit 1; }
+[ "$FIXTURE_COUNT" -ge 10 ] || { echo "Expected 10+ fixtures, found $FIXTURE_COUNT"; exit 1; }
 
 echo "== 7) CLI exec-summary spot-check (enginenews fixtures) =="
 fixtures=(

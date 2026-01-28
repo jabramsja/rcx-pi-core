@@ -28,22 +28,14 @@ try:
 
     # Default profile: production settings with database caching
     # Omitting database= uses the default .hypothesis/ directory
+    # NOTE: CI and local use the same profile - PYTHONHASHSEED=0 provides determinism
     settings.register_profile(
         "default",
         print_blob=True,  # Print reproduction blob on failure
-        derandomize=False,  # Keep randomized search
+        derandomize=False,  # Keep randomized search (PYTHONHASHSEED seeds it)
     )
 
-    # CI profile: same as default but explicit for documentation
-    settings.register_profile(
-        "ci",
-        print_blob=True,
-        derandomize=False,
-    )
-
-    # Load profile from HYPOTHESIS_PROFILE env var, default to "default"
-    profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
-    settings.load_profile(profile)
+    settings.load_profile("default")
 
 except ImportError:
     pass  # hypothesis not installed, skip configuration

@@ -19,10 +19,6 @@ set -euo pipefail
 #   ./tools/audit_all.sh  - Full audit including fuzzer (CI standard)
 # ============================================================================
 
-# macOS bash session-save quirks
-export HISTTIMEFORMAT="${HISTTIMEFORMAT:-}"
-export size="${size:-}"
-
 echo "== FAST AUDIT (local iteration) =="
 echo ""
 
