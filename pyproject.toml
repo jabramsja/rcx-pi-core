@@ -22,7 +22,7 @@ rcx-world-trace = "rcx_pi.worlds.world_trace_cli:main"
 packages = ["rcx_pi", "rcx_pi.core", "rcx_pi.engine", "rcx_pi.reduction", "rcx_pi.specs", "rcx_pi.utils", "rcx_pi.worlds"]
 
 [project.optional-dependencies]
-test = ["pytest", "jsonschema"]
+test = ["pytest", "pytest-xdist", "jsonschema", "hypothesis"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "rcx_pi"]

@@ -65,25 +65,33 @@ See `docs/agents/AgentRig.v0.md` for full documentation.
 
 ## Workflow
 
-**Before committing:**
+**Audit scripts (two tiers):**
+
+| Script | Time | Purpose | When |
+|--------|------|---------|------|
+| `./tools/audit_fast.sh` | ~2 min | Core tests only (no fuzzer) | Local iteration |
+| `./tools/audit_all.sh` | ~4-6 min | Full suite + fuzzer | Before push, CI |
+
+Both use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
+
+**Development workflow:**
 ```bash
-./tools/pre-commit-check.sh       # Full local checks (syntax, contraband, AST, docs)
+# Iterate locally (fast feedback)
+./tools/audit_fast.sh
+
+# Before pushing (full validation)
+./tools/audit_all.sh
+
+# Or let CI catch it (slower feedback but thorough)
+git push
 ```
 
-**Commit workflow:**
-```
-1. ./tools/pre-commit-check.sh    # Run manually before commit
-2. Ask Claude Code to run agents  # Free (Max subscription)
-3. git commit                     # Pre-commit hook validates docs
-4. git push                       # CI runs tests (free)
-```
-
-**Pre-commit scripts (two different ones):**
+**Pre-commit scripts:**
 
 | Script | Purpose | When |
 |--------|---------|------|
-| `tools/pre-commit-check.sh` | Full checks: syntax, contraband, AST, docs index, private attrs | Run manually before commit |
-| `tools/pre-commit-doc-check` | Doc checks only: consistency, debt ceiling, STATUS.md drift | Auto-runs as git hook |
+| `tools/pre-commit-check.sh` | Syntax, contraband, AST, docs | Run manually |
+| `tools/pre-commit-doc-check` | Doc consistency, debt ceiling | Auto git hook |
 
 **Consistency tools:**
 - `./tools/check_docs_consistency.sh` - Validate STATUS.md matches reality
@@ -94,8 +102,9 @@ See `docs/agents/AgentRig.v0.md` for full documentation.
 - Local agents (Claude Code): FREE (Max subscription)
 - CI agents (GitHub Actions): COSTS MONEY (manual trigger only)
 
-**Hook install** (required):
+**Setup (one-time):**
 ```bash
+pip install pytest-xdist  # 2-3x faster test execution
 ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 ```
 
