@@ -1,8 +1,6 @@
 # Debt Categories v0
 
-This document formalizes the distinction between **scaffolding debt** (acceptable infrastructure) and **semantic debt** (must become structural).
-
-## Status: IMPLEMENTED (v0) - Updated 2026-01-27
+> **Current debt counts:** See `STATUS.md` for current debt threshold and counts. This doc explains the categories.
 
 ---
 

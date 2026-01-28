@@ -1,13 +1,6 @@
 # Self-Hosting Specification v0
 
-Status: **PHASE 6d COMPLETE** - Iterative validation, code cleanup, debt reduced to 11
-
-**Important distinction**:
-- ✓ **Algorithmic self-hosting**: match/subst ALGORITHMS are expressed as Mu projections
-- ✓ **Behavioral parity**: `step_mu == step` for all inputs (33+ tests prove this)
-- ✗ **Operational self-hosting**: The projections are still EXECUTED by Python's `step()`
-
-See structural-proof agent report for detailed analysis.
+> **Current status:** See `STATUS.md` for current phase and L-level. This doc is the detailed design spec.
 
 ## Purpose
 

@@ -102,7 +102,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Adversary agent: red team attack testing
   - PR verification reminder workflow (auto-comment on sensitive file changes)
   - RATCHET debt policy: threshold can only decrease, never increase
-- RCX Kernel Phase 4-5: Self-Hosting Complete:
+- RCX Kernel Phase 4-5: Algorithmic Self-Hosting (L1) Complete:
   - Phase 4a: `match_mu()` as Mu projections (`seeds/match.v1.json`, 23 parity tests)
   - Phase 4b: `subst_mu()` as Mu projections (`seeds/subst.v1.json`, 17 parity tests)
   - Phase 4d: Integration tests (67 total: 28 parity + 27 grounding + 12 fuzzer)
@@ -226,13 +226,17 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 Note: Phase 7 requires meta-circular design. The kernel loop (for-loop selecting projections)
 is the remaining major scaffolding debt.
 
-**Debt status**: 11 total (8 tracked + 3 AST_OK bootstrap), threshold 11 (at ceiling). Next target: 9.
+**Debt status**: See `STATUS.md` for current counts and threshold.
 
 ---
 
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
 **Active designs:**
+- Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - Phase 7 kernel loop self-hosting
+  - Linked-list cursor design (proven structural)
+  - Agent review: gaps identified (context preservation, structural NO_MATCH)
+  - Status: Design iteration in progress
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 
 **Completed designs (now in Ra):**

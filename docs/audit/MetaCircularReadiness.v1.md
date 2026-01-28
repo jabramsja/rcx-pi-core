@@ -1,5 +1,9 @@
 # RCX Meta-Circular Readiness Definition (v1)
 
+> **Current status:** See `STATUS.md` for current phase and L-level. This doc defines the criteria.
+
+> ⚠️ **FUTURE ACCEPTANCE CRITERIA** — This document defines gates and criteria for meta-circular readiness (L3). No section implies current achievement unless explicitly marked PASS. Current project state is L1 (Algorithmic Self-Hosting). See `STATUS.md` for what is actually achieved vs planned.
+
 **Status: DESIGN DOCUMENT — No code changes.**
 
 This document defines explicit, measurable criteria for meta-circular readiness. It is the single authoritative definition for v1.
@@ -192,7 +196,23 @@ The following are explicitly forbidden in meta-circular v1:
 | M3. Reference interpreter | SUPERSEDED | Replaced by kernel + EVAL_SEED (Phase 5) |
 | M4. Organism extraction | SUPERSEDED | Replaced by Phase 4 (match/subst as Mu) |
 | M5. Seeded self-host loop | PASS | Phase 5: step_mu uses match_mu + subst_mu |
-| M6. Meta-circular attempt | PASS | Algorithmic self-hosting achieved |
+| M6. Algorithmic self-hosting | PASS | match/subst as Mu projections (Phase 6d) |
+| M7. Operational self-hosting | DESIGN | Phase 7: kernel loop as projections |
+| M8. Full meta-circular | FUTURE | RCX runs RCX with no Python |
+
+### Self-Hosting Levels (Clarification)
+
+**Important:** "Self-hosting" has multiple levels. Achieving one level does not mean all levels are complete.
+
+| Level | Description | Status | Evidence |
+|-------|-------------|--------|----------|
+| **L1: Algorithmic** | Core algorithms (match, subst) expressed as Mu projections | ACHIEVED | seeds/match.v1.json, seeds/subst.v1.json |
+| **L2: Operational** | Iteration and selection as Mu projections (kernel loop) | DESIGN | docs/core/MetaCircularKernel.v0.md |
+| **L3: Full Bootstrap** | RCX evaluator runs itself with no Python | FUTURE | — |
+
+**Current gap:** The kernel loop (`step_mu` for-loop) is still Python scaffolding. Phase 7 design addresses this.
+
+**Meta-circular requirement:** Both self-hosting AND meta-circularity are needed. The evaluator must run itself - projections select projections. If Python provides iteration, emergence might be a Python artifact.
 
 ---
 
@@ -224,13 +244,15 @@ See `docs/core/RCXKernel.v0.md`, `docs/core/SelfHosting.v0.md`, and `docs/core/S
 
 ## Version
 
-Document version: v1.2 (added kernel architecture reference)
-Last updated: 2026-01-25
+Document version: v1.3 (clarified self-hosting levels, added Phase 7 context)
+Last updated: 2026-01-27
 Dependencies:
 - `docs/schemas/rcx-trace-event.v1.json` (replay, frozen)
 - `docs/schemas/rcx-trace-event.v2.json` (observability)
 - `docs/BytecodeMapping.v0.md`
 - `docs/StallFixObservability.v0.md`
-- `docs/RCXKernel.v0.md` (new architecture)
-- `docs/StructuralPurity.v0.md` (guardrails)
+- `docs/core/RCXKernel.v0.md` (kernel architecture)
+- `docs/core/SelfHosting.v0.md` (self-hosting design)
+- `docs/core/MetaCircularKernel.v0.md` (Phase 7 design, VECTOR)
+- `docs/core/StructuralPurity.v0.md` (guardrails)
 - `EntropyBudget.md`

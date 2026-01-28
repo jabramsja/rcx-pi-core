@@ -1,76 +1,122 @@
 # Claude Code Instructions for RCX
 
-This file is read by Claude Code at session start. It contains project-specific instructions.
+This file is read by Claude Code at session start.
 
-## Current Status (2026-01-27)
+---
 
-**Phase 6d Complete:** Iterative validation and code cleanup.
-- Core self-hosting: `rcx_pi/selfhost/` (mu_type, kernel, eval_seed, match_mu, subst_mu, step_mu, classify_mu)
-- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`
-- `_check_empty_var_names()` now iterative with explicit stack
-- Removed deprecated `_seen` params and unused `Any` imports
-- 53 fuzzer tests, 10,000+ random examples verify parity
-- Debt: 11 total (8 tracked + 3 AST_OK), threshold 11 (at ceiling)
-- All 6 agents APPROVE stack for Phase 7 readiness
+## Session Discipline
 
-## Pre-Push Checklist
+**At session START:**
+1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
+2. Read `TASKS.md` - know what's in progress, what's next
 
-**BEFORE pushing or creating a PR, run these agents locally (uses Max subscription):**
+**At session END (before signing off):**
+1. Did phase or debt change? → Update `STATUS.md`
+2. Did tasks complete or promote? → Update `TASKS.md`
+3. Were notable changes made? → Update `CHANGELOG.md`
 
-1. **Verifier** - Check North Star invariants
-2. **Adversary** - Red team for vulnerabilities
-3. **Expert** - Code quality review
-4. **Structural-proof** - Verify Mu projection claims
+**If unsure:** Run `./tools/check_docs_consistency.sh` to validate STATUS.md matches reality.
 
-**For core kernel/seed code, also run:**
-5. **Grounding** - Write executable tests
-6. **Fuzzer** - Property-based testing (Hypothesis)
+---
 
-To run: Ask Claude Code to "run verifier/adversary/expert/structural-proof on [files]"
+## What RCX Is (Alignment)
 
-## Agent Summary (8 agents)
+RCX is a native structural substrate, not a simulation on top of Python. Python exists only as scaffolding to bootstrap the kernel.
+
+**The Goal:** Both SELF-HOSTING and META-CIRCULARITY are required.
+- **Self-hosting**: RCX algorithms expressed as Mu projections
+- **Meta-circular**: The evaluator runs itself - projections select projections
+
+If Python provides the control flow, emergence might be a Python artifact. True emergence must come from structure alone.
+
+---
+
+## Current Status
+
+**Read `STATUS.md`** for current phase, self-hosting level (L1/L2/L3), and debt counts.
+
+**Read `TASKS.md`** for work items (Ra, NEXT, VECTOR, SINK).
+
+These are the only two files that track current state. Do not duplicate status info elsewhere.
+
+---
+
+## Agents (10 total)
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | verifier | North Star invariant compliance | Every PR with rcx_pi/ changes |
-| adversary | Security/attack surface analysis | New modules, security-sensitive code |
-| expert | Code quality, simplification | Complex code, before major refactors |
+| adversary | Red team attack testing | New modules, security-sensitive code |
+| expert | Code quality, simplification | Complex code, major refactors |
 | structural-proof | Verify Mu projection claims | When claiming "pure structural" |
 | grounding | Convert claims to executable tests | Core kernel/seed code |
 | fuzzer | Property-based testing (1000+ inputs) | Core kernel/seed code |
-| translator | Plain English explanation | On request (founder review) |
-| visualizer | Mermaid diagrams of Mu structures | On request (founder review) |
+| translator | Plain English explanation | Founder review |
+| visualizer | Mermaid diagrams of Mu structures | Founder review |
+| advisor | Strategic advice, trade-offs | When stuck on design decisions |
 
-See `docs/agents/AgentRig.v0.md` for full agent rig documentation.
+**Mandatory for PRs:** verifier, adversary, expert, structural-proof (4)
+**For core code:** Add grounding, fuzzer (6)
+**For founder review:** Add translator, visualizer (8)
 
-## Cost Model
+See `docs/agents/AgentRig.v0.md` for full documentation.
 
-- **Local agents (ask Claude Code)**: Uses Max subscription - FREE
-- **CI agents (GitHub Actions)**: Uses API - COSTS MONEY (manual trigger only)
-- **Local tools (python tools/run_*.py)**: Uses API key - COSTS MONEY
+---
 
-## Standard Workflow
+## Workflow
 
 ```
-1. ./tools/pre-commit-check.sh          # Quick local checks
-2. Ask Claude Code to run agents        # Uses subscription (free)
-3. git push                              # CI runs tests/audit (free)
-4. [Optional] Manual CI agent trigger   # Only when needed (costs $)
+1. ./tools/pre-commit-check.sh    # Quick local checks
+2. Ask Claude Code to run agents  # Free (Max subscription)
+3. git commit                     # Pre-commit hook warns if docs need update
+4. git push                       # CI runs tests (free)
 ```
+
+**Consistency tools:**
+- `./tools/check_docs_consistency.sh` - Validate STATUS.md matches reality
+- Pre-commit hook (`tools/pre-commit-doc-check`) - Warns if rcx_pi/ changed but STATUS.md didn't
+- Verifier agent (Section F) - Checks doc consistency as part of verification
+
+**Cost model:**
+- Local agents (Claude Code): FREE (Max subscription)
+- CI agents (GitHub Actions): COSTS MONEY (manual trigger only)
+
+**Hook install** (if not already installed):
+```
+ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
+```
+
+---
+
+## Phase Transitions
+
+When advancing phases:
+1. Update `STATUS.md` (change L1 → L2 → L3)
+2. Update `TASKS.md` (move item to Ra)
+3. Agents automatically enforce new standards
+
+Do NOT update individual agent files - they read STATUS.md.
+
+---
 
 ## Key Files
 
-- `TASKS.md` - Canonical task list, single source of truth
-- `docs/core/` - Core design specs (RCXKernel, EVAL_SEED, SelfHosting, MuType)
-- `docs/agents/AgentRig.v0.md` - Agent rig documentation
-- `tools/pre-commit-check.sh` - Quick guardrails
-- `tools/debt_dashboard.sh` - Host debt inventory
-- `rcx_pi/selfhost/` - Core self-hosting implementation
+| File | Purpose |
+|------|---------|
+| `STATUS.md` | Current phase/debt (source of truth) |
+| `TASKS.md` | Work items (source of truth) |
+| `docs/core/` | Design specs |
+| `docs/agents/AgentRig.v0.md` | Agent rig docs |
+| `rcx_pi/selfhost/` | Core implementation |
+| `seeds/*.json` | Mu projection definitions |
 
-## North Star Invariants
+---
 
-1. Structure is the primitive (not host language semantics)
-2. Stall → Fix → Trace → Closure is the native loop
-3. Seeds must be minimal, growth structurally justified
-4. Determinism is a hard invariant
-5. Every task must reduce host smuggling
+## Governance & Invariants
+
+**See `TASKS.md`** for:
+- North Star invariants (12 items)
+- Governance rules (non-negotiable)
+- Promotion criteria (SINK → VECTOR → NEXT)
+
+TASKS.md is the authority. Do not duplicate rules here.
