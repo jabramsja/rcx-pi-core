@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -38,6 +39,7 @@ def test_world_trace_pingpong_is_deterministic_against_golden() -> None:
         cwd=str(ROOT),
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
     assert r.returncode == 0, (r.stdout or "") + "\n" + (r.stderr or "")
 

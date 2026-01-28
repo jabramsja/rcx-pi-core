@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 
@@ -13,6 +14,7 @@ def _run_omega(expr: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
     # normalize trailing whitespace only (avoid false diffs from newline)
     return p.stdout.strip() + "\n"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -37,6 +38,7 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         cwd=str(cwd),
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
 
 

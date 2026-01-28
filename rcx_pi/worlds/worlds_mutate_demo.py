@@ -77,7 +77,7 @@ def json_to_mu(json_name: str, mu_name: str) -> None:
         str(mu_path),
     ]
     print(f"[json→mu] {' '.join(cmd)}")
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT))
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env={**os.environ, "PYTHONHASHSEED": "0"})
     if proc.returncode != 0:
         raise RuntimeError(f"worlds_json to-mu failed for {json_name}")
 
