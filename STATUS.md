@@ -16,14 +16,15 @@ NAME: step_mu Wired to Structural Kernel
 | Level | Description | Status |
 |-------|-------------|--------|
 | **L1: Algorithmic** | match/subst algorithms are Mu projections | DONE (iteration is Python scaffolding) |
-| **L2: Operational** | kernel loop (iteration/selection) is Mu projections | IN PROGRESS (7d-1 done, 7d-2/3 pending) |
+| **L2: Operational** | kernel loop (iteration/selection) is Mu projections | PARTIAL (selection structural, execution Python) |
 | **L3: Full Bootstrap** | RCX runs RCX with no Python | FUTURE |
 
 ## What This Means
 
 - **L1 Algorithmic self-hosting achieved** (see Self-Hosting Levels table): `match_mu()` and `subst_mu()` use Mu projections from seeds, not Python recursion
-- **L2 Operational partially achieved**: `step_mu()` now uses structural kernel projections (kernel.v1 + match.v2 + subst.v2) instead of Python for-loop
-- **Phase 7d-1 complete**: `docs/core/MetaCircularKernel.v0.md` describes the kernel design; step_mu is now wired to it
+- **L2 Operational PARTIAL**: Projection SELECTION is structural (linked-list cursor in kernel.v1), but projection EXECUTION still uses Python for-loop in `step_kernel_mu`
+- **Phase 7d-1 complete**: `step_mu()` delegates to `step_kernel_mu()` which uses kernel projections for selection. The execution loop remains Python (marked with @host_iteration)
+- **True L2 requires Phase 8**: Recursive kernel projections that eliminate the execution loop
 
 ## Development Workflow
 
@@ -46,24 +47,29 @@ The pre-commit hook checks doc consistency, debt ceiling, and warns if core code
 
 ```
 THRESHOLD: 15
-CURRENT: 14 (11 tracked + 3 AST_OK)
-TARGET: 12 (via phased reduction: 15 → 14 → 13 → 12)
+CURRENT: 15 (12 tracked + 3 AST_OK)
+TARGET: 12 (deferred to Phase 8)
 ```
 
 **Debt breakdown:**
 - @host_recursion: 3 (eval_seed match/substitute)
 - @host_builtin: 3 (eval_seed, deep_eval)
-- @host_iteration: 3 (run_mu, eval_seed.step, projection_runner) - step_mu removed in 7d-1
+- @host_iteration: 4 (run_mu, step_kernel_mu, eval_seed.step, projection_runner)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 3
 
-**Phase 7d debt reduction plan (revised per structural-proof agent 2026-01-28):**
-- 7d-1: Remove step_mu @host_iteration → 15 → 14 ✓ DONE
-- 7d-2: Deprecate eval_seed.step → 14 → 13
-- 7d-3: Eliminate projection_runner → 13 → 12
+**Phase 7d-1 outcome (honest assessment per 7-agent review 2026-01-28):**
+- step_mu now delegates to step_kernel_mu (structural selection via kernel.v1)
+- step_kernel_mu execution loop marked with @host_iteration (honest debt tracking)
+- Net debt change: 15 → 15 (moved location, not eliminated)
+- True debt reduction requires Phase 8 recursive kernel design
+
+**Phase 7d-2/7d-3 PAUSED:**
+- Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
+- 7d-2/7d-3 depend on 7d-1 being complete - they are not viable until Phase 8
+- See phase-7d-complete-design.md for full agent analysis
 
 Note: run_mu outer loop is scaffolding (L3 boundary), not removed in Phase 7.
-Note: Original target was 9, but structural-proof analysis shows only 3 @host_iteration markers are removable in Phase 7 (step_mu, eval_seed.step, projection_runner). The 4th (run_mu) remains as L3 boundary.
 
 ## Agent Enforcement Guide
 
@@ -120,7 +126,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 7d-1 COMPLETE (2026-01-28). step_mu now uses structural kernel.
+**Status:** Phase 7d-1 COMPLETE but L2 PARTIAL (2026-01-28). 7-agent review revealed execution loop not eliminated.
 
 **Completed (Phase 7c):**
 - [x] Created `seeds/kernel.v1.json` with 7 kernel projections
@@ -132,23 +138,26 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 **Completed (Phase 7d-1):**
 - [x] Wired step_mu to structural kernel (kernel.v1 + match.v2 + subst.v2)
-- [x] Removed @host_iteration from step_mu (debt 15 → 14)
 - [x] Added helpers: list_to_linked, normalize_projection, load_combined_kernel_projections
 - [x] Updated test_step_mu_parity.py for behavioral difference (unbound vars stall instead of error)
 - [x] All 106 core tests pass
+- [x] 7-agent review identified execution loop still Python (honest assessment)
+- [x] Added @host_iteration to step_kernel_mu (honest debt tracking)
 
 **Behavioral Change (7d-1):**
 - **Before:** Unbound variables raised `KeyError`
 - **After:** Unbound variables cause stall (return original input)
 - This is more consistent with pure Mu semantics where errors become stalls
 
-**Do (ready to proceed):**
+**PAUSED (requires Phase 8 redesign):**
 - Phase 7d-2: Migrate projection_runner to step_mu
 - Phase 7d-3: Eliminate projection_runner iteration
+- Reason: 7d-1 moved the loop, didn't eliminate it. 7d-2/7d-3 depend on 7d-1 achieving full L2.
 
-**Do NOT:**
-- Remove debt markers until Python iteration actually replaced
-- Expect 13→9 in Phase 7 (structural-proof: realistic target is 12, run_mu stays)
+**Phase 8 Design Required:**
+- Recursive kernel projections that call themselves
+- Eliminate step_kernel_mu execution loop entirely
+- True L2 = both selection AND execution are structural
 
 ---
 

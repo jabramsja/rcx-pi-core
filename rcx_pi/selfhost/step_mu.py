@@ -178,6 +178,7 @@ def clear_combined_kernel_cache() -> None:
     _combined_kernel_cache = None
 
 
+@host_iteration("Kernel execution loop - Phase 8 replaces with recursive kernel projections")
 def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     """
     Try each projection in order using structural kernel projections.
@@ -191,6 +192,10 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     3. kernel.match_success/fail: On success, substitute via subst.v2; on fail, try next
     4. kernel.stall: All projections tried, no match
     5. kernel.unwrap: Extract final result
+
+    L2 PARTIAL: Projection SELECTION is structural (linked-list cursor).
+    Projection EXECUTION still uses Python for-loop (this function).
+    True L2 requires recursive kernel projections (Phase 8).
 
     Args:
         projections: List of domain projections to try.

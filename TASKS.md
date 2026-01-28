@@ -264,25 +264,25 @@ All blockers resolved 2026-01-28:
    - Fixed: Updated STATUS.md with phased debt reduction plan (15→14→13→12)
    - Note: Original target was 9, revised to 12 per structural-proof (run_mu stays as L3 boundary)
 
-- [x] **Phase 7d-1: Wire step_mu to kernel** - DONE 2026-01-28
+- [x] **Phase 7d-1: Wire step_mu to kernel** - DONE 2026-01-28 (L2 PARTIAL)
   - [x] Modify `step_mu()` to call structural kernel (step_kernel_mu)
   - [x] Call validate_kernel_projections_first() for security
   - [x] Added helpers: list_to_linked, normalize_projection, load_combined_kernel_projections
   - [x] Parity tests: 106 core tests pass (existing + fuzzer)
-  - [x] Remove step_mu @host_iteration marker
-  - [x] Debt reduced: 15 → 14
+  - [x] 7-agent review revealed: execution loop still Python (honest assessment)
+  - [x] Added @host_iteration to step_kernel_mu (honest debt tracking)
   - Note: Behavioral change - unbound variables now stall instead of raising KeyError
+  - **Outcome:** Projection SELECTION is structural (linked-list cursor). Projection EXECUTION is Python.
+  - **Debt:** 15 → 15 (moved location, not eliminated)
 
-- [ ] **Phase 7d-2: Migrate projection_runner** (after 7d-1)
-  - Change projection_runner to use step_mu instead of eval_seed.step
-  - Add deprecation warning to eval_seed.step()
-  - Update DEBT_THRESHOLD: 14 → 13
+- [ ] **Phase 7d-2: Migrate projection_runner** - PAUSED (requires Phase 8)
+  - Original plan assumed 7d-1 eliminated the loop (it didn't)
+  - Cannot proceed until Phase 8 designs recursive kernel projections
+  - Blocked by: Phase 8 design
 
-- [ ] **Phase 7d-3: Eliminate projection_runner iteration** (after 7d-2)
-  - Replace factory pattern with direct kernel use
-  - Match/subst/classify use kernel directly
-  - Remove projection_runner iteration debt
-  - Update DEBT_THRESHOLD: 13 → 12 (run_mu stays as L3 boundary)
+- [ ] **Phase 7d-3: Eliminate projection_runner iteration** - PAUSED (requires Phase 8)
+  - Blocked by: Phase 7d-2
+  - True debt reduction requires Phase 8 recursive kernel design
 
 **Success criteria:**
 - [x] `seeds/kernel.v1.json` exists with 7 projections
@@ -292,10 +292,11 @@ All blockers resolved 2026-01-28:
 - [x] v2 parity tests pass (37 tests: 19 match + 18 subst) - 2026-01-28
 - [x] Doc inconsistencies fixed (all .md files reference STATUS.md for debt) - 2026-01-28
 - [x] Kernel projections pass parity tests with Python `step_mu` - 2026-01-28 (106 tests)
-- [x] No Python for-loop in step_mu execution path - 2026-01-28 (uses step_kernel_mu)
+- [x] step_mu delegates to step_kernel_mu (structural selection) - 2026-01-28
 - [x] All 1293+ existing tests still pass - 2026-01-28
-- [x] Debt reduced: 15 → 14 (7d-1 done) - 2026-01-28
-- [ ] Debt continues: 14 → 13 → 12 (7d-2, 7d-3 pending)
+- [x] L2 PARTIAL achieved: selection structural, execution Python - 2026-01-28
+- [ ] L2 FULL: both selection and execution structural (Phase 8)
+- [ ] Debt reduction: 15 → 12 (deferred to Phase 8)
 
 **Recommended before 7d-1 (from second agent review 2026-01-28):**
 - [ ] Add fuzzer tests for kernel projection ordering (500+ examples)
