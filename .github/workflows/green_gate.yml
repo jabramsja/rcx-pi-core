@@ -22,6 +22,8 @@ jobs:
     name: green-gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PYTHONHASHSEED: "0"  # Deterministic dict ordering
 
     steps:
       - name: Checkout
