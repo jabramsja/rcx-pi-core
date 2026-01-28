@@ -13,8 +13,10 @@ from __future__ import annotations
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import NO_MATCH, _NoMatch, step
 from .kernel import get_step_budget
-from .seed_integrity import load_verified_seed, get_seeds_dir
+from .seed_integrity import get_seeds_dir  # load_verified_seed used via factory
 from .classify_mu import classify_linked_list
+from .projection_loader import make_projection_loader
+from .projection_runner import make_projection_runner
 
 # =============================================================================
 # Type Tag Validation (Phase 6c Security)
@@ -44,29 +46,10 @@ def validate_type_tag(tag: str, context: str = "") -> None:
 
 
 # =============================================================================
-# Projection Loading
+# Projection Loading (consolidated via factory)
 # =============================================================================
 
-_MATCH_PROJECTIONS: list[Mu] | None = None
-
-
-def load_match_projections() -> list[Mu]:
-    """Load match projections from seeds/match.v1.json with integrity verification."""
-    global _MATCH_PROJECTIONS
-    if _MATCH_PROJECTIONS is not None:
-        return _MATCH_PROJECTIONS
-
-    seed_path = get_seeds_dir() / "match.v1.json"
-    seed = load_verified_seed(seed_path)
-
-    _MATCH_PROJECTIONS = seed["projections"]
-    return _MATCH_PROJECTIONS
-
-
-def clear_projection_cache() -> None:
-    """Clear cached projections (for testing)."""
-    global _MATCH_PROJECTIONS
-    _MATCH_PROJECTIONS = None
+load_match_projections, clear_projection_cache = make_projection_loader("match.v1.json")
 
 
 # =============================================================================
@@ -651,66 +634,10 @@ def dict_to_bindings(d: dict[str, Mu]) -> Mu:
 
 
 # =============================================================================
-# Match Runner
+# Match Runner (consolidated via factory)
 # =============================================================================
 
-
-def is_match_done(state: Mu) -> bool:
-    """Check if state is a completed match result."""
-    return (
-        isinstance(state, dict)
-        and state.get("mode") == "match_done"
-    )
-
-
-def is_match_state(state: Mu) -> bool:
-    """Check if state is an in-progress match state."""
-    return (
-        isinstance(state, dict)
-        and state.get("mode") == "match"
-    )
-
-
-def run_match_projections(
-    projections: list[Mu],
-    initial_state: Mu,
-    max_steps: int = 1000
-) -> tuple[Mu, int, bool]:
-    """
-    Run match projections until done or stall.
-
-    Reports steps to the global step budget for cross-call resource accounting.
-
-    Returns:
-        (final_state, steps_taken, is_stall)
-
-    Raises:
-        RuntimeError: If global step budget exceeded.
-    """
-    budget = get_step_budget()
-    state = initial_state
-    for i in range(max_steps):
-        # Check if done
-        if is_match_done(state):
-            # Report steps consumed to global budget
-            budget.consume(i)
-            return state, i, False
-
-        # Take a step
-        next_state = step(projections, state)
-
-        # Check for stall (no change) - use mu_equal to avoid Python type coercion
-        if mu_equal(next_state, state):
-            # Report steps consumed to global budget
-            budget.consume(i)
-            return state, i, True
-
-        state = next_state
-
-    # Max steps exceeded - treat as stall
-    # Report steps consumed to global budget
-    budget.consume(max_steps)
-    return state, max_steps, True
+is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
 
 
 def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:

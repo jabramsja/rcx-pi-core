@@ -30,6 +30,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "subst.v1.json": "ff2acb1450b30a078a7cd2bdd42443b07e28075569a8b095f65165e23eb69893",
     # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
     "classify.v1.json": "3216e28b2f28b8f9d2dfd2693dfecad2c2ba94783151bb4b8f920d29aa8e5cf1",
+    # Phase 7a: meta-circular kernel projections (v1.0.0)
+    "kernel.v1.json": "34ca5c5b32c07b897e183770c1d05f0a00b54c6c6d4559f1ba9a174671da551e",
 }
 
 # Expected projection IDs for each seed.
@@ -65,6 +67,15 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "classify.not_kv",
         "classify.empty",
         "classify.wrap",  # Must be last (catch-all)
+    ],
+    "kernel.v1.json": [
+        "kernel.wrap",      # Entry point (must be first for entry matching)
+        "kernel.stall",     # Empty remaining list -> stall
+        "kernel.try",       # Start matching first projection
+        "kernel.match_success",  # Match succeeded -> start substitution
+        "kernel.match_fail",     # Match failed -> try next projection
+        "kernel.subst_success",  # Substitution complete -> return result
+        "kernel.unwrap",    # Extract final result (must be last)
     ],
 }
 
@@ -179,14 +190,28 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
             f"Seed {seed_name} missing expected projection IDs: {missing}"
         )
 
-    # Check wrap projection is last (it's the catch-all entry point)
-    wrap_id = [eid for eid in expected if eid.endswith(".wrap")]  # AST_OK: infra
-    if wrap_id:
-        wrap_id = wrap_id[0]
-        if actual_ids[-1] != wrap_id:
+    # Check wrap projection is last (catch-all) for match/subst/classify seeds
+    # Kernel seeds have different structure: wrap is entry point, unwrap is exit
+    if seed_name != "kernel.v1.json":
+        wrap_id = [eid for eid in expected if eid.endswith(".wrap")]  # AST_OK: infra
+        if wrap_id:
+            wrap_id = wrap_id[0]
+            if actual_ids[-1] != wrap_id:
+                raise ValueError(
+                    f"Seed {seed_name}: '{wrap_id}' must be last projection "
+                    f"(catch-all), but last is '{actual_ids[-1]}'"
+                )
+    else:
+        # Kernel seeds: wrap is first (entry), unwrap is last (exit)
+        if actual_ids[0] != "kernel.wrap":
             raise ValueError(
-                f"Seed {seed_name}: '{wrap_id}' must be last projection "
-                f"(catch-all), but last is '{actual_ids[-1]}'"
+                f"Seed {seed_name}: 'kernel.wrap' must be first projection "
+                f"(entry point), but first is '{actual_ids[0]}'"
+            )
+        if actual_ids[-1] != "kernel.unwrap":
+            raise ValueError(
+                f"Seed {seed_name}: 'kernel.unwrap' must be last projection "
+                f"(exit point), but last is '{actual_ids[-1]}'"
             )
 
 

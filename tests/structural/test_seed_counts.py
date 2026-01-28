@@ -18,10 +18,10 @@ ROOT = Path(__file__).parent.parent.parent
 SEEDS_DIR = ROOT / "seeds"
 
 # All known seed files
-ALL_SEEDS = ["match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json"]
+ALL_SEEDS = ["match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json", "kernel.v1.json"]
 
 # Self-hosting seeds (follow naming conventions)
-SELFHOST_SEEDS = ["match.v1.json", "subst.v1.json", "classify.v1.json"]
+SELFHOST_SEEDS = ["match.v1.json", "subst.v1.json", "classify.v1.json", "kernel.v1.json"]
 
 # Expected projection counts (update intentionally when seeds change)
 EXPECTED_COUNTS = {
@@ -29,6 +29,7 @@ EXPECTED_COUNTS = {
     "subst.v1.json": 12,     # Phase 6a (includes lookup)
     "classify.v1.json": 6,   # Phase 6b
     "eval.v1.json": 7,       # deep_eval traversal (legacy naming)
+    "kernel.v1.json": 7,     # Phase 7a (meta-circular kernel)
 }
 
 # Expected namespace prefixes (self-hosting seeds only)
@@ -36,6 +37,7 @@ EXPECTED_PREFIXES = {
     "match.v1.json": "match.",
     "subst.v1.json": "subst.",
     "classify.v1.json": "classify.",
+    "kernel.v1.json": "kernel.",
 }
 
 
@@ -102,16 +104,28 @@ class TestSeedProjectionNaming:
 
     @pytest.mark.parametrize("seed_name", SELFHOST_SEEDS)
     def test_wrap_projection_is_last(self, seed_name):
-        """Self-hosting wrap projection must be last (catch-all entry point)."""
+        """Self-hosting wrap projection must be last (catch-all entry point).
+
+        Exception: kernel seeds have .wrap as first (entry) and .unwrap as last (exit).
+        """
         seed = load_seed(seed_name)
         ids = get_projection_ids(seed)
 
         assert ids, f"{seed_name}: no projections found"
 
         last_id = ids[-1]
-        assert last_id.endswith(".wrap"), (
-            f"{seed_name}: last projection should be .wrap, found '{last_id}'"
-        )
+        if seed_name == "kernel.v1.json":
+            # Kernel seeds: wrap is first (entry), unwrap is last (exit)
+            assert last_id.endswith(".unwrap"), (
+                f"{seed_name}: last projection should be .unwrap, found '{last_id}'"
+            )
+            assert ids[0].endswith(".wrap"), (
+                f"{seed_name}: first projection should be .wrap, found '{ids[0]}'"
+            )
+        else:
+            assert last_id.endswith(".wrap"), (
+                f"{seed_name}: last projection should be .wrap, found '{last_id}'"
+            )
 
     @pytest.mark.parametrize("seed_name", ALL_SEEDS)
     def test_no_duplicate_projection_ids(self, seed_name):

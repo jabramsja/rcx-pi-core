@@ -28,10 +28,12 @@ If Python provides the iteration ("try each projection in order"), emergence mig
 ## Problem Statement
 
 Phase 5/6 achieved:
-- `match_mu`: Pattern matching as Mu projections (13 projections)
-- `subst_mu`: Substitution as Mu projections (13 projections)
+- `match_mu`: Pattern matching as Mu projections (7 projections)
+- `subst_mu`: Substitution as Mu projections (12 projections)
 - `classify_mu`: Classification as Mu projections (6 projections)
 - `step_mu`: Composition of match_mu + subst_mu
+
+> Counts reflect current verified seed JSONs; see STATUS.md for authoritative updates.
 
 But `step_mu` still has Python iteration:
 ```python
@@ -345,11 +347,11 @@ These are **additive changes** to existing seeds - no breaking changes to curren
 **Kernel projections (7):** wrap, stall, try, match_success, match_fail, subst_success, unwrap
 
 **Modified existing:**
-- match.* (13 projections) + context passthrough
-- subst.* (13 projections) + context passthrough
+- match.* (7 projections) + context passthrough
+- subst.* (12 projections) + context passthrough
 - classify.* (6 projections) - unchanged
 
-**Total: 39 projections** for fully self-hosted kernel step
+**Total: 32 projections** for fully self-hosted kernel step
 
 ## Manual Trace: Concrete Example
 
@@ -534,11 +536,241 @@ This is acceptable because:
 4. **Context preservation:** `_match_ctx` / `_subst_ctx` passthrough
 5. **Bootstrap iteration:** Outer run loop remains Python (acceptable boundary)
 
+## Addendum: Match Failure Representation (Phase 7b Design)
+
+**Status:** DESIGN (added 2026-01-27, reviewed 2026-01-27)
+
+**Agent Review Summary:**
+- structural-proof: SOUND (first-match-wins ensures correctness)
+- adversary: VULNERABLE → Fixed (boundary validation + order enforcement added)
+- expert: COULD_SIMPLIFY (design sound, docs verbose)
+- advisor: APPROVE with fixes (guard clarification, ordering validation)
+
+### The Problem
+
+The current `match.v1.json` has **no explicit failure projection**. When a pattern doesn't match:
+
+1. The match state has non-null `pattern_focus` and `value_focus`
+2. None of the progress projections (equal, var, descend) apply
+3. The state **stalls** - no projection matches
+4. The kernel can't distinguish "match failed" from "match in progress"
+
+This breaks the kernel loop because `kernel.match_fail` expects:
+```json
+{"_mode": "match_done", "_status": "no_match", "_match_ctx": {...}}
+```
+
+But current match stalls produce:
+```json
+{"mode": "match", "pattern_focus": X, "value_focus": Y, "bindings": {...}, "stack": {...}}
+```
+
+### Solution: Catch-All Failure Projection
+
+**Insight:** First-match-wins semantics means we can add `match.fail` as the **last progress projection** (before `match.wrap`). If no other projection matches a non-null focus state, it must be a failure.
+
+**Phase 7b implementation:**
+
+1. Add `_match_ctx` passthrough to all match projections (as planned)
+2. Add `match.fail` that catches any state where progress stalled:
+
+```json
+{
+  "id": "match.fail",
+  "description": "Catch-all: any match state not caught by progress projections = failure",
+  "note": "First-match-wins ordering ensures this only fires on actual failures",
+  "pattern": {
+    "mode": "match",
+    "pattern_focus": {"var": "pf"},
+    "value_focus": {"var": "vf"},
+    "bindings": {"var": "_"},
+    "stack": {"var": "_"},
+    "_match_ctx": {"var": "ctx"}
+  },
+  "body": {
+    "_mode": "match_done",
+    "_status": "no_match",
+    "_match_ctx": {"var": "ctx"}
+  }
+}
+```
+
+**Key insight:** This projection can ONLY fire when:
+1. All other match projections have been tried (first-match-wins)
+2. State is still in "match" mode with non-null focus
+3. Therefore, match must have failed
+
+The pattern `{"var": "pf"}` binds any non-null value. Combined with projection ordering, this catches exactly the failure cases.
+
+**Projection order in match.v2.json:**
+1. match.done (success, null focus + null stack)
+2. match.sibling (progress, null focus + non-null stack)
+3. match.equal (progress, identical structures)
+4. match.var (progress, variable binding)
+5. match.typed.descend (progress, type-tagged descent)
+6. match.dict.descend (progress, dict descent)
+7. **match.fail** (catch-all failure)
+8. match.wrap (entry point)
+
+**Total: 8 projections** (up from 7)
+
+### Verification: All Failure Cases Covered
+
+| Scenario | Why match.fail catches it |
+|----------|---------------------------|
+| Pattern `{x: 1}` vs value `{y: 2}` | Keys don't align, no descend matches, fail catches |
+| Pattern `5` vs value `6` | Literals differ, match.equal doesn't fire, fail catches |
+| Pattern `{a: 1}` vs value `5` | Structure mismatch, no projection matches, fail catches |
+| Pattern longer than value | descend stalls when value exhausted, fail catches |
+
+### Context Passthrough Requirement
+
+For `match.fail` to work with the kernel, ALL match projections must preserve `_match_ctx`:
+
+```json
+// Example: match.equal with context passthrough
+{
+  "pattern": {
+    "mode": "match",
+    "pattern_focus": {"var": "same"},
+    "value_focus": {"var": "same"},
+    "bindings": {"var": "b"},
+    "stack": {"var": "s"},
+    "_match_ctx": {"var": "ctx"}  // NEW
+  },
+  "body": {
+    "mode": "match",
+    "pattern_focus": null,
+    "value_focus": null,
+    "bindings": {"var": "b"},
+    "stack": {"var": "s"},
+    "_match_ctx": {"var": "ctx"}  // NEW
+  }
+}
+```
+
+This is the Phase 7b work: add `_match_ctx` to all 7 existing match projections, then add `match.fail` as #8.
+
+### Test Cases for match.fail
+
+```python
+def test_match_fail_different_literals():
+    """Pattern 5 vs value 6 produces structural failure."""
+    state = {
+        "mode": "match",
+        "pattern_focus": 5,
+        "value_focus": 6,
+        "bindings": None,
+        "stack": None,
+        "_match_ctx": {"_input": 6, "_body": {}, "_remaining": None}
+    }
+    result = step_mu(match_v2_projections, state)
+    assert result == {
+        "_mode": "match_done",
+        "_status": "no_match",
+        "_match_ctx": {"_input": 6, "_body": {}, "_remaining": None}
+    }
+
+def test_match_fail_structure_mismatch():
+    """Pattern dict vs value int produces structural failure."""
+    state = {
+        "mode": "match",
+        "pattern_focus": {"x": 1},
+        "value_focus": 42,
+        "bindings": None,
+        "stack": None,
+        "_match_ctx": {"_input": 42, "_body": {}, "_remaining": None}
+    }
+    result = step_mu(match_v2_projections, state)
+    assert result["_status"] == "no_match"
+```
+
+### Security Fixes (Adversary Review)
+
+**Fix 1: Boundary Validation (MANDATORY)**
+
+Add validation at kernel entry to reject inputs with kernel-reserved fields:
+
+```python
+KERNEL_RESERVED_FIELDS = {
+    "_mode", "_phase", "_input", "_remaining",
+    "_match_ctx", "_subst_ctx", "_kernel_ctx",
+    "_status", "_result", "_stall"
+}
+
+def validate_kernel_boundary(value: Mu) -> None:
+    """Reject inputs containing kernel-reserved fields."""
+    if isinstance(value, dict):
+        for key in value.keys():
+            if key in KERNEL_RESERVED_FIELDS:
+                raise ValueError(
+                    f"SECURITY: Input cannot contain kernel-reserved field: {key}"
+                )
+```
+
+This prevents domain data from forging kernel state by including `_match_ctx` or `_mode`.
+
+**Fix 2: Match Projection Order Validation**
+
+Add to seed integrity checks (similar to kernel projection order validation):
+
+```python
+def validate_match_projection_order(projections: list[Mu]) -> None:
+    """Verify match projections are in correct order for first-match-wins."""
+    ids = [p["id"] for p in projections]
+
+    # match.wrap must be last (entry point)
+    if not ids[-1].endswith(".wrap"):
+        raise ValueError("SECURITY: match.wrap must be last projection")
+
+    # match.fail (if present) must be second-to-last
+    if "match.fail" in ids and ids[-2] != "match.fail":
+        raise ValueError("SECURITY: match.fail must be before match.wrap")
+
+    # All progress projections must come before match.fail
+    progress = ["match.done", "match.sibling", "match.equal",
+                "match.var", "match.typed.descend", "match.dict.descend"]
+    fail_idx = ids.index("match.fail") if "match.fail" in ids else len(ids)
+    for proj in progress:
+        if proj in ids and ids.index(proj) >= fail_idx:
+            raise ValueError(f"SECURITY: {proj} must come before match.fail")
+```
+
+**Fix 3: Guard Clarification**
+
+The pattern `{"var": "pf"}` matches ANY value including null. This is SAFE because:
+
+1. If focus is null AND stack is null → `match.done` fires first (success)
+2. If focus is null AND stack is non-null → `match.sibling` fires first (continue)
+3. If focus is non-null and no progress matches → `match.fail` catches it
+
+The "guard" is implemented by **projection ordering**, not pattern syntax. Remove the misleading `"guard": "pf is not null"` comment from the projection spec.
+
+### Migration Path
+
+1. **Phase 7b:** Create `match.v2.json` with context passthrough + match.fail
+2. **Parity tests:** Verify match.v2 produces same success results as match.v1
+3. **Integration:** Test match.v2 with kernel.v1 for full cycle
+4. **Deprecate:** match.v1.json becomes legacy (keep for rollback)
+
+### Impact on Projection Counts
+
+| Seed | v1 Count | v2 Count | Change |
+|------|----------|----------|--------|
+| match | 7 | 8 | +1 (match.fail) |
+| subst | 12 | 13 | +1 (subst.done wrapper) |
+| kernel | 7 | 7 | unchanged |
+| **Total kernel+match+subst** | 26 | 28 | +2 |
+
+---
+
 ## References
 
 - `docs/core/SelfHosting.v0.md` - Phase 5/6 self-hosting spec
 - `docs/core/RCXKernel.v0.md` - Original kernel spec
 - `rcx_pi/selfhost/step_mu.py` - Current Python implementation
-- `seeds/match.v1.json` - Match projections (13)
-- `seeds/subst.v1.json` - Subst projections (13)
+- `seeds/match.v1.json` - Match projections (7)
+- `seeds/subst.v1.json` - Subst projections (12)
 - `seeds/classify.v1.json` - Classify projections (6)
+- `seeds/eval.v1.json` - Eval projections (7)
+- `seeds/kernel.v1.json` - Kernel projections (7)

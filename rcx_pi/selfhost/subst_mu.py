@@ -13,7 +13,6 @@ from __future__ import annotations
 from .mu_type import Mu, assert_mu, mu_equal
 from .eval_seed import step
 from .kernel import get_step_budget
-from .seed_integrity import load_verified_seed, get_seeds_dir
 from .match_mu import (
     normalize_for_match,
     denormalize_from_match,
@@ -21,98 +20,21 @@ from .match_mu import (
     bindings_to_dict,
     _check_empty_var_names,
 )
+from .projection_loader import make_projection_loader
+from .projection_runner import make_projection_runner
 
 
 # =============================================================================
-# Projection Loading
+# Projection Loading (consolidated via factory)
 # =============================================================================
 
-_SUBST_PROJECTIONS: list[Mu] | None = None
-
-
-def load_subst_projections() -> list[Mu]:
-    """Load substitute projections from seeds/subst.v1.json with integrity verification."""
-    global _SUBST_PROJECTIONS
-    if _SUBST_PROJECTIONS is not None:
-        return _SUBST_PROJECTIONS
-
-    seed_path = get_seeds_dir() / "subst.v1.json"
-    seed = load_verified_seed(seed_path)
-
-    _SUBST_PROJECTIONS = seed["projections"]
-    return _SUBST_PROJECTIONS
-
-
-def clear_projection_cache() -> None:
-    """Clear cached projections (for testing)."""
-    global _SUBST_PROJECTIONS
-    _SUBST_PROJECTIONS = None
-
+load_subst_projections, clear_projection_cache = make_projection_loader("subst.v1.json")
 
 # =============================================================================
-# Substitute Runner
+# Substitute Runner (consolidated via factory)
 # =============================================================================
 
-
-def is_subst_done(state: Mu) -> bool:
-    """Check if state is a completed substitute result."""
-    return (
-        isinstance(state, dict)
-        and state.get("mode") == "subst_done"
-    )
-
-
-def is_subst_state(state: Mu) -> bool:
-    """Check if state is an in-progress substitute state."""
-    return (
-        isinstance(state, dict)
-        and state.get("mode") == "subst"
-    )
-
-
-def run_subst_projections(
-    projections: list[Mu],
-    initial_state: Mu,
-    max_steps: int = 1000
-) -> tuple[Mu, int, bool]:
-    """
-    Run substitute projections until done or stall.
-
-    Reports steps to the global step budget for cross-call resource accounting.
-
-    As of Phase 6a, lookup is handled structurally by subst.lookup.found and
-    subst.lookup.next projections - bindings are embedded in initial_state.
-
-    Returns:
-        (final_state, steps_taken, is_stall)
-
-    Raises:
-        RuntimeError: If global step budget exceeded.
-    """
-    budget = get_step_budget()
-    state = initial_state
-    for i in range(max_steps):
-        # Check if done
-        if is_subst_done(state):
-            # Report steps consumed to global budget
-            budget.consume(i)
-            return state, i, False
-
-        # Take a step (lookup is now handled by subst.lookup.* projections)
-        next_state = step(projections, state)
-
-        # Check for stall (no change) - use mu_equal to avoid Python type coercion
-        if mu_equal(next_state, state):
-            # Report steps consumed to global budget
-            budget.consume(i)
-            return state, i, True
-
-        state = next_state
-
-    # Max steps exceeded - treat as stall
-    # Report steps consumed to global budget
-    budget.consume(max_steps)
-    return state, max_steps, True
+is_subst_done, is_subst_state, run_subst_projections = make_projection_runner("subst")
 
 
 def is_head_tail_structure(value: Mu) -> bool:

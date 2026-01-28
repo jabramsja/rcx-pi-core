@@ -217,19 +217,44 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-*(Phase 6a, 6b, and 6c complete - see Ra section)*
+### Phase 7: Meta-Circular Kernel (L2 Operational Self-Hosting)
 
-**Future phases (not yet promoted):**
+**Promoted from VECTOR:** 2026-01-27
+**Rationale:** All 7 agents APPROVE. Design complete (MetaCircularKernel.v0.md v0.2). All blockers resolved.
 
-- **Phase 7**: Self-host the kernel loop (projection selection as Mu projections)
+**Goal:** Replace Python for-loop in `step_mu()` with structural kernel projections.
 
-Note: Phase 7 requires meta-circular design. The kernel loop (for-loop selecting projections)
-is the remaining major scaffolding debt.
+**Sub-phases:**
 
-**Phase 7 prerequisites (fuzzer agent findings):**
-- Seed projection coverage tests (verify no unintended stalls)
-- Kernel trace integrity tests (replay trace manually)
-- Security fuzzer tests (type tag injection, resource exhaustion)
+- [ ] **Phase 7a: Kernel Projections Seed** (1-2 days)
+  - Create `seeds/kernel.v1.json` with 7 projections
+  - Manual trace tests (success, failure, empty projections)
+  - Projection order regression test (kernel projections FIRST)
+
+- [ ] **Phase 7b: Match/Subst Context Passthrough** (2-3 days)
+  - Copy match.v1.json → match.v2.json, add `_match_ctx` passthrough
+  - Copy subst.v1.json → subst.v2.json, add `_subst_ctx` passthrough
+  - Parity tests: v2 seeds == v1 behavior (WITHOUT kernel)
+
+- [ ] **Phase 7c: Integration Testing** (1-2 days)
+  - Full cycle test: kernel → match → subst → kernel
+  - Trace inspection: verify context preserved
+  - Security test: domain data can't forge `_mode`
+
+- [ ] **Phase 7d: Replace Python Scaffolding** (2-3 days)
+  - Modify `step_mu()` to call structural kernel
+  - Parity tests: structural step_mu == Python step_mu (1000+ fuzzer)
+  - Remove `@host_iteration` debt markers
+  - Update DEBT_THRESHOLD: 11 → 9 (or lower)
+
+**Success criteria:**
+- [ ] `seeds/kernel.v1.json` exists with 7 projections
+- [ ] Manual trace tests pass for success/failure/empty cases
+- [ ] Match/subst context passthrough tests pass
+- [ ] Kernel projections pass parity tests with Python `step_mu`
+- [ ] No Python for-loop in step_mu execution path
+- [ ] All 1036+ existing tests still pass
+- [ ] Debt threshold decreases (target: 11 → 9 or lower)
 
 **Debt status**: See `STATUS.md` for current counts and threshold.
 
@@ -238,11 +263,13 @@ is the remaining major scaffolding debt.
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
 **Active designs:**
-- Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - Phase 7 kernel loop self-hosting
-  - Linked-list cursor design (proven structural)
-  - Agent review: gaps identified (context preservation, structural NO_MATCH)
-  - Status: Design iteration in progress
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
+
+**Promoted to NEXT:**
+- Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - **Promoted 2026-01-27**
+  - All 7 agents APPROVE (verifier, adversary, expert, structural-proof, grounding, fuzzer, advisor)
+  - Design complete: 7 kernel projections, linked-list cursor, context passthrough
+  - See NEXT section for Phase 7 implementation plan
 
 **Completed designs (now in Ra):**
 - RCX Kernel v0 (`docs/core/RCXKernel.v0.md`)

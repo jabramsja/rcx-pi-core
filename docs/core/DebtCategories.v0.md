@@ -228,3 +228,43 @@ Type tags resolve the list/dict ambiguity where `[["a", 1]]` and `{"a": 1}` woul
 4. **Classification fast-path:** `classify_linked_list()` checks `_type` directly for type-tagged structures, avoiding full structural scan.
 
 5. **Legacy support:** Structures without `_type` still work via projection-based classification.
+
+### String Key Assumption (classify_mu.py)
+
+The `classify_linked_list()` function in `rcx_pi/selfhost/classify_mu.py` determines whether a head/tail structure encodes a dict or list.
+
+**The Limitation:**
+
+Mu projections can only check structural patterns (head/tail shape), not Python types. The string key check at line 179 is a **security boundary** that projections cannot enforce:
+
+```python
+if not isinstance(key, str):
+    # Key is not a string - not a valid dict encoding
+    return "list"
+```
+
+**Why This Matters:**
+
+1. **Ambiguity after normalization:** A list like `[["key", "value"]]` and a dict like `{"key": "value"}` both normalize to the same head/tail structure. Without the string key check, an attacker could create structures with non-string keys that bypass validation.
+
+2. **Host semantics leakage:** Python's `isinstance(key, str)` determines whether a structure is valid dict encoding. This is a pre-condition the projections assume but cannot verify.
+
+3. **Design decision:** When ambiguous, we favor dict interpretation because dicts with None values are more common than lists of 2-element sublists.
+
+**Documentation in Code:**
+
+This is documented in classify_mu.py lines 167-173:
+```python
+# KNOWN LIMITATION: A list like [[s, x]] normalizes identically to {s: x}
+# We cannot distinguish them after normalization. We favor dict interpretation
+# because dicts with None values are more common than lists of 2-element sublists.
+```
+
+And in the seed file `seeds/classify.v1.json` meta/invariants:
+```json
+"Pre-condition: dict keys are strings (JSON constraint)"
+```
+
+**Resolution Path:**
+
+Phase 6c type tags resolve this for new code - tagged structures (`_type: "dict"` or `_type: "list"`) bypass projection-based classification entirely. The string key check only applies to legacy untagged structures.

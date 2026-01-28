@@ -10,6 +10,10 @@ Phase 5 Goal: EVAL_SEED runs EVAL_SEED
 - step() uses match + substitute (Python recursion)
 - If traces are identical, self-hosting is achieved
 
+SECURITY: Projection order is security-critical. When combining kernel
+projections with domain projections (Phase 7+), kernel projections MUST
+run first to prevent domain data from forging kernel state.
+
 See docs/core/SelfHosting.v0.md for design.
 """
 
@@ -17,6 +21,72 @@ from .eval_seed import NO_MATCH
 from .match_mu import match_mu
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_equal
+
+
+# =============================================================================
+# Projection Order Security (Phase 7+)
+# =============================================================================
+
+def is_kernel_projection(projection: Mu) -> bool:
+    """
+    Check if a projection is a kernel projection (matches _mode prefix).
+
+    Kernel projections have patterns that match on _mode field, which is
+    the kernel namespace. Domain projections should not use _mode patterns.
+
+    Args:
+        projection: A projection dict with pattern and body.
+
+    Returns:
+        True if projection ID starts with "kernel." or pattern has _mode key.
+    """
+    if not isinstance(projection, dict):
+        return False
+
+    # Check by ID (fast path)
+    proj_id = projection.get("id", "")
+    if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+        return True
+
+    # Check by pattern structure (fallback)
+    pattern = projection.get("pattern", {})
+    if isinstance(pattern, dict) and "_mode" in pattern:
+        return True
+
+    return False
+
+
+def validate_kernel_projections_first(projections: list[Mu]) -> None:
+    """
+    Validate that kernel projections appear before domain projections.
+
+    SECURITY: This is critical for Phase 7+ when kernel and domain projections
+    are combined. If domain projections run first, they could forge kernel state
+    by matching patterns like {"_step": ..., "_projs": ...} before kernel.wrap.
+
+    Args:
+        projections: List of projections to validate.
+
+    Raises:
+        ValueError: If domain projection appears before kernel projection.
+    """
+    seen_domain = False
+    first_domain_id = None
+
+    for proj in projections:
+        is_kernel = is_kernel_projection(proj)
+
+        if is_kernel and seen_domain:
+            proj_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"
+            raise ValueError(
+                f"SECURITY: Kernel projection '{proj_id}' appears after domain projection "
+                f"'{first_domain_id}'. Kernel projections MUST be first to prevent "
+                f"domain data from forging kernel state."
+            )
+
+        if not is_kernel and not seen_domain:
+            seen_domain = True
+            first_domain_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"
 
 
 def apply_mu(projection: Mu, input_value: Mu) -> Mu:
