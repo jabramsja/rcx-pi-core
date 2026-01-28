@@ -1,47 +1,91 @@
 #!/usr/bin/env bash
-# Git pre-commit hook for doc consistency
+# Git pre-commit hook for doc consistency and structural integrity
 # Install: ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 #
 # This hook:
 # 1. Runs check_docs_consistency.sh (validates STATUS.md matches reality)
-# 2. Warns if rcx_pi/ or seeds/ changed but STATUS.md wasn't touched
+# 2. BLOCKS if seeds/ changed - runs seed integrity tests
+# 3. Warns if rcx_pi/ changed but STATUS.md wasn't touched
 #
-# Warnings don't block commits - they're advisory reminders.
+# Use --no-verify to bypass (emergency only, tracked in git log)
 
 set -e
 
 cd "$(dirname "$0")/../.." 2>/dev/null || cd "$(git rev-parse --show-toplevel)"
 
-# === 1. Run doc consistency validation (automatic) ===
+# === 1. Run doc consistency validation ===
 if [ -f "./tools/check_docs_consistency.sh" ]; then
     if ! ./tools/check_docs_consistency.sh 2>/dev/null; then
         echo ""
         echo "⚠️  Doc consistency check found issues (see above)"
-        echo "   Continuing with commit - please review and fix if needed"
         echo ""
     fi
 fi
 
-# === 2. Check if core code changed without STATUS.md update ===
+# === 2. Get staged files ===
 STAGED_FILES=$(git diff --cached --name-only)
 
 RCX_CHANGED=$(echo "$STAGED_FILES" | grep -E '^rcx_pi/' || true)
 SEEDS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^seeds/' || true)
 STATUS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^STATUS\.md$' || true)
+TESTS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^tests/structural/' || true)
 
-if [ -n "$RCX_CHANGED" ] || [ -n "$SEEDS_CHANGED" ]; then
+# === 3. BLOCKING: If seeds changed, run seed integrity tests ===
+if [ -n "$SEEDS_CHANGED" ]; then
+    echo ""
+    echo "🔒 Seeds changed - running integrity tests..."
+    echo ""
+
+    # Run fast seed tests (count, schema, naming)
+    if ! python3 -m pytest tests/structural/test_seed_counts.py -q --tb=short 2>&1; then
+        echo ""
+        echo "❌ BLOCKED: Seed integrity tests failed"
+        echo ""
+        echo "Changed seeds:"
+        echo "$SEEDS_CHANGED" | sed 's/^/  /'
+        echo ""
+        echo "Fix the tests or update expected counts if change is intentional."
+        echo "Use 'git commit --no-verify' to bypass (emergency only)."
+        exit 1
+    fi
+
+    echo "✅ Seed integrity tests passed"
+    echo ""
+fi
+
+# === 4. BLOCKING: If structural tests changed, verify they pass ===
+if [ -n "$TESTS_CHANGED" ]; then
+    echo ""
+    echo "🔒 Structural tests changed - verifying they pass..."
+    echo ""
+
+    if ! python3 -m pytest tests/structural/ -q --tb=short 2>&1; then
+        echo ""
+        echo "❌ BLOCKED: Structural tests failed"
+        echo ""
+        echo "Changed test files:"
+        echo "$TESTS_CHANGED" | sed 's/^/  /'
+        echo ""
+        echo "Fix failing tests before committing."
+        exit 1
+    fi
+
+    echo "✅ Structural tests passed"
+    echo ""
+fi
+
+# === 5. WARNING: Core code changed without STATUS.md ===
+if [ -n "$RCX_CHANGED" ]; then
     if [ -z "$STATUS_CHANGED" ]; then
         echo ""
         echo "⚠️  Core code changed but STATUS.md was not updated"
         echo ""
         echo "Changed files:"
-        [ -n "$RCX_CHANGED" ] && echo "$RCX_CHANGED" | sed 's/^/  /'
-        [ -n "$SEEDS_CHANGED" ] && echo "$SEEDS_CHANGED" | sed 's/^/  /'
+        echo "$RCX_CHANGED" | sed 's/^/  /'
         echo ""
         echo "Please verify: Does this affect debt count or current phase?"
         echo ""
     fi
 fi
 
-# Always allow commit (warnings are advisory, not blocking)
 exit 0

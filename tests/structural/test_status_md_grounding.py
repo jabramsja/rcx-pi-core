@@ -7,6 +7,7 @@ If a test fails, either the code changed or STATUS.md needs updating.
 See: docs/agents/AgentRig.v0.md (grounding agent)
 """
 
+import ast
 import re
 import subprocess
 from pathlib import Path
@@ -53,6 +54,31 @@ def run_debt_dashboard() -> int:
     pytest.fail(f"Could not parse debt from dashboard output:\n{result.stdout}")
 
 
+def get_function_decorators(file_path: Path, function_name: str) -> list[str]:
+    """Use AST to find decorators on a specific function.
+
+    Returns list of decorator names (e.g., ['host_recursion', 'staticmethod']).
+    """
+    content = file_path.read_text()
+    tree = ast.parse(content)
+
+    decorators = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function_name:
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Name):
+                    decorators.append(decorator.id)
+                elif isinstance(decorator, ast.Attribute):
+                    decorators.append(decorator.attr)
+                elif isinstance(decorator, ast.Call):
+                    if isinstance(decorator.func, ast.Name):
+                        decorators.append(decorator.func.id)
+                    elif isinstance(decorator.func, ast.Attribute):
+                        decorators.append(decorator.func.attr)
+
+    return decorators
+
+
 class TestDebtRatchet:
     """Verify debt ratchet policy: actual debt <= threshold."""
 
@@ -80,49 +106,40 @@ class TestDebtRatchet:
 
 
 class TestSelfHostingLevelClaims:
-    """Verify L1/L2/L3 claims match implementation state."""
+    """Verify L1/L2/L3 claims match implementation state using AST parsing."""
 
     def test_l1_match_mu_has_no_host_recursion(self):
-        """L1 claim: match_mu uses projections, not Python recursion."""
+        """L1 claim: match_mu function has no @host_recursion decorator.
+
+        Uses AST parsing for robustness (not text matching).
+        """
         match_mu_path = ROOT / "rcx_pi" / "selfhost" / "match_mu.py"
-        content = match_mu_path.read_text()
+        decorators = get_function_decorators(match_mu_path, "match_mu")
 
-        # Should NOT have @host_recursion on match_mu function itself
-        # (helper functions may have it, but the main algorithm shouldn't)
-        lines = content.split("\n")
-        in_match_mu_func = False
-
-        for i, line in enumerate(lines):
-            if "def match_mu(" in line:
-                in_match_mu_func = True
-            elif in_match_mu_func and line.startswith("def "):
-                in_match_mu_func = False
-
-            if in_match_mu_func and "@host_recursion" in line:
-                pytest.fail(
-                    f"match_mu.py line {i+1}: @host_recursion found in match_mu function\n"
-                    f"L1 claim requires match algorithm to use projections"
-                )
+        assert "host_recursion" not in decorators, (
+            f"match_mu function has @host_recursion decorator: {decorators}\n"
+            f"L1 claim requires match algorithm to use projections, not Python recursion"
+        )
 
     def test_l1_subst_mu_has_no_host_recursion(self):
-        """L1 claim: subst_mu uses projections, not Python recursion."""
+        """L1 claim: subst_mu function has no @host_recursion decorator."""
         subst_mu_path = ROOT / "rcx_pi" / "selfhost" / "subst_mu.py"
-        content = subst_mu_path.read_text()
+        decorators = get_function_decorators(subst_mu_path, "subst_mu")
 
-        lines = content.split("\n")
-        in_subst_mu_func = False
+        assert "host_recursion" not in decorators, (
+            f"subst_mu function has @host_recursion decorator: {decorators}\n"
+            f"L1 claim requires subst algorithm to use projections, not Python recursion"
+        )
 
-        for i, line in enumerate(lines):
-            if "def subst_mu(" in line:
-                in_subst_mu_func = True
-            elif in_subst_mu_func and line.startswith("def "):
-                in_subst_mu_func = False
+    def test_l1_step_mu_has_no_host_recursion(self):
+        """L1 claim: step_mu function has no @host_recursion decorator."""
+        step_mu_path = ROOT / "rcx_pi" / "selfhost" / "step_mu.py"
+        decorators = get_function_decorators(step_mu_path, "step_mu")
 
-            if in_subst_mu_func and "@host_recursion" in line:
-                pytest.fail(
-                    f"subst_mu.py line {i+1}: @host_recursion found in subst_mu function\n"
-                    f"L1 claim requires subst algorithm to use projections"
-                )
+        assert "host_recursion" not in decorators, (
+            f"step_mu function has @host_recursion decorator: {decorators}\n"
+            f"L1 claim requires step algorithm to use projections"
+        )
 
     def test_l2_kernel_loop_is_still_python(self):
         """L2 DESIGN: kernel loop should still be Python (not yet structural)."""
@@ -144,10 +161,14 @@ class TestKeyFilesExist:
         "rcx_pi/selfhost/match_mu.py",
         "rcx_pi/selfhost/subst_mu.py",
         "rcx_pi/selfhost/step_mu.py",
+        "rcx_pi/selfhost/classify_mu.py",
         "seeds/match.v1.json",
         "seeds/subst.v1.json",
         "seeds/classify.v1.json",
+        "seeds/eval.v1.json",
         "TASKS.md",
+        "STATUS.md",
+        "CLAUDE.md",
     ])
     def test_key_file_exists(self, path):
         """STATUS.md references this file - it must exist."""
@@ -176,4 +197,38 @@ class TestPhaseStatus:
         assert not kernel_loop_impl.exists(), (
             "kernel_loop_mu.py exists but STATUS.md says L2 is DESIGN\n"
             "Update STATUS.md if kernel loop is now structural"
+        )
+
+
+class TestToolsExist:
+    """Verify enforcement tools exist and are executable."""
+
+    @pytest.mark.parametrize("tool", [
+        "tools/debt_dashboard.sh",
+        "tools/check_docs_consistency.sh",
+        "tools/pre-commit-doc-check",
+        "tools/audit_semantic_purity.sh",
+    ])
+    def test_tool_exists(self, tool):
+        """Enforcement tool must exist."""
+        tool_path = ROOT / tool
+        assert tool_path.exists(), f"Tool not found: {tool}"
+
+    def test_debt_dashboard_produces_output(self):
+        """debt_dashboard.sh should produce parseable output."""
+        result = subprocess.run(
+            ["./tools/debt_dashboard.sh"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+
+        assert result.returncode == 0, (
+            f"debt_dashboard.sh failed with code {result.returncode}\n"
+            f"stderr: {result.stderr}"
+        )
+
+        assert "Total Semantic:" in result.stdout, (
+            f"debt_dashboard.sh output missing 'Total Semantic:'\n"
+            f"stdout: {result.stdout}"
         )
