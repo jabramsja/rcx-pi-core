@@ -10,6 +10,15 @@ Phase 7d: Meta-circular kernel
 - The Python for-loop is replaced with kernel projections that iterate structurally
 - Iteration uses linked-list cursor, not arithmetic
 
+TERMINOLOGY NOTE:
+- kernel.v1.json = structural kernel (7 Mu projections for iteration)
+- Kernel class (kernel.py) = Python scaffolding (hash, trace, dispatch)
+
+This module uses kernel.v1.json projections for structural iteration.
+The Kernel class is NOT involved in self-hosting - it's boundary scaffolding.
+step_kernel_mu() correctly uses the structural kernel; it is NOT "bypassing"
+the kernel architecture.
+
 SECURITY: Projection order is security-critical. When combining kernel
 projections with domain projections (Phase 7+), kernel projections MUST
 run first to prevent domain data from forging kernel state.
