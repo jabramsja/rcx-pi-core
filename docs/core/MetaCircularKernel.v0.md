@@ -28,10 +28,12 @@ If Python provides the iteration ("try each projection in order"), emergence mig
 ## Problem Statement
 
 Phase 5/6 achieved:
-- `match_mu`: Pattern matching as Mu projections (13 projections)
-- `subst_mu`: Substitution as Mu projections (13 projections)
+- `match_mu`: Pattern matching as Mu projections (7 projections)
+- `subst_mu`: Substitution as Mu projections (12 projections)
 - `classify_mu`: Classification as Mu projections (6 projections)
 - `step_mu`: Composition of match_mu + subst_mu
+
+> Counts reflect current verified seed JSONs; see STATUS.md for authoritative updates.
 
 But `step_mu` still has Python iteration:
 ```python
@@ -345,11 +347,11 @@ These are **additive changes** to existing seeds - no breaking changes to curren
 **Kernel projections (7):** wrap, stall, try, match_success, match_fail, subst_success, unwrap
 
 **Modified existing:**
-- match.* (13 projections) + context passthrough
-- subst.* (13 projections) + context passthrough
+- match.* (7 projections) + context passthrough
+- subst.* (12 projections) + context passthrough
 - classify.* (6 projections) - unchanged
 
-**Total: 39 projections** for fully self-hosted kernel step
+**Total: 32 projections** for fully self-hosted kernel step
 
 ## Manual Trace: Concrete Example
 
@@ -539,6 +541,7 @@ This is acceptable because:
 - `docs/core/SelfHosting.v0.md` - Phase 5/6 self-hosting spec
 - `docs/core/RCXKernel.v0.md` - Original kernel spec
 - `rcx_pi/selfhost/step_mu.py` - Current Python implementation
-- `seeds/match.v1.json` - Match projections (13)
-- `seeds/subst.v1.json` - Subst projections (13)
+- `seeds/match.v1.json` - Match projections (7)
+- `seeds/subst.v1.json` - Subst projections (12)
 - `seeds/classify.v1.json` - Classify projections (6)
+- `seeds/eval.v1.json` - Eval projections (7)

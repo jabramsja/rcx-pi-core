@@ -18,96 +18,21 @@ from typing import Literal
 from .mu_type import Mu, mu_equal
 from .eval_seed import step
 from .kernel import get_step_budget
-from .seed_integrity import load_verified_seed, get_seeds_dir
+from .projection_loader import make_projection_loader
+from .projection_runner import make_projection_runner
 
 
 # =============================================================================
-# Projection Loading
+# Projection Loading (consolidated via factory)
 # =============================================================================
 
-_CLASSIFY_PROJECTIONS: list[Mu] | None = None
-
-
-def load_classify_projections() -> list[Mu]:
-    """Load classify projections from seeds/classify.v1.json with integrity verification."""
-    global _CLASSIFY_PROJECTIONS
-    if _CLASSIFY_PROJECTIONS is not None:
-        return _CLASSIFY_PROJECTIONS
-
-    seed_path = get_seeds_dir() / "classify.v1.json"
-    seed = load_verified_seed(seed_path)
-
-    _CLASSIFY_PROJECTIONS = seed["projections"]
-    return _CLASSIFY_PROJECTIONS
-
-
-def clear_projection_cache() -> None:
-    """Clear cached projections (for testing)."""
-    global _CLASSIFY_PROJECTIONS
-    _CLASSIFY_PROJECTIONS = None
-
+load_classify_projections, clear_projection_cache = make_projection_loader("classify.v1.json")
 
 # =============================================================================
-# Classify Runner
+# Classify Runner (consolidated via factory)
 # =============================================================================
 
-
-def is_classify_done(state: Mu) -> bool:
-    """Check if state is a completed classification result."""
-    return (
-        isinstance(state, dict)
-        and state.get("mode") == "classify_done"
-    )
-
-
-def is_classify_state(state: Mu) -> bool:
-    """Check if state is an in-progress classify state."""
-    return (
-        isinstance(state, dict)
-        and state.get("mode") == "classify"
-    )
-
-
-def run_classify_projections(
-    projections: list[Mu],
-    initial_state: Mu,
-    max_steps: int = 1000
-) -> tuple[Mu, int, bool]:
-    """
-    Run classify projections until done or stall.
-
-    Reports steps to the global step budget for cross-call resource accounting.
-
-    Returns:
-        (final_state, steps_taken, is_stall)
-
-    Raises:
-        RuntimeError: If global step budget exceeded.
-    """
-    budget = get_step_budget()
-    state = initial_state
-    for i in range(max_steps):
-        # Check if done
-        if is_classify_done(state):
-            # Report steps consumed to global budget
-            budget.consume(i)
-            return state, i, False
-
-        # Take a step
-        next_state = step(projections, state)
-
-        # Check for stall (no change) - use mu_equal to avoid Python type coercion
-        if mu_equal(next_state, state):
-            # Report steps consumed to global budget
-            budget.consume(i)
-            return state, i, True
-
-        state = next_state
-
-    # Max steps exceeded - treat as stall
-    # Report steps consumed to global budget
-    budget.consume(max_steps)
-    return state, max_steps, True
+is_classify_done, is_classify_state, run_classify_projections = make_projection_runner("classify")
 
 
 def classify_linked_list(value: Mu) -> Literal["dict", "list"]:

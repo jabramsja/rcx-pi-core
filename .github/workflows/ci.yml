@@ -37,3 +37,15 @@ jobs:
           set -euo pipefail
           chmod +x scripts/green_gate.sh || true
           scripts/green_gate.sh python-only
+
+      - name: Doc consistency check (non-blocking)
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x tools/check_docs_consistency.sh || true
+          if tools/check_docs_consistency.sh; then
+            echo "✓ Doc consistency check passed"
+          else
+            echo "⚠ Doc consistency check failed (non-blocking)"
+          fi
