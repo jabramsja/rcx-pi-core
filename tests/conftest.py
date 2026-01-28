@@ -26,16 +26,32 @@ from rcx_pi.subst_mu import subst_mu
 try:
     from hypothesis import settings, Verbosity, Phase
 
-    # Default profile: production settings with database caching
-    # Omitting database= uses the default .hypothesis/ directory
-    # NOTE: CI and local use the same profile - PYTHONHASHSEED=0 provides determinism
+    # CI profile: full fuzzing (default example counts from test decorators)
     settings.register_profile(
-        "default",
-        print_blob=True,  # Print reproduction blob on failure
-        derandomize=False,  # Keep randomized search (PYTHONHASHSEED seeds it)
+        "ci",
+        print_blob=True,
+        derandomize=False,
     )
 
-    settings.load_profile("default")
+    # Dev profile: fast fuzzing (50 examples max for rapid iteration)
+    settings.register_profile(
+        "dev",
+        max_examples=50,
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Default profile (same as CI)
+    settings.register_profile(
+        "default",
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Load profile from environment: HYPOTHESIS_PROFILE=dev for fast local runs
+    import os
+    profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
+    settings.load_profile(profile)
 
 except ImportError:
     pass  # hypothesis not installed, skip configuration
