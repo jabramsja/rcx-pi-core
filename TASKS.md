@@ -338,3 +338,4 @@ All blockers resolved 2026-01-28:
 - Multi-value/concurrent execution
 - Performance-first optimizations
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
+- Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.

@@ -12,6 +12,33 @@ Status: **NEXT** (promoted 2026-01-27, Phase 7a/7b/7c DONE, 7d pending)
 - expert: Simplify from 11 to 5-7 projections - addressed
 - verifier: Context preservation gap - addressed with `kernel_ctx` field
 
+---
+
+## Terminology Clarification: Two "Kernels"
+
+**IMPORTANT:** RCX has two concepts that share the word "kernel":
+
+| Term | What It Is | Role |
+|------|------------|------|
+| **kernel.v1.json** | 7 Mu projections for structural iteration | THE structural kernel |
+| **Kernel class** (kernel.py) | Python hash/trace/dispatch infrastructure | Scaffolding |
+
+**kernel.v1.json** (structural kernel):
+- 7 Mu projections: wrap, stall, try, match_success, match_fail, subst_success, unwrap
+- Linked-list cursor (head/tail) for projection selection
+- Replaces Python for-loops with structural pattern matching
+- THIS is "the kernel" in "meta-circular kernel"
+
+**Kernel class** (Python scaffolding):
+- Hash computation (`compute_identity`) for stall detection
+- Trace recording (`record_trace`) for replay
+- Handler dispatch (`gate_dispatch`) for event routing
+- Infrastructure only - NOT the operational kernel
+
+**Why this matters:** Phase 7d-1 correctly uses kernel.v1.json projections. The `step_kernel_mu()` function is NOT "bypassing" the kernel - it IS using the structural kernel. The Python Kernel class is boundary scaffolding, not the self-hosting target.
+
+---
+
 ## Purpose
 
 Define how the kernel loop itself becomes structural. Currently, `step_mu()` uses a Python for-loop to try projections in order. Phase 7 eliminates this by expressing projection selection as Mu projections.

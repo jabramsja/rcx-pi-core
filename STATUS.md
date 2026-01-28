@@ -19,6 +19,8 @@ NAME: step_mu Wired to Structural Kernel
 | **L2: Operational** | kernel loop (iteration/selection) is Mu projections | PARTIAL (selection structural, execution Python) |
 | **L3: Full Bootstrap** | RCX runs RCX with no Python | FUTURE |
 
+**Terminology Note:** The "kernel" in L2 refers to `kernel.v1.json` (7 structural Mu projections), NOT the `Kernel` class in kernel.py (Python scaffolding for hash/trace/dispatch). See `docs/core/MetaCircularKernel.v0.md` for full clarification.
+
 ## What This Means
 
 - **L1 Algorithmic self-hosting achieved** (see Self-Hosting Levels table): `match_mu()` and `subst_mu()` use Mu projections from seeds, not Python recursion
