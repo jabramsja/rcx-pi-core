@@ -187,24 +187,70 @@ def clear_combined_kernel_cache() -> None:
     _combined_kernel_cache = None
 
 
-@host_iteration("Kernel execution loop - Phase 8 replaces with recursive kernel projections")
+# =============================================================================
+# Kernel Terminal Detection (Phase 8b)
+# =============================================================================
+
+
+def is_kernel_terminal(result: Mu) -> bool:
+    """
+    Check if result is in kernel terminal state.
+
+    Terminal state is: {"_mode": "done", "_result": ..., "_stall": ...}
+    This is a simple structural marker check - no semantic decisions.
+    The kernel itself determines what "done" means; we just detect the marker.
+
+    Phase 8b: This replaces the semantic branching that was inside the loop.
+    """
+    return (
+        isinstance(result, dict) and
+        result.get("_mode") == "done" and
+        "_result" in result and
+        "_stall" in result
+    )
+
+
+def extract_kernel_result(terminal_state: Mu, original_input: Mu) -> Mu:
+    """
+    Extract result from terminal kernel state.
+
+    If _stall is true, return original input (preserves Python type info
+    for empty containers that normalize to None).
+    Otherwise, denormalize and return the result.
+
+    This is mechanical unpacking of the structural marker - no semantic
+    decisions about WHAT constitutes terminal are made here.
+
+    Phase 8b: This replaces the semantic branching that was inside the loop.
+    """
+    if terminal_state.get("_stall") is True:
+        return original_input
+    return denormalize_from_match(terminal_state.get("_result"))
+
+
+@host_iteration("Kernel execution loop - mechanical driver (Phase 8b simplified)")
 def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     """
     Try each projection in order using structural kernel projections.
 
-    This is the structural replacement for the Python for-loop.
-    Uses kernel.v1 + match.v2 + subst.v2 projections for iteration.
+    Phase 8b: MECHANICAL driver - no semantic decisions inside the loop.
+    The for-loop is the bootstrap primitive (like Forth's NEXT). It stays.
+    Semantic decisions moved to structural kernel projections.
 
     The kernel works as a state machine:
     1. kernel.wrap: Wraps input and projections into kernel state
     2. kernel.try: Tries first projection via match.v2
     3. kernel.match_success/fail: On success, substitute via subst.v2; on fail, try next
-    4. kernel.stall: All projections tried, no match
-    5. kernel.unwrap: Extract final result
+    4. kernel.stall: All projections tried, no match -> {_mode: "done", _stall: true}
+    5. kernel.unwrap: Success -> {_mode: "done", _result: X, _stall: false}
+
+    The loop ONLY does:
+    - is_kernel_terminal(): Check for structural marker {_mode: "done", ...}
+    - extract_kernel_result(): Unpack the marker (no semantic decisions)
+    - mu_equal(): Detect no-progress stall
 
     L2 PARTIAL: Projection SELECTION is structural (linked-list cursor).
-    Projection EXECUTION still uses Python for-loop (this function).
-    True L2 requires recursive kernel projections (Phase 8).
+    Projection EXECUTION uses Python for-loop (bootstrap primitive).
 
     Args:
         projections: List of domain projections to try.
@@ -238,40 +284,24 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
 
     # Run kernel until done or stall
     current = kernel_entry
-    max_steps = 10000  # Safety limit
+    # BOOTSTRAP_PRIMITIVE: max_steps
+    # This is the irreducible resource exhaustion guard.
+    # Cannot be structural (would require arithmetic on fuel).
+    # Prevents infinite execution - analogous to watchdog timer.
+    # See docs/core/BootstrapPrimitives.v0.md
+    max_steps = 10000
 
+    # Phase 8b: Simplified mechanical loop - no semantic decisions inside
     for _ in range(max_steps):
         result = eval_step(kernel_projs, current)
 
-        # Check for stall (no change)
+        # Terminal state check - simple structural marker detection
+        if is_kernel_terminal(result):
+            return extract_kernel_result(result, input_value)
+
+        # Stall check - no change means no progress
         if mu_equal(result, current):
-            # Stall before reaching done - return original input
             return input_value
-
-        # Check for done state BEFORE unwrap
-        # Kernel.done state has _mode=done, _result, _stall
-        # If _stall=true, return original input (preserves type info for empty containers)
-        if isinstance(result, dict) and result.get("_mode") == "done":
-            if result.get("_stall") is True:
-                # Kernel indicates stall - return original input
-                return input_value
-            else:
-                # Success - get the result and denormalize
-                kernel_result = result.get("_result")
-                return denormalize_from_match(kernel_result)
-
-        # Check for final unwrapped result (after kernel.unwrap)
-        if isinstance(result, dict):
-            mode = result.get("_mode")
-            # Final result has no _mode and no entry format markers
-            if mode is None and "_step" not in result and "match" not in result and "subst" not in result:
-                # Check it's not a match/subst internal state either
-                if result.get("mode") not in ("match", "subst"):
-                    # Unwrapped result - denormalize and return
-                    return denormalize_from_match(result)
-        else:
-            # Primitive result (from kernel.unwrap)
-            return result
 
         current = result
 

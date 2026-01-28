@@ -49,26 +49,28 @@ The pre-commit hook checks doc consistency, debt ceiling, and warns if core code
 
 ```
 THRESHOLD: 15
-CURRENT: 15 (12 tracked + 3 AST_OK)
-TARGET: 12 (deferred to Phase 8)
+CURRENT: 14 (11 tracked + 3 AST_OK)
+TARGET: 12 (deferred to Phase 8c+)
 ```
 
 **Debt breakdown:**
 - @host_recursion: 3 (eval_seed match/substitute)
 - @host_builtin: 3 (eval_seed, deep_eval)
-- @host_iteration: 4 (run_mu, step_kernel_mu, eval_seed.step, projection_runner)
+- @host_iteration: 3 (run_mu, step_kernel_mu, projection_runner)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 3
 
-**Phase 7d-1 outcome (honest assessment per 7-agent review 2026-01-28):**
-- step_mu now delegates to step_kernel_mu (structural selection via kernel.v1)
-- step_kernel_mu execution loop marked with @host_iteration (honest debt tracking)
-- Net debt change: 15 → 15 (moved location, not eliminated)
-- True debt reduction requires Phase 8 recursive kernel design
+**Phase 8b outcome (2026-01-28):**
+- Simplified step_kernel_mu to MECHANICAL operation (no semantic branching)
+- Added `is_kernel_terminal()` - simple structural marker detection
+- Added `extract_kernel_result()` - mechanical unpacking
+- Loop body: ~35 lines → ~15 lines
+- eval_step reclassified as BOOTSTRAP_PRIMITIVE (not debt)
+- Net debt change: 15 → 14
 
 **Phase 7d-2/7d-3 PAUSED:**
 - Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
-- 7d-2/7d-3 depend on 7d-1 being complete - they are not viable until Phase 8
+- 7d-2/7d-3 depend on 7d-1 being complete - they are not viable until Phase 8c+
 - See phase-7d-complete-design.md for full agent analysis
 
 Note: run_mu outer loop is scaffolding (L3 boundary), not removed in Phase 7.
@@ -128,7 +130,50 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 7d-1 COMPLETE but L2 PARTIAL (2026-01-28). 7-agent review revealed execution loop not eliminated.
+**Status:** Phase 8 DESIGN v2 READY (2026-01-28). 9-agent review reached consensus on honest boundaries.
+
+**Phase 8a IMPLEMENTED (2026-01-28):**
+
+All 5 bootstrap primitives marked with `# BOOTSTRAP_PRIMITIVE`:
+1. `eval_step` - `rcx_pi/selfhost/eval_seed.py:step()`
+2. `mu_equal` - `rcx_pi/selfhost/mu_type.py:mu_equal()`
+3. `max_steps` - `rcx_pi/selfhost/step_mu.py:241`
+4. `stack_guard` - `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH`
+5. `projection_loader` - `rcx_pi/selfhost/seed_integrity.py:load_verified_seed()`
+
+**Document updated with:**
+- Scope and Self-Hosting Levels section
+- EngineNews Compatibility section
+- Hidden/Implicit Primitives section
+- Known Limitations section
+
+**Tests created:**
+- `tests/structural/test_bootstrap_primitives.py` (36 tests)
+- `tests/test_bootstrap_fuzzer.py` (18 property-based tests)
+
+**See `docs/core/BootstrapPrimitives.v0.md`** for full specification.
+
+**Phase 8b IMPLEMENTED (2026-01-28):**
+
+Simplified step_kernel_mu to MECHANICAL operation:
+1. Added `is_kernel_terminal()` - simple structural marker detection
+2. Added `extract_kernel_result()` - mechanical unpacking
+3. Removed ~20 lines of semantic branching from loop
+4. Loop body now only checks structural markers + stall detection
+5. Fixed empty container type preservation (KNOWN LIMITATION resolved):
+   - `[]` now normalizes to `{"_type": "list"}` (was `None`)
+   - `{}` now normalizes to `{"_type": "dict"}` (was `None`)
+   - Denormalization correctly reverses typed sentinels
+   - Normalization is now idempotent
+6. All 1343+ tests pass
+
+**Tests created:**
+- `tests/test_phase8b_mechanical_kernel.py` (31 tests)
+- `tests/test_phase8b_grounding_gaps.py` (12 tests)
+
+**Debt reduction:** 15 → 14 (eval_step reclassified as BOOTSTRAP_PRIMITIVE)
+
+---
 
 **Completed (Phase 7c):**
 - [x] Created `seeds/kernel.v1.json` with 7 kernel projections
@@ -145,23 +190,19 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - [x] All 106 core tests pass
 - [x] 7-agent review identified execution loop still Python (honest assessment)
 - [x] Added @host_iteration to step_kernel_mu (honest debt tracking)
+- [x] 9-agent review of Phase 8 design completed (2026-01-28)
 
 **Behavioral Change (7d-1):**
 - **Before:** Unbound variables raised `KeyError`
 - **After:** Unbound variables cause stall (return original input)
 - This is more consistent with pure Mu semantics where errors become stalls
 
-**PAUSED (requires Phase 8 redesign):**
+**PAUSED (requires Phase 8 implementation):**
 - Phase 7d-2: Migrate projection_runner to step_mu
 - Phase 7d-3: Eliminate projection_runner iteration
-- Reason: 7d-1 moved the loop, didn't eliminate it. 7d-2/7d-3 depend on 7d-1 achieving full L2.
-
-**Phase 8 Design Required:**
-- Recursive kernel projections that call themselves
-- Eliminate step_kernel_mu execution loop entirely
-- True L2 = both selection AND execution are structural
+- Reason: 7d-1 moved the loop, didn't eliminate it. Phase 8 addresses this properly.
 
 ---
 
 **Last updated:** 2026-01-28
-**Next milestone:** Phase 7d-2 (migrate projection_runner to step_mu)
+**Next milestone:** Phase 8c (oscillation detection) or Phase 8d (EngineNews trace model)

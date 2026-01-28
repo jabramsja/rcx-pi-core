@@ -86,6 +86,37 @@ Both use parallel execution if `pytest-xdist` is installed: `pip install pytest-
 git push
 ```
 
+---
+
+## Test Execution (IMPORTANT - READ THIS)
+
+**Default is SERIAL (fast for single files).** Parallel is used via audit scripts or explicit flag.
+
+| Scenario | Command | Time |
+|----------|---------|------|
+| Single file | `pytest tests/foo.py` | Fast (no overhead) |
+| Specific test | `pytest tests/foo.py::TestClass::test_name` | Fastest |
+| Full suite | `pytest -n auto` | ~44s (6x faster than serial) |
+| Full suite | `./tools/audit_fast.sh` | ~2 min (auto-parallel) |
+
+**Quick reference:**
+```bash
+# Single file (default serial, fast)
+pytest tests/test_match_parity.py
+
+# Full suite with parallel (6x speedup)
+pytest -n auto --dist worksteal
+
+# Or use audit scripts (auto-detect parallel)
+./tools/audit_fast.sh   # Core tests
+./tools/audit_all.sh    # Full suite + fuzzer
+```
+
+**Why this setup:**
+- Single-file runs: Serial is faster (avoids 3s worker spawn overhead)
+- Full suite (1000+ tests): Parallel is 6x faster (44s vs 255s)
+- Audit scripts auto-detect xdist and enable parallel when available
+
 **Pre-commit scripts:**
 
 | Script | Purpose | When |

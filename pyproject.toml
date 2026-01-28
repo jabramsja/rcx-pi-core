@@ -26,6 +26,11 @@ test = ["pytest", "pytest-xdist", "jsonschema", "hypothesis"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "rcx_pi"]
+# NOTE: Parallel execution (-n auto) is NOT enabled by default because:
+# - Single-file runs have 3s worker spawn overhead that makes them slower
+# - Full suite runs use audit scripts which add -n auto explicitly
+# To run full suite with parallel: pytest -n auto --dist worksteal
+# Or use: ./tools/audit_fast.sh or ./tools/audit_all.sh
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md"]

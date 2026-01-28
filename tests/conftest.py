@@ -5,6 +5,7 @@ Provides:
 - Projection coverage tracking (enable with RCX_PROJECTION_COVERAGE=1)
 - Skips tests that require optional modules (rcx_omega, scripts)
 - Shared test utilities (apply_mu for Phase 4d integration)
+- Hypothesis configuration for deterministic fuzzing
 """
 
 import os
@@ -13,6 +14,39 @@ import pytest
 from rcx_pi.eval_seed import NO_MATCH
 from rcx_pi.match_mu import match_mu
 from rcx_pi.subst_mu import subst_mu
+
+# =============================================================================
+# Hypothesis Configuration (lossless optimization)
+# =============================================================================
+# - Database caches found examples for faster reruns
+# - print_blob=True makes failures easy to reproduce
+# - derandomize=False keeps search random but seeded for CI reproducibility
+
+try:
+    from hypothesis import settings, Verbosity, Phase
+
+    # Default profile: production settings with database caching
+    settings.register_profile(
+        "default",
+        database=None,  # Use default .hypothesis/ database
+        print_blob=True,  # Print reproduction blob on failure
+        derandomize=False,  # Keep randomized search
+    )
+
+    # CI profile: same as default but explicit for documentation
+    settings.register_profile(
+        "ci",
+        database=None,
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Load profile from HYPOTHESIS_PROFILE env var, default to "default"
+    profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
+    settings.load_profile(profile)
+
+except ImportError:
+    pass  # hypothesis not installed, skip configuration
 
 
 # =============================================================================

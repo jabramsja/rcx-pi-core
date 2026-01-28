@@ -175,7 +175,8 @@ def normalize_for_match(value: Mu) -> Mu:
 
             if isinstance(val, list):
                 if len(val) == 0:
-                    result = None
+                    # Empty list: use typed sentinel to preserve type info
+                    result = {"_type": "list"}
                     continue
                 # Start building list from the end (last element first)
                 stack.append(("list_tail", len(val) - 1, [], val))
@@ -184,6 +185,14 @@ def normalize_for_match(value: Mu) -> Mu:
 
             if isinstance(val, dict):
                 keys = set(val.keys())
+
+                # Empty typed sentinel - already normalized, preserve it
+                # This ensures normalize(normalize(x)) == normalize(x) for empty containers
+                if keys == {"_type"}:  # AST_OK: key comparison
+                    _type = val.get("_type")
+                    if _type in VALID_TYPE_TAGS:
+                        result = val
+                        continue
 
                 # Type-tagged structure - preserve _type, normalize head/tail
                 if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
@@ -199,7 +208,8 @@ def normalize_for_match(value: Mu) -> Mu:
                     continue
 
                 if len(keys) == 0:
-                    result = None
+                    # Empty dict: use typed sentinel to preserve type info
+                    result = {"_type": "dict"}
                     continue
 
                 # Regular dict - convert to sorted kv linked list
@@ -439,6 +449,17 @@ def denormalize_from_match(value: Mu) -> Mu:
             # Dict
             if isinstance(val, dict):
                 keys = set(val.keys())
+
+                # Empty typed sentinel (Phase 8b fix: preserves empty container type)
+                if keys == {"_type"}:  # AST_OK: key comparison
+                    _type = val.get("_type")
+                    if _type == "list":
+                        result = []
+                        continue
+                    elif _type == "dict":
+                        result = {}
+                        continue
+                    # Unknown type - fall through to other handlers
 
                 # Type-tagged linked list (Phase 6c: fixes list/dict ambiguity)
                 if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison

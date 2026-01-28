@@ -250,9 +250,18 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
 # =============================================================================
 
 
+# BOOTSTRAP_PRIMITIVE: projection_loader
+# This is the irreducible seed bootstrap primitive.
+# Cannot be structural because projections must come from somewhere (JSON files).
+# JSON parsing and schema validation are Python's job, not expressible as projections.
+# See docs/core/BootstrapPrimitives.v0.md for full justification.
 def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
     """
-    Load a seed file with integrity verification.
+    BOOTSTRAP PRIMITIVE: Load a seed file with integrity verification.
+
+    This is the irreducible projection_loader primitive - analogous to
+    ROM bootstrap or BIOS loading. Projections must come from somewhere,
+    and JSON parsing cannot be expressed as a projection.
 
     Args:
         seed_path: Path to seed JSON file.
@@ -264,6 +273,8 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
     Raises:
         FileNotFoundError: If seed file doesn't exist.
         ValueError: If integrity check fails.
+
+    See: docs/core/BootstrapPrimitives.v0.md
     """
     seed_name = seed_path.name
 
