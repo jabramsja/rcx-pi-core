@@ -2,6 +2,76 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-28
+
+### Self-Hosting
+- **Phase 7a: Kernel Projections Seed**
+  - Created `seeds/kernel.v1.json` with 7 kernel projections
+  - Projections: kernel.wrap, kernel.stall, kernel.try, kernel.match_success, kernel.match_fail, kernel.subst_success, kernel.unwrap
+  - 30 manual trace tests pass (success, failure, empty, fallthrough)
+  - Tests in `tests/test_kernel_projections.py`
+
+- **Phase 7b: Match/Subst Context Passthrough**
+  - Created `seeds/match.v2.json` with `_match_ctx` passthrough + match.fail catch-all
+  - Created `seeds/subst.v2.json` with `_subst_ctx` passthrough
+  - Context enables kernel to preserve state across mode transitions
+
+- **Phase 7c: Integration Testing**
+  - 20 integration tests: kernel → match → subst → kernel cycles
+  - Tests in `tests/test_phase7c_integration.py`
+  - Context preservation verified through full cycles
+  - Security: domain data can't forge `_mode` (underscore prefix)
+
+### Tests
+- **v2 Parity Tests**
+  - Created `tests/test_match_v2_parity.py` (19 tests)
+  - Created `tests/test_subst_v2_parity.py` (18 tests)
+  - 37 tests verify v2 seeds preserve v1 behavior
+  - Tests: seed structure compatibility, functional parity, context design
+
+### Debt Tracking
+- **Comprehensive Debt Audit**
+  - Found and marked 4 @host_iteration markers (step_mu, run_mu, eval_seed.step, projection_runner)
+  - Added `# @host_iteration` comment marker for nested function debt
+  - Updated `debt_dashboard.sh` to count both decorator and comment markers
+  - Debt: 15 (12 tracked + 3 AST_OK)
+
+- **Debt Target Revision**
+  - Original target was 9, revised to 12 per structural-proof agent
+  - run_mu outer loop stays as L3 boundary (scaffolding, not semantic debt)
+  - Phased reduction: 15 → 14 → 13 → 12 over 7d-1, 7d-2, 7d-3
+
+### Docs
+- **Doc Consistency Fixes**
+  - All design docs now reference STATUS.md for debt numbers (no hardcoded values)
+  - `docs/core/SelfHosting.v0.md`: Removed hardcoded debt breakdown
+  - `docs/core/MetaCircularKernel.v0.md`: Updated status VECTOR → NEXT
+  - `docs/core/DebtCategories.v0.md`: Removed outdated DEBT_THRESHOLD values
+
+### Security
+- **Kernel Projection Order Validation**
+  - Added `validate_kernel_projections_first()` call in step_mu() production path
+  - Domain projections can no longer run before kernel projections
+  - Tests in `tests/structural/test_projection_order_security.py`
+
+### Process
+- **7 Agent Review Complete**
+  - verifier: APPROVE WITH DOC FIXES
+  - adversary: AT_RISK (security concerns documented)
+  - expert: MINIMAL (code is clean)
+  - structural-proof: PARTIALLY PROVEN (debt 15→9 unrealistic, revised to 15→12)
+  - grounding: GROUNDED (all claims backed by tests)
+  - fuzzer: GAPS (3 property tests recommended before 7d)
+  - advisor: PROCEED NOW (foundation strong)
+
+### Tooling
+- **Pre-commit Hook Improvements**
+  - Added debt ceiling check to `tools/pre-commit-doc-check`
+  - Hook now warns if debt exceeds THRESHOLD from STATUS.md
+  - Updated `CLAUDE.md` with clearer workflow documentation
+  - Added "Development Workflow" section to `STATUS.md`
+  - Two pre-commit scripts documented: `pre-commit-check.sh` (full) vs `pre-commit-doc-check` (hook)
+
 ## 2026-01-27
 
 ### Agents

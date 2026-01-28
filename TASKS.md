@@ -226,35 +226,78 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 **Sub-phases:**
 
-- [ ] **Phase 7a: Kernel Projections Seed** (1-2 days)
-  - Create `seeds/kernel.v1.json` with 7 projections
-  - Manual trace tests (success, failure, empty projections)
-  - Projection order regression test (kernel projections FIRST)
+- [x] **Phase 7a: Kernel Projections Seed** (DONE 2026-01-28)
+  - Created `seeds/kernel.v1.json` with 7 projections
+  - 30 manual trace tests pass (success, failure, empty projections)
+  - Projection order regression tests pass
 
-- [ ] **Phase 7b: Match/Subst Context Passthrough** (2-3 days)
-  - Copy match.v1.json → match.v2.json, add `_match_ctx` passthrough
-  - Copy subst.v1.json → subst.v2.json, add `_subst_ctx` passthrough
-  - Parity tests: v2 seeds == v1 behavior (WITHOUT kernel)
+- [x] **Phase 7b: Match/Subst Context Passthrough** (DONE 2026-01-28)
+  - Created match.v2.json with `_match_ctx` passthrough + match.fail catch-all
+  - Created subst.v2.json with `_subst_ctx` passthrough
+  - Parity tests pass (v2 seeds == v1 behavior)
 
-- [ ] **Phase 7c: Integration Testing** (1-2 days)
-  - Full cycle test: kernel → match → subst → kernel
-  - Trace inspection: verify context preserved
-  - Security test: domain data can't forge `_mode`
+- [x] **Phase 7c: Integration Testing** (DONE 2026-01-28)
+  - 20 integration tests: kernel → match → subst → kernel
+  - Context preservation verified through full cycles
+  - Security: domain data can't forge `_mode` (underscore prefix)
 
-- [ ] **Phase 7d: Replace Python Scaffolding** (2-3 days)
+**Phase 7d Blockers (from agent review 2026-01-28):**
+
+All blockers resolved 2026-01-28:
+
+1. [x] **SECURITY: Call validate_kernel_projections_first() in production** (adversary)
+   - Fixed: Added call in step_mu() at line 154
+   - Domain projections can no longer run before kernel
+
+2. [x] **TESTING: Add v2 parity tests** (grounding)
+   - Fixed: Created test_match_v2_parity.py (19 tests)
+   - Fixed: Created test_subst_v2_parity.py (18 tests)
+   - 37 new parity tests verify v2 preserves v1 behavior
+
+3. [x] **DEBT: Track projection_runner iteration debt** (advisor)
+   - Fixed: Added "# @host_iteration" marker in projection_runner.py
+   - Fixed: Updated debt_dashboard.sh to count comment markers
+   - Debt now accurately shows 15 (was 14)
+
+4. [x] **DEBT: Update target to phased approach** (structural-proof, advisor)
+   - Fixed: Updated TASKS.md with 7d-1, 7d-2, 7d-3 sub-phases
+   - Fixed: Updated STATUS.md with phased debt reduction plan (15→14→13→12)
+   - Note: Original target was 9, revised to 12 per structural-proof (run_mu stays as L3 boundary)
+
+- [ ] **Phase 7d-1: Wire step_mu to kernel** (after blockers resolved)
   - Modify `step_mu()` to call structural kernel
+  - Call validate_kernel_projections_first() for security
   - Parity tests: structural step_mu == Python step_mu (1000+ fuzzer)
-  - Remove `@host_iteration` debt markers
-  - Update DEBT_THRESHOLD: 11 → 9 (or lower)
+  - Remove step_mu @host_iteration marker
+  - Update DEBT_THRESHOLD: 15 → 14
+
+- [ ] **Phase 7d-2: Migrate projection_runner** (after 7d-1)
+  - Change projection_runner to use step_mu instead of eval_seed.step
+  - Add deprecation warning to eval_seed.step()
+  - Update DEBT_THRESHOLD: 14 → 13
+
+- [ ] **Phase 7d-3: Eliminate projection_runner iteration** (after 7d-2)
+  - Replace factory pattern with direct kernel use
+  - Match/subst/classify use kernel directly
+  - Remove projection_runner iteration debt
+  - Update DEBT_THRESHOLD: 13 → 12 (run_mu stays as L3 boundary)
 
 **Success criteria:**
-- [ ] `seeds/kernel.v1.json` exists with 7 projections
-- [ ] Manual trace tests pass for success/failure/empty cases
-- [ ] Match/subst context passthrough tests pass
+- [x] `seeds/kernel.v1.json` exists with 7 projections
+- [x] Manual trace tests pass for success/failure/empty cases
+- [x] Match/subst context passthrough tests pass
+- [x] Phase 7d blockers resolved (security, testing, debt tracking) - 2026-01-28
+- [x] v2 parity tests pass (37 tests: 19 match + 18 subst) - 2026-01-28
+- [x] Doc inconsistencies fixed (all .md files reference STATUS.md for debt) - 2026-01-28
 - [ ] Kernel projections pass parity tests with Python `step_mu`
 - [ ] No Python for-loop in step_mu execution path
-- [ ] All 1036+ existing tests still pass
-- [ ] Debt threshold decreases (target: 11 → 9 or lower)
+- [x] All 1275+ existing tests still pass (2 idempotent tests fail until commit)
+- [ ] Debt threshold decreases (15 → 14 → 13 → 12 over sub-phases)
+
+**Recommended before 7d-1 (from second agent review 2026-01-28):**
+- [ ] Add fuzzer tests for kernel projection ordering (500+ examples)
+- [ ] Add fuzzer tests for mode transition completeness (500+ examples)
+- [ ] Add fuzzer tests for context passthrough stress (500+ examples)
 
 **Debt status**: See `STATUS.md` for current counts and threshold.
 

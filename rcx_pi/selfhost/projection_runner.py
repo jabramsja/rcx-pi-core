@@ -32,6 +32,13 @@ def make_projection_runner(mode_name: str) -> tuple[
 
     This consolidates the runner pattern used by match/subst/classify.
 
+    HOST ITERATION DEBT: The returned run() function contains a for-loop that
+    iterates projections. This is semantic debt that Phase 7d will eliminate
+    when the meta-circular kernel handles match/subst internally. Cannot use
+    decorator on nested function, so documented here instead.
+
+    # @host_iteration - nested function debt (counted by debt_dashboard.sh)
+
     Args:
         mode_name: The mode name (e.g., "match", "subst", "classify")
 

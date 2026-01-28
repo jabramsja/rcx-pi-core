@@ -159,13 +159,13 @@
     {
       "id": "match.fail",
       "description": "Catch-all: any match state not caught by progress projections = failure",
-      "note": "First-match-wins ordering ensures this only fires on actual failures",
+      "note": "First-match-wins ordering ensures this only fires on actual failures. Uses different var names for bindings/stack since they may have different values.",
       "pattern": {
         "mode": "match",
         "pattern_focus": {"var": "pf"},
         "value_focus": {"var": "vf"},
-        "bindings": {"var": "_"},
-        "stack": {"var": "_"},
+        "bindings": {"var": "_b"},
+        "stack": {"var": "_s"},
         "_match_ctx": {"var": "ctx"}
       },
       "body": {

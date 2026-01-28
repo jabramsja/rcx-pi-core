@@ -109,25 +109,22 @@ To mark new semantic debt, use existing `@host_*` decorators or `# AST_OK: boots
 
 ### Enforcement Status
 
-**Implemented (PR #155, updated PR #156):**
-- `debt_dashboard.sh` now counts AST_OK: bootstrap bypasses separately from scaffolding
-- `audit_semantic_purity.sh` includes AST_OK: bootstrap in the debt threshold (DEBT_THRESHOLD=23)
+**Current threshold and counts:** See `STATUS.md` (single source of truth).
+
+**Implemented:**
+- `debt_dashboard.sh` counts all @host_* markers and AST_OK: bootstrap bypasses
 - Dashboard shows: Tracked markers + AST_OK bootstrap = Total Semantic Debt
-- AST_OK patterns use `[[:space:]]*` to catch spacing variations (e.g., `AST_OK:bootstrap`)
+- Run `./tools/debt_dashboard.sh --json` for machine-readable counts
 
-**Known grep behavior:**
-- Grep counts docstring examples as decorators (e.g., line 51 of eval_seed.py)
-- Actual decorators: 7 (2 recursion + 3 builtin + 2 mutation)
-- Grep reports: 8 (includes 1 docstring example)
-- Threshold set to 14 to account for: 8 grep-counted + 5 AST_OK + 1 PHASE REVIEW
+**Tracking mechanisms:**
+- @host_* decorators for function-level debt
+- `# @host_*` comments for nested function debt (can't decorate)
+- `# AST_OK: bootstrap` for statement-level semantic debt
+- `# AST_OK: infra` for infrastructure scaffolding (not counted as debt)
 
-**Remaining gaps:**
-- ~289 lines of unmarked semantic debt (normalize, denormalize, classify functions)
-- No CI check that fails if unmarked semantic functions are added
-
-**To fully close the gap:**
-- Mark remaining semantic debt with `@host_*` decorators or `# AST_OK: bootstrap`
-- Consider unified tracking (all semantic debt uses @host_* decorators)
+**To fully close gaps:**
+- Mark any new semantic debt with `@host_*` decorators or `# AST_OK: bootstrap`
+- All debt markers must have clear elimination path documented
 
 ---
 

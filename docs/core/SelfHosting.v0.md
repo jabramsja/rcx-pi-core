@@ -455,9 +455,12 @@ Phase 5 complete:
 11. [x] Phase 6a: Lookup as Mu projections (removed 2 @host_builtin)
 12. [x] Phase 6b: Classification as Mu projections (removed 2 @host_builtin)
 13. [x] Phase 6c: Iterative normalization + type tags (removed 2 @host_recursion)
-14. [x] **Debt reduced!** 15 total (11 tracked + 3 AST_OK + 1 review), down from 23
+14. [x] **Debt reduced!** See `STATUS.md` for current counts (down from 23)
 
-**Phase 7+ (Future):**
+**Phase 7 (IN PROGRESS):**
 - Self-host the kernel loop (projection selection as Mu projections)
+- See `STATUS.md` for current phase and `TASKS.md` for Phase 7 sub-phases
+
+**Phase 8+ (Future):**
 - Self-host iteration itself (recursion as structural transformation)
 - These are "scaffolding debt", not required for operational self-hosting

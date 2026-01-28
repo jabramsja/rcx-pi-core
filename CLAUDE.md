@@ -65,24 +65,37 @@ See `docs/agents/AgentRig.v0.md` for full documentation.
 
 ## Workflow
 
+**Before committing:**
+```bash
+./tools/pre-commit-check.sh       # Full local checks (syntax, contraband, AST, docs)
 ```
-1. ./tools/pre-commit-check.sh    # Quick local checks
+
+**Commit workflow:**
+```
+1. ./tools/pre-commit-check.sh    # Run manually before commit
 2. Ask Claude Code to run agents  # Free (Max subscription)
-3. git commit                     # Pre-commit hook warns if docs need update
+3. git commit                     # Pre-commit hook validates docs
 4. git push                       # CI runs tests (free)
 ```
 
+**Pre-commit scripts (two different ones):**
+
+| Script | Purpose | When |
+|--------|---------|------|
+| `tools/pre-commit-check.sh` | Full checks: syntax, contraband, AST, docs index, private attrs | Run manually before commit |
+| `tools/pre-commit-doc-check` | Doc checks only: consistency, debt ceiling, STATUS.md drift | Auto-runs as git hook |
+
 **Consistency tools:**
 - `./tools/check_docs_consistency.sh` - Validate STATUS.md matches reality
-- Pre-commit hook (`tools/pre-commit-doc-check`) - Warns if rcx_pi/ changed but STATUS.md didn't
+- `./tools/debt_dashboard.sh` - Show current debt counts and locations
 - Verifier agent (Section F) - Checks doc consistency as part of verification
 
 **Cost model:**
 - Local agents (Claude Code): FREE (Max subscription)
 - CI agents (GitHub Actions): COSTS MONEY (manual trigger only)
 
-**Hook install** (if not already installed):
-```
+**Hook install** (required):
+```bash
 ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 ```
 

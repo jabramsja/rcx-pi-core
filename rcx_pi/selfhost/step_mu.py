@@ -17,7 +17,7 @@ run first to prevent domain data from forging kernel state.
 See docs/core/SelfHosting.v0.md for design.
 """
 
-from .eval_seed import NO_MATCH
+from .eval_seed import NO_MATCH, host_iteration
 from .match_mu import match_mu
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_equal
@@ -129,6 +129,7 @@ def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     return subst_mu(body, bindings)
 
 
+@host_iteration("Kernel loop iterates projections - Phase 7d replaces with meta-circular kernel")
 def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     """
     Try each projection in order using Mu-based apply.
@@ -142,8 +143,15 @@ def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
+
+    Raises:
+        ValueError: If kernel projections appear after domain projections (security).
     """
     assert_mu(input_value, "step_mu.input")
+
+    # SECURITY: Validate projection order when kernel projections present
+    # Domain projections running before kernel could forge kernel state
+    validate_kernel_projections_first(projections)
 
     for proj in projections:
         result = apply_mu(proj, input_value)
@@ -154,6 +162,7 @@ def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     return input_value
 
 
+@host_iteration("Kernel run loop - Phase 7d replaces with meta-circular kernel")
 def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[Mu, list[dict], bool]:
     """
     Run projections repeatedly until stall or max steps.
@@ -171,9 +180,6 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
         - trace: List of {"step": n, "value": v} entries
         - is_stall: True if stopped due to stall (no change)
     """
-    # HOST ITERATION DEBT: This for-loop is Python iteration.
-    # Phase 5 self-hosts operations (match/subst), not the kernel loop.
-    # Kernel loop as projections is a Phase 6+ goal.
     trace = []
     current = initial
 
