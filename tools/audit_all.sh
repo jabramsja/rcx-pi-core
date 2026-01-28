@@ -22,10 +22,11 @@ export HISTTIMEFORMAT="${HISTTIMEFORMAT:-}"
 export size="${size:-}"
 
 # Check if pytest-xdist is available for parallel execution
+# Using --dist worksteal for better load balancing (idle workers steal from busy)
 PARALLEL_FLAG=""
 if python3 -c "import xdist" 2>/dev/null; then
-    PARALLEL_FLAG="-n auto"
-    echo "Using parallel execution (pytest-xdist detected)"
+    PARALLEL_FLAG="-n auto --dist worksteal"
+    echo "Using parallel execution with worksteal (pytest-xdist detected)"
 fi
 
 echo "== 0) Repo clean =="

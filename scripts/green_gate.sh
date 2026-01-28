@@ -8,10 +8,11 @@ cd "$REPO_ROOT"
 MODE="${1:-all}"   # all | python-only | rust-only
 
 # Check if pytest-xdist is available for parallel execution (2-3x speedup)
+# Using --dist worksteal for better load balancing (idle workers steal from busy)
 PARALLEL_FLAG=""
 if python3 -c "import xdist" 2>/dev/null; then
-    PARALLEL_FLAG="-n auto"
-    echo "Using parallel execution (pytest-xdist detected)"
+    PARALLEL_FLAG="-n auto --dist worksteal"
+    echo "Using parallel execution with worksteal (pytest-xdist detected)"
 fi
 
 echo "== RCX green gate =="
