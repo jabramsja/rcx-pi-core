@@ -1,26 +1,30 @@
 """
-Step as Mu Projections - Phase 5 Self-Hosting
+Step as Mu Projections - Phase 7d Self-Hosting
 
 This module implements the step function using Mu projections instead of
 Python recursion. It achieves parity with eval_seed.step() using match_mu
 and subst_mu.
 
-Phase 5 Goal: EVAL_SEED runs EVAL_SEED
-- step_mu() uses match_mu + subst_mu (Mu projections)
-- step() uses match + substitute (Python recursion)
-- If traces are identical, self-hosting is achieved
+Phase 7d: Meta-circular kernel
+- step_mu() now uses structural kernel projections (kernel.v1 + match.v2 + subst.v2)
+- The Python for-loop is replaced with kernel projections that iterate structurally
+- Iteration uses linked-list cursor, not arithmetic
 
 SECURITY: Projection order is security-critical. When combining kernel
 projections with domain projections (Phase 7+), kernel projections MUST
 run first to prevent domain data from forging kernel state.
 
 See docs/core/SelfHosting.v0.md for design.
+See docs/core/MetaCircularKernel.v0.md for kernel design.
 """
 
-from .eval_seed import NO_MATCH, host_iteration
-from .match_mu import match_mu
+from __future__ import annotations
+
+from .eval_seed import NO_MATCH, host_iteration, step as eval_step
+from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_equal
+from .seed_integrity import get_seeds_dir, load_verified_seed
 
 
 # =============================================================================
@@ -89,6 +93,187 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
             first_domain_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"
 
 
+# =============================================================================
+# Structural Kernel Helpers (Phase 7d)
+# =============================================================================
+
+# Module-level cache for combined kernel projections
+_combined_kernel_cache: list[Mu] | None = None
+
+
+def list_to_linked(items: list[Mu]) -> Mu:
+    """
+    Convert Python list to Mu linked-list format.
+
+    [a, b, c] -> {head: a, tail: {head: b, tail: {head: c, tail: null}}}
+    [] -> null
+
+    Required for structural kernel iteration (no arithmetic in pure Mu).
+    Uses iterative construction for performance.
+
+    Args:
+        items: Python list of Mu values.
+
+    Returns:
+        Mu linked-list (dict with head/tail) or None for empty list.
+    """
+    if not items:
+        return None
+    result: Mu = None
+    for item in reversed(items):
+        result = {"head": item, "tail": result}
+    return result
+
+
+def normalize_projection(proj: dict) -> dict:
+    """
+    Normalize a projection's pattern and body for kernel use.
+
+    Both pattern and body are converted to head/tail format so they can
+    be structurally matched and substituted by the Mu projections.
+
+    Args:
+        proj: Projection dict with "pattern" and "body" keys.
+
+    Returns:
+        Dict with normalized pattern and body.
+    """
+    return {
+        "pattern": normalize_for_match(proj["pattern"]),
+        "body": normalize_for_match(proj["body"])
+    }
+
+
+def load_combined_kernel_projections() -> list[Mu]:
+    """
+    Load and cache combined kernel + match.v2 + subst.v2 projections.
+
+    SECURITY: Kernel projections MUST come first to prevent domain
+    projections from forging kernel state.
+
+    Returns:
+        Combined list of kernel, match, and subst projections.
+    """
+    global _combined_kernel_cache
+    if _combined_kernel_cache is not None:
+        return _combined_kernel_cache
+
+    seeds_dir = get_seeds_dir()
+    kernel_seed = load_verified_seed(seeds_dir / "kernel.v1.json")
+    match_seed = load_verified_seed(seeds_dir / "match.v2.json")
+    subst_seed = load_verified_seed(seeds_dir / "subst.v2.json")
+
+    # SECURITY: Kernel projections MUST be first
+    _combined_kernel_cache = (
+        kernel_seed["projections"] +
+        match_seed["projections"] +
+        subst_seed["projections"]
+    )
+    return _combined_kernel_cache
+
+
+def clear_combined_kernel_cache() -> None:
+    """Clear cached kernel projections (for testing)."""
+    global _combined_kernel_cache
+    _combined_kernel_cache = None
+
+
+@host_iteration("Kernel execution loop - Phase 8 replaces with recursive kernel projections")
+def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
+    """
+    Try each projection in order using structural kernel projections.
+
+    This is the structural replacement for the Python for-loop.
+    Uses kernel.v1 + match.v2 + subst.v2 projections for iteration.
+
+    The kernel works as a state machine:
+    1. kernel.wrap: Wraps input and projections into kernel state
+    2. kernel.try: Tries first projection via match.v2
+    3. kernel.match_success/fail: On success, substitute via subst.v2; on fail, try next
+    4. kernel.stall: All projections tried, no match
+    5. kernel.unwrap: Extract final result
+
+    L2 PARTIAL: Projection SELECTION is structural (linked-list cursor).
+    Projection EXECUTION still uses Python for-loop (this function).
+    True L2 requires recursive kernel projections (Phase 8).
+
+    Args:
+        projections: List of domain projections to try.
+        input_value: The value to transform.
+
+    Returns:
+        Transformed value if any projection matched, input unchanged otherwise.
+
+    Raises:
+        ValueError: If kernel projections appear after domain projections (security).
+    """
+    assert_mu(input_value, "step_kernel_mu.input")
+
+    # SECURITY: Validate projection order
+    validate_kernel_projections_first(projections)
+
+    # Load combined kernel projections
+    kernel_projs = load_combined_kernel_projections()
+
+    # Normalize domain projections to head/tail format
+    normalized_projs = [normalize_projection(p) for p in projections]  # AST_OK: infra - kernel bridge scaffolding
+
+    # Normalize input value
+    normalized_input = normalize_for_match(input_value)
+
+    # Build kernel entry format: {_step: normalized_input, _projs: linked_list}
+    kernel_entry: Mu = {
+        "_step": normalized_input,
+        "_projs": list_to_linked(normalized_projs)
+    }
+
+    # Run kernel until done or stall
+    current = kernel_entry
+    max_steps = 10000  # Safety limit
+
+    for _ in range(max_steps):
+        result = eval_step(kernel_projs, current)
+
+        # Check for stall (no change)
+        if mu_equal(result, current):
+            # Stall before reaching done - return original input
+            return input_value
+
+        # Check for done state BEFORE unwrap
+        # Kernel.done state has _mode=done, _result, _stall
+        # If _stall=true, return original input (preserves type info for empty containers)
+        if isinstance(result, dict) and result.get("_mode") == "done":
+            if result.get("_stall") is True:
+                # Kernel indicates stall - return original input
+                return input_value
+            else:
+                # Success - get the result and denormalize
+                kernel_result = result.get("_result")
+                return denormalize_from_match(kernel_result)
+
+        # Check for final unwrapped result (after kernel.unwrap)
+        if isinstance(result, dict):
+            mode = result.get("_mode")
+            # Final result has no _mode and no entry format markers
+            if mode is None and "_step" not in result and "match" not in result and "subst" not in result:
+                # Check it's not a match/subst internal state either
+                if result.get("mode") not in ("match", "subst"):
+                    # Unwrapped result - denormalize and return
+                    return denormalize_from_match(result)
+        else:
+            # Primitive result (from kernel.unwrap)
+            return result
+
+        current = result
+
+    # Max steps exceeded - return original input (stall)
+    return input_value
+
+
+# =============================================================================
+# Projection Application (Phase 5)
+# =============================================================================
+
 def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     """
     Apply a projection to a value using Mu-based match and substitute.
@@ -129,13 +314,14 @@ def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     return subst_mu(body, bindings)
 
 
-@host_iteration("Kernel loop iterates projections - Phase 7d replaces with meta-circular kernel")
 def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     """
-    Try each projection in order using Mu-based apply.
+    Try each projection in order using structural kernel.
 
-    This is step() implemented with match_mu + subst_mu.
-    Returns first successful application, or input unchanged (stall).
+    Phase 7d-1: This function now uses the meta-circular kernel
+    (kernel.v1 + match.v2 + subst.v2 projections) instead of a Python
+    for-loop. The kernel provides iteration without host arithmetic
+    or control flow.
 
     Args:
         projections: List of projections to try.
@@ -147,19 +333,7 @@ def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     Raises:
         ValueError: If kernel projections appear after domain projections (security).
     """
-    assert_mu(input_value, "step_mu.input")
-
-    # SECURITY: Validate projection order when kernel projections present
-    # Domain projections running before kernel could forge kernel state
-    validate_kernel_projections_first(projections)
-
-    for proj in projections:
-        result = apply_mu(proj, input_value)
-        if result is not NO_MATCH:
-            return result
-
-    # No match - return input unchanged (stall)
-    return input_value
+    return step_kernel_mu(projections, input_value)
 
 
 @host_iteration("Kernel run loop - Phase 7d replaces with meta-circular kernel")

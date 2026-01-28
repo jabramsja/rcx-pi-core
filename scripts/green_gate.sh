@@ -7,6 +7,13 @@ cd "$REPO_ROOT"
 
 MODE="${1:-all}"   # all | python-only | rust-only
 
+# Check if pytest-xdist is available for parallel execution (2-3x speedup)
+PARALLEL_FLAG=""
+if python3 -c "import xdist" 2>/dev/null; then
+    PARALLEL_FLAG="-n auto"
+    echo "Using parallel execution (pytest-xdist detected)"
+fi
+
 echo "== RCX green gate =="
 echo "mode: $MODE"
 echo
@@ -17,7 +24,7 @@ run_python() {
   echo
   echo "[PY 2/2] Python test suite"
 
-  python3 -m pytest
+  python3 -m pytest $PARALLEL_FLAG
 echo
 echo "[PY] CLI smoke (end-to-end entrypoints)"
 python3 scripts/cli_smoke.py

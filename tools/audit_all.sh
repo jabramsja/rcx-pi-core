@@ -1,17 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ----
+# ============================================================================
+# FULL AUDIT - CI standard (~4-6 minutes with parallel, ~10+ without)
+# ============================================================================
+#
+# This is the comprehensive audit for CI and pre-push validation. It runs:
+# - All 1300+ tests including fuzzer (hash-seeded for determinism)
+# - Specialized test suites (IndependentEncounter, Enginenews, Bytecode VM)
+# - Semantic purity checks, contraband detection, AST police
+# - Anti-cheat scans, fixture validation
+#
+# For local iteration, use ./tools/audit_fast.sh (~2 minutes)
+#
+# Usage:
+#   ./tools/audit_all.sh
+# ============================================================================
+
 # macOS bash session-save quirks: prevent "unbound variable" crashes
-# ----
 export HISTTIMEFORMAT="${HISTTIMEFORMAT:-}"
 export size="${size:-}"
+
+# Check if pytest-xdist is available for parallel execution
+PARALLEL_FLAG=""
+if python3 -c "import xdist" 2>/dev/null; then
+    PARALLEL_FLAG="-n auto"
+    echo "Using parallel execution (pytest-xdist detected)"
+fi
 
 echo "== 0) Repo clean =="
 test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --porcelain; exit 1; }
 
 echo "== 1) Full suite (hash-seeded) =="
-PYTHONHASHSEED=0 pytest -q
+PYTHONHASHSEED=0 pytest $PARALLEL_FLAG -q
 test -z "$(git status --porcelain)" || { echo "Dirty after pytest"; git status --porcelain; exit 1; }
 
 echo "== 2) IndependentEncounter tests only =="

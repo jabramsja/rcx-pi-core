@@ -5,6 +5,21 @@ All notable changes to RCX are documented in this file.
 ## 2026-01-28
 
 ### Self-Hosting
+- **Phase 7d-1: Wire step_mu to Structural Kernel** (L2 PARTIAL)
+  - `step_mu()` delegates to `step_kernel_mu()` which uses structural kernel
+  - Added helpers: `list_to_linked()`, `normalize_projection()`, `load_combined_kernel_projections()`
+  - Kernel uses linked-list cursor for projection SELECTION (structural)
+  - Projection EXECUTION still uses Python for-loop in `step_kernel_mu`
+  - Behavioral change: unbound variables now stall instead of raising KeyError
+
+- **Honest Assessment (7-agent review)**
+  - structural-proof agent found: execution loop still Python (lines 229-261)
+  - Added `@host_iteration` decorator to `step_kernel_mu()` (honest debt tracking)
+  - Debt: 15 → 15 (moved location, not eliminated)
+  - L2 PARTIAL: selection structural, execution Python
+  - True L2 requires Phase 8 recursive kernel design
+  - 7d-2/7d-3 PAUSED pending Phase 8
+
 - **Phase 7a: Kernel Projections Seed**
   - Created `seeds/kernel.v1.json` with 7 kernel projections
   - Projections: kernel.wrap, kernel.stall, kernel.try, kernel.match_success, kernel.match_fail, kernel.subst_success, kernel.unwrap
@@ -39,7 +54,8 @@ All notable changes to RCX are documented in this file.
 - **Debt Target Revision**
   - Original target was 9, revised to 12 per structural-proof agent
   - run_mu outer loop stays as L3 boundary (scaffolding, not semantic debt)
-  - Phased reduction: 15 → 14 → 13 → 12 over 7d-1, 7d-2, 7d-3
+  - 7d-1 moved debt from step_mu to step_kernel_mu (net: 15 → 15)
+  - True debt reduction (15 → 12) deferred to Phase 8
 
 ### Docs
 - **Doc Consistency Fixes**
