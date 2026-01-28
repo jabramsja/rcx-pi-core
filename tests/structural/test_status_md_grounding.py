@@ -181,22 +181,23 @@ class TestKeyFilesExist:
 class TestPhaseStatus:
     """Verify phase claims are consistent."""
 
-    def test_phase_7_is_design_only(self):
-        """Phase 7 should be VECTOR status (design-only, no implementation)."""
+    def test_phase_7_is_in_progress(self):
+        """Phase 7 should be NEXT status (promoted 2026-01-27, implementation in progress)."""
         kernel_doc = ROOT / "docs" / "core" / "MetaCircularKernel.v0.md"
         content = kernel_doc.read_text()
 
-        # Should have VECTOR status
-        assert "VECTOR" in content, (
-            "MetaCircularKernel.v0.md should have VECTOR status\n"
-            "If Phase 7 is implemented, update STATUS.md"
+        # Should have NEXT status (promoted from VECTOR on 2026-01-27)
+        assert "NEXT" in content, (
+            "MetaCircularKernel.v0.md should have NEXT status\n"
+            "Phase 7 was promoted from VECTOR to NEXT on 2026-01-27"
         )
 
-        # Should NOT have kernel loop implementation
+        # Kernel loop NOT fully structural yet (Phase 7d pending)
+        # step_mu still uses Python for-loop, will be replaced in 7d-1
         kernel_loop_impl = ROOT / "rcx_pi" / "selfhost" / "kernel_loop_mu.py"
         assert not kernel_loop_impl.exists(), (
-            "kernel_loop_mu.py exists but STATUS.md says L2 is DESIGN\n"
-            "Update STATUS.md if kernel loop is now structural"
+            "kernel_loop_mu.py should not exist yet\n"
+            "Phase 7d-1 will wire step_mu to structural kernel"
         )
 
 

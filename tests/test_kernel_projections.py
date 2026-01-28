@@ -161,7 +161,7 @@ class TestKernelTry:
     """Test kernel.try projection (start matching first projection)."""
 
     def test_try_extracts_first_projection(self, kernel_projections):
-        """kernel.try extracts pattern/body from head of remaining list."""
+        """kernel.try outputs match entry format for match.wrap to process."""
         proj1 = {"pattern": {"x": {"var": "v"}}, "body": {"result": {"var": "v"}}}
         proj2 = {"pattern": {"y": {"var": "w"}}, "body": {"other": {"var": "w"}}}
 
@@ -174,9 +174,10 @@ class TestKernelTry:
 
         result = step(kernel_projections, input_state)
 
-        assert result["_mode"] == "match"
-        assert result["_pattern_focus"] == proj1["pattern"]
-        assert result["_value_focus"] == {"x": 1}
+        # New entry format: {match: {pattern, value}, _match_ctx: {...}}
+        assert "match" in result, f"Expected match entry format, got {result}"
+        assert result["match"]["pattern"] == proj1["pattern"]
+        assert result["match"]["value"] == {"x": 1}
 
         # Context preserved
         assert result["_match_ctx"]["_input"] == {"x": 1}
@@ -208,7 +209,7 @@ class TestKernelMatchSuccess:
     """Test kernel.match_success projection (match succeeded)."""
 
     def test_match_success_starts_substitution(self, kernel_projections):
-        """kernel.match_success transitions to subst mode with bindings."""
+        """kernel.match_success outputs subst entry format."""
         input_state = {
             "_mode": "match_done",
             "_status": "success",
@@ -222,9 +223,10 @@ class TestKernelMatchSuccess:
 
         result = step(kernel_projections, input_state)
 
-        assert result["_mode"] == "subst"
-        assert result["_focus"] == {"result": {"var": "v"}}
-        assert result["_bindings"] == {"v": 1}
+        # New entry format: {subst: {body, bindings}, _subst_ctx: {...}}
+        assert "subst" in result, f"Expected subst entry format, got {result}"
+        assert result["subst"]["body"] == {"result": {"var": "v"}}
+        assert result["subst"]["bindings"] == {"v": 1}
 
         # Context preserved for after subst
         assert result["_subst_ctx"]["_input"] == {"x": 1}
@@ -399,15 +401,16 @@ class TestManualTraceSuccess:
         assert state["_phase"] == "try"
         assert state["_input"] == {"x": 1}
 
-        # Step 2: kernel.try -> match mode
+        # Step 2: kernel.try -> match entry format
         # Note: _projs was a Python list, kernel.try expects head/tail linked list
         # We need to convert to linked list format for kernel.try to match
         state["_remaining"] = {"head": proj, "tail": None}
         state = step(kernel_projections, state)
 
-        assert state["_mode"] == "match"
-        assert state["_pattern_focus"] == proj["pattern"]
-        assert state["_value_focus"] == {"x": 1}
+        # Now outputs match entry format
+        assert "match" in state, f"Expected match entry format, got {state}"
+        assert state["match"]["pattern"] == proj["pattern"]
+        assert state["match"]["value"] == {"x": 1}
         assert "_match_ctx" in state
 
         # Steps 3-N: Would be handled by match projections
@@ -420,9 +423,10 @@ class TestManualTraceSuccess:
         }
         state = step(kernel_projections, state)
 
-        assert state["_mode"] == "subst"
-        assert state["_focus"] == {"result": {"var": "v"}}
-        assert state["_bindings"] == {"v": 1}
+        # Now outputs subst entry format
+        assert "subst" in state, f"Expected subst entry format, got {state}"
+        assert state["subst"]["body"] == {"result": {"var": "v"}}
+        assert state["subst"]["bindings"] == {"v": 1}
 
         # Steps N+1 to M: Would be handled by subst projections
         # Simulate subst success
@@ -467,11 +471,12 @@ class TestManualTraceFailure:
         assert state["_phase"] == "try"
         assert state["_input"] == {"y": 2}
 
-        # Step 2: kernel.try -> match mode
+        # Step 2: kernel.try -> match entry format
         state["_remaining"] = {"head": proj, "tail": None}
         state = step(kernel_projections, state)
 
-        assert state["_mode"] == "match"
+        # Now outputs match entry format
+        assert "match" in state, f"Expected match entry format, got {state}"
 
         # Steps 3-N: Match would fail
         # Simulate match failure
@@ -546,7 +551,8 @@ class TestMultipleProjectionFallthrough:
         # Convert to linked list and try first
         state["_remaining"] = {"head": proj1, "tail": {"head": proj2, "tail": None}}
         state = step(kernel_projections, state)
-        assert state["_mode"] == "match"
+        # Now outputs match entry format
+        assert "match" in state, f"Expected match entry format, got {state}"
 
         # First match fails
         state = {
@@ -562,8 +568,9 @@ class TestMultipleProjectionFallthrough:
 
         # Try second projection
         state = step(kernel_projections, state)
-        assert state["_mode"] == "match"
-        assert state["_pattern_focus"] == proj2["pattern"]
+        # Now outputs match entry format
+        assert "match" in state, f"Expected match entry format, got {state}"
+        assert state["match"]["pattern"] == proj2["pattern"]
 
         # Second match succeeds
         state = {
@@ -574,8 +581,9 @@ class TestMultipleProjectionFallthrough:
         }
         state = step(kernel_projections, state)
 
-        assert state["_mode"] == "subst"
-        assert state["_focus"] == proj2["body"]
+        # Now outputs subst entry format
+        assert "subst" in state, f"Expected subst entry format, got {state}"
+        assert state["subst"]["body"] == proj2["body"]
 
 
 # =============================================================================
@@ -612,7 +620,7 @@ class TestProjectionOrder:
         assert result["_stall"] is True
 
     def test_try_matches_head_tail_remaining(self, kernel_projections):
-        """kernel.try should match head/tail remaining."""
+        """kernel.try should match head/tail remaining and produce match entry format."""
         try_input = {
             "_mode": "kernel",
             "_phase": "try",
@@ -622,8 +630,8 @@ class TestProjectionOrder:
 
         result = step(kernel_projections, try_input)
 
-        # Should have transitioned to match mode
-        assert result["_mode"] == "match"
+        # Should have produced match entry format
+        assert "match" in result, f"Expected match entry format, got {result}"
 
 
 # =============================================================================

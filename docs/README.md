@@ -23,8 +23,10 @@
 
 | File | Title |
 |------|-------|
+| [DebtCategories.v0.md](core/DebtCategories.v0.md) | Debt Categories v0 |
 | [EVAL_SEED.v0.md](core/EVAL_SEED.v0.md) | EVAL_SEED Specification v0 |
 | [EntropyBudget.md](core/EntropyBudget.md) | RCX Entropy Budget (Contract) |
+| [MetaCircularKernel.v0.md](core/MetaCircularKernel.v0.md) | Meta-Circular Kernel Specification v0 |
 | [MuType.v0.md](core/MuType.v0.md) | Mu Type Definition v0 |
 | [RCXKernel.v0.md](core/RCXKernel.v0.md) | RCX Kernel Specification v0 |
 | [SelfHosting.v0.md](core/SelfHosting.v0.md) | Self-Hosting Specification v0 |
@@ -103,10 +105,12 @@
 | [RCX_REWRITE_TERMINATION_CONTRACTS.md](archive/RCX_REWRITE_TERMINATION_CONTRACTS.md) | RCX Rewrite Termination Contracts (Frozen) |
 | [RCX_SESSION_BOOT.md](archive/RCX_SESSION_BOOT.md) | RCX Session Boot (paste into a new chat) |
 | [RCX_TEX_CANON.md](archive/RCX_TEX_CANON.md) | RCX TeX Canon Contract (Machine-Ingestible Spec) |
+| [README_BOOTSTRAP.md](archive/README_BOOTSTRAP.md) | BOOTSTRAP COMPLETE (Historical) |
 | [SNAPSHOT_STATUS.md](archive/SNAPSHOT_STATUS.md) | Snapshot / Serialization Status (Ra-for-now) |
 | [SNAPSHOT_V1.md](archive/SNAPSHOT_V1.md) | Snapshot v1 (RCX-π) — Canonical State Serialization |
 | [STABLE_BASELINE_RELEASE.md](archive/STABLE_BASELINE_RELEASE.md) | RCX-Ω Stable Baseline: Release/Tag Checklist |
 | [STAGING_TO_STABLE.md](archive/STAGING_TO_STABLE.md) | Staging → Stable Promotion (RCX-Ω) |
+| [verification_checklist_v0.md](archive/verification_checklist_v0.md) | RCX Verification Agent Checklist |
 
 ## fixtures
 

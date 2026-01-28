@@ -103,6 +103,28 @@ def host_mutation(reason: str):
     return decorator
 
 
+def host_iteration(reason: str):
+    """
+    Mark code as using host iteration (Python for-loops).
+
+    This is a debt marker. The kernel loop should be structural projections,
+    not Python iteration. Phase 7 eliminates this by making the kernel
+    meta-circular (projections selecting projections).
+
+    Args:
+        reason: Why this host iteration exists and how it will be eliminated.
+    """
+    def decorator(func):
+        func._host_iteration = True
+        func._host_iteration_reason = reason
+        mark_bootstrap(
+            f"host_iteration:{func.__name__}",
+            f"Host iteration: {reason}"
+        )
+        return func
+    return decorator
+
+
 # =============================================================================
 # NOT Lambda Calculus Guardrails
 # =============================================================================
@@ -396,6 +418,10 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     return substitute(body, bindings)
 
 
+@host_iteration(
+    "Kernel loop iterates projections. Used by match_mu/subst_mu/classify_mu. "
+    "Phase 7d replaces with meta-circular kernel that handles match/subst internally."
+)
 def step(projections: list[Mu], input_value: Mu) -> Mu:
     """
     Try each projection in order, return first successful application.

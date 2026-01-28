@@ -58,9 +58,10 @@
         }
       },
       "body": {
-        "_mode": "match",
-        "_pattern_focus": {"var": "p"},
-        "_value_focus": {"var": "input"},
+        "match": {
+          "pattern": {"var": "p"},
+          "value": {"var": "input"}
+        },
         "_match_ctx": {
           "_input": {"var": "input"},
           "_body": {"var": "b"},
@@ -82,9 +83,10 @@
         }
       },
       "body": {
-        "_mode": "subst",
-        "_focus": {"var": "body"},
-        "_bindings": {"var": "bindings"},
+        "subst": {
+          "body": {"var": "body"},
+          "bindings": {"var": "bindings"}
+        },
         "_subst_ctx": {
           "_input": {"var": "input"},
           "_remaining": {"var": "rest"}

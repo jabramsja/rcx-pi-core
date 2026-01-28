@@ -30,10 +30,10 @@ SEED_CHECKSUMS: dict[str, str] = {
     "subst.v1.json": "ff2acb1450b30a078a7cd2bdd42443b07e28075569a8b095f65165e23eb69893",
     # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
     "classify.v1.json": "3216e28b2f28b8f9d2dfd2693dfecad2c2ba94783151bb4b8f920d29aa8e5cf1",
-    # Phase 7a: meta-circular kernel projections (v1.0.0)
-    "kernel.v1.json": "34ca5c5b32c07b897e183770c1d05f0a00b54c6c6d4559f1ba9a174671da551e",
-    # Phase 7b: match with kernel context passthrough + match.fail
-    "match.v2.json": "9f5418217d26e1ad655fb6f49bf704dd1cf7d84704841ffc65b6e904106f903b",
+    # Phase 7a: meta-circular kernel projections (v1.0.1 - entry format output)
+    "kernel.v1.json": "8d9eb8a05da580f8652c7f0453fbf19e88eb7c36057a7e885bdeb3348bf0e9f6",
+    # Phase 7b: match with kernel context passthrough + match.fail (fixed var names)
+    "match.v2.json": "1fbd00c6988505a8369cec8f25968453cf3405855dfdf053756bd22375f7acc2",
     # Phase 7b: subst with kernel context passthrough
     "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
 }

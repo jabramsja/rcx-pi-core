@@ -22,10 +22,13 @@ count_markers() {
 
 if [ "$JSON_OUTPUT" = true ]; then
     # JSON output for programmatic use
-    # Use anchored patterns (^[[:space:]]*@) to match only actual decorators, not comments
+    # Use anchored patterns (^[[:space:]]*@) to match actual decorators
+    # Also count "# @host_*" comments for nested function debt that can't be decorated
     HOST_RECURSION=$(count_markers "^[[:space:]]*@host_recursion" "rcx_pi/")
     HOST_BUILTIN=$(count_markers "^[[:space:]]*@host_builtin" "rcx_pi/")
-    HOST_ITERATION=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_ITERATION_DECORATED=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_ITERATION_COMMENT=$(count_markers "# @host_iteration" "rcx_pi/")
+    HOST_ITERATION=$((HOST_ITERATION_DECORATED + HOST_ITERATION_COMMENT))
     HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
     BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
     AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
@@ -60,10 +63,13 @@ else
     echo "Tracked Markers (rcx_pi/) - @host_* decorators"
     echo "----------------------------------------------"
 
-    # Use anchored patterns (^[[:space:]]*@) to match only actual decorators, not comments
+    # Use anchored patterns (^[[:space:]]*@) to match actual decorators
+    # Also count "# @host_*" comments for nested function debt that can't be decorated
     HOST_RECURSION=$(count_markers "^[[:space:]]*@host_recursion" "rcx_pi/")
     HOST_BUILTIN=$(count_markers "^[[:space:]]*@host_builtin" "rcx_pi/")
-    HOST_ITERATION=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_ITERATION_DECORATED=$(count_markers "^[[:space:]]*@host_iteration" "rcx_pi/")
+    HOST_ITERATION_COMMENT=$(count_markers "# @host_iteration" "rcx_pi/")
+    HOST_ITERATION=$((HOST_ITERATION_DECORATED + HOST_ITERATION_COMMENT))
     HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
     BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
 
@@ -75,7 +81,7 @@ else
 
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     echo "----------------------------------------------"
-    printf "  Total Tracked:    %3d (ceiling: 11)\n" "$TOTAL_TRACKED"
+    printf "  Total Tracked:    %3d (ceiling: 15)\n" "$TOTAL_TRACKED"
     echo ""
 
     echo "AST_OK Bypasses (rcx_pi/) - Statement-level semantic debt"

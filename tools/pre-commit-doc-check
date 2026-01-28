@@ -4,7 +4,8 @@
 #
 # This hook:
 # 1. Runs check_docs_consistency.sh (validates STATUS.md matches reality)
-# 2. Warns if rcx_pi/ or seeds/ changed but STATUS.md wasn't touched
+# 2. Checks debt ceiling is not exceeded
+# 3. Warns if rcx_pi/ or seeds/ changed but STATUS.md wasn't touched
 #
 # All checks are WARNINGS, not blockers. CI runs pytest and catches real issues.
 # Use --no-verify to skip entirely (not recommended).
@@ -19,6 +20,21 @@ if [ -f "./tools/check_docs_consistency.sh" ]; then
         echo ""
         echo "⚠️  Doc consistency check found issues (see above)"
         echo "   CI will catch this - but consider fixing now"
+        echo ""
+    fi
+fi
+
+# === 2. Check debt ceiling ===
+if [ -f "./tools/debt_dashboard.sh" ]; then
+    DEBT_JSON=$(./tools/debt_dashboard.sh --json 2>/dev/null || echo '{}')
+    CURRENT=$(echo "$DEBT_JSON" | grep -o '"total_semantic": [0-9]*' | grep -o '[0-9]*' || echo "0")
+    THRESHOLD=$(grep -E '^THRESHOLD:' STATUS.md 2>/dev/null | grep -o '[0-9]*' || echo "999")
+
+    if [ "$CURRENT" -gt "$THRESHOLD" ]; then
+        echo ""
+        echo "🚨 DEBT CEILING EXCEEDED: $CURRENT > $THRESHOLD"
+        echo "   Run ./tools/debt_dashboard.sh to see debt locations"
+        echo "   Fix debt or update threshold in STATUS.md before committing"
         echo ""
     fi
 fi

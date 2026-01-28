@@ -1,6 +1,6 @@
 # Meta-Circular Kernel Specification v0
 
-Status: **VECTOR** (design-only, no implementation until approved)
+Status: **NEXT** (promoted 2026-01-27, Phase 7a/7b/7c DONE, 7d pending)
 
 **Revision History:**
 - v0.1: Initial design with 11 projections
@@ -474,7 +474,7 @@ Then kernel.unwrap:
 4. [ ] Kernel projections pass parity tests with Python `step_mu`
 5. [ ] No Python for-loop in step_mu execution path
 6. [ ] All 1000+ existing tests still pass
-7. [ ] Debt threshold decreases (target: 11 → 9 or lower)
+7. [ ] Debt threshold decreases (see `STATUS.md` for current threshold and target)
 
 ## Risks and Mitigations
 
