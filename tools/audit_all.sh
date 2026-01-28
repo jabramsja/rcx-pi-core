@@ -7,7 +7,6 @@ set -euo pipefail
 #
 # This is the comprehensive audit for CI and pre-push validation. It runs:
 # - All 1300+ tests including fuzzer (hash-seeded for determinism)
-# - Specialized test suites (IndependentEncounter, Enginenews, Bytecode VM)
 # - Semantic purity checks, contraband detection, AST police
 # - Anti-cheat scans, fixture validation
 #
@@ -33,31 +32,21 @@ echo "== 0) Repo clean =="
 test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --porcelain; exit 1; }
 
 echo "== 1) Full suite (hash-seeded) =="
+# NOTE: This runs ALL tests including IndependentEncounter, Enginenews, etc.
+# No need for separate -k filter runs - they're subsets of the full suite.
 PYTHONHASHSEED=0 pytest $PARALLEL_FLAG -q
 test -z "$(git status --porcelain)" || { echo "Dirty after pytest"; git status --porcelain; exit 1; }
 
-echo "== 2) IndependentEncounter tests only =="
-PYTHONHASHSEED=0 pytest -q -k 'independent_encounter'
-
-echo "== 3) Enginenews tests only =="
-PYTHONHASHSEED=0 pytest -q -k 'enginenews'
-
-echo "== 3.1) Bytecode VM v0 tests =="
-PYTHONHASHSEED=0 pytest -q tests/test_bytecode_vm_v0.py
-
-echo "== 3.2) Bytecode VM v0 audit =="
-./tools/audit_bytecode.sh
-
-echo "== 3.3) Semantic purity audit (self-hosting readiness) =="
+echo "== 2) Semantic purity audit (self-hosting readiness) =="
 ./tools/audit_semantic_purity.sh
 
-echo "== 3.4) Contraband check (grep-based) =="
+echo "== 3) Contraband check (grep-based) =="
 ./tools/contraband.sh rcx_pi
 
-echo "== 3.5) AST police (catches what grep misses) =="
+echo "== 4) AST police (catches what grep misses) =="
 python3 tools/ast_police.py
 
-echo "== 4) Anti-cheat scans =="
+echo "== 5) Anti-cheat scans =="
 echo "-- no private attr access in tests/ or prototypes/"
 ! grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ || { echo "Found private attr access"; exit 1; }
 
@@ -72,13 +61,13 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: match.v2.json and subst.v2.json are excluded - they use _match_ctx/_subst_ctx for kernel integration
 ! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
-echo "== 5) Fixture size check (all v2 jsonl) =="
+echo "== 6) Fixture size check (all v2 jsonl) =="
 find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 -print | sort | while read -r f; do
   n="$(wc -l < "$f" | tr -d ' ')"
   printf "%-80s %s lines\n" "$f" "$n"
 done
 
-echo "== 6) CLI exec-summary spot-check (enginenews fixtures) =="
+echo "== 7) CLI exec-summary spot-check (enginenews fixtures) =="
 fixtures=(
   tests/fixtures/traces_v2/enginenews_spec_v0/progressive_refinement.v2.jsonl
   tests/fixtures/traces_v2/enginenews_spec_v0/stall_pressure.v2.jsonl

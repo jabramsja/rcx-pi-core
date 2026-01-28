@@ -18,17 +18,18 @@ from rcx_pi.subst_mu import subst_mu
 # =============================================================================
 # Hypothesis Configuration (lossless optimization)
 # =============================================================================
-# - Database caches found examples for faster reruns
+# - Database caches found examples for faster reruns (uses .hypothesis/ by default)
 # - print_blob=True makes failures easy to reproduce
 # - derandomize=False keeps search random but seeded for CI reproducibility
+# NOTE: Do NOT set database=None - that DISABLES the database. Omit to use default.
 
 try:
     from hypothesis import settings, Verbosity, Phase
 
     # Default profile: production settings with database caching
+    # Omitting database= uses the default .hypothesis/ directory
     settings.register_profile(
         "default",
-        database=None,  # Use default .hypothesis/ database
         print_blob=True,  # Print reproduction blob on failure
         derandomize=False,  # Keep randomized search
     )
@@ -36,7 +37,6 @@ try:
     # CI profile: same as default but explicit for documentation
     settings.register_profile(
         "ci",
-        database=None,
         print_blob=True,
         derandomize=False,
     )
@@ -91,6 +91,7 @@ collect_ignore = [
     "test_semantic_goldens.py",     # requires rcx_omega
     "test_semantic_invariants.py",  # requires rcx_omega
     "test_normalize_graphviz_svg.py",  # requires scripts module
+    "archive",  # archived tests (e.g., bytecode VM - superseded by kernel approach)
 ]
 
 

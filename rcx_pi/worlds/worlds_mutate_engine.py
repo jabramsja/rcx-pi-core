@@ -97,7 +97,7 @@ def classify(mu: str) -> str:
 
 def load_route_map_from_file(path: str) -> Dict[str, str]:
     ns = {}
-    exec(open(path).read(), ns)
+    exec(open(path).read(), ns)  # CONTRABAND_OK: loading generated world route files (experimental)
     return ns.get("ROUTES", {})
 
 
