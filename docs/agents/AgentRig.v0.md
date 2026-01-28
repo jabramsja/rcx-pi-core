@@ -6,6 +6,31 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 
 **Key Insight:** We don't trust any single agent. We trust the **fight** between agents.
 
+## STATUS.md: Single Source of Truth
+
+**All agents MUST read `STATUS.md` before any assessment.**
+
+`STATUS.md` contains:
+- Current phase and self-hosting level (L1/L2/L3)
+- What standards apply NOW vs LATER
+- Debt status and thresholds
+- Key file references
+
+**Why this matters:**
+- Agents no longer hardcode phase numbers
+- When we advance phases, update ONE file (`STATUS.md`), not 8+ agent files
+- Agents use semantic conditions ("L1+ Algorithmic") not version numbers ("Phase 6+")
+
+## Self-Hosting Levels (from STATUS.md)
+
+| Level | Description | Agent Implications |
+|-------|-------------|--------------------|
+| **L1: Algorithmic** | match/subst are Mu projections | Demand proof for match/subst, note kernel loop as scaffolding |
+| **L2: Operational** | kernel loop is Mu projections | Demand proof for ALL structural claims |
+| **L3: Full Bootstrap** | RCX runs RCX, no Python | Full meta-circular enforcement |
+
+Agents read STATUS.md to determine current level and apply standards accordingly.
+
 ## The Rig Architecture
 
 ```
@@ -119,6 +144,14 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - **Red flag:** Any red "blob" node = Python list smuggled in
 - **Output:** Mermaid diagram (renders in GitHub, VS Code, etc.)
 
+### 10. Advisor (`advisor.md`)
+- **Model:** Sonnet
+- **Purpose:** Strategic advice when stuck - options, trade-offs, creative solutions
+- **Focus:** Exploring solution space, unblocking progress, out-of-the-box thinking
+- **When to use:** Design decisions, multiple valid approaches, need fresh perspective
+- **Verdict:** OPTIONS_PROVIDED / RECOMMENDATION / NEEDS_MORE_CONTEXT
+- **Note:** Advisor PROPOSES, other agents VALIDATE
+
 ## Key Design Decisions
 
 ### Intelligence Balance
@@ -131,6 +164,13 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - We don't trust the Verifier's approval
 - We trust the **conflict** between them
 - If Adversary can't break it AND Verifier approves AND Structural-Proof is satisfied, then merge
+
+### Verdict Authority
+- **Adversary verdict = CHALLENGE** — "I found a weakness" (does not approve or reject)
+- **Verifier verdict = GATE** — "This passes/fails invariants" (approval authority)
+- **Advisor verdict = PROPOSAL** — "Here are options" (no gating authority)
+
+Adversary may claim impossibility. Verifier decides whether that impossibility violates an invariant or merely blocks progress.
 
 ### Parallelization
 - Verifier and Adversary run in parallel (independent)
@@ -147,6 +187,24 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 - **The Rule:** Claude writes DATA. Kernel executes DATA. If kernel crashes, Claude lied.
 - **Enforcement:** Kernel files should be treated as read-only after initial bootstrap
 - This architecture makes it mathematically impossible for Claude to smuggle host semantics - JSON simply doesn't support Python features
+
+## Phase Scope (Semantic)
+
+Each agent has standards that apply at different self-hosting levels (L1/L2/L3). **Agents read STATUS.md to determine current level.**
+
+| Agent | L1 (Algorithmic) | L2 (Operational) | L3 (Bootstrap) |
+|-------|------------------|------------------|----------------|
+| **verifier** | Sections A-E required, F advisory for kernel | All sections required | Full enforcement |
+| **adversary** | All attack vectors | + Kernel loop attacks | Full red team |
+| **expert** | Simplicity + self-hosting readiness | + Kernel loop review | Full review |
+| **structural-proof** | match/subst proof required, kernel advisory | All proofs required | Full meta-circular proof |
+| **grounding** | match/subst parity tests | + Kernel loop tests | Full bootstrap tests |
+| **fuzzer** | Roundtrip, parity, determinism | + Kernel properties | Full properties |
+| **translator** | Semantic debt = FAIL, scaffolding = NOTE | All debt = FAIL | Full enforcement |
+| **visualizer** | Linked-list encoding | + Kernel state diagrams | Full visualization |
+| **advisor** | Design options, RCX patterns | + Meta-circular strategies | Full strategic advice |
+
+**Key insight:** Agents use semantic conditions, not version numbers. When STATUS.md changes, agent behavior updates automatically.
 
 ## Usage
 
@@ -216,6 +274,7 @@ python3 tools/ast_police.py
 
 | File | Purpose |
 |------|---------|
+| `STATUS.md` | **Single source of truth** - agents read this first |
 | `.claude/agents/expert.md` | Builder agent config |
 | `.claude/agents/verifier.md` | Invariant checker config |
 | `.claude/agents/adversary.md` | Red team attacker config |
@@ -224,6 +283,8 @@ python3 tools/ast_police.py
 | `.claude/agents/translator.md` | Plain English explainer config |
 | `.claude/agents/fuzzer.md` | Chaos monkey / property-based testing |
 | `.claude/agents/visualizer.md` | Mermaid diagram generator |
+| `.claude/agents/advisor.md` | Strategic advisor (when stuck) |
+| `tools/agents/*.md` | Tracked copies of agent prompts |
 | `tools/contraband.sh` | Dumb regex linter (no AI) |
 | `tools/ast_police.py` | AST-based linter (catches what grep misses) |
 
@@ -241,3 +302,7 @@ python3 tools/ast_police.py
 | 2026-01-26 | Documented Trusted Kernel architecture |
 | 2026-01-26 | Added visualizer agent (Mermaid diagrams) |
 | 2026-01-26 | Added ast_police.py (catches what grep misses) |
+| 2026-01-27 | Created STATUS.md as single source of truth for project phase |
+| 2026-01-27 | All agents now MUST read STATUS.md before assessments |
+| 2026-01-27 | Converted Phase Scope from version numbers to semantic levels (L1/L2/L3) |
+| 2026-01-27 | Clarified scaffolding debt vs semantic debt distinction |

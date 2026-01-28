@@ -4,6 +4,61 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-01-27
 
+### Agents
+- **Advisor Agent** - New strategic advisor for when stuck on design decisions
+  - Created `tools/agents/advisor_prompt.md` and `.claude/agents/advisor.md`
+  - Provides options, trade-off analysis, creative solutions
+  - Verdict types: OPTIONS_PROVIDED / RECOMMENDATION / NEEDS_MORE_CONTEXT
+  - Advisor PROPOSES, other agents VALIDATE
+
+- **Agent Documentation Completion**
+  - Created 4 missing prompt files in `tools/agents/` (now all 10 agents tracked in git):
+    - `grounding_prompt.md`, `fuzzer_prompt.md`, `translator_prompt.md`, `visualizer_prompt.md`
+  - All agents now have "STATUS.md wins" override rule
+  - structural-proof has exec/non-exec modes (Mode A: run, Mode B: CI verification)
+
+- **Archived**: `tools/verification_checklist.md` → `docs/archive/verification_checklist_v0.md`
+  - Superseded by `tools/agents/verifier_prompt.md` (verifier agent)
+
+### Design
+- **Phase 7 Design: Meta-Circular Kernel** (PR #168)
+  - Created `docs/core/MetaCircularKernel.v0.md` (VECTOR status)
+  - Defines how kernel loop becomes structural (projections select projections)
+  - Key design: linked-list cursor eliminates arithmetic (head/tail destructuring)
+  - Structural-proof agent verified cursor approach is SOUND and STRUCTURAL
+  - v0.2 revision addresses agent-identified gaps:
+    - Context preservation via `_match_ctx` / `_subst_ctx` fields
+    - Structural NO_MATCH: `{"_mode": "match_done", "_status": "no_match"}`
+    - Namespace protection: `_` prefix for kernel-internal fields
+    - Simplified from 11 to 7 kernel projections
+  - Total projections: 7 kernel + 32 existing = 39 for fully self-hosted kernel
+
+### Tooling
+- **STATUS.md: Single Source of Truth for Project Phase**
+  - Created `STATUS.md` as canonical source for current phase and self-hosting level
+  - All agents now read STATUS.md before assessments (MANDATORY)
+  - Self-hosting levels: L1 (Algorithmic), L2 (Operational), L3 (Full Bootstrap)
+  - Agent Enforcement Guide table: what applies NOW vs LATER
+  - When advancing phases: update ONE file, not 8+ agent files
+
+- **Agent Semantic Phase Scope**
+  - Updated all 8 agent `.md` files with semantic scope (L1/L2/L3, not phase numbers)
+  - Agents reference STATUS.md for current level, not hardcoded version
+  - Distinguishes scaffolding debt (acceptable at current L) from semantic debt (must fix)
+  - Updated `docs/agents/AgentRig.v0.md` with semantic Phase Scope table
+  - Prevents phase drift: agents adapt automatically when STATUS.md updates
+
+### Tests
+- **Kernel Loop Fuzzer Tests** (PR #167)
+  - 11 property-based tests for apply_mu, step_mu, run_mu
+  - TestApplyMuDeterminism: 3 tests (determinism, var pattern, literal match)
+  - TestApplyMuParity: 1 test (apply_mu == apply_projection)
+  - TestStepMuDeterminism: 3 tests (determinism, empty projections, stall idempotent)
+  - TestStepMuParity: 2 tests (step_mu == step, first-match-wins)
+  - TestRunMuDeterminism: 2 tests (determinism, immediate stall)
+  - 3000+ random examples stress-test kernel loop stability
+  - Closes fuzzer gap identified by agents before Phase 7
+
 ### Tooling
 - **Comprehensive Debt Tracking** (PR #155)
   - Marked ~289 LOC of previously unmarked semantic debt with `@host_*` decorators

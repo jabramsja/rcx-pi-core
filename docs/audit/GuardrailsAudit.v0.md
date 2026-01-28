@@ -1,5 +1,12 @@
 # Guardrails Audit v0
 
+> ⚠️ **HISTORICAL DOCUMENT** — This document is a pre-implementation audit from the bootstrap phase. Active enforcement now lives in:
+> - `STATUS.md` (current state and debt)
+> - `tools/audit_semantic_purity.sh` (automated checks)
+> - Agent rig (verifier, adversary, structural-proof)
+>
+> Many gaps identified here have been closed. See `TASKS.md` Ra section for completed items.
+
 Status: REFERENCE (pre-implementation audit)
 
 ## Purpose
