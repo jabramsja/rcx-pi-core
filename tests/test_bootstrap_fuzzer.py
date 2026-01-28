@@ -361,10 +361,15 @@ class TestBootstrapBoundary:
             # Unbound variable - acceptable
             pass
 
-    @given(mu_values(), st.integers(min_value=10, max_value=100))
+    @given(mu_values(), st.integers(min_value=10, max_value=50))
     @settings(max_examples=300, deadline=None)
     def test_max_steps_uses_mu_equal_for_stall(self, value, max_steps):
-        """run_mu uses mu_equal to detect stalls."""
+        """run_mu uses mu_equal to detect stalls.
+
+        Note: max_steps limited to 50 because the "double" projection adds
+        ~2 depth levels per step after normalization. MAX_MU_DEPTH is 200,
+        so 50 steps keeps us safely under the limit.
+        """
         assume(is_mu(value))
 
         # Projection that doubles a number (will stall on non-numbers)
