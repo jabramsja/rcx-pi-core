@@ -7,7 +7,7 @@
 ## Why This Matters
 
 Self-hosting has three levels:
-- **L1 (Algorithmic)**: Projections encode the algorithm (match/substitute as Mu) ✓ COMPLETE
+- **L1 (Algorithmic)**: Projections encode the algorithm (match/substitute as Mu) ✓ DONE
 - **L2 (Operational)**: RCX executes projections structurally - NEXT
 - **L3 (Meta-circular)**: Kernel itself is projections - FUTURE
 

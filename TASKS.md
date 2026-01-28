@@ -102,7 +102,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Adversary agent: red team attack testing
   - PR verification reminder workflow (auto-comment on sensitive file changes)
   - RATCHET debt policy: threshold can only decrease, never increase
-- RCX Kernel Phase 4-5: Algorithmic Self-Hosting (L1) Complete:
+- RCX Kernel Phase 4-5: Algorithmic Self-Hosting (L1) Done:
   - Phase 4a: `match_mu()` as Mu projections (`seeds/match.v1.json`, 23 parity tests)
   - Phase 4b: `subst_mu()` as Mu projections (`seeds/subst.v1.json`, 17 parity tests)
   - Phase 4d: Integration tests (67 total: 28 parity + 27 grounding + 12 fuzzer)
@@ -225,6 +225,11 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 Note: Phase 7 requires meta-circular design. The kernel loop (for-loop selecting projections)
 is the remaining major scaffolding debt.
+
+**Phase 7 prerequisites (fuzzer agent findings):**
+- Seed projection coverage tests (verify no unintended stalls)
+- Kernel trace integrity tests (replay trace manually)
+- Security fuzzer tests (type tag injection, resource exhaustion)
 
 **Debt status**: See `STATUS.md` for current counts and threshold.
 
