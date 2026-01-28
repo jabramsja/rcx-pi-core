@@ -190,7 +190,8 @@ def normalize_for_match(value: Mu) -> Mu:
                 # This ensures normalize(normalize(x)) == normalize(x) for empty containers
                 if keys == {"_type"}:  # AST_OK: key comparison
                     _type = val.get("_type")
-                    if _type in VALID_TYPE_TAGS:
+                    # _type must be a string to be a valid type tag (guards against unhashable types)
+                    if isinstance(_type, str) and _type in VALID_TYPE_TAGS:
                         result = val
                         continue
 
