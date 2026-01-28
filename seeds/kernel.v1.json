@@ -1,0 +1,138 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "KERNEL_SEED",
+    "description": "Meta-circular kernel projections for Phase 7 self-hosting",
+    "doc": "docs/core/MetaCircularKernel.v0.md",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Kernel projections run FIRST (match on _mode prefix)",
+      "Linked-list cursor (_remaining) provides iteration without arithmetic",
+      "Context passthrough (_match_ctx, _subst_ctx) preserves state across mode transitions",
+      "CRITICAL: Projection order is security-critical (first-match-wins)"
+    ]
+  },
+  "projections": [
+    {
+      "id": "kernel.wrap",
+      "description": "Entry point: wrap input and projections into kernel state",
+      "pattern": {
+        "_step": {"var": "input"},
+        "_projs": {"var": "projs"}
+      },
+      "body": {
+        "_mode": "kernel",
+        "_phase": "try",
+        "_input": {"var": "input"},
+        "_remaining": {"var": "projs"}
+      }
+    },
+    {
+      "id": "kernel.stall",
+      "description": "Empty remaining list (null) -> all projections tried, stall",
+      "pattern": {
+        "_mode": "kernel",
+        "_phase": "try",
+        "_input": {"var": "input"},
+        "_remaining": null
+      },
+      "body": {
+        "_mode": "done",
+        "_result": {"var": "input"},
+        "_stall": true
+      }
+    },
+    {
+      "id": "kernel.try",
+      "description": "Start matching first projection from remaining list",
+      "pattern": {
+        "_mode": "kernel",
+        "_phase": "try",
+        "_input": {"var": "input"},
+        "_remaining": {
+          "head": {
+            "pattern": {"var": "p"},
+            "body": {"var": "b"}
+          },
+          "tail": {"var": "rest"}
+        }
+      },
+      "body": {
+        "_mode": "match",
+        "_pattern_focus": {"var": "p"},
+        "_value_focus": {"var": "input"},
+        "_match_ctx": {
+          "_input": {"var": "input"},
+          "_body": {"var": "b"},
+          "_remaining": {"var": "rest"}
+        }
+      }
+    },
+    {
+      "id": "kernel.match_success",
+      "description": "Match succeeded -> start substitution with bindings",
+      "pattern": {
+        "_mode": "match_done",
+        "_status": "success",
+        "_bindings": {"var": "bindings"},
+        "_match_ctx": {
+          "_input": {"var": "input"},
+          "_body": {"var": "body"},
+          "_remaining": {"var": "rest"}
+        }
+      },
+      "body": {
+        "_mode": "subst",
+        "_focus": {"var": "body"},
+        "_bindings": {"var": "bindings"},
+        "_subst_ctx": {
+          "_input": {"var": "input"},
+          "_remaining": {"var": "rest"}
+        }
+      }
+    },
+    {
+      "id": "kernel.match_fail",
+      "description": "Match failed -> advance to next projection in remaining list",
+      "pattern": {
+        "_mode": "match_done",
+        "_status": "no_match",
+        "_match_ctx": {
+          "_input": {"var": "input"},
+          "_body": {"var": "_"},
+          "_remaining": {"var": "rest"}
+        }
+      },
+      "body": {
+        "_mode": "kernel",
+        "_phase": "try",
+        "_input": {"var": "input"},
+        "_remaining": {"var": "rest"}
+      }
+    },
+    {
+      "id": "kernel.subst_success",
+      "description": "Substitution complete -> return result (no stall)",
+      "pattern": {
+        "_mode": "subst_done",
+        "_result": {"var": "result"},
+        "_subst_ctx": {"var": "_"}
+      },
+      "body": {
+        "_mode": "done",
+        "_result": {"var": "result"},
+        "_stall": false
+      }
+    },
+    {
+      "id": "kernel.unwrap",
+      "description": "Extract final result from done state",
+      "pattern": {
+        "_mode": "done",
+        "_result": {"var": "result"},
+        "_stall": {"var": "stall"}
+      },
+      "body": {"var": "result"}
+    }
+  ]
+}
