@@ -55,7 +55,7 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 
 ## Core Components
 
-### Current Architecture (Phase 2 Complete)
+### Core Modules (see STATUS.md for current phase)
 
 | Module | Purpose |
 |-------|---------|
