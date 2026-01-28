@@ -65,77 +65,42 @@ Code that **interprets Mu** or **determines what operations mean**.
 
 ## Current Inventory
 
-### Tracked Markers (debt_dashboard.sh)
+> **For current counts, see `STATUS.md`.** This section describes the categories, not the numbers.
+>
+> Run `./tools/debt_dashboard.sh` for live counts. Grounding tests in `tests/structural/` verify counts match STATUS.md.
 
-| Marker | Count | Category | Location |
-|--------|-------|----------|----------|
-| `@host_recursion` | 4 | Semantic | eval_seed.py (match, substitute), match_mu.py (check_empty_var) |
-| `@host_builtin` | 5 | Semantic | eval_seed.py, deep_eval.py, match_mu.py (convert) |
-| `@host_mutation` | 2 | Scaffolding | eval_seed.py, deep_eval.py |
-| `@bootstrap_only` | 0 | Semantic | (deprecated marker) |
+### Tracked Markers
 
-**Total tracked:** 11 markers (ceiling: 15)
+| Marker | Category | Meaning |
+|--------|----------|---------|
+| `@host_recursion` | Semantic | Python recursion doing Mu work |
+| `@host_builtin` | Semantic | Python builtins interpreting Mu |
+| `@host_mutation` | Scaffolding | Python mutation (dict assignment) |
 
-**Phase 6 debt reduction:**
-- Phase 6a: Removed 2 `@host_builtin` (lookup as structural)
-- Phase 6b: Removed 2 `@host_builtin` (classification as structural)
-- Phase 6c: Removed 2 `@host_recursion` (iterative normalization)
+### AST_OK Bypasses
 
-### AST_OK Bypasses (ast_police.py)
-
-| Category | Count | Reason |
-|----------|-------|--------|
-| `# AST_OK: infra` | 24 | Infrastructure (CLI, coverage, tracing) |
-| `# AST_OK: bootstrap` | 3 | Semantic debt in selfhost modules |
-| `# AST_OK: key comparison` | 5 | Type tag key set comparisons (Phase 6c) |
-| `# AST_OK: constant whitelist` | 1 | VALID_TYPE_TAGS frozenset (Phase 6c) |
-
-**Total bypasses:** 33 instances across 12 files
-
-The 3 `bootstrap` bypasses are semantic debt (line numbers may drift):
-- `eval_seed.py` - 2 instances (substitute comprehensions)
-- `match_mu.py` - 1 instance (remaining comprehension)
-
-The 6 Phase 6c `AST_OK` markers are scaffolding (key comparison for type tags).
+| Category | Meaning |
+|----------|---------|
+| `# AST_OK: infra` | Infrastructure (CLI, tracing) - acceptable |
+| `# AST_OK: bootstrap` | Semantic debt - must become structural |
+| `# AST_OK: key comparison` | Type tag checks - scaffolding |
 
 ### Remaining Semantic Debt
 
-Functions still marked with `@host_recursion` or `@host_builtin` decorators:
-
-| Function | Marker | File | Path to Structural |
-|----------|--------|------|-------------------|
-| `_check_empty_var_names()` | @host_recursion | match_mu.py | Validation projection |
-| `bindings_to_dict()` | @host_builtin | match_mu.py | Conversion projection |
-| `dict_to_bindings()` | @host_builtin | match_mu.py | Conversion projection |
-| `match()` | @host_recursion | eval_seed.py | (already structural in match_mu) |
-| `substitute()` | @host_recursion | eval_seed.py | (already structural in subst_mu) |
-
-### Eliminated Semantic Debt (Phase 6)
-
-| Function | Was | Now | Phase |
-|----------|-----|-----|-------|
-| `normalize_for_match()` | @host_recursion | Iterative | 6c |
-| `denormalize_from_match()` | @host_recursion | Iterative | 6c |
-| `resolve_lookups()` | @host_builtin | Mu projection | 6a |
-| `lookup_binding()` | @host_builtin | Mu projection | 6a |
-| `is_dict_linked_list()` | @host_builtin | `classify_linked_list()` | 6b |
-| `is_kv_pair_linked()` | @host_builtin | Mu projection | 6b |
-
-**Note:** Cycle detection remains in normalize/denormalize (~28 lines) but is now inline in iterative code, not recursive.
+Functions still using host operations (see `debt_dashboard.sh` for current list):
+- `match()` / `substitute()` in eval_seed.py (reference implementations)
+- Conversion helpers in match_mu.py (`bindings_to_dict`, `dict_to_bindings`)
+- Empty var validation in match_mu.py
 
 ---
 
 ## Debt Ceiling Policy
 
-### Current State
-- **Tracked markers:** 11/14 (at ceiling)
-- **AST_OK bootstrap:** 3 (semantic debt, counted separately)
-- **AST_OK infra/key comparison:** 30 (scaffolding, acceptable)
-- **Total semantic debt:** 14 (11 tracked + 3 AST_OK)
+> **Current threshold/count: See `STATUS.md`**
 
 ### Policy
 
-1. **Marker ceiling is 14** - reduced from 23 after Phase 6a/6b/6c and PR #163 cleanup
+1. **Threshold can only decrease** (ratchet policy)
 2. **Track AST_OK: bootstrap separately** - these are semantic debt
 3. **Use existing markers** - no new marker systems needed
 4. **Ratchet only tightens** - threshold can only decrease, never increase
@@ -203,24 +168,19 @@ The key distinction: scaffolding is **mechanism** (how to run), semantic is **in
 
 ## Summary
 
-| Category | LOC | Status | Blocking |
-|----------|-----|--------|----------|
-| Scaffolding | ~150 | Acceptable | No |
-| Semantic (tracked) | ~200 | 11/14 ceiling | L2 |
-| Semantic (AST_OK) | 3 instances | Counted separately | L2 |
-| Semantic (unmarked) | 0 | All marked | L2 |
+> **For current counts, see `STATUS.md`.** Run `./tools/debt_dashboard.sh` for live counts.
 
-**Total semantic debt blocking L2:** ~150 lines (reduced from ~340 after Phase 6)
+| Category | Status | Blocking |
+|----------|--------|----------|
+| Scaffolding | Acceptable | No |
+| Semantic (tracked markers) | See STATUS.md | L2 |
+| Semantic (AST_OK bootstrap) | See STATUS.md | L2 |
 
-**Phase 6 debt reduction:**
-- Phase 6a: Lookup as Mu projections (~66 lines eliminated)
-- Phase 6b: Classification as Mu projections (~52 lines eliminated)
-- Phase 6c: Iterative normalization (~28 lines eliminated)
-- PR #163: Dead code removal (`resolve_lookups()` deleted, ~47 lines)
+**Debt is finite, bounded, and has a clear elimination path.** Remaining semantic debt is in:
+- `eval_seed.py` (match/substitute reference implementations)
+- `match_mu.py` (conversion helpers)
 
-This debt is finite, bounded, and has a clear elimination path. The remaining semantic debt is primarily in `eval_seed.py` (match/substitute core) and `match_mu.py` (conversion helpers). Kernel loop (Phase 7) requires L3 design.
-
-**LOC estimates are approximate** - actual counts may vary with code formatting. Use `grep` commands in grounding tests for verification.
+Kernel loop self-hosting (Phase 7) is tracked in TASKS.md.
 
 ---
 

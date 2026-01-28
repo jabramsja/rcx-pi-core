@@ -45,14 +45,45 @@ Use this to determine what standards apply NOW vs LATER:
 | Python recursion in algorithms | Semantic debt | FAIL - must use projections |
 | Unmarked host operations | Debt violation | FAIL - must mark with `@host_*` |
 
+## Phase 7 Blockers (Agent Findings - 2026-01-27)
+
+These must be resolved before promoting Phase 7 from VECTOR to NEXT:
+
+**Fuzzer agent (INSUFFICIENT for Phase 7):**
+- [ ] Create `tests/test_phase7_readiness_fuzzer.py` (~300 lines):
+  - [ ] Seed projection coverage (no unintended stalls)
+  - [ ] Kernel trace integrity (traces are replay-complete)
+  - [ ] Kernel state injection resistance (domain data can't forge `_mode`/`_phase`)
+- [ ] Add non-linear pattern fuzzer tests
+
+**Grounding agent (13 claims UNGROUNDED):**
+- [ ] Seed projection count tests (match=7, subst=12, classify=6)
+- [ ] Seed schema validation tests (id, pattern, body required)
+- [ ] Type tag security tests (whitelist enforcement)
+
+**Adversary agent (SECURE, recommendations):**
+- [ ] Add projection order regression test (first-match-wins is security-critical)
+- [ ] Consider seed checksum update tool for operational security
+- [ ] Document classify_mu.py string key assumption as known limitation
+
+**Expert agent (COULD_SIMPLIFY):**
+- [ ] Consolidate projection loader pattern (~45 lines duplication)
+- [ ] Consolidate runner pattern (~90 lines duplication)
+- [ ] Move test-only helpers out of match_mu.py (~70 lines)
+
+**Structural-proof agent:**
+- [x] L1 claims PROVEN (match_mu, subst_mu, classify use projections)
+- [ ] Verify L2 design structurally sound before implementation
+
 ## Key Files
 
 - Design doc: `docs/core/MetaCircularKernel.v0.md`
 - Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
 - Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`
 - Task list: `TASKS.md`
+- Grounding tests: `tests/structural/test_status_md_grounding.py`
 
 ---
 
 **Last updated:** 2026-01-27
-**Next milestone:** Phase 7 promotion from VECTOR to NEXT
+**Next milestone:** Phase 7 promotion from VECTOR to NEXT (requires blockers resolved)

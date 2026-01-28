@@ -293,73 +293,65 @@ We follow the same pattern for match and substitute.
 
 **6. subst.wrap** - Entry point
 
-### Total Projection Count
+### Seed Projection Counts
 
-| Component | Projections |
-|-----------|-------------|
-| Match     | 6-8         |
-| Substitute| 5-6         |
-| Lookup    | 2-3         |
-| **Total** | **13-17**   |
+> **Verified by grounding tests in `tests/structural/test_seed_counts.py`**
 
-This aligns with the Expert agent's estimate of 10-15 projections.
+| Seed | File | Projections |
+|------|------|-------------|
+| Match | `seeds/match.v1.json` | (see grounding tests) |
+| Substitute | `seeds/subst.v1.json` | (see grounding tests) |
+| Classify | `seeds/classify.v1.json` | (see grounding tests) |
+
+Grounding tests fail if seed files change. This prevents doc drift.
 
 ## Phased Implementation
 
+> **Test counts are not hardcoded here.** Run `pytest --collect-only` to see current counts.
+> Grounding tests verify structural claims; pytest verifies test existence.
+
 ### Phase 4a: Match as Mu ✅ COMPLETE
-- 12 match projections in `seeds/match.v1.json`
+- Match projections in `seeds/match.v1.json`
 - Implementation: `rcx_pi/match_mu.py`
-- 23 parity tests in `tests/test_match_parity.py`
+- Parity tests in `tests/test_match_parity.py`
 
 ### Phase 4b: Substitute as Mu ✅ COMPLETE
-- 9 substitute projections in `seeds/subst.v1.json`
+- Substitute projections in `seeds/subst.v1.json`
 - Implementation: `rcx_pi/subst_mu.py`
-- 17 parity tests in `tests/test_subst_parity.py`
+- Parity tests in `tests/test_subst_parity.py`
 
 ### Phase 4c: Binding Lookup ✅ COMPLETE
 - Integrated into substitute projections (no separate seed needed)
 - Lookup done via linked list traversal in subst projections
 
 ### Phase 4d: Integration Testing ✅ COMPLETE
-- 67 total tests verifying match_mu + subst_mu work together:
-  - `tests/test_apply_mu_integration.py` - 28 parity tests
-  - `tests/structural/test_apply_mu_grounding.py` - 27 structural tests
-  - `tests/test_apply_mu_fuzzer.py` - 12 property-based tests (Hypothesis)
-- Shared utility: `apply_mu()` in `tests/conftest.py`
-- Agent review: verifier=APPROVE, adversary=HARDENED, expert=ACCEPTABLE
+- Integration tests in `tests/test_apply_mu_integration.py`
+- Structural tests in `tests/structural/test_apply_mu_grounding.py`
+- Fuzzer tests in `tests/test_apply_mu_fuzzer.py`
 
 ### Phase 5: Self-Hosting ✅ COMPLETE
 - `rcx_pi/step_mu.py`: `apply_mu()`, `step_mu()`, `run_mu()`
-- Implementation: step_mu uses match_mu + subst_mu (Mu projections, not Python recursion)
-- `tests/test_step_mu_parity.py`: 22 parity tests verifying step_mu == step
-- `tests/test_self_hosting_v0.py`: 11 self-hosting tests including trace comparison
-- Critical test: `test_self_hosting_complete` - Python trace == Mu trace
-- Note: Operations (match/subst) are self-hosted; kernel loop is still Python for-loop (Phase 6+ goal)
+- step_mu uses match_mu + subst_mu (Mu projections, not Python recursion)
+- Parity tests in `tests/test_step_mu_parity.py`
+- Self-hosting tests in `tests/test_self_hosting_v0.py`
+- Note: Operations (match/subst) are self-hosted; kernel loop is still Python (see STATUS.md L1/L2)
 
 ### Phase 6a: Lookup as Mu Projections ✅ COMPLETE
-- Added `subst.lookup.found` and `subst.lookup.next` projections to `seeds/subst.v1.json`
-- Lookup is now structural: pattern matching with non-linear vars (same name binds same value)
-- Removed 2 `@host_builtin` decorators from `subst_mu.py`
-- 37 subst parity tests pass with structural lookup
+- Added `subst.lookup.found` and `subst.lookup.next` projections
+- Lookup is structural: pattern matching with non-linear vars
+- Subst parity tests pass with structural lookup
 
 ### Phase 6b: Classification as Mu Projections ✅ COMPLETE
-- Created `seeds/classify.v1.json` with 6 projections for linked list classification
-- Created `rcx_pi/selfhost/classify_mu.py` for projection-based classification
-- `denormalize_from_match()` uses `classify_linked_list()` instead of `is_dict_linked_list()`
-- Classification distinguishes dict-encoding (all kv-pairs with string keys) from list-encoding
-- Removed 2 `@host_builtin` decorators from `match_mu.py`
-- 26 tests in `tests/test_classify_mu.py`
+- Created `seeds/classify.v1.json` for linked list classification
+- Created `rcx_pi/selfhost/classify_mu.py`
+- Classification distinguishes dict-encoding from list-encoding
+- Tests in `tests/test_classify_mu.py`
 
 ### Phase 6c: Type Tags and Iterative Normalization ✅ COMPLETE
-- **Iterative normalization**: `normalize_for_match()` and `denormalize_from_match()` converted from recursive to iterative with explicit stack
-- Removed 2 `@host_recursion` decorators from `match_mu.py`
-- **Type tags** resolve list/dict ambiguity (previously `[["a", 1]]` and `{"a": 1}` normalized identically):
-  - Lists get `_type: "list"`, dicts get `_type: "dict"` at root node
-  - `VALID_TYPE_TAGS` whitelist + `validate_type_tag()` for security
-  - New projections: `match.typed.descend`, `subst.typed.{descend,sibling,ascend}`
-- `classify_linked_list()` fast-path for type-tagged structures
-- 24 new property-based fuzzer tests (`tests/test_type_tags_fuzzer.py`)
-- All 1022 self-hosting tests pass
+- `normalize_for_match()` and `denormalize_from_match()` are now iterative
+- Type tags (`_type: "list"` / `_type: "dict"`) resolve list/dict ambiguity
+- `VALID_TYPE_TAGS` whitelist for security
+- Fuzzer tests in `tests/test_type_tags_fuzzer.py`
 
 ## Resolved Questions
 
