@@ -57,12 +57,12 @@ These must be resolved before promoting Phase 7 from VECTOR to NEXT:
 - [ ] Add non-linear pattern fuzzer tests
 
 **Grounding agent (13 claims UNGROUNDED):**
-- [ ] Seed projection count tests (match=7, subst=12, classify=6)
-- [ ] Seed schema validation tests (id, pattern, body required)
-- [ ] Type tag security tests (whitelist enforcement)
+- [x] Seed projection count tests (match=7, subst=12, classify=6, eval=7)
+- [x] Seed schema validation tests (id, pattern, body required)
+- [x] Type tag security tests (whitelist enforcement)
 
 **Adversary agent (SECURE, recommendations):**
-- [ ] Add projection order regression test (first-match-wins is security-critical)
+- [x] Add projection order regression test (first-match-wins is security-critical)
 - [ ] Consider seed checksum update tool for operational security
 - [ ] Document classify_mu.py string key assumption as known limitation
 
@@ -79,9 +79,9 @@ These must be resolved before promoting Phase 7 from VECTOR to NEXT:
 
 - Design doc: `docs/core/MetaCircularKernel.v0.md`
 - Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
-- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`
+- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`, `seeds/eval.v1.json`
 - Task list: `TASKS.md`
-- Grounding tests: `tests/structural/test_status_md_grounding.py`
+- Grounding tests: `tests/structural/` (status, seeds, type tags, projection order)
 
 ---
 
