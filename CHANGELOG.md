@@ -5,6 +5,14 @@ All notable changes to RCX are documented in this file.
 ## 2026-01-28
 
 ### Self-Hosting
+- **Phase 7d-1: Wire step_mu to Structural Kernel** (NEW)
+  - `step_mu()` now uses structural kernel projections instead of Python for-loop
+  - Added `step_kernel_mu()` - the structural kernel implementation
+  - Added helpers: `list_to_linked()`, `normalize_projection()`, `load_combined_kernel_projections()`
+  - Kernel uses linked-list cursor for iteration (no arithmetic)
+  - Debt reduced: 15 → 14 (removed @host_iteration from step_mu)
+  - Behavioral change: unbound variables now stall instead of raising KeyError
+
 - **Phase 7a: Kernel Projections Seed**
   - Created `seeds/kernel.v1.json` with 7 kernel projections
   - Projections: kernel.wrap, kernel.stall, kernel.try, kernel.match_success, kernel.match_fail, kernel.subst_success, kernel.unwrap

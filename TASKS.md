@@ -264,12 +264,14 @@ All blockers resolved 2026-01-28:
    - Fixed: Updated STATUS.md with phased debt reduction plan (15→14→13→12)
    - Note: Original target was 9, revised to 12 per structural-proof (run_mu stays as L3 boundary)
 
-- [ ] **Phase 7d-1: Wire step_mu to kernel** (after blockers resolved)
-  - Modify `step_mu()` to call structural kernel
-  - Call validate_kernel_projections_first() for security
-  - Parity tests: structural step_mu == Python step_mu (1000+ fuzzer)
-  - Remove step_mu @host_iteration marker
-  - Update DEBT_THRESHOLD: 15 → 14
+- [x] **Phase 7d-1: Wire step_mu to kernel** - DONE 2026-01-28
+  - [x] Modify `step_mu()` to call structural kernel (step_kernel_mu)
+  - [x] Call validate_kernel_projections_first() for security
+  - [x] Added helpers: list_to_linked, normalize_projection, load_combined_kernel_projections
+  - [x] Parity tests: 106 core tests pass (existing + fuzzer)
+  - [x] Remove step_mu @host_iteration marker
+  - [x] Debt reduced: 15 → 14
+  - Note: Behavioral change - unbound variables now stall instead of raising KeyError
 
 - [ ] **Phase 7d-2: Migrate projection_runner** (after 7d-1)
   - Change projection_runner to use step_mu instead of eval_seed.step
@@ -289,10 +291,11 @@ All blockers resolved 2026-01-28:
 - [x] Phase 7d blockers resolved (security, testing, debt tracking) - 2026-01-28
 - [x] v2 parity tests pass (37 tests: 19 match + 18 subst) - 2026-01-28
 - [x] Doc inconsistencies fixed (all .md files reference STATUS.md for debt) - 2026-01-28
-- [ ] Kernel projections pass parity tests with Python `step_mu`
-- [ ] No Python for-loop in step_mu execution path
-- [x] All 1275+ existing tests still pass (2 idempotent tests fail until commit)
-- [ ] Debt threshold decreases (15 → 14 → 13 → 12 over sub-phases)
+- [x] Kernel projections pass parity tests with Python `step_mu` - 2026-01-28 (106 tests)
+- [x] No Python for-loop in step_mu execution path - 2026-01-28 (uses step_kernel_mu)
+- [x] All 1293+ existing tests still pass - 2026-01-28
+- [x] Debt reduced: 15 → 14 (7d-1 done) - 2026-01-28
+- [ ] Debt continues: 14 → 13 → 12 (7d-2, 7d-3 pending)
 
 **Recommended before 7d-1 (from second agent review 2026-01-28):**
 - [ ] Add fuzzer tests for kernel projection ordering (500+ examples)

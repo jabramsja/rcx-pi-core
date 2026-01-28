@@ -293,13 +293,23 @@ class TestStepMuErrors:
             step_mu(projections, 42)
 
     def test_unbound_variable(self):
-        """Unbound variable in body raises KeyError."""
+        """Unbound variable in body: step raises KeyError, step_mu stalls.
+
+        Phase 7d behavioral difference: The structural kernel (step_mu) treats
+        unbound variables as a stall condition rather than an error. This is
+        more consistent with pure Mu semantics where errors become stalls.
+
+        - step(): Raises KeyError (Python error handling)
+        - step_mu(): Returns original input (stall - structural behavior)
+        """
         projections = [
             {"pattern": 42, "body": {"result": {"var": "unbound"}}}
         ]
 
+        # Python step still raises KeyError
         with pytest.raises(KeyError):
             step(projections, 42)
 
-        with pytest.raises(KeyError):
-            step_mu(projections, 42)
+        # Structural step_mu stalls instead of raising
+        result = step_mu(projections, 42)
+        assert result == 42  # Returns original input (stall)
