@@ -1,16 +1,17 @@
 name: CI
 
-on: [push, pull_request]
+# Light gate - push only (feature branch feedback)
+# PRs to dev are handled by green_gate.yml (more comprehensive)
+on:
+  push:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Skip on PRs to dev - green_gate.yml covers those more comprehensively
-    if: ${{ !(github.event_name == 'pull_request' && github.base_ref == 'dev') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
