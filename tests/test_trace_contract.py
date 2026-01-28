@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 
@@ -10,6 +11,7 @@ def _run(cmd, stdin: str | None = None) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
     return p.stdout.strip() + "\n"
 

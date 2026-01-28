@@ -1,12 +1,16 @@
 name: PR Verification Reminder
 
+concurrency:
+  group: pr-reminder-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
     types: [opened, synchronize]
     paths:
-      - 'rcx_pi/kernel.py'
-      - 'rcx_pi/eval_seed.py'
-      - 'rcx_pi/mu_type.py'
+      - 'rcx_pi/selfhost/kernel.py'
+      - 'rcx_pi/selfhost/eval_seed.py'
+      - 'rcx_pi/selfhost/mu_type.py'
 
 jobs:
   remind:
@@ -27,13 +31,13 @@ jobs:
           EVAL_SEED_CHANGED=false
           MU_TYPE_CHANGED=false
 
-          if echo "$CHANGED" | grep -q "rcx_pi/kernel.py"; then
+          if echo "$CHANGED" | grep -q "rcx_pi/selfhost/kernel.py"; then
             KERNEL_CHANGED=true
           fi
-          if echo "$CHANGED" | grep -q "rcx_pi/eval_seed.py"; then
+          if echo "$CHANGED" | grep -q "rcx_pi/selfhost/eval_seed.py"; then
             EVAL_SEED_CHANGED=true
           fi
-          if echo "$CHANGED" | grep -q "rcx_pi/mu_type.py"; then
+          if echo "$CHANGED" | grep -q "rcx_pi/selfhost/mu_type.py"; then
             MU_TYPE_CHANGED=true
           fi
 
@@ -53,9 +57,9 @@ jobs:
             const muTypeChanged = '${{ steps.check.outputs.mu_type }}' === 'true';
 
             let files = [];
-            if (kernelChanged) files.push('`rcx_pi/kernel.py`');
-            if (evalSeedChanged) files.push('`rcx_pi/eval_seed.py`');
-            if (muTypeChanged) files.push('`rcx_pi/mu_type.py`');
+            if (kernelChanged) files.push('`rcx_pi/selfhost/kernel.py`');
+            if (evalSeedChanged) files.push('`rcx_pi/selfhost/eval_seed.py`');
+            if (muTypeChanged) files.push('`rcx_pi/selfhost/mu_type.py`');
 
             const body = `## 🔍 Verification Agents Recommended
 

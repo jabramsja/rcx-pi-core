@@ -41,4 +41,4 @@ fi
 echo
 
 echo "-- Truth Gate --"
-python3 -m pytest -q
+PYTHONHASHSEED=0 python3 -m pytest -q

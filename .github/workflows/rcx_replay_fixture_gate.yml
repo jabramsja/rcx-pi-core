@@ -21,4 +21,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Replay fixture gate
+        env:
+          PYTHONHASHSEED: "0"
         run: ./scripts/check_replay_fixture.sh

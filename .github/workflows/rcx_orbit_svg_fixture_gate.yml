@@ -21,4 +21,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Orbit SVG fixture gate (semantic)
+        env:
+          PYTHONHASHSEED: "0"
         run: ./scripts/check_orbit_svg_fixture.sh

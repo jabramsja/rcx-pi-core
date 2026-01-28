@@ -21,7 +21,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Build artifacts
+        env:
+          PYTHONHASHSEED: "0"
         run: ./scripts/build_orbit_artifacts.sh
 
       - name: Index semantic gate
+        env:
+          PYTHONHASHSEED: "0"
         run: ./scripts/check_orbit_index_fixture.sh

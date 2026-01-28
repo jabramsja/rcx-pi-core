@@ -23,4 +23,6 @@ jobs:
           python-version: "3.x"
 
       - name: Orbit DOT fixture gate
+        env:
+          PYTHONHASHSEED: "0"
         run: ./scripts/check_orbit_dot_fixture.sh
