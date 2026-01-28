@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
+export PYTHONHASHSEED=0
+
 # ============================================================================
 # FULL AUDIT - CI standard (~4-6 minutes with parallel, ~10+ without)
 # ============================================================================
@@ -30,7 +33,7 @@ test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --por
 echo "== 1) Full suite (hash-seeded) =="
 # NOTE: This runs ALL tests including IndependentEncounter, Enginenews, etc.
 # No need for separate -k filter runs - they're subsets of the full suite.
-PYTHONHASHSEED=0 pytest $PARALLEL_FLAG -q
+pytest $PARALLEL_FLAG -q
 test -z "$(git status --porcelain)" || { echo "Dirty after pytest"; git status --porcelain; exit 1; }
 
 echo "== 2) Semantic purity audit (self-hosting readiness) =="
@@ -85,7 +88,7 @@ for f in "${fixtures[@]}"; do
   echo "== $f =="
 
   out="$(
-    PYTHONHASHSEED=0 python3 -m rcx_pi.rcx_cli replay \
+    python3 -m rcx_pi.rcx_cli replay \
       --trace "$f" --check-canon --print-exec-summary 2>&1
   )"
 

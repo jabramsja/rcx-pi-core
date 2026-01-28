@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
+export PYTHONHASHSEED=0
+
 # ============================================================================
 # FAST AUDIT - For local development iteration (~2 minutes)
 # ============================================================================
@@ -46,7 +49,7 @@ echo "== 4) Core structural tests (parallel if available) =="
 # Run core algorithm tests - these are the most important for local iteration
 # Skip fuzzer tests (those run 500-1000 examples each, slow locally)
 # Core tests: match, subst, step, kernel, eval_seed, mu_type
-PYTHONHASHSEED=0 pytest $PARALLEL_FLAG -q \
+pytest $PARALLEL_FLAG -q \
     tests/structural/ \
     tests/test_match_parity.py \
     tests/test_match_v2_parity.py \

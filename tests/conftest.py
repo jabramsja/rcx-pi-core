@@ -88,7 +88,16 @@ collect_ignore = [
 
 
 def pytest_configure(config):
-    """Enable projection coverage if RCX_PROJECTION_COVERAGE is set."""
+    """Configure pytest: enforce determinism, enable coverage if requested."""
+    # Enforce PYTHONHASHSEED=0 for deterministic dict ordering
+    hashseed = os.environ.get("PYTHONHASHSEED")
+    if hashseed != "0":
+        raise RuntimeError(
+            f"PYTHONHASHSEED must be '0' for deterministic tests, got {hashseed!r}. "
+            "Run with: PYTHONHASHSEED=0 pytest ..."
+        )
+
+    # Enable projection coverage if requested
     if os.environ.get("RCX_PROJECTION_COVERAGE") == "1":
         from rcx_pi.projection_coverage import coverage
         coverage.enable()

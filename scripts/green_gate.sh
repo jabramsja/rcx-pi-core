@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
+export PYTHONHASHSEED=0
+
 # Resolve repo root no matter where this script lives
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -25,7 +28,7 @@ run_python() {
   echo
   echo "[PY 2/2] Python test suite"
 
-  PYTHONHASHSEED=0 python3 -m pytest $PARALLEL_FLAG
+  python3 -m pytest $PARALLEL_FLAG
 echo
 echo "[PY] CLI smoke (end-to-end entrypoints)"
 python3 scripts/cli_smoke.py
