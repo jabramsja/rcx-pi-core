@@ -87,19 +87,23 @@ These must be resolved before promoting Phase 7 from VECTOR to NEXT:
 
 ## Recommended Next Action
 
-**Status:** Phase 7 PROMOTED to NEXT (2026-01-27). Implementation authorized.
+**Status:** Phase 7a COMPLETE (2026-01-27). Ready for Phase 7b.
+
+**Completed:**
+- [x] Created `seeds/kernel.v1.json` with 7 kernel projections
+- [x] 30 manual trace tests pass (success, failure, empty, fallthrough)
+- [x] Projection order regression tests pass
 
 **Do:**
-- Begin Phase 7a: Create `seeds/kernel.v1.json` with 7 projections
-- Write manual trace tests (success, failure, empty projections)
-- Add projection order regression test
+- Begin Phase 7b: Add `_match_ctx` passthrough to match.v2.json
+- Add `_subst_ctx` passthrough to subst.v2.json
+- Run parity tests (v2 seeds == v1 behavior)
 
 **Do NOT:**
-- Skip manual trace validation before Phase 7b
-- Modify existing match/subst seeds without parity tests
-- Skip the NEXT → Ra promotion process
+- Modify match.v1.json or subst.v1.json directly (copy to v2 first)
+- Skip parity tests before integration
 
 ---
 
 **Last updated:** 2026-01-27
-**Next milestone:** Phase 7a complete (kernel projections seed + manual trace tests)
+**Next milestone:** Phase 7b complete (match/subst context passthrough)
