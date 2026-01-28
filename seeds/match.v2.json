@@ -1,0 +1,197 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "MATCH_SEED_V2",
+    "description": "Pattern matching with kernel context passthrough for Phase 7b",
+    "doc": "docs/core/MetaCircularKernel.v0.md",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "No host recursion - kernel loop provides iteration",
+      "Deterministic: same input -> same output",
+      "Linear patterns only (no conflict detection)",
+      "_match_ctx passes through unchanged for kernel integration"
+    ]
+  },
+  "projections": [
+    {
+      "id": "match.done",
+      "description": "Focus null, stack empty -> match succeeded, return bindings with kernel-compatible output",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": null,
+        "value_focus": null,
+        "bindings": {"var": "b"},
+        "stack": null,
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "_mode": "match_done",
+        "_status": "success",
+        "_bindings": {"var": "b"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.sibling",
+      "description": "After matching head, move to tail (sibling)",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": null,
+        "value_focus": null,
+        "bindings": {"var": "b"},
+        "stack": {
+          "head": {
+            "type": "pair",
+            "pattern_rest": {"var": "pt"},
+            "value_rest": {"var": "vt"}
+          },
+          "tail": {"var": "rest"}
+        },
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": {"var": "pt"},
+        "value_focus": {"var": "vt"},
+        "bindings": {"var": "b"},
+        "stack": {"var": "rest"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.equal",
+      "description": "Pattern equals value (non-linear: same var binds same value) - clears focus",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"var": "same"},
+        "value_focus": {"var": "same"},
+        "bindings": {"var": "b"},
+        "stack": {"var": "s"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": null,
+        "value_focus": null,
+        "bindings": {"var": "b"},
+        "stack": {"var": "s"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.var",
+      "description": "Variable site binds to any value",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"var": {"var": "name"}},
+        "value_focus": {"var": "value"},
+        "bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": null,
+        "value_focus": null,
+        "bindings": {
+          "name": {"var": "name"},
+          "value": {"var": "value"},
+          "rest": {"var": "bindings"}
+        },
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.typed.descend",
+      "description": "Descend into type-tagged head/tail structure (requires matching _type)",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"_type": {"var": "type"}, "head": {"var": "ph"}, "tail": {"var": "pt"}},
+        "value_focus": {"_type": {"var": "type"}, "head": {"var": "vh"}, "tail": {"var": "vt"}},
+        "bindings": {"var": "b"},
+        "stack": {"var": "s"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": {"var": "ph"},
+        "value_focus": {"var": "vh"},
+        "bindings": {"var": "b"},
+        "stack": {
+          "head": {
+            "type": "pair",
+            "pattern_rest": {"var": "pt"},
+            "value_rest": {"var": "vt"}
+          },
+          "tail": {"var": "s"}
+        },
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.dict.descend",
+      "description": "Descend into head/tail structure (both pattern and value)",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"head": {"var": "ph"}, "tail": {"var": "pt"}},
+        "value_focus": {"head": {"var": "vh"}, "tail": {"var": "vt"}},
+        "bindings": {"var": "b"},
+        "stack": {"var": "s"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": {"var": "ph"},
+        "value_focus": {"var": "vh"},
+        "bindings": {"var": "b"},
+        "stack": {
+          "head": {
+            "type": "pair",
+            "pattern_rest": {"var": "pt"},
+            "value_rest": {"var": "vt"}
+          },
+          "tail": {"var": "s"}
+        },
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.fail",
+      "description": "Catch-all: any match state not caught by progress projections = failure",
+      "note": "First-match-wins ordering ensures this only fires on actual failures",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"var": "pf"},
+        "value_focus": {"var": "vf"},
+        "bindings": {"var": "_"},
+        "stack": {"var": "_"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "_mode": "match_done",
+        "_status": "no_match",
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "match.wrap",
+      "description": "Entry point - wrap raw match request into state (must be last)",
+      "pattern": {
+        "match": {
+          "pattern": {"var": "p"},
+          "value": {"var": "v"}
+        },
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": {"var": "p"},
+        "value_focus": {"var": "v"},
+        "bindings": null,
+        "stack": null,
+        "_match_ctx": {"var": "ctx"}
+      }
+    }
+  ]
+}
