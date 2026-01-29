@@ -3,28 +3,32 @@
 # Install: ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 #
 # This hook:
-# 1. Runs check_docs_consistency.sh (validates STATUS.md matches reality)
-# 2. Checks debt ceiling is not exceeded
+# 1. Runs check_docs_consistency.sh (validates STATUS.md matches reality) - BLOCKS on failure
+# 2. Checks debt ceiling is not exceeded - BLOCKS on failure
 # 3. Warns if rcx_pi/ or seeds/ changed but STATUS.md wasn't touched
 #
-# All checks are WARNINGS, not blockers. CI runs pytest and catches real issues.
 # Use --no-verify to skip entirely (not recommended).
 
 set -e
 
 cd "$(dirname "$0")/../.." 2>/dev/null || cd "$(git rev-parse --show-toplevel)"
 
-# === 1. Run doc consistency validation ===
+FAILED=0
+
+# === 1. Run doc consistency validation (BLOCKING) ===
 if [ -f "./tools/check_docs_consistency.sh" ]; then
+    echo "Running doc consistency check..."
     if ! ./tools/check_docs_consistency.sh 2>/dev/null; then
         echo ""
-        echo "⚠️  Doc consistency check found issues (see above)"
-        echo "   CI will catch this - but consider fixing now"
+        echo "❌ Doc consistency check FAILED"
+        echo "   Run ./tools/check_docs_consistency.sh to see details"
+        echo "   Fix inconsistencies before committing"
         echo ""
+        FAILED=1
     fi
 fi
 
-# === 2. Check debt ceiling ===
+# === 2. Check debt ceiling (BLOCKING) ===
 if [ -f "./tools/debt_dashboard.sh" ]; then
     DEBT_JSON=$(./tools/debt_dashboard.sh --json 2>/dev/null || echo '{}')
     CURRENT=$(echo "$DEBT_JSON" | grep -o '"total_semantic": [0-9]*' | grep -o '[0-9]*' || echo "0")
@@ -32,34 +36,38 @@ if [ -f "./tools/debt_dashboard.sh" ]; then
 
     if [ "$CURRENT" -gt "$THRESHOLD" ]; then
         echo ""
-        echo "🚨 DEBT CEILING EXCEEDED: $CURRENT > $THRESHOLD"
+        echo "❌ DEBT CEILING EXCEEDED: $CURRENT > $THRESHOLD"
         echo "   Run ./tools/debt_dashboard.sh to see debt locations"
         echo "   Fix debt or update threshold in STATUS.md before committing"
         echo ""
+        FAILED=1
     fi
 fi
 
-# === 2. Get staged files ===
+# === 3. Get staged files ===
 STAGED_FILES=$(git diff --cached --name-only)
 
 RCX_CHANGED=$(echo "$STAGED_FILES" | grep -E '^rcx_pi/' || true)
 SEEDS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^seeds/' || true)
 STATUS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^STATUS\.md$' || true)
+TASKS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^TASKS\.md$' || true)
+TESTS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^tests/' || true)
 
-# === 3. Warn if core code changed without STATUS.md ===
+# === 4. Warn if core code changed without STATUS.md (warning only) ===
 if [ -n "$RCX_CHANGED" ] || [ -n "$SEEDS_CHANGED" ]; then
-    if [ -z "$STATUS_CHANGED" ]; then
+    if [ -z "$STATUS_CHANGED" ] && [ -z "$TASKS_CHANGED" ]; then
         echo ""
-        echo "⚠️  Core code changed but STATUS.md was not updated"
-        echo ""
-        echo "Changed files:"
-        [ -n "$RCX_CHANGED" ] && echo "$RCX_CHANGED" | sed 's/^/  /'
-        [ -n "$SEEDS_CHANGED" ] && echo "$SEEDS_CHANGED" | sed 's/^/  /'
-        echo ""
-        echo "CI will run grounding tests - they'll fail if docs drift."
+        echo "⚠️  Doc Sync reminder:"
+        echo "   You staged code/tests changes but didn't stage TASKS.md / README.md / docs/*."
+        echo "   If this PR completes a task or changes behavior, consider updating the trackers."
         echo ""
     fi
 fi
 
-# Always allow commit - CI catches real issues
+# Exit with failure if any blocking check failed
+if [ "$FAILED" -eq 1 ]; then
+    echo "Pre-commit checks failed. Use --no-verify to bypass (not recommended)."
+    exit 1
+fi
+
 exit 0
