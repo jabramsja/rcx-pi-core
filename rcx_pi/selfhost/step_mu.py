@@ -103,6 +103,66 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
 
 
 # =============================================================================
+# Kernel Boundary Security (Phase 7d - Adversary Review Fix)
+# =============================================================================
+
+# Fields reserved for kernel internal state - domain data cannot contain these
+KERNEL_RESERVED_FIELDS = frozenset({  # AST_OK: security whitelist - frozen constant
+    "_mode", "_phase", "_input", "_remaining",
+    "_match_ctx", "_subst_ctx", "_kernel_ctx",
+    "_status", "_result", "_stall",
+    "_step", "_projs"  # Kernel entry format fields (Phase 8b adversary fix)
+})
+
+
+def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth: int = 0) -> None:
+    """
+    Validate that a value does not contain kernel-reserved fields (DEEP).
+
+    SECURITY: Prevents domain data from forging kernel state by including
+    fields like _mode, _match_ctx, etc. If domain input contains these
+    at ANY nesting level, it could potentially confuse the kernel state machine.
+
+    Phase 8b fix: Now checks recursively to prevent nested smuggling attacks.
+    Attack vector blocked: {"outer": {"_mode": "done", "_result": "pwned"}}
+
+    This validation is called at the kernel entry point (step_kernel_mu)
+    to ensure domain inputs are clean at all depths.
+
+    Args:
+        value: The Mu value to validate.
+        context: Description for error message (e.g., "input", "projection body").
+        _depth: Internal recursion depth tracker (prevents stack overflow).
+
+    Raises:
+        ValueError: If value contains kernel-reserved fields at any depth.
+    """
+    # Depth guard - FAIL CLOSED on pathological inputs (Phase 8b expert fix)
+    # Adversary model: Domain inputs may be untrusted (e.g., from network).
+    # Trade-off: Depth 100 allows reasonable nesting but prevents stack overflow.
+    # Security: Fail CLOSED (reject) rather than open (trust).
+    MAX_VALIDATION_DEPTH = 100  # AST_OK: bootstrap constant - stack guard
+    if _depth > MAX_VALIDATION_DEPTH:
+        raise ValueError(
+            f"SECURITY: {context} exceeded maximum validation depth ({MAX_VALIDATION_DEPTH}). "
+            f"Possible deeply nested attack structure."
+        )
+
+    if isinstance(value, dict):
+        for key, val in value.items():
+            if key in KERNEL_RESERVED_FIELDS:
+                raise ValueError(
+                    f"SECURITY: {context} cannot contain kernel-reserved field: {key}. "
+                    f"Reserved fields: {sorted(KERNEL_RESERVED_FIELDS)}"
+                )
+            # Recurse into nested values
+            validate_no_kernel_reserved_fields(val, context, _depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            validate_no_kernel_reserved_fields(item, context, _depth + 1)
+
+
+# =============================================================================
 # Structural Kernel Helpers (Phase 7d)
 # =============================================================================
 
@@ -261,8 +321,12 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
 
     Raises:
         ValueError: If kernel projections appear after domain projections (security).
+        ValueError: If input contains kernel-reserved fields (security).
     """
     assert_mu(input_value, "step_kernel_mu.input")
+
+    # SECURITY: Validate input doesn't contain kernel-reserved fields
+    validate_no_kernel_reserved_fields(input_value, "step_kernel_mu input")
 
     # SECURITY: Validate projection order
     validate_kernel_projections_first(projections)

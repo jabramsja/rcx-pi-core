@@ -59,10 +59,11 @@ Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
 | Tier 2 | All tests including 200+ example fuzzers | Before push, CI |
 | Tier 3 | Deep nesting, wide structures, pathological inputs | Comprehensive validation |
 
-**Fuzzer Settings (fixed 2026-01-28):**
-- `max_depth=3` in test generators (prevents pathological nesting after normalization)
-- `deadline=5000` on all fuzzer tests (5 second timeout per example)
-- Stress tests use `deadline=30000-60000` for deep edge cases
+**Fuzzer Settings (standardized 2026-01-28):**
+- `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
+- `deadline=5000` on ALL fuzzer tests (5 second timeout per example)
+- Stress tests use `deadline=10000-30000` for deep edge cases
+- Files standardized: test_bootstrap_fuzzer.py, test_selfhost_fuzzer.py, test_type_tags_fuzzer.py, test_apply_mu_fuzzer.py, test_phase8b_fuzzer.py, test_phase7_readiness_fuzzer.py
 
 **For fast local iteration:**
 ```bash
@@ -75,7 +76,7 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 
 ```
 THRESHOLD: 15
-CURRENT: 14 (11 tracked + 3 AST_OK)
+CURRENT: 15 (11 tracked + 4 AST_OK)
 TARGET: 12 (deferred to Phase 8c+)
 ```
 
@@ -84,7 +85,10 @@ TARGET: 12 (deferred to Phase 8c+)
 - @host_builtin: 3 (eval_seed, deep_eval)
 - @host_iteration: 3 (run_mu, step_kernel_mu, projection_runner)
 - @host_mutation: 2 (eval_seed, deep_eval)
-- AST_OK bootstrap: 3
+- AST_OK bootstrap: 4 (includes MAX_VALIDATION_DEPTH stack guard)
+
+**Note on boundary scaffolding:**
+The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match, bindings_to_dict, etc.) are NOT counted as debt. These are Python API conversion functions that convert between Python types and Mu linked lists at the boundary. They are explicitly documented as "boundary scaffolding" in their docstrings. Boundary scaffolding is expected to remain indefinitely as part of the Python API layer - it's not a target for structural replacement.
 
 **Phase 8b outcome (2026-01-28):**
 - Simplified step_kernel_mu to MECHANICAL operation (no semantic branching)
@@ -92,7 +96,8 @@ TARGET: 12 (deferred to Phase 8c+)
 - Added `extract_kernel_result()` - mechanical unpacking
 - Loop body: ~35 lines → ~15 lines
 - eval_step reclassified as BOOTSTRAP_PRIMITIVE (not debt)
-- Net debt change: 15 → 14
+- Deep validation fix: `validate_no_kernel_reserved_fields()` now recursive (adversary review)
+- Net debt: 15 (MAX_VALIDATION_DEPTH stack guard added)
 
 **Phase 7d-2/7d-3 PAUSED:**
 - Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
@@ -143,6 +148,20 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 **Structural-proof agent:**
 - [x] L1 claims PROVEN (match_mu, subst_mu, classify use projections)
 - [x] L2 design verified structurally sound (linked-list cursor, context passthrough, meta-circularity confirmed 2026-01-27)
+
+**Additional tests (2026-01-28):**
+- [x] `tests/structural/test_projection_loader.py` - Factory loader tests (36 tests)
+- [x] `tests/structural/test_projection_runner.py` - Factory runner tests (33 tests)
+- [x] `tests/test_kernel_loop_fuzzer.py` - L2 kernel iteration fuzz tests (16 tests)
+- [x] `tests/test_context_passthrough_fuzzer.py` - Context preservation fuzz tests (12 tests)
+- [x] `tests/structural/test_step_mu_kernel_integration.py` - Kernel integration tests (30 tests)
+
+**Security fix (2026-01-28 - Adversary review):**
+- [x] Implemented `KERNEL_RESERVED_FIELDS` boundary validation in `step_mu.py`
+- [x] `validate_no_kernel_reserved_fields()` rejects domain inputs with kernel fields
+- [x] Fields protected: `_mode`, `_phase`, `_input`, `_remaining`, `_match_ctx`, `_subst_ctx`, `_kernel_ctx`, `_status`, `_result`, `_stall`, `_step`, `_projs`
+- [x] Deep validation: recursive check prevents nested smuggling attacks (e.g., `{"outer": {"_mode": "done"}}`)
+- [x] Fail closed: Depth limit (100) raises ValueError, doesn't silently trust remaining structure
 
 ## Key Files
 
