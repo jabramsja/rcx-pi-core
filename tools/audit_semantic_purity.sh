@@ -808,9 +808,10 @@ echo "== 19. Host Debt: Threshold Check =="
 #   - subst_mu.py: +2 @host_builtin
 #   - Total: 17 tracked + 5 AST_OK + 1 review = 23
 # - After L2: 0 (semantic debt eliminated)
-DEBT_THRESHOLD=11  # <-- RATCHET: Lower this as debt is paid, never raise it
-# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163), 14→11 (Phase 6d)
+DEBT_THRESHOLD=14  # <-- RATCHET: Lower this as debt is paid, never raise it
+# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163), 14→11 (Phase 6d), 11→14 (Phase 7d-1 added @host_iteration)
 # Phase 6d: iterative _check_empty_var_names (-1), boundary reclassification of bindings_to_dict/dict_to_bindings (-2)
+# Phase 7d-1: Added @host_iteration counting (2 decorators + 4 AST_OK bootstrap = 14 total)
 
 echo "Counting all semantic debt markers..."
 
@@ -819,11 +820,12 @@ RECURSION_COUNT=$(grep -rE "^[[:space:]]*@host_recursion" rcx_pi/ --include="*.p
 ARITHMETIC_COUNT=$(grep -rE "^[[:space:]]*@host_arithmetic" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 BUILTIN_COUNT=$(grep -rE "^[[:space:]]*@host_builtin" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 MUTATION_COUNT=$(grep -rE "^[[:space:]]*@host_mutation" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
+ITERATION_COUNT=$(grep -rE "^[[:space:]]*@host_iteration" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 COMPARISON_COUNT=$(grep -rE "^[[:space:]]*@host_comparison" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 STRING_COUNT=$(grep -rE "^[[:space:]]*@host_string_op" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 BOOTSTRAP_ONLY_COUNT=$(grep -rE "^[[:space:]]*@bootstrap_only" rcx_pi/ --include="*.py" 2>/dev/null | wc -l | tr -d ' ')
 
-HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + COMPARISON_COUNT + STRING_COUNT + BOOTSTRAP_ONLY_COUNT))
+HOST_DEBT=$((RECURSION_COUNT + ARITHMETIC_COUNT + BUILTIN_COUNT + MUTATION_COUNT + ITERATION_COUNT + COMPARISON_COUNT + STRING_COUNT + BOOTSTRAP_ONLY_COUNT))
 
 # AST_OK: bootstrap bypasses (semantic debt - must become structural)
 # Pattern uses [[:space:]]* to catch spacing variations like "AST_OK:bootstrap"
@@ -840,6 +842,7 @@ echo "    @host_recursion:  $RECURSION_COUNT"
 echo "    @host_arithmetic: $ARITHMETIC_COUNT"
 echo "    @host_builtin:    $BUILTIN_COUNT"
 echo "    @host_mutation:   $MUTATION_COUNT"
+echo "    @host_iteration:  $ITERATION_COUNT"
 echo "    @host_comparison: $COMPARISON_COUNT"
 echo "    @host_string_op:  $STRING_COUNT"
 echo "    @bootstrap_only:  $BOOTSTRAP_ONLY_COUNT"

@@ -75,17 +75,19 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 15
-CURRENT: 15 (11 tracked + 4 AST_OK)
+THRESHOLD: 14
+CURRENT: 14 (10 tracked decorators + 4 AST_OK)
 TARGET: 12 (deferred to Phase 8c+)
 ```
 
 **Debt breakdown:**
 - @host_recursion: 3 (eval_seed match/substitute)
 - @host_builtin: 3 (eval_seed, deep_eval)
-- @host_iteration: 3 (run_mu, step_kernel_mu, projection_runner)
+- @host_iteration: 2 (run_mu, step_kernel_mu)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 4 (includes MAX_VALIDATION_DEPTH stack guard)
+
+Note: projection_runner has a comment mentioning @host_iteration but uses composition pattern, not decoration.
 
 **Note on boundary scaffolding:**
 The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match, bindings_to_dict, etc.) are NOT counted as debt. These are Python API conversion functions that convert between Python types and Mu linked lists at the boundary. They are explicitly documented as "boundary scaffolding" in their docstrings. Boundary scaffolding is expected to remain indefinitely as part of the Python API layer - it's not a target for structural replacement.
@@ -100,7 +102,7 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
   - Deep validation: recursive check prevents nested smuggling
   - KERNEL_RESERVED_FIELDS: 12 fields (added `_step`, `_projs`)
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
-- Net debt: 15 (11 tracked + 4 AST_OK)
+- Net debt: 14 (10 tracked decorators + 4 AST_OK)
 
 **Phase 7d-2/7d-3 PAUSED:**
 - Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
@@ -219,7 +221,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - `tests/test_phase8b_mechanical_kernel.py` (31 tests)
 - `tests/test_phase8b_grounding_gaps.py` (12 tests)
 
-**Debt:** 15 (eval_step reclassified as BOOTSTRAP_PRIMITIVE; MAX_VALIDATION_DEPTH added)
+**Debt:** 14 (eval_step reclassified as BOOTSTRAP_PRIMITIVE; MAX_VALIDATION_DEPTH added; debt_dashboard.sh comment counting corrected)
 
 ---
 
