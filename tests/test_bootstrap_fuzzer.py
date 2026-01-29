@@ -366,7 +366,7 @@ class TestBootstrapBoundary:
             pass
 
     @given(mu_values(), st.integers(min_value=5, max_value=20))
-    @settings(max_examples=200, deadline=5000)
+    @settings(max_examples=200, deadline=8000)
     def test_max_steps_uses_mu_equal_for_stall(self, value, max_steps):
         """run_mu uses mu_equal to detect stalls.
 

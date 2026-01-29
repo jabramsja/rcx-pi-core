@@ -100,17 +100,18 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
     assert result.returncode == 0
     data = json.loads(result.stdout)
 
-    # Current count should be 3 (from match_mu.py and eval_seed.py)
+    # Current count should be 4 (from match_mu.py, eval_seed.py, step_mu.py)
     # Phase 6c removed 2 (normalize_for_match and denormalize_from_match comprehensions)
+    # Phase 8b added 1 (MAX_VALIDATION_DEPTH in step_mu.py)
     ast_ok_count = data["debt"]["ast_ok_bootstrap"]
 
     # Verify it's a reasonable number
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 3
-    assert ast_ok_count == 3, (
-        f"Expected 3 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    # Current expected count is 4
+    assert ast_ok_count == 4, (
+        f"Expected 4 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 
