@@ -7,8 +7,8 @@
 ## Current Phase
 
 ```
-PHASE: 7d-1
-NAME: step_mu Wired to Structural Kernel
+PHASE: 8b
+NAME: Mechanical Kernel (Security Hardened)
 ```
 
 ## Self-Hosting Levels
@@ -187,7 +187,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - New code using deprecated Kernel will FAIL tests (not just warn)
 - Removed `TestKernelIntegration` (4 tests) - used deprecated Kernel
 - Created `tests/structural/test_step_budget.py` (18 tests) for ACTIVE infrastructure
-- Created `tests/structural/test_audit_claims_grounding.py` (17 tests) for audit verification
+- Created `tests/structural/test_audit_claims_grounding.py` (18 tests) for audit verification
 - Added `tests/archive/README.md` documenting archive purpose
 
 **Architecture Cleanup (2026-01-29):**

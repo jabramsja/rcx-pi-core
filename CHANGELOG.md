@@ -27,7 +27,7 @@ All notable changes to RCX are documented in this file.
   - Catches host smuggling before merge (was only in local audit_all.sh)
 
 - **Audit Claims Grounding Tests** (grounding agent recommendation)
-  - Created `tests/structural/test_audit_claims_grounding.py` (17 tests)
+  - Created `tests/structural/test_audit_claims_grounding.py` (18 tests)
   - Tests verify: archive blocking, deprecation enforcement, audit script structure
   - Tests verify: lambda guardrails exist, step budget coverage exists
   - Fully grounds all audit infrastructure claims
