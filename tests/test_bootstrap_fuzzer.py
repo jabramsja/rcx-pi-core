@@ -55,12 +55,18 @@ mu_primitives = st.one_of(
 )
 
 
+# Dict keys that don't start with underscore (underscore-prefixed are kernel-reserved)
+# See step_mu.py KERNEL_RESERVED_FIELDS for the security rationale.
+domain_safe_keys = st.text(min_size=1, max_size=10).filter(lambda k: not k.startswith("_"))
+
+
 @composite
 def mu_values(draw, max_depth=3):
     """Generate valid Mu values recursively.
 
     Note: max_depth reduced from 5 to 3 to prevent pathological nesting
     after normalization (each dict level can double during normalization).
+    Keys filtered to exclude underscore-prefixed (kernel-reserved) fields.
     """
     if max_depth <= 0:
         return draw(mu_primitives)
@@ -72,7 +78,7 @@ def mu_values(draw, max_depth=3):
             max_size=5
         ),
         st.dictionaries(
-            st.text(min_size=1, max_size=10),
+            domain_safe_keys,
             st.deferred(lambda: mu_values(max_depth=max_depth-1)),
             max_size=5
         ),
