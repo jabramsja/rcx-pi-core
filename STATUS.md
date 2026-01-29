@@ -96,8 +96,11 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
 - Added `extract_kernel_result()` - mechanical unpacking
 - Loop body: ~35 lines → ~15 lines
 - eval_step reclassified as BOOTSTRAP_PRIMITIVE (not debt)
-- Deep validation fix: `validate_no_kernel_reserved_fields()` now recursive (adversary review)
-- Net debt: 15 (MAX_VALIDATION_DEPTH stack guard added)
+- **Security hardening (9-agent reviewed):**
+  - Deep validation: recursive check prevents nested smuggling
+  - KERNEL_RESERVED_FIELDS: 12 fields (added `_step`, `_projs`)
+  - Depth guard fails CLOSED (raises ValueError at depth > 100)
+- Net debt: 15 (11 tracked + 4 AST_OK)
 
 **Phase 7d-2/7d-3 PAUSED:**
 - Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
@@ -175,7 +178,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8 DESIGN v2 READY (2026-01-28). 9-agent review reached consensus on honest boundaries.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 844 tests passing.
 
 **Phase 8a IMPLEMENTED (2026-01-28):**
 
@@ -216,7 +219,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - `tests/test_phase8b_mechanical_kernel.py` (31 tests)
 - `tests/test_phase8b_grounding_gaps.py` (12 tests)
 
-**Debt reduction:** 15 → 14 (eval_step reclassified as BOOTSTRAP_PRIMITIVE)
+**Debt:** 15 (eval_step reclassified as BOOTSTRAP_PRIMITIVE; MAX_VALIDATION_DEPTH added)
 
 ---
 
