@@ -746,12 +746,14 @@ class TestKnownRegressions:
 
     def test_empty_list_vs_empty_dict_normalization(self):
         """
-        Empty list and empty dict both normalize to None (known limitation).
+        Empty list and empty dict normalize to distinct typed sentinels.
 
-        This is EXPECTED behavior, not a bug. Documented in Phase 6c.
+        Phase 8b fix: Empty containers use typed sentinels to preserve type:
+        - [] → {"_type": "list"}
+        - {} → {"_type": "dict"}
         """
-        assert normalize_for_match([]) is None
-        assert normalize_for_match({}) is None
+        assert normalize_for_match([]) == {"_type": "list"}
+        assert normalize_for_match({}) == {"_type": "dict"}
 
     def test_type_tag_whitelist_enforced(self):
         """

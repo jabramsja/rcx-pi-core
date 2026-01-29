@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ def test_world_trace_cli_runs_as_script_help():
         cwd=str(repo_root),
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
     assert r.returncode == 0, r.stdout + "\n" + r.stderr
 
@@ -26,5 +28,6 @@ def test_world_trace_cli_runs_as_module_help():
         cwd=str(repo_root),
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
     assert r.returncode == 0, r.stdout + "\n" + r.stderr

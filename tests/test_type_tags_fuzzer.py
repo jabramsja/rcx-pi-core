@@ -515,9 +515,14 @@ class TestEdgeCases:
     """Tests for specific edge cases."""
 
     def test_empty_list_vs_empty_dict(self):
-        """Empty list and empty dict both normalize to None."""
-        assert normalize_for_match([]) is None
-        assert normalize_for_match({}) is None
+        """Empty list and empty dict normalize to distinct typed sentinels.
+
+        Phase 8b fix: Empty containers now use typed sentinels to preserve type info:
+        - [] → {"_type": "list"}
+        - {} → {"_type": "dict"}
+        """
+        assert normalize_for_match([]) == {"_type": "list"}
+        assert normalize_for_match({}) == {"_type": "dict"}
 
     def test_single_element_list_has_type_tag(self):
         """Single-element list gets type tag."""
@@ -532,12 +537,16 @@ class TestEdgeCases:
         assert normalized.get("_type") == "dict"
 
     def test_nested_empty_collections(self):
-        """Nested empty collections normalize correctly."""
+        """Nested empty collections normalize correctly.
+
+        Phase 8b fix: Empty containers now preserve type info, so inner []
+        roundtrips correctly back to [].
+        """
         value = {"outer": {"inner": []}}
         normalized = normalize_for_match(value)
         denormalized = denormalize_from_match(normalized)
-        # Inner [] becomes None
-        assert denormalized == {"outer": {"inner": None}}
+        # Inner [] is now preserved (Phase 8b typed sentinels)
+        assert denormalized == {"outer": {"inner": []}}
 
     def test_mixed_valid_and_invalid_type_tags(self):
         """Structure with mix of valid and invalid type tags."""

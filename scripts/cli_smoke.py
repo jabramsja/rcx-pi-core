@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ def _run(
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
 
 

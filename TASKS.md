@@ -157,6 +157,16 @@ Items here are implemented and verified under current invariants. Changes requir
   - Removed 2 `@host_builtin` decorators from match_mu.py (is_kv_pair_linked, is_dict_linked_list)
   - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
   - 26 new tests in `tests/test_classify_mu.py`
+- Testing Tier System (2026-01-28):
+  - 9-agent review resolved fuzzer hang issue (rejected circuit breaker, chose Option B)
+  - Tier 1: `audit_fast.sh` (~3 min) - Core tests for local iteration
+  - Tier 2: `audit_all.sh` (~5-8 min) - Core + Fuzzer for CI
+  - Tier 3: `tests/stress/` (~10+ min) - Deep edge cases for comprehensive validation
+  - Fuzzer settings standardized: `max_depth=3` (generators AND call sites), `deadline=5000`
+  - Files standardized (6): test_bootstrap_fuzzer.py, test_selfhost_fuzzer.py, test_type_tags_fuzzer.py, test_apply_mu_fuzzer.py, test_phase8b_fuzzer.py, test_phase7_readiness_fuzzer.py
+  - Call site overrides fixed: 29 instances of `max_depth=4` → `max_depth=3` across 4 files
+  - Hypothesis profiles: `HYPOTHESIS_PROFILE=dev` for fast local fuzzer runs (50 examples)
+  - See STATUS.md "Testing Tiers" for current config (single source of truth)
   - DEBT_THRESHOLD: 23 → 21 (ratchet tightened)
   - `resolve_lookups()` Python function deprecated (kept for backward compat)
   - 37 subst parity tests pass with structural lookup
@@ -298,12 +308,40 @@ All blockers resolved 2026-01-28:
 - [ ] L2 FULL: both selection and execution structural (Phase 8)
 - [ ] Debt reduction: 15 → 12 (deferred to Phase 8)
 
-**Recommended before 7d-1 (from second agent review 2026-01-28):**
+**Recommended fuzzer additions (from agent review):**
 - [ ] Add fuzzer tests for kernel projection ordering (500+ examples)
 - [ ] Add fuzzer tests for mode transition completeness (500+ examples)
 - [ ] Add fuzzer tests for context passthrough stress (500+ examples)
+- [ ] Add property-based tests for _step/_projs field fuzzing (500+ examples)
+- [ ] Add depth boundary fuzzing (95-105 range)
 
 **Debt status**: See `STATUS.md` for current counts and threshold.
+
+---
+
+### Phase 8: Bootstrap Primitives + Mechanical Kernel (DONE 2026-01-28)
+
+**Goal:** Document irreducible primitives, simplify kernel loop to mechanical operation.
+
+- [x] **Phase 8a: Bootstrap Primitives** (DONE 2026-01-28)
+  - Created `docs/core/BootstrapPrimitives.v0.md`
+  - Marked 5 primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+  - 36 tests in `test_bootstrap_primitives.py`, 18 fuzzer tests
+
+- [x] **Phase 8b: Mechanical Kernel** (DONE 2026-01-28)
+  - Added `is_kernel_terminal()` and `extract_kernel_result()` helpers
+  - Simplified loop to ~15 lines (was ~35)
+  - Fixed empty container type preservation
+  - 31 tests + 12 grounding tests
+
+- [x] **Phase 8b Security Hardening** (DONE 2026-01-28, 9-agent reviewed)
+  - Added KERNEL_RESERVED_FIELDS (12 fields) with deep validation
+  - Changed depth guard to fail CLOSED (raises ValueError at depth > 100)
+  - Added `_step` and `_projs` to reserved fields (kernel entry format protection)
+  - 35 tests in `test_step_mu_kernel_integration.py`
+  - 844 total tests passing
+
+**Next:** Phase 8c (oscillation detection) or Phase 8d (EngineNews trace model)
 
 ---
 

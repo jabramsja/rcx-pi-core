@@ -215,9 +215,8 @@ class TestApplyMuParityEdgeCases:
     def test_empty_dict(self):
         """Empty dict as value.
 
-        KNOWN LIMITATION: Empty collections normalize to None in linked-list
-        representation. The denormalization can't recover the original type.
-        This is acceptable because RCX projections work on normalized structures.
+        Phase 8b fix: Empty collections now use typed sentinels to preserve
+        type information through normalization/denormalization.
         """
         proj = {
             "pattern": {"var": "x"},
@@ -229,14 +228,14 @@ class TestApplyMuParityEdgeCases:
 
         # Python version preserves empty dict
         assert py_result == {"wrapped": {}}
-        # Mu version normalizes to None (empty linked list)
-        assert mu_result == {"wrapped": None}
+        # Mu version now also preserves empty dict (Phase 8b fix)
+        assert mu_result == {"wrapped": {}}
 
     def test_empty_list(self):
         """Empty list as value.
 
-        KNOWN LIMITATION: Empty collections normalize to None in linked-list
-        representation. The denormalization can't recover the original type.
+        Phase 8b fix: Empty collections now use typed sentinels to preserve
+        type information through normalization/denormalization.
         """
         proj = {
             "pattern": {"var": "x"},
@@ -248,8 +247,8 @@ class TestApplyMuParityEdgeCases:
 
         # Python version preserves empty list
         assert py_result == {"items": []}
-        # Mu version normalizes to None (empty linked list)
-        assert mu_result == {"items": None}
+        # Mu version now also preserves empty list (Phase 8b fix)
+        assert mu_result == {"items": []}
 
     def test_complex_nested_value(self):
         """Complex nested structure as captured value."""

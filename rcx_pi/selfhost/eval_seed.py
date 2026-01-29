@@ -418,22 +418,30 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     return substitute(body, bindings)
 
 
-@host_iteration(
-    "Kernel loop iterates projections. Used by match_mu/subst_mu/classify_mu. "
-    "Phase 7d replaces with meta-circular kernel that handles match/subst internally."
-)
+# BOOTSTRAP_PRIMITIVE: eval_step
+# This is the irreducible execution primitive - like Forth's NEXT.
+# The for-loop cannot be expressed as a projection because projections
+# need something to apply them. This IS that something.
+# See docs/core/BootstrapPrimitives.v0.md for full justification.
 def step(projections: list[Mu], input_value: Mu) -> Mu:
     """
-    Try each projection in order, return first successful application.
+    BOOTSTRAP PRIMITIVE: Apply first matching projection to value.
 
-    If no projection matches, return input unchanged (this causes a stall).
+    This is the irreducible eval_step primitive - analogous to Forth's NEXT
+    or the CPU instruction fetch-decode-execute cycle. Projections cannot
+    apply themselves; something must try them in order.
+
+    The for-loop is NOT debt - it is the bootstrap iteration that cannot
+    be expressed as a projection without infinite regress.
 
     Args:
-        projections: List of projections to try.
+        projections: List of projections to try (first-match-wins).
         input_value: The value to transform.
 
     Returns:
-        Transformed value if any projection matched, input unchanged otherwise.
+        Transformed value if any projection matched, input unchanged (stall) otherwise.
+
+    See: docs/core/BootstrapPrimitives.v0.md
     """
     from rcx_pi.projection_coverage import coverage
 

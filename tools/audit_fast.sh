@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
+export PYTHONHASHSEED=0
+
 # ============================================================================
-# FAST AUDIT - For local development iteration (~2 minutes)
+# FAST AUDIT - For local development iteration (~3 minutes)
 # ============================================================================
 #
-# This is the quick sanity check for local development. It runs:
+# TESTING TIERS:
+#   Tier 1: Fast Audit (this script) - Core tests, ~3 min
+#   Tier 2: Full Audit (audit_all.sh) - Core + Fuzzer, ~5-8 min
+#   Tier 3: Stress Tests (tests/stress/) - Deep edge cases, ~10+ min
+#
+# This script runs Tier 1 only:
 # - Syntax/structure checks (contraband, AST police)
 # - Core algorithm tests (match, subst, step, kernel)
-# - Skips fuzzer tests (those run in CI via audit_all.sh)
+# - Skips fuzzer tests (those run in Tier 2)
+# - Skips stress tests (those run in Tier 3)
 #
 # Use this for rapid iteration. Run audit_all.sh before pushing.
 #
@@ -16,21 +25,19 @@ set -euo pipefail
 #   ./tools/audit_fast.sh
 #
 # See also:
-#   ./tools/audit_all.sh  - Full audit including fuzzer (CI standard)
+#   ./tools/audit_all.sh       - Tier 2: Full audit including fuzzer
+#   pytest tests/stress/ -v    - Tier 3: Deep edge case stress tests
 # ============================================================================
-
-# macOS bash session-save quirks
-export HISTTIMEFORMAT="${HISTTIMEFORMAT:-}"
-export size="${size:-}"
 
 echo "== FAST AUDIT (local iteration) =="
 echo ""
 
 # Check if pytest-xdist is available for parallel execution
+# Using --dist worksteal for better load balancing (idle workers steal from busy)
 PARALLEL_FLAG=""
 if python3 -c "import xdist" 2>/dev/null; then
-    PARALLEL_FLAG="-n auto"
-    echo "Using parallel execution (pytest-xdist detected)"
+    PARALLEL_FLAG="-n auto --dist worksteal"
+    echo "Using parallel execution with worksteal (pytest-xdist detected)"
 else
     echo "Note: Install pytest-xdist for faster execution: pip install pytest-xdist"
 fi
@@ -49,7 +56,7 @@ echo "== 4) Core structural tests (parallel if available) =="
 # Run core algorithm tests - these are the most important for local iteration
 # Skip fuzzer tests (those run 500-1000 examples each, slow locally)
 # Core tests: match, subst, step, kernel, eval_seed, mu_type
-PYTHONHASHSEED=0 pytest $PARALLEL_FLAG -q \
+pytest $PARALLEL_FLAG -q \
     tests/structural/ \
     tests/test_match_parity.py \
     tests/test_match_v2_parity.py \

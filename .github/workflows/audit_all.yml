@@ -1,6 +1,16 @@
 name: Audit All
 
-on: [push, pull_request]
+# Heavy gate (includes fuzzer) - only run on dev path to save CI cost
+# Light gate (ci.yml) runs on all branches for quick feedback
+on:
+  push:
+    branches: ["dev"]
+  pull_request:
+    branches: ["dev"]
+
+concurrency:
+  group: audit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   audit:
@@ -31,5 +41,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x tools/audit_all.sh
           tools/audit_all.sh

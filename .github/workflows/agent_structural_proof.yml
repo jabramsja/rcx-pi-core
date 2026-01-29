@@ -3,6 +3,11 @@ name: Agent Structural Proof
 # Manual trigger only - run locally by default to save API costs
 # Use: Actions > Agent Structural Proof > Run workflow
 # Or: gh workflow run agent_structural_proof.yml
+
+concurrency:
+  group: agent-structural-proof-${{ github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -48,6 +53,7 @@ jobs:
         id: prove
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PYTHONHASHSEED: "0"
         run: |
           python tools/run_structural_proof.py "${{ inputs.claim }}" 2>&1 | tee /tmp/proof_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT

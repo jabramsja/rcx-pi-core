@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,9 @@ def _git_diff_tracked_names(cwd: Path) -> str:
             ".",
             ":(exclude)rcx_pi_core.egg-info/PKG-INFO",
             ":(exclude)rcx_pi_core.egg-info/SOURCES.txt",
+            # Exclude orbit artifacts touched by test_orbit_artifacts_idempotent
+            # (can change during parallel xdist execution)
+            ":(exclude)docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg",
         ],
         cwd=str(cwd),
         capture_output=True,
@@ -37,6 +41,7 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         cwd=str(cwd),
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
     )
 
 

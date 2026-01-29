@@ -502,10 +502,11 @@ class TestMatchParityEmptyCollections:
     These tests document this intentional difference rather than assert parity.
     """
 
-    def test_empty_dict_vs_empty_list_python_differs(self):
-        """DOCUMENTED DIFFERENCE: Python says {} vs [] is NO_MATCH, Mu says match.
+    def test_empty_dict_vs_empty_list_now_matches_python(self):
+        """Phase 8b fix: {} vs [] is now NO_MATCH in both Python and Mu.
 
-        This is intentional: after normalization, both are empty linked lists.
+        With typed sentinels, {} becomes {"_type": "dict"} and [] becomes
+        {"_type": "list"}, so they no longer match (correct behavior).
         """
         from rcx_pi.eval_seed import match
         from rcx_pi.match_mu import match_mu
@@ -514,14 +515,14 @@ class TestMatchParityEmptyCollections:
         assert match({}, []) is NO_MATCH
         assert match([], {}) is NO_MATCH
 
-        # Mu normalizes both to null, so they match
-        assert match_mu({}, []) == {}  # Match succeeds with no bindings
-        assert match_mu([], {}) == {}
+        # Mu now also distinguishes them (Phase 8b fix)
+        assert match_mu({}, []) is NO_MATCH
+        assert match_mu([], {}) is NO_MATCH
 
-    def test_var_matches_empty_dict_normalizes_to_null(self):
-        """DOCUMENTED DIFFERENCE: Variable binding of {} becomes None in Mu.
+    def test_var_matches_empty_dict_preserves_type(self):
+        """Phase 8b fix: Variable binding of {} now preserved in Mu.
 
-        Python preserves the original {}, Mu normalizes to null.
+        With typed sentinel, {} roundtrips correctly.
         """
         from rcx_pi.eval_seed import match
         from rcx_pi.match_mu import match_mu
@@ -529,13 +530,13 @@ class TestMatchParityEmptyCollections:
         # Python preserves the original structure
         assert match({"var": "x"}, {}) == {"x": {}}
 
-        # Mu normalizes {} to null
-        assert match_mu({"var": "x"}, {}) == {"x": None}
+        # Mu now also preserves {} via typed sentinel (Phase 8b fix)
+        assert match_mu({"var": "x"}, {}) == {"x": {}}
 
-    def test_var_matches_empty_list_normalizes_to_null(self):
-        """DOCUMENTED DIFFERENCE: Variable binding of [] becomes None in Mu.
+    def test_var_matches_empty_list_preserves_type(self):
+        """Phase 8b fix: Variable binding of [] now preserved in Mu.
 
-        Python preserves the original [], Mu normalizes to null.
+        With typed sentinel, [] roundtrips correctly.
         """
         from rcx_pi.eval_seed import match
         from rcx_pi.match_mu import match_mu
@@ -543,8 +544,8 @@ class TestMatchParityEmptyCollections:
         # Python preserves the original structure
         assert match({"var": "x"}, []) == {"x": []}
 
-        # Mu normalizes [] to null
-        assert match_mu({"var": "x"}, []) == {"x": None}
+        # Mu now also preserves [] via typed sentinel (Phase 8b fix)
+        assert match_mu({"var": "x"}, []) == {"x": []}
 
     def test_dict_with_empty_value(self):
         """Dict with empty list value - parity maintained for nested empties."""

@@ -17,9 +17,11 @@ from typing import Any
 # Type alias for documentation (Python's type system can't express recursive JSON)
 Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 
-# Maximum nesting depth for Mu validation (prevents RecursionError attacks)
-# Set conservatively below Python's default recursion limit (~1000)
-# to account for stack frames used by comprehensions
+# BOOTSTRAP_PRIMITIVE: stack_guard (MAX_MU_DEPTH)
+# This is the irreducible depth limit that prevents stack overflow.
+# Cannot be structural because Python's stack is runtime, not Mu data.
+# Protects against deeply nested structures that would overflow during traversal.
+# See docs/core/BootstrapPrimitives.v0.md for full justification.
 MAX_MU_DEPTH = 200
 
 # Maximum width (number of elements) for lists/dicts (prevents resource exhaustion)
@@ -377,9 +379,18 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
 # =============================================================================
 
 
+# BOOTSTRAP_PRIMITIVE: mu_equal
+# This is the irreducible fixed-point detection primitive.
+# Cannot be structural because comparison requires touching every node.
+# Used for stall detection: if mu_equal(before, after), no progress was made.
+# See docs/core/BootstrapPrimitives.v0.md for full justification.
 def mu_equal(a: Any, b: Any) -> bool:
     """
-    Compare two Mu values for structural equality.
+    BOOTSTRAP PRIMITIVE: Compare two Mu values for structural equality.
+
+    This is the irreducible mu_equal primitive - analogous to a hardware
+    comparator circuit. Stall detection requires comparing "before" and "after"
+    structurally (not Python object identity).
 
     Uses canonical JSON serialization to avoid Python's type coercion.
     This ensures True != 1 and other edge cases are handled correctly.
@@ -393,6 +404,8 @@ def mu_equal(a: Any, b: Any) -> bool:
 
     Raises:
         TypeError: If either value is not a valid Mu.
+
+    See: docs/core/BootstrapPrimitives.v0.md
     """
     assert_mu(a, "mu_equal.a")
     assert_mu(b, "mu_equal.b")

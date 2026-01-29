@@ -100,17 +100,18 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
     assert result.returncode == 0
     data = json.loads(result.stdout)
 
-    # Current count should be 3 (from match_mu.py and eval_seed.py)
+    # Current count should be 4 (from match_mu.py, eval_seed.py, step_mu.py)
     # Phase 6c removed 2 (normalize_for_match and denormalize_from_match comprehensions)
+    # Phase 8b added 1 (MAX_VALIDATION_DEPTH in step_mu.py)
     ast_ok_count = data["debt"]["ast_ok_bootstrap"]
 
     # Verify it's a reasonable number
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 3
-    assert ast_ok_count == 3, (
-        f"Expected 3 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    # Current expected count is 4
+    assert ast_ok_count == 4, (
+        f"Expected 4 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 
@@ -149,8 +150,8 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     assert "TOTAL SEMANTIC DEBT:" in result.stdout
 
 
-def test_audit_semantic_purity_threshold_is_11():
-    """Verify the threshold is set to 11 as documented.
+def test_audit_semantic_purity_threshold_is_14():
+    """Verify the threshold is set to 14 as documented.
 
     Threshold history:
     - 14: Original (7 tracked + 5 AST_OK + 2 headroom)
@@ -166,6 +167,8 @@ def test_audit_semantic_purity_threshold_is_11():
           (10 tracked + 3 AST_OK + 1 review = 14)
     - 11: Phase 6d iterative validation + boundary reclassification
           (8 tracked + 3 AST_OK = 11)
+    - 14: Phase 7d-1 added @host_iteration tracking
+          (10 tracked + 4 AST_OK = 14)
     """
     script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
 
@@ -177,12 +180,12 @@ def test_audit_semantic_purity_threshold_is_11():
 
     assert len(threshold_lines) >= 1, "Should find DEBT_THRESHOLD assignment"
 
-    # Extract value - format: DEBT_THRESHOLD=11
+    # Extract value - format: DEBT_THRESHOLD=14
     line = threshold_lines[0]
     value = line.split("=")[1].split()[0]
 
-    assert value == "11", (
-        f"Expected DEBT_THRESHOLD=11, found {value}. "
+    assert value == "14", (
+        f"Expected DEBT_THRESHOLD=14, found {value}. "
         f"If this changed, update test to match current threshold."
     )
 

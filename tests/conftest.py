@@ -5,6 +5,7 @@ Provides:
 - Projection coverage tracking (enable with RCX_PROJECTION_COVERAGE=1)
 - Skips tests that require optional modules (rcx_omega, scripts)
 - Shared test utilities (apply_mu for Phase 4d integration)
+- Hypothesis configuration for deterministic fuzzing
 """
 
 import os
@@ -13,6 +14,47 @@ import pytest
 from rcx_pi.eval_seed import NO_MATCH
 from rcx_pi.match_mu import match_mu
 from rcx_pi.subst_mu import subst_mu
+
+# =============================================================================
+# Hypothesis Configuration (lossless optimization)
+# =============================================================================
+# - Database caches found examples for faster reruns (uses .hypothesis/ by default)
+# - print_blob=True makes failures easy to reproduce
+# - derandomize=False keeps search random but seeded for CI reproducibility
+# NOTE: Do NOT set database=None - that DISABLES the database. Omit to use default.
+
+try:
+    from hypothesis import settings, Verbosity, Phase
+
+    # CI profile: full fuzzing (default example counts from test decorators)
+    settings.register_profile(
+        "ci",
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Dev profile: fast fuzzing (50 examples max for rapid iteration)
+    settings.register_profile(
+        "dev",
+        max_examples=50,
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Default profile (same as CI)
+    settings.register_profile(
+        "default",
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Load profile from environment: HYPOTHESIS_PROFILE=dev for fast local runs
+    import os
+    profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
+    settings.load_profile(profile)
+
+except ImportError:
+    pass  # hypothesis not installed, skip configuration
 
 
 # =============================================================================
@@ -57,11 +99,21 @@ collect_ignore = [
     "test_semantic_goldens.py",     # requires rcx_omega
     "test_semantic_invariants.py",  # requires rcx_omega
     "test_normalize_graphviz_svg.py",  # requires scripts module
+    "archive",  # archived tests (e.g., bytecode VM - superseded by kernel approach)
 ]
 
 
 def pytest_configure(config):
-    """Enable projection coverage if RCX_PROJECTION_COVERAGE is set."""
+    """Configure pytest: enforce determinism, enable coverage if requested."""
+    # Enforce PYTHONHASHSEED=0 for deterministic dict ordering
+    hashseed = os.environ.get("PYTHONHASHSEED")
+    if hashseed != "0":
+        raise RuntimeError(
+            f"PYTHONHASHSEED must be '0' for deterministic tests, got {hashseed!r}. "
+            "Run with: PYTHONHASHSEED=0 pytest ..."
+        )
+
+    # Enable projection coverage if requested
     if os.environ.get("RCX_PROJECTION_COVERAGE") == "1":
         from rcx_pi.projection_coverage import coverage
         coverage.enable()

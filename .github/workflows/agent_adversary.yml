@@ -3,6 +3,11 @@ name: Agent Adversary
 # Manual trigger only - run locally by default to save API costs
 # Use: Actions > Agent Adversary > Run workflow
 # Or: gh workflow run agent_adversary.yml
+
+concurrency:
+  group: agent-adversary-${{ github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -60,6 +65,7 @@ jobs:
         if: steps.files.outputs.files != ''
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PYTHONHASHSEED: "0"
         run: |
           python tools/run_adversary.py ${{ steps.files.outputs.files }} 2>&1 | tee /tmp/adversary_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT

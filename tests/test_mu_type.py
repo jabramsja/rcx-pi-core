@@ -902,9 +902,9 @@ class TestNoGuardrailMocking:
 
         We check for actual @patch decorator usage, not just string mentions.
         """
-        import inspect
         import re
-        source = inspect.getsource(__import__('tests.test_mu_type', fromlist=['']))
+        from pathlib import Path
+        source = Path(__file__).read_text(encoding="utf-8")
 
         # Look for actual decorator usage: @patch(...) at start of line (with indent)
         # This excludes string literals like the ones in this test

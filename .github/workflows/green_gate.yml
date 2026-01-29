@@ -22,6 +22,8 @@ jobs:
     name: green-gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PYTHONHASHSEED: "0"  # Deterministic dict ordering
 
     steps:
       - name: Checkout
@@ -69,5 +71,4 @@ jobs:
         run: |
           set -euo pipefail
           export PAGER=cat GIT_PAGER=cat LESS='-FRSX'
-          chmod +x scripts/green_gate.sh
-          bash scripts/green_gate.sh
+          scripts/green_gate.sh

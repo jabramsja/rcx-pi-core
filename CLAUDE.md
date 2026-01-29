@@ -65,14 +65,20 @@ See `docs/agents/AgentRig.v0.md` for full documentation.
 
 ## Workflow
 
-**Audit scripts (two tiers):**
+**Audit scripts (three tiers):**
 
-| Script | Time | Purpose | When |
-|--------|------|---------|------|
-| `./tools/audit_fast.sh` | ~2 min | Core tests only (no fuzzer) | Local iteration |
-| `./tools/audit_all.sh` | ~4-6 min | Full suite + fuzzer | Before push, CI |
+| Tier | Script | Time | Purpose | When |
+|------|--------|------|---------|------|
+| 1 | `./tools/audit_fast.sh` | ~3 min | Core tests only | Local iteration |
+| 2 | `./tools/audit_all.sh` | ~5-8 min | Core + Fuzzer | Before push, CI |
+| 3 | `pytest tests/stress/` | ~10+ min | Deep edge cases | Comprehensive validation |
 
-Both use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
+Both audit scripts use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
+
+**Hypothesis profiles for fast local fuzzer runs:**
+```bash
+HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # 50 examples, ~30s
+```
 
 **Development workflow:**
 ```bash
@@ -85,6 +91,37 @@ Both use parallel execution if `pytest-xdist` is installed: `pip install pytest-
 # Or let CI catch it (slower feedback but thorough)
 git push
 ```
+
+---
+
+## Test Execution (IMPORTANT - READ THIS)
+
+**Default is SERIAL (fast for single files).** Parallel is used via audit scripts or explicit flag.
+
+| Scenario | Command | Time |
+|----------|---------|------|
+| Single file | `pytest tests/foo.py` | Fast (no overhead) |
+| Specific test | `pytest tests/foo.py::TestClass::test_name` | Fastest |
+| Full suite | `pytest -n auto` | ~44s (6x faster than serial) |
+| Full suite | `./tools/audit_fast.sh` | ~2 min (auto-parallel) |
+
+**Quick reference:**
+```bash
+# Single file (default serial, fast)
+pytest tests/test_match_parity.py
+
+# Full suite with parallel (6x speedup)
+pytest -n auto --dist worksteal
+
+# Or use audit scripts (auto-detect parallel)
+./tools/audit_fast.sh   # Core tests
+./tools/audit_all.sh    # Full suite + fuzzer
+```
+
+**Why this setup:**
+- Single-file runs: Serial is faster (avoids 3s worker spawn overhead)
+- Full suite (1000+ tests): Parallel is 6x faster (44s vs 255s)
+- Audit scripts auto-detect xdist and enable parallel when available
 
 **Pre-commit scripts:**
 
