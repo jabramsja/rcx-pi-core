@@ -26,6 +26,11 @@ test = ["pytest", "pytest-xdist", "jsonschema", "hypothesis"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "rcx_pi"]
+# Treat DeprecationWarning from rcx_pi as error to catch accidental legacy usage
+# Tests that intentionally use deprecated code must wrap with pytest.warns(DeprecationWarning)
+filterwarnings = [
+    "error::DeprecationWarning:rcx_pi.*",
+]
 # NOTE: Parallel execution (-n auto) is NOT enabled by default because:
 # - Single-file runs have 3s worker spawn overhead that makes them slower
 # - Full suite runs use audit scripts which add -n auto explicitly

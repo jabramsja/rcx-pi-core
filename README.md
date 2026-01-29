@@ -59,9 +59,13 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 
 | Module | Purpose |
 |-------|---------|
-| `rcx_pi/kernel.py` | Minimal kernel (4 primitives: identity, stall, trace, dispatch) |
-| `rcx_pi/eval_seed.py` | EVAL_SEED evaluator (match, substitute, apply_projection, step) |
-| `rcx_pi/mu_type.py` | Mu type validation and guardrails |
+| `seeds/kernel.v1.json` | Structural kernel (7 Mu projections) - THE canonical kernel |
+| `rcx_pi/selfhost/step_mu.py` | Self-hosting step (uses kernel.v1 + match.v2 + subst.v2) |
+| `rcx_pi/selfhost/match_mu.py` | Pattern matching as Mu projections |
+| `rcx_pi/selfhost/subst_mu.py` | Substitution as Mu projections |
+| `rcx_pi/selfhost/kernel.py` | Step budget + legacy Kernel class (not canonical) |
+| `rcx_pi/selfhost/eval_seed.py` | EVAL_SEED evaluator (apply_projection, step) |
+| `rcx_pi/selfhost/mu_type.py` | Mu type validation and guardrails |
 
 ### Legacy / Archived (not the current approach)
 

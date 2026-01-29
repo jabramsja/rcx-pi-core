@@ -34,8 +34,15 @@ Status: **NEXT** (promoted 2026-01-27, Phase 7a/7b/7c DONE, 7d pending)
 - Trace recording (`record_trace`) for replay
 - Handler dispatch (`gate_dispatch`) for event routing
 - Infrastructure only - NOT the operational kernel
+- **DEPRECATED (2026-01-29)**: Emits deprecation warning when instantiated
+- Tests archived to `tests/archive/legacy/test_kernel_v0.py`
 
 **Why this matters:** Phase 7d-1 correctly uses kernel.v1.json projections. The `step_kernel_mu()` function is NOT "bypassing" the kernel - it IS using the structural kernel. The Python Kernel class is boundary scaffolding, not the self-hosting target.
+
+**Note on max_steps constants:**
+- `MAX_PROJECTION_STEPS = 50000` in kernel.py - global cross-call budget (not used by self-hosting)
+- `max_steps = 10000` in step_mu.py - per-execution limit for step_kernel_mu()
+- These are independent limits that do NOT interact
 
 ---
 
@@ -785,9 +792,9 @@ The "guard" is implemented by **projection ordering**, not pattern syntax. Remov
 | Seed | v1 Count | v2 Count | Change |
 |------|----------|----------|--------|
 | match | 7 | 8 | +1 (match.fail) |
-| subst | 12 | 13 | +1 (subst.done wrapper) |
+| subst | 12 | 12 | subst.done modified (not added) |
 | kernel | 7 | 7 | unchanged |
-| **Total kernel+match+subst** | 26 | 28 | +2 |
+| **Total kernel+match+subst** | 26 | 27 | +1 |
 
 ---
 

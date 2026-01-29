@@ -2,7 +2,82 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-29
+
+### Security Hardening (7-agent review)
+- **Deprecation Enforcement** (HIGH priority fix)
+  - Added `filterwarnings = ["error::DeprecationWarning:rcx_pi.*"]` to pyproject.toml
+  - New code using deprecated Kernel class will now FAIL tests (not just warn)
+  - Removed `TestKernelIntegration` class (4 tests) - used deprecated Kernel
+  - Coverage already exists via test_step_mu_parity.py, test_kernel_projections.py
+
+- **Step Budget Test Coverage** (coverage gap fix)
+  - Created `tests/structural/test_step_budget.py` (18 tests)
+  - Tests: basics, limits, reset, thread safety, no-deprecation verification
+  - Grounds the claim that step budget functions are ACTIVE (not deprecated)
+
+- **Archive Protection** (MEDIUM priority fix)
+  - Added `tests/archive/conftest.py` with `pytest_ignore_collect` hook
+  - `pytest tests/archive/` now collects 0 tests (was 134)
+  - Prevents accidental execution of deprecated tests
+
+- **CI Contraband/AST Police** (MEDIUM priority fix)
+  - Added contraband.sh and ast_police.py to `scripts/green_gate.sh`
+  - CI now runs [PY 1/4] syntax, [PY 2/4] contraband, [PY 3/4] AST, [PY 4/4] tests
+  - Catches host smuggling before merge (was only in local audit_all.sh)
+
+- **Audit Claims Grounding Tests** (grounding agent recommendation)
+  - Created `tests/structural/test_audit_claims_grounding.py` (17 tests)
+  - Tests verify: archive blocking, deprecation enforcement, audit script structure
+  - Tests verify: lambda guardrails exist, step budget coverage exists
+  - Fully grounds all audit infrastructure claims
+
+### Architecture Cleanup
+- **kernel.py Clarification** (7-agent review)
+  - Added architecture comment block explaining two distinct concerns:
+    1. ACTIVE: Step budget functions (get_step_budget, etc.) - used by self-hosting
+    2. LEGACY: Kernel class - NOT used by self-hosting, only for testing
+  - Added deprecation warning to `Kernel` class and `create_kernel()` factory
+  - Moved `test_kernel_v0.py` to `tests/archive/legacy/`
+  - Created `tests/structural/test_lambda_calculus_guardrails.py` with 11 guardrail tests
+  - Updated docs/core/MetaCircularKernel.v0.md with deprecation note and max_steps clarification
+
+- **Documentation: kernel.v1.json as Canonical Kernel**
+  - Updated README.md: Core modules table now lists kernel.v1.json as "THE canonical kernel"
+  - Updated docs/core/SelfHosting.v0.md: kernel.py noted as "not canonical; see kernel.v1.json"
+  - Updated docs/core/RCXKernel.v0.md: Added status column marking kernel.v1.json as canonical
+  - Updated docs/audit/MetaCircularReadiness.v1.md: Current status references kernel.v1.json
+
+- **Audit Stack Cleanup**
+  - Updated tools/audit_fast.sh: Removed archived test_kernel_v0.py from explicit test list
+  - tests/conftest.py already has `"archive"` in collect_ignore (no change needed)
+  - Lambda calculus guardrails auto-included via tests/structural/ in audit_fast.sh
+
+### Testing
+- **Lambda Calculus Guardrail Tests Migrated** (11 tests)
+  - Migrated from test_eval_seed_v0.py to dedicated structural test file
+  - Tests prove: no closures, no self-application, no Y-combinator, no higher-order matching
+  - These are NORTH STAR invariant enforcement tests
+
+### Documentation
+- **STATUS.md**: Fixed @host_recursion count (3 → 2)
+- **Added tests for `is_kernel_intermediate()`** (12 tests)
+  - Documents key finding: `{"mode": "subst"}` (value) vs `{"subst": ...}` (key)
+  - Proves mu_equal stall detection works correctly for unbound variables
+
 ## 2026-01-28
+
+### Testing
+- **Fuzzer Configuration Fully Standardized** (3x 9-agent review)
+  - Fixed `deadline=None` in test_apply_mu_fuzzer.py (10 tests → `deadline=5000` or `deadline=10000`)
+  - Standardized `max_depth=3` default across ALL 6 fuzzer generators:
+    - test_bootstrap_fuzzer.py, test_selfhost_fuzzer.py, test_type_tags_fuzzer.py
+    - test_apply_mu_fuzzer.py, test_phase8b_fuzzer.py, test_phase7_readiness_fuzzer.py
+  - Fixed 29 call site overrides: `max_depth=4` → `max_depth=3` across 4 files
+  - Fixed docstring bug in test_apply_mu_fuzzer.py ("default 5" → "default 3")
+  - Documentation claims now match reality (STATUS.md is single source of truth)
+  - Prevents tests from hanging on pathological inputs
+  - All 772 core tests pass
 
 ### Self-Hosting
 - **Phase 7d-1: Wire step_mu to Structural Kernel** (L2 PARTIAL)

@@ -81,7 +81,7 @@ TARGET: 12 (deferred to Phase 8c+)
 ```
 
 **Debt breakdown:**
-- @host_recursion: 3 (eval_seed match/substitute)
+- @host_recursion: 2 (eval_seed match/substitute)
 - @host_builtin: 3 (eval_seed, deep_eval)
 - @host_iteration: 2 (run_mu, step_kernel_mu)
 - @host_mutation: 2 (eval_seed, deep_eval)
@@ -174,13 +174,31 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
 - Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`, `seeds/eval.v1.json`
 - Task list: `TASKS.md`
-- Grounding tests: `tests/structural/` (status, seeds, type tags, projection order)
+- Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
 ---
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 844 tests passing.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 880+ tests passing.
+
+**Security Hardening (2026-01-29, 7-agent review):**
+- Added `filterwarnings = ["error::DeprecationWarning:rcx_pi.*"]` to pyproject.toml
+- New code using deprecated Kernel will FAIL tests (not just warn)
+- Removed `TestKernelIntegration` (4 tests) - used deprecated Kernel
+- Created `tests/structural/test_step_budget.py` (18 tests) for ACTIVE infrastructure
+- Created `tests/structural/test_audit_claims_grounding.py` (17 tests) for audit verification
+- Added `tests/archive/README.md` documenting archive purpose
+
+**Architecture Cleanup (2026-01-29):**
+- kernel.py: Added architecture comment block clarifying two concerns:
+  - ACTIVE: Step budget functions (get_step_budget, etc.)
+  - LEGACY: Kernel class (deprecated, not used by self-hosting)
+- Deprecated: `Kernel` class and `create_kernel()` emit DeprecationWarning
+- Archived: `test_kernel_v0.py` moved to `tests/archive/legacy/`
+- Created: `tests/structural/test_lambda_calculus_guardrails.py` (11 tests)
+- Added: Tests for `is_kernel_intermediate()` (12 tests)
+- Note: `MAX_PROJECTION_STEPS=50000` (kernel.py) is NOT used by step_kernel_mu which uses `max_steps=10000`
 
 **Phase 8a IMPLEMENTED (2026-01-28):**
 
@@ -254,5 +272,5 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-01-28
+**Last updated:** 2026-01-29
 **Next milestone:** Phase 8c (oscillation detection) or Phase 8d (EngineNews trace model)

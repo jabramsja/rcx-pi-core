@@ -1,6 +1,14 @@
 """
 Tests for RCX Kernel v0.
 
+ARCHIVED (2026-01-29):
+This file tests the LEGACY Kernel class which is NOT used by self-hosting.
+Self-hosting uses kernel.v1.json projections via step_kernel_mu().
+Moved to tests/archive/legacy/ to reduce confusion.
+
+The primitive functions (compute_identity, detect_stall, record_trace) are
+still tested by tests/test_selfhost_fuzzer.py.
+
 Tests the 4 kernel primitives and the main loop.
 See docs/core/RCXKernel.v0.md for specification.
 """

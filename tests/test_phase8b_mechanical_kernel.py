@@ -13,6 +13,7 @@ import pytest
 
 from rcx_pi.selfhost.step_mu import (
     is_kernel_terminal,
+    is_kernel_intermediate,
     extract_kernel_result,
     step_kernel_mu,
     step_mu,
@@ -85,6 +86,92 @@ class TestIsKernelTerminal:
     def test_empty_dict_not_terminal(self):
         """Empty dict is not terminal."""
         assert is_kernel_terminal({}) is False
+
+
+# =============================================================================
+# is_kernel_intermediate() Tests
+# =============================================================================
+
+class TestIsKernelIntermediate:
+    """Test is_kernel_intermediate() helper - detect mid-execution kernel states.
+
+    This function determines when to skip mu_equal stall detection.
+    It checks for kernel-internal fields as KEYS (not values).
+
+    Key insight from investigation: The unbound variable state has
+    `mode: "subst"` (a VALUE), not `subst` as a KEY. So mu_equal
+    runs correctly and detects the stall.
+    """
+
+    def test_subst_key_is_intermediate(self):
+        """State with 'subst' as KEY is intermediate."""
+        state = {"subst": {"body": {}, "bindings": {}}, "_subst_ctx": {"x": 1}}
+        assert is_kernel_intermediate(state) is True
+
+    def test_subst_ctx_key_is_intermediate(self):
+        """State with '_subst_ctx' as KEY is intermediate."""
+        state = {"_subst_ctx": {"_input": 42}}
+        assert is_kernel_intermediate(state) is True
+
+    def test_match_key_is_intermediate(self):
+        """State with 'match' as KEY is intermediate."""
+        state = {"match": {"pattern": {}, "value": {}}, "_match_ctx": {"x": 1}}
+        assert is_kernel_intermediate(state) is True
+
+    def test_match_ctx_key_is_intermediate(self):
+        """State with '_match_ctx' as KEY is intermediate."""
+        state = {"_match_ctx": {"_input": 42}}
+        assert is_kernel_intermediate(state) is True
+
+    def test_mode_kernel_is_intermediate(self):
+        """State with _mode='kernel' is intermediate."""
+        state = {"_mode": "kernel", "_phase": "try", "_input": 42}
+        assert is_kernel_intermediate(state) is True
+
+    def test_mode_match_is_intermediate(self):
+        """State with _mode='match' is intermediate."""
+        state = {"_mode": "match", "_phase": "descend"}
+        assert is_kernel_intermediate(state) is True
+
+    def test_mode_done_is_not_intermediate(self):
+        """State with _mode='done' is NOT intermediate (it's terminal)."""
+        state = {"_mode": "done", "_result": 42, "_stall": False}
+        assert is_kernel_intermediate(state) is False
+
+    def test_primitive_is_not_intermediate(self):
+        """Primitive values are not intermediate."""
+        assert is_kernel_intermediate(42) is False
+        assert is_kernel_intermediate("hello") is False
+        assert is_kernel_intermediate(None) is False
+        assert is_kernel_intermediate(True) is False
+
+    def test_plain_dict_is_not_intermediate(self):
+        """Plain dict without kernel fields is not intermediate."""
+        assert is_kernel_intermediate({"x": 1, "y": 2}) is False
+        assert is_kernel_intermediate({}) is False
+
+    def test_list_is_not_intermediate(self):
+        """Lists are not intermediate states."""
+        assert is_kernel_intermediate([1, 2, 3]) is False
+        assert is_kernel_intermediate([]) is False
+
+    def test_mode_subst_value_is_not_intermediate(self):
+        """State with 'mode: subst' as VALUE is NOT intermediate.
+
+        This is the key insight from the investigation:
+        - `{"subst": ...}` (KEY) -> intermediate (kernel working)
+        - `{"mode": "subst", ...}` (VALUE) -> NOT intermediate (can stall)
+
+        The unbound variable state has mode="subst" as a value,
+        so mu_equal correctly runs and detects the stall.
+        """
+        state = {"mode": "subst", "phase": "lookup", "lookup_bindings": None}
+        assert is_kernel_intermediate(state) is False
+
+    def test_mode_match_value_is_not_intermediate(self):
+        """State with 'mode: match' as VALUE is NOT intermediate."""
+        state = {"mode": "match", "pattern_focus": 1, "value_focus": 2}
+        assert is_kernel_intermediate(state) is False
 
 
 # =============================================================================

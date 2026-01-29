@@ -422,11 +422,11 @@ Phase 5 complete:
 - `docs/execution/DeepStep.v0.md` - Deep traversal design
 - `rcx_pi/selfhost/` - Core self-hosting modules:
   - `mu_type.py` - Mu type validation and guardrails
-  - `kernel.py` - 4 kernel primitives
-  - `eval_seed.py` - EVAL_SEED evaluator (match, substitute, step)
+  - `kernel.py` - Step budget + legacy Kernel class (not canonical; see kernel.v1.json)
+  - `eval_seed.py` - EVAL_SEED evaluator (apply_projection, step)
   - `match_mu.py` - Pattern matching as Mu projections + normalization
   - `subst_mu.py` - Substitution as Mu projections
-  - `step_mu.py` - Self-hosting step (uses match_mu + subst_mu)
+  - `step_mu.py` - Self-hosting step (uses kernel.v1 + match.v2 + subst.v2)
   - `classify_mu.py` - Linked list classification as Mu projections
 - `rcx_pi/deep_eval.py` - Deep evaluation machinery
 - `seeds/` - Mu projection definitions:

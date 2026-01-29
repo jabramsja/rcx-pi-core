@@ -63,7 +63,6 @@ pytest $PARALLEL_FLAG -q \
     tests/test_subst_parity.py \
     tests/test_subst_v2_parity.py \
     tests/test_step_mu_parity.py \
-    tests/test_kernel_v0.py \
     tests/test_kernel_projections.py \
     tests/test_phase7c_integration.py \
     tests/test_eval_seed_v0.py \

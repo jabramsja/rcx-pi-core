@@ -226,12 +226,13 @@ The following are explicitly forbidden in meta-circular v1:
 - Seeds are pure Mu (no Python functions)
 - Self-hosting = EVAL_SEED runs EVAL_SEED
 
-**Current Status (Phase 5 Complete):**
-- `rcx_pi/kernel.py` - Minimal kernel (4 primitives)
-- `rcx_pi/eval_seed.py` - EVAL_SEED evaluator
-- `rcx_pi/step_mu.py` - Self-hosting: step_mu uses match_mu + subst_mu
-- `seeds/match.v1.json`, `seeds/subst.v1.json` - Match/substitute as Mu projections
-- 33 tests proving algorithmic self-hosting
+**Current Status (see STATUS.md for current phase):**
+- `seeds/kernel.v1.json` - Structural kernel (7 Mu projections) - **canonical kernel**
+- `rcx_pi/selfhost/step_mu.py` - step_kernel_mu uses kernel.v1 + match.v2 + subst.v2
+- `rcx_pi/selfhost/eval_seed.py` - EVAL_SEED evaluator (apply_projection, step)
+- `rcx_pi/selfhost/kernel.py` - Step budget + legacy Kernel class (not canonical)
+- `seeds/match.v2.json`, `seeds/subst.v2.json` - Match/substitute with context passthrough
+- 800+ tests including fuzzer coverage
 
 **Superseded:**
 - Gates 4 and 5 (bytecode) are superseded by kernel + seeds

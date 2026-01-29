@@ -1,18 +1,23 @@
 # Testing Performance Issue - Handoff Document
 
+> **NOTE:** This is a HISTORICAL CONTEXT document. For current testing configuration,
+> see `STATUS.md` (Testing Tiers section) which is the single source of truth.
+
 **Date:** 2026-01-28
-**Status:** RESOLVED (Option B implemented)
+**Status:** RESOLVED (Option B implemented + call site fixes)
 
 ## Resolution Summary
 
-**9-agent review consensus:** REJECT circuit breaker proposal (violates determinism).
+**9-agent review consensus (3 rounds):** REJECT circuit breaker proposal (violates determinism).
 **Solution implemented:** Option B - test configuration only (zero production code changes).
 
 **Changes made:**
-1. `max_depth=5` → `max_depth=3` in test generators
-2. Added `deadline=5000` to all fuzzer `@settings` decorators
-3. Reduced `max_steps` range in pathological projection tests
-4. Created `tests/stress/` for deep edge case testing (Tier 3)
+1. `max_depth=5` → `max_depth=3` in ALL test generators (6 files standardized)
+2. Fixed 29 call site overrides: `max_depth=4` → `max_depth=3` (found by adversary agent)
+3. Added `deadline=5000` to ALL fuzzer `@settings` decorators (removed deadline=None)
+4. Reduced `max_steps` range in pathological projection tests
+5. Created `tests/stress/` for deep edge case testing (Tier 3)
+6. Files standardized: test_bootstrap_fuzzer.py, test_selfhost_fuzzer.py, test_type_tags_fuzzer.py, test_apply_mu_fuzzer.py, test_phase8b_fuzzer.py, test_phase7_readiness_fuzzer.py
 
 **Results:**
 - Bootstrap fuzzer: 18 tests pass in 4 minutes (was hanging indefinitely)

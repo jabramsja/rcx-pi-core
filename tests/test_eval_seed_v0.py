@@ -21,7 +21,8 @@ from rcx_pi.eval_seed import (
     register_eval_seed,
     assert_not_lambda_calculus,
 )
-from rcx_pi.kernel import create_kernel
+# NOTE: create_kernel import removed - TestKernelIntegration tests removed
+# Legacy Kernel class is deprecated; use kernel.v1.json via step_kernel_mu()
 
 
 # =============================================================================
@@ -424,94 +425,12 @@ class TestHandlers:
 # =============================================================================
 # Integration tests
 # =============================================================================
-
-
-class TestKernelIntegration:
-    """Integration tests with kernel."""
-
-    def test_countdown_peano(self):
-        """Countdown using Peano numerals."""
-        # 0 = "zero", 1 = {"succ": "zero"}, 2 = {"succ": {"succ": "zero"}}
-        projections = [
-            # Base case: zero stalls (pattern = body)
-            {"pattern": "zero", "body": "zero"},
-            # Recursive case: unwrap succ
-            {"pattern": {"succ": {"var": "n"}}, "body": {"var": "n"}},
-        ]
-
-        kernel = create_kernel()
-        register_eval_seed(kernel, projections)
-
-        # Start with 3 = {"succ": {"succ": {"succ": "zero"}}}
-        three = {"succ": {"succ": {"succ": "zero"}}}
-        final, trace, reason = kernel.run(three, max_steps=100)
-
-        assert reason == "stall"
-        assert final == "zero"
-        assert len(trace) == 4  # 3 decrements + 1 stall
-
-    def test_identity_projection(self):
-        """Identity projection causes immediate stall."""
-        projections = [
-            {"pattern": {"var": "x"}, "body": {"var": "x"}}
-        ]
-
-        kernel = create_kernel()
-        register_eval_seed(kernel, projections)
-
-        final, trace, reason = kernel.run({"value": 42}, max_steps=100)
-
-        assert reason == "stall"
-        assert final == {"value": 42}
-        assert len(trace) == 1
-
-    def test_swap_pair(self):
-        """Projection that swaps pair elements."""
-        projections = [
-            {
-                "pattern": {"first": {"var": "a"}, "second": {"var": "b"}},
-                "body": {"first": {"var": "b"}, "second": {"var": "a"}}
-            }
-        ]
-
-        kernel = create_kernel()
-        register_eval_seed(kernel, projections)
-
-        # This will oscillate: {1,2} -> {2,1} -> {1,2} -> ...
-        # Until max_steps
-        final, trace, reason = kernel.run(
-            {"first": 1, "second": 2},
-            max_steps=10
-        )
-
-        assert reason == "max_steps"
-        assert len(trace) == 10
-
-    def test_list_head(self):
-        """Extract head of list."""
-        projections = [
-            # Non-empty list: extract head
-            {
-                "pattern": [{"var": "head"}, {"var": "tail"}],
-                "body": {"var": "head"}
-            },
-            # Anything else stalls
-            {
-                "pattern": {"var": "x"},
-                "body": {"var": "x"}
-            }
-        ]
-
-        kernel = create_kernel()
-        register_eval_seed(kernel, projections)
-
-        # [1, 2] matches the 2-element pattern, not the var
-        # Wait, [1, 2] has 2 elements, pattern [head, tail] has 2 elements
-        # So it matches: head=1, tail=2
-        final, trace, reason = kernel.run([1, 2], max_steps=100)
-
-        assert reason == "stall"
-        assert final == 1
+# NOTE: TestKernelIntegration removed (2026-01-29)
+# Those tests used the deprecated Kernel class. The behaviors they tested
+# (countdown, stall detection, oscillation) are covered by:
+# - tests/test_step_mu_parity.py (step_mu tests)
+# - tests/test_kernel_projections.py (kernel.v1.json tests)
+# - tests/structural/test_step_mu_kernel_integration.py (integration)
 
 
 class TestPeanoArithmetic:

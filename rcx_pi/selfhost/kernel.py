@@ -1,14 +1,40 @@
 """
-RCX Kernel v0 - Minimal Structural Runtime
+RCX Kernel v0 - Step Budget and Legacy Kernel Infrastructure
 
+=============================================================================
+ARCHITECTURE NOTE (2026-01-29)
+
+This file contains TWO distinct concerns:
+
+1. ACTIVE: Step Budget Infrastructure (lines ~45-130)
+   - _ProjectionStepBudget, get_step_budget(), reset_step_budget()
+   - Used by match_mu.py, subst_mu.py, classify_mu.py, projection_runner.py
+   - MAX_PROJECTION_STEPS = 50000 (global budget across all calls)
+
+2. LEGACY: Kernel Class and Primitives (lines ~135-420)
+   - compute_identity(), detect_stall(), record_trace(), gate_dispatch()
+   - Kernel class, create_kernel() factory
+   - NOT used by self-hosting path (use kernel.v1.json projections instead)
+   - Kept for reference, testing infrastructure, and backward compatibility
+
+SELF-HOSTING PATH:
+  step_mu() -> step_kernel_mu() -> kernel.v1.json projections
+  Uses max_steps=10000 (per run), NOT MAX_PROJECTION_STEPS (global budget)
+
+Do NOT confuse:
+  - MAX_PROJECTION_STEPS (50000) - global cross-call budget in this file
+  - max_steps (10000) - per-execution limit in step_mu.py
+
+The structural kernel is in seeds/kernel.v1.json (7 Mu projections).
+See docs/core/MetaCircularKernel.v0.md for terminology clarification.
+=============================================================================
+
+Legacy docstring (preserved for reference):
 The kernel provides exactly 4 primitives:
 1. compute_identity(mu) - SHA-256 of canonical JSON
 2. detect_stall(before, after) - Compare identity hashes
 3. record_trace(entry) - Append to trace history
 4. gate_dispatch(event, context) - Call seed-provided handler
-
-The kernel is "dumb" - it doesn't know how to match patterns or apply
-projections. Seeds define all semantics via handlers.
 
 See docs/core/RCXKernel.v0.md for the full specification.
 """
@@ -18,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import warnings
 from typing import Any, Callable
 
 from .mu_type import (
@@ -241,6 +268,12 @@ class Kernel:
     """
     RCX Kernel - minimal structural runtime.
 
+    DEPRECATION NOTICE (2026-01-29):
+    This class is LEGACY scaffolding, NOT used by the self-hosting path.
+    Self-hosting uses kernel.v1.json projections via step_kernel_mu().
+    This class is retained for testing infrastructure and reference.
+    See docs/core/MetaCircularKernel.v0.md for clarification.
+
     The kernel maintains:
     - A trace (history of events)
     - A handler table (seed-provided event handlers)
@@ -252,6 +285,13 @@ class Kernel:
 
     def __init__(self) -> None:
         """Initialize an empty kernel."""
+        warnings.warn(
+            "Kernel class is legacy scaffolding (hash/trace/dispatch). "
+            "Self-hosting uses kernel.v1.json projections via step_kernel_mu(). "
+            "See docs/core/MetaCircularKernel.v0.md for clarification.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self._trace: list[Mu] = []
         self._handlers: dict[str, Callable[[Mu], Mu]] = {}
         self._step_counter: int = 0
@@ -415,6 +455,10 @@ def create_kernel() -> Kernel:
     """
     Create a new kernel instance.
 
-    This is the recommended way to create a kernel.
+    DEPRECATION NOTICE (2026-01-29):
+    This factory creates a LEGACY Kernel class instance.
+    Self-hosting uses kernel.v1.json projections via step_kernel_mu().
+    See docs/core/MetaCircularKernel.v0.md for clarification.
     """
+    # Note: Kernel.__init__ already emits deprecation warning
     return Kernel()

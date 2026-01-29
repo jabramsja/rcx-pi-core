@@ -288,13 +288,17 @@ The kernel is maximally general. Specific behaviors (EngineeNews, Wolfram-style,
 
 ## Relationship to Existing Code
 
-| Component | Role |
-|-----------|------|
-| `mu_type.py` | Implements Mu validation |
-| `trace_canon.py` | Implements `compute_identity` |
-| `bytecode_vm.py` | Current VM - will evolve to implement kernel |
-| Future: `kernel.py` | Clean kernel implementation |
-| Future: `seeds/` | Directory of seed configurations |
+**Note:** This section was written during Phase 1-2 design. See STATUS.md for current phase.
+
+| Component | Role | Status |
+|-----------|------|--------|
+| `mu_type.py` | Implements Mu validation | Active |
+| `seeds/kernel.v1.json` | Structural kernel (7 Mu projections) | **Canonical kernel** |
+| `rcx_pi/selfhost/step_mu.py` | step_kernel_mu() uses kernel.v1 | Active |
+| `rcx_pi/selfhost/kernel.py` | Step budget + legacy Kernel class | Legacy (step budget active) |
+| `seeds/` | Mu projection definitions | Active |
+| `trace_canon.py` | Implements `compute_identity` | Legacy |
+| `bytecode_vm.py` | Bytecode VM | Archived |
 
 ## Implementation Order
 
