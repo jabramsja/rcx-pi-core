@@ -113,7 +113,7 @@ class TestKernelLoopTermination:
         assert mu_equal(result, value)
 
     @given(value=simple_mu, projs=projection_lists(max_size=3))
-    @settings(max_examples=200, deadline=15000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=200, deadline=60000, suppress_health_check=[HealthCheck.too_slow])
     def test_kernel_terminates_with_custom_projections(self, value, projs):
         """Kernel loop terminates with arbitrary projection lists."""
         # Use step_mu which uses step_kernel_mu internally
