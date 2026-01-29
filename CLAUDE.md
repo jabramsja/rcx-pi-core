@@ -99,12 +99,17 @@ HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # 50 examples, ~30
 # Iterate locally (fast feedback)
 ./tools/audit_fast.sh
 
-# Before pushing (full validation)
+# REQUIRED: Before pushing, run full validation locally
 ./tools/audit_all.sh
 
-# Or let CI catch it (slower feedback but thorough)
+# Only push after local tests pass
 git push
 ```
+
+**IMPORTANT: Always run `./tools/audit_all.sh` locally before pushing.**
+- Local runs are faster (~5 min) than waiting for CI (~10 min)
+- Tests are deterministic (PYTHONHASHSEED=0) so same inputs run locally and on CI
+- CI runners are slower, so deadline issues may only surface there - but running locally first catches most problems faster
 
 ---
 
