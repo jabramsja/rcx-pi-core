@@ -59,9 +59,19 @@ mu_primitives = st.one_of(
 )
 
 
+# Dict keys that don't start with underscore (underscore-prefixed are kernel-reserved)
+# See step_mu.py KERNEL_RESERVED_FIELDS for the security rationale.
+domain_safe_keys = st.text(min_size=1, max_size=10).filter(lambda k: not k.startswith("_"))
+
+
 @composite
-def mu_values(draw, max_depth=4):
-    """Generate valid Mu values recursively."""
+def mu_values(draw, max_depth=3):
+    """Generate valid Mu values recursively.
+
+    Note: max_depth=3 prevents pathological nesting after normalization
+    (each dict level can triple during normalization to linked-list form).
+    Keys filtered to exclude underscore-prefixed (kernel-reserved) fields.
+    """
     if max_depth <= 0:
         return draw(mu_primitives)
 
@@ -72,7 +82,7 @@ def mu_values(draw, max_depth=4):
             max_size=5
         ),
         st.dictionaries(
-            st.text(min_size=1, max_size=10),
+            domain_safe_keys,
             st.deferred(lambda: mu_values(max_depth=max_depth-1)),
             max_size=5
         ),
@@ -153,7 +163,7 @@ class TestNormalizationRoundtripFuzzer:
     - {} -> {"_type": "dict"} -> {}
     """
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=1000, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_roundtrip_all_mu_types(self, value):
         """Normalization roundtrip preserves ALL Mu values."""
@@ -221,7 +231,7 @@ class TestNormalizationIdempotencyFuzzer:
     Lines 189-195 in match_mu.py handle this case.
     """
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=1000, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_normalize_idempotent_all_types(self, value):
         """normalize(normalize(x)) == normalize(x) for all Mu."""
