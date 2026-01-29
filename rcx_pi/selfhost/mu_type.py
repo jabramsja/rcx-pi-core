@@ -22,7 +22,12 @@ Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 # Cannot be structural because Python's stack is runtime, not Mu data.
 # Protects against deeply nested structures that would overflow during traversal.
 # See docs/core/BootstrapPrimitives.v0.md for full justification.
-MAX_MU_DEPTH = 200
+#
+# Phase 8b note: Increased from 200 to 300 to support deeper kernel states.
+# Kernel normalization converts dicts to linked-lists, multiplying depth by ~4x.
+# Must stay below ~400 to avoid Python's default recursion limit (~1000).
+# Stress tests with max_steps > ~60 may need kernel-internal bypass.
+MAX_MU_DEPTH = 300
 
 # Maximum width (number of elements) for lists/dicts (prevents resource exhaustion)
 # A dict/list with 1M keys could exhaust memory during validation

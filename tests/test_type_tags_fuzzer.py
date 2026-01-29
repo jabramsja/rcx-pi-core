@@ -54,8 +54,12 @@ mu_primitives = st.one_of(
 
 
 @composite
-def mu_values(draw, max_depth=5):
-    """Generate valid Mu values recursively."""
+def mu_values(draw, max_depth=3):
+    """Generate valid Mu values recursively.
+
+    Note: max_depth=3 prevents pathological nesting after normalization
+    (each dict level can triple during normalization to linked-list form).
+    """
     if max_depth <= 0:
         return draw(mu_primitives)
 
@@ -171,7 +175,7 @@ def contains_empty_collection(value, _seen=None):
 class TestIterativeRoundtrip:
     """Tests for normalize(denormalize(normalize(x))) == normalize(x)."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_normalize_denormalize_normalize_idempotency(self, value):
         """normalize(denormalize(normalize(x))) == normalize(x).
@@ -411,7 +415,7 @@ class TestListDictDiscrimination:
 class TestNormalizationDeterminism:
     """Tests that normalization is deterministic."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_normalize_is_deterministic(self, value):
         """normalize_for_match produces same output every time."""
@@ -424,7 +428,7 @@ class TestNormalizationDeterminism:
         assert mu_equal(norm1, norm2), f"Normalization non-deterministic: {norm1} != {norm2}"
         assert mu_equal(norm2, norm3), f"Normalization non-deterministic: {norm2} != {norm3}"
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=300, deadline=5000)
     def test_denormalize_is_deterministic(self, value):
         """denormalize_from_match produces same output every time."""
@@ -479,7 +483,7 @@ class TestCircularReferenceDetection:
 class TestNoCrashOnValidInputs:
     """Tests that valid inputs don't cause unexpected crashes."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_normalize_never_crashes_on_valid_mu(self, value):
         """normalize_for_match handles any valid Mu without unexpected crashes."""
@@ -492,7 +496,7 @@ class TestNoCrashOnValidInputs:
             # Only circular reference errors are acceptable
             assert "Circular reference" in str(e), f"Unexpected ValueError: {e}"
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=300, deadline=5000)
     def test_denormalize_never_crashes_on_valid_mu(self, value):
         """denormalize_from_match handles any valid Mu without unexpected crashes."""

@@ -107,6 +107,10 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
 # =============================================================================
 
 # Fields reserved for kernel internal state - domain data cannot contain these
+# Note: 'subst' and 'match' are NOT included - they're too generic as domain keys.
+# The bypass functions (is_kernel_intermediate, _is_kernel_internal_state) check
+# for these to skip validation of kernel states, but domain data with these keys
+# cannot forge kernel state because kernel projections require specific patterns.
 KERNEL_RESERVED_FIELDS = frozenset({  # AST_OK: security whitelist - frozen constant
     "_mode", "_phase", "_input", "_remaining",
     "_match_ctx", "_subst_ctx", "_kernel_ctx",
@@ -270,6 +274,40 @@ def is_kernel_terminal(result: Mu) -> bool:
     )
 
 
+def is_kernel_intermediate(result: Mu) -> bool:
+    """
+    Check if result is an intermediate kernel state (mid-execution).
+
+    Intermediate states have kernel-internal fields that indicate
+    the kernel is still processing (match, subst, or kernel phases).
+    These include:
+    - subst, _subst_ctx (substitution in progress)
+    - match, _match_ctx (matching in progress)
+    - _mode with value other than "done" (kernel loop in progress)
+
+    These are NOT stalls - the kernel is actively working.
+    We skip the mu_equal stall check for these because:
+    1. They may have deeply nested linked-list structures
+    2. They're intermediate by definition - no comparison needed
+
+    Phase 8b: This prevents mu_equal from being called on kernel internals.
+    """
+    if not isinstance(result, dict):
+        return False
+
+    # Kernel internal fields indicate mid-execution
+    # Use tuple for determinism (avoid set literal)
+    kernel_internal_fields = ('subst', '_subst_ctx', 'match', '_match_ctx')
+    if any(f in result for f in kernel_internal_fields):  # AST_OK: infra
+        return True
+
+    # _mode present but not "done" means kernel loop in progress
+    if "_mode" in result and result.get("_mode") != "done":
+        return True
+
+    return False
+
+
 def extract_kernel_result(terminal_state: Mu, original_input: Mu) -> Mu:
     """
     Extract result from terminal kernel state.
@@ -364,7 +402,9 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
             return extract_kernel_result(result, input_value)
 
         # Stall check - no change means no progress
-        if mu_equal(result, current):
+        # Skip for intermediate kernel states (they have deep nested structures
+        # and are mid-execution by definition, not stalls)
+        if not is_kernel_intermediate(result) and mu_equal(result, current):
             return input_value
 
         current = result

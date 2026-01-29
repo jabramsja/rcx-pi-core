@@ -277,6 +277,8 @@ class TestKernelReservedFieldsValidation:
 
     def test_reserved_fields_constant_complete(self):
         """KERNEL_RESERVED_FIELDS contains all expected fields."""
+        # Note: 'subst' and 'match' are NOT reserved - they're too generic.
+        # Domain data with these keys cannot forge kernel state.
         expected = {
             "_mode", "_phase", "_input", "_remaining",
             "_match_ctx", "_subst_ctx", "_kernel_ctx",
@@ -312,6 +314,18 @@ class TestKernelReservedFieldsValidation:
 
         with pytest.raises(ValueError, match="SECURITY.*_match_ctx"):
             validate_no_kernel_reserved_fields(malicious, "test")
+
+    def test_validate_allows_subst_field(self):
+        """Input with subst field is allowed (too generic to reserve)."""
+        # 'subst' is a common domain key (e.g., text substitution)
+        clean = {"data": 1, "subst": {"pattern": 1, "body": 2}}
+        validate_no_kernel_reserved_fields(clean, "test")  # Should not raise
+
+    def test_validate_allows_match_field(self):
+        """Input with match field is allowed (too generic to reserve)."""
+        # 'match' is a common domain key (e.g., pattern matching result)
+        clean = {"data": 1, "match": {"pattern_focus": 42}}
+        validate_no_kernel_reserved_fields(clean, "test")  # Should not raise
 
     def test_validate_no_kernel_reserved_fields_allows_clean_input(self):
         """Input without reserved fields is accepted."""

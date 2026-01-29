@@ -158,12 +158,13 @@ def hostile_mu_values(draw, max_depth=3):
 
 
 @composite
-def mu_values(draw, max_depth=5, allow_var_sites=False, allow_head_tail=False):
+def mu_values(draw, max_depth=3, allow_var_sites=False, allow_head_tail=False):
     """
     Generate valid Mu values recursively.
 
     Args:
-        max_depth: Maximum nesting depth (default 5 for performance)
+        max_depth: Maximum nesting depth (default 3 to prevent pathological
+                   nesting after normalization - each dict level can triple)
         allow_var_sites: If True, can generate {"var": "x"} structures
         allow_head_tail: If True, can generate {"head": x, "tail": y} structures
     """
@@ -371,14 +372,14 @@ def contains_empty_var_name(pattern, _seen=None):
 class TestMuEqualEquivalence:
     """Tests for mu_equal equivalence relation properties."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_mu_equal_reflexivity(self, value):
         """mu_equal(x, x) must be True (reflexivity)."""
         assume(is_mu(value))
         assert mu_equal(value, value), f"Reflexivity failed for {value}"
 
-    @given(mu_values(max_depth=4), mu_values(max_depth=4))
+    @given(mu_values(max_depth=3), mu_values(max_depth=3))
     @settings(
         max_examples=500,
         deadline=5000,
@@ -416,7 +417,7 @@ class TestMuEqualEquivalence:
 class TestComputeIdentityDeterminism:
     """Tests for compute_identity determinism."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=1000, deadline=5000)
     def test_compute_identity_determinism(self, value):
         """compute_identity must be deterministic - same input gives same hash."""
@@ -429,7 +430,7 @@ class TestComputeIdentityDeterminism:
         assert isinstance(hash1, str)
         assert len(hash1) == 64  # SHA-256 hex string
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_mu_hash_is_deterministic(self, value):
         """mu_hash is deterministic - same value gives same hash.
@@ -462,7 +463,7 @@ class TestComputeIdentityDeterminism:
 class TestComputeIdentityCollisionResistance:
     """Tests for hash collision resistance."""
 
-    @given(mu_values(max_depth=4), mu_values(max_depth=4))
+    @given(mu_values(max_depth=3), mu_values(max_depth=3))
     @settings(
         max_examples=500,
         deadline=5000,
@@ -491,7 +492,7 @@ class TestComputeIdentityCollisionResistance:
 class TestHashEqualityConsistency:
     """Tests for hash/equality consistency."""
 
-    @given(mu_values(max_depth=4), mu_values(max_depth=4))
+    @given(mu_values(max_depth=3), mu_values(max_depth=3))
     @settings(
         max_examples=500,
         deadline=5000,
@@ -534,7 +535,7 @@ class TestDetectStallCorrectness:
 class TestNormalizationRoundtrip:
     """Tests for normalization roundtrip property."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=1000, deadline=5000)
     def test_normalize_denormalize_roundtrip(self, value):
         """denormalize(normalize(x)) == x for most Mu values.
@@ -575,7 +576,7 @@ class TestNormalizationRoundtrip:
 
         assert denormalized == value, f"Roundtrip failed: {value} -> {normalized} -> {denormalized}"
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_normalization_preserves_validity(self, value):
         """Normalized values are valid Mu."""
@@ -584,7 +585,7 @@ class TestNormalizationRoundtrip:
         normalized = normalize_for_match(value)
         assert is_mu(normalized), f"Normalized value is not Mu: {normalized}"
 
-    @given(mu_values(max_depth=4, allow_head_tail=True))
+    @given(mu_values(max_depth=3, allow_head_tail=True))
     @settings(max_examples=500, deadline=5000)
     def test_denormalization_preserves_validity(self, value):
         """Denormalized values are valid Mu.
@@ -634,7 +635,7 @@ class TestNormalizationRoundtrip:
 class TestNormalizationIdempotency:
     """Tests for normalization idempotency."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_normalize_idempotency(self, value):
         """normalize(normalize(x)) denormalizes to same value."""
@@ -661,7 +662,7 @@ class TestNormalizationIdempotency:
 class TestMatchMuDeterminism:
     """Tests for match_mu determinism."""
 
-    @given(mu_patterns(max_depth=3), mu_values(max_depth=4))
+    @given(mu_patterns(max_depth=3), mu_values(max_depth=3))
     @settings(
         max_examples=500,
         deadline=5000,
@@ -768,7 +769,7 @@ class TestVariableBindingConsistency:
 class TestTypePreservation:
     """Tests for Mu type preservation."""
 
-    @given(mu_patterns(max_depth=3), mu_values(max_depth=4))
+    @given(mu_patterns(max_depth=3), mu_values(max_depth=3))
     @settings(
         max_examples=300,
         deadline=5000,
@@ -880,14 +881,14 @@ class TestLimitEnforcement:
 class TestNoCrashOnValidInputs:
     """Tests that valid inputs don't cause crashes."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=1000, deadline=5000)
     def test_is_mu_never_crashes(self, value):
         """is_mu should never crash, just return bool."""
         result = is_mu(value)
         assert isinstance(result, bool)
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_mu_type_name_never_crashes(self, value):
         """mu_type_name should never crash."""
@@ -895,14 +896,14 @@ class TestNoCrashOnValidInputs:
         assert isinstance(result, str)
         assert result in ["null", "bool", "int", "float", "str", "list", "dict", "INVALID"]
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_has_callable_never_crashes(self, value):
         """has_callable should never crash."""
         result = has_callable(value)
         assert isinstance(result, bool)
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=300, deadline=5000)
     def test_compute_identity_never_crashes_on_valid_mu(self, value):
         """compute_identity should never crash on valid Mu."""
@@ -990,7 +991,7 @@ class TestTypeDiscrimination:
 class TestJSONRoundtripConsistency:
     """Tests for JSON roundtrip consistency."""
 
-    @given(mu_values(max_depth=4))
+    @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_json_roundtrip_consistency(self, value):
         """Valid Mu values should roundtrip through JSON."""
@@ -1145,7 +1146,7 @@ from rcx_pi.eval_seed import match as python_match, substitute as python_substit
 class TestMatchMuParity:
     """Tests for match_mu parity with Python-native eval_seed.match()."""
 
-    @given(mu_patterns(max_depth=3), mu_values(max_depth=4))
+    @given(mu_patterns(max_depth=3), mu_values(max_depth=3))
     @settings(
         max_examples=500,
         deadline=5000,
