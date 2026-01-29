@@ -96,13 +96,13 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 - **Verdict:** MINIMAL / COULD_SIMPLIFY / OVER_ENGINEERED
 
 ### 3. Verifier (`verifier.md`)
-- **Model:** Sonnet (upgraded from Haiku)
+- **Model:** Opus (upgraded from Sonnet for deeper invariant reasoning)
 - **Purpose:** Check North Star invariants
 - **Focus:** Host smuggling, Mu type integrity, lambda prevention, determinism
 - **Verdict:** APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION
 
 ### 4. Adversary (`adversary.md`)
-- **Model:** Sonnet (upgraded from Haiku)
+- **Model:** Opus (upgraded from Sonnet for deeper attack analysis)
 - **Purpose:** Break things, find vulnerabilities
 - **Focus:** Type confusion, lambda smuggling, non-determinism, edge cases
 - **Verdict:** SECURE / VULNERABLE / NEEDS_HARDENING
@@ -145,7 +145,7 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 - **Output:** Mermaid diagram (renders in GitHub, VS Code, etc.)
 
 ### 10. Advisor (`advisor.md`)
-- **Model:** Sonnet
+- **Model:** Opus (upgraded from Sonnet for deeper strategic reasoning)
 - **Purpose:** Strategic advice when stuck - options, trade-offs, creative solutions
 - **Focus:** Exploring solution space, unblocking progress, out-of-the-box thinking
 - **When to use:** Design decisions, multiple valid approaches, need fresh perspective
@@ -306,3 +306,4 @@ python3 tools/ast_police.py
 | 2026-01-27 | All agents now MUST read STATUS.md before assessments |
 | 2026-01-27 | Converted Phase Scope from version numbers to semantic levels (L1/L2/L3) |
 | 2026-01-27 | Clarified scaffolding debt vs semantic debt distinction |
+| 2026-01-29 | Upgraded core agents (advisor, verifier, adversary) to Opus for deeper reasoning |

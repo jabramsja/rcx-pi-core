@@ -4,7 +4,16 @@ This file is read by Claude Code at session start.
 
 ---
 
-## Session Discipline
+## SESSION ONBOARDING (Read This First)
+
+**CANONICAL SOURCES - There are only TWO files that matter for current state:**
+
+| File | Purpose | Contains |
+|------|---------|----------|
+| `STATUS.md` | **Current state** | Phase, debt counts, testing tiers, fuzzer config |
+| `TASKS.md` | **Work items** | Ra (done), NEXT (active), VECTOR (design), SINK (parked) |
+
+**Everything else is reference material.** Docs in `docs/` are specs and historical context - they should NOT contain operational state that drifts.
 
 **At session START:**
 1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
@@ -43,17 +52,22 @@ These are the only two files that track current state. Do not duplicate status i
 
 ## Agents
 
-| Agent | Purpose | When to Use |
-|-------|---------|-------------|
-| verifier | North Star invariant compliance | Every PR with rcx_pi/ changes |
-| adversary | Red team attack testing | New modules, security-sensitive code |
-| expert | Code quality, simplification | Complex code, major refactors |
-| structural-proof | Verify Mu projection claims | When claiming "pure structural" |
-| grounding | Convert claims to executable tests | Core kernel/seed code |
-| fuzzer | Property-based testing (1000+ inputs) | Core kernel/seed code |
-| translator | Plain English explanation | Founder review |
-| visualizer | Mermaid diagrams of Mu structures | Founder review |
-| advisor | Strategic advice, trade-offs | When stuck on design decisions |
+| Agent | Model | Purpose | When to Use |
+|-------|-------|---------|-------------|
+| advisor | **opus** | Strategic advice, trade-offs | When stuck on design decisions |
+| verifier | **opus** | North Star invariant compliance | Every PR with rcx_pi/ changes |
+| adversary | **opus** | Red team attack testing | New modules, security-sensitive code |
+| expert | sonnet | Code quality, simplification | Complex code, major refactors |
+| structural-proof | sonnet | Verify Mu projection claims | When claiming "pure structural" |
+| grounding | sonnet | Convert claims to executable tests | Core kernel/seed code |
+| fuzzer | sonnet | Property-based testing (1000+ inputs) | Core kernel/seed code |
+| translator | sonnet | Plain English explanation | Founder review |
+| visualizer | haiku | Mermaid diagrams of Mu structures | Founder review |
+
+**Model selection rationale:**
+- **Opus** for core agents (advisor, verifier, adversary) - deeper reasoning for strategic/security analysis
+- **Sonnet** for implementation agents - good balance of speed and quality
+- **Haiku** for visualizer - simple diagram generation, run often
 
 **Mandatory for PRs:** verifier, adversary, expert, structural-proof (4)
 **For core code:** Add grounding, fuzzer (6)
@@ -103,7 +117,7 @@ git push
 | Single file | `pytest tests/foo.py` | Fast (no overhead) |
 | Specific test | `pytest tests/foo.py::TestClass::test_name` | Fastest |
 | Full suite | `pytest -n auto` | ~44s (6x faster than serial) |
-| Full suite | `./tools/audit_fast.sh` | ~2 min (auto-parallel) |
+| Full suite | `./tools/audit_fast.sh` | ~3 min (auto-parallel) |
 
 **Quick reference:**
 ```bash
