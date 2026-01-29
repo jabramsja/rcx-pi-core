@@ -34,7 +34,12 @@ from rcx_pi.selfhost.eval_seed import step
 # Strategies for generating test inputs
 # =============================================================================
 
+# Dict keys that don't start with underscore (underscore-prefixed are kernel-reserved)
+# See step_mu.py KERNEL_RESERVED_FIELDS for the security rationale.
+domain_safe_keys = st.text(max_size=10).filter(lambda k: not k.startswith("_"))
+
 # Simple Mu values (max_depth=3 to prevent pathological nesting)
+# Keys filtered to exclude underscore-prefixed (kernel-reserved) fields.
 simple_mu = st.recursive(
     st.one_of(
         st.none(),
@@ -45,7 +50,7 @@ simple_mu = st.recursive(
     ),
     lambda children: st.one_of(
         st.lists(children, max_size=3),
-        st.dictionaries(st.text(max_size=10), children, max_size=3),
+        st.dictionaries(domain_safe_keys, children, max_size=3),
     ),
     max_leaves=10,
 )

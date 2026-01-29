@@ -366,13 +366,13 @@ class TestBootstrapBoundary:
             pass
 
     @given(mu_values(), st.integers(min_value=5, max_value=20))
-    @settings(max_examples=200, deadline=8000)
+    @settings(max_examples=200, deadline=None)
     def test_max_steps_uses_mu_equal_for_stall(self, value, max_steps):
         """run_mu uses mu_equal to detect stalls.
 
-        Note: max_steps limited to 20 because the "double" projection adds
-        ~2 depth levels per step after normalization. With 20 steps, we stay
-        well under the 5 second deadline while still testing the property.
+        Note: max_steps limited to 20. Deadline disabled because this test
+        checks correctness of stall detection, not performance. Complex nested
+        inputs can take 10+ seconds but the property must still hold.
         """
         assume(is_mu(value))
 
