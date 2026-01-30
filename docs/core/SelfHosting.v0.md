@@ -457,10 +457,14 @@ Phase 5 complete:
 13. [x] Phase 6c: Iterative normalization + type tags (removed 2 @host_recursion)
 14. [x] **Debt reduced!** See `STATUS.md` for current counts (down from 23)
 
-**Phase 7 (IN PROGRESS):**
-- Self-host the kernel loop (projection selection as Mu projections)
+**Phase 7 (L2 PARTIAL achieved):**
+- [x] 7a/7b/7c: Kernel projections, context passthrough, integration tests
+- [x] 7d-1: Wire step_mu to structural kernel (selection is structural, execution is Python)
+- [ ] 7d-2/7d-3: PAUSED (requires Phase 8 recursive kernel design)
 - See `STATUS.md` for current phase and `TASKS.md` for Phase 7 sub-phases
 
-**Phase 8+ (Future):**
-- Self-host iteration itself (recursion as structural transformation)
-- These are "scaffolding debt", not required for operational self-hosting
+**Phase 8 (Bootstrap Primitives + Mechanical Kernel):**
+- [x] 8a: Document 5 bootstrap primitives (eval_step, mu_equal, etc.)
+- [x] 8b: Simplify step_kernel_mu to mechanical operation (~15 lines)
+- [ ] 8c: Oscillation detection (future)
+- [ ] 8d: EngineNews trace model (future)
