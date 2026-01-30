@@ -93,3 +93,4 @@ RCX_MINIMAL_SPINE_MANIFEST.json
 # local tooling
 .claude/
 .agent_memory/
+experiments/
