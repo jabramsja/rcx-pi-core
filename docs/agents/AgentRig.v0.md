@@ -307,3 +307,4 @@ python3 tools/ast_police.py
 | 2026-01-27 | Converted Phase Scope from version numbers to semantic levels (L1/L2/L3) |
 | 2026-01-27 | Clarified scaffolding debt vs semantic debt distinction |
 | 2026-01-29 | Upgraded core agents (advisor, verifier, adversary) to Opus for deeper reasoning |
+| 2026-01-29 | Deployed v4.3 prompt updates: evidence requirements, A-K attack checklist, THEATER detection, North Star tracing |
