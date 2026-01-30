@@ -2,17 +2,21 @@
 
 A projection-based computational substrate where **structure is the primitive**.
 
-## Current Status: L2 PARTIAL Self-Hosting (Phase 8b)
+## Current Status: L3 Substrate Portability COMPLETE (Step 5 Done)
 
 | Level | Description | Status |
 |-------|-------------|--------|
 | **L1** | match/subst algorithms as Mu projections | ✅ DONE |
 | **L2** | Kernel state machine as Mu projections | 🔶 PARTIAL |
-| **L3** | Substrate portability (Python + JS) | ✅ PROVEN |
+| **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
+| **Step 5** | EngineNews structural closure detection | ✅ DONE |
 
-- **1,743 tests** across 92 test files
+- **1,810+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
 - **13 CRITICAL_TEST_FILES** protected from silent skipping
+
+**Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
+All logic is in `seeds/enginenews.v1.json` (9 projections). Bootstrap provides only mechanical execution.
 
 See `STATUS.md` for full details.
 
@@ -29,6 +33,7 @@ See `STATUS.md` for full details.
 - `TASKS.md` - Canonical task tracker
 - `docs/core/MetaCircularKernel.v0.md` - Kernel architecture
 - `docs/core/BootstrapPrimitives.v0.md` - 5 bootstrap primitives
+- `docs/core/EngineNewsStructural.v0.md` - EngineNews closure detection spec
 
 
 ## CI (Green Gate)
@@ -77,6 +82,7 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `seeds/subst.v2.json` | Substitution (12 projections) - with context passthrough |
 | `seeds/classify.v1.json` | Type classification (6 projections) |
 | `seeds/eval.v1.json` | Evaluation (7 projections) |
+| `seeds/enginenews.v1.json` | Closure detection (9 projections) - Rule 2.2♢ |
 
 ### Core Modules
 

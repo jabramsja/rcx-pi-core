@@ -186,7 +186,7 @@ Do NOT update individual agent files - they read STATUS.md.
 | `docs/core/` | Design specs |
 | `docs/agents/AgentRig.v0.md` | Agent rig docs |
 | `rcx_pi/selfhost/` | Core implementation |
-| `seeds/*.json` | Mu projection definitions |
+| `seeds/*.json` | Mu projection definitions (including enginenews.v1.json) |
 
 ---
 
