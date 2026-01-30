@@ -3,6 +3,7 @@
 **Status:** DESIGN COMPLETE (pre-Step 5 gate)
 **Created:** 2026-01-30
 **Origin:** 7-agent review requirement before Step 5 implementation
+**Canonical Reference:** RCXEngineNew.pdf (RCX Core Engine Stateless Specification, May 2025)
 
 ---
 
@@ -16,6 +17,28 @@ instead of Mu projections.
 - If EngineNews runs via Python loops/logic, emergence might be a Python artifact
 - For structural honesty, closure detection must be pattern matching on traces
 - The bootstrap (eval_step, mu_equal) is acceptable - the LOGIC must be projections
+
+---
+
+## Alignment with RCX Core Engine Spec
+
+The original RCX Core Engine specification defines the formal closure mechanism:
+
+| Spec Rule | Description | Our Implementation |
+|-----------|-------------|-------------------|
+| **Rule 2.2♢** | Closure-on-Second-Demand | `run_mu_structural()` trace enables this |
+| **Rule 0.7c′** | LeafInvariance (logs τ) | Stall detection in trace |
+| **Rule 3.1** | Operator Exhaustion | Max steps / freeze operator |
+| **A.10** | Trace Token τ | Our trace linked-list captures this |
+| **A.10b** | Closure Object Ω(τ) | The "closure evidence" we emit |
+
+**Key insight from spec:** "A second, independent derivation that encounters the same τ
+triggers Rule 2.2♢, projecting a closure object Ω(τ) such as ω."
+
+Our implementation must:
+1. Capture trace tokens (τ) as structural data
+2. Detect recurrence of the same trace pattern
+3. Project closure evidence structurally (not via Python conditionals)
 
 ---
 
@@ -224,6 +247,7 @@ Before Step 5 is COMPLETE, these grounding tests must exist:
 
 ## Related Documents
 
+- **RCXEngineNew.pdf** - Canonical RCX Core Engine Stateless Specification (May 2025)
 - `docs/core/BootstrapPrimitives.v0.md` - What Python can do
 - `docs/core/MetaCircularKernel.v0.md` - How kernel executes projections
 - `TASKS.md` - Step 5 task definition
@@ -231,6 +255,32 @@ Before Step 5 is COMPLETE, these grounding tests must exist:
 
 ---
 
+## Spec Rule Mapping
+
+From RCX Core Engine Stateless Specification:
+
+### Rule 2.2♢ Closure-on-Second-Demand
+> "A stalled derivation encounters the trace-token τ a second time via an operator O′
+> that is independent of the first... Action: Project the closure object Ω(τ) and log ⟨closFix, τ⟩."
+
+**Our implementation:** The trace from `run_mu_structural()` captures repeated states.
+EngineNews projections must pattern-match on this trace to detect τ recurrence.
+
+### Rule 0.7c′ LeafInvariance
+> "If... the recursion is degenerate. Log a tracetoken τ, freeze the operator..."
+
+**Our implementation:** When `mu_equal(before, after)` in step loop → stall detected.
+This is the τ logging moment.
+
+### A.5 Independence
+> "Two derivations must diverge before the first encounter of τ"
+
+**Our implementation:** Cross-substrate parity (Python + JS) provides independence.
+Same projections, different substrates = independent derivations.
+
+---
+
 ## Changelog
 
 - **v0 (2026-01-30):** Initial design doc, pre-Step 5 gate (7-agent review requirement)
+- **v0.1 (2026-01-30):** Added alignment with RCX Core Engine spec (Rule 2.2♢, A.10, etc.)
