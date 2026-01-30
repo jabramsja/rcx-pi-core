@@ -145,7 +145,7 @@ def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth
     # Adversary model: Domain inputs may be untrusted (e.g., from network).
     # Trade-off: Depth 100 allows reasonable nesting but prevents stack overflow.
     # Security: Fail CLOSED (reject) rather than open (trust).
-    MAX_VALIDATION_DEPTH = 100  # AST_OK: bootstrap constant - stack guard
+    MAX_VALIDATION_DEPTH = 100  # AST_OK: infra - constant definition
     if _depth > MAX_VALIDATION_DEPTH:
         raise ValueError(
             f"SECURITY: {context} exceeded maximum validation depth ({MAX_VALIDATION_DEPTH}). "

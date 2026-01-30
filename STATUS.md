@@ -139,8 +139,8 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 
 ```
 THRESHOLD: 14
-CURRENT: 13 (9 tracked decorators + 4 AST_OK)
-TARGET: 12 (deferred to Phase 8c+)
+CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
+TARGET: 10 (Phase B: deprecate eval_seed reference implementations)
 ```
 
 **Debt breakdown:**
@@ -148,7 +148,11 @@ TARGET: 12 (deferred to Phase 8c+)
 - @host_builtin: 3 (eval_seed, deep_eval)
 - @host_iteration: 2 (run_mu, step_kernel_mu)
 - @host_mutation: 2 (eval_seed, deep_eval)
-- AST_OK bootstrap: 4 (includes MAX_VALIDATION_DEPTH stack guard)
+- AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+
+**Reclassified as infrastructure (not debt):**
+- match_mu.py:708 - boundary conversion function (AST_OK: infra)
+- step_mu.py:148 - constant definition (AST_OK: infra)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
 - AST_OK:infra ceiling: 35 (current ~31)
@@ -169,7 +173,7 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
   - Deep validation: recursive check prevents nested smuggling
   - KERNEL_RESERVED_FIELDS: 12 fields (added `_step`, `_projs`)
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
-- Net debt: 13 (9 tracked decorators + 4 AST_OK)
+- Net debt: 11 (9 tracked decorators + 2 AST_OK bootstrap)
 
 **Phase 7d-2/7d-3 PAUSED:**
 - Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
