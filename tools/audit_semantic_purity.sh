@@ -808,10 +808,11 @@ echo "== 19. Host Debt: Threshold Check =="
 #   - subst_mu.py: +2 @host_builtin
 #   - Total: 17 tracked + 5 AST_OK + 1 review = 23
 # - After L2: 0 (semantic debt eliminated)
-DEBT_THRESHOLD=14  # <-- RATCHET: Lower this as debt is paid, never raise it
-# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163), 14→11 (Phase 6d), 11→14 (Phase 7d-1 added @host_iteration)
+DEBT_THRESHOLD=12  # <-- RATCHET: Lower this as debt is paid, never raise it
+# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163), 14→11 (Phase 6d), 11→14 (Phase 7d-1 added @host_iteration), 14→12 (Phase 8b security hardening)
 # Phase 6d: iterative _check_empty_var_names (-1), boundary reclassification of bindings_to_dict/dict_to_bindings (-2)
 # Phase 7d-1: Added @host_iteration counting (2 decorators + 4 AST_OK bootstrap = 14 total)
+# Phase 8b: Reduced to 12 (10 tracked decorators + 2 AST_OK bootstrap)
 
 echo "Counting all semantic debt markers..."
 
