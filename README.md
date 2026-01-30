@@ -1,21 +1,34 @@
-# RCX-π Core — Minimal Structural Runtime v1
+# RCX-π Core — Minimal Structural Runtime
 
+A projection-based computational substrate where **structure is the primitive**.
+
+## Current Status: L2 PARTIAL Self-Hosting (Phase 8b)
+
+| Level | Description | Status |
+|-------|-------------|--------|
+| **L1** | match/subst algorithms as Mu projections | ✅ DONE |
+| **L2** | Kernel state machine as Mu projections | 🔶 PARTIAL |
+| **L3** | Substrate portability (Python + JS) | ✅ PROVEN |
+
+- **1,743 tests** across 92 test files
+- **12 semantic debt** (irreducible bootstrap floor)
+- **13 CRITICAL_TEST_FILES** protected from silent skipping
+
+See `STATUS.md` for full details.
 
 ### Development Rules (Enforced)
 
 - All changes go through PRs
-- CI green is mandatory (`green-gate` + `test`)
-- Development proceeds by **layering**, not arbitrary mutation
+- CI green is mandatory (`green_gate.sh`)
 - Structural purity enforced: program IN RCX, not ABOUT RCX
+- Security tools have grounding tests (tests actually test what they claim)
 
-If CI is not green, the change does not exist.
+### Key Documentation
 
-### Current Direction
-
-Building a minimal self-hosting kernel. See:
-- `docs/core/RCXKernel.v0.md` - Kernel architecture (4 primitives, seeds define semantics)
-- `docs/core/StructuralPurity.v0.md` - Guardrails for Mu purity
+- `STATUS.md` - Current phase, debt counts, testing tiers (source of truth)
 - `TASKS.md` - Canonical task tracker
+- `docs/core/MetaCircularKernel.v0.md` - Kernel architecture
+- `docs/core/BootstrapPrimitives.v0.md` - 5 bootstrap primitives
 
 
 ## CI (Green Gate)
@@ -55,28 +68,46 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 
 ## Core Components
 
-### Core Modules (see STATUS.md for current phase)
+### Seeds (Mu Projections)
+
+| Seed | Purpose |
+|------|---------|
+| `seeds/kernel.v1.json` | Structural kernel (7 projections) - state machine |
+| `seeds/match.v2.json` | Pattern matching (8 projections) - with context passthrough |
+| `seeds/subst.v2.json` | Substitution (12 projections) - with context passthrough |
+| `seeds/classify.v1.json` | Type classification (6 projections) |
+| `seeds/eval.v1.json` | Evaluation (7 projections) |
+
+### Core Modules
 
 | Module | Purpose |
 |-------|---------|
-| `seeds/kernel.v1.json` | Structural kernel (7 Mu projections) - THE canonical kernel |
-| `rcx_pi/selfhost/step_mu.py` | Self-hosting step (uses kernel.v1 + match.v2 + subst.v2) |
+| `rcx_pi/selfhost/step_mu.py` | Kernel execution (uses kernel.v1 + match.v2 + subst.v2) |
 | `rcx_pi/selfhost/match_mu.py` | Pattern matching as Mu projections |
 | `rcx_pi/selfhost/subst_mu.py` | Substitution as Mu projections |
-| `rcx_pi/selfhost/kernel.py` | Step budget + legacy Kernel class (not canonical) |
-| `rcx_pi/selfhost/eval_seed.py` | EVAL_SEED evaluator (apply_projection, step) |
-| `rcx_pi/selfhost/mu_type.py` | Mu type validation and guardrails |
+| `rcx_pi/selfhost/eval_seed.py` | Bootstrap evaluator (apply_projection, step) |
+| `rcx_pi/selfhost/mu_type.py` | Mu type validation and structural equality |
+| `rcx_pi/selfhost/kernel.py` | Step budget infrastructure only |
 
-### Legacy / Archived (not the current approach)
+### Testing
 
-| Module | Purpose | Status |
-|-------|---------|--------|
-| `core/motif.py` | Motif object and `μ(...)` constructor | Legacy |
-| `engine/evaluator_pure.py` | Closure-based evaluator | Legacy |
-| `rcx_pi/bytecode_vm.py` | Bytecode VM | **ARCHIVED** - superseded by kernel + seeds |
-| `docs/archive/bytecode/` | Bytecode documentation | **ARCHIVED** |
+```
+Tier 1: ./tools/audit_fast.sh    ~3 min   Core + security tests (local iteration)
+Tier 2: ./tools/audit_all.sh     ~5-8 min All tests + fuzzers (before push)
+Tier 3: pytest tests/stress/     ~10+ min Deep edge cases
+```
 
-Run `pytest` to verify health. See `TASKS.md` for current phase status.
+Security tools have grounding tests in `tests/tools/` that verify the tools actually detect what they claim.
+
+### Archived (superseded)
+
+| Module | Status |
+|--------|--------|
+| `rcx_pi/bytecode_vm.py` | ARCHIVED - superseded by kernel + seeds |
+| `docs/archive/bytecode/` | ARCHIVED |
+| `tests/archive/` | Legacy tests for deleted code |
+
+Run `PYTHONHASHSEED=0 pytest` to verify health.
 
 ---
 
@@ -144,7 +175,6 @@ Examples:
 ## CLI Quickstart
 See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
 
-<!-- protection smoke: 2026-01-13T23:02:14Z -->
+---
 
-
-# protection proof: 2026-01-13T23:29:28Z
+*Last updated: 2026-01-30*
