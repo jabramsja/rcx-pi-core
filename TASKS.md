@@ -341,30 +341,115 @@ All blockers resolved 2026-01-28:
   - 35 tests in `test_step_mu_kernel_integration.py`
   - 844 total tests passing
 
-**Next:** Phase 8d (EngineNews trace model) - see below
+**Next:** L3 Substrate Portability + EngineNews Demo (5-step plan from 7-agent review)
 
-### Phase 8d: EngineNews Trace Model
+### L3 + EngineNews Implementation Plan
+
+**Goal:** Prove projections are substrate-portable AND demo EngineNews on RCX
+
+**Sequence (7-agent reviewed, 2026-01-30):**
+
+| Step | Task | Status | Effort |
+|------|------|--------|--------|
+| 1 | Fix JS security gaps | **DONE** | ~80 LOC (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair fix) |
+| 2 | Create cross-substrate parity tests | **DONE** | ~120 LOC + 20 vectors (`tests/test_parity_python.py`) |
+| 3 | Phase 8d in Python (trace model) | **DONE** | ~80 LOC + 14 tests (`tests/test_structural_trace.py`) |
+| 4 | Port trace to JS POC | **DONE** | ~80 LOC + 5 tests |
+| 5 | EngineNews demo on both substrates | TODO | Demo script |
+
+---
+
+### Step 1: Fix JS Security Gaps ✅ DONE
+
+**Location:** `experiments/eval_step.js`
+
+**Completed (2026-01-30):**
+- [x] Add `KERNEL_RESERVED_FIELDS` validation (12 fields)
+- [x] Add `validate_type_tag()` for type injection prevention
+- [x] Add deep validation at kernel entry point
+- [x] Fix dict kv-pair normalization parity (critical bug)
+
+---
+
+### Step 2: Cross-Substrate Parity Tests ✅ DONE
+
+**Goal:** Prove JS matches Python BEFORE adding features
+
+**Completed (2026-01-30):**
+- [x] Created `tests/fixtures/parity_vectors.json` with 20 parity + 3 security vectors
+- [x] Created `tests/test_parity_python.py` (20 parity + 3 security tests)
+- [x] JS POC passes all 20 parity vectors
+- [x] Added semantic checks: direct equality + structural normalization
+
+---
+
+### Step 3: Phase 8d - EngineNews Trace Model (Python) ✅ DONE
 
 **Goal:** Structural trace accumulation for EngineNews Rule 2.2 (closure-on-second-demand)
 
-**Design:**
-1. Add `_trace` field to kernel state (Mu linked list of value hashes)
-2. Add trace accumulation projection to kernel.v1 (appends current value hash)
-3. Support closure detection: τ recurs independently (hash appears twice in trace)
-
-**Implementation steps:**
-- [ ] 8d-1: Design trace format (linked list of hashes vs full values)
-- [ ] 8d-2: Add `_trace` field to kernel state machine
-- [ ] 8d-3: Add `kernel.trace` projection to kernel.v1.json
-- [ ] 8d-4: Wire step_kernel_mu to pass trace through
-- [ ] 8d-5: Add closure detection helper (hash recurs in trace)
-- [ ] 8d-6: Tests: trace accumulation, closure detection, EngineNews Rule 2.2
+**Completed (2026-01-30):**
+- [x] `run_mu_structural()` in `step_mu.py` - returns Mu-compatible trace format
+- [x] Trace is Mu linked-list: `{head: entry, tail: {head: entry, tail: ...}}`
+- [x] Each entry: `{step, state, projection}` (projection=None for stall)
+- [x] `list_to_linked()` helper for Python list → Mu linked-list
+- [x] 14 tests in `tests/test_structural_trace.py`:
+  - Trace format tests (linked-list structure, required fields)
+  - Stall detection tests (projection=None for unmatched)
+  - Closure detection capability tests (oscillation captured)
 
 **EngineNews Alignment:**
-- Stall detection: `mu_equal(before, after)` → already exists (primitive)
-- Fix operation: domain projections → already exists (structural)
-- Promote: kernel selection → already exists (kernel.v1)
-- **Closure**: trace accumulation → **Phase 8d target**
+- Stall detection: `mu_equal(before, after)` → exists (primitive)
+- Fix operation: domain projections → exists (structural)
+- Promote: kernel selection → exists (kernel.v1)
+- **Closure**: trace accumulation → **DONE** (run_mu_structural)
+
+---
+
+### Step 4: Port Trace to JS POC ✅ DONE
+
+**Completed (2026-01-30):**
+- [x] `runStructural()` in `experiments/eval_step.js`
+- [x] Returns `{result, trace, stall, steps}` matching Python
+- [x] Trace as Mu linked-list format
+- [x] 5 structural trace tests pass in JS
+
+---
+
+### Step 5: EngineNews Demo (CRITICAL: Must Be Structural)
+
+**REQUIREMENT:** EngineNews rules MUST be expressed as Mu projections, NOT Python code.
+
+**Why this matters (from 7-agent review):**
+- If EngineNews runs via Python loops/logic, emergence might be a Python artifact
+- For structural honesty, closure detection must be pattern matching on traces
+- The bootstrap (eval_step, mu_equal) is acceptable - the LOGIC must be projections
+
+**Implementation:**
+1. Create `seeds/enginenews.v1.json` with projections for:
+   - `enginenews.detect_repeat` - find repeated state in trace (closure candidate)
+   - `enginenews.check_seen` - structural lookup in seen-set
+   - `enginenews.mark_closure` - emit closure evidence when repeat found
+   - `enginenews.advance` - move to next trace entry
+
+2. Trace format (from Step 3/4):
+   - Mu linked-list: `{head: entry, tail: {head: entry, tail: ...}}`
+   - Each entry: `{step, state, projection}` (projection=None for stall)
+
+3. Success criteria:
+   - [ ] `enginenews.v1.json` exists with ≥4 projections
+   - [ ] EngineNews projections run via kernel (step_kernel_mu), NOT Python loops
+   - [ ] Closure detection is structural: projection matches trace pattern
+   - [ ] Same projections produce same closure evidence on Python AND JS
+   - [ ] No Python `if/for/while` in closure detection path (only in bootstrap)
+
+**The demonstration:**
+- Same projections (kernel.v1 + match.v2 + subst.v2 + enginenews.v1)
+- Same input (EngineNews workload)
+- Same trace output
+- Same closure detection
+- Two substrates (Python, JavaScript)
+
+**This proves:** All meaning is in projections. Host provides only mechanical execution. Emergence is structural, not a Python artifact.
 
 ---
 

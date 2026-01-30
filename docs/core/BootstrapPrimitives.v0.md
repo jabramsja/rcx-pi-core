@@ -132,7 +132,7 @@ def run_with_limit(projections, value, max_steps=MAX_STEPS):
 **What it does:**
 ```python
 # In mu_type.py - depth validation during is_mu() checks
-MAX_MU_DEPTH = 200  # Conservative limit below Python's ~1000 frame stack
+MAX_MU_DEPTH = 300  # Conservative limit below Python's ~1000 frame stack
 
 def is_mu(value: Any, _seen: set | None = None, _depth: int = 0) -> bool:
     # Depth limit check (prevents RecursionError attacks)
@@ -322,6 +322,37 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ---
 
+## L3 Substrate Portability: JavaScript POC
+
+**Location:** `experiments/eval_step.js` (~300 LOC core)
+
+**What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
+
+| Primitive | Python Implementation | JavaScript Implementation |
+|-----------|----------------------|---------------------------|
+| eval_step | `eval_seed.py:step()` | `eval_step.js:step()` |
+| mu_equal | `mu_type.py:mu_equal()` | `eval_step.js:muEqual()` |
+| max_steps | `step_mu.py:max_steps` | `eval_step.js:maxSteps` |
+| stack_guard | `mu_type.py:MAX_MU_DEPTH` | `eval_step.js:MAX_DEPTH` |
+| projection_loader | `seed_integrity.py` | `eval_step.js:JSON.parse()` |
+
+**Security hardening (completed 2026-01-30):**
+- [x] `KERNEL_RESERVED_FIELDS` validation (12 fields)
+- [x] `validate_type_tag()` - whitelist enforcement
+- [x] Dict kv-pair normalization parity fix
+- [ ] Lambda calculus guard (future - not critical for L3)
+
+**Cross-substrate parity tests (completed 2026-01-30):**
+- `tests/test_parity_python.py` - 20 parity + 3 security vectors
+- `tests/test_structural_trace.py` - 14 trace model tests
+- `tests/fixtures/parity_vectors.json` - shared test vectors (23 total)
+
+**Role clarification:**
+- **Python:** Primary development substrate (1480+ tests, agent-reviewed)
+- **JavaScript:** Portability proof (auditable ~300 LOC, all parity tests pass)
+
+---
+
 ## Verification Questions for Agents
 
 1. **Verifier:** Do these five primitives violate any North Star invariants?
@@ -350,7 +381,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 |-----------|------------------|--------|
 | `eval_step` | `rcx_pi/selfhost/eval_seed.py:step()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
-| `max_steps` | `rcx_pi/selfhost/step_mu.py:241` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
+| `max_steps` | `rcx_pi/selfhost/step_mu.py:389` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `stack_guard` | `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `projection_loader` | `rcx_pi/selfhost/seed_integrity.py` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 

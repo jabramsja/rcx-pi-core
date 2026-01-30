@@ -51,13 +51,37 @@ class TestMakeProjectionLoader:
 class TestCaching:
     """Test that caching works correctly."""
 
-    def test_second_load_returns_same_object(self):
-        """Caching returns same list object on subsequent calls."""
+    def test_second_load_returns_equal_content(self):
+        """Caching returns equal content on subsequent calls.
+
+        Note: Returns defensive copy (not same object) to prevent cache mutation.
+        (Adversary finding: cache mutation vulnerability)
+        """
         load_fn, clear_fn = make_projection_loader("match.v1.json")
         clear_fn()
         first = load_fn()
         second = load_fn()
-        assert first is second  # Same object, not just equal
+        assert first == second  # Equal content
+        assert first is not second  # But defensive copy (different object)
+
+    def test_mutation_does_not_affect_cache(self):
+        """Mutating returned list doesn't affect cached data.
+
+        This is the security fix for the cache mutation vulnerability.
+        (Adversary finding: cache mutation vulnerability)
+        """
+        load_fn, clear_fn = make_projection_loader("match.v1.json")
+        clear_fn()
+        first = load_fn()
+        original_len = len(first)
+
+        # Mutate the returned list
+        first.append({"pattern": "attack", "body": "payload"})
+        assert len(first) == original_len + 1
+
+        # Cache should be unaffected
+        second = load_fn()
+        assert len(second) == original_len  # Original length, not mutated
 
     def test_clear_forces_reload(self):
         """Clear function forces next load to reload from disk."""
@@ -66,7 +90,7 @@ class TestCaching:
         first = load_fn()
         clear_fn()
         second = load_fn()
-        # After clear, should be a new list (equal but not same object)
+        # After clear, should be equal content (reloaded)
         assert first == second
         assert first is not second
 
@@ -85,7 +109,8 @@ class TestCaching:
 
         # Clearing one doesn't affect the other
         clear_match()
-        assert load_subst() is subst_projs  # Still cached
+        reloaded_subst = load_subst()
+        assert reloaded_subst == subst_projs  # Still cached (equal content)
 
 
 class TestSeedLoading:

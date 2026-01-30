@@ -72,7 +72,11 @@ pytest $PARALLEL_FLAG -q \
     tests/test_eval_seed_parity.py \
     tests/test_mu_type.py \
     tests/test_seed_integrity.py \
-    tests/test_classify_mu.py
+    tests/test_classify_mu.py \
+    tests/test_parity_python.py \
+    tests/test_structural_trace.py \
+    tests/test_kernel_security_fuzzer.py \
+    tests/test_normalization_roundtrip.py
 
 echo ""
 echo "✅ Fast audit pass"

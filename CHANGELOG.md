@@ -2,6 +2,60 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-30
+
+### Second 7-Agent Adversarial Review (Complete)
+
+**Verdicts:**
+- Verifier: CONDITIONAL_APPROVE (all 12 invariants maintained)
+- Adversary: SECURE (11/11 attacks blocked, defensive cache copy verified)
+- Expert: COULD_SIMPLIFY (2 trivial import issues in conftest.py)
+- Structural-proof: CLAIMS_HONEST (L2 PARTIAL proven with concrete evidence)
+- Grounding: GROUNDED (all 4 claims have executable tests)
+- Fuzzer: GAPS_EXIST (4 boundary gaps: depth=100, width=900-1000, cache at scale, mixed)
+- Advisor: ON_TRACK (Step 5 needs concrete success criteria)
+
+### Security Fixes
+- **Cache Mutation Vulnerability** (Adversary finding - CLOSED)
+  - `projection_loader.py`: Returns `list(cache[0])` defensive copy
+  - `step_mu.py`: Returns `list(_combined_kernel_cache)` defensive copy
+  - New test: `test_mutation_does_not_affect_cache()` in test_projection_loader.py
+  - Updated caching tests to verify content equality, not object identity
+
+### Code Quality
+- **Duplicate Code Consolidated** (Expert finding - CLOSED)
+  - `run_until_done()` moved to `tests/conftest.py` as shared utility
+  - `test_phase7c_integration.py` now imports from conftest
+  - `test_parity_python.py` now imports from conftest
+  - Removed ~70 lines of duplicate code
+
+### Testing
+- **Dict kv-pair Regression Tests** (Grounding finding - CLOSED)
+  - Added `TestDictKvPairFormat` class (4 tests)
+  - Tests exact structural format: `{"head": key, "tail": {"head": value, "tail": null}}`
+  - Tests sorted key order, nested preservation
+
+- **Malformed Linked List Tests** (Fuzzer finding - CLOSED)
+  - Added `TestMalformedLinkedListEdgeCases` class (9 tests)
+  - Tests head-only, tail-only, malformed tail types
+  - Tests circular reference detection
+  - Tests deeply nested and wide dict handling
+
+### Documentation
+- **CRITICAL: EngineNews Must Be Structural**
+  - Updated TASKS.md Step 5 with concrete success criteria
+  - EngineNews rules MUST be Mu projections, NOT Python code
+  - Closure detection must be pattern matching on traces
+  - This ensures emergence is structural, not "Python did it"
+  - Added `enginenews.v1.json` requirements (≥4 projections)
+
+- **STATUS.md**: Added second 7-agent review verdicts table
+- **TASKS.md**: Updated Step 5 with structural requirements and success criteria
+
+### Test Count
+- 913 tests pass in fast audit
+- 1669 tests pass in full suite (2 expected idempotency failures from uncommitted changes)
+
 ## 2026-01-29
 
 ### Security Hardening (7-agent review)

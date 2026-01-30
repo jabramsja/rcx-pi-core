@@ -578,14 +578,6 @@ def create_eval_seed(projections: list[Mu]) -> dict:
     }
 
 
-def register_eval_seed(kernel, projections: list[Mu]) -> None:
-    """
-    Register EVAL_SEED handlers with a kernel.
-
-    Args:
-        kernel: Kernel instance to register with.
-        projections: List of projections for this seed.
-    """
-    handlers = create_eval_seed(projections)
-    for event, handler in handlers.items():
-        kernel.register_handler(event, handler)
+# NOTE: register_eval_seed() was removed in Phase 8b cleanup (2026-01-30)
+# It called kernel.register_handler() on the deleted legacy Kernel class.
+# The handler creator functions above are kept for test compatibility.

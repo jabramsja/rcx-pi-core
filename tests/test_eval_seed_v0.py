@@ -18,7 +18,7 @@ from rcx_pi.eval_seed import (
     create_step_handler,
     create_stall_handler,
     create_eval_seed,
-    register_eval_seed,
+    # register_eval_seed removed - legacy Kernel class deleted
     assert_not_lambda_calculus,
 )
 # NOTE: create_kernel import removed - TestKernelIntegration tests removed

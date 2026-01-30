@@ -20,38 +20,11 @@ from rcx_pi.selfhost.eval_seed import step, apply_projection
 from rcx_pi.selfhost.mu_type import Mu, mu_equal
 from rcx_pi.selfhost.match_mu import normalize_for_match
 from rcx_pi.selfhost.subst_mu import denormalize_from_match
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-def list_to_linked(items: list) -> Mu:
-    """
-    Convert Python list to Mu linked-list format.
-
-    [a, b, c] -> {head: a, tail: {head: b, tail: {head: c, tail: null}}}
-    [] -> null
-
-    This is required because the kernel uses linked-list cursors for iteration
-    (no arithmetic in pure Mu).
-    """
-    if not items:
-        return None
-    return {"head": items[0], "tail": list_to_linked(items[1:])}
-
-
-def normalize_projection(proj: dict) -> dict:
-    """
-    Normalize a projection's pattern and body for kernel use.
-
-    Both pattern and body are converted to head/tail format so they can
-    be structurally matched and substituted by the Mu projections.
-    """
-    return {
-        "pattern": normalize_for_match(proj["pattern"]),
-        "body": normalize_for_match(proj["body"])
-    }
+from rcx_pi.selfhost.step_mu import (
+    list_to_linked,        # Use canonical implementation (Expert finding: avoid duplication)
+    normalize_projection,  # Use canonical implementation (Expert finding: avoid duplication)
+)
+from conftest import run_until_done  # Use shared implementation (Expert finding: avoid duplication)
 
 
 # =============================================================================
@@ -90,44 +63,7 @@ def combined_projections(kernel_projections, match_v2_projections, subst_v2_proj
     return kernel_projections + match_v2_projections + subst_v2_projections
 
 
-def run_until_done(projections: list[Mu], initial: Mu, max_steps: int = 100) -> tuple[Mu, list[Mu]]:
-    """
-    Run projections until kernel.unwrap fires (produces non-kernel output).
-
-    Returns:
-        Tuple of (final_result, trace)
-    """
-    trace = [initial]
-    current = initial
-
-    for _ in range(max_steps):
-        result = step(projections, current)
-        trace.append(result)
-
-        # Check if we've reached final result (not a kernel/match/subst state)
-        if isinstance(result, dict):
-            # Check for mode markers (internal state format)
-            mode = result.get("_mode") or result.get("mode")
-            # Check for entry format (match/subst requests)
-            is_entry_format = "match" in result or "subst" in result
-            # Check for kernel entry format
-            is_kernel_entry = "_step" in result
-
-            if mode is None and not is_entry_format and not is_kernel_entry:
-                # No mode field and not entry format - final unwrapped result
-                return result, trace
-        else:
-            # Primitive result
-            return result, trace
-
-        # Check for stall (no change)
-        if mu_equal(result, current):
-            return result, trace
-
-        current = result
-
-    # Hit max steps
-    return current, trace
+# run_until_done imported from conftest (Expert finding: consolidated duplicate)
 
 
 # =============================================================================
@@ -157,7 +93,7 @@ class TestFullSuccessCycle:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Result is in Mu format, denormalize to compare
         denorm_result = denormalize_from_match(result)
@@ -175,7 +111,7 @@ class TestFullSuccessCycle:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         denorm_result = denormalize_from_match(result)
         assert denorm_result == {"extracted": 42}
@@ -192,7 +128,7 @@ class TestFullSuccessCycle:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         denorm_result = denormalize_from_match(result)
         assert denorm_result == {"sum_parts": {"first": 10, "second": 20}}
@@ -217,7 +153,7 @@ class TestFullFailureCycle:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Should return original input (stall) - denormalize for comparison
         denorm_result = denormalize_from_match(result)
@@ -239,7 +175,7 @@ class TestFullFailureCycle:
             "_projs": list_to_linked([proj1, proj2])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         denorm_result = denormalize_from_match(result)
         assert denorm_result == {"b_result": 42}
@@ -254,7 +190,7 @@ class TestFullFailureCycle:
             "_projs": list_to_linked([proj1, proj2])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Stall returns original input
         denorm_result = denormalize_from_match(result)
@@ -267,7 +203,7 @@ class TestFullFailureCycle:
             "_projs": list_to_linked([])  # Returns null, matches kernel.stall
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Empty projection list -> kernel.stall -> returns original input
         denorm_result = denormalize_from_match(result)
@@ -444,7 +380,7 @@ class TestSecurityIsolation:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Should match and return the data as-is
         denorm_result = denormalize_from_match(result)
@@ -464,7 +400,7 @@ class TestSecurityIsolation:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # The _mode inside data doesn't affect kernel processing
         denorm_result = denormalize_from_match(result)
@@ -491,7 +427,7 @@ class TestSecurityIsolation:
             "_projs": list_to_linked([malicious_proj, good_proj])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Should use good_proj, not malicious_proj
         denorm_result = denormalize_from_match(result)
@@ -581,7 +517,7 @@ class TestManualTraceFromDesignDoc:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         denorm_result = denormalize_from_match(result)
         assert denorm_result == {"result": 1}
@@ -609,7 +545,7 @@ class TestManualTraceFromDesignDoc:
             "_projs": list_to_linked([projection])
         }
 
-        result, trace = run_until_done(combined_projections, kernel_entry)
+        result, trace, _ = run_until_done(combined_projections, kernel_entry)
 
         # Stall returns original input
         denorm_result = denormalize_from_match(result)

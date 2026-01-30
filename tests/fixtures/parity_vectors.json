@@ -1,0 +1,249 @@
+{
+  "description": "Cross-substrate parity test vectors. Same inputs run on both Python and JavaScript, expecting identical outputs.",
+  "version": "1.0",
+  "vectors": [
+    {
+      "id": "simple_match",
+      "description": "Simple pattern match with variable binding",
+      "projection": {
+        "pattern": {"op": "double", "value": {"var": "n"}},
+        "body": {"result": {"var": "n"}, "doubled": {"var": "n"}}
+      },
+      "input": {"op": "double", "value": 42},
+      "expected_output": {"result": 42, "doubled": 42},
+      "expected_stall": true
+    },
+    {
+      "id": "no_match_stall",
+      "description": "No projection matches - returns original input",
+      "projection": {
+        "pattern": {"op": "triple", "value": {"var": "n"}},
+        "body": {"result": {"var": "n"}}
+      },
+      "input": {"op": "double", "value": 42},
+      "expected_output": {"op": "double", "value": 42},
+      "expected_stall": true
+    },
+    {
+      "id": "nested_binding",
+      "description": "Deep nested pattern with multiple bindings",
+      "projection": {
+        "pattern": {"outer": {"inner": {"var": "x"}, "also": {"var": "y"}}},
+        "body": {"flattened": [{"var": "x"}, {"var": "y"}]}
+      },
+      "input": {"outer": {"inner": "hello", "also": "world"}},
+      "expected_output": {"flattened": ["hello", "world"]},
+      "expected_stall": true
+    },
+    {
+      "id": "empty_list_preservation",
+      "description": "Empty list in input/output",
+      "projection": {
+        "pattern": {"items": {"var": "list"}},
+        "body": {"original": {"var": "list"}}
+      },
+      "input": {"items": []},
+      "expected_output": {"original": []},
+      "expected_stall": true
+    },
+    {
+      "id": "empty_dict_preservation",
+      "description": "Empty dict in input/output",
+      "projection": {
+        "pattern": {"config": {"var": "cfg"}},
+        "body": {"saved": {"var": "cfg"}}
+      },
+      "input": {"config": {}},
+      "expected_output": {"saved": {}},
+      "expected_stall": true
+    },
+    {
+      "id": "boolean_values",
+      "description": "Boolean values in pattern and body",
+      "projection": {
+        "pattern": {"enabled": true, "data": {"var": "d"}},
+        "body": {"processed": {"var": "d"}, "was_enabled": true}
+      },
+      "input": {"enabled": true, "data": "payload"},
+      "expected_output": {"processed": "payload", "was_enabled": true},
+      "expected_stall": true
+    },
+    {
+      "id": "null_values",
+      "description": "Null values in pattern and body",
+      "projection": {
+        "pattern": {"value": null},
+        "body": {"was_null": true}
+      },
+      "input": {"value": null},
+      "expected_output": {"was_null": true},
+      "expected_stall": true
+    },
+    {
+      "id": "numeric_types",
+      "description": "Integer and float values",
+      "projection": {
+        "pattern": {"int_val": {"var": "i"}, "float_val": {"var": "f"}},
+        "body": {"int": {"var": "i"}, "float": {"var": "f"}}
+      },
+      "input": {"int_val": 42, "float_val": 3.14159},
+      "expected_output": {"int": 42, "float": 3.14159},
+      "expected_stall": true
+    },
+    {
+      "id": "catchall_pattern",
+      "description": "Variable-only pattern catches everything",
+      "projection": {
+        "pattern": {"var": "anything"},
+        "body": {"wrapped": {"var": "anything"}}
+      },
+      "input": {"complex": [1, 2, {"nested": true}]},
+      "expected_output": {"wrapped": {"complex": [1, 2, {"nested": true}]}},
+      "expected_stall": true
+    },
+    {
+      "id": "repeated_variable",
+      "description": "Same variable used twice in pattern (must match same value)",
+      "projection": {
+        "pattern": {"a": {"var": "x"}, "b": {"var": "x"}},
+        "body": {"matched": {"var": "x"}}
+      },
+      "input": {"a": "same", "b": "same"},
+      "expected_output": {"matched": "same"},
+      "expected_stall": true
+    },
+    {
+      "id": "list_with_mixed_types",
+      "description": "List containing various types",
+      "projection": {
+        "pattern": {"items": {"var": "list"}},
+        "body": {"saved": {"var": "list"}}
+      },
+      "input": {"items": [1, "two", true, null, {"key": "value"}]},
+      "expected_output": {"saved": [1, "two", true, null, {"key": "value"}]},
+      "expected_stall": true
+    },
+    {
+      "id": "unicode_strings",
+      "description": "Unicode characters in strings",
+      "projection": {
+        "pattern": {"text": {"var": "t"}},
+        "body": {"echo": {"var": "t"}}
+      },
+      "input": {"text": "Hello 世界 🌍"},
+      "expected_output": {"echo": "Hello 世界 🌍"},
+      "expected_stall": true
+    },
+    {
+      "id": "negative_numbers",
+      "description": "Negative integers and floats",
+      "projection": {
+        "pattern": {"x": {"var": "a"}, "y": {"var": "b"}},
+        "body": {"values": [{"var": "a"}, {"var": "b"}]}
+      },
+      "input": {"x": -42, "y": -3.14},
+      "expected_output": {"values": [-42, -3.14]},
+      "expected_stall": true
+    },
+    {
+      "id": "zero_values",
+      "description": "Zero as integer and float",
+      "projection": {
+        "pattern": {"int_zero": {"var": "i"}, "float_zero": {"var": "f"}},
+        "body": {"zeros": [{"var": "i"}, {"var": "f"}]}
+      },
+      "input": {"int_zero": 0, "float_zero": 0.0},
+      "expected_output": {"zeros": [0, 0.0]},
+      "expected_stall": true
+    },
+    {
+      "id": "large_integer",
+      "description": "Large integer near JS MAX_SAFE_INTEGER (2^53)",
+      "projection": {
+        "pattern": {"big": {"var": "n"}},
+        "body": {"echo": {"var": "n"}}
+      },
+      "input": {"big": 9007199254740991},
+      "expected_output": {"echo": 9007199254740991},
+      "expected_stall": true
+    },
+    {
+      "id": "variable_name_as_data",
+      "description": "Input containing {var: x} should be treated as data, not pattern variable",
+      "projection": {
+        "pattern": {"data": {"var": "x"}},
+        "body": {"matched": {"var": "x"}}
+      },
+      "input": {"data": {"var": "literal_string"}},
+      "expected_output": {"matched": {"var": "literal_string"}},
+      "expected_stall": true
+    },
+    {
+      "id": "deep_nesting_5_levels",
+      "description": "Deeply nested structure (5 levels) to test depth handling",
+      "projection": {
+        "pattern": {"l1": {"var": "x"}},
+        "body": {"result": {"var": "x"}}
+      },
+      "input": {"l1": {"l2": {"l3": {"l4": {"l5": "bottom"}}}}},
+      "expected_output": {"result": {"l2": {"l3": {"l4": {"l5": "bottom"}}}}},
+      "expected_stall": true
+    },
+    {
+      "id": "dict_with_head_tail_keys",
+      "description": "Dict with 'head' and 'tail' keys plus extra - should NOT be treated as linked list",
+      "projection": {
+        "pattern": {"container": {"var": "c"}},
+        "body": {"data": {"var": "c"}}
+      },
+      "input": {"container": {"head": "first", "tail": "second", "extra": "third"}},
+      "expected_output": {"data": {"head": "first", "tail": "second", "extra": "third"}},
+      "expected_stall": true
+    },
+    {
+      "id": "unicode_key_sorting",
+      "description": "Dict with unicode keys - must sort by codepoint consistently",
+      "projection": {
+        "pattern": {"var": "d"},
+        "body": {"echo": {"var": "d"}}
+      },
+      "input": {"zzz": 1, "aaa": 2, "中文": 3},
+      "expected_output": {"echo": {"zzz": 1, "aaa": 2, "中文": 3}},
+      "expected_stall": true
+    },
+    {
+      "id": "nested_empty_containers",
+      "description": "Nested empty containers preserve type through normalization",
+      "projection": {
+        "pattern": {"data": {"var": "x"}},
+        "body": {"result": {"var": "x"}}
+      },
+      "input": {"data": {"empty_list": [], "empty_dict": {}, "nested": [[]]}},
+      "expected_output": {"result": {"empty_list": [], "empty_dict": {}, "nested": [[]]}},
+      "expected_stall": true
+    }
+  ],
+  "security_vectors": [
+    {
+      "id": "reject_kernel_reserved_step",
+      "description": "Domain data with _step field must be rejected",
+      "input": {"op": "test", "_step": "forged"},
+      "expect_error": true,
+      "error_contains": "_step"
+    },
+    {
+      "id": "reject_kernel_reserved_mode",
+      "description": "Domain data with _mode field must be rejected",
+      "input": {"_mode": "kernel"},
+      "expect_error": true,
+      "error_contains": "_mode"
+    },
+    {
+      "id": "reject_nested_reserved",
+      "description": "Nested kernel-reserved field must be rejected",
+      "input": {"outer": {"inner": {"_projs": []}}},
+      "expect_error": true,
+      "error_contains": "_projs"
+    }
+  ]
+}

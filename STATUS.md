@@ -60,25 +60,28 @@ The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Optio
 
 ## L3/L4 Definition (Bootstrap Architecture)
 
-### L3 Target: Forth-Style Bootstrap (NEXT)
+### L3: Substrate Portability (ACHIEVED via JS POC)
 
-L3 is defined as **Forth-style bootstrap** - algorithms as projections, executed by minimal primitives:
+L3 is defined as **projections run on minimal, auditable substrate**:
 
-| Component | Role | Precedent |
-|-----------|------|-----------|
-| **Bootstrap Primitives** | eval_step, mu_equal, stack_guard, projection_loader | Like Forth's NEXT, Lisp's EVAL |
-| **Algorithms** | match, subst, classify, eval - expressed as Mu projections | Threaded code in Forth |
-| **Python's Role** | Substrate for bootstrap primitives | Inner interpreter in Forth |
+| Component | Role | Status |
+|-----------|------|--------|
+| **Projections** | kernel.v1, match.v2, subst.v2 - all meaning in JSON | ✅ DONE |
+| **Python Substrate** | ~2000 LOC, 1480+ tests, production-ready | ✅ PRIMARY |
+| **JS Substrate** | ~300 LOC, auditable, portability proof | ✅ PROOF (needs security fixes) |
+| **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both |
 
-**What "self-hosting" means at L3:**
-- All algorithms are Mu projections (data, not code)
-- Bootstrap primitives execute projections (irreducible)
-- Python is explicitly marked substrate, not hidden dependency
-- This is what Lisp, Forth, and PyPy actually do
+**What L3 proves:**
+- The SAME projections (kernel.v1.json, match.v2.json, subst.v2.json) run on Python AND JavaScript
+- All semantics are in the projections (data), not the host (code)
+- The host provides only mechanical execution (the 5 bootstrap primitives)
+- This is the Hex0/Forth precedent: meaning in data, mechanics in minimal runner
+
+**JS POC location:** `experiments/eval_step.js` (~300 LOC core + tests)
 
 ### L4 Research: True Self-Hosting (SINK)
 
-L4 asks: **Can bootstrap primitives be eliminated or made substrate-independent?**
+L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 | Primitive | L4 Question | Possible Path |
 |-----------|-------------|---------------|
@@ -89,9 +92,26 @@ L4 asks: **Can bootstrap primitives be eliminated or made substrate-independent?
 
 **L4 Status:** Open research question in SINK. Not promised, not ruled out.
 
-**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal, we know exactly what would need to change. If L4 is possible, L3 is the path to it.
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~300 LOC in JS), we know exactly what would need to change.
 
-**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive, and can it be substrate-independent (e.g., hardware, WASM)?
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~300 LOC is our current answer - auditable, portable, mechanical.
+
+### Cross-Substrate Testing Strategy
+
+**Status:** GROUNDED (Steps 1-4 complete, 2026-01-30)
+
+Cross-substrate parity tests verify L3 (substrate portability):
+- [x] Shared JSON test vectors: `tests/fixtures/parity_vectors.json` (20 parity + 3 security = 23 vectors)
+- [x] Python tests: `tests/test_parity_python.py` (20 parity tests + 3 security tests)
+- [x] JS tests: `experiments/eval_step.js` (20 parity tests pass)
+- [x] Structural trace tests: `tests/test_structural_trace.py` (14 tests)
+- [ ] CI workflow that runs both (Python in CI, JS manual)
+
+**Security gaps in JS POC (adversary finding - FIXED 2026-01-30):**
+- [x] `KERNEL_RESERVED_FIELDS` validation (added v4)
+- [x] `validate_type_tag()` in denormalize (added v4 fix)
+- [x] Dict kv-pair normalization parity fix (v4)
+- [ ] Lambda calculus guard (future - not critical for L3)
 
 ## Development Workflow
 
@@ -141,28 +161,30 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 
 ```
 THRESHOLD: 14
-CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
-L2 FLOOR: 11 (see explanation below)
+CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
+L2 FLOOR: 12 (see explanation below)
 ```
 
 **Debt breakdown:**
 - @host_recursion: 2 (eval_seed match/substitute - BOOTSTRAP)
 - @host_builtin: 3 (eval_seed, deep_eval)
-- @host_iteration: 2 (run_mu, step_kernel_mu - BOOTSTRAP)
+- @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
 
-**Why 11 is the L2 floor (not a target for reduction):**
+**Why 12 is the L2 floor (not a target for reduction):**
 The `match()` and `substitute()` in eval_seed.py are NOT "reference implementations" - they ARE the bootstrap primitives that `eval_step()` uses to apply ANY projection. The production path is:
 1. `step_kernel_mu()` → `eval_step()` (on kernel.v1 + match.v2 + subst.v2)
 2. `eval_step()` → `apply_projection()` → `match()` + `substitute()` (eval_seed.py)
+3. `run_mu_structural()` → structural trace for EngineNews (Phase 8d)
 
 These cannot be eliminated because:
 - eval_step needs to apply projections (pattern match + substitute)
 - match_mu/subst_mu use eval_step to apply THEIR projections
+- run_mu_structural provides trace accumulation for EngineNews
 - Circular dependency: eliminating them would require eval_step to not exist
 
-The debt of 11 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L3/L4 would require fundamentally different architecture (CPS, trampolining, or true meta-circularity).
+The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L3/L4 would require fundamentally different architecture (CPS, trampolining, or true meta-circularity).
 
 **Reclassified as infrastructure (not debt):**
 - match_mu.py:708 - boundary conversion function (AST_OK: infra)
@@ -267,6 +289,51 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 ## Recommended Next Action
 
 **Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1480+ tests passing.
+
+**L3 Substrate Portability Progress (2026-01-30):**
+- Step 1 DONE: JS POC security hardened (v4) - KERNEL_RESERVED_FIELDS validation, dict kv-pair fix
+- Step 2 DONE: Cross-substrate parity tests - 20 vectors pass on both Python and JS
+- Step 3 DONE: Phase 8d trace model in Python - run_mu_structural() + 14 tests
+- Step 4 DONE: Port trace to JS POC - runStructural() + 5 tests
+- Step 5 TODO: EngineNews demo on both substrates
+
+**Test files (must be tracked in git):**
+- `tests/test_parity_python.py` - 20 parity + 3 security tests
+- `tests/test_structural_trace.py` - 14 structural trace tests
+- `tests/fixtures/parity_vectors.json` - 23 shared test vectors
+
+**Critical Bug Fix (2026-01-30 - Adversarial Review):**
+- Fixed Python/JS dict kv-pair normalization parity bug
+- Python: `{"head": key, "tail": {"head": value, "tail": null}}`
+- JS was wrong: `{"head": key, "tail": value}` (now fixed to match Python)
+- Added type tag validation to JS denormalize() for security parity
+
+**7-Agent Review Implementation (2026-01-30):**
+Addressed findings from comprehensive 7-agent adversarial peer review:
+- **Expert finding (consolidated):** Removed duplicate `run_until_done()` - now shared via `conftest.py`
+- **Grounding finding (closed):** Added `TestDictKvPairFormat` - exact kv-pair structure regression tests
+- **Fuzzer finding (closed):** Added `TestMalformedLinkedListEdgeCases` - edge case handling tests
+- **Adversary finding (closed):** Added defensive cache copy to projection_loader.py and step_mu.py
+- **Tests added:** 13 new tests in `tests/test_normalization_roundtrip.py`, 1 new cache mutation test
+- **Test updates:** `test_phase7c_integration.py` and `test_parity_python.py` now use shared `run_until_done()`
+- **Test updates:** `test_projection_loader.py` and `test_classify_mu.py` updated for defensive copy behavior
+
+**Second 7-Agent Review Verdicts (2026-01-30):**
+| Agent | Verdict | Summary |
+|-------|---------|---------|
+| Verifier | CONDITIONAL_APPROVE | All 12 invariants maintained |
+| Adversary | SECURE | 11/11 attacks blocked |
+| Expert | COULD_SIMPLIFY | 2 trivial import issues |
+| Structural-proof | CLAIMS_HONEST | L2 PARTIAL proven, gaps documented |
+| Grounding | GROUNDED | All claims have tests |
+| Fuzzer | GAPS_EXIST | 4 boundary gaps identified |
+| Advisor | ON_TRACK | Step 5 needs concrete criteria |
+
+**CRITICAL: EngineNews Must Be Structural (2026-01-30):**
+Step 5 (EngineNews Demo) requires that EngineNews rules are expressed as Mu projections,
+NOT Python code. Closure detection must be pattern matching on traces, not Python loops.
+This is essential for structural honesty - emergence must be attributable to RCX dynamics,
+not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 
 **Security Hardening (2026-01-29, 7-agent review):**
 - Added `filterwarnings = ["error::DeprecationWarning:rcx_pi.*"]` to pyproject.toml
@@ -379,5 +446,14 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-01-29
-**Next milestone:** Phase 8d (EngineNews trace model) - structural trace accumulation for Rule 2.2 closure detection
+**Last updated:** 2026-01-30
+**Next milestone:** Step 5 - EngineNews Demo on Both Substrates
+
+**Completed (Steps 1-4):**
+1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
+2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
+3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
+4. ✅ Ported trace to JS (runStructural in experiments/eval_step.js)
+
+**Remaining:**
+5. EngineNews demo on both substrates

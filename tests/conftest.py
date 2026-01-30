@@ -25,7 +25,7 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 # NOTE: Do NOT set database=None - that DISABLES the database. Omit to use default.
 
 try:
-    from hypothesis import settings, Verbosity, Phase
+    from hypothesis import settings  # Expert finding: removed unused Verbosity, Phase
 
     # CI profile: full fuzzing (default example counts from test decorators)
     settings.register_profile(
@@ -50,7 +50,7 @@ try:
     )
 
     # Load profile from environment: HYPOTHESIS_PROFILE=dev for fast local runs
-    import os
+    # Note: uses os imported at module level (line 11)
     profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
     settings.load_profile(profile)
 
@@ -140,3 +140,60 @@ def reset_budget_between_tests():
     reset_step_budget()
     yield
     reset_step_budget()
+
+
+# =============================================================================
+# Kernel Execution Utility (Expert finding: consolidated from duplicates)
+# =============================================================================
+
+def run_until_done(projections, initial, max_steps: int = 100):
+    """
+    Run projections until kernel.unwrap fires (produces non-kernel output).
+
+    Consolidated from duplicate implementations in test_phase7c_integration.py
+    and test_parity_python.py (7-agent review, Expert finding).
+
+    Args:
+        projections: List of Mu projections
+        initial: Initial Mu value to evaluate
+        max_steps: Maximum steps before timeout (default 100)
+
+    Returns:
+        Tuple of (final_result, trace, is_stall)
+        - final_result: The final Mu value
+        - trace: List of all intermediate states
+        - is_stall: True if evaluation stalled (no change or reached final state)
+    """
+    from rcx_pi.selfhost.eval_seed import step
+    from rcx_pi.selfhost.mu_type import mu_equal
+
+    trace = [initial]
+    current = initial
+
+    for _ in range(max_steps):
+        result = step(projections, current)
+        trace.append(result)
+
+        # Check for stall (no change)
+        if mu_equal(result, current):
+            return result, trace, True
+
+        current = result
+
+        # Check if we've reached final result (not a kernel/match/subst state)
+        if isinstance(result, dict):
+            # Check for mode markers (internal state format)
+            mode = result.get("_mode") or result.get("mode")
+            # Check for entry format (match/subst requests)
+            is_entry_format = "match" in result or "subst" in result
+            # Check for kernel entry format
+            is_kernel_entry = "_step" in result
+
+            if mode is None and not is_entry_format and not is_kernel_entry:
+                # No mode field and not entry format - final unwrapped result
+                return result, trace, True
+        else:
+            # Primitive result
+            return result, trace, True
+
+    return current, trace, False

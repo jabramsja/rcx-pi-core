@@ -400,8 +400,8 @@ Additional attack vectors addressed in security hardening pass:
 
 Phase 4a-4d complete:
 
-1. [x] `match()` expressed as Mu projections (`seeds/match.v1.json`, 12 projections)
-2. [x] `substitute()` expressed as Mu projections (`seeds/subst.v1.json`, 9 projections)
+1. [x] `match()` expressed as Mu projections (`seeds/match.v1.json`, 7 projections)
+2. [x] `substitute()` expressed as Mu projections (`seeds/subst.v1.json`, 12 projections)
 3. [x] Parity tests pass: Mu-match == Python-match (23 tests in `test_match_parity.py`)
 4. [x] Parity tests pass: Mu-subst == Python-subst (17 tests in `test_subst_parity.py`)
 5. [x] Integration tests: match_mu + subst_mu work together (67 tests total)
@@ -431,8 +431,8 @@ Phase 5 complete:
 - `rcx_pi/deep_eval.py` - Deep evaluation machinery
 - `seeds/` - Mu projection definitions:
   - `eval.v1.json` - EVAL_SEED traversal projections
-  - `match.v1.json` - Match projections (13 rules, includes typed.descend)
-  - `subst.v1.json` - Substitute projections (13 rules, includes lookup + typed)
+  - `match.v1.json` - Match projections (7 rules)
+  - `subst.v1.json` - Substitute projections (12 rules, includes lookup + typed)
   - `classify.v1.json` - Classification projections (6 rules)
 
 ## Next Steps
@@ -467,4 +467,41 @@ Phase 5 complete:
 - [x] 8a: Document 5 bootstrap primitives (eval_step, mu_equal, etc.)
 - [x] 8b: Simplify step_kernel_mu to mechanical operation (~15 lines)
 - [ ] 8c: Oscillation detection (future)
-- [ ] 8d: EngineNews trace model (future)
+- [ ] 8d: EngineNews trace model (in progress - see L3 plan below)
+
+**L3 Substrate Portability (7-agent reviewed 2026-01-30):**
+- [x] JS POC exists (`experiments/eval_step.js`, ~300 LOC core)
+- [x] Same projections run on Python AND JavaScript
+- [x] Step 1: Fix JS security gaps (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair)
+- [x] Step 2: Cross-substrate parity tests (`tests/test_parity_python.py`, 20 vectors)
+- [x] Step 3: Phase 8d trace model in Python (`tests/test_structural_trace.py`, 14 tests)
+- [x] Step 4: Port trace to JS POC (`runStructural()`, 5 tests)
+- [ ] Step 5: EngineNews demo on both substrates (CRITICAL: must be structural)
+
+**CRITICAL: EngineNews Must Be Structural (2026-01-30)**
+
+EngineNews rules MUST be expressed as Mu projections, NOT Python code:
+
+1. **Why this matters:** If EngineNews runs via Python loops/logic, emergence might be a Python artifact. For structural honesty, closure detection must be pattern matching on traces.
+
+2. **What's acceptable:** The bootstrap primitives (eval_step, mu_equal, for-loop driver) are fine - they're like Forth's NEXT. The LOGIC must be projections.
+
+3. **Success criteria for Step 5:**
+   - `seeds/enginenews.v1.json` exists with ≥4 projections
+   - EngineNews projections run via kernel (step_kernel_mu), NOT Python loops
+   - Closure detection is structural: projection matches trace pattern
+   - Same projections produce same closure evidence on Python AND JS
+   - No Python `if/for/while` in closure detection path (only in bootstrap)
+
+4. **Required projections:**
+   - `enginenews.detect_repeat` - find repeated state in trace
+   - `enginenews.check_seen` - structural lookup in seen-set
+   - `enginenews.mark_closure` - emit closure evidence
+   - `enginenews.advance` - move to next trace entry
+
+**Test files:**
+- `tests/test_parity_python.py` - 20 parity + 3 security tests
+- `tests/test_structural_trace.py` - 14 structural trace tests
+- `tests/fixtures/parity_vectors.json` - 23 shared test vectors
+
+**What L3 proves:** All meaning is in projections. The host (Python or JS) provides only mechanical execution via the 5 bootstrap primitives. Emergence is structural, not a Python artifact. This is the Hex0/Forth precedent.
