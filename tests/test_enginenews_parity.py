@@ -223,7 +223,7 @@ class TestEngineNewsParity:
         assert result["closure_detected"] is True
 
     @pytest.mark.parametrize("vector_id", [
-        "engine.no_closure_stall",
+        "engine.closure_immediate_repeat",
         "engine.no_closure_single",
         "engine.closure_oscillation",
         "engine.no_closure_distinct",
@@ -305,3 +305,182 @@ class TestEngineNewsIntegration:
         # Actually the trace will have initial state + stall state = 2 entries
         # Both with same state "X" -> closure detected!
         assert "closure_detected" in result
+
+
+class TestEngineNewsSpecCompliance:
+    """Grounding tests for RCXEngineNew.pdf Rule 2.2♢ compliance.
+
+    These tests verify the SECOND-demand semantics explicitly.
+    """
+
+    def setup_method(self):
+        reset_step_budget()
+
+    @pytest.fixture
+    def projections(self):
+        return load_enginenews_projections()
+
+    def test_first_occurrence_no_closure(self, projections):
+        """Rule 2.2♢: First occurrence MUST NOT trigger closure.
+
+        A single state appearing once is not closure.
+        """
+        # Only one occurrence of state "A"
+        trace = {
+            "head": {"step": 0, "state": "A", "projection": None, "stall": True},
+            "tail": None
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": "A"}}
+        result = run_until_stable(projections, initial)
+
+        assert result["closure_detected"] is False, \
+            "Rule 2.2♢: First occurrence must NOT trigger closure"
+
+    def test_second_occurrence_triggers_closure(self, projections):
+        """Rule 2.2♢: SECOND occurrence MUST trigger closure.
+
+        State appearing twice (positions 0 and 1) = closure.
+        """
+        # State "A" at step 0, different state "B" at step 1, state "A" again at step 2
+        trace = {
+            "head": {"step": 0, "state": "A", "projection": "to_b"},
+            "tail": {
+                "head": {"step": 1, "state": "B", "projection": "to_a"},
+                "tail": {
+                    "head": {"step": 2, "state": "A", "projection": None},
+                    "tail": None
+                }
+            }
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": "A"}}
+        result = run_until_stable(projections, initial)
+
+        assert result["closure_detected"] is True, \
+            "Rule 2.2♢: Second occurrence MUST trigger closure"
+
+    def test_immediate_repeat_is_second_occurrence(self, projections):
+        """Rule 2.2♢: Immediate repeat (A->A) counts as second occurrence."""
+        # State "A" at step 0, same state "A" at step 1 (immediate stall)
+        trace = {
+            "head": {"step": 0, "state": "A", "projection": None},
+            "tail": {
+                "head": {"step": 1, "state": "A", "projection": None, "stall": True},
+                "tail": None
+            }
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": "A"}}
+        result = run_until_stable(projections, initial)
+
+        assert result["closure_detected"] is True, \
+            "Immediate repeat (A->A) is SECOND occurrence"
+
+    def test_three_occurrences_still_detects_closure(self, projections):
+        """Rule 2.2♢: Closure triggers on SECOND, works with 3+ occurrences."""
+        # State "A" at steps 0, 2, 4
+        trace = {
+            "head": {"step": 0, "state": "A", "projection": "to_b"},
+            "tail": {
+                "head": {"step": 1, "state": "B", "projection": "to_a"},
+                "tail": {
+                    "head": {"step": 2, "state": "A", "projection": "to_b"},
+                    "tail": {
+                        "head": {"step": 3, "state": "B", "projection": "to_a"},
+                        "tail": {
+                            "head": {"step": 4, "state": "A", "projection": None},
+                            "tail": None
+                        }
+                    }
+                }
+            }
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": "A"}}
+        result = run_until_stable(projections, initial)
+
+        # Closure detected at step 2 (second "A")
+        assert result["closure_detected"] is True
+
+    def test_tau_is_state_not_projection(self, projections):
+        """A.10: Trace token τ = state (not projection id).
+
+        Same state via different projections = closure.
+        Different states via same projection = no closure.
+        """
+        # Same state "X" reached via different projections
+        trace_same_state = {
+            "head": {"step": 0, "state": "X", "projection": "path_a"},
+            "tail": {
+                "head": {"step": 1, "state": "X", "projection": "path_b"},
+                "tail": None
+            }
+        }
+
+        result1 = run_until_stable(projections, {
+            "_detect_closure": {"trace": trace_same_state, "result": "X"}
+        })
+        assert result1["closure_detected"] is True, \
+            "A.10: τ = state; same state via different projections = closure"
+
+        # Different states via same projection
+        trace_diff_state = {
+            "head": {"step": 0, "state": "X", "projection": "same_proj"},
+            "tail": {
+                "head": {"step": 1, "state": "Y", "projection": "same_proj"},
+                "tail": None
+            }
+        }
+
+        result2 = run_until_stable(projections, {
+            "_detect_closure": {"trace": trace_diff_state, "result": "Y"}
+        })
+        assert result2["closure_detected"] is False, \
+            "A.10: τ = state; different states via same projection = no closure"
+
+    def test_complex_state_equality(self, projections):
+        """Closure detection works with complex nested states."""
+        complex_state = {"x": 1, "y": [2, 3]}
+
+        trace = {
+            "head": {"step": 0, "state": complex_state, "projection": "p1"},
+            "tail": {
+                "head": {"step": 1, "state": {"z": 99}, "projection": "p2"},
+                "tail": {
+                    "head": {"step": 2, "state": complex_state, "projection": None},
+                    "tail": None
+                }
+            }
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": complex_state}}
+        result = run_until_stable(projections, initial)
+
+        assert result["closure_detected"] is True, \
+            "Complex nested states detected as equal"
+
+    def test_primitive_type_distinctness(self, projections):
+        """0 vs false vs null vs empty string are DISTINCT states."""
+        test_cases = [
+            (0, False, "0 vs false"),
+            (0, None, "0 vs null"),
+            (False, None, "false vs null"),
+            ("", False, "empty string vs false"),
+        ]
+
+        for state1, state2, desc in test_cases:
+            trace = {
+                "head": {"step": 0, "state": state1, "projection": None},
+                "tail": {
+                    "head": {"step": 1, "state": state2, "projection": None},
+                    "tail": None
+                }
+            }
+
+            result = run_until_stable(projections, {
+                "_detect_closure": {"trace": trace, "result": state2}
+            })
+
+            assert result["closure_detected"] is False, \
+                f"Type distinctness: {desc} must be distinct states"

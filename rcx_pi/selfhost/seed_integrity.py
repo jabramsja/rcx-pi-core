@@ -37,7 +37,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Phase 7b: subst with kernel context passthrough
     "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
     # Step 5: EngineNews structural closure detection (Rule 2.2♢)
-    "enginenews.v1.json": "0002feebe9d90b3ffa9e65ecd4c32e0655686ada15eac8381b2416802f037cfe",
+    "enginenews.v1.json": "2a842d13342ed5a8514e5e0a7993afea01444e8ae15139096d96029f90b2c39d",
 }
 
 # Expected projection IDs for each seed.

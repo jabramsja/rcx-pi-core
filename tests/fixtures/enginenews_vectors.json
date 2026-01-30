@@ -7,8 +7,8 @@
   },
   "vectors": [
     {
-      "id": "engine.no_closure_stall",
-      "description": "Immediate stall - no repeated states possible",
+      "id": "engine.closure_immediate_repeat",
+      "description": "Immediate repeat (A->A stall) - closure on second occurrence",
       "input": {
         "_detect_closure": {
           "trace": {

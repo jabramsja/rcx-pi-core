@@ -9,7 +9,12 @@
       "All projections are pure Mu (JSON-compatible)",
       "Closure detection uses pattern matching, NOT Python conditionals",
       "Seen-set is a Mu linked-list, NOT Python set",
-      "Trace token τ recurrence detected structurally"
+      "Trace token τ recurrence detected structurally",
+      "Non-linear patterns (same var twice) require eval_step bootstrap for enforcement"
+    ],
+    "bootstrap_dependencies": [
+      "eval_step() binding conflict detection (lines 331-336, 351-355 of eval_seed.py)",
+      "Both Python and JS substrates handle non-linear patterns identically"
     ]
   },
   "projections": [
