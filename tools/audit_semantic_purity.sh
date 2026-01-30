@@ -548,10 +548,10 @@ echo "Checking for BOOTSTRAP markers in Python code..."
 BOOTSTRAP_COUNT=$(grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | wc -l | tr -d ' ')
 if [ "$BOOTSTRAP_COUNT" -gt 0 ]; then
     echo "  Found $BOOTSTRAP_COUNT BOOTSTRAP markers (temporary Python code)"
-    echo "  These must be removed for true self-hosting (Phase 3)"
+    echo "  These are documented bootstrap primitives - see docs/core/BootstrapPrimitives.v0.md"
     grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | head -5
 else
-    echo "  ✓ No BOOTSTRAP markers found (or Phase 3 complete)"
+    echo "  ✓ No BOOTSTRAP markers found"
 fi
 
 echo ""
@@ -816,7 +816,19 @@ echo "== 19. Host Debt: Threshold Check =="
 # Eliminating them would require eval_step to not exist (circular dependency).
 # L3/L4 would require fundamentally different architecture.
 #
-DEBT_THRESHOLD=12  # <-- RATCHET: Lower this as debt is paid, never raise it
+# Read threshold from STATUS.md (single source of truth)
+# Format: "THRESHOLD: 12" - extract first token after colon to handle inline comments
+DEBT_THRESHOLD=$(grep "^THRESHOLD:" "$PROJECT_ROOT/STATUS.md" | head -1 | cut -d: -f2 | awk '{print $1}')
+if [ -z "$DEBT_THRESHOLD" ]; then
+    echo "ERROR: Could not read THRESHOLD from STATUS.md"
+    exit 1
+fi
+# Validate threshold is numeric (security: prevent injection via STATUS.md tampering)
+if ! [[ "$DEBT_THRESHOLD" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: DEBT_THRESHOLD must be numeric, got: '$DEBT_THRESHOLD'"
+    exit 1
+fi
+# RATCHET POLICY: Lower this in STATUS.md as debt is paid, never raise it
 #
 # HISTORY (for archaeology, not policy):
 # 6→23 (comprehensive marking), 23→21 (Phase 6a), 21→19 (6b), 19→15 (6c),

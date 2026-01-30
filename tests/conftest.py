@@ -103,6 +103,24 @@ collect_ignore = [
     "archive",  # archived tests (e.g., bytecode VM - superseded by kernel approach)
 ]
 
+# SECURITY: These test files are CRITICAL and must NEVER be in collect_ignore
+# Adding them to collect_ignore would silently disable security tests
+# 7-agent adversary review finding (2026-01-30)
+CRITICAL_TEST_FILES = frozenset({
+    # Debt and security enforcement
+    "test_debt_enforcement.py",
+    "test_security_boundary_fuzzer.py",
+    "test_seed_integrity_fuzzer.py",
+    # Core algorithm parity tests
+    "test_match_parity.py",
+    "test_subst_parity.py",
+    "test_kernel_projections.py",
+    # Security tool grounding tests (verify security checks actually work)
+    "test_contraband_detection.py",
+    "test_ast_police_detection.py",
+    "test_check_test_theater_detection.py",
+})
+
 
 def pytest_configure(config):
     """Configure pytest: enforce determinism, enable coverage if requested."""
@@ -112,6 +130,16 @@ def pytest_configure(config):
         raise RuntimeError(
             f"PYTHONHASHSEED must be '0' for deterministic tests, got {hashseed!r}. "
             "Run with: PYTHONHASHSEED=0 pytest ..."
+        )
+
+    # SECURITY: Verify critical test files are NOT in collect_ignore
+    # This prevents silently disabling security tests (7-agent adversary finding)
+    ignored_critical = CRITICAL_TEST_FILES & set(collect_ignore)
+    if ignored_critical:
+        raise RuntimeError(
+            f"CRITICAL TEST FILES in collect_ignore: {ignored_critical}. "
+            "These files contain security tests and MUST NOT be ignored. "
+            "Remove them from collect_ignore."
         )
 
     # Enable projection coverage if requested

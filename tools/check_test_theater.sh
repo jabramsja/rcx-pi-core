@@ -22,7 +22,8 @@ echo ""
 # - Not followed by "==" (which tests type coercion)
 # - Not whitelisted with THEATER_OK
 # Pattern: "assert True" followed by optional comment or end of line
-THEATER_HITS=$(grep -rn "assert True\s*$\|assert True\s*#" "$TESTS_DIR" --include="*.py" 2>/dev/null | grep -v "THEATER_OK" | grep -v "assert True ==" || true)
+# Note: -E for extended regex (needed for \s and |)
+THEATER_HITS=$(grep -E -rn "assert True\s*$|assert True\s*#" "$TESTS_DIR" --include="*.py" 2>/dev/null | grep -v "THEATER_OK" | grep -v "assert True ==" || true)
 
 if [ -n "$THEATER_HITS" ]; then
     echo "TEST THEATER DETECTED: Found vacuous 'assert True':"

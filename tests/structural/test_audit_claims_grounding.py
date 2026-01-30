@@ -102,6 +102,15 @@ class TestAuditScriptStructure:
             "green_gate.sh must include AST police check"
         )
 
+    def test_green_gate_has_semantic_purity_audit(self):
+        """green_gate.sh must run semantic purity audit (7-agent review finding)."""
+        script = REPO_ROOT / "scripts" / "green_gate.sh"
+        content = script.read_text()
+        assert "audit_semantic_purity" in content, (
+            "green_gate.sh must include audit_semantic_purity.sh check. "
+            "This was a critical gap identified in 7-agent review (2026-01-30)."
+        )
+
     def test_green_gate_check_order(self):
         """green_gate.sh must run checks in correct order (syntax, contraband, AST, tests)."""
         script = REPO_ROOT / "scripts" / "green_gate.sh"

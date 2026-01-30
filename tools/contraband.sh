@@ -90,6 +90,26 @@ if [ -n "$LAMBDA_HITS" ]; then
     EXIT_CODE=1
 fi
 
+# 8. Ban getattr(__builtins__) - Dynamic builtin access bypass
+# This catches attempts to access eval/exec via getattr to bypass direct checks
+GETATTR_BUILTINS_HITS=$(grep -rn "getattr.*__builtins__\|__builtins__\[" "$RCX_DIR" --include="*.py" $EXCLUDE $EXCLUDE_FILES 2>/dev/null | grep -v "CONTRABAND_OK" || true)
+if [ -n "$GETATTR_BUILTINS_HITS" ]; then
+    echo "CRITICAL: Found dynamic __builtins__ access (eval/exec bypass attempt):"
+    echo "$GETATTR_BUILTINS_HITS"
+    echo ""
+    EXIT_CODE=1
+fi
+
+# 9. Ban 'import builtins' - Alternative dynamic builtin access bypass
+# This catches attempts to access eval/exec via the builtins module
+IMPORT_BUILTINS_HITS=$(grep -rn "import builtins\|from builtins import" "$RCX_DIR" --include="*.py" $EXCLUDE $EXCLUDE_FILES 2>/dev/null | grep -v "CONTRABAND_OK" || true)
+if [ -n "$IMPORT_BUILTINS_HITS" ]; then
+    echo "CRITICAL: Found 'import builtins' (eval/exec bypass attempt):"
+    echo "$IMPORT_BUILTINS_HITS"
+    echo ""
+    EXIT_CODE=1
+fi
+
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
     echo "No contraband syntax found in core RCX code."

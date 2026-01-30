@@ -12,7 +12,9 @@ ALLOWED patterns (not violations):
 - Set literals for key comparison: set(x.keys()) == {"head", "tail"}
 - Generators in all()/any()/list()/tuple() - idiomatic Python
 - Global statements for caching (projection loaders)
-- Lines marked with # AST_OK: reason
+- Lines marked with # AST_OK: <category> where category is in ALLOWED_AST_OK_CATEGORIES
+
+SECURITY: AST_OK markers must use approved categories to prevent bypass abuse.
 """
 import ast
 import sys
@@ -22,6 +24,19 @@ from typing import List, Tuple, Set
 # Directories to skip
 SKIP_DIRS = {"worlds", "prototypes", "core"}
 SKIP_FILES = {"_cli.py", "test_"}
+
+# SECURITY: Only these AST_OK categories are allowed to prevent bypass abuse
+# Adding a new category requires explicit review and justification
+ALLOWED_AST_OK_CATEGORIES = {
+    "bootstrap",   # Bootstrap primitives (eval_seed comprehensions)
+    "infra",       # Infrastructure/boundary scaffolding
+    "boundary",    # Host/Mu boundary conversions
+    "test",        # Test-specific allowed patterns
+    "cycle",       # Cycle detection (single-element sets)
+    "key",         # Key comparison (set equality checks like keys == {"head", "tail"})
+    "constant",    # Constant definitions (frozensets, lookup tables)
+    "security",    # Security-related constants (whitelists, reserved fields)
+}
 
 # Set literals that are OK (used for key comparison or fixed membership tests)
 ALLOWED_SET_LITERALS: Set[frozenset] = {
@@ -51,6 +66,33 @@ def get_source_line(source: str, lineno: int) -> str:
     return ""
 
 
+def is_valid_ast_ok_marker(line: str) -> Tuple[bool, str]:
+    """
+    Check if AST_OK marker uses an approved category.
+
+    Returns (is_valid, category_or_error).
+    Valid format: # AST_OK: category - optional reason
+    """
+    if "AST_OK:" not in line:
+        return (False, "no marker")
+
+    # Extract the part after AST_OK:
+    idx = line.index("AST_OK:")
+    rest = line[idx + 7:].strip()
+
+    # Get the category (first word)
+    parts = rest.split()
+    if not parts:
+        return (False, "missing category")
+
+    category = parts[0].rstrip("-:,")  # Handle "bootstrap -" or "bootstrap:"
+
+    if category in ALLOWED_AST_OK_CATEGORIES:
+        return (True, category)
+    else:
+        return (False, f"invalid category '{category}' (allowed: {', '.join(sorted(ALLOWED_AST_OK_CATEGORIES))})")
+
+
 def is_allowed_set_literal(node: ast.Set) -> bool:
     """Check if this set literal is in the allowed list."""
     try:
@@ -75,16 +117,29 @@ def check_file(filepath: str) -> List[Tuple[int, str]]:
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             source = f.read()
+    except UnicodeDecodeError as e:
+        return [(0, f"File encoding error (not UTF-8): {e}")]
+
+    try:
         tree = ast.parse(source, filename=filepath)
     except SyntaxError as e:
         return [(e.lineno or 0, f"Syntax Error: {e.msg}")]
 
     for node in ast.walk(tree):
-        # Check if line has AST_OK marker
+        # Check if line has AST_OK marker with valid category
         if hasattr(node, 'lineno'):
             line = get_source_line(source, node.lineno)
             if "AST_OK:" in line:
-                continue
+                is_valid, result = is_valid_ast_ok_marker(line)
+                if is_valid:
+                    continue  # Valid marker, skip this line
+                else:
+                    # Invalid marker - report as violation
+                    violations.append((
+                        node.lineno,
+                        f"Invalid AST_OK marker: {result}"
+                    ))
+                    continue  # Still skip the original check to avoid double-reporting
 
         # 1. Set Literals - but allow key comparison sets and single-element union
         if isinstance(node, ast.Set):

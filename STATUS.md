@@ -163,6 +163,8 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
+INFRA_CEILING: 35
+INFRA_CURRENT: 33
 ```
 
 **Debt breakdown:**

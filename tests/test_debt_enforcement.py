@@ -20,14 +20,21 @@ DEBT_DASHBOARD = ROOT / "tools" / "debt_dashboard.sh"
 AUDIT_SCRIPT = ROOT / "tools" / "audit_semantic_purity.sh"
 
 
-def _run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess command and return the result."""
+def _run(args: list[str], cwd: Path | None = None, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess command and return the result.
+
+    Args:
+        args: Command and arguments to run
+        cwd: Working directory (defaults to ROOT)
+        timeout: Maximum seconds to wait (prevents CI hangs)
+    """
     return subprocess.run(
         args,
         cwd=str(cwd or ROOT),
         capture_output=True,
         text=True,
         check=False,
+        timeout=timeout,
     )
 
 
@@ -151,10 +158,11 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
 
 
 def test_audit_semantic_purity_threshold_matches_status_md():
-    """Verify the threshold matches STATUS.md (single source of truth).
+    """Verify the threshold is read from STATUS.md (single source of truth).
 
-    The threshold should be read from STATUS.md, not hardcoded.
-    This test verifies audit_semantic_purity.sh uses the correct value.
+    7-agent review finding: audit_semantic_purity.sh should read the threshold
+    dynamically from STATUS.md rather than hardcoding it, ensuring a single
+    source of truth.
 
     Current threshold: 12 (L2 floor - irreducible bootstrap substrate)
     - @host_recursion: 2 (eval_seed match/substitute)
@@ -163,35 +171,54 @@ def test_audit_semantic_purity_threshold_matches_status_md():
     - @host_mutation: 2 (eval_seed, deep_eval)
     - AST_OK bootstrap: 2 (eval_seed comprehensions)
     """
-    # Read expected threshold from STATUS.md (single source of truth)
+    # Verify STATUS.md has the threshold line
     status_md = ROOT / "STATUS.md"
     status_content = status_md.read_text(encoding="utf-8")
 
-    # Extract threshold from STATUS.md - format: THRESHOLD: 12
     status_threshold = None
     for line in status_content.split("\n"):
         if line.startswith("THRESHOLD:"):
-            status_threshold = line.split(":")[1].strip()
+            # Use split()[0] to handle inline comments like "12 (current)"
+            status_threshold = line.split(":")[1].strip().split()[0]
             break
 
     assert status_threshold is not None, "Should find THRESHOLD in STATUS.md"
 
-    # Read actual threshold from audit script
+    # Verify audit script reads from STATUS.md (not hardcoded)
     script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
 
-    threshold_lines = [
+    # Script should read THRESHOLD from STATUS.md
+    assert 'grep "^THRESHOLD:" "$PROJECT_ROOT/STATUS.md"' in script_content, (
+        "audit_semantic_purity.sh must read DEBT_THRESHOLD from STATUS.md"
+    )
+
+    # Should NOT have a hardcoded numeric DEBT_THRESHOLD=NN line
+    # (the assignment uses $(grep...) now)
+    hardcoded_lines = [
         line for line in script_content.split("\n")
-        if "DEBT_THRESHOLD=" in line and not line.strip().startswith("#")
+        if line.strip().startswith("DEBT_THRESHOLD=") and
+        line.split("=")[1].strip().isdigit()
     ]
+    assert len(hardcoded_lines) == 0, (
+        f"Found hardcoded DEBT_THRESHOLD in audit script: {hardcoded_lines}. "
+        f"Script should read from STATUS.md instead."
+    )
 
-    assert len(threshold_lines) >= 1, "Should find DEBT_THRESHOLD assignment"
 
-    line = threshold_lines[0]
-    script_threshold = line.split("=")[1].split()[0]
+def test_audit_semantic_purity_has_selfhost_error_path():
+    """Verify audit_semantic_purity.sh fails with clear error if selfhost missing.
 
-    assert script_threshold == status_threshold, (
-        f"audit_semantic_purity.sh threshold ({script_threshold}) doesn't match "
-        f"STATUS.md threshold ({status_threshold}). Keep them in sync."
+    7-agent review finding: The else branch must fail with an actionable error,
+    not silently pass or assign variables to themselves (dead code).
+    """
+    script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
+
+    # Check for the error message that tells users what's wrong
+    assert "ERROR: selfhost subpackage not found" in script_content, (
+        "audit_semantic_purity.sh must have clear error message when selfhost missing"
+    )
+    assert "exit 1" in script_content, (
+        "audit_semantic_purity.sh must exit with error code when selfhost missing"
     )
 
 
@@ -258,8 +285,23 @@ def test_debt_dashboard_json_includes_infra_count():
     assert "ast_ok_infra" in data["debt"], "JSON should include ast_ok_infra"
     assert "ast_ok_infra_ceiling" in data["debt"], "JSON should include ast_ok_infra_ceiling"
 
-    # Verify ceiling is 35
-    assert data["debt"]["ast_ok_infra_ceiling"] == 35
+    # Verify ceiling matches STATUS.md (single source of truth)
+    status_md = ROOT / "STATUS.md"
+    status_content = status_md.read_text(encoding="utf-8")
+    status_ceiling = None
+    for line in status_content.split("\n"):
+        if line.startswith("INFRA_CEILING:"):
+            status_ceiling = int(line.split(":")[1].strip().split()[0])
+            break
+
+    if status_ceiling is not None:
+        assert data["debt"]["ast_ok_infra_ceiling"] == status_ceiling, (
+            f"Ceiling in dashboard ({data['debt']['ast_ok_infra_ceiling']}) "
+            f"doesn't match STATUS.md ({status_ceiling})"
+        )
+    else:
+        # Fallback: just verify it's the expected default
+        assert data["debt"]["ast_ok_infra_ceiling"] == 35
 
 
 def test_infra_count_within_ceiling():
