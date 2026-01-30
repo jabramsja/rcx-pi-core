@@ -68,10 +68,10 @@ def host_recursion(reason: str):
 
     Usage::
 
-        # Example: marking a function that uses Python recursion
-        @host_recursion("reason why recursion exists")
-        def my_function(args):
-            ...
+        >>> # Example: marking a function that uses Python recursion
+        >>> @host_recursion("reason why recursion exists")  # noqa: debt-example
+        ... def my_function(args):
+        ...     pass
     """
     def decorator(func):
         func._host_recursion = True
