@@ -235,3 +235,53 @@ def test_ast_ok_pattern_catches_spacing_variations():
     assert "[[:space:]]*bootstrap" in script_content or "\\s*bootstrap" in script_content, (
         "AST_OK pattern should handle spacing variations"
     )
+
+
+# -----------------------------------------------------------------------------
+# Infrastructure Ceiling Tests
+# -----------------------------------------------------------------------------
+
+
+def test_debt_dashboard_json_includes_infra_count():
+    """Verify debt_dashboard.sh JSON output includes infra fields."""
+    result = _run(["bash", str(DEBT_DASHBOARD), "--json"])
+
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+
+    # Check infra fields exist
+    assert "ast_ok_infra" in data["debt"], "JSON should include ast_ok_infra"
+    assert "ast_ok_infra_ceiling" in data["debt"], "JSON should include ast_ok_infra_ceiling"
+
+    # Verify ceiling is 35
+    assert data["debt"]["ast_ok_infra_ceiling"] == 35
+
+
+def test_infra_count_within_ceiling():
+    """Verify AST_OK:infra count is below ceiling (35).
+
+    This test enforces the infra ceiling to prevent unbounded accumulation
+    of boundary scaffolding. Infra markers are not debt (they don't block
+    self-hosting), but excessive infra suggests architectural issues.
+
+    Current expected: 33 (Phase 8b)
+    """
+    result = _run(["bash", str(DEBT_DASHBOARD), "--json"])
+
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+
+    infra_count = data["debt"]["ast_ok_infra"]
+    infra_ceiling = data["debt"]["ast_ok_infra_ceiling"]
+
+    # Must be within ceiling
+    assert infra_count <= infra_ceiling, (
+        f"AST_OK:infra ({infra_count}) exceeds ceiling ({infra_ceiling}). "
+        f"Review and reduce scaffolding markers before adding more."
+    )
+
+    # Current expected count is 33
+    assert infra_count == 33, (
+        f"Expected 33 AST_OK:infra markers, found {infra_count}. "
+        f"If this is intentional, update the test."
+    )

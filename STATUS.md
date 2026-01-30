@@ -36,12 +36,14 @@ NAME: Mechanical Kernel (Security Hardened)
 
 **L2 PARTIAL (current status):**
 - [x] Kernel state machine is 7 Mu projections (`kernel.v1.json`)
-- [x] Match v2 with context passthrough (8 projections, `_match_ctx`)
-- [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`)
+- [x] Match v2 with context passthrough (8 projections, `_match_ctx`) - used by kernel
+- [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 - [x] `step_kernel_mu()` wired to use structural kernel
 - [x] Security hardening complete (12 reserved fields, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py:397-410`)
+
+**Seed version note:** `match_mu()` and `subst_mu()` standalone functions use v1 seeds for direct invocation. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
 
 **L2 FULL (target - requires decision):**
 The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Options:
@@ -140,15 +142,27 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 ```
 THRESHOLD: 14
 CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
-TARGET: 10 (Phase B: deprecate eval_seed reference implementations)
+L2 FLOOR: 11 (see explanation below)
 ```
 
 **Debt breakdown:**
-- @host_recursion: 2 (eval_seed match/substitute)
+- @host_recursion: 2 (eval_seed match/substitute - BOOTSTRAP)
 - @host_builtin: 3 (eval_seed, deep_eval)
-- @host_iteration: 2 (run_mu, step_kernel_mu)
+- @host_iteration: 2 (run_mu, step_kernel_mu - BOOTSTRAP)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+
+**Why 11 is the L2 floor (not a target for reduction):**
+The `match()` and `substitute()` in eval_seed.py are NOT "reference implementations" - they ARE the bootstrap primitives that `eval_step()` uses to apply ANY projection. The production path is:
+1. `step_kernel_mu()` → `eval_step()` (on kernel.v1 + match.v2 + subst.v2)
+2. `eval_step()` → `apply_projection()` → `match()` + `substitute()` (eval_seed.py)
+
+These cannot be eliminated because:
+- eval_step needs to apply projections (pattern match + substitute)
+- match_mu/subst_mu use eval_step to apply THEIR projections
+- Circular dependency: eliminating them would require eval_step to not exist
+
+The debt of 11 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L3/L4 would require fundamentally different architecture (CPS, trampolining, or true meta-circularity).
 
 **Reclassified as infrastructure (not debt):**
 - match_mu.py:708 - boundary conversion function (AST_OK: infra)
@@ -243,7 +257,8 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 - Design doc: `docs/core/MetaCircularKernel.v0.md`
 - Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
-- Seeds: `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`, `seeds/eval.v1.json`
+- Seeds (standalone): `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`, `seeds/eval.v1.json`
+- Seeds (kernel): `seeds/kernel.v1.json`, `seeds/match.v2.json`, `seeds/subst.v2.json`
 - Task list: `TASKS.md`
 - Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
@@ -365,4 +380,4 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Last updated:** 2026-01-29
-**Next milestone:** Phase 8c (oscillation detection) or Phase 8d (EngineNews trace model)
+**Next milestone:** Phase 8d (EngineNews trace model) - structural trace accumulation for Rule 2.2 closure detection

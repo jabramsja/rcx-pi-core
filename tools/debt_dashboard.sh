@@ -30,6 +30,7 @@ if [ "$JSON_OUTPUT" = true ]; then
     HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
     BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
     AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
+    AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
     PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
     PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
@@ -45,6 +46,8 @@ if [ "$JSON_OUTPUT" = true ]; then
     "host_mutation": $HOST_MUTATION,
     "bootstrap_only": $BOOTSTRAP,
     "ast_ok_bootstrap": $AST_OK_BOOTSTRAP,
+    "ast_ok_infra": $AST_OK_INFRA,
+    "ast_ok_infra_ceiling": 35,
     "prototype_builtin": $PROTO_BUILTIN,
     "prototype_iteration": $PROTO_ITERATION,
     "total_tracked": $TOTAL_TRACKED,

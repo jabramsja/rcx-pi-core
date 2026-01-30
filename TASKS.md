@@ -341,7 +341,30 @@ All blockers resolved 2026-01-28:
   - 35 tests in `test_step_mu_kernel_integration.py`
   - 844 total tests passing
 
-**Next:** Phase 8c (oscillation detection) or Phase 8d (EngineNews trace model)
+**Next:** Phase 8d (EngineNews trace model) - see below
+
+### Phase 8d: EngineNews Trace Model
+
+**Goal:** Structural trace accumulation for EngineNews Rule 2.2 (closure-on-second-demand)
+
+**Design:**
+1. Add `_trace` field to kernel state (Mu linked list of value hashes)
+2. Add trace accumulation projection to kernel.v1 (appends current value hash)
+3. Support closure detection: τ recurs independently (hash appears twice in trace)
+
+**Implementation steps:**
+- [ ] 8d-1: Design trace format (linked list of hashes vs full values)
+- [ ] 8d-2: Add `_trace` field to kernel state machine
+- [ ] 8d-3: Add `kernel.trace` projection to kernel.v1.json
+- [ ] 8d-4: Wire step_kernel_mu to pass trace through
+- [ ] 8d-5: Add closure detection helper (hash recurs in trace)
+- [ ] 8d-6: Tests: trace accumulation, closure detection, EngineNews Rule 2.2
+
+**EngineNews Alignment:**
+- Stall detection: `mu_equal(before, after)` → already exists (primitive)
+- Fix operation: domain projections → already exists (structural)
+- Promote: kernel selection → already exists (kernel.v1)
+- **Closure**: trace accumulation → **Phase 8d target**
 
 ---
 
