@@ -46,6 +46,9 @@ echo ""
 echo "== 1) Contraband check =="
 ./tools/contraband.sh rcx_pi
 
+echo "== 1b) Test theater check =="
+./tools/check_test_theater.sh tests
+
 echo "== 2) AST police =="
 python3 tools/ast_police.py
 

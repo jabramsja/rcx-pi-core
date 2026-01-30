@@ -11,22 +11,60 @@ PHASE: 8b
 NAME: Mechanical Kernel (Security Hardened)
 ```
 
-## Self-Hosting Levels
+## Projection-Based Architecture Levels
 
 | Level | Description | Status |
 |-------|-------------|--------|
-| **L1: Algorithmic** | match/subst algorithms are Mu projections | DONE (iteration is Python scaffolding) |
-| **L2: Operational** | kernel loop (iteration/selection) is Mu projections | PARTIAL (selection structural, execution Python) |
-| **L3: Full Bootstrap** | RCX runs RCX with no Python | FUTURE |
+| **L1: Algorithmic** | match/subst algorithms EXPRESSED as Mu projections | DONE (Python executes projections) |
+| **L2: Operational** | kernel state machine EXPRESSED as Mu projections | PARTIAL (selection structural, execution Python) |
+| **L3: Full Bootstrap** | RCX runs RCX on minimal substrate | FUTURE (Forth-style bootstrap - see below) |
+| **L4: True Self-Hosting** | Bootstrap primitives eliminated or substrate-independent | SINK (research question) |
 
-**Terminology Note:** The "kernel" in L2 refers to `kernel.v1.json` (7 structural Mu projections), NOT the `Kernel` class in kernel.py (Python scaffolding for hash/trace/dispatch). See `docs/core/MetaCircularKernel.v0.md` for full clarification.
+**Terminology Honesty:**
+- "Projection-based" means the ALGORITHM is expressed as Mu projections (data)
+- Python's `eval_step()` EXECUTES those projections (like Forth's NEXT executes threaded code)
+- This is NOT "self-hosting" in the traditional sense - Python is the execution engine
+- The "kernel" in L2 refers to `kernel.v1.json` (7 projections), NOT the deprecated `Kernel` class
 
 ## What This Means
 
-- **L1 Algorithmic self-hosting achieved** (see Self-Hosting Levels table): `match_mu()` and `subst_mu()` use Mu projections from seeds, not Python recursion
-- **L2 Operational PARTIAL**: Projection SELECTION is structural (linked-list cursor in kernel.v1), but projection EXECUTION still uses Python for-loop in `step_kernel_mu`
-- **Phase 7d-1 complete**: `step_mu()` delegates to `step_kernel_mu()` which uses kernel projections for selection. The execution loop remains Python (marked with @host_iteration)
-- **True L2 requires Phase 8**: Recursive kernel projections that eliminate the execution loop
+- **L1 Algorithmic DONE**: `match_mu()` and `subst_mu()` algorithms are expressed as Mu projections in seeds. Python's `eval_step()` executes them.
+- **L2 Operational PARTIAL**: Projection SELECTION is structural (linked-list cursor in kernel.v1). Projection EXECUTION is Python (`for` loop in `step_kernel_mu`).
+- **Python's role**: `eval_step()` is a bootstrap primitive (like Forth's NEXT). It applies projections using Python pattern matching. This is irreducible in current architecture.
+## L3/L4 Definition (Bootstrap Architecture)
+
+### L3 Target: Forth-Style Bootstrap (NEXT)
+
+L3 is defined as **Forth-style bootstrap** - algorithms as projections, executed by minimal primitives:
+
+| Component | Role | Precedent |
+|-----------|------|-----------|
+| **Bootstrap Primitives** | eval_step, mu_equal, stack_guard, projection_loader | Like Forth's NEXT, Lisp's EVAL |
+| **Algorithms** | match, subst, classify, eval - expressed as Mu projections | Threaded code in Forth |
+| **Python's Role** | Substrate for bootstrap primitives | Inner interpreter in Forth |
+
+**What "self-hosting" means at L3:**
+- All algorithms are Mu projections (data, not code)
+- Bootstrap primitives execute projections (irreducible)
+- Python is explicitly marked substrate, not hidden dependency
+- This is what Lisp, Forth, and PyPy actually do
+
+### L4 Research: True Self-Hosting (SINK)
+
+L4 asks: **Can bootstrap primitives be eliminated or made substrate-independent?**
+
+| Primitive | L4 Question | Possible Path |
+|-----------|-------------|---------------|
+| `eval_step` | Can it be a projection? | Requires meta-level substrate |
+| `mu_equal` | Can structural equality be structural? | Possibly via comparison projections |
+| `stack_guard` | Can depth be Mu data? | Count in Mu, not Python |
+| `projection_loader` | Can Mu load Mu? | Possibly, with file I/O primitive |
+
+**L4 Status:** Open research question in SINK. Not promised, not ruled out.
+
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal, we know exactly what would need to change. If L4 is possible, L3 is the path to it.
+
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive, and can it be substrate-independent (e.g., hardware, WASM)?
 
 ## Development Workflow
 
@@ -180,7 +218,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 880+ tests passing.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1500+ tests passing.
 
 **Security Hardening (2026-01-29, 7-agent review):**
 - Added `filterwarnings = ["error::DeprecationWarning:rcx_pi.*"]` to pyproject.toml
@@ -191,14 +229,19 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Added `tests/archive/README.md` documenting archive purpose
 
 **Architecture Cleanup (2026-01-29):**
-- kernel.py: Added architecture comment block clarifying two concerns:
-  - ACTIVE: Step budget functions (get_step_budget, etc.)
-  - LEGACY: Kernel class (deprecated, not used by self-hosting)
-- Deprecated: `Kernel` class and `create_kernel()` emit DeprecationWarning
+- kernel.py: DELETED legacy Kernel class (~350 lines removed)
+  - KEPT: Step budget infrastructure (get_step_budget, reset_step_budget, MAX_PROJECTION_STEPS)
+  - DELETED: Kernel class, create_kernel(), compute_identity(), detect_stall(), gate_dispatch(), record_trace()
 - Archived: `test_kernel_v0.py` moved to `tests/archive/legacy/`
 - Created: `tests/structural/test_lambda_calculus_guardrails.py` (11 tests)
 - Added: Tests for `is_kernel_intermediate()` (12 tests)
 - Note: `MAX_PROJECTION_STEPS=50000` (kernel.py) is NOT used by step_kernel_mu which uses `max_steps=10000`
+
+**Security Fuzzers (2026-01-29):**
+- Created `tests/test_security_boundary_fuzzer.py` (24 tests) - validate_no_kernel_reserved_fields
+  - Tests depth guards, nested smuggling, unicode homoglyphs, list traversal
+- Created `tests/test_seed_integrity_fuzzer.py` (21 tests) - seed validation functions
+  - Tests checksum tampering, structure validation, projection order security, injection attacks
 
 **Phase 8a IMPLEMENTED (2026-01-28):**
 

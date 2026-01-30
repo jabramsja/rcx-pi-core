@@ -27,15 +27,19 @@ run_python() {
   python3 -m py_compile rcx_start.py
   echo
 
-  echo "[PY 2/4] Contraband check (grep-based lint)"
+  echo "[PY 2/5] Contraband check (grep-based lint)"
   ./tools/contraband.sh rcx_pi
   echo
 
-  echo "[PY 3/4] AST police (catches what grep misses)"
+  echo "[PY 3/5] Test theater check (assert True)"
+  ./tools/check_test_theater.sh tests
+  echo
+
+  echo "[PY 4/5] AST police (catches what grep misses)"
   python3 tools/ast_police.py
   echo
 
-  echo "[PY 4/4] Python test suite"
+  echo "[PY 5/5] Python test suite"
   python3 -m pytest $PARALLEL_FLAG
 echo
 echo "[PY] CLI smoke (end-to-end entrypoints)"

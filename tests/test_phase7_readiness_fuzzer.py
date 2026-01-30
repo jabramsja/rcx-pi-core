@@ -641,9 +641,9 @@ class TestContextPreservation:
 
     @given(mu_patterns(max_depth=2), mu_values(max_depth=2))
     @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
-    def test_match_subst_roundtrip_preserves_value_type(self, pattern, value):
+    def test_match_subst_roundtrip_produces_valid_mu_on_success(self, pattern, value):
         """
-        match_mu -> subst_mu roundtrip should produce valid Mu.
+        match_mu -> subst_mu roundtrip produces valid Mu when successful (exceptions acceptable).
         """
         assume(is_mu(pattern))
         assume(is_mu(value))
@@ -667,7 +667,7 @@ class TestContextPreservation:
             # Result should be valid Mu
             assert is_mu(result), "subst_mu result not valid Mu"
         except (ValueError, KeyError):
-            pass
+            pass  # Expected errors - test only verifies invariant on success path
 
     @given(projection_lists(min_size=2, max_size=3))
     @settings(max_examples=200, deadline=5000)

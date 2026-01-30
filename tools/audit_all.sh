@@ -51,6 +51,9 @@ echo "== 2) Semantic purity audit (self-hosting readiness) =="
 echo "== 3) Contraband check (grep-based) =="
 ./tools/contraband.sh rcx_pi
 
+echo "== 3b) Test theater check (assert True) =="
+./tools/check_test_theater.sh tests
+
 echo "== 4) AST police (catches what grep misses) =="
 python3 tools/ast_police.py
 

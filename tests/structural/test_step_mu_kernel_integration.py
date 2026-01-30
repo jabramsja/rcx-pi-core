@@ -59,8 +59,10 @@ class TestStepMuUsesKernelProjections:
             # This will stall immediately with empty projections
             try:
                 step_kernel_mu([], 42)
-            except Exception:
-                pass  # May fail, but we just want to verify load was called
+            except (ValueError, TypeError, KeyError):
+                pass  # Expected validation errors
+            except Exception as e:
+                raise AssertionError(f"Unexpected exception in step_kernel_mu: {type(e).__name__}: {e}")
 
             assert mock_load.called
 

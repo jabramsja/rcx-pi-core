@@ -134,45 +134,11 @@ class TestWidthLimits:
 
 
 # =============================================================================
-# Trace Size Limits (Memory Exhaustion Prevention)
-# =============================================================================
-
-
-class TestTraceLimits:
-    """Tests for trace size limits.
-
-    HARDENED: Unbounded trace growth could exhaust memory in long-running
-    evaluations. MAX_TRACE_ENTRIES prevents this attack vector.
-    """
-
-    def test_trace_within_limit_works(self):
-        """Recording traces within limit works normally."""
-        from rcx_pi.kernel import record_trace, MAX_TRACE_ENTRIES
-
-        trace = []
-        # Record a modest number of entries
-        for i in range(min(100, MAX_TRACE_ENTRIES - 1)):
-            record_trace(trace, {"step": i})
-
-        assert len(trace) == min(100, MAX_TRACE_ENTRIES - 1)
-
-    def test_trace_exceeding_limit_raises(self):
-        """Exceeding trace limit raises RuntimeError."""
-        from rcx_pi.kernel import record_trace, MAX_TRACE_ENTRIES
-
-        trace = []
-        # Fill to limit
-        for i in range(MAX_TRACE_ENTRIES):
-            record_trace(trace, {"step": i})
-
-        # One more should raise
-        with pytest.raises(RuntimeError, match="Trace size limit exceeded"):
-            record_trace(trace, {"step": "overflow"})
-
-
-# =============================================================================
 # Global Step Budget (Cross-Call Resource Accounting)
 # =============================================================================
+# NOTE: TestTraceLimits was removed (2026-01-29) - record_trace was deleted
+# as part of legacy Kernel class cleanup. Trace limits are no longer enforced
+# at this level; step budget provides resource exhaustion protection instead.
 
 
 class TestGlobalStepBudget:

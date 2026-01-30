@@ -247,10 +247,9 @@ class TestModeTransitionContext:
         kernel_projs = load_combined_kernel_projections()
         result = step(kernel_projs, match_done_state)
 
-        # Should transition to subst mode or done
-        if isinstance(result, dict):
-            # Either moved to subst or stayed (if projection doesn't match)
-            assert result is not None
+        # Should transition to subst mode or done (result is valid Mu)
+        # Note: result can be dict, list, or primitive depending on projection outcome
+        assert result is None or isinstance(result, (bool, int, float, str, list, dict))
 
     @given(input_val=simple_values, remaining=st.one_of(st.none(), simple_values))
     @settings(max_examples=100, deadline=5000)
@@ -268,9 +267,8 @@ class TestModeTransitionContext:
         kernel_projs = load_combined_kernel_projections()
         result = step(kernel_projs, subst_done_state)
 
-        # Should transition to done mode
-        if isinstance(result, dict):
-            assert result is not None
+        # Should transition to done mode (result is valid Mu)
+        assert result is None or isinstance(result, (bool, int, float, str, list, dict))
 
 
 # =============================================================================

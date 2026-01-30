@@ -3,7 +3,7 @@ Property-Based Fuzzing for RCX Self-Hosting Stack using Hypothesis.
 
 This test suite generates 3000+ random inputs to stress-test:
 - mu_type.py: is_mu, mu_equal, assert_mu, depth/width limits
-- kernel.py: compute_identity, detect_stall, record_trace
+- kernel.py: step budget (compute_identity, detect_stall, record_trace DELETED 2026-01-29)
 - match_mu.py: normalize_for_match, denormalize_from_match, match_mu
 - subst_mu.py: subst_mu (lookup is now structural via projections)
 - step_mu.py: apply_mu, step_mu, run_mu (kernel loop)
@@ -46,12 +46,9 @@ from rcx_pi.mu_type import (
     MAX_MU_DEPTH,
     MAX_MU_WIDTH,
 )
-from rcx_pi.kernel import (
-    compute_identity,
-    detect_stall,
-    record_trace,
-    MAX_TRACE_ENTRIES,
-)
+# DELETED 2026-01-29: compute_identity, detect_stall, record_trace, MAX_TRACE_ENTRIES
+# These were legacy kernel functions removed in architecture cleanup.
+# Related test classes have been removed.
 from rcx_pi.match_mu import (
     normalize_for_match,
     denormalize_from_match,
@@ -411,34 +408,25 @@ class TestMuEqualEquivalence:
 
 
 # =============================================================================
-# Property 2: compute_identity Determinism
+# DELETED (2026-01-29): compute_identity, detect_stall tests
+# =============================================================================
+# TestComputeIdentityDeterminism, TestComputeIdentityCollisionResistance,
+# TestHashEqualityConsistency, TestDetectStallCorrectness were removed
+# because they tested legacy kernel functions that have been deleted.
+# See git history for reference if needed.
+
+
+# =============================================================================
+# Property 2: mu_hash Determinism
 # =============================================================================
 
-class TestComputeIdentityDeterminism:
-    """Tests for compute_identity determinism."""
-
-    @given(mu_values(max_depth=3))
-    @settings(max_examples=1000, deadline=5000)
-    def test_compute_identity_determinism(self, value):
-        """compute_identity must be deterministic - same input gives same hash."""
-        assume(is_mu(value))
-
-        hash1 = compute_identity(value)
-        hash2 = compute_identity(value)
-
-        assert hash1 == hash2, f"Determinism failed for {value}"
-        assert isinstance(hash1, str)
-        assert len(hash1) == 64  # SHA-256 hex string
+class TestMuHashDeterminism:
+    """Tests for mu_hash determinism."""
 
     @given(mu_values(max_depth=3))
     @settings(max_examples=500, deadline=5000)
     def test_mu_hash_is_deterministic(self, value):
-        """mu_hash is deterministic - same value gives same hash.
-
-        Note: mu_hash uses ensure_ascii=False, while compute_identity uses
-        ensure_ascii=True. They may differ for non-ASCII strings, but each
-        should be internally deterministic.
-        """
+        """mu_hash is deterministic - same value gives same hash."""
         assume(is_mu(value))
 
         # mu_hash should be deterministic
@@ -448,88 +436,9 @@ class TestComputeIdentityDeterminism:
         assert isinstance(hash1, str) and len(hash1) == 64
         assert hash1 == hash2, f"mu_hash not deterministic for {value}"
 
-        # compute_identity should also be deterministic
-        id1 = compute_identity(value)
-        id2 = compute_identity(value)
-
-        assert isinstance(id1, str) and len(id1) == 64
-        assert id1 == id2, f"compute_identity not deterministic for {value}"
-
 
 # =============================================================================
-# Property 3: compute_identity Collision Resistance (Probabilistic)
-# =============================================================================
-
-class TestComputeIdentityCollisionResistance:
-    """Tests for hash collision resistance."""
-
-    @given(mu_values(max_depth=3), mu_values(max_depth=3))
-    @settings(
-        max_examples=500,
-        deadline=5000,
-        suppress_health_check=[HealthCheck.filter_too_much]
-    )
-    def test_compute_identity_collision_resistance(self, a, b):
-        """Different values should produce different hashes (with high probability)."""
-        assume(is_mu(a))
-        assume(is_mu(b))
-
-        # Skip structurally equal values
-        if mu_equal(a, b):
-            return
-
-        hash_a = compute_identity(a)
-        hash_b = compute_identity(b)
-
-        # Different values should have different hashes
-        assert hash_a != hash_b, f"Hash collision: {a} and {b} both hash to {hash_a}"
-
-
-# =============================================================================
-# Property 4: Hash Consistency with Equality
-# =============================================================================
-
-class TestHashEqualityConsistency:
-    """Tests for hash/equality consistency."""
-
-    @given(mu_values(max_depth=3), mu_values(max_depth=3))
-    @settings(
-        max_examples=500,
-        deadline=5000,
-        suppress_health_check=[HealthCheck.filter_too_much]
-    )
-    def test_mu_equal_implies_same_hash(self, a, b):
-        """If mu_equal(a, b) then compute_identity(a) == compute_identity(b)."""
-        assume(is_mu(a))
-        assume(is_mu(b))
-
-        if mu_equal(a, b):
-            hash_a = compute_identity(a)
-            hash_b = compute_identity(b)
-            assert hash_a == hash_b, f"Equal values have different hashes: {a} vs {b}"
-
-
-# =============================================================================
-# Property 5: detect_stall Correctness
-# =============================================================================
-
-class TestDetectStallCorrectness:
-    """Tests for detect_stall correctness."""
-
-    @given(st.text(min_size=64, max_size=64), st.text(min_size=64, max_size=64))
-    @settings(max_examples=300, deadline=5000)
-    def test_detect_stall_correctness(self, hash1, hash2):
-        """detect_stall returns True iff hashes are equal."""
-        result = detect_stall(hash1, hash2)
-
-        if hash1 == hash2:
-            assert result is True
-        else:
-            assert result is False
-
-
-# =============================================================================
-# Property 6: Normalization Roundtrip
+# Property 3: Normalization Roundtrip
 # =============================================================================
 
 class TestNormalizationRoundtrip:
@@ -775,8 +684,8 @@ class TestTypePreservation:
         deadline=5000,
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
     )
-    def test_match_mu_preserves_mu_type(self, pattern, value):
-        """match_mu bindings must be valid Mu."""
+    def test_match_mu_bindings_are_valid_mu_on_success(self, pattern, value):
+        """When match_mu succeeds, bindings must be valid Mu (exceptions are acceptable termination)."""
         assume(is_mu(pattern))
         assume(is_mu(value))
 
@@ -793,7 +702,7 @@ class TestTypePreservation:
                     assert isinstance(var_name, str)
                     assert is_mu(bound_value), f"Bound value is not Mu: {bound_value}"
         except (ValueError, TypeError, RuntimeError):
-            pass  # Expected errors
+            pass  # Expected errors - test only verifies invariant on success path
 
     @given(mu_values(max_depth=3, allow_var_sites=True), mu_bindings_dict(max_depth=3))
     @settings(
@@ -801,8 +710,8 @@ class TestTypePreservation:
         deadline=5000,
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
     )
-    def test_subst_mu_preserves_mu_type(self, body, bindings):
-        """subst_mu result must be valid Mu."""
+    def test_subst_mu_result_is_valid_mu_on_success(self, body, bindings):
+        """When subst_mu succeeds, result must be valid Mu (exceptions are acceptable termination)."""
         assume(is_mu(body))
 
         # Skip if body has empty var names
@@ -818,7 +727,7 @@ class TestTypePreservation:
             result = subst_mu(body, bindings)
             assert is_mu(result), f"Result is not Mu: {result}"
         except (KeyError, ValueError, TypeError, RuntimeError):
-            pass
+            pass  # Expected errors - test only verifies invariant on success path
 
 
 # =============================================================================
@@ -903,51 +812,18 @@ class TestNoCrashOnValidInputs:
         result = has_callable(value)
         assert isinstance(result, bool)
 
-    @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
-    def test_compute_identity_never_crashes_on_valid_mu(self, value):
-        """compute_identity should never crash on valid Mu."""
-        assume(is_mu(value))
-
-        try:
-            result = compute_identity(value)
-            assert isinstance(result, str)
-            assert len(result) == 64
-        except TypeError:
-            # Invalid Mu - expected
-            pass
+    # DELETED (2026-01-29): test_compute_identity_never_crashes_on_valid_mu
+    # compute_identity was removed in architecture cleanup
 
 
 # =============================================================================
-# Property 14: Trace Limit Enforcement
+# DELETED (2026-01-29): TestTraceLimitEnforcement
+# record_trace, MAX_TRACE_ENTRIES were removed in architecture cleanup
 # =============================================================================
-
-class TestTraceLimitEnforcement:
-    """Tests for trace limit enforcement."""
-
-    @given(st.integers(min_value=0, max_value=min(100, MAX_TRACE_ENTRIES)))
-    @settings(max_examples=20, deadline=5000)
-    def test_record_trace_accepts_within_limit(self, num_entries):
-        """record_trace accepts entries up to MAX_TRACE_ENTRIES."""
-        trace = []
-        for i in range(num_entries):
-            record_trace(trace, {"step": i})
-
-        assert len(trace) == num_entries
-
-    def test_record_trace_rejects_at_limit(self):
-        """record_trace raises RuntimeError at MAX_TRACE_ENTRIES."""
-        trace = []
-        for i in range(MAX_TRACE_ENTRIES):
-            record_trace(trace, {"step": i})
-
-        # Next one should raise
-        with pytest.raises(RuntimeError, match="Trace size limit exceeded"):
-            record_trace(trace, {"step": MAX_TRACE_ENTRIES})
 
 
 # =============================================================================
-# Property 15: Bindings Conversion Roundtrip
+# Property 14: Bindings Conversion Roundtrip
 # =============================================================================
 
 class TestBindingsConversionRoundtrip:
@@ -1064,11 +940,11 @@ class TestHostileUnicodeHandling:
     @given(hostile_mu_values(max_depth=2))
     @settings(max_examples=300, deadline=5000)
     def test_hostile_unicode_hash_deterministic(self, value):
-        """compute_identity is deterministic for hostile unicode."""
+        """mu_hash is deterministic for hostile unicode."""
         assume(is_mu(value))
 
-        hash1 = compute_identity(value)
-        hash2 = compute_identity(value)
+        hash1 = mu_hash(value)
+        hash2 = mu_hash(value)
         assert hash1 == hash2, f"Hash not deterministic for {repr(value)}"
 
     @given(hostile_mu_values(max_depth=2), hostile_mu_values(max_depth=2))
@@ -1438,7 +1314,7 @@ class TestNearLimitStress:
         assert is_mu(wide_list), f"Valid list width {width} rejected"
 
         # Should be able to hash
-        hash_result = compute_identity(wide_list)
+        hash_result = mu_hash(wide_list)
         assert len(hash_result) == 64
 
     @given(st.integers(min_value=max(1, MAX_MU_WIDTH - 100), max_value=MAX_MU_WIDTH))
@@ -1449,7 +1325,7 @@ class TestNearLimitStress:
         assert is_mu(wide_dict), f"Valid dict width {width} rejected"
 
         # Should be able to hash
-        hash_result = compute_identity(wide_dict)
+        hash_result = mu_hash(wide_dict)
         assert len(hash_result) == 64
 
     @given(st.integers(min_value=max(1, MAX_MU_DEPTH - 10), max_value=MAX_MU_DEPTH))
@@ -1463,7 +1339,7 @@ class TestNearLimitStress:
         assert is_mu(deep), f"Valid depth {depth} rejected"
 
         # Should be able to hash
-        hash_result = compute_identity(deep)
+        hash_result = mu_hash(deep)
         assert len(hash_result) == 64
 
     @given(st.integers(min_value=MAX_MU_WIDTH + 1, max_value=MAX_MU_WIDTH + 10))

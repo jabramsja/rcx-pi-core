@@ -115,16 +115,17 @@ class TestKernelLoopTermination:
     @given(value=simple_mu, projs=projection_lists(max_size=3))
     @settings(max_examples=200, deadline=60000, suppress_health_check=[HealthCheck.too_slow])
     def test_kernel_terminates_with_custom_projections(self, value, projs):
-        """Kernel loop terminates with arbitrary projection lists."""
-        # Use step_mu which uses step_kernel_mu internally
-        # This just needs to not hang - any result is valid
+        """Kernel loop terminates with arbitrary projection lists (no hang, no unexpected crash)."""
+        # Termination verified by reaching end of function without timeout (deadline=60s)
+        # We don't verify result semantics - just termination and no unexpected exceptions
         try:
-            result = step_mu(projs, value)
-            # If we get here, it terminated
-            assert True
-        except Exception:
-            # Exceptions are okay too (e.g., validation errors)
-            assert True
+            step_mu(projs, value)
+            # Termination verified by reaching this line
+        except (ValueError, TypeError, KeyError):
+            pass  # Expected validation errors are acceptable termination
+        except Exception as e:
+            # Unexpected exceptions indicate a real bug - fail loudly
+            raise AssertionError(f"Unexpected exception: {type(e).__name__}: {e}")
 
     @given(value=simple_mu)
     @settings(max_examples=50, deadline=5000)
@@ -290,7 +291,7 @@ class TestAdversarialInputs:
         reset_step_budget()
 
     def test_deeply_nested_input(self):
-        """Kernel handles deeply nested input."""
+        """Kernel stalls on deeply nested input with empty projections."""
         # Create nested structure (within limits)
         nested = 42
         for _ in range(10):
@@ -298,17 +299,19 @@ class TestAdversarialInputs:
 
         result = step_mu([], nested)
 
-        assert result is not None
+        # With empty projections, kernel stalls and returns original
+        assert mu_equal(result, nested), f"Expected stall to return original, got {result}"
 
     def test_wide_input(self):
-        """Kernel handles wide (many keys) input."""
+        """Kernel stalls on wide input with empty projections."""
         wide = {f"key_{i}": i for i in range(20)}
         result = step_mu([], wide)
 
-        assert result is not None
+        # With empty projections, kernel stalls and returns original
+        assert mu_equal(result, wide), f"Expected stall to return original, got {result}"
 
     def test_mixed_types_input(self):
-        """Kernel handles mixed type input."""
+        """Kernel stalls on mixed type input with empty projections."""
         mixed = {
             "int": 42,
             "str": "hello",
@@ -319,4 +322,5 @@ class TestAdversarialInputs:
         }
         result = step_mu([], mixed)
 
-        assert result is not None
+        # With empty projections, kernel stalls and returns original
+        assert mu_equal(result, mixed), f"Expected stall to return original, got {result}"

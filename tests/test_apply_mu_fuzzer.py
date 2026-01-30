@@ -369,8 +369,8 @@ def test_apply_mu_parity_fuzzer(projection, value):
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
 )
-def test_apply_mu_preserves_mu_type(projection, value):
-    """If apply_mu returns a result, it must be a valid Mu."""
+def test_apply_mu_result_is_valid_mu_on_success(projection, value):
+    """When apply_mu succeeds, result must be valid Mu (exceptions are acceptable termination)."""
     assume(is_mu(projection))
     assume(is_mu(value))
 
@@ -380,8 +380,7 @@ def test_apply_mu_preserves_mu_type(projection, value):
         if result is not NO_MATCH:
             assert is_mu(result), f"Result is not valid Mu: {result}"
     except (KeyError, TypeError, ValueError):
-        # Expected errors are OK
-        pass
+        pass  # Expected errors - test only verifies invariant on success path
 
 
 # =============================================================================

@@ -65,19 +65,17 @@ class TestDeprecationEnforcement:
             "filterwarnings must treat DeprecationWarning as error"
         )
 
-    def test_kernel_class_emits_deprecation(self):
-        """Kernel class must emit DeprecationWarning."""
-        # Import in isolation to avoid affecting other tests
-        with pytest.warns(DeprecationWarning, match="Kernel class is legacy"):
-            from rcx_pi.selfhost.kernel import Kernel
-            Kernel()
+    def test_kernel_class_deleted(self):
+        """Kernel class must be deleted (was legacy scaffolding)."""
+        # Kernel class was removed in 2026-01-29 cleanup
+        with pytest.raises(ImportError):
+            from rcx_pi.selfhost.kernel import Kernel  # noqa: F401
 
-    def test_create_kernel_emits_deprecation(self):
-        """create_kernel() must emit DeprecationWarning."""
-        # create_kernel() calls Kernel() which emits the warning
-        with pytest.warns(DeprecationWarning, match="Kernel class is legacy"):
-            from rcx_pi.selfhost.kernel import create_kernel
-            create_kernel()
+    def test_create_kernel_deleted(self):
+        """create_kernel() must be deleted (was legacy scaffolding)."""
+        # create_kernel was removed in 2026-01-29 cleanup
+        with pytest.raises(ImportError):
+            from rcx_pi.selfhost.kernel import create_kernel  # noqa: F401
 
 
 class TestAuditScriptStructure:
