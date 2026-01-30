@@ -160,7 +160,7 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 14
+THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
 ```
