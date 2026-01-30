@@ -140,9 +140,15 @@ Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
 
 | Tier | What It Tests | When to Run |
 |------|---------------|-------------|
-| Tier 1 | Core algorithms, syntax, contraband | Local iteration |
+| Tier 1 | Core algorithms, syntax, contraband, security tool grounding | Local iteration |
 | Tier 2 | All tests including 200+ example fuzzers | Before push, CI |
 | Tier 3 | Deep nesting, wide structures, pathological inputs | Comprehensive validation |
+
+**Tier 1 includes (2026-01-30):**
+- `tests/structural/` (16 files) - structural claims grounding
+- `tests/tools/` (3 files) - security tool grounding tests
+- 20 core test files including adversarial and self-hosting tests
+- 13 CRITICAL_TEST_FILES protected from silent skipping
 
 **Fuzzer Settings (standardized 2026-01-28):**
 - `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
@@ -344,6 +350,19 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Created `tests/structural/test_step_budget.py` (18 tests) for ACTIVE infrastructure
 - Created `tests/structural/test_audit_claims_grounding.py` (18 tests) for audit verification
 - Added `tests/archive/README.md` documenting archive purpose
+
+**CI/Audit Infrastructure Hardening (2026-01-30, 7-agent review):**
+- Created `tests/tools/` directory with grounding tests for security tools (51 tests):
+  - `test_contraband_detection.py` (21 tests) - verifies contraband.sh patterns work
+  - `test_ast_police_detection.py` (23 tests) - verifies ast_police.py detection
+  - `test_check_test_theater_detection.py` (7 tests) - verifies theater check
+- Added `import builtins` detection to contraband.sh (closes eval/exec bypass)
+- Added AST_OK category validation (8 approved categories prevent bypass abuse)
+- Added CRITICAL_TEST_FILES protection (13 files cannot be silently skipped):
+  - Debt/security enforcement, core parity tests, tool grounding tests
+  - Adversarial tests, self-hosting tests, grounding verification
+- Updated audit_fast.sh to include security-critical tests in Tier 1
+- Single source of truth: THRESHOLD and INFRA_CEILING read from STATUS.md
 
 **Architecture Cleanup (2026-01-29):**
 - kernel.py: DELETED legacy Kernel class (~350 lines removed)
