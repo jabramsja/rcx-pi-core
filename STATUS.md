@@ -155,7 +155,7 @@ TARGET: 10 (Phase B: deprecate eval_seed reference implementations)
 - step_mu.py:148 - constant definition (AST_OK: infra)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 35 (current ~31)
+- AST_OK:infra ceiling: 35 (current 33)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 
 Note: projection_runner has a comment mentioning @host_iteration but uses composition pattern, not decoration.
