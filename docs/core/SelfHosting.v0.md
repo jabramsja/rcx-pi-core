@@ -422,7 +422,7 @@ Phase 5 complete:
 - `docs/execution/DeepStep.v0.md` - Deep traversal design
 - `rcx_pi/selfhost/` - Core self-hosting modules:
   - `mu_type.py` - Mu type validation and guardrails
-  - `kernel.py` - Step budget + legacy Kernel class (not canonical; see kernel.v1.json)
+  - `kernel.py` - Step budget infrastructure only (legacy Kernel class DELETED 2026-01-29)
   - `eval_seed.py` - EVAL_SEED evaluator (apply_projection, step)
   - `match_mu.py` - Pattern matching as Mu projections + normalization
   - `subst_mu.py` - Substitution as Mu projections

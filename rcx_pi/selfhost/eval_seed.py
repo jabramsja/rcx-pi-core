@@ -66,9 +66,11 @@ def host_recursion(reason: str):
     Args:
         reason: Why this host recursion exists and how it will be eliminated.
 
-    Usage:
-        @host_recursion("Tree traversal - will become iterative projections in Phase 3")
-        def substitute(body, bindings):
+    Usage::
+
+        # Example: marking a function that uses Python recursion
+        @host_recursion("reason why recursion exists")
+        def my_function(args):
             ...
     """
     def decorator(func):

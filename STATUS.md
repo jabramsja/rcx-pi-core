@@ -150,6 +150,10 @@ TARGET: 12 (deferred to Phase 8c+)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 4 (includes MAX_VALIDATION_DEPTH stack guard)
 
+**Scaffolding ceiling (prevents unbounded accumulation):**
+- AST_OK:infra ceiling: 35 (current ~31)
+- AST_OK:infra is NOT debt, but capped to prevent drift
+
 Note: projection_runner has a comment mentioning @host_iteration but uses composition pattern, not decoration.
 
 **Note on boundary scaffolding:**
@@ -243,7 +247,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1500+ tests passing.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1480+ tests passing.
 
 **Security Hardening (2026-01-29, 7-agent review):**
 - Added `filterwarnings = ["error::DeprecationWarning:rcx_pi.*"]` to pyproject.toml
@@ -267,6 +271,22 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
   - Tests depth guards, nested smuggling, unicode homoglyphs, list traversal
 - Created `tests/test_seed_integrity_fuzzer.py` (21 tests) - seed validation functions
   - Tests checksum tampering, structure validation, projection order security, injection attacks
+
+**L2 Grounding & Boundary Validation (2026-01-29):**
+- Fixed docstring false positive at eval_seed.py:70 (was being counted as debt)
+- Updated SelfHosting.v0.md re: kernel.py cleanup (legacy Kernel class deleted)
+- Created `tests/structural/test_l2_cursor_grounding.py` (7 tests) - proves linked-list cursor:
+  - Verifies `_remaining` is structural (head/tail), not arithmetic index
+  - Tests kernel.wrap creates _remaining from _projs linked list
+  - Tests kernel.try consumes head, kernel.match_fail advances to tail
+- Created `tests/test_boundary_validation_fuzzer.py` (27 tests) - boundary guards:
+  - Tests assert_seed_pure with valid/invalid inputs (lambdas, functions, builtins)
+  - Tests validate_type_tag whitelist enforcement (list/dict only)
+  - Tests get_var_name validation (empty names, non-var sites)
+- Created `tests/test_kernel_bridge_fuzzer.py` (26 tests) - kernel bridge functions:
+  - Tests list_to_linked (preserves length, order, produces valid Mu)
+  - Tests normalize_projection (pattern/body normalization)
+  - Integration tests for projection list conversion
 
 **Phase 8a IMPLEMENTED (2026-01-28):**
 

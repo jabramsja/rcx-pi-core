@@ -87,10 +87,17 @@ else
     AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
 
     printf "  # AST_OK: bootstrap: %3d (semantic debt)\n" "$AST_OK_BOOTSTRAP"
-    printf "  # AST_OK: infra:     %3d (scaffolding)\n" "$AST_OK_INFRA"
+    printf "  # AST_OK: infra:     %3d (scaffolding, ceiling: 35)\n" "$AST_OK_INFRA"
     echo "----------------------------------------------"
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
     printf "  Total Semantic:   %3d (tracked + bootstrap)\n" "$TOTAL_SEMANTIC"
+
+    # Warn if infra ceiling exceeded (prevents unbounded accumulation)
+    if [ "$AST_OK_INFRA" -gt 35 ]; then
+        echo ""
+        echo "WARNING: AST_OK:infra ($AST_OK_INFRA) exceeds ceiling (35)"
+        echo "         Review and reduce scaffolding markers before adding more."
+    fi
     echo ""
 
     echo "Prototype Debt (prototypes/) - Acceptable during development"

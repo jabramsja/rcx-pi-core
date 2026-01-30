@@ -14,6 +14,7 @@ import pytest
 from rcx_pi.eval_seed import NO_MATCH
 from rcx_pi.match_mu import match_mu
 from rcx_pi.subst_mu import subst_mu
+from rcx_pi.selfhost.kernel import reset_step_budget
 
 # =============================================================================
 # Hypothesis Configuration (lossless optimization)
@@ -126,3 +127,16 @@ def pytest_unconfigure(config):
         from rcx_pi.projection_coverage import coverage
         print("\n")
         print(coverage.report())
+
+
+@pytest.fixture(autouse=True)
+def reset_budget_between_tests():
+    """Reset step budget before each test to prevent cross-test pollution.
+
+    Some tests (e.g., test_step_budget.py) set custom budget limits.
+    Without this fixture, subsequent tests may fail with "step limit exceeded"
+    if the budget was left in an active state with a low limit.
+    """
+    reset_step_budget()
+    yield
+    reset_step_budget()

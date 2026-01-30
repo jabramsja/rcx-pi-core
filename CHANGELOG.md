@@ -65,6 +65,33 @@ All notable changes to RCX are documented in this file.
   - Documents key finding: `{"mode": "subst"}` (value) vs `{"subst": ...}` (key)
   - Proves mu_equal stall detection works correctly for unbound variables
 
+### L2 Grounding & Boundary Validation
+- **Docstring False Positive Fix**
+  - Fixed eval_seed.py:70 docstring being counted as debt by debt_dashboard.sh
+  - Was matching `@host_` pattern in docstring text
+
+- **L2 Cursor Grounding Tests** (7 tests)
+  - Created `tests/structural/test_l2_cursor_grounding.py`
+  - Proves `_remaining` is structural (head/tail), not arithmetic index
+  - Tests kernel.wrap creates _remaining from _projs linked list
+  - Tests kernel.try consumes head, kernel.match_fail advances to tail
+
+- **Boundary Validation Fuzzer** (27 tests)
+  - Created `tests/test_boundary_validation_fuzzer.py`
+  - Tests assert_seed_pure with valid/invalid inputs (lambdas, functions, builtins)
+  - Tests validate_type_tag whitelist enforcement (list/dict only)
+  - Tests get_var_name validation (empty names, non-var sites)
+
+- **Kernel Bridge Fuzzer** (26 tests)
+  - Created `tests/test_kernel_bridge_fuzzer.py`
+  - Tests list_to_linked (preserves length, order, produces valid Mu)
+  - Tests normalize_projection (pattern/body normalization)
+  - Integration tests for projection list conversion
+
+- **SelfHosting.v0.md Update**
+  - Documented legacy Kernel class deletion (~350 lines removed)
+  - Clarified kernel.py now only contains step budget infrastructure
+
 ## 2026-01-28
 
 ### Testing
