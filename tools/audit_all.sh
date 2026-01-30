@@ -70,7 +70,9 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: kernel.v1.json is excluded - kernel state MUST use underscore-prefixed fields (_mode, _phase, etc.)
 #       to distinguish kernel state from domain data (see MetaCircularKernel.v0.md)
 # Note: match.v2.json and subst.v2.json are excluded - they use _match_ctx/_subst_ctx for kernel integration
-! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+# Note: enginenews.v1.json is excluded - engine state uses underscore-prefixed fields (_mode, _phase, _seen, etc.)
+#       to distinguish engine state from domain data (see EngineNewsStructural.v0.md)
+! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'enginenews.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 6) Fixture validation (v2 jsonl) =="
 # Count fixtures and verify none are empty

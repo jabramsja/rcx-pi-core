@@ -49,11 +49,21 @@ if [ -n "$STAGED_PY" ]; then
 fi
 
 # 3. Check for underscore-prefixed keys in JSON
+# Note: Kernel/engine seeds use underscore-prefixed fields (_mode, _phase, etc.) by design
+#       to distinguish internal state from domain data. See:
+#       - MetaCircularKernel.v0.md (kernel.v1.json, match.v2.json, subst.v2.json)
+#       - EngineNewsStructural.v0.md (enginenews.v1.json)
+KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json"
 if [ -n "$STAGED_JSON" ]; then
     echo "-- Checking for non-standard underscore keys in JSON..."
     for f in $STAGED_JSON; do
         if [[ "$f" == prototypes/* ]] || [[ "$f" == seeds/* ]]; then
-            if grep -nE '"_[a-zA-Z]+":' "$f" 2>/dev/null; then
+            # Skip kernel/engine seeds - they legitimately use underscore-prefixed fields
+            if echo "$f" | grep -qE "$KERNEL_SEEDS"; then
+                continue
+            fi
+            # Also allow _marker and _type in any seed (security/type features)
+            if grep -nE '"_[a-zA-Z]+":' "$f" 2>/dev/null | grep -vE '"_marker":|"_type":'; then
                 echo "❌ Non-standard underscore key in $f"
                 ERRORS=$((ERRORS + 1))
             fi

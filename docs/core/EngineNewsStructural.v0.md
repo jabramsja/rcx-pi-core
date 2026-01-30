@@ -73,6 +73,11 @@ This means:
 **Key design:** Non-linear patterns for state equality. `enginenews.found_in_seen` uses
 `{"var": "state"}` twice - binding conflict detection in eval_seed.match() enforces equality.
 
+**Underscore prefix convention:** All engine state fields use underscore prefix (`_mode`, `_phase`,
+`_seen`, `_current`, `_result`, etc.) to distinguish engine-internal state from domain data.
+This prevents domain data from accidentally colliding with engine state (same convention as
+kernel.v1.json, match.v2.json, subst.v2.json). See also MetaCircularKernel.v0.md.
+
 ---
 
 ## Trace Format (Input to EngineNews)
