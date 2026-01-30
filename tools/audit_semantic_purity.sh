@@ -33,10 +33,9 @@ if [ -f "rcx_pi/selfhost/mu_type.py" ]; then
     EVAL_SEED_FILE="rcx_pi/selfhost/eval_seed.py"
     echo "Using selfhost subpackage layout"
 else
-    MU_TYPE_FILE="$MU_TYPE_FILE"
-    KERNEL_FILE="$KERNEL_FILE"
-    EVAL_SEED_FILE="$EVAL_SEED_FILE"
-    echo "Using legacy layout"
+    echo "ERROR: selfhost subpackage not found (rcx_pi/selfhost/mu_type.py missing)"
+    echo "This audit requires the selfhost layout. Legacy layout no longer supported."
+    exit 1
 fi
 echo ""
 

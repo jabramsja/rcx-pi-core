@@ -150,29 +150,35 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     assert "TOTAL SEMANTIC DEBT:" in result.stdout
 
 
-def test_audit_semantic_purity_threshold_is_14():
-    """Verify the threshold is set to 14 as documented.
+def test_audit_semantic_purity_threshold_matches_status_md():
+    """Verify the threshold matches STATUS.md (single source of truth).
 
-    Threshold history:
-    - 14: Original (7 tracked + 5 AST_OK + 2 headroom)
-    - 23: After marking ~289 LOC of previously unmarked semantic debt
-          (17 tracked + 5 AST_OK + 1 review = 23)
-    - 21: Phase 6a lookup as Mu projections (removed 2 @host_builtin)
-          (15 tracked + 5 AST_OK + 1 review = 21)
-    - 19: Phase 6b classification as Mu projections (removed 2 @host_builtin)
-          (13 tracked + 5 AST_OK + 1 review = 19)
-    - 15: Phase 6c normalization as iterative (removed 2 @host_recursion, 2 AST_OK)
-          (11 tracked + 3 AST_OK + 1 review = 15)
-    - 14: PR #163 dead code removal (resolve_lookups deleted)
-          (10 tracked + 3 AST_OK + 1 review = 14)
-    - 11: Phase 6d iterative validation + boundary reclassification
-          (8 tracked + 3 AST_OK = 11)
-    - 14: Phase 7d-1 added @host_iteration tracking
-          (10 tracked + 4 AST_OK = 14)
+    The threshold should be read from STATUS.md, not hardcoded.
+    This test verifies audit_semantic_purity.sh uses the correct value.
+
+    Current threshold: 12 (L2 floor - irreducible bootstrap substrate)
+    - @host_recursion: 2 (eval_seed match/substitute)
+    - @host_builtin: 3 (eval_seed, deep_eval)
+    - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural)
+    - @host_mutation: 2 (eval_seed, deep_eval)
+    - AST_OK bootstrap: 2 (eval_seed comprehensions)
     """
+    # Read expected threshold from STATUS.md (single source of truth)
+    status_md = ROOT / "STATUS.md"
+    status_content = status_md.read_text(encoding="utf-8")
+
+    # Extract threshold from STATUS.md - format: THRESHOLD: 12
+    status_threshold = None
+    for line in status_content.split("\n"):
+        if line.startswith("THRESHOLD:"):
+            status_threshold = line.split(":")[1].strip()
+            break
+
+    assert status_threshold is not None, "Should find THRESHOLD in STATUS.md"
+
+    # Read actual threshold from audit script
     script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
 
-    # Find the DEBT_THRESHOLD line
     threshold_lines = [
         line for line in script_content.split("\n")
         if "DEBT_THRESHOLD=" in line and not line.strip().startswith("#")
@@ -180,13 +186,12 @@ def test_audit_semantic_purity_threshold_is_14():
 
     assert len(threshold_lines) >= 1, "Should find DEBT_THRESHOLD assignment"
 
-    # Extract value - format: DEBT_THRESHOLD=14
     line = threshold_lines[0]
-    value = line.split("=")[1].split()[0]
+    script_threshold = line.split("=")[1].split()[0]
 
-    assert value == "14", (
-        f"Expected DEBT_THRESHOLD=14, found {value}. "
-        f"If this changed, update test to match current threshold."
+    assert script_threshold == status_threshold, (
+        f"audit_semantic_purity.sh threshold ({script_threshold}) doesn't match "
+        f"STATUS.md threshold ({status_threshold}). Keep them in sync."
     )
 
 
