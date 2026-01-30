@@ -80,7 +80,7 @@ else
 
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     echo "----------------------------------------------"
-    printf "  Total Tracked:    %3d (ceiling: 14)\n" "$TOTAL_TRACKED"
+    printf "  Total Tracked:    %3d (ceiling: 12)\n" "$TOTAL_TRACKED"
     echo ""
 
     echo "AST_OK Bypasses (rcx_pi/) - Statement-level semantic debt"

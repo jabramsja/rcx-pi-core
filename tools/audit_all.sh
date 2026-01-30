@@ -9,7 +9,7 @@ export PYTHONHASHSEED=0
 # ============================================================================
 #
 # This is the comprehensive audit for CI and pre-push validation. It runs:
-# - All 1300+ tests including fuzzer (hash-seeded for determinism)
+# - All 1600+ tests including fuzzer (hash-seeded for determinism)
 # - Semantic purity checks, contraband detection, AST police
 # - Anti-cheat scans, fixture validation
 #

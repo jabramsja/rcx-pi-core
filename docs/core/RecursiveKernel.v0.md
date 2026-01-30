@@ -370,7 +370,7 @@ User calls: run_mu(user_projections, input)
 
 ### Test Suite Passing
 
-- [ ] All 1300+ existing tests pass
+- [ ] All 1600+ existing tests pass
 - [ ] Grounding tests document structural claims
 - [ ] Fuzzer tests stress boundaries (3500+ examples)
 

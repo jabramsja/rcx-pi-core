@@ -348,7 +348,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 - `tests/fixtures/parity_vectors.json` - shared test vectors (23 total)
 
 **Role clarification:**
-- **Python:** Primary development substrate (1480+ tests, agent-reviewed)
+- **Python:** Primary development substrate (1600+ tests, agent-reviewed)
 - **JavaScript:** Portability proof (auditable ~300 LOC, all parity tests pass)
 
 ---

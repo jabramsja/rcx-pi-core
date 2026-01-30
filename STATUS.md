@@ -67,7 +67,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | Component | Role | Status |
 |-----------|------|--------|
 | **Projections** | kernel.v1, match.v2, subst.v2 - all meaning in JSON | ✅ DONE |
-| **Python Substrate** | ~2000 LOC, 1480+ tests, production-ready | ✅ PRIMARY |
+| **Python Substrate** | ~2000 LOC, 1600+ tests, production-ready | ✅ PRIMARY |
 | **JS Substrate** | ~300 LOC, auditable, portability proof | ✅ PROOF (needs security fixes) |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both |
 
@@ -209,7 +209,7 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
   - Deep validation: recursive check prevents nested smuggling
   - KERNEL_RESERVED_FIELDS: 12 fields (added `_step`, `_projs`)
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
-- Net debt: 11 (9 tracked decorators + 2 AST_OK bootstrap)
+- Net debt: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 
 **Phase 7d-2/7d-3 PAUSED:**
 - Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
@@ -288,7 +288,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1480+ tests passing.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1600+ tests passing.
 
 **L3 Substrate Portability Progress (2026-01-30):**
 - Step 1 DONE: JS POC security hardened (v4) - KERNEL_RESERVED_FIELDS validation, dict kv-pair fix
@@ -407,13 +407,13 @@ Simplified step_kernel_mu to MECHANICAL operation:
    - `{}` now normalizes to `{"_type": "dict"}` (was `None`)
    - Denormalization correctly reverses typed sentinels
    - Normalization is now idempotent
-6. All 1343+ tests pass
+6. All 1600+ tests pass
 
 **Tests created:**
 - `tests/test_phase8b_mechanical_kernel.py` (31 tests)
 - `tests/test_phase8b_grounding_gaps.py` (12 tests)
 
-**Debt:** 14 (eval_step reclassified as BOOTSTRAP_PRIMITIVE; MAX_VALIDATION_DEPTH added; debt_dashboard.sh comment counting corrected)
+**Debt:** 12 (10 tracked decorators + 2 AST_OK bootstrap = L2 floor)
 
 ---
 
