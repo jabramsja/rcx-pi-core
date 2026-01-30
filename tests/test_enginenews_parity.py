@@ -56,7 +56,7 @@ class TestEngineNewsProjections:
     def test_seed_loads(self):
         """Seed file loads and verifies."""
         projs = load_enginenews_projections()
-        assert len(projs) >= 4, "Need at least 4 projections"
+        assert len(projs) == 9, f"Expected exactly 9 projections, got {len(projs)}"
 
     def test_projection_ids_present(self):
         """Required projection IDs exist."""
@@ -484,3 +484,105 @@ class TestEngineNewsSpecCompliance:
 
             assert result["closure_detected"] is False, \
                 f"Type distinctness: {desc} must be distinct states"
+
+
+class TestEngineNewsClosureObjectStructure:
+    """Grounding tests for exact Omega(tau) closure object structure.
+
+    Per A.10b: Closure object Omega(tau) must have specific structure.
+    """
+
+    def setup_method(self):
+        reset_step_budget()
+
+    @pytest.fixture
+    def projections(self):
+        return load_enginenews_projections()
+
+    def test_closure_object_has_required_keys(self, projections):
+        """Closure object MUST have closure_detected and final_result keys."""
+        trace = {
+            "head": {"step": 0, "state": "A", "projection": "p1"},
+            "tail": {
+                "head": {"step": 1, "state": "A", "projection": None},
+                "tail": None
+            }
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": "A"}}
+        result = run_until_stable(projections, initial)
+
+        # Exact structure check
+        assert set(result.keys()) == {"closure_detected", "final_result"}, \
+            f"Omega(tau) must have exactly closure_detected and final_result, got {set(result.keys())}"
+
+    def test_closure_detected_is_boolean(self, projections):
+        """closure_detected MUST be a boolean."""
+        trace = {
+            "head": {"step": 0, "state": "X", "projection": None, "stall": True},
+            "tail": None
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": "X"}}
+        result = run_until_stable(projections, initial)
+
+        assert isinstance(result["closure_detected"], bool), \
+            f"closure_detected must be bool, got {type(result['closure_detected'])}"
+
+    def test_final_result_preserves_input_result(self, projections):
+        """final_result MUST equal the input result."""
+        test_state = {"complex": [1, 2, 3]}
+
+        trace = {
+            "head": {"step": 0, "state": test_state, "projection": None, "stall": True},
+            "tail": None
+        }
+
+        initial = {"_detect_closure": {"trace": trace, "result": test_state}}
+        result = run_until_stable(projections, initial)
+
+        from rcx_pi.selfhost.mu_type import mu_equal
+        assert mu_equal(result["final_result"], test_state), \
+            "final_result must equal input result"
+
+
+class TestEngineNewsExactProjectionCount:
+    """Grounding test: exact projection count must be 9."""
+
+    def test_exactly_nine_projections(self):
+        """enginenews.v1.json MUST have exactly 9 projections.
+
+        Count breakdown:
+        1. enginenews.init - Entry point
+        2. enginenews.end_of_trace - End of trace (null)
+        3. enginenews.check_state_stall - Extract state from stall entry
+        4. enginenews.check_state_maxsteps - Extract state from max_steps entry
+        5. enginenews.check_state - Extract state from normal entry
+        6. enginenews.found_in_seen - State found in seen-set
+        7. enginenews.not_in_head - State not in head, check tail
+        8. enginenews.not_found - State not found, add to seen
+        9. enginenews.unwrap - Extract final result
+        """
+        projs = load_enginenews_projections()
+        assert len(projs) == 9, \
+            f"enginenews.v1.json must have exactly 9 projections, got {len(projs)}"
+
+    def test_all_required_projection_ids(self):
+        """All 9 required projection IDs must be present."""
+        projs = load_enginenews_projections()
+        ids = {p["id"] for p in projs}
+
+        required = {
+            "enginenews.init",
+            "enginenews.end_of_trace",
+            "enginenews.check_state_stall",
+            "enginenews.check_state_maxsteps",
+            "enginenews.check_state",
+            "enginenews.found_in_seen",
+            "enginenews.not_in_head",
+            "enginenews.not_found",
+            "enginenews.unwrap",
+        }
+
+        assert ids == required, \
+            f"Expected exactly these IDs: {required}, got: {ids}"

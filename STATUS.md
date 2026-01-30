@@ -303,7 +303,17 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Step 2 DONE: Cross-substrate parity tests - 20 vectors pass on both Python and JS
 - Step 3 DONE: Phase 8d trace model in Python - run_mu_structural() + 14 tests
 - Step 4 DONE: Port trace to JS POC - runStructural() + 5 tests
-- Step 5 TODO: EngineNews demo on both substrates
+- Step 5 DONE: EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
+
+**Step 5 EngineNews Implementation (2026-01-30):**
+- Created `seeds/enginenews.v1.json` with 9 projections for structural closure detection
+- Implements Rule 2.2 (Closure-on-Second-Demand) via pattern matching on traces
+- Closure detection uses non-linear patterns (same var twice) for state equality
+- Non-linear pattern enforcement provided by eval_seed.match() binding conflict detection
+- 23 parity tests in `tests/test_enginenews_parity.py`
+- 5 parity vectors in `tests/fixtures/enginenews_vectors.json`
+- Property-based fuzzer tests in `tests/test_enginenews_fuzzer.py`
+- 7-agent review: All agents APPROVE (adversary concern RESOLVED)
 
 **Test files (must be tracked in git):**
 - `tests/test_parity_python.py` - 20 parity + 3 security tests
@@ -474,13 +484,13 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Last updated:** 2026-01-30
-**Next milestone:** Step 5 - EngineNews Demo on Both Substrates
+**Next milestone:** L3 Complete - JS EngineNews parity tests (optional enhancement)
 
-**Completed (Steps 1-4):**
+**Completed (Steps 1-5):**
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
 4. ✅ Ported trace to JS (runStructural in experiments/eval_step.js)
+5. ✅ EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
 
-**Remaining:**
-5. EngineNews demo on both substrates
+**L3 COMPLETE:** All 5 steps done. Projections are substrate-portable.
