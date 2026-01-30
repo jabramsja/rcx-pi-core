@@ -31,6 +31,31 @@ NAME: Mechanical Kernel (Security Hardened)
 - **L1 Algorithmic DONE**: `match_mu()` and `subst_mu()` algorithms are expressed as Mu projections in seeds. Python's `eval_step()` executes them.
 - **L2 Operational PARTIAL**: Projection SELECTION is structural (linked-list cursor in kernel.v1). Projection EXECUTION is Python (`for` loop in `step_kernel_mu`).
 - **Python's role**: `eval_step()` is a bootstrap primitive (like Forth's NEXT). It applies projections using Python pattern matching. This is irreducible in current architecture.
+
+## L2 Completion Criteria (Explicit)
+
+**L2 PARTIAL (current status):**
+- [x] Kernel state machine is 7 Mu projections (`kernel.v1.json`)
+- [x] Match v2 with context passthrough (8 projections, `_match_ctx`)
+- [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`)
+- [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
+- [x] `step_kernel_mu()` wired to use structural kernel
+- [x] Security hardening complete (12 reserved fields, deep validation)
+- [ ] Python for-loop still drives kernel execution (`step_mu.py:397-410`)
+
+**L2 FULL (target - requires decision):**
+The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Options:
+1. **Accept as bootstrap primitive** (Forth precedent) - Loop is like Forth's NEXT, irreducible
+2. **CPS/Trampolining** - Convert loop to continuation-passing, projections chain via Mu data
+3. **Structural fuel counter** - `max_steps` becomes Mu data that decrements structurally
+
+**Current decision:** Option 1 (accept as bootstrap primitive). The for-loop is marked with `@host_iteration` and documented as irreducible. L2 FULL = L2 PARTIAL + explicit acceptance.
+
+**L2 EXCLUDED (by design):**
+- `eval_step()` is bootstrap primitive (irreducible)
+- `run_mu()` outer loop is L3 boundary (repeat-until-stall scaffolding)
+- `projection_runner.py` iteration (composition pattern, not execution)
+
 ## L3/L4 Definition (Bootstrap Architecture)
 
 ### L3 Target: Forth-Style Bootstrap (NEXT)
