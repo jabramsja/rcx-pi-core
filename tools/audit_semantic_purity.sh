@@ -789,30 +789,39 @@ echo ""
 echo "== 19. Host Debt: Threshold Check =="
 
 # Count ALL semantic debt (host operations + AST_OK bypasses + deferred reviews)
+#
 # DEBT POLICY (RATCHET):
 # - Threshold is a CEILING that can only go DOWN, never up
 # - When debt is reduced, threshold MUST be lowered to match
 # - To add new debt, you must first reduce existing debt below threshold
 # - AST_OK: bootstrap bypasses are semantic debt (must become structural)
-# - AST_OK: infra bypasses are scaffolding (acceptable)
-# - Deferred reviews ("PHASE 3 REVIEW") count as debt to prevent silent accumulation
+# - AST_OK: infra bypasses are scaffolding (acceptable, not counted)
+# - Deferred reviews ("PHASE N REVIEW") count as debt to prevent silent accumulation
 #
-# UPDATE THIS when debt is paid down:
-# - Phase 2 start: 5 host + 1 review = 6
-# - Phase 3 deep_eval: +3 (2 host_builtin + 1 host_mutation) = 9
-# - Added AST_OK: bootstrap counting: 7 markers + 5 AST_OK = 12
-# - Added PHASE REVIEW tracking: +1 review marker = 13
-# - Note: grep overcounts by ~1 (docstring example counted as decorator)
-# - PR #XXX: Marked ~289 LOC of previously unmarked semantic debt:
-#   - match_mu.py: +3 @host_recursion, +4 @host_builtin
-#   - subst_mu.py: +2 @host_builtin
-#   - Total: 17 tracked + 5 AST_OK + 1 review = 23
-# - After L2: 0 (semantic debt eliminated)
+# CURRENT STATE (Phase 8b, 2026-01-30):
+# - 12 = L2 FLOOR (irreducible bootstrap substrate)
+# - This is NOT a target for reduction - these are bootstrap primitives
+#
+# BREAKDOWN (must match STATUS.md):
+#   @host_recursion:  2 (eval_seed match/substitute - BOOTSTRAP)
+#   @host_builtin:    3 (eval_seed, deep_eval)
+#   @host_iteration:  3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
+#   @host_mutation:   2 (eval_seed, deep_eval)
+#   AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+#   ─────────────────────
+#   TOTAL:           12
+#
+# WHY 12 IS THE FLOOR:
+# The match() and substitute() in eval_seed.py are NOT "reference implementations" -
+# they ARE the bootstrap primitives that eval_step() uses to apply ANY projection.
+# Eliminating them would require eval_step to not exist (circular dependency).
+# L3/L4 would require fundamentally different architecture.
+#
 DEBT_THRESHOLD=12  # <-- RATCHET: Lower this as debt is paid, never raise it
-# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163), 14→11 (Phase 6d), 11→14 (Phase 7d-1 added @host_iteration), 14→12 (Phase 8b security hardening)
-# Phase 6d: iterative _check_empty_var_names (-1), boundary reclassification of bindings_to_dict/dict_to_bindings (-2)
-# Phase 7d-1: Added @host_iteration counting (2 decorators + 4 AST_OK bootstrap = 14 total)
-# Phase 8b: Reduced to 12 (10 tracked decorators + 2 AST_OK bootstrap)
+#
+# HISTORY (for archaeology, not policy):
+# 6→23 (comprehensive marking), 23→21 (Phase 6a), 21→19 (6b), 19→15 (6c),
+# 15→14 (PR #163), 14→11 (6d), 11→14 (7d-1 @host_iteration), 14→12 (Phase 8b)
 
 echo "Counting all semantic debt markers..."
 
