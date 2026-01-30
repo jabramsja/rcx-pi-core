@@ -119,6 +119,13 @@ CRITICAL_TEST_FILES = frozenset({
     "test_contraband_detection.py",
     "test_ast_police_detection.py",
     "test_check_test_theater_detection.py",
+    # Adversarial and security fuzzer tests
+    "test_eval_seed_adversary.py",
+    "test_kernel_security_fuzzer.py",
+    # Self-hosting verification (L1/L2 compliance)
+    "test_self_hosting_v0.py",
+    # Grounding gap verification
+    "test_phase8b_grounding_gaps.py",
 })
 
 

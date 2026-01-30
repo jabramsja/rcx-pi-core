@@ -78,7 +78,10 @@ pytest $PARALLEL_FLAG -q \
     tests/test_structural_trace.py \
     tests/test_kernel_security_fuzzer.py \
     tests/test_normalization_roundtrip.py \
-    tests/test_debt_enforcement.py
+    tests/test_debt_enforcement.py \
+    tests/test_eval_seed_adversary.py \
+    tests/test_self_hosting_v0.py \
+    tests/test_phase8b_grounding_gaps.py
 
 echo ""
 echo "✅ Fast audit pass"
