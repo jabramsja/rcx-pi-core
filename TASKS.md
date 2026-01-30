@@ -417,6 +417,13 @@ All blockers resolved 2026-01-28:
 
 ### Step 5: EngineNews Demo (CRITICAL: Must Be Structural)
 
+**GATES (from 7-agent review 2026-01-30):**
+- [x] Design doc: `docs/core/EngineNewsStructural.v0.md` (explicit criteria)
+- [x] Property-based fuzzer: `tests/test_structural_trace_fuzzer.py` (23 tests)
+- [x] CRITICAL_TEST_FILES updated: structural trace fuzzer protected
+- [ ] Implementation: `seeds/enginenews.v1.json` (4+ projections)
+- [ ] Parity tests: Python AND JS produce same closure evidence
+
 **REQUIREMENT:** EngineNews rules MUST be expressed as Mu projections, NOT Python code.
 
 **Why this matters (from 7-agent review):**

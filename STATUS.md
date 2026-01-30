@@ -308,6 +308,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 **Test files (must be tracked in git):**
 - `tests/test_parity_python.py` - 20 parity + 3 security tests
 - `tests/test_structural_trace.py` - 14 structural trace tests
+- `tests/test_structural_trace_fuzzer.py` - 23 property-based fuzzer tests (7-agent critical gap closed)
 - `tests/fixtures/parity_vectors.json` - 23 shared test vectors
 
 **Critical Bug Fix (2026-01-30 - Adversarial Review):**
@@ -336,6 +337,11 @@ Addressed findings from comprehensive 7-agent adversarial peer review:
 | Grounding | GROUNDED | All claims have tests |
 | Fuzzer | GAPS_EXIST | 4 boundary gaps identified |
 | Advisor | ON_TRACK | Step 5 needs concrete criteria |
+
+**Fuzzer Gap Resolution (2026-01-30):**
+- Gap 1 (CRITICAL) CLOSED: `tests/test_structural_trace_fuzzer.py` (23 property-based tests)
+- Tests run_mu_structural() for: termination, structure validity, trace format, stall detection, determinism, oscillation detection
+- Added to CRITICAL_TEST_FILES (cannot be silently skipped)
 
 **CRITICAL: EngineNews Must Be Structural (2026-01-30):**
 Step 5 (EngineNews Demo) requires that EngineNews rules are expressed as Mu projections,

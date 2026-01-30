@@ -126,6 +126,8 @@ CRITICAL_TEST_FILES = frozenset({
     "test_self_hosting_v0.py",
     # Grounding gap verification
     "test_phase8b_grounding_gaps.py",
+    # Structural trace fuzzer (closure detection robustness - 7-agent critical gap)
+    "test_structural_trace_fuzzer.py",
 })
 
 
