@@ -90,28 +90,29 @@ class TestTypeTagInjection:
         with pytest.raises(ValueError, match="Invalid type tag"):
             denormalize_from_match(malicious)
 
-    def test_denormalize_rejects_numeric_type_tag(self):
-        """Type tags must be strings, not numbers."""
+    def test_denormalize_handles_numeric_type_tag_safely(self):
+        """Numeric type tags should either raise or be treated as regular dict (no crash)."""
         malicious = {"_type": 123, "head": 1, "tail": None}
 
-        # Should either raise or handle gracefully (not crash)
+        # Either raise (rejecting invalid tag) or handle gracefully as regular dict
         try:
             result = denormalize_from_match(malicious)
-            # If it doesn't raise, it should treat as regular dict
-            assert result is not None
+            # If it doesn't raise, verify it's returned as a regular dict (not interpreted as list)
+            assert isinstance(result, dict), f"Expected dict, got {type(result)}"
         except (ValueError, TypeError):
-            pass  # Expected behavior
+            pass  # Rejection is also acceptable
 
-    def test_denormalize_rejects_null_type_tag(self):
-        """Type tags must be strings, not null."""
+    def test_denormalize_handles_null_type_tag_safely(self):
+        """Null type tags should either raise or be treated as regular dict (no crash)."""
         malicious = {"_type": None, "head": 1, "tail": None}
 
+        # Either raise (rejecting invalid tag) or handle gracefully as regular dict
         try:
             result = denormalize_from_match(malicious)
-            # If it doesn't raise, it should treat as regular dict
-            assert result is not None
+            # If it doesn't raise, verify it's returned as a regular dict (not interpreted as list)
+            assert isinstance(result, dict), f"Expected dict, got {type(result)}"
         except (ValueError, TypeError):
-            pass  # Expected behavior
+            pass  # Rejection is also acceptable
 
     def test_kernel_mode_injection_blocked(self):
         """Cannot inject kernel state via _mode key."""

@@ -65,19 +65,17 @@ class TestDeprecationEnforcement:
             "filterwarnings must treat DeprecationWarning as error"
         )
 
-    def test_kernel_class_emits_deprecation(self):
-        """Kernel class must emit DeprecationWarning."""
-        # Import in isolation to avoid affecting other tests
-        with pytest.warns(DeprecationWarning, match="Kernel class is legacy"):
-            from rcx_pi.selfhost.kernel import Kernel
-            Kernel()
+    def test_kernel_class_deleted(self):
+        """Kernel class must be deleted (was legacy scaffolding)."""
+        # Kernel class was removed in 2026-01-29 cleanup
+        with pytest.raises(ImportError):
+            from rcx_pi.selfhost.kernel import Kernel  # noqa: F401
 
-    def test_create_kernel_emits_deprecation(self):
-        """create_kernel() must emit DeprecationWarning."""
-        # create_kernel() calls Kernel() which emits the warning
-        with pytest.warns(DeprecationWarning, match="Kernel class is legacy"):
-            from rcx_pi.selfhost.kernel import create_kernel
-            create_kernel()
+    def test_create_kernel_deleted(self):
+        """create_kernel() must be deleted (was legacy scaffolding)."""
+        # create_kernel was removed in 2026-01-29 cleanup
+        with pytest.raises(ImportError):
+            from rcx_pi.selfhost.kernel import create_kernel  # noqa: F401
 
 
 class TestAuditScriptStructure:
@@ -102,6 +100,15 @@ class TestAuditScriptStructure:
         content = script.read_text()
         assert "ast_police" in content, (
             "green_gate.sh must include AST police check"
+        )
+
+    def test_green_gate_has_semantic_purity_audit(self):
+        """green_gate.sh must run semantic purity audit (7-agent review finding)."""
+        script = REPO_ROOT / "scripts" / "green_gate.sh"
+        content = script.read_text()
+        assert "audit_semantic_purity" in content, (
+            "green_gate.sh must include audit_semantic_purity.sh check. "
+            "This was a critical gap identified in 7-agent review (2026-01-30)."
         )
 
     def test_green_gate_check_order(self):

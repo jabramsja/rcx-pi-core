@@ -1,6 +1,6 @@
 # Meta-Circular Kernel Specification v0
 
-Status: **NEXT** (promoted 2026-01-27, Phase 7a/7b/7c DONE, 7d pending)
+Status: **NEXT** (promoted 2026-01-27, Phase 7a/7b/7c/7d-1 DONE, L2 PARTIAL achieved, 7d-2/7d-3 paused)
 
 **Revision History:**
 - v0.1: Initial design with 11 projections

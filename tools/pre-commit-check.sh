@@ -94,6 +94,13 @@ if ! ./tools/contraband.sh rcx_pi 2>/dev/null; then
     ERRORS=$((ERRORS + 1))
 fi
 
+# 6b. Run test theater check (assert True)
+echo "-- Running test theater check..."
+if ! ./tools/check_test_theater.sh tests 2>/dev/null; then
+    echo "❌ Test theater check failed (found vacuous assert True)"
+    ERRORS=$((ERRORS + 1))
+fi
+
 # 7. Run ast_police.py (catches what grep misses)
 if [ -n "$STAGED_PY" ]; then
     echo "-- Running AST police on staged files..."

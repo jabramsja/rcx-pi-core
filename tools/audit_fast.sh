@@ -46,6 +46,9 @@ echo ""
 echo "== 1) Contraband check =="
 ./tools/contraband.sh rcx_pi
 
+echo "== 1b) Test theater check =="
+./tools/check_test_theater.sh tests
+
 echo "== 2) AST police =="
 python3 tools/ast_police.py
 
@@ -58,6 +61,7 @@ echo "== 4) Core structural tests (parallel if available) =="
 # Core tests: match, subst, step, kernel, eval_seed, mu_type
 pytest $PARALLEL_FLAG -q \
     tests/structural/ \
+    tests/tools/ \
     tests/test_match_parity.py \
     tests/test_match_v2_parity.py \
     tests/test_subst_parity.py \
@@ -69,7 +73,15 @@ pytest $PARALLEL_FLAG -q \
     tests/test_eval_seed_parity.py \
     tests/test_mu_type.py \
     tests/test_seed_integrity.py \
-    tests/test_classify_mu.py
+    tests/test_classify_mu.py \
+    tests/test_parity_python.py \
+    tests/test_structural_trace.py \
+    tests/test_kernel_security_fuzzer.py \
+    tests/test_normalization_roundtrip.py \
+    tests/test_debt_enforcement.py \
+    tests/test_eval_seed_adversary.py \
+    tests/test_self_hosting_v0.py \
+    tests/test_phase8b_grounding_gaps.py
 
 echo ""
 echo "✅ Fast audit pass"

@@ -33,10 +33,9 @@ if [ -f "rcx_pi/selfhost/mu_type.py" ]; then
     EVAL_SEED_FILE="rcx_pi/selfhost/eval_seed.py"
     echo "Using selfhost subpackage layout"
 else
-    MU_TYPE_FILE="$MU_TYPE_FILE"
-    KERNEL_FILE="$KERNEL_FILE"
-    EVAL_SEED_FILE="$EVAL_SEED_FILE"
-    echo "Using legacy layout"
+    echo "ERROR: selfhost subpackage not found (rcx_pi/selfhost/mu_type.py missing)"
+    echo "This audit requires the selfhost layout. Legacy layout no longer supported."
+    exit 1
 fi
 echo ""
 
@@ -549,10 +548,10 @@ echo "Checking for BOOTSTRAP markers in Python code..."
 BOOTSTRAP_COUNT=$(grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | wc -l | tr -d ' ')
 if [ "$BOOTSTRAP_COUNT" -gt 0 ]; then
     echo "  Found $BOOTSTRAP_COUNT BOOTSTRAP markers (temporary Python code)"
-    echo "  These must be removed for true self-hosting (Phase 3)"
+    echo "  These are documented bootstrap primitives - see docs/core/BootstrapPrimitives.v0.md"
     grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | head -5
 else
-    echo "  ✓ No BOOTSTRAP markers found (or Phase 3 complete)"
+    echo "  ✓ No BOOTSTRAP markers found"
 fi
 
 echo ""
@@ -789,29 +788,51 @@ echo ""
 echo "== 19. Host Debt: Threshold Check =="
 
 # Count ALL semantic debt (host operations + AST_OK bypasses + deferred reviews)
+#
 # DEBT POLICY (RATCHET):
 # - Threshold is a CEILING that can only go DOWN, never up
 # - When debt is reduced, threshold MUST be lowered to match
 # - To add new debt, you must first reduce existing debt below threshold
 # - AST_OK: bootstrap bypasses are semantic debt (must become structural)
-# - AST_OK: infra bypasses are scaffolding (acceptable)
-# - Deferred reviews ("PHASE 3 REVIEW") count as debt to prevent silent accumulation
+# - AST_OK: infra bypasses are scaffolding (acceptable, not counted)
+# - Deferred reviews ("PHASE N REVIEW") count as debt to prevent silent accumulation
 #
-# UPDATE THIS when debt is paid down:
-# - Phase 2 start: 5 host + 1 review = 6
-# - Phase 3 deep_eval: +3 (2 host_builtin + 1 host_mutation) = 9
-# - Added AST_OK: bootstrap counting: 7 markers + 5 AST_OK = 12
-# - Added PHASE REVIEW tracking: +1 review marker = 13
-# - Note: grep overcounts by ~1 (docstring example counted as decorator)
-# - PR #XXX: Marked ~289 LOC of previously unmarked semantic debt:
-#   - match_mu.py: +3 @host_recursion, +4 @host_builtin
-#   - subst_mu.py: +2 @host_builtin
-#   - Total: 17 tracked + 5 AST_OK + 1 review = 23
-# - After L2: 0 (semantic debt eliminated)
-DEBT_THRESHOLD=14  # <-- RATCHET: Lower this as debt is paid, never raise it
-# History: 14→23 (PR #155 comprehensive marking), 23→21 (Phase 6a), 21→19 (Phase 6b), 19→15 (Phase 6c), 15→14 (PR #163), 14→11 (Phase 6d), 11→14 (Phase 7d-1 added @host_iteration)
-# Phase 6d: iterative _check_empty_var_names (-1), boundary reclassification of bindings_to_dict/dict_to_bindings (-2)
-# Phase 7d-1: Added @host_iteration counting (2 decorators + 4 AST_OK bootstrap = 14 total)
+# CURRENT STATE (Phase 8b, 2026-01-30):
+# - 12 = L2 FLOOR (irreducible bootstrap substrate)
+# - This is NOT a target for reduction - these are bootstrap primitives
+#
+# BREAKDOWN (must match STATUS.md):
+#   @host_recursion:  2 (eval_seed match/substitute - BOOTSTRAP)
+#   @host_builtin:    3 (eval_seed, deep_eval)
+#   @host_iteration:  3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
+#   @host_mutation:   2 (eval_seed, deep_eval)
+#   AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+#   ─────────────────────
+#   TOTAL:           12
+#
+# WHY 12 IS THE FLOOR:
+# The match() and substitute() in eval_seed.py are NOT "reference implementations" -
+# they ARE the bootstrap primitives that eval_step() uses to apply ANY projection.
+# Eliminating them would require eval_step to not exist (circular dependency).
+# L3/L4 would require fundamentally different architecture.
+#
+# Read threshold from STATUS.md (single source of truth)
+# Format: "THRESHOLD: 12" - extract first token after colon to handle inline comments
+DEBT_THRESHOLD=$(grep "^THRESHOLD:" "$PROJECT_ROOT/STATUS.md" | head -1 | cut -d: -f2 | awk '{print $1}')
+if [ -z "$DEBT_THRESHOLD" ]; then
+    echo "ERROR: Could not read THRESHOLD from STATUS.md"
+    exit 1
+fi
+# Validate threshold is numeric (security: prevent injection via STATUS.md tampering)
+if ! [[ "$DEBT_THRESHOLD" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: DEBT_THRESHOLD must be numeric, got: '$DEBT_THRESHOLD'"
+    exit 1
+fi
+# RATCHET POLICY: Lower this in STATUS.md as debt is paid, never raise it
+#
+# HISTORY (for archaeology, not policy):
+# 6→23 (comprehensive marking), 23→21 (Phase 6a), 21→19 (6b), 19→15 (6c),
+# 15→14 (PR #163), 14→11 (6d), 11→14 (7d-1 @host_iteration), 14→12 (Phase 8b)
 
 echo "Counting all semantic debt markers..."
 

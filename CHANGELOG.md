@@ -2,6 +2,60 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-30
+
+### Second 7-Agent Adversarial Review (Complete)
+
+**Verdicts:**
+- Verifier: CONDITIONAL_APPROVE (all 12 invariants maintained)
+- Adversary: SECURE (11/11 attacks blocked, defensive cache copy verified)
+- Expert: COULD_SIMPLIFY (2 trivial import issues in conftest.py)
+- Structural-proof: CLAIMS_HONEST (L2 PARTIAL proven with concrete evidence)
+- Grounding: GROUNDED (all 4 claims have executable tests)
+- Fuzzer: GAPS_EXIST (4 boundary gaps: depth=100, width=900-1000, cache at scale, mixed)
+- Advisor: ON_TRACK (Step 5 needs concrete success criteria)
+
+### Security Fixes
+- **Cache Mutation Vulnerability** (Adversary finding - CLOSED)
+  - `projection_loader.py`: Returns `list(cache[0])` defensive copy
+  - `step_mu.py`: Returns `list(_combined_kernel_cache)` defensive copy
+  - New test: `test_mutation_does_not_affect_cache()` in test_projection_loader.py
+  - Updated caching tests to verify content equality, not object identity
+
+### Code Quality
+- **Duplicate Code Consolidated** (Expert finding - CLOSED)
+  - `run_until_done()` moved to `tests/conftest.py` as shared utility
+  - `test_phase7c_integration.py` now imports from conftest
+  - `test_parity_python.py` now imports from conftest
+  - Removed ~70 lines of duplicate code
+
+### Testing
+- **Dict kv-pair Regression Tests** (Grounding finding - CLOSED)
+  - Added `TestDictKvPairFormat` class (4 tests)
+  - Tests exact structural format: `{"head": key, "tail": {"head": value, "tail": null}}`
+  - Tests sorted key order, nested preservation
+
+- **Malformed Linked List Tests** (Fuzzer finding - CLOSED)
+  - Added `TestMalformedLinkedListEdgeCases` class (9 tests)
+  - Tests head-only, tail-only, malformed tail types
+  - Tests circular reference detection
+  - Tests deeply nested and wide dict handling
+
+### Documentation
+- **CRITICAL: EngineNews Must Be Structural**
+  - Updated TASKS.md Step 5 with concrete success criteria
+  - EngineNews rules MUST be Mu projections, NOT Python code
+  - Closure detection must be pattern matching on traces
+  - This ensures emergence is structural, not "Python did it"
+  - Added `enginenews.v1.json` requirements (≥4 projections)
+
+- **STATUS.md**: Added second 7-agent review verdicts table
+- **TASKS.md**: Updated Step 5 with structural requirements and success criteria
+
+### Test Count
+- 913 tests pass in fast audit
+- 1669 tests pass in full suite (2 expected idempotency failures from uncommitted changes)
+
 ## 2026-01-29
 
 ### Security Hardening (7-agent review)
@@ -64,6 +118,33 @@ All notable changes to RCX are documented in this file.
 - **Added tests for `is_kernel_intermediate()`** (12 tests)
   - Documents key finding: `{"mode": "subst"}` (value) vs `{"subst": ...}` (key)
   - Proves mu_equal stall detection works correctly for unbound variables
+
+### L2 Grounding & Boundary Validation
+- **Docstring False Positive Fix**
+  - Fixed eval_seed.py:70 docstring being counted as debt by debt_dashboard.sh
+  - Was matching `@host_` pattern in docstring text
+
+- **L2 Cursor Grounding Tests** (7 tests)
+  - Created `tests/structural/test_l2_cursor_grounding.py`
+  - Proves `_remaining` is structural (head/tail), not arithmetic index
+  - Tests kernel.wrap creates _remaining from _projs linked list
+  - Tests kernel.try consumes head, kernel.match_fail advances to tail
+
+- **Boundary Validation Fuzzer** (27 tests)
+  - Created `tests/test_boundary_validation_fuzzer.py`
+  - Tests assert_seed_pure with valid/invalid inputs (lambdas, functions, builtins)
+  - Tests validate_type_tag whitelist enforcement (list/dict only)
+  - Tests get_var_name validation (empty names, non-var sites)
+
+- **Kernel Bridge Fuzzer** (26 tests)
+  - Created `tests/test_kernel_bridge_fuzzer.py`
+  - Tests list_to_linked (preserves length, order, produces valid Mu)
+  - Tests normalize_projection (pattern/body normalization)
+  - Integration tests for projection list conversion
+
+- **SelfHosting.v0.md Update**
+  - Documented legacy Kernel class deletion (~350 lines removed)
+  - Clarified kernel.py now only contains step budget infrastructure
 
 ## 2026-01-28
 

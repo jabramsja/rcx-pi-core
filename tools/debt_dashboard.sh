@@ -20,6 +20,12 @@ count_markers() {
     echo "${count:-0}"
 }
 
+# Read infra ceiling from STATUS.md (single source of truth)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+INFRA_CEILING=$(grep "^INFRA_CEILING:" "$PROJECT_ROOT/STATUS.md" 2>/dev/null | head -1 | cut -d: -f2 | awk '{print $1}')
+INFRA_CEILING=${INFRA_CEILING:-35}  # Default to 35 if not found
+
 if [ "$JSON_OUTPUT" = true ]; then
     # JSON output for programmatic use
     # Use anchored patterns (^[[:space:]]*@) to match actual decorators only
@@ -30,6 +36,7 @@ if [ "$JSON_OUTPUT" = true ]; then
     HOST_MUTATION=$(count_markers "^[[:space:]]*@host_mutation" "rcx_pi/")
     BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
     AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
+    AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
     PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
     PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
@@ -45,6 +52,8 @@ if [ "$JSON_OUTPUT" = true ]; then
     "host_mutation": $HOST_MUTATION,
     "bootstrap_only": $BOOTSTRAP,
     "ast_ok_bootstrap": $AST_OK_BOOTSTRAP,
+    "ast_ok_infra": $AST_OK_INFRA,
+    "ast_ok_infra_ceiling": $INFRA_CEILING,
     "prototype_builtin": $PROTO_BUILTIN,
     "prototype_iteration": $PROTO_ITERATION,
     "total_tracked": $TOTAL_TRACKED,
@@ -77,7 +86,7 @@ else
 
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     echo "----------------------------------------------"
-    printf "  Total Tracked:    %3d (ceiling: 14)\n" "$TOTAL_TRACKED"
+    printf "  Total Tracked:    %3d (ceiling: 12)\n" "$TOTAL_TRACKED"
     echo ""
 
     echo "AST_OK Bypasses (rcx_pi/) - Statement-level semantic debt"
@@ -87,10 +96,17 @@ else
     AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
 
     printf "  # AST_OK: bootstrap: %3d (semantic debt)\n" "$AST_OK_BOOTSTRAP"
-    printf "  # AST_OK: infra:     %3d (scaffolding)\n" "$AST_OK_INFRA"
+    printf "  # AST_OK: infra:     %3d (scaffolding, ceiling: %d)\n" "$AST_OK_INFRA" "$INFRA_CEILING"
     echo "----------------------------------------------"
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
     printf "  Total Semantic:   %3d (tracked + bootstrap)\n" "$TOTAL_SEMANTIC"
+
+    # Warn if infra ceiling exceeded (prevents unbounded accumulation)
+    if [ "$AST_OK_INFRA" -gt "$INFRA_CEILING" ]; then
+        echo ""
+        echo "WARNING: AST_OK:infra ($AST_OK_INFRA) exceeds ceiling ($INFRA_CEILING)"
+        echo "         Review and reduce scaffolding markers before adding more."
+    fi
     echo ""
 
     echo "Prototype Debt (prototypes/) - Acceptable during development"

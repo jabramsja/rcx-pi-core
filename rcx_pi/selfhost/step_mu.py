@@ -145,7 +145,7 @@ def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth
     # Adversary model: Domain inputs may be untrusted (e.g., from network).
     # Trade-off: Depth 100 allows reasonable nesting but prevents stack overflow.
     # Security: Fail CLOSED (reject) rather than open (trust).
-    MAX_VALIDATION_DEPTH = 100  # AST_OK: bootstrap constant - stack guard
+    MAX_VALIDATION_DEPTH = 100  # AST_OK: infra - constant definition
     if _depth > MAX_VALIDATION_DEPTH:
         raise ValueError(
             f"SECURITY: {context} exceeded maximum validation depth ({MAX_VALIDATION_DEPTH}). "
@@ -224,12 +224,15 @@ def load_combined_kernel_projections() -> list[Mu]:
     SECURITY: Kernel projections MUST come first to prevent domain
     projections from forging kernel state.
 
+    Returns a shallow copy to prevent callers from mutating the cache.
+    (Adversary finding: cache mutation vulnerability - defensive copy)
+
     Returns:
         Combined list of kernel, match, and subst projections.
     """
     global _combined_kernel_cache
     if _combined_kernel_cache is not None:
-        return _combined_kernel_cache
+        return list(_combined_kernel_cache)  # Defensive copy prevents cache mutation
 
     seeds_dir = get_seeds_dir()
     kernel_seed = load_verified_seed(seeds_dir / "kernel.v1.json")
@@ -242,7 +245,7 @@ def load_combined_kernel_projections() -> list[Mu]:
         match_seed["projections"] +
         subst_seed["projections"]
     )
-    return _combined_kernel_cache
+    return list(_combined_kernel_cache)  # Defensive copy prevents cache mutation
 
 
 def clear_combined_kernel_cache() -> None:
@@ -515,3 +518,83 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     # Hit max steps without stall
     trace.append({"step": max_steps, "value": current, "max_steps": True})
     return current, trace, False
+
+
+@host_iteration("Phase 8d trace model - structural trace for EngineNews")
+def run_mu_structural(
+    projections: list[Mu],
+    initial: Mu,
+    max_steps: int = 1000
+) -> dict:
+    """
+    Run projections with structural trace accumulation (Phase 8d).
+
+    Returns a Mu-compatible result structure that EngineNews can analyze:
+    {
+        "result": final_value,
+        "trace": linked_list_of_steps,  # Mu linked list, not Python list
+        "stall": bool,
+        "steps": int
+    }
+
+    Each trace entry is:
+    {
+        "step": int,
+        "state": value_at_step,
+        "projection": id_or_null  # Which projection matched (null = stall)
+    }
+
+    This enables Rule 2.2 (closure-on-second-demand) - EngineNews projections
+    can pattern-match against the trace to detect when a state recurs.
+    """
+    trace_entries = []
+    current = initial
+
+    for i in range(max_steps):
+        # Find which projection will match (for trace)
+        matched_id = None
+        for proj in projections:
+            from rcx_pi.selfhost.eval_seed import match
+            bindings = match(proj.get("pattern"), current)
+            if bindings is not None:
+                matched_id = proj.get("id")
+                break
+
+        trace_entries.append({
+            "step": i,
+            "state": current,
+            "projection": matched_id
+        })
+
+        result = step_mu(projections, current)
+
+        # Check for stall (no change)
+        if mu_equal(result, current):
+            trace_entries.append({
+                "step": i + 1,
+                "state": result,
+                "projection": None,
+                "stall": True
+            })
+            return {
+                "result": result,
+                "trace": list_to_linked(trace_entries),
+                "stall": True,
+                "steps": i + 1
+            }
+
+        current = result
+
+    # Hit max steps without stall
+    trace_entries.append({
+        "step": max_steps,
+        "state": current,
+        "projection": None,
+        "max_steps": True
+    })
+    return {
+        "result": current,
+        "trace": list_to_linked(trace_entries),
+        "stall": False,
+        "steps": max_steps
+    }

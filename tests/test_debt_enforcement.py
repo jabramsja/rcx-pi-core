@@ -20,14 +20,21 @@ DEBT_DASHBOARD = ROOT / "tools" / "debt_dashboard.sh"
 AUDIT_SCRIPT = ROOT / "tools" / "audit_semantic_purity.sh"
 
 
-def _run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess command and return the result."""
+def _run(args: list[str], cwd: Path | None = None, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess command and return the result.
+
+    Args:
+        args: Command and arguments to run
+        cwd: Working directory (defaults to ROOT)
+        timeout: Maximum seconds to wait (prevents CI hangs)
+    """
     return subprocess.run(
         args,
         cwd=str(cwd or ROOT),
         capture_output=True,
         text=True,
         check=False,
+        timeout=timeout,
     )
 
 
@@ -102,16 +109,16 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
 
     # Current count should be 4 (from match_mu.py, eval_seed.py, step_mu.py)
     # Phase 6c removed 2 (normalize_for_match and denormalize_from_match comprehensions)
-    # Phase 8b added 1 (MAX_VALIDATION_DEPTH in step_mu.py)
+    # Phase A reclassified 2 items from bootstrap to infra (match_mu boundary, step_mu constant)
     ast_ok_count = data["debt"]["ast_ok_bootstrap"]
 
     # Verify it's a reasonable number
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 4
-    assert ast_ok_count == 4, (
-        f"Expected 4 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    # Current expected count is 2 (eval_seed.py list/dict comprehensions)
+    assert ast_ok_count == 2, (
+        f"Expected 2 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 
@@ -150,43 +157,68 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     assert "TOTAL SEMANTIC DEBT:" in result.stdout
 
 
-def test_audit_semantic_purity_threshold_is_14():
-    """Verify the threshold is set to 14 as documented.
+def test_audit_semantic_purity_threshold_matches_status_md():
+    """Verify the threshold is read from STATUS.md (single source of truth).
 
-    Threshold history:
-    - 14: Original (7 tracked + 5 AST_OK + 2 headroom)
-    - 23: After marking ~289 LOC of previously unmarked semantic debt
-          (17 tracked + 5 AST_OK + 1 review = 23)
-    - 21: Phase 6a lookup as Mu projections (removed 2 @host_builtin)
-          (15 tracked + 5 AST_OK + 1 review = 21)
-    - 19: Phase 6b classification as Mu projections (removed 2 @host_builtin)
-          (13 tracked + 5 AST_OK + 1 review = 19)
-    - 15: Phase 6c normalization as iterative (removed 2 @host_recursion, 2 AST_OK)
-          (11 tracked + 3 AST_OK + 1 review = 15)
-    - 14: PR #163 dead code removal (resolve_lookups deleted)
-          (10 tracked + 3 AST_OK + 1 review = 14)
-    - 11: Phase 6d iterative validation + boundary reclassification
-          (8 tracked + 3 AST_OK = 11)
-    - 14: Phase 7d-1 added @host_iteration tracking
-          (10 tracked + 4 AST_OK = 14)
+    7-agent review finding: audit_semantic_purity.sh should read the threshold
+    dynamically from STATUS.md rather than hardcoding it, ensuring a single
+    source of truth.
+
+    Current threshold: 12 (L2 floor - irreducible bootstrap substrate)
+    - @host_recursion: 2 (eval_seed match/substitute)
+    - @host_builtin: 3 (eval_seed, deep_eval)
+    - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural)
+    - @host_mutation: 2 (eval_seed, deep_eval)
+    - AST_OK bootstrap: 2 (eval_seed comprehensions)
+    """
+    # Verify STATUS.md has the threshold line
+    status_md = ROOT / "STATUS.md"
+    status_content = status_md.read_text(encoding="utf-8")
+
+    status_threshold = None
+    for line in status_content.split("\n"):
+        if line.startswith("THRESHOLD:"):
+            # Use split()[0] to handle inline comments like "12 (current)"
+            status_threshold = line.split(":")[1].strip().split()[0]
+            break
+
+    assert status_threshold is not None, "Should find THRESHOLD in STATUS.md"
+
+    # Verify audit script reads from STATUS.md (not hardcoded)
+    script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
+
+    # Script should read THRESHOLD from STATUS.md
+    assert 'grep "^THRESHOLD:" "$PROJECT_ROOT/STATUS.md"' in script_content, (
+        "audit_semantic_purity.sh must read DEBT_THRESHOLD from STATUS.md"
+    )
+
+    # Should NOT have a hardcoded numeric DEBT_THRESHOLD=NN line
+    # (the assignment uses $(grep...) now)
+    hardcoded_lines = [
+        line for line in script_content.split("\n")
+        if line.strip().startswith("DEBT_THRESHOLD=") and
+        line.split("=")[1].strip().isdigit()
+    ]
+    assert len(hardcoded_lines) == 0, (
+        f"Found hardcoded DEBT_THRESHOLD in audit script: {hardcoded_lines}. "
+        f"Script should read from STATUS.md instead."
+    )
+
+
+def test_audit_semantic_purity_has_selfhost_error_path():
+    """Verify audit_semantic_purity.sh fails with clear error if selfhost missing.
+
+    7-agent review finding: The else branch must fail with an actionable error,
+    not silently pass or assign variables to themselves (dead code).
     """
     script_content = AUDIT_SCRIPT.read_text(encoding="utf-8")
 
-    # Find the DEBT_THRESHOLD line
-    threshold_lines = [
-        line for line in script_content.split("\n")
-        if "DEBT_THRESHOLD=" in line and not line.strip().startswith("#")
-    ]
-
-    assert len(threshold_lines) >= 1, "Should find DEBT_THRESHOLD assignment"
-
-    # Extract value - format: DEBT_THRESHOLD=14
-    line = threshold_lines[0]
-    value = line.split("=")[1].split()[0]
-
-    assert value == "14", (
-        f"Expected DEBT_THRESHOLD=14, found {value}. "
-        f"If this changed, update test to match current threshold."
+    # Check for the error message that tells users what's wrong
+    assert "ERROR: selfhost subpackage not found" in script_content, (
+        "audit_semantic_purity.sh must have clear error message when selfhost missing"
+    )
+    assert "exit 1" in script_content, (
+        "audit_semantic_purity.sh must exit with error code when selfhost missing"
     )
 
 
@@ -234,4 +266,69 @@ def test_ast_ok_pattern_catches_spacing_variations():
     # Check that the pattern includes flexibility for spacing
     assert "[[:space:]]*bootstrap" in script_content or "\\s*bootstrap" in script_content, (
         "AST_OK pattern should handle spacing variations"
+    )
+
+
+# -----------------------------------------------------------------------------
+# Infrastructure Ceiling Tests
+# -----------------------------------------------------------------------------
+
+
+def test_debt_dashboard_json_includes_infra_count():
+    """Verify debt_dashboard.sh JSON output includes infra fields."""
+    result = _run(["bash", str(DEBT_DASHBOARD), "--json"])
+
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+
+    # Check infra fields exist
+    assert "ast_ok_infra" in data["debt"], "JSON should include ast_ok_infra"
+    assert "ast_ok_infra_ceiling" in data["debt"], "JSON should include ast_ok_infra_ceiling"
+
+    # Verify ceiling matches STATUS.md (single source of truth)
+    status_md = ROOT / "STATUS.md"
+    status_content = status_md.read_text(encoding="utf-8")
+    status_ceiling = None
+    for line in status_content.split("\n"):
+        if line.startswith("INFRA_CEILING:"):
+            status_ceiling = int(line.split(":")[1].strip().split()[0])
+            break
+
+    if status_ceiling is not None:
+        assert data["debt"]["ast_ok_infra_ceiling"] == status_ceiling, (
+            f"Ceiling in dashboard ({data['debt']['ast_ok_infra_ceiling']}) "
+            f"doesn't match STATUS.md ({status_ceiling})"
+        )
+    else:
+        # Fallback: just verify it's the expected default
+        assert data["debt"]["ast_ok_infra_ceiling"] == 35
+
+
+def test_infra_count_within_ceiling():
+    """Verify AST_OK:infra count is below ceiling (35).
+
+    This test enforces the infra ceiling to prevent unbounded accumulation
+    of boundary scaffolding. Infra markers are not debt (they don't block
+    self-hosting), but excessive infra suggests architectural issues.
+
+    Current expected: 33 (Phase 8b)
+    """
+    result = _run(["bash", str(DEBT_DASHBOARD), "--json"])
+
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+
+    infra_count = data["debt"]["ast_ok_infra"]
+    infra_ceiling = data["debt"]["ast_ok_infra_ceiling"]
+
+    # Must be within ceiling
+    assert infra_count <= infra_ceiling, (
+        f"AST_OK:infra ({infra_count}) exceeds ceiling ({infra_ceiling}). "
+        f"Review and reduce scaffolding markers before adding more."
+    )
+
+    # Current expected count is 33
+    assert infra_count == 33, (
+        f"Expected 33 AST_OK:infra markers, found {infra_count}. "
+        f"If this is intentional, update the test."
     )

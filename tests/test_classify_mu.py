@@ -275,8 +275,13 @@ class TestProjectionLoading:
         assert projections[-1]["id"] == "classify.wrap"
 
     def test_caching_works(self):
-        """Second load returns same cached projections."""
+        """Second load returns equal cached projections.
+
+        Note: Returns defensive copy (not same object) to prevent cache mutation.
+        (Adversary finding: cache mutation vulnerability)
+        """
         clear_projection_cache()
         p1 = load_classify_projections()
         p2 = load_classify_projections()
-        assert p1 is p2  # Same object (cached)
+        assert p1 == p2  # Equal content (cached)
+        assert p1 is not p2  # But defensive copy (different object)

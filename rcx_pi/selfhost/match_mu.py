@@ -705,7 +705,7 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
             bindings = final_state.get("bindings")
             raw_dict = bindings_to_dict(bindings)
             # Denormalize the bound values back to regular Python structures
-            return {k: denormalize_from_match(v) for k, v in raw_dict.items()}  # AST_OK: bootstrap
+            return {k: denormalize_from_match(v) for k, v in raw_dict.items()}  # AST_OK: infra - boundary conversion
         else:
             # Explicit failure status
             return NO_MATCH

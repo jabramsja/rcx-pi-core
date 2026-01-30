@@ -66,10 +66,12 @@ def host_recursion(reason: str):
     Args:
         reason: Why this host recursion exists and how it will be eliminated.
 
-    Usage:
-        @host_recursion("Tree traversal - will become iterative projections in Phase 3")
-        def substitute(body, bindings):
-            ...
+    Usage::
+
+        >>> # Example: marking a function that uses Python recursion
+        >>> @host_recursion("reason why recursion exists")  # noqa: debt-example
+        ... def my_function(args):
+        ...     pass
     """
     def decorator(func):
         func._host_recursion = True
@@ -576,14 +578,6 @@ def create_eval_seed(projections: list[Mu]) -> dict:
     }
 
 
-def register_eval_seed(kernel, projections: list[Mu]) -> None:
-    """
-    Register EVAL_SEED handlers with a kernel.
-
-    Args:
-        kernel: Kernel instance to register with.
-        projections: List of projections for this seed.
-    """
-    handlers = create_eval_seed(projections)
-    for event, handler in handlers.items():
-        kernel.register_handler(event, handler)
+# NOTE: register_eval_seed() was removed in Phase 8b cleanup (2026-01-30)
+# It called kernel.register_handler() on the deleted legacy Kernel class.
+# The handler creator functions above are kept for test compatibility.

@@ -9,7 +9,7 @@ export PYTHONHASHSEED=0
 # ============================================================================
 #
 # This is the comprehensive audit for CI and pre-push validation. It runs:
-# - All 1300+ tests including fuzzer (hash-seeded for determinism)
+# - All 1600+ tests including fuzzer (hash-seeded for determinism)
 # - Semantic purity checks, contraband detection, AST police
 # - Anti-cheat scans, fixture validation
 #
@@ -50,6 +50,9 @@ echo "== 2) Semantic purity audit (self-hosting readiness) =="
 
 echo "== 3) Contraband check (grep-based) =="
 ./tools/contraband.sh rcx_pi
+
+echo "== 3b) Test theater check (assert True) =="
+./tools/check_test_theater.sh tests
 
 echo "== 4) AST police (catches what grep misses) =="
 python3 tools/ast_police.py

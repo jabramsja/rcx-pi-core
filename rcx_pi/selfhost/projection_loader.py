@@ -45,15 +45,19 @@ def make_projection_loader(seed_filename: str) -> tuple[
     cache: list[list[Mu] | None] = [None]  # Use list to allow mutation in closure
 
     def load() -> list[Mu]:
-        """Load projections from seed file with integrity verification."""
+        """Load projections from seed file with integrity verification.
+
+        Returns a shallow copy to prevent callers from mutating the cache.
+        (Adversary finding: cache mutation vulnerability - defensive copy)
+        """
         if cache[0] is not None:
-            return cache[0]
+            return list(cache[0])  # Defensive copy prevents cache mutation
 
         seed_path = get_seeds_dir() / seed_filename
         seed = load_verified_seed(seed_path)
 
         cache[0] = seed["projections"]
-        return cache[0]
+        return list(cache[0])  # Defensive copy prevents cache mutation
 
     def clear() -> None:
         """Clear cached projections (for testing)."""
