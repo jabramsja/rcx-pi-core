@@ -142,6 +142,8 @@ CRITICAL_TEST_FILES = frozenset({
     # EngineNews tests - CRITICAL for closure detection (9-agent review 2026-01-31)
     "test_enginenews_parity.py",
     "test_enginenews_fuzzer.py",
+    # L3 JS automated parity - CRITICAL for substrate portability (9-agent round 2)
+    "test_js_parity_automated.py",
 })
 
 
