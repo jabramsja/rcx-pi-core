@@ -23,32 +23,47 @@ echo "mode: $MODE"
 echo
 
 run_python() {
-  echo "[PY 1/7] Python syntax check"
+  echo "[PY 1/8] Python syntax check"
   python3 -m py_compile rcx_start.py
   echo
 
-  echo "[PY 2/7] Contraband check (grep-based lint)"
+  echo "[PY 2/8] Contraband check (grep-based lint)"
   ./tools/contraband.sh rcx_pi
   echo
 
-  echo "[PY 3/7] Test theater check (assert True)"
+  echo "[PY 3/8] Test theater check (assert True)"
   ./tools/check_test_theater.sh tests
   echo
 
-  echo "[PY 4/7] AST police (catches what grep misses)"
+  echo "[PY 4/8] AST police (catches what grep misses)"
   python3 tools/ast_police.py
   echo
 
-  echo "[PY 5/7] Semantic purity audit (host debt, smuggling detection)"
+  echo "[PY 5/8] Semantic purity audit (host debt, smuggling detection)"
   ./tools/audit_semantic_purity.sh
   echo
 
-  echo "[PY 6/7] Python test suite"
+  echo "[PY 6/8] Python test suite"
   python3 -m pytest $PARALLEL_FLAG
   echo
 
-  echo "[PY 7/7] CLI smoke (end-to-end entrypoints)"
+  echo "[PY 7/8] CLI smoke (end-to-end entrypoints)"
   python3 scripts/cli_smoke.py
+  echo
+
+  echo "[PY 8/8] JavaScript L3 parity (same projections, same semantics)"
+  ./tools/check_js_debt.sh
+  ./tools/contraband_js.sh
+  ./tools/ast_police_js.sh
+  ./tools/check_test_theater_js.sh
+  ./tools/seed_police.sh
+  if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    echo "OK: JS parity tests pass"
+  else
+    echo "FAIL: JS parity tests failed"
+    node experiments/eval_step.js 2>&1 | tail -10
+    exit 1
+  fi
   echo
 }
 

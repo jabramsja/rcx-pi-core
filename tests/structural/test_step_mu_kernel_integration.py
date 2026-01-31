@@ -43,10 +43,15 @@ class TestStepMuUsesKernelProjections:
         with patch('rcx_pi.selfhost.step_mu.step_kernel_mu') as mock_kernel:
             mock_kernel.return_value = 42
 
-            result = step_mu([{"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}], 100)
+            test_projs = [{"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}]
+            result = step_mu(test_projs, 100)
 
-            # step_kernel_mu should have been called
-            assert mock_kernel.called
+            # step_kernel_mu should have been called with the projections and input
+            assert mock_kernel.called, "step_kernel_mu was not called"
+            call_args = mock_kernel.call_args
+            assert call_args is not None, "No call arguments captured"
+            # Verify projections were passed (first positional arg)
+            assert call_args[0][0] == test_projs, f"Wrong projections passed: {call_args[0][0]}"
             # Result should be what step_kernel_mu returned
             assert result == 42
 

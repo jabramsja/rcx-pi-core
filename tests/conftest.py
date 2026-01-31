@@ -139,11 +139,20 @@ CRITICAL_TEST_FILES = frozenset({
     "test_match_v2_parity.py",
     "test_subst_v2_parity.py",
     "test_parity_python.py",
+    "test_step_mu_parity.py",
     # EngineNews tests - CRITICAL for closure detection (9-agent review 2026-01-31)
     "test_enginenews_parity.py",
     "test_enginenews_fuzzer.py",
     # L3 JS automated parity - CRITICAL for substrate portability (9-agent round 2)
     "test_js_parity_automated.py",
+    # Normalization/bindings roundtrip fuzzers - CRITICAL for kernel boundary (9-agent round 2)
+    "test_normalization_roundtrip.py",
+    "test_normalization_roundtrip_fuzzer.py",
+    "test_bindings_roundtrip_fuzzer.py",
+    # Structural trace and integration (9-agent round 3 - advisor critical gap)
+    "test_structural_trace.py",
+    "test_eval_seed_parity.py",
+    "test_eval_seed_v0.py",
 })
 
 

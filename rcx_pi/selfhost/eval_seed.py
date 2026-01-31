@@ -30,12 +30,17 @@ def _is_kernel_internal_state(value: Any) -> bool:
 
     This is NOT a security bypass - the input was already validated at the
     boundary before kernel processing began.
+
+    SECURITY FIX (Phase 8b Round 6): Now requires underscore-prefixed kernel
+    fields from KERNEL_RESERVED_FIELDS, NOT 'match'/'subst' which are generic.
+    Attack vector blocked: {"match": {}, "bomb": <depth 500>} no longer bypasses.
     """
     if not isinstance(value, dict):
         return False
-    # Kernel-internal fields indicate mid-execution state
-    # Use tuple for determinism (avoid set literal)
-    kernel_fields = ('subst', '_subst_ctx', 'match', '_match_ctx', '_mode', '_phase')
+    # SECURITY: Only check for underscore-prefixed reserved kernel fields
+    # 'match' and 'subst' are too generic - domain data legitimately uses them
+    # Kernel-internal state ALWAYS has _mode or _phase (reserved fields)
+    kernel_fields = ('_mode', '_phase', '_match_ctx', '_subst_ctx', '_kernel_ctx')
     return any(f in value for f in kernel_fields)  # AST_OK: infra
 
 

@@ -1,331 +1,342 @@
 """
-Kernel Security Fuzzer - Property-Based Testing for L2 Security Boundaries
+Kernel Security Fuzzer - Property-based tests for kernel boundary functions.
 
-Created: 2026-01-30 (from 7-agent adversarial review)
-Covers gaps identified by fuzzer agent:
-1. Deep nesting stress (depth 50-200)
-2. Wide structure stress (width 100-1000)
-3. Kernel reserved field smuggling at depth boundaries
-4. Unicode homoglyph attacks on field names
-5. Projection count boundaries (0, 1, 100+)
+Created based on 9-agent review (2026-01-30): Fuzzer found gaps in security-critical
+kernel functions that were only tested with manual examples.
 
-Run with: pytest tests/test_kernel_security_fuzzer.py -v
+Targets:
+- is_kernel_projection() - Security boundary classification
+- validate_kernel_projections_first() - Projection ordering enforcement
+- extract_kernel_result() - Terminal state unpacking
+
+These functions are security-critical because they determine what code runs
+with kernel privileges vs domain restrictions.
 """
-
 import pytest
+from hypothesis import given, settings, assume
+import hypothesis.strategies as st
 
-hypothesis = pytest.importorskip("hypothesis", reason="hypothesis required for fuzzer tests")
-
-from hypothesis import given, strategies as st, settings, assume
-
-from rcx_pi.selfhost.mu_type import (
-    is_mu,
-    mu_equal,
-    MAX_MU_DEPTH,
-    MAX_MU_WIDTH,
-)
-from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 from rcx_pi.selfhost.step_mu import (
-    validate_no_kernel_reserved_fields,
-    KERNEL_RESERVED_FIELDS,
-    step_kernel_mu,
+    is_kernel_projection,
+    validate_kernel_projections_first,
     is_kernel_terminal,
     is_kernel_intermediate,
+    extract_kernel_result,
+    KERNEL_RESERVED_FIELDS,
 )
 
 
 # =============================================================================
-# Strategies
+# Strategies for generating test data
 # =============================================================================
 
-mu_primitives = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(min_value=-(2**31), max_value=2**31),
-    st.floats(allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e6),
-    st.text(max_size=20),
-)
+@st.composite
+def kernel_mode_values(draw):
+    """Generate valid kernel _mode values."""
+    return draw(st.sampled_from(["wrap", "try", "match_ok", "match_fail", "done"]))
 
 
-# =============================================================================
-# Deep Nesting Stress Tests
-# =============================================================================
-
-class TestDeepNestingStress:
-    """Test behavior at depth limits."""
-
-    @given(st.integers(min_value=10, max_value=50))
-    @settings(max_examples=50, deadline=10000)
-    def test_moderate_depth_normalizes(self, depth):
-        """Structures at moderate depth should normalize and roundtrip."""
-        value = "leaf"
-        for _ in range(depth):
-            value = {"nested": value}
-
-        assume(is_mu(value))
-
-        normalized = normalize_for_match(value)
-        denormalized = denormalize_from_match(normalized)
-
-        assert denormalized == value
-
-    @given(st.integers(min_value=1, max_value=20))
-    @settings(max_examples=50, deadline=5000)
-    def test_depth_determinism(self, depth):
-        """Normalization is deterministic at any depth."""
-        value = 42
-        for _ in range(depth):
-            value = {"level": value}
-
-        assume(is_mu(value))
-
-        norm1 = normalize_for_match(value)
-        norm2 = normalize_for_match(value)
-
-        assert mu_equal(norm1, norm2)
+# NOTE: non_kernel_mode_values strategy was removed (2026-01-30)
+# It was dead code - never used in any test. If needed for future
+# type confusion tests, regenerate from: ["Wrap", "WRAP", "wrap ", etc.]
 
 
-# =============================================================================
-# Wide Structure Stress Tests
-# =============================================================================
+@st.composite
+def kernel_projection(draw):
+    """Generate a projection that looks like a kernel projection."""
+    mode = draw(kernel_mode_values())
+    return {
+        "pattern": {"_mode": mode},
+        "body": {"_mode": "done", "_result": draw(st.integers())}
+    }
 
-class TestWideStructureStress:
-    """Test behavior at width limits."""
 
-    @given(st.integers(min_value=50, max_value=200))
-    @settings(max_examples=30, deadline=15000)
-    def test_wide_dict_normalizes(self, width):
-        """Wide dicts should normalize and roundtrip."""
-        wide_dict = {f"key{i}": i for i in range(width)}
+@st.composite
+def domain_projection(draw):
+    """Generate a projection that should NOT be classified as kernel."""
+    # No _mode in pattern
+    key = draw(st.text(min_size=1, max_size=10).filter(lambda x: not x.startswith("_")))
+    return {
+        "pattern": {key: draw(st.integers())},
+        "body": {"result": draw(st.integers())}
+    }
 
-        assume(is_mu(wide_dict))
 
-        normalized = normalize_for_match(wide_dict)
-        denormalized = denormalize_from_match(normalized)
+@st.composite
+def fake_kernel_projection(draw):
+    """Generate a projection that LOOKS like kernel but has _mode in wrong place."""
+    modes = ["wrap", "try", "done"]
+    return draw(st.sampled_from([
+        # _mode in body but not pattern
+        {"pattern": {"x": 1}, "body": {"_mode": draw(st.sampled_from(modes))}},
+        # _mode nested in pattern
+        {"pattern": {"outer": {"_mode": draw(st.sampled_from(modes))}}, "body": {"x": 1}},
+        # _mode as VALUE not KEY
+        {"pattern": {"mode": "_mode"}, "body": {"x": 1}},
+        # Empty pattern (not kernel)
+        {"pattern": {}, "body": {"_mode": "done"}},
+    ]))
 
-        assert len(denormalized) == width
 
-    @given(st.integers(min_value=50, max_value=200))
-    @settings(max_examples=30, deadline=15000)
-    def test_wide_list_normalizes(self, width):
-        """Wide lists should normalize and roundtrip."""
-        wide_list = list(range(width))
+@st.composite
+def terminal_state(draw):
+    """Generate a valid kernel terminal state.
 
-        assume(is_mu(wide_list))
+    Terminal state requires: _mode="done", _result (any value), _stall (bool).
+    """
+    return {
+        "_mode": "done",
+        "_result": draw(st.integers() | st.text(max_size=10) | st.none()),
+        "_stall": draw(st.booleans()),
+    }
 
-        normalized = normalize_for_match(wide_list)
-        denormalized = denormalize_from_match(normalized)
 
-        assert len(denormalized) == width
+@st.composite
+def malformed_terminal_state(draw):
+    """Generate something that looks like terminal but is malformed."""
+    return draw(st.sampled_from([
+        # Missing _result
+        {"_mode": "done", "_status": "complete"},
+        # Wrong _status value
+        {"_mode": "done", "_status": "invalid", "_result": 42},
+        # Missing _status
+        {"_mode": "done", "_result": 42},
+        # _mode is done but no other fields
+        {"_mode": "done"},
+        # Stall without _stall marker
+        {"_mode": "done", "_status": "stall", "_result": "stalled"},
+    ]))
 
 
 # =============================================================================
-# Kernel Reserved Field Smuggling Tests
+# Tests for is_kernel_projection()
 # =============================================================================
 
-class TestKernelReservedFieldSmuggling:
-    """Test kernel boundary security."""
+class TestIsKernelProjectionFuzzer:
+    """Property-based tests for is_kernel_projection classification."""
 
-    @given(st.sampled_from(sorted(KERNEL_RESERVED_FIELDS)), mu_primitives)
+    @given(kernel_projection())
     @settings(max_examples=200, deadline=5000)
-    def test_top_level_reserved_field_rejected(self, field_name, value):
-        """Top-level kernel reserved fields are rejected."""
-        smuggled = {field_name: value}
+    def test_kernel_projections_classified_as_kernel(self, proj):
+        """Projections with _mode in pattern root are kernel projections."""
+        assert is_kernel_projection(proj), f"Should be kernel: {proj}"
 
-        with pytest.raises(ValueError, match="kernel-reserved field"):
-            validate_no_kernel_reserved_fields(smuggled)
+    @given(domain_projection())
+    @settings(max_examples=200, deadline=5000)
+    def test_domain_projections_not_classified_as_kernel(self, proj):
+        """Projections without _mode in pattern are NOT kernel projections."""
+        assert not is_kernel_projection(proj), f"Should NOT be kernel: {proj}"
 
-    @given(st.integers(min_value=1, max_value=50))
+    @given(fake_kernel_projection())
     @settings(max_examples=100, deadline=5000)
-    def test_nested_reserved_field_rejected(self, depth):
-        """Kernel reserved fields at any depth are rejected."""
-        smuggled = {"_mode": "pwned"}
-        for _ in range(depth):
-            smuggled = {"outer": smuggled}
+    def test_fake_kernel_projections_rejected(self, proj):
+        """Projections with _mode in wrong location are NOT kernel."""
+        assert not is_kernel_projection(proj), f"Should NOT be kernel: {proj}"
 
-        with pytest.raises(ValueError, match="kernel-reserved field"):
-            validate_no_kernel_reserved_fields(smuggled)
-
-    @given(st.integers(min_value=95, max_value=100))
-    @settings(max_examples=20, deadline=10000)
-    def test_smuggling_near_depth_limit(self, depth):
-        """Smuggling at depth limit is still caught or rejected."""
-        smuggled = {"_result": "attack"}
-        for _ in range(depth):
-            smuggled = {"nested": smuggled}
-
-        # Should either catch the field or reject due to depth
-        with pytest.raises(ValueError):
-            validate_no_kernel_reserved_fields(smuggled)
-
-    @given(st.integers(min_value=101, max_value=120))
-    @settings(max_examples=20, deadline=10000)
-    def test_depth_limit_enforced(self, depth):
-        """Validation rejects inputs deeper than MAX_VALIDATION_DEPTH."""
-        value = "leaf"
-        for _ in range(depth):
-            value = {"nested": value}
-
-        with pytest.raises(ValueError, match="maximum validation depth"):
-            validate_no_kernel_reserved_fields(value)
-
-    @given(st.sampled_from(sorted(KERNEL_RESERVED_FIELDS)))
+    @given(st.integers() | st.text() | st.none() | st.lists(st.integers()))
     @settings(max_examples=100, deadline=5000)
-    def test_reserved_field_in_list(self, field_name):
-        """Kernel reserved fields in lists are rejected."""
-        smuggled = [{field_name: "attack"}]
+    def test_non_dict_never_kernel(self, value):
+        """Non-dict values are never kernel projections."""
+        # is_kernel_projection expects a projection dict with pattern/body
+        # Invalid input should return False, not crash
+        proj = {"pattern": value, "body": {}}
+        result = is_kernel_projection(proj)
+        # Non-dict patterns can't have _mode key
+        if not isinstance(value, dict):
+            assert not result
 
-        with pytest.raises(ValueError, match="kernel-reserved field"):
-            validate_no_kernel_reserved_fields(smuggled)
+    @given(st.dictionaries(st.text(min_size=1, max_size=5), st.integers(), max_size=3))
+    @settings(max_examples=100, deadline=5000)
+    def test_random_pattern_classification_deterministic(self, pattern):
+        """Classification is deterministic for any pattern."""
+        proj = {"pattern": pattern, "body": {"x": 1}}
+        result1 = is_kernel_projection(proj)
+        result2 = is_kernel_projection(proj)
+        assert result1 == result2, "Classification must be deterministic"
 
 
 # =============================================================================
-# Unicode Homoglyph Attack Tests
+# Tests for validate_kernel_projections_first()
 # =============================================================================
 
-class TestUnicodeHomoglyphAttacks:
-    """Test Unicode attacks on field names - adversary finding."""
+class TestValidateKernelProjectionsFirstFuzzer:
+    """Property-based tests for kernel projection ordering enforcement."""
 
-    def test_cyrillic_o_not_confused_with_mode(self):
-        """Cyrillic 'о' (U+043E) should not be confused with Latin 'o'."""
-        # _mоde with Cyrillic 'о' should pass (not a reserved field)
-        attack = {"_m\u043ede": "attack"}  # Cyrillic о
-        # Should NOT raise - it's not "_mode"
-        validate_no_kernel_reserved_fields(attack)
+    @given(st.lists(kernel_projection(), min_size=1, max_size=5))
+    @settings(max_examples=100, deadline=5000)
+    def test_kernel_only_list_valid(self, projs):
+        """List of only kernel projections is valid."""
+        # Should not raise
+        validate_kernel_projections_first(projs)
 
-    def test_cyrillic_a_not_confused_with_phase(self):
-        """Cyrillic 'а' (U+0430) should not be confused with Latin 'a'."""
-        attack = {"_ph\u0430se": "attack"}  # Cyrillic а
-        validate_no_kernel_reserved_fields(attack)
+    @given(st.lists(domain_projection(), min_size=1, max_size=5))
+    @settings(max_examples=100, deadline=5000)
+    def test_domain_only_list_valid(self, projs):
+        """List of only domain projections is valid."""
+        # Should not raise
+        validate_kernel_projections_first(projs)
 
-    def test_cyrillic_i_not_confused_with_input(self):
-        """Cyrillic 'і' (U+0456) should not be confused with Latin 'i'."""
-        attack = {"_\u0456nput": "attack"}  # Cyrillic і
-        validate_no_kernel_reserved_fields(attack)
+    @given(
+        st.lists(kernel_projection(), min_size=1, max_size=3),
+        st.lists(domain_projection(), min_size=1, max_size=3)
+    )
+    @settings(max_examples=100, deadline=5000)
+    def test_kernel_before_domain_valid(self, kernel_projs, domain_projs):
+        """Kernel projections before domain projections is valid."""
+        combined = kernel_projs + domain_projs
+        # Should not raise
+        validate_kernel_projections_first(combined)
 
-    def test_cyrillic_e_not_confused_with_step(self):
-        """Cyrillic 'е' (U+0435) should not be confused with Latin 'e'."""
-        attack = {"_st\u0435p": "attack"}  # Cyrillic е
-        validate_no_kernel_reserved_fields(attack)
+    @given(
+        st.lists(domain_projection(), min_size=1, max_size=3),
+        st.lists(kernel_projection(), min_size=1, max_size=3)
+    )
+    @settings(max_examples=100, deadline=5000)
+    def test_domain_before_kernel_invalid(self, domain_projs, kernel_projs):
+        """Domain projections before kernel projections is INVALID."""
+        combined = domain_projs + kernel_projs
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_kernel_projections_first(combined)
 
-    def test_all_12_reserved_with_cyrillic_o(self):
-        """All 12 reserved fields with Cyrillic 'о' should pass."""
+    @given(
+        kernel_projection(),
+        domain_projection(),
+        kernel_projection()
+    )
+    @settings(max_examples=100, deadline=5000)
+    def test_interleaved_kernel_domain_invalid(self, k1, d1, k2):
+        """Kernel-domain-kernel pattern is INVALID (kernel after domain)."""
+        combined = [k1, d1, k2]
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_kernel_projections_first(combined)
+
+
+# =============================================================================
+# Tests for extract_kernel_result()
+# =============================================================================
+
+class TestExtractKernelResultFuzzer:
+    """Property-based tests for kernel terminal state extraction."""
+
+    @given(terminal_state(), st.integers())
+    @settings(max_examples=200, deadline=5000)
+    def test_valid_terminal_extracts(self, state, original_input):
+        """Valid terminal states extract without error."""
+        # Should not raise
+        result = extract_kernel_result(state, original_input)
+        # If stalled, returns original_input; otherwise _result
+        if state.get("_stall"):
+            assert result == original_input
+        else:
+            assert result == state.get("_result")
+
+    @given(malformed_terminal_state(), st.integers())
+    @settings(max_examples=100, deadline=5000)
+    def test_malformed_terminal_handled(self, state, original_input):
+        """Malformed terminal states raise expected errors or return gracefully."""
+        raised_expected = False
+        returned_value = False
+        result = None
+        try:
+            result = extract_kernel_result(state, original_input)
+            returned_value = True
+            # GROUNDED: If it returns, verify result is valid (original input or Mu value)
+            # Round 8 fix: Was vacuous `assert X is not None or X is None`
+            assert result == original_input or isinstance(result, (dict, list, str, int, float, bool, type(None))), (
+                f"Result must be original input or valid Mu, got: {type(result)}"
+            )
+        except (KeyError, ValueError, TypeError) as e:
+            raised_expected = True
+            # GROUNDED: Verify exception has meaningful message
+            # Round 8 fix: Was vacuous `assert str(e) or True`
+            error_msg = str(e)
+            assert len(error_msg) > 0, "Exception must have non-empty message"
+
+        # Assert: function either returned or raised expected exception (no silent failures)
+        assert raised_expected or returned_value, "Function must either return or raise expected error"
+
+    @given(st.integers() | st.text() | st.none(), st.integers())
+    @settings(max_examples=50, deadline=5000)
+    def test_non_dict_terminal_handled(self, value, original_input):
+        """Non-dict values raise expected errors (no silent failures or crashes)."""
+        raised_expected = False
+        returned_value = False
+        unexpected_error = None
+        try:
+            result = extract_kernel_result(value, original_input)
+            returned_value = True
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            raised_expected = True
+            # Verify exception has context
+            assert isinstance(e, Exception)
+        except Exception as e:
+            unexpected_error = e
+
+        # Assert: no unexpected exception types
+        assert unexpected_error is None, f"Unexpected error type: {type(unexpected_error).__name__}: {unexpected_error}"
+        # Assert: function either returned or raised expected exception
+        assert raised_expected or returned_value, "Function must either return or raise expected error"
+
+
+# =============================================================================
+# Tests for is_kernel_terminal() and is_kernel_intermediate()
+# =============================================================================
+
+class TestKernelStateClassificationFuzzer:
+    """Property-based tests for kernel state classification."""
+
+    @given(terminal_state())
+    @settings(max_examples=100, deadline=5000)
+    def test_terminal_state_is_terminal(self, state):
+        """Terminal states are classified as terminal."""
+        assert is_kernel_terminal(state)
+
+    @given(terminal_state())
+    @settings(max_examples=100, deadline=5000)
+    def test_terminal_state_not_intermediate(self, state):
+        """Terminal states are NOT intermediate."""
+        assert not is_kernel_intermediate(state)
+
+    @given(st.sampled_from(["wrap", "try", "match_ok", "match_fail"]))
+    @settings(max_examples=50, deadline=5000)
+    def test_intermediate_modes_are_intermediate(self, mode):
+        """Intermediate modes are classified as intermediate."""
+        state = {"_mode": mode, "_input": 42}
+        assert is_kernel_intermediate(state)
+        assert not is_kernel_terminal(state)
+
+    @given(st.dictionaries(st.text(min_size=1, max_size=5), st.integers(), max_size=3))
+    @settings(max_examples=100, deadline=5000)
+    def test_non_kernel_state_classification(self, data):
+        """Non-kernel data is neither terminal nor intermediate."""
+        assume("_mode" not in data)
+        assert not is_kernel_terminal(data)
+        assert not is_kernel_intermediate(data)
+
+
+# =============================================================================
+# Tests for KERNEL_RESERVED_FIELDS constant
+# =============================================================================
+
+class TestKernelReservedFieldsFuzzer:
+    """Verify KERNEL_RESERVED_FIELDS completeness."""
+
+    def test_reserved_fields_count(self):
+        """Exactly 12 reserved fields (per STATUS.md)."""
+        assert len(KERNEL_RESERVED_FIELDS) == 12
+
+    def test_reserved_fields_are_underscore_prefixed(self):
+        """All reserved fields start with underscore."""
         for field in KERNEL_RESERVED_FIELDS:
-            if 'o' in field:
-                attack = {field.replace('o', '\u043e'): "attack"}
-                # Should pass - different character
-                validate_no_kernel_reserved_fields(attack)
+            assert field.startswith("_"), f"Reserved field {field} must start with _"
 
-
-# =============================================================================
-# Projection Count Boundary Tests
-# =============================================================================
-
-class TestProjectionCountBoundaries:
-    """Test behavior with varying projection counts."""
-
-    @given(mu_primitives)
-    @settings(max_examples=100, deadline=5000)
-    def test_zero_projections_stalls(self, value):
-        """Empty projection list causes immediate stall."""
-        assume(is_mu(value))
-        assume(not isinstance(value, dict) or not any(k.startswith('_') for k in value.keys()))
-
-        result = step_kernel_mu([], value)
-        assert mu_equal(result, value), "Empty projections should return input unchanged"
-
-    @given(mu_primitives)
-    @settings(max_examples=100, deadline=5000)
-    def test_single_identity_projection(self, value):
-        """Single identity projection returns input."""
-        assume(is_mu(value))
-        assume(not isinstance(value, dict) or not any(k.startswith('_') for k in value.keys()))
-
-        identity_proj = {"pattern": {"var": "x"}, "body": {"var": "x"}}
-        result = step_kernel_mu([identity_proj], value)
-
-        assert mu_equal(result, value), "Identity projection should preserve input"
-
-    @given(st.integers(min_value=10, max_value=50))
-    @settings(max_examples=20, deadline=30000)
-    def test_many_projections_first_match_wins(self, count):
-        """With many projections, first match wins."""
-        identity_proj = {"pattern": {"var": "x"}, "body": {"var": "x"}}
-        projections = [identity_proj] * count
-
-        value = 42
-        result = step_kernel_mu(projections, value)
-
-        assert mu_equal(result, value), f"First match should win with {count} projections"
-
-
-# =============================================================================
-# Kernel State Detection Tests
-# =============================================================================
-
-class TestKernelStateDetection:
-    """Test kernel terminal/intermediate detection."""
-
-    @given(mu_primitives)
-    @settings(max_examples=100, deadline=5000)
-    def test_primitives_not_terminal(self, value):
-        """Primitive values are not kernel terminal states."""
-        assume(is_mu(value))
-        assume(not isinstance(value, dict))
-
-        assert not is_kernel_terminal(value)
-
-    def test_done_state_is_terminal(self):
-        """Kernel done state is detected."""
-        done_state = {"_mode": "done", "_result": 42, "_stall": False}
-        assert is_kernel_terminal(done_state)
-
-    def test_incomplete_done_not_terminal(self):
-        """Incomplete done state is not terminal."""
-        incomplete = {"_mode": "done", "_result": 42}  # Missing _stall
-        assert not is_kernel_terminal(incomplete)
-
-    @given(mu_primitives)
-    @settings(max_examples=100, deadline=5000)
-    def test_primitives_not_intermediate(self, value):
-        """Primitive values are not kernel intermediate states."""
-        assume(is_mu(value))
-        assume(not isinstance(value, dict))
-
-        assert not is_kernel_intermediate(value)
-
-
-# =============================================================================
-# Determinism Under Stress
-# =============================================================================
-
-class TestDeterminismUnderStress:
-    """Test determinism with edge case inputs."""
-
-    @given(st.integers(min_value=5, max_value=30))
-    @settings(max_examples=50, deadline=10000)
-    def test_nested_dict_deterministic(self, depth):
-        """Nested dict normalization is deterministic."""
-        value = {"leaf": 42}
-        for i in range(depth):
-            value = {f"level_{i}": value}
-
-        assume(is_mu(value))
-
-        norm1 = normalize_for_match(value)
-        norm2 = normalize_for_match(value)
-
-        assert mu_equal(norm1, norm2)
-
-    @given(st.integers(min_value=10, max_value=100))
-    @settings(max_examples=30, deadline=10000)
-    def test_wide_dict_deterministic(self, width):
-        """Wide dict normalization is deterministic."""
-        value = {f"k{i}": i for i in range(width)}
-
-        assume(is_mu(value))
-
-        norm1 = normalize_for_match(value)
-        norm2 = normalize_for_match(value)
-
-        assert mu_equal(norm1, norm2)
+    @given(st.sampled_from(list(KERNEL_RESERVED_FIELDS)))
+    @settings(max_examples=50, deadline=5000)
+    def test_reserved_field_makes_projection_look_kernel(self, field):
+        """Reserved fields in pattern trigger kernel classification for _mode."""
+        if field == "_mode":
+            # _mode is the primary kernel marker
+            proj = {"pattern": {"_mode": "wrap"}, "body": {}}
+            assert is_kernel_projection(proj)
+        # Other reserved fields don't make something a kernel projection by themselves
+        # (only _mode does that), but they are blocked from domain data

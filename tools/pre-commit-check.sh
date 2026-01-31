@@ -144,6 +144,56 @@ if [ -n "$STAGED_PY" ]; then
     done
 fi
 
+# 10. Check JS debt parity if JS file changed
+STAGED_JS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'eval_step\.js$' || true)
+if [ -n "$STAGED_JS" ]; then
+    echo "-- Checking JS debt markers (L3 parity)..."
+    if ! ./tools/check_js_debt.sh 2>/dev/null; then
+        echo "❌ JS debt check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    echo "-- Checking JS contraband (forbidden patterns)..."
+    if ! ./tools/contraband_js.sh 2>/dev/null; then
+        echo "❌ JS contraband check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    echo "-- Checking JS AST police..."
+    if ! ./tools/ast_police_js.sh 2>/dev/null; then
+        echo "❌ JS AST police check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    echo "-- Checking JS test theater..."
+    if ! ./tools/check_test_theater_js.sh 2>/dev/null; then
+        echo "❌ JS test theater check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+# 12. Check seed integrity if seed files changed
+STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
+if [ -n "$STAGED_SEEDS" ]; then
+    echo "-- Checking seed police (structure, theater, host leakage)..."
+    if ! ./tools/seed_police.sh 2>/dev/null; then
+        echo "❌ Seed police check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+# 11. Run JS tests if JS file or seeds changed
+STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
+if [ -n "$STAGED_JS" ] || [ -n "$STAGED_SEEDS" ]; then
+    echo "-- Running JS parity tests..."
+    if ! node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+        echo "❌ JS parity tests failed"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "   JS tests pass"
+    fi
+fi
+
 if [ $ERRORS -gt 0 ]; then
     echo ""
     echo "❌ Pre-commit check failed with $ERRORS error(s)"

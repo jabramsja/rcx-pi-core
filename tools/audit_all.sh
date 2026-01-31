@@ -54,7 +54,19 @@ echo "== 3) Contraband check (grep-based) =="
 echo "== 3b) Test theater check (assert True) =="
 ./tools/check_test_theater.sh tests
 
-echo "== 4) AST police (catches what grep misses) =="
+echo "== 3c) JS contraband check (L3 parity) =="
+./tools/contraband_js.sh
+
+echo "== 3d) JS AST police (catches what grep misses in JS) =="
+./tools/ast_police_js.sh
+
+echo "== 3e) JS test theater check =="
+./tools/check_test_theater_js.sh
+
+echo "== 3f) Seed police (structure, theater, host leakage) =="
+./tools/seed_police.sh
+
+echo "== 4) AST police (catches what grep misses in Python) =="
 python3 tools/ast_police.py
 
 echo "== 5) Anti-cheat scans =="
@@ -121,5 +133,18 @@ assert j["final_status"] in ("ACTIVE","STALLED")
 print("OK:", j["final_status"], j["counts"])
 '
 done
+
+echo "== 8) JavaScript L3 parity check =="
+echo "-- JS debt markers (must match Python) --"
+./tools/check_js_debt.sh
+
+echo "-- JS tests (must all pass) --"
+node experiments/eval_step.js 2>&1 | tail -5 | head -1
+if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    echo "OK: JS tests pass"
+else
+    echo "FAIL: JS tests failed"
+    exit 1
+fi
 
 echo "✅ audit_all pass"

@@ -17,7 +17,7 @@ DELETED (2026-01-29):
 
 from __future__ import annotations
 
-import threading
+import threading  # CONTRABAND_OK: infra - thread-local storage for step budget
 
 # Maximum total projection steps across all match_mu/subst_mu calls
 # Prevents resource exhaustion from nested/cascading calls

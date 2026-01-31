@@ -70,7 +70,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **enginenews.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
-| **Python Substrate** | ~2000 LOC, 1810+ tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~2000 LOC, 2070+ tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~350 LOC, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
 

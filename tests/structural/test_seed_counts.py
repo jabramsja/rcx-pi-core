@@ -239,31 +239,6 @@ class TestProjectionOrder:
                     )
 
 
-class TestSeedChecksums:
-    """Verify seed checksums for tamper detection.
-
-    These checksums are computed at test time and compared to stored values.
-    If a seed changes, the checksum changes, and this test fails.
-    This provides an additional layer of change detection beyond projection counts.
-    """
-
-    # Stored checksums (update when seeds legitimately change)
-    # Run: python3 -c "import hashlib; print(hashlib.sha256(open('seeds/X.json','rb').read()).hexdigest()[:16])"
-    CHECKSUMS = {
-        "match.v1.json": None,      # Populated on first run
-        "subst.v1.json": None,
-        "classify.v1.json": None,
-        "eval.v1.json": None,
-    }
-
-    @pytest.mark.parametrize("seed_name", ALL_SEEDS)
-    def test_seed_checksum_logged(self, seed_name):
-        """Log seed checksum for verification (informational test).
-
-        This test always passes but logs the checksum.
-        Use this to populate CHECKSUMS dict above.
-        """
-        checksum = compute_seed_checksum(seed_name)
-        # Just log it - actual enforcement is in test_seed_integrity.py
-        # which uses SHA256 checksums stored in seed_integrity.py
-        assert checksum, f"{seed_name}: computed checksum {checksum}"
+# NOTE: Checksum verification tests are in tests/test_seed_integrity.py
+# (TestChecksumsCurrent class) using SEED_CHECKSUMS from seed_integrity.py.
+# This file focuses on projection count validation, not checksum enforcement.

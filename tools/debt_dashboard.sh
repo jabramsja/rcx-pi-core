@@ -42,6 +42,14 @@ if [ "$JSON_OUTPUT" = true ]; then
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
 
+    # JavaScript debt
+    JS_FILE="experiments/eval_step.js"
+    JS_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" 2>/dev/null || echo 0)
+    JS_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" 2>/dev/null || echo 0)
+    JS_BUILTIN=$(grep -c "@host_builtin" "$JS_FILE" 2>/dev/null || echo 0)
+    JS_BOOTSTRAP=$(grep -c "BOOTSTRAP_PRIMITIVE" "$JS_FILE" 2>/dev/null || echo 0)
+    JS_TOTAL=$((JS_ITERATION + JS_RECURSION + JS_BUILTIN))
+
     cat <<EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -57,7 +65,12 @@ if [ "$JSON_OUTPUT" = true ]; then
     "prototype_builtin": $PROTO_BUILTIN,
     "prototype_iteration": $PROTO_ITERATION,
     "total_tracked": $TOTAL_TRACKED,
-    "total_semantic": $TOTAL_SEMANTIC
+    "total_semantic": $TOTAL_SEMANTIC,
+    "js_iteration": $JS_ITERATION,
+    "js_recursion": $JS_RECURSION,
+    "js_builtin": $JS_BUILTIN,
+    "js_bootstrap_primitives": $JS_BOOTSTRAP,
+    "js_total": $JS_TOTAL
   }
 }
 EOF
@@ -123,6 +136,54 @@ else
     PROTO_TOTAL=$((PROTO_BUILTIN + PROTO_ITERATION + PROTO_RECURSION))
     echo "----------------------------------------------"
     printf "  Total Prototype:  %3d (not blocking)\n" "$PROTO_TOTAL"
+    echo ""
+
+    echo "JavaScript Guardrails (L3 Parity Enforcement)"
+    echo "----------------------------------------------"
+    # Check that all JS guardrail scripts exist and are executable
+    JS_GUARDS=("check_js_debt.sh" "contraband_js.sh" "ast_police_js.sh" "check_test_theater_js.sh" "seed_police.sh")
+    for guard in "${JS_GUARDS[@]}"; do
+        if [ -x "tools/$guard" ]; then
+            printf "  ✓ %s\\n" "$guard"
+        else
+            printf "  ✗ %s MISSING or not executable\\n" "$guard"
+        fi
+    done
+    echo ""
+
+    echo "JavaScript Debt (experiments/eval_step.js) - L3 Parity"
+    echo "----------------------------------------------"
+    JS_FILE="experiments/eval_step.js"
+    if [ -f "$JS_FILE" ]; then
+        JS_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" 2>/dev/null || echo 0)
+        JS_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" 2>/dev/null || echo 0)
+        JS_BUILTIN=$(grep -c "@host_builtin" "$JS_FILE" 2>/dev/null || echo 0)
+        JS_BOOTSTRAP=$(grep -c "BOOTSTRAP_PRIMITIVE" "$JS_FILE" 2>/dev/null || echo 0)
+
+        printf "  @host_iteration:     %3d (header + inline markers)\n" "$JS_ITERATION"
+        printf "  @host_recursion:     %3d (header + inline markers)\n" "$JS_RECURSION"
+        printf "  @host_builtin:       %3d (header + inline markers)\n" "$JS_BUILTIN"
+        printf "  BOOTSTRAP_PRIMITIVE: %3d (5 expected)\n" "$JS_BOOTSTRAP"
+        echo "----------------------------------------------"
+
+        # Check JS debt markers exist
+        if [ "$JS_BOOTSTRAP" -lt 5 ]; then
+            echo "  WARNING: Missing BOOTSTRAP_PRIMITIVE markers ($JS_BOOTSTRAP < 5)"
+        elif [ "$JS_ITERATION" -lt 6 ] || [ "$JS_RECURSION" -lt 4 ] || [ "$JS_BUILTIN" -lt 2 ]; then
+            echo "  WARNING: Missing @host_* markers"
+        else
+            echo "  OK: JS debt markers present (same bootstrap as Python)"
+        fi
+
+        # Quick JS test check
+        if node "$JS_FILE" 2>&1 | grep -q "All tests passed: true"; then
+            echo "  OK: JS tests pass"
+        else
+            echo "  WARNING: JS tests may be failing"
+        fi
+    else
+        echo "  WARNING: $JS_FILE not found"
+    fi
     echo ""
 
     # Show locations if there's semantic debt
