@@ -117,6 +117,7 @@ CRITICAL_TEST_FILES = frozenset({
     "test_kernel_projections.py",
     # Security tool grounding tests (verify security checks actually work)
     "test_contraband_detection.py",
+    "test_seed_police_detection.py",
     "test_ast_police_detection.py",
     "test_check_test_theater_detection.py",
     # Adversarial and security fuzzer tests
@@ -128,6 +129,18 @@ CRITICAL_TEST_FILES = frozenset({
     "test_phase8b_grounding_gaps.py",
     # Structural trace fuzzer (closure detection robustness - 7-agent critical gap)
     "test_structural_trace_fuzzer.py",
+    # Boundary validation fuzzers (9-agent review 2026-01-30)
+    "test_boundary_validation_fuzzer.py",
+    "test_kernel_bridge_fuzzer.py",
+    # L2 cursor grounding tests (structural cursor operations)
+    "test_l2_cursor_grounding.py",
+    # L3 Parity tests - CRITICAL for substrate portability (9-agent review 2026-01-31)
+    "test_match_v2_parity.py",
+    "test_subst_v2_parity.py",
+    "test_parity_python.py",
+    # EngineNews tests - CRITICAL for closure detection (9-agent review 2026-01-31)
+    "test_enginenews_parity.py",
+    "test_enginenews_fuzzer.py",
 })
 
 
