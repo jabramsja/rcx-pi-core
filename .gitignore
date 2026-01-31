@@ -96,3 +96,7 @@ RCX_MINIMAL_SPINE_MANIFEST.json
 experiments/
 # But track the JS POC for L3 parity (referenced by CI)
 !experiments/eval_step.js
+
+# Reference documents (not source code)
+RCXEngineNew.pdf
+*.pdf
