@@ -1,8 +1,10 @@
 # Boot0 Architecture: Staged Bootstrap for RCX
 
-**Version:** 0.3
+**Version:** 0.4
 **Status:** DESIGN PROPOSAL (not yet implemented)
 **Date:** 2026-01-31
+
+**v0.4 changes:** Clarified "stable semantics, shrinking substrate" (primitives can migrate to smaller substrates), documented JSON as "Phase 0" format, explicit Boot0↔Boot1 handshake ABI, added security invariant for bootstrap code, added explicit L3 parity contract.
 
 > **NOTE:** This document describes a PROPOSED architecture for future migration.
 > The Boot0/Boot1/Boot2 modules do not exist yet. The components (seeds, primitives)
@@ -51,11 +53,13 @@ Boot0 is the Hex0 equivalent - the minimal trusted base that must be implemented
 | `stack_guard` | Recursion depth limit | `mu_type.py:MAX_MU_DEPTH` |
 | `projection_loader` | Load seeds from JSON | `seed_integrity.py:load_verified_seed()` |
 
+**Note on projection_loader:** JSON is the "Phase 0" seed format - a convenience for current development. For true Hex0-style bootstrap, a future substrate might use a simpler format (binary image, S-expression) that requires minimal parsing. The semantics are stable; the format may evolve.
+
 ### Bootstrap vs Permanent Code
 
 **Important distinction:**
 
-- The 5 primitives above are PERMANENT - they remain in the host language forever
+- The 5 primitives above have STABLE SEMANTICS - their behavior is fixed, but their implementation may migrate to smaller substrates over time (Python → C/Rust → minimal VM → verified VM). This is the Hex0 precedent: the trusted base shrinks, it doesn't stay "Python forever"
 - `eval_step` internally uses `match()` and `substitute()` functions
 - These match/subst functions are BOOTSTRAP CODE - temporary Python implementations
 - Boot1 REPLACES bootstrap match/subst with projection-based implementations
@@ -222,6 +226,8 @@ Boot1 replaces Boot0's `boot0_match` and `boot0_subst` with projection-based imp
 3. Boot0's `eval_step` applies match projections to reduce the request
 4. Same for subst: `{"_subst_ctx": {"body": B, "bindings": {...}, ...}}`
 
+**Boot0↔Boot1 Handshake ABI:** The envelope types `_match_ctx` and `_subst_ctx` are the stable interface between Boot0 and Boot1. Boot0 wraps requests in these envelopes; Boot1 projections consume them. These are part of the kernel reserved fields (`KERNEL_RESERVED_FIELDS` in step_mu.py) and cannot be forged by domain data.
+
 ### Boot1 Contract
 
 ```
@@ -358,6 +364,14 @@ Boot2.eval(projections, value) =
 - **Determinism:** `PYTHONHASHSEED=0` ensures reproducibility
 - **Debt tracking:** 12/12 markers, ratchet prevents regression
 
+**L3 Parity Contract (explicit definition):**
+- Same input seed set (kernel.v1 + match.v2 + subst.v2 + enginenews.v1)
+- Same input value
+- → Identical final value
+- → Identical trace format (including stall behavior and step counts)
+
+This contract is verified by `tests/test_js_parity_automated.py` which runs the same 20 parity vectors through both Python and JavaScript substrates and compares actual outputs.
+
 ## Mapping to Current Code
 
 | Boot Layer | Current Files | Seeds |
@@ -413,7 +427,10 @@ The bootstrap `match()` and `substitute()` functions are NOT exposed to external
 2. Production code uses Boot1 projections (step_kernel_mu path)
 3. The functions exist for debugging/testing, not runtime use
 
-**Invariant:** No external input reaches bootstrap code without first passing Boot0 validation.
+**Security Invariants:**
+
+1. No external input reaches bootstrap code without first passing Boot0 validation.
+2. **After Boot1 seeds are loaded, Boot0 must never call Python match/subst on untrusted inputs.** The projection path is always used for domain data. Bootstrap functions handle only seed verification (trusted, audited data).
 
 ## Success Criteria
 

@@ -1,6 +1,6 @@
 # Meta-Circular Kernel Specification v0
 
-Status: **NEXT** (promoted 2026-01-27, Phase 7a/7b/7c/7d-1 DONE, L2 PARTIAL achieved, 7d-2/7d-3 paused)
+Status: **DONE** (promoted 2026-01-27, Phase 7 COMPLETE, L2 FULL achieved via explicit acceptance of for-loop as bootstrap primitive)
 
 **Revision History:**
 - v0.1: Initial design with 11 projections

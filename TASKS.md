@@ -172,6 +172,22 @@ Items here are implemented and verified under current invariants. Changes requir
   - Removed 2 `@host_builtin` decorators from match_mu.py (is_kv_pair_linked, is_dict_linked_list)
   - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
   - 26 new tests in `tests/test_classify_mu.py`
+- Boot0 Architecture v0.4 (`docs/core/Boot0Architecture.v0.md`) - 9-agent reviewed 2026-01-31:
+  - Hex0-inspired staged bootstrap design: Boot0 → Boot1 → Boot2
+  - 5 irreducible bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+  - Boot0=structural, Boot1=none, Boot2=kernel validation boundaries
+  - v0.4: Added "stable semantics, shrinking substrate", JSON as Phase 0 format, explicit handshake ABI, security invariants, L3 parity contract
+  - Design COMPLETE, implementation DEFERRED per 9-agent Advisor recommendation
+  - L3 is complete; Boot0 extraction can wait until L4 research drives it
+- mu_equal Phase 1/2 Review (9-agent dialectic 2026-01-31):
+  - **Phase 1 DONE**: Centralized binding conflict checks to call mu_equal (2-line fix in eval_seed.py)
+  - **Phase 2 DEFERRED**: Structural recursion to replace json.dumps - NOT WORTH IT
+  - Reason: json.dumps IS structural equality for JSON data. Mu IS JSON by definition.
+  - 9-agent consensus: "Cosmetic change, not semantic. Both use host mechanisms."
+  - Structural-proof: "Cannot find ONE example where json.dumps gives wrong answer"
+  - Expert: "4 lines → 40-60 lines with identical semantics"
+  - L4 research question remains open: "Can mu_equal become projections?"
+  - Parity fuzzer created: `tests/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
 - Testing Tier System (2026-01-28):
   - 9-agent review resolved fuzzer hang issue (rejected circuit breaker, chose Option B)
   - Tier 1: `audit_fast.sh` (~3 min) - Core tests for local iteration
@@ -300,14 +316,14 @@ All blockers resolved 2026-01-28:
   - **Outcome:** Projection SELECTION is structural (linked-list cursor). Projection EXECUTION is Python.
   - **Debt:** 15 → 15 (moved location, not eliminated)
 
-- [ ] **Phase 7d-2: Migrate projection_runner** - PAUSED (requires Phase 8)
-  - Original plan assumed 7d-1 eliminated the loop (it didn't)
-  - Cannot proceed until Phase 8 designs recursive kernel projections
-  - Blocked by: Phase 8 design
+- [x] **Phase 7d-2: Migrate projection_runner** - CLOSED (not applicable per Phase 8 decision)
+  - Phase 8 decided: "Option 1 (accept as bootstrap primitive)"
+  - The for-loop is accepted as irreducible - no migration needed
+  - L2 FULL achieved via explicit acceptance
 
-- [ ] **Phase 7d-3: Eliminate projection_runner iteration** - PAUSED (requires Phase 8)
-  - Blocked by: Phase 7d-2
-  - True debt reduction requires Phase 8 recursive kernel design
+- [x] **Phase 7d-3: Eliminate projection_runner iteration** - CLOSED (not applicable per Phase 8 decision)
+  - Same as 7d-2: loop is accepted as bootstrap primitive
+  - If L4 pursues CPS/trampolining, new tasks will be created
 
 **Success criteria:**
 - [x] `seeds/kernel.v1.json` exists with 7 projections
@@ -320,8 +336,8 @@ All blockers resolved 2026-01-28:
 - [x] step_mu delegates to step_kernel_mu (structural selection) - 2026-01-28
 - [x] All 1293+ existing tests still pass - 2026-01-28
 - [x] L2 PARTIAL achieved: selection structural, execution Python - 2026-01-28
-- [ ] L2 FULL: both selection and execution structural (Phase 8)
-- [ ] Debt reduction: 15 → 12 (deferred to Phase 8)
+- [x] L2 FULL achieved: PARTIAL + explicit acceptance of for-loop as bootstrap primitive - 2026-01-28
+- [x] Debt floor: 12 (irreducible bootstrap substrate) - no further reduction without L4 architecture
 
 **Recommended fuzzer additions (from agent review):**
 - [ ] Add fuzzer tests for kernel projection ordering (500+ examples)

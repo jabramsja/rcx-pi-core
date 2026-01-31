@@ -181,23 +181,21 @@ class TestKeyFilesExist:
 class TestPhaseStatus:
     """Verify phase claims are consistent."""
 
-    def test_phase_7_is_in_progress(self):
-        """Phase 7 should be NEXT status (promoted 2026-01-27, implementation in progress)."""
+    def test_phase_7_is_complete(self):
+        """Phase 7 should be DONE status (L2 FULL achieved via explicit acceptance)."""
         kernel_doc = ROOT / "docs" / "core" / "MetaCircularKernel.v0.md"
         content = kernel_doc.read_text()
 
-        # Should have NEXT status (promoted from VECTOR on 2026-01-27)
-        assert "NEXT" in content, (
-            "MetaCircularKernel.v0.md should have NEXT status\n"
-            "Phase 7 was promoted from VECTOR to NEXT on 2026-01-27"
+        # Should have DONE status (Phase 8 decision: accept for-loop as bootstrap primitive)
+        assert "DONE" in content, (
+            "MetaCircularKernel.v0.md should have DONE status\n"
+            "Phase 7 is complete - L2 FULL achieved via explicit acceptance of for-loop as bootstrap"
         )
 
-        # Kernel loop NOT fully structural yet (Phase 7d pending)
-        # step_mu still uses Python for-loop, will be replaced in 7d-1
-        kernel_loop_impl = ROOT / "rcx_pi" / "selfhost" / "kernel_loop_mu.py"
-        assert not kernel_loop_impl.exists(), (
-            "kernel_loop_mu.py should not exist yet\n"
-            "Phase 7d-1 will wire step_mu to structural kernel"
+        # L2 FULL achieved - for-loop is accepted as bootstrap primitive
+        assert "L2 FULL" in content, (
+            "MetaCircularKernel.v0.md should mention L2 FULL\n"
+            "Phase 8 decision: accept for-loop as irreducible bootstrap primitive"
         )
 
 

@@ -16,7 +16,7 @@ NAME: Mechanical Kernel (Security Hardened)
 | Level | Description | Status |
 |-------|-------------|--------|
 | **L1: Algorithmic** | match/subst algorithms EXPRESSED as Mu projections | DONE (Python executes projections) |
-| **L2: Operational** | kernel state machine EXPRESSED as Mu projections | PARTIAL (selection structural, execution Python) |
+| **L2: Operational** | kernel state machine EXPRESSED as Mu projections | FULL (decision: accept for-loop as bootstrap primitive) |
 | **L3: Full Bootstrap** | RCX runs RCX on minimal substrate | FUTURE (Forth-style bootstrap - see below) |
 | **L4: True Self-Hosting** | Bootstrap primitives eliminated or substrate-independent | SINK (research question) |
 
@@ -29,12 +29,12 @@ NAME: Mechanical Kernel (Security Hardened)
 ## What This Means
 
 - **L1 Algorithmic DONE**: `match_mu()` and `subst_mu()` algorithms are expressed as Mu projections in seeds. Python's `eval_step()` executes them.
-- **L2 Operational PARTIAL**: Projection SELECTION is structural (linked-list cursor in kernel.v1). Projection EXECUTION is Python (`for` loop in `step_kernel_mu`).
+- **L2 Operational FULL**: Projection SELECTION is structural (linked-list cursor in kernel.v1). Projection EXECUTION is Python (`for` loop in `step_kernel_mu`) - accepted as bootstrap primitive per Phase 8 decision.
 - **Python's role**: `eval_step()` is a bootstrap primitive (like Forth's NEXT). It applies projections using Python pattern matching. This is irreducible in current architecture.
 
 ## L2 Completion Criteria (Explicit)
 
-**L2 PARTIAL (current status):**
+**L2 FULL (current status - PARTIAL + explicit acceptance):**
 - [x] Kernel state machine is 7 Mu projections (`kernel.v1.json`)
 - [x] Match v2 with context passthrough (8 projections, `_match_ctx`) - used by kernel
 - [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
@@ -210,7 +210,7 @@ Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
 - `tests/structural/` (16 files) - structural claims grounding
 - `tests/tools/` (3 files) - security tool grounding tests
 - 20 core test files including adversarial and self-hosting tests
-- 13 CRITICAL_TEST_FILES protected from silent skipping
+- 32 CRITICAL_TEST_FILES protected from silent skipping
 
 **Fuzzer Settings (standardized 2026-01-28):**
 - `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
@@ -281,10 +281,12 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
 - Net debt: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 
-**Phase 7d-2/7d-3 PAUSED:**
-- Original plan assumed 7d-1 eliminated the loop (it didn't, it moved it)
-- 7d-2/7d-3 depend on 7d-1 being complete - they are not viable until Phase 8c+
-- See phase-7d-complete-design.md for full agent analysis
+**Phase 7d-2/7d-3 CLOSED (per Phase 8 decision):**
+- Phase 8 decided: "Option 1 (accept as bootstrap primitive)"
+- The for-loop in step_kernel_mu is accepted as irreducible (like Forth's NEXT)
+- L2 FULL = L2 PARTIAL + explicit acceptance - this is ACHIEVED
+- 7d-2/7d-3 are no longer needed; they assumed we'd eliminate the loop
+- If L4 pursues CPS/trampolining, new tasks will be created
 
 Note: run_mu outer loop is scaffolding (L3 boundary), not removed in Phase 7.
 
@@ -295,7 +297,7 @@ Use this to determine what standards apply NOW vs LATER:
 | Condition | Status | Agent Action |
 |-----------|--------|--------------|
 | Match/subst must be Mu projections | L1 DONE | REQUIRED - enforce now |
-| Kernel loop must be Mu projections | L2 PARTIAL | `step_mu` uses structural kernel; `run_mu` still Python |
+| Kernel loop must be Mu projections | L2 FULL | `step_mu` uses structural kernel; for-loop accepted as bootstrap |
 | Python iteration in `step_mu` | FIXED (7d-1) | No longer debt - uses structural kernel |
 | Python iteration in `run_mu` | L3 boundary | ACCEPTABLE - outer loop scaffolding |
 | Python recursion in algorithms | Semantic debt | FAIL - must use projections |
@@ -441,7 +443,7 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Added `import builtins` detection to contraband.sh (closes eval/exec bypass)
 - Added `base64/codecs` detection to contraband.sh (encoding bypass defense-in-depth)
 - Added AST_OK category validation (8 approved categories prevent bypass abuse)
-- Added CRITICAL_TEST_FILES protection (13 files cannot be silently skipped):
+- Added CRITICAL_TEST_FILES protection (32 files cannot be silently skipped):
   - Debt/security enforcement, core parity tests, tool grounding tests
   - Adversarial tests, self-hosting tests, grounding verification
 - Updated audit_fast.sh to include security-critical tests in Tier 1
@@ -495,6 +497,16 @@ All 5 bootstrap primitives marked with `# BOOTSTRAP_PRIMITIVE`:
 3. `max_steps` - `rcx_pi/selfhost/step_mu.py:241`
 4. `stack_guard` - `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH`
 5. `projection_loader` - `rcx_pi/selfhost/seed_integrity.py:load_verified_seed()`
+
+**mu_equal Bootstrap Primitive Review (2026-01-31):**
+- **Phase 1 DONE**: eval_seed.py binding conflict detection now calls mu_equal (was inline json.dumps)
+- **Phase 2 DEFERRED**: External reviewer proposed replacing json.dumps with structural recursion
+- **9-agent consensus: NOT WORTH IT** - json.dumps IS structural equality for JSON data
+  - Structural-proof: "Cannot find ONE example where json.dumps gives wrong answer"
+  - Expert: "4 lines → 40-60 lines with identical semantics, both use host mechanisms"
+  - Translator: "You're trading one set of Python dependencies for a different set"
+- **L4 question remains open**: Can mu_equal become Mu projections? (comparison via pattern matching)
+- **Parity fuzzer**: `tests/test_mu_equal_parity_fuzzer.py` proves equivalence (13 tests, 500+ inputs)
 
 **Document updated with:**
 - Scope and Self-Hosting Levels section

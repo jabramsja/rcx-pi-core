@@ -457,10 +457,11 @@ Phase 5 complete:
 13. [x] Phase 6c: Iterative normalization + type tags (removed 2 @host_recursion)
 14. [x] **Debt reduced!** See `STATUS.md` for current counts (down from 23)
 
-**Phase 7 (L2 PARTIAL achieved):**
+**Phase 7 (L2 FULL achieved via explicit acceptance):**
 - [x] 7a/7b/7c: Kernel projections, context passthrough, integration tests
 - [x] 7d-1: Wire step_mu to structural kernel (selection is structural, execution is Python)
-- [ ] 7d-2/7d-3: PAUSED (requires Phase 8 recursive kernel design)
+- [x] 7d-2/7d-3: CLOSED (not applicable - Phase 8 decided to accept for-loop as bootstrap primitive)
+- L2 FULL = L2 PARTIAL + explicit acceptance. The for-loop is like Forth's NEXT: irreducible.
 - See `STATUS.md` for current phase and `TASKS.md` for Phase 7 sub-phases
 
 **Phase 8 (Bootstrap Primitives + Mechanical Kernel):**

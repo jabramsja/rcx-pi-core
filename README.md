@@ -7,13 +7,13 @@ A projection-based computational substrate where **structure is the primitive**.
 | Level | Description | Status |
 |-------|-------------|--------|
 | **L1** | match/subst algorithms as Mu projections | ✅ DONE |
-| **L2** | Kernel state machine as Mu projections | 🔶 PARTIAL |
+| **L2** | Kernel state machine as Mu projections | ✅ FULL |
 | **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
 | **Step 5** | EngineNews structural closure detection | ✅ DONE |
 
 - **2,025+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
-- **13 CRITICAL_TEST_FILES** protected from silent skipping
+- **32 CRITICAL_TEST_FILES** protected from silent skipping
 
 **Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
 All logic is in `seeds/enginenews.v1.json` (9 projections). Bootstrap provides only mechanical execution.

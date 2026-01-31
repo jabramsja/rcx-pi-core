@@ -359,8 +359,8 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     - extract_kernel_result(): Unpack the marker (no semantic decisions)
     - mu_equal(): Detect no-progress stall
 
-    L2 PARTIAL: Projection SELECTION is structural (linked-list cursor).
-    Projection EXECUTION uses Python for-loop (bootstrap primitive).
+    L2 FULL: Projection SELECTION is structural (linked-list cursor).
+    Projection EXECUTION uses Python for-loop (accepted as bootstrap primitive per Phase 8 decision).
 
     Args:
         projections: List of domain projections to try.
