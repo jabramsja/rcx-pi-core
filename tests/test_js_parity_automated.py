@@ -73,8 +73,50 @@ class TestJSTestSuitePasses:
         assert "PASS parity: true" in output, "Parity vector tests failed"
 
 
+def _normalize_for_cross_substrate(value):
+    """Normalize Python values for cross-substrate comparison with JS.
+
+    JavaScript doesn't distinguish int/float (all numbers are float64).
+    When comparing Python vs JS outputs, we need to normalize:
+    - int/float: 0 and 0.0 should compare equal
+    - Both are mathematically equal; type difference is host artifact
+
+    9-agent Round 3 (Grounding finding): This handles the known limitation
+    that JS doesn't have int/float distinction.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value  # bool before int (bool is subclass of int in Python)
+    if isinstance(value, (int, float)):
+        # Normalize to float for comparison (JS representation)
+        return float(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return [_normalize_for_cross_substrate(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _normalize_for_cross_substrate(v) for k, v in value.items()}
+    return value
+
+
+def _cross_substrate_equal(py_val, js_val) -> bool:
+    """Compare Python and JS values, handling cross-substrate type differences.
+
+    Uses normalized comparison to handle int/float distinction that exists
+    in Python but not in JavaScript.
+    """
+    norm_py = _normalize_for_cross_substrate(py_val)
+    norm_js = _normalize_for_cross_substrate(js_val)
+    return json.dumps(norm_py, sort_keys=True) == json.dumps(norm_js, sort_keys=True)
+
+
 class TestCrossSubstrateParity:
-    """Verify Python and JavaScript produce identical results for parity vectors."""
+    """Verify Python and JavaScript produce identical results for parity vectors.
+
+    9-agent Round 3 (Grounding finding): These tests now do ACTUAL cross-substrate
+    comparison via JSON API, not just string matching theater.
+    """
 
     @pytest.fixture
     def parity_vectors(self):
@@ -90,6 +132,26 @@ class TestCrossSubstrateParity:
         """Load kernel projections."""
         from rcx_pi.selfhost.step_mu import load_combined_kernel_projections
         return load_combined_kernel_projections()
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        """Call JS with JSON API and parse response.
+
+        9-agent Round 3 fix: Machine-readable output for actual comparison.
+        """
+        result = subprocess.run(
+            ["node", "experiments/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=60
+        )
+
+        # Find JSON response line
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+
+        raise RuntimeError(f"No JSON_API_RESPONSE found in JS output: {result.stdout[:500]}")
 
     def test_parity_vector_count_matches(self, parity_vectors):
         """Verify Python and JS test the same number of parity vectors."""
@@ -112,6 +174,92 @@ class TestCrossSubstrateParity:
 
         assert js_count == py_count, (
             f"Parity vector count mismatch: Python has {py_count}, JS tested {js_count}"
+        )
+
+    def test_actual_cross_substrate_comparison(self, parity_vectors, kernel_projections):
+        """ACTUAL cross-substrate test: run same inputs through Python and JS, compare outputs.
+
+        9-agent Round 3 (Grounding finding): This is the real test. Previous tests
+        just parsed strings. This test runs the same parity vectors through BOTH
+        Python and JavaScript kernels and compares the actual results.
+        """
+        from rcx_pi.selfhost.step_mu import normalize_projection, list_to_linked
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        from rcx_pi.selfhost.subst_mu import denormalize_from_match
+        from conftest import run_until_done
+
+        mismatches = []
+
+        for vector in parity_vectors.get("vectors", []):
+            vector_id = vector["id"]
+            input_val = vector["input"]
+            projection = vector["projection"]
+
+            # Run through Python kernel (same pattern as test_parity_python.py)
+            try:
+                norm_input = normalize_for_match(input_val)
+                norm_proj = normalize_projection(projection)
+                kernel_entry = {
+                    "_step": norm_input,
+                    "_projs": list_to_linked([norm_proj])
+                }
+                py_result, _, _ = run_until_done(kernel_projections, kernel_entry, max_steps=100)
+                py_denorm = denormalize_from_match(py_result)
+            except Exception as e:
+                py_denorm = {"_error": str(e)}
+
+            # Run through JS kernel via JSON API
+            try:
+                js_response = self._run_js_json_api({
+                    "action": "run_vector",
+                    "input": input_val,
+                    "projection": projection
+                })
+                if js_response.get("success"):
+                    js_denorm = js_response["result"]
+                else:
+                    js_denorm = {"_error": js_response.get("error", "unknown")}
+            except Exception as e:
+                js_denorm = {"_error": str(e)}
+
+            # Compare Python and JS results (using cross-substrate comparison
+            # that handles int/float equivalence - JS doesn't distinguish)
+            if not _cross_substrate_equal(py_denorm, js_denorm):
+                mismatches.append({
+                    "id": vector_id,
+                    "python": py_denorm,
+                    "javascript": js_denorm
+                })
+
+        assert len(mismatches) == 0, (
+            f"Cross-substrate mismatch in {len(mismatches)} vectors:\n" +
+            "\n".join(f"  {m['id']}: PY={m['python']} JS={m['javascript']}" for m in mismatches[:5])
+        )
+
+    def test_python_js_constants_match(self):
+        """Verify Python and JS have matching security constants.
+
+        9-agent Round 3: Verify constants like MAX_DEPTH and KERNEL_RESERVED_FIELDS
+        are actually identical, not just claimed to be.
+        """
+        from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
+        from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
+
+        js_response = self._run_js_json_api({"action": "get_constants"})
+        assert js_response["success"], f"JS get_constants failed: {js_response}"
+
+        # MAX_DEPTH must match
+        assert js_response["MAX_DEPTH"] == MAX_MU_DEPTH, (
+            f"MAX_DEPTH mismatch: Python={MAX_MU_DEPTH}, JS={js_response['MAX_DEPTH']}"
+        )
+
+        # KERNEL_RESERVED_FIELDS must match
+        py_fields = set(KERNEL_RESERVED_FIELDS)
+        js_fields = set(js_response["KERNEL_RESERVED_FIELDS"])
+        assert py_fields == js_fields, (
+            f"KERNEL_RESERVED_FIELDS mismatch:\n"
+            f"  Python only: {py_fields - js_fields}\n"
+            f"  JS only: {js_fields - py_fields}"
         )
 
     def test_python_js_normalization_matches(self):
