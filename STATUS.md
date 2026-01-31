@@ -64,20 +64,77 @@ The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Optio
 
 L3 is defined as **projections run on minimal, auditable substrate**:
 
-| Component | Role | Status |
-|-----------|------|--------|
-| **Projections** | kernel.v1, match.v2, subst.v2 - all meaning in JSON | ✅ DONE |
-| **Python Substrate** | ~2000 LOC, 1600+ tests, production-ready | ✅ PRIMARY |
-| **JS Substrate** | ~300 LOC, auditable, portability proof | ✅ PROOF (needs security fixes) |
-| **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both |
+| Component | Role | Python | JS |
+|-----------|------|--------|-----|
+| **kernel.v1.json** | Kernel state machine (7 projections) | ✅ | ✅ |
+| **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
+| **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
+| **enginenews.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
+| **Python Substrate** | ~2000 LOC, 1810+ tests, production-ready | ✅ PRIMARY | - |
+| **JS Substrate** | ~350 LOC, auditable, portability proof | - | ✅ COMPLETE |
+| **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
 
 **What L3 proves:**
-- The SAME projections (kernel.v1.json, match.v2.json, subst.v2.json) run on Python AND JavaScript
+- The SAME projections (all 4 seed files) run on Python AND JavaScript
+- All semantics are in the projections (data), not the host (code)
+- The host provides only mechanical execution (the 5 bootstrap primitives)
+- EngineNews closure detection works identically on both substrates
+
+**L3 Parity Requirement (MANDATORY - North Star #13):**
+- Any change to Python projection behavior MUST be mirrored in JavaScript
+- Any new seed file MUST be loaded and tested in BOTH substrates
+- Parity vectors in `tests/fixtures/` are shared by both implementations
+- Run `node experiments/eval_step.js` after Python changes to verify JS parity
+- Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
+- Violation of parity breaks L3 and must be fixed before merge
+
+**JS Debt Tracking (matches Python):**
+- JS file has DEBT SUMMARY header with counts
+- Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
+- Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE`
+- `tools/check_js_debt.sh` validates markers are present
+- `tools/contraband_js.sh` validates no forbidden patterns (determinism, purity)
+- Both audit scripts (fast/all) run JS debt check and contraband check
 - All semantics are in the projections (data), not the host (code)
 - The host provides only mechanical execution (the 5 bootstrap primitives)
 - This is the Hex0/Forth precedent: meaning in data, mechanics in minimal runner
 
-**JS POC location:** `experiments/eval_step.js` (~300 LOC core + tests)
+**JS Contraband Patterns (blocked by contraband_js.sh):**
+- `eval(`, `Function(` - Code injection breaks purity
+- `setTimeout`, `setInterval` - Async breaks determinism
+- `Math.random`, `Date.now`, `new Date(` - Non-determinism
+- `process.env` - Environment leakage
+- `child_process`, `exec(`, `spawn(` - Subprocess spawning
+- `fs.write*`, `fs.append*`, `fs.unlink`, `fs.rm*` - File mutation (read-only allowed)
+- `require.*http`, `fetch(` - Network access breaks determinism
+
+**JS AST Police (blocked by ast_police_js.sh):**
+- Indirect eval: `window['eval']`, `globalThis.eval`, `(0,eval)`
+- String concatenation bypass: `'ev'+'al'`
+- Scope manipulation: `with()`, `debugger`
+- Prototype pollution: `__proto__`, `Object.setPrototypeOf`
+- Reflection bypass: `Reflect.construct`, `Reflect.apply`
+- Async: `async function`, `await`, generators (`function*`, `yield`)
+- Hidden state: `Proxy`, `WeakMap`, `WeakSet`, `Symbol.for`, `Symbol.iterator`
+- Note: `const SENTINEL = Symbol('name')` is allowed for sentinel values
+
+**JS Theater Check (blocked by check_test_theater_js.sh):**
+- Vacuous assertions: `assert(true)`, `assert(1)`, `assert(!false)`
+- Self-comparison: `x === x`
+- Empty test bodies
+- Commented-out assertions
+- TODO/FIXME test placeholders
+
+**Seed Police (blocked by seed_police.sh):**
+- Missing required fields: `id`, `pattern`, `body`
+- Theater projections: empty patterns, trivial bodies, duplicate IDs
+- Host leakage: `lambda`, `def `, `function(`, `=>`, `eval(` in string values
+- Security: reserved field misuse in non-kernel projections
+- Cross-seed ID collisions (except versioned families like v1/v2)
+
+**JS POC location:** `experiments/eval_step.js` (~350 LOC core + tests)
+- Now tracked in git (required for CI)
+- Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
 ### L4 Research: True Self-Hosting (SINK)
 
@@ -98,14 +155,19 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 ### Cross-Substrate Testing Strategy
 
-**Status:** GROUNDED (Steps 1-4 complete, 2026-01-30)
+**Status:** GROUNDED (Steps 1-5 complete, 2026-01-31)
 
 Cross-substrate parity tests verify L3 (substrate portability):
 - [x] Shared JSON test vectors: `tests/fixtures/parity_vectors.json` (20 parity + 3 security = 23 vectors)
 - [x] Python tests: `tests/test_parity_python.py` (20 parity tests + 3 security tests)
 - [x] JS tests: `experiments/eval_step.js` (20 parity tests pass)
 - [x] Structural trace tests: `tests/test_structural_trace.py` (14 tests)
-- [ ] CI workflow that runs both (Python in CI, JS manual)
+- [x] **ACTUAL cross-substrate comparison** (9-agent Round 3 fix, 2026-01-31):
+  - `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
+  - Runs SAME 20 vectors through BOTH Python and JS kernels via JSON API
+  - Compares actual outputs (not just string parsing)
+  - Handles int/float normalization (JS doesn't distinguish)
+- [x] CI workflow runs both: Python pytest + `node experiments/eval_step.js`
 
 **Security gaps in JS POC (adversary finding - FIXED 2026-01-30):**
 - [x] `KERNEL_RESERVED_FIELDS` validation (added v4)
@@ -367,18 +429,32 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Created `tests/structural/test_audit_claims_grounding.py` (18 tests) for audit verification
 - Added `tests/archive/README.md` documenting archive purpose
 
-**CI/Audit Infrastructure Hardening (2026-01-30, 7-agent review):**
-- Created `tests/tools/` directory with grounding tests for security tools (51 tests):
-  - `test_contraband_detection.py` (21 tests) - verifies contraband.sh patterns work
+**CI/Audit Infrastructure Hardening (2026-01-30, 9-agent review):**
+- Created `tests/tools/` directory with grounding tests for security tools (65+ tests):
+  - `test_contraband_detection.py` (65 tests) - verifies contraband.sh patterns work
+  - `test_contraband_js_detection.py` (34 tests) - verifies contraband_js.sh patterns
   - `test_ast_police_detection.py` (23 tests) - verifies ast_police.py detection
+  - `test_ast_police_js_detection.py` (32 tests) - verifies AST patterns in JS
   - `test_check_test_theater_detection.py` (7 tests) - verifies theater check
+  - `test_check_test_theater_js_detection.py` (16 tests) - verifies JS theater check
+  - `test_seed_police_detection.py` (16 tests) - verifies seed_police.sh
 - Added `import builtins` detection to contraband.sh (closes eval/exec bypass)
+- Added `base64/codecs` detection to contraband.sh (encoding bypass defense-in-depth)
 - Added AST_OK category validation (8 approved categories prevent bypass abuse)
 - Added CRITICAL_TEST_FILES protection (13 files cannot be silently skipped):
   - Debt/security enforcement, core parity tests, tool grounding tests
   - Adversarial tests, self-hosting tests, grounding verification
 - Updated audit_fast.sh to include security-critical tests in Tier 1
 - Single source of truth: THRESHOLD and INFRA_CEILING read from STATUS.md
+
+**Known Security Limitations (9-agent consensus, 2026-01-30):**
+These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
+1. **Unicode homoglyphs** (Cyrillic/Greek lookalikes): NOT_RELEVANT - Attack defeats itself.
+   Homoglyphs in patterns won't match ASCII in real seeds; attacker would need to
+   modify BOTH pattern AND target, which gains nothing. Seeds are audited.
+2. **Test theater gaps** (vacuous assertions): FIX_LATER - Quality issue, not security.
+   Current tests verify real behavior; theater detection is for new code.
+3. **JS inline comment exclusion**: ALREADY_DONE - contraband_js.sh patterns work correctly.
 
 **Architecture Cleanup (2026-01-29):**
 - kernel.py: DELETED legacy Kernel class (~350 lines removed)
@@ -483,8 +559,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-01-30
-**Next milestone:** L3 Complete - JS EngineNews parity tests (optional enhancement)
+**Last updated:** 2026-01-31
+**Next milestone:** L4 research or new features (L3 is complete with verified cross-substrate parity)
 
 **Completed (Steps 1-5):**
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
@@ -493,4 +569,12 @@ Simplified step_kernel_mu to MECHANICAL operation:
 4. ✅ Ported trace to JS (runStructural in experiments/eval_step.js)
 5. ✅ EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
 
-**L3 COMPLETE:** All 5 steps done. Projections are substrate-portable.
+**L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.
+
+**Proof:**
+- [x] kernel.v1.json: 7 projections (Python ✓, JS ✓)
+- [x] match.v2.json: 8 projections (Python ✓, JS ✓)
+- [x] subst.v2.json: 12 projections (Python ✓, JS ✓)
+- [x] enginenews.v1.json: 9 projections (Python ✓, JS ✓)
+- [x] 5 EngineNews parity vectors pass on both substrates
+- [x] End-to-end closure detection works on both substrates

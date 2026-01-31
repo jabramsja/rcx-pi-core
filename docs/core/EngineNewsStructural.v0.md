@@ -125,7 +125,8 @@ Step 5 is COMPLETE:
 - [x] Same projections produce same results on Python
 - [x] Parity tests in `tests/test_enginenews_parity.py` (23+ tests)
 - [x] Fuzzer tests in `tests/test_enginenews_fuzzer.py`
-- [ ] JS tests in `experiments/eval_step.js` (optional enhancement)
+- [x] JS tests in `experiments/eval_step.js` (v5, with EngineNews support)
+- [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
 
 ### 4. Closure Evidence is Structural ✅
 - [x] Closure detection is a projection (`enginenews.found_in_seen`) using non-linear patterns

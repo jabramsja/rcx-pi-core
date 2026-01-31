@@ -2,7 +2,7 @@
 
 A projection-based computational substrate where **structure is the primitive**.
 
-## Current Status: L3 Substrate Portability COMPLETE (Step 5 Done)
+## Current Status: L3 Substrate Portability COMPLETE
 
 | Level | Description | Status |
 |-------|-------------|--------|
@@ -11,7 +11,7 @@ A projection-based computational substrate where **structure is the primitive**.
 | **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
 | **Step 5** | EngineNews structural closure detection | ✅ DONE |
 
-- **1,810+ tests** across 90+ test files
+- **2,025+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
 - **13 CRITICAL_TEST_FILES** protected from silent skipping
 
@@ -183,4 +183,4 @@ See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emi
 
 ---
 
-*Last updated: 2026-01-30*
+*Last updated: 2026-01-31*

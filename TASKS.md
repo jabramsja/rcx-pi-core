@@ -19,6 +19,11 @@ If a task is not listed here, it is NOT to be implemented.
 10. A "program" is a pressure vessel: seed + allowable gates + thresholds + observation outputs.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
+13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
+    - Same seeds: kernel.v1, match.v2, subst.v2, enginenews.v1 (all 36 projections)
+    - Same bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+    - Any change to Python projection behavior MUST be mirrored in JS
+    - Any new seed MUST be loaded and tested in BOTH substrates
 
 ---
 
@@ -29,10 +34,20 @@ If a task is not listed here, it is NOT to be implemented.
 - Do not leave broken files/tests behind and add replacements.
 - Minimize file creation. Prefer editing existing files.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
+- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `seeds/` MUST be mirrored in `experiments/eval_step.js`.
+  - Run `node experiments/eval_step.js` to verify all JS tests pass
+  - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
+  - Run `./tools/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
+  - Run `./tools/ast_police_js.sh` to catch JS patterns that bypass grep
+  - Run `./tools/check_test_theater_js.sh` to catch vacuous JS assertions
+  - Run `./tools/seed_police.sh` to verify seed integrity and no host leakage
+  - New seeds must be loaded in both Python and JavaScript
+  - Parity vectors must pass on both substrates before merge
 - **Pre-commit doc review**: Before committing changes to `rcx_pi/`, `prototypes/`, or `seeds/`:
   1. Read relevant docs in `docs/` (e.g., EVAL_SEED.v0.md, DeepStep.v0.md)
   2. Update docs if implementation differs from spec
   3. Update TASKS.md status if completing/progressing items
+  4. Verify JS parity if projection behavior changed
 
 ---
 
@@ -355,7 +370,9 @@ All blockers resolved 2026-01-28:
 | 2 | Create cross-substrate parity tests | **DONE** | ~120 LOC + 20 vectors (`tests/test_parity_python.py`) |
 | 3 | Phase 8d in Python (trace model) | **DONE** | ~80 LOC + 14 tests (`tests/test_structural_trace.py`) |
 | 4 | Port trace to JS POC | **DONE** | ~80 LOC + 5 tests |
-| 5 | EngineNews demo on both substrates | TODO | Demo script |
+| 5 | EngineNews in Python | **DONE** | `seeds/enginenews.v1.json` (9 projections) |
+| 6 | EngineNews in JS (L3 parity) | **DONE** | JS POC v5 with EngineNews tests |
+| 7 | ACTUAL cross-substrate verification | **DONE** | JSON API + actual output comparison (9-agent Round 3 fix, 2026-01-31) |
 
 ---
 
@@ -458,14 +475,21 @@ All blockers resolved 2026-01-28:
    - [x] No Python `if/for/while` in closure detection path (only in bootstrap)
    - [x] 7-agent review: All agents APPROVE
 
-**The demonstration (ACHIEVED):**
+**The demonstration (COMPLETE):**
 - Same projections (kernel.v1 + match.v2 + subst.v2 + enginenews.v1)
 - Same input (EngineNews workload)
 - Same trace output
 - Same closure detection
-- Two substrates (Python, JavaScript) - JS parity tests optional enhancement
+- **Python:** Full EngineNews support ✅
+- **JavaScript:** Full EngineNews support ✅ (v5, 2026-01-30)
 
-**This proves:** All meaning is in projections. Host provides only mechanical execution. Emergence is structural, not a Python artifact.
+**This proves:** All meaning is in projections. Host provides only mechanical execution. Emergence is structural, not a Python artifact. L3 Substrate Portability is COMPLETE.
+
+**Cross-substrate verification (9-agent Round 3 fix, 2026-01-31):**
+- Previous tests just parsed strings from JS stdout (theater)
+- Now runs SAME 20 parity vectors through BOTH substrates via JSON API
+- Compares actual outputs, handles int/float normalization
+- See `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
 
 **7-Agent Review Results (2026-01-30):**
 | Agent | Verdict | Key Finding |

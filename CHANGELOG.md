@@ -2,6 +2,42 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-31
+
+### Cross-Substrate Parity Verification (9-agent Round 3 Fix)
+
+**Problem (Grounding finding):** Previous JS parity tests were "theater" - they just
+parsed strings like "0 failed" from stdout. No test actually ran the same input through
+both Python and JavaScript and compared the outputs.
+
+**Fixes:**
+
+- **JS JSON API Mode** (`experiments/eval_step.js`)
+  - Added `--json-api` command line option for machine-readable output
+  - Actions: `run_vector`, `run_all_vectors`, `run_enginenews`, `get_constants`
+  - Outputs JSON on single line for easy parsing by Python tests
+  - Fixed EngineNews e2e test expectations: stall IS a closure (fixed point)
+
+- **Actual Cross-Substrate Comparison** (`tests/test_js_parity_automated.py`)
+  - Added `_normalize_for_cross_substrate()` - handles int/float equivalence (JS doesn't distinguish)
+  - Added `_cross_substrate_equal()` - compares normalized outputs
+  - New `test_actual_cross_substrate_comparison` - runs SAME 20 parity vectors through BOTH substrates
+  - New `test_python_js_constants_match` - verifies MAX_DEPTH=300 and KERNEL_RESERVED_FIELDS match
+
+- **Git Tracking** (`.gitignore`)
+  - `experiments/eval_step.js` now tracked in git (was previously gitignored)
+  - Required for CI to run JS parity tests
+
+**Test Results:**
+- 13 JS parity tests: PASSED (including actual comparison)
+- 2025 functional tests: PASSED
+- Cross-substrate parity is now ACTUALLY VERIFIED, not just claimed
+
+**Known Limitation (documented, not a bug):**
+- JavaScript doesn't distinguish between integers and floats (0 === 0.0)
+- Cross-substrate comparison normalizes all numbers to float for comparison
+- Semantically equivalent; only representation differs
+
 ## 2026-01-30
 
 ### Step 5: EngineNews Structural Closure Detection (COMPLETE)
