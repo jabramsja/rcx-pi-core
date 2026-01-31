@@ -15,6 +15,7 @@ from rcx_pi.eval_seed import NO_MATCH
 from rcx_pi.match_mu import match_mu
 from rcx_pi.subst_mu import subst_mu
 from rcx_pi.selfhost.kernel import reset_step_budget
+from rcx_pi.selfhost.step_mu import clear_combined_kernel_cache
 
 # =============================================================================
 # Hypothesis Configuration (lossless optimization)
@@ -180,16 +181,21 @@ def pytest_unconfigure(config):
 
 
 @pytest.fixture(autouse=True)
-def reset_budget_between_tests():
-    """Reset step budget before each test to prevent cross-test pollution.
+def reset_state_between_tests():
+    """Reset state before each test to prevent cross-test pollution.
 
     Some tests (e.g., test_step_budget.py) set custom budget limits.
     Without this fixture, subsequent tests may fail with "step limit exceeded"
     if the budget was left in an active state with a low limit.
+
+    9-agent round 2 (Expert finding): Also clear kernel projection cache
+    to prevent stale cache pollution when tests mock projections.
     """
     reset_step_budget()
+    clear_combined_kernel_cache()
     yield
     reset_step_budget()
+    clear_combined_kernel_cache()
 
 
 # =============================================================================

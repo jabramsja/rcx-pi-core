@@ -249,7 +249,12 @@ def load_combined_kernel_projections() -> list[Mu]:
 
 
 def clear_combined_kernel_cache() -> None:
-    """Clear cached kernel projections (for testing)."""
+    """
+    Clear the combined kernel projection cache.
+
+    9-agent round 2 (Expert finding): Restored for test isolation.
+    Tests that mock projections need this to prevent stale cache pollution.
+    """
     global _combined_kernel_cache
     _combined_kernel_cache = None
 
@@ -300,7 +305,11 @@ def is_kernel_intermediate(result: Mu) -> bool:
 
     # Kernel internal fields indicate mid-execution
     # Use tuple for determinism (avoid set literal)
-    kernel_internal_fields = ('subst', '_subst_ctx', 'match', '_match_ctx')
+    # SECURITY FIX (9-agent round 2): Only check underscore-prefixed fields.
+    # Generic keys 'match' and 'subst' removed - domain data can legitimately
+    # contain these, and checking for them bypasses stall detection.
+    # See KERNEL_RESERVED_FIELDS comment at line 110-113.
+    kernel_internal_fields = ('_subst_ctx', '_match_ctx', '_kernel_ctx')
     if any(f in result for f in kernel_internal_fields):  # AST_OK: infra
         return True
 
