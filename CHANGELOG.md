@@ -2,7 +2,94 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-01-31
+
+### Cross-Substrate Parity Verification (9-agent Round 3 Fix)
+
+**Problem (Grounding finding):** Previous JS parity tests were "theater" - they just
+parsed strings like "0 failed" from stdout. No test actually ran the same input through
+both Python and JavaScript and compared the outputs.
+
+**Fixes:**
+
+- **JS JSON API Mode** (`experiments/eval_step.js`)
+  - Added `--json-api` command line option for machine-readable output
+  - Actions: `run_vector`, `run_all_vectors`, `run_enginenews`, `get_constants`
+  - Outputs JSON on single line for easy parsing by Python tests
+  - Fixed EngineNews e2e test expectations: stall IS a closure (fixed point)
+
+- **Actual Cross-Substrate Comparison** (`tests/test_js_parity_automated.py`)
+  - Added `_normalize_for_cross_substrate()` - handles int/float equivalence (JS doesn't distinguish)
+  - Added `_cross_substrate_equal()` - compares normalized outputs
+  - New `test_actual_cross_substrate_comparison` - runs SAME 20 parity vectors through BOTH substrates
+  - New `test_python_js_constants_match` - verifies MAX_DEPTH=300 and KERNEL_RESERVED_FIELDS match
+
+- **Git Tracking** (`.gitignore`)
+  - `experiments/eval_step.js` now tracked in git (was previously gitignored)
+  - Required for CI to run JS parity tests
+
+**Test Results:**
+- 13 JS parity tests: PASSED (including actual comparison)
+- 2025 functional tests: PASSED
+- Cross-substrate parity is now ACTUALLY VERIFIED, not just claimed
+
+**Known Limitation (documented, not a bug):**
+- JavaScript doesn't distinguish between integers and floats (0 === 0.0)
+- Cross-substrate comparison normalizes all numbers to float for comparison
+- Semantically equivalent; only representation differs
+
 ## 2026-01-30
+
+### Step 5: EngineNews Structural Closure Detection (COMPLETE)
+
+**Implementation:**
+- Created `seeds/enginenews.v1.json` with 9 projections for Rule 2.2 (Closure-on-Second-Demand)
+- Projections: init, end_of_trace, check_state_stall, check_state_maxsteps, check_state,
+  found_in_seen, not_in_head, not_found, unwrap
+- Non-linear patterns for state equality (same variable `{"var": "state"}` twice)
+- Seen-set is Mu linked-list, NOT Python set
+- All closure detection logic is in projections (DATA), not Python code
+
+**Key Design Decision: Non-linear Patterns**
+- `enginenews.found_in_seen` uses `{"var": "state"}` in both `_state` and `_check_list.head`
+- eval_seed.match() binding conflict detection (lines 331-336, 351-355) enforces equality
+- This is bootstrap primitive (like Forth's NEXT), not semantic debt
+- Both Python and JS substrates handle binding conflicts identically
+
+**Tests:**
+- `tests/test_enginenews_parity.py` - 23+ parity tests including:
+  - TestEngineNewsProjections: seed structure validation
+  - TestEngineNewsParity: parity vector tests
+  - TestEngineNewsIntegration: integration with run_mu_structural
+  - TestEngineNewsSpecCompliance: Rule 2.2 grounding tests
+  - TestEngineNewsClosureObjectStructure: exact Omega(tau) structure
+  - TestEngineNewsExactProjectionCount: 9 projections exactly
+- `tests/test_enginenews_fuzzer.py` - Property-based fuzzer tests:
+  - TestEngineNewsDeterminism: same input -> same output
+  - TestEngineNewsClosureSemantics: Rule 2.2 semantics
+  - TestEngineNewsEdgeCases: numeric, string, null states
+  - TestEngineNewsTypeDistinctness: 0 vs false vs null
+  - TestEngineNewsTraceFormats: stall, max_steps entries
+  - TestEngineNewsComplexStates: nested state equality
+- `tests/fixtures/enginenews_vectors.json` - 5 parity vectors
+
+**7-Agent Review (Second Pass):**
+| Agent | Verdict | Summary |
+|-------|---------|---------|
+| Verifier | APPROVE | All 12 North Star invariants maintained |
+| Adversary | SECURE | Non-linear pattern concern RESOLVED |
+| Expert | MINIMAL | Code appropriately sized |
+| Structural-proof | PROVEN | All 4 structural claims verified |
+| Grounding | GROUNDED | All claims have executable tests |
+| Fuzzer | DESIGN COMPLETE | Comprehensive fuzzer code provided |
+| Advisor | RESOLVED | Architecture is sound |
+
+**Documentation:**
+- Updated `docs/core/EngineNewsStructural.v0.md` - marked IMPLEMENTED
+- Updated `docs/core/SelfHosting.v0.md` - added EngineNews section
+- Updated `docs/core/BootstrapPrimitives.v0.md` - added binding conflict note
+- Updated `STATUS.md` - Step 5 DONE
+- Updated `TASKS.md` - all checkboxes marked complete
 
 ### Second 7-Agent Adversarial Review (Complete)
 

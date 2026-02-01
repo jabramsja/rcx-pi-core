@@ -15,6 +15,7 @@ from rcx_pi.eval_seed import NO_MATCH
 from rcx_pi.match_mu import match_mu
 from rcx_pi.subst_mu import subst_mu
 from rcx_pi.selfhost.kernel import reset_step_budget
+from rcx_pi.selfhost.step_mu import clear_combined_kernel_cache
 
 # =============================================================================
 # Hypothesis Configuration (lossless optimization)
@@ -117,6 +118,7 @@ CRITICAL_TEST_FILES = frozenset({
     "test_kernel_projections.py",
     # Security tool grounding tests (verify security checks actually work)
     "test_contraband_detection.py",
+    "test_seed_police_detection.py",
     "test_ast_police_detection.py",
     "test_check_test_theater_detection.py",
     # Adversarial and security fuzzer tests
@@ -128,6 +130,31 @@ CRITICAL_TEST_FILES = frozenset({
     "test_phase8b_grounding_gaps.py",
     # Structural trace fuzzer (closure detection robustness - 7-agent critical gap)
     "test_structural_trace_fuzzer.py",
+    # Boundary validation fuzzers (9-agent review 2026-01-30)
+    "test_boundary_validation_fuzzer.py",
+    "test_kernel_bridge_fuzzer.py",
+    # L2 cursor grounding tests (structural cursor operations)
+    "test_l2_cursor_grounding.py",
+    # L3 Parity tests - CRITICAL for substrate portability (9-agent review 2026-01-31)
+    "test_match_v2_parity.py",
+    "test_subst_v2_parity.py",
+    "test_parity_python.py",
+    "test_step_mu_parity.py",
+    # EngineNews tests - CRITICAL for closure detection (9-agent review 2026-01-31)
+    "test_enginenews_parity.py",
+    "test_enginenews_fuzzer.py",
+    # mu_equal parity fuzzer - CRITICAL for binding conflict detection (9-agent review 2026-01-31)
+    "test_mu_equal_parity_fuzzer.py",
+    # L3 JS automated parity - CRITICAL for substrate portability (9-agent round 2)
+    "test_js_parity_automated.py",
+    # Normalization/bindings roundtrip fuzzers - CRITICAL for kernel boundary (9-agent round 2)
+    "test_normalization_roundtrip.py",
+    "test_normalization_roundtrip_fuzzer.py",
+    "test_bindings_roundtrip_fuzzer.py",
+    # Structural trace and integration (9-agent round 3 - advisor critical gap)
+    "test_structural_trace.py",
+    "test_eval_seed_parity.py",
+    "test_eval_seed_v0.py",
 })
 
 
@@ -167,16 +194,21 @@ def pytest_unconfigure(config):
 
 
 @pytest.fixture(autouse=True)
-def reset_budget_between_tests():
-    """Reset step budget before each test to prevent cross-test pollution.
+def reset_state_between_tests():
+    """Reset state before each test to prevent cross-test pollution.
 
     Some tests (e.g., test_step_budget.py) set custom budget limits.
     Without this fixture, subsequent tests may fail with "step limit exceeded"
     if the budget was left in an active state with a low limit.
+
+    9-agent round 2 (Expert finding): Also clear kernel projection cache
+    to prevent stale cache pollution when tests mock projections.
     """
     reset_step_budget()
+    clear_combined_kernel_cache()
     yield
     reset_step_budget()
+    clear_combined_kernel_cache()
 
 
 # =============================================================================

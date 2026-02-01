@@ -69,6 +69,13 @@ def eval_step(projections: list[Projection], value: Mu) -> Mu:
 - No arithmetic on data values
 - No control flow choices beyond "first match wins"
 
+**Non-linear Pattern Support (binding conflict detection):**
+- When a variable like `{"var": "x"}` appears twice in a pattern, both occurrences must bind to equal values
+- eval_seed.match() implements this via binding conflict detection (lines 331-336, 351-355)
+- If `x` is already bound to `A`, and the pattern tries to bind `x` to `B`, match FAILS
+- This is how `enginenews.found_in_seen` detects state equality structurally
+- Both Python and JS substrates handle binding conflicts identically
+
 **Analogy:** CPU instruction fetch-decode-execute cycle
 
 ---

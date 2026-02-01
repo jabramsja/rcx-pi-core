@@ -28,7 +28,7 @@ from typing import Any
 
 # Global coverage state
 _coverage_enabled = False
-_coverage_data: dict[str, dict[str, Any]] = defaultdict(lambda: {  # AST_OK: infra
+_coverage_data: dict[str, dict[str, Any]] = defaultdict(lambda: {  # AST_OK: infra  # CONTRABAND_OK: infra - coverage factory
     "hits": 0,
     "last_input": None,
     "last_output": None,
@@ -52,7 +52,7 @@ def disable():
 def reset():
     """Reset all coverage data."""
     global _coverage_data, _total_steps, _total_matches
-    _coverage_data = defaultdict(lambda: {  # AST_OK: infra
+    _coverage_data = defaultdict(lambda: {  # AST_OK: infra  # CONTRABAND_OK: infra - coverage factory
         "hits": 0,
         "last_input": None,
         "last_output": None,

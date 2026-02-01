@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap
+from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_equal
 
 
 def _is_kernel_internal_state(value: Any) -> bool:
@@ -30,12 +30,17 @@ def _is_kernel_internal_state(value: Any) -> bool:
 
     This is NOT a security bypass - the input was already validated at the
     boundary before kernel processing began.
+
+    SECURITY FIX (Phase 8b Round 6): Now requires underscore-prefixed kernel
+    fields from KERNEL_RESERVED_FIELDS, NOT 'match'/'subst' which are generic.
+    Attack vector blocked: {"match": {}, "bomb": <depth 500>} no longer bypasses.
     """
     if not isinstance(value, dict):
         return False
-    # Kernel-internal fields indicate mid-execution state
-    # Use tuple for determinism (avoid set literal)
-    kernel_fields = ('subst', '_subst_ctx', 'match', '_match_ctx', '_mode', '_phase')
+    # SECURITY: Only check for underscore-prefixed reserved kernel fields
+    # 'match' and 'subst' are too generic - domain data legitimately uses them
+    # Kernel-internal state ALWAYS has _mode or _phase (reserved fields)
+    kernel_fields = ('_mode', '_phase', '_match_ctx', '_subst_ctx', '_kernel_ctx')
     return any(f in value for f in kernel_fields)  # AST_OK: infra
 
 
@@ -330,8 +335,8 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             # Merge bindings (check for conflicts)
             for k, v in sub_bindings.items():
                 if k in bindings:
-                    # Same variable bound twice - must be same value
-                    if json.dumps(bindings[k], sort_keys=True) != json.dumps(v, sort_keys=True):
+                    # Same variable bound twice - must be same value (non-linear pattern)
+                    if not mu_equal(bindings[k], v):
                         return NO_MATCH
                 bindings[k] = v
         return bindings
@@ -350,7 +355,8 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             # Merge bindings
             for k, v in sub_bindings.items():
                 if k in bindings:
-                    if json.dumps(bindings[k], sort_keys=True) != json.dumps(v, sort_keys=True):
+                    # Same variable bound twice - must be same value (non-linear pattern)
+                    if not mu_equal(bindings[k], v):
                         return NO_MATCH
                 bindings[k] = v
         return bindings

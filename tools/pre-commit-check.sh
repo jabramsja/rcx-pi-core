@@ -49,11 +49,21 @@ if [ -n "$STAGED_PY" ]; then
 fi
 
 # 3. Check for underscore-prefixed keys in JSON
+# Note: Kernel/engine seeds use underscore-prefixed fields (_mode, _phase, etc.) by design
+#       to distinguish internal state from domain data. See:
+#       - MetaCircularKernel.v0.md (kernel.v1.json, match.v2.json, subst.v2.json)
+#       - EngineNewsStructural.v0.md (enginenews.v1.json)
+KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json"
 if [ -n "$STAGED_JSON" ]; then
     echo "-- Checking for non-standard underscore keys in JSON..."
     for f in $STAGED_JSON; do
         if [[ "$f" == prototypes/* ]] || [[ "$f" == seeds/* ]]; then
-            if grep -nE '"_[a-zA-Z]+":' "$f" 2>/dev/null; then
+            # Skip kernel/engine seeds - they legitimately use underscore-prefixed fields
+            if echo "$f" | grep -qE "$KERNEL_SEEDS"; then
+                continue
+            fi
+            # Also allow _marker and _type in any seed (security/type features)
+            if grep -nE '"_[a-zA-Z]+":' "$f" 2>/dev/null | grep -vE '"_marker":|"_type":'; then
                 echo "❌ Non-standard underscore key in $f"
                 ERRORS=$((ERRORS + 1))
             fi
@@ -132,6 +142,56 @@ if [ -n "$STAGED_PY" ]; then
             break
         fi
     done
+fi
+
+# 10. Check JS debt parity if JS file changed
+STAGED_JS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'eval_step\.js$' || true)
+if [ -n "$STAGED_JS" ]; then
+    echo "-- Checking JS debt markers (L3 parity)..."
+    if ! ./tools/check_js_debt.sh 2>/dev/null; then
+        echo "❌ JS debt check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    echo "-- Checking JS contraband (forbidden patterns)..."
+    if ! ./tools/contraband_js.sh 2>/dev/null; then
+        echo "❌ JS contraband check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    echo "-- Checking JS AST police..."
+    if ! ./tools/ast_police_js.sh 2>/dev/null; then
+        echo "❌ JS AST police check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    echo "-- Checking JS test theater..."
+    if ! ./tools/check_test_theater_js.sh 2>/dev/null; then
+        echo "❌ JS test theater check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+# 12. Check seed integrity if seed files changed
+STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
+if [ -n "$STAGED_SEEDS" ]; then
+    echo "-- Checking seed police (structure, theater, host leakage)..."
+    if ! ./tools/seed_police.sh 2>/dev/null; then
+        echo "❌ Seed police check failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+# 11. Run JS tests if JS file or seeds changed
+STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
+if [ -n "$STAGED_JS" ] || [ -n "$STAGED_SEEDS" ]; then
+    echo "-- Running JS parity tests..."
+    if ! node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+        echo "❌ JS parity tests failed"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "   JS tests pass"
+    fi
 fi
 
 if [ $ERRORS -gt 0 ]; then

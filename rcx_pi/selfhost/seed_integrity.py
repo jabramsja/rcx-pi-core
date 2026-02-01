@@ -36,6 +36,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "match.v2.json": "1fbd00c6988505a8369cec8f25968453cf3405855dfdf053756bd22375f7acc2",
     # Phase 7b: subst with kernel context passthrough
     "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
+    # Step 5: EngineNews structural closure detection (Rule 2.2♢)
+    "enginenews.v1.json": "2a842d13342ed5a8514e5e0a7993afea01444e8ae15139096d96029f90b2c39d",
 }
 
 # Expected projection IDs for each seed.
@@ -106,6 +108,19 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "subst.descend",
         "subst.primitive",
         "subst.wrap",       # Must be last (entry point)
+    ],
+    # Step 5: EngineNews structural closure detection (Rule 2.2♢)
+    # init is entry point, unwrap is exit point (no .wrap catch-all)
+    "enginenews.v1.json": [
+        "enginenews.init",               # Entry: _detect_closure -> internal state
+        "enginenews.end_of_trace",       # End of trace (null) -> no closure
+        "enginenews.check_state_stall",  # Extract state from stall entry
+        "enginenews.check_state_maxsteps",  # Extract state from max_steps entry
+        "enginenews.check_state",        # Extract state from trace entry
+        "enginenews.found_in_seen",      # State in seen-set -> closure!
+        "enginenews.not_in_head",        # State not in head -> check tail
+        "enginenews.not_found",          # State not in seen -> add and advance
+        "enginenews.unwrap",             # Exit: extract final result
     ],
 }
 

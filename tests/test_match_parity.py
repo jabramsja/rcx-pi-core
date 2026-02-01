@@ -573,7 +573,7 @@ class TestSharedReferencesAllowed:
 
     def test_shared_list_in_normalize(self):
         """Shared list reference should not trigger cycle detection."""
-        from rcx_pi.match_mu import normalize_for_match
+        from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
         shared = [1, 2, 3]
         dag = [shared, shared]  # Same object twice
@@ -581,10 +581,14 @@ class TestSharedReferencesAllowed:
         # Should NOT raise ValueError
         result = normalize_for_match(dag)
         assert result is not None
+        # Verify round-trip preserves semantic content (both branches have same values)
+        denorm = denormalize_from_match(result)
+        assert denorm[0] == [1, 2, 3], f"First element wrong: {denorm[0]}"
+        assert denorm[1] == [1, 2, 3], f"Second element wrong: {denorm[1]}"
 
     def test_shared_dict_in_normalize(self):
         """Shared dict reference should not trigger cycle detection."""
-        from rcx_pi.match_mu import normalize_for_match
+        from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
         shared = {"x": 42}
         dag = {"a": shared, "b": shared}  # Same object twice
@@ -592,10 +596,14 @@ class TestSharedReferencesAllowed:
         # Should NOT raise ValueError
         result = normalize_for_match(dag)
         assert result is not None
+        # Verify round-trip preserves semantic content
+        denorm = denormalize_from_match(result)
+        assert denorm["a"] == {"x": 42}, f"Key 'a' wrong: {denorm['a']}"
+        assert denorm["b"] == {"x": 42}, f"Key 'b' wrong: {denorm['b']}"
 
     def test_shared_empty_list_in_normalize(self):
         """Shared empty list reference - the original bug case."""
-        from rcx_pi.match_mu import normalize_for_match
+        from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
         shared = []
         dag = [shared, shared, "literal"]
@@ -603,10 +611,15 @@ class TestSharedReferencesAllowed:
         # Should NOT raise ValueError (this was the bug!)
         result = normalize_for_match(dag)
         assert result is not None
+        # Verify round-trip preserves semantic content
+        denorm = denormalize_from_match(result)
+        assert denorm[0] == [], f"First element wrong: {denorm[0]}"
+        assert denorm[1] == [], f"Second element wrong: {denorm[1]}"
+        assert denorm[2] == "literal", f"Third element wrong: {denorm[2]}"
 
     def test_diamond_dag_in_normalize(self):
         """Diamond DAG pattern - shared node at multiple depths."""
-        from rcx_pi.match_mu import normalize_for_match
+        from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
         leaf = {"value": 1}
         left = {"child": leaf}
@@ -616,6 +629,10 @@ class TestSharedReferencesAllowed:
         # Should NOT raise ValueError
         result = normalize_for_match(root)
         assert result is not None
+        # Verify round-trip preserves semantic content
+        denorm = denormalize_from_match(result)
+        assert denorm["left"]["child"]["value"] == 1, f"Left path wrong: {denorm}"
+        assert denorm["right"]["child"]["value"] == 1, f"Right path wrong: {denorm}"
 
     def test_shared_reference_in_denormalize(self):
         """Shared reference in denormalize_from_match."""
@@ -628,6 +645,8 @@ class TestSharedReferencesAllowed:
         # Should NOT raise ValueError
         result = denormalize_from_match(dag)
         assert result is not None
+        # Verify both elements are equal (shared ref becomes equal values)
+        assert result[0] == result[1], f"Shared refs should produce equal values: {result}"
 
     def test_true_cycle_still_detected_normalize(self):
         """True cycles should still be detected in normalize."""

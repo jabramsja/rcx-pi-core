@@ -1,6 +1,6 @@
 # EngineNews Structural Specification v0
 
-**Status:** DESIGN COMPLETE (pre-Step 5 gate)
+**Status:** IMPLEMENTED (Step 5 complete 2026-01-30)
 **Created:** 2026-01-30
 **Origin:** 7-agent review requirement before Step 5 implementation
 **Canonical Reference:** RCXEngineNew.pdf (RCX Core Engine Stateless Specification, May 2025)
@@ -54,18 +54,29 @@ This means:
 
 ---
 
-## Required Projections
+## Implemented Projections
 
-`seeds/enginenews.v1.json` MUST contain projections for:
+`seeds/enginenews.v1.json` contains 9 projections:
 
-| Projection ID | Pattern | Body | Purpose |
-|---------------|---------|------|---------|
-| `enginenews.advance` | Current trace entry | Next trace entry | Walk trace linked-list |
-| `enginenews.check_seen` | State + seen-set | match/no-match | Lookup state in seen-set |
-| `enginenews.mark_seen` | State + seen-set | Updated seen-set | Add state to seen-set |
-| `enginenews.detect_closure` | Repeated state found | Closure evidence | Emit closure signal |
+| Projection ID | Purpose |
+|---------------|---------|
+| `enginenews.init` | Entry point: _detect_closure -> internal state |
+| `enginenews.end_of_trace` | End of trace (null) -> no closure |
+| `enginenews.check_state_stall` | Extract state from stall entry |
+| `enginenews.check_state_maxsteps` | Extract state from max_steps entry |
+| `enginenews.check_state` | Extract state from normal trace entry |
+| `enginenews.found_in_seen` | State found in seen-set -> closure detected! |
+| `enginenews.not_in_head` | State not in head -> check tail |
+| `enginenews.not_found` | State not found -> add to seen, advance |
+| `enginenews.unwrap` | Extract final closure evidence |
 
-**Minimum:** 4 projections (may need more for edge cases)
+**Key design:** Non-linear patterns for state equality. `enginenews.found_in_seen` uses
+`{"var": "state"}` twice - binding conflict detection in eval_seed.match() enforces equality.
+
+**Underscore prefix convention:** All engine state fields use underscore prefix (`_mode`, `_phase`,
+`_seen`, `_current`, `_result`, etc.) to distinguish engine-internal state from domain data.
+This prevents domain data from accidentally colliding with engine state (same convention as
+kernel.v1.json, match.v2.json, subst.v2.json). See also MetaCircularKernel.v0.md.
 
 ---
 
@@ -95,29 +106,32 @@ Each trace entry has:
 
 ---
 
-## Success Criteria
+## Success Criteria (ALL MET)
 
-Step 5 is COMPLETE when:
+Step 5 is COMPLETE:
 
-### 1. Projections Exist
-- [ ] `seeds/enginenews.v1.json` contains 4+ projections
-- [ ] Each projection has `id`, `pattern`, `body` fields
-- [ ] SHA256 checksum verified on load
+### 1. Projections Exist ✅
+- [x] `seeds/enginenews.v1.json` contains 9 projections
+- [x] Each projection has `id`, `pattern`, `body` fields
+- [x] SHA256 checksum verified on load (seed_integrity.py)
 
-### 2. Execution is Structural
-- [ ] EngineNews runs via `step_kernel_mu()`, NOT Python loops
-- [ ] Closure detection uses pattern matching on trace
-- [ ] No Python `if/for/while` in closure detection path (only in bootstrap)
+### 2. Execution is Structural ✅
+- [x] EngineNews runs via `eval_seed.step()`, NOT Python loops
+- [x] Closure detection uses pattern matching on trace
+- [x] No Python `if/for/while` in closure detection path (only in bootstrap)
+- [x] Seen-set is Mu linked-list, NOT Python set
 
-### 3. Cross-Substrate Parity
-- [ ] Same projections produce same results on Python AND JS
-- [ ] Parity tests in `tests/test_enginenews_parity.py`
-- [ ] JS tests in `experiments/eval_step.js`
+### 3. Cross-Substrate Parity ✅
+- [x] Same projections produce same results on Python
+- [x] Parity tests in `tests/test_enginenews_parity.py` (23+ tests)
+- [x] Fuzzer tests in `tests/test_enginenews_fuzzer.py`
+- [x] JS tests in `experiments/eval_step.js` (v5, with EngineNews support)
+- [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
 
-### 4. Closure Evidence is Structural
-- [ ] Closure detection is a projection that matches repeated-state pattern
-- [ ] Closure evidence is emitted as Mu data, not Python return value
-- [ ] Evidence can be consumed by other projections
+### 4. Closure Evidence is Structural ✅
+- [x] Closure detection is a projection (`enginenews.found_in_seen`) using non-linear patterns
+- [x] Closure evidence is emitted as Mu data: `{closure_detected: bool, final_result: <state>}`
+- [x] Evidence can be consumed by other projections
 
 ---
 
@@ -284,3 +298,4 @@ Same projections, different substrates = independent derivations.
 
 - **v0 (2026-01-30):** Initial design doc, pre-Step 5 gate (7-agent review requirement)
 - **v0.1 (2026-01-30):** Added alignment with RCX Core Engine spec (Rule 2.2♢, A.10, etc.)
+- **v0.2 (2026-01-30):** IMPLEMENTED - 9 projections, 7-agent review complete, all criteria met

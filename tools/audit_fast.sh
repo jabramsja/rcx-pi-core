@@ -49,7 +49,19 @@ echo "== 1) Contraband check =="
 echo "== 1b) Test theater check =="
 ./tools/check_test_theater.sh tests
 
-echo "== 2) AST police =="
+echo "== 1c) JS contraband check =="
+./tools/contraband_js.sh
+
+echo "== 1d) JS AST police =="
+./tools/ast_police_js.sh
+
+echo "== 1e) JS test theater check =="
+./tools/check_test_theater_js.sh
+
+echo "== 1f) Seed police =="
+./tools/seed_police.sh
+
+echo "== 2) AST police (Python) =="
 python3 tools/ast_police.py
 
 echo "== 3) Debt dashboard =="
@@ -81,7 +93,19 @@ pytest $PARALLEL_FLAG -q \
     tests/test_debt_enforcement.py \
     tests/test_eval_seed_adversary.py \
     tests/test_self_hosting_v0.py \
-    tests/test_phase8b_grounding_gaps.py
+    tests/test_phase8b_grounding_gaps.py \
+    tests/test_enginenews_parity.py \
+    tests/test_js_parity_automated.py
+
+echo ""
+echo "== 5) JavaScript L3 parity check =="
+./tools/check_js_debt.sh
+if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    echo "OK: JS tests pass"
+else
+    echo "FAIL: JS tests failed"
+    exit 1
+fi
 
 echo ""
 echo "✅ Fast audit pass"

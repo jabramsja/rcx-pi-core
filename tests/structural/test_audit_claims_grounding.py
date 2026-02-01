@@ -206,3 +206,94 @@ class TestStepBudgetCoverage:
         assert "reset_step_budget" in content, (
             "Step budget tests must test reset_step_budget"
         )
+
+
+class TestUnderscoreKeyAudit:
+    """Verify underscore-prefixed key audit handles kernel/engine seeds correctly.
+
+    Kernel and engine seeds MUST use underscore-prefixed fields (_mode, _phase, etc.)
+    to distinguish internal state from domain data. This prevents domain data from
+    accidentally colliding with kernel/engine state.
+
+    See:
+    - MetaCircularKernel.v0.md (kernel.v1.json, match.v2.json, subst.v2.json)
+    - EngineNewsStructural.v0.md (enginenews.v1.json)
+    """
+
+    # Seeds that are intentionally allowed to use underscore-prefixed keys
+    KERNEL_ENGINE_SEEDS = [
+        "kernel.v1.json",      # Kernel state: _mode, _phase, _remaining, etc.
+        "match.v2.json",       # Match context: _match_ctx
+        "subst.v2.json",       # Subst context: _subst_ctx
+        "enginenews.v1.json",  # Engine state: _mode, _phase, _seen, _current, etc.
+    ]
+
+    def test_audit_all_excludes_kernel_seeds(self):
+        """audit_all.sh must exclude kernel/engine seeds from underscore check."""
+        script = REPO_ROOT / "tools" / "audit_all.sh"
+        content = script.read_text()
+
+        for seed in self.KERNEL_ENGINE_SEEDS:
+            assert seed in content, (
+                f"audit_all.sh must exclude {seed} from underscore key check. "
+                f"Kernel/engine seeds use underscore-prefixed fields by design."
+            )
+
+    def test_precommit_excludes_kernel_seeds(self):
+        """pre-commit-check.sh must exclude kernel/engine seeds from underscore check."""
+        script = REPO_ROOT / "tools" / "pre-commit-check.sh"
+        content = script.read_text()
+
+        # Check for the KERNEL_SEEDS pattern or individual exclusions
+        for seed in self.KERNEL_ENGINE_SEEDS:
+            assert seed in content, (
+                f"pre-commit-check.sh must exclude {seed} from underscore key check. "
+                f"Kernel/engine seeds use underscore-prefixed fields by design."
+            )
+
+    def test_kernel_seed_uses_underscore_mode(self):
+        """kernel.v1.json must use _mode for state machine transitions."""
+        import json
+        seed_path = REPO_ROOT / "seeds" / "kernel.v1.json"
+        content = seed_path.read_text()
+        seed = json.loads(content)
+
+        # Verify _mode is used in projections
+        all_text = json.dumps(seed)
+        assert '"_mode"' in all_text, (
+            "kernel.v1.json must use _mode for state machine transitions"
+        )
+
+    def test_enginenews_seed_uses_underscore_fields(self):
+        """enginenews.v1.json must use underscore-prefixed fields for engine state."""
+        import json
+        seed_path = REPO_ROOT / "seeds" / "enginenews.v1.json"
+        content = seed_path.read_text()
+        seed = json.loads(content)
+
+        # Verify engine state fields are underscore-prefixed
+        all_text = json.dumps(seed)
+        required_fields = ["_mode", "_phase", "_seen", "_current", "_result"]
+        for field in required_fields:
+            assert f'"{field}"' in all_text, (
+                f"enginenews.v1.json must use {field} for engine state. "
+                f"Underscore prefix distinguishes engine state from domain data."
+            )
+
+    def test_underscore_prefix_documented(self):
+        """The underscore prefix convention must be documented."""
+        # Check MetaCircularKernel.v0.md
+        doc1 = REPO_ROOT / "docs" / "core" / "MetaCircularKernel.v0.md"
+        if doc1.exists():
+            content1 = doc1.read_text()
+            assert "_mode" in content1 or "underscore" in content1.lower(), (
+                "MetaCircularKernel.v0.md should document underscore prefix convention"
+            )
+
+        # Check EngineNewsStructural.v0.md
+        doc2 = REPO_ROOT / "docs" / "core" / "EngineNewsStructural.v0.md"
+        if doc2.exists():
+            content2 = doc2.read_text()
+            assert "_mode" in content2 or "underscore" in content2.lower(), (
+                "EngineNewsStructural.v0.md should document underscore prefix convention"
+            )
