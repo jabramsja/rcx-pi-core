@@ -561,11 +561,11 @@ def run_mu_structural(
 
     for i in range(max_steps):
         # Find which projection will match (for trace)
+        # Uses match_mu to stay structural (9-agent review 2026-01-31: avoid Python match())
         matched_id = None
         for proj in projections:
-            from rcx_pi.selfhost.eval_seed import match
-            bindings = match(proj.get("pattern"), current)
-            if bindings is not None:
+            bindings = match_mu(proj.get("pattern"), current)
+            if bindings is not NO_MATCH:
                 matched_id = proj.get("id")
                 break
 

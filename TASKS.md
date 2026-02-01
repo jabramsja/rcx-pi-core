@@ -340,11 +340,11 @@ All blockers resolved 2026-01-28:
 - [x] Debt floor: 12 (irreducible bootstrap substrate) - no further reduction without L4 architecture
 
 **Recommended fuzzer additions (from agent review):**
-- [ ] Add fuzzer tests for kernel projection ordering (500+ examples)
-- [ ] Add fuzzer tests for mode transition completeness (500+ examples)
-- [ ] Add fuzzer tests for context passthrough stress (500+ examples)
-- [ ] Add property-based tests for _step/_projs field fuzzing (500+ examples)
-- [ ] Add depth boundary fuzzing (95-105 range)
+- [x] Add fuzzer tests for kernel projection ordering (500+ examples) - 2026-02-01
+- [x] Add fuzzer tests for mode transition completeness (500+ examples) - 2026-02-01
+- [x] Add fuzzer tests for context passthrough stress (500+ examples) - 2026-02-01
+- [x] Add property-based tests for _step/_projs field fuzzing (500+ examples) - 2026-02-01
+- [x] Add depth boundary fuzzing (95-105 range) - 2026-02-01
 
 **Debt status**: See `STATUS.md` for current counts and threshold.
 
@@ -524,6 +524,7 @@ All blockers resolved 2026-01-28:
 
 **Active designs:**
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
+- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - Rule 3.1 operator freeze mechanism (Step 6 candidate) - **Added 2026-02-01**
 
 **Promoted to NEXT:**
 - Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - **Promoted 2026-01-27**

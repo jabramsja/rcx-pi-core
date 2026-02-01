@@ -72,9 +72,10 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
         ValueError: If an empty variable name is found.
     """
     # Iterative traversal with explicit stack
+    # BOUNDARY SCAFFOLDING: Pre-validation check, not semantic computation.
     stack: list[Mu] = [value]
 
-    while stack:
+    while stack:  # @host_iteration: boundary pre-validation (9-agent review 2026-01-31)
         current = stack.pop()
 
         if isinstance(current, dict):  # isinstance at boundary is scaffolding
@@ -140,11 +141,13 @@ def normalize_for_match(value: Mu) -> Mu:
 
     # Path-based cycle detection: track current ancestors, not all visited nodes.
     # This allows shared references (DAGs) while detecting true back-edges (cycles).
+    # BOUNDARY SCAFFOLDING: Normalization converts Python list/dict to Mu head/tail
+    # at API boundary. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
     path: set[int] = set()
     stack: list = [("eval", value)]
     result: Mu = None
 
-    while stack:
+    while stack:  # @host_iteration: boundary normalization (Phase 6c)
         item = stack.pop()
         op = item[0]
 
@@ -341,9 +344,10 @@ def is_dict_linked_list(value: Mu) -> bool:
         return False
 
     # Check ALL elements are valid kv-pairs (with cycle detection)
+    # BOUNDARY SCAFFOLDING: Legacy classification for untagged structures.
     visited: set[int] = set()
     current = value
-    while current is not None:
+    while current is not None:  # @host_iteration: boundary classification (legacy)
         node_id = id(current)
         if node_id in visited:
             return False  # Circular structure - not a valid dict encoding
@@ -400,11 +404,13 @@ def denormalize_from_match(value: Mu) -> Mu:
 
     # Path-based cycle detection: track current ancestors, not all visited nodes.
     # This allows shared references (DAGs) while detecting true back-edges (cycles).
+    # BOUNDARY SCAFFOLDING: Denormalization converts Mu head/tail to Python list/dict
+    # at API boundary. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
     path: set[int] = set()
     stack: list = [("eval", value)]
     result: Mu = None
 
-    while stack:
+    while stack:  # @host_iteration: boundary denormalization (Phase 6c)
         item = stack.pop()
         op = item[0]
 
@@ -621,11 +627,11 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
 
     Note: This is a boundary conversion function (Python API scaffolding),
     not semantic debt. The projections work on linked lists; this converts
-    the result for Python callers.
+    the result for Python callers. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
     """
     result: dict[str, Mu] = {}
     current = linked
-    while current is not None:
+    while current is not None:  # @host_iteration: boundary conversion (API scaffolding)
         if not isinstance(current, dict):  # isinstance at boundary is scaffolding
             raise ValueError(f"Invalid bindings structure: {current}")
         name = current.get("name")

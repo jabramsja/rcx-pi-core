@@ -155,6 +155,8 @@ CRITICAL_TEST_FILES = frozenset({
     "test_structural_trace.py",
     "test_eval_seed_parity.py",
     "test_eval_seed_v0.py",
+    # Kernel recommended fuzzers - CRITICAL for kernel security (9-agent recommendations)
+    "test_kernel_recommended_fuzzers.py",
 })
 
 
