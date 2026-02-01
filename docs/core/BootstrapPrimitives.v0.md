@@ -27,8 +27,9 @@ It does NOT define the complete architecture for self-hosting. The primitives ar
 | Level | What | Status | Enabled By |
 |-------|------|--------|------------|
 | **L1: Algorithmic** | match/subst as projections | DONE | eval_step + mu_equal |
-| **L2: Operational** | kernel loop as projections | PARTIAL | All 5 primitives |
-| **L3: Full Bootstrap** | RCX runs RCX | FUTURE | All 5 primitives + structural outer loop |
+| **L2: Operational** | kernel loop as projections | FULL | All 5 primitives |
+| **L3: Substrate Portability** | Same projections run on Python + JS | COMPLETE | All 5 primitives on both substrates |
+| **L4: True Self-Hosting** | Bootstrap primitives eliminated | SINK | Research question |
 
 All three levels USE these primitives. The primitives enable self-hosting but don't guarantee it.
 
@@ -355,7 +356,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 - `tests/fixtures/parity_vectors.json` - shared test vectors (23 total)
 
 **Role clarification:**
-- **Python:** Primary development substrate (1600+ tests, agent-reviewed)
+- **Python:** Primary development substrate (2,100+ tests, agent-reviewed)
 - **JavaScript:** Portability proof (auditable ~300 LOC, all parity tests pass)
 
 ---

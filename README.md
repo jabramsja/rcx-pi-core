@@ -11,9 +11,9 @@ A projection-based computational substrate where **structure is the primitive**.
 | **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
 | **Step 5** | EngineNews structural closure detection | ✅ DONE |
 
-- **2,025+ tests** across 90+ test files
+- **2,100+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
-- **32 CRITICAL_TEST_FILES** protected from silent skipping
+- **33 CRITICAL_TEST_FILES** protected from silent skipping
 
 **Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
 All logic is in `seeds/enginenews.v1.json` (9 projections). Bootstrap provides only mechanical execution.
@@ -183,4 +183,4 @@ See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emi
 
 ---
 
-*Last updated: 2026-01-31*
+*Last updated: 2026-02-01*

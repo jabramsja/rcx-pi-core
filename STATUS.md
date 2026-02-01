@@ -70,7 +70,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **enginenews.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
-| **Python Substrate** | ~2000 LOC, 2070+ tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~2000 LOC, 2,100+ tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~350 LOC, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
 
@@ -210,7 +210,7 @@ Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
 - `tests/structural/` (16 files) - structural claims grounding
 - `tests/tools/` (3 files) - security tool grounding tests
 - 20 core test files including adversarial and self-hosting tests
-- 32 CRITICAL_TEST_FILES protected from silent skipping
+- 33 CRITICAL_TEST_FILES protected from silent skipping
 
 **Fuzzer Settings (standardized 2026-01-28):**
 - `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
@@ -360,7 +360,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 1600+ tests passing.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,100+ tests passing.
 
 **L3 Substrate Portability Progress (2026-01-30):**
 - Step 1 DONE: JS POC security hardened (v4) - KERNEL_RESERVED_FIELDS validation, dict kv-pair fix
@@ -532,7 +532,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
    - `{}` now normalizes to `{"_type": "dict"}` (was `None`)
    - Denormalization correctly reverses typed sentinels
    - Normalization is now idempotent
-6. All 1600+ tests pass
+6. All 2,100+ tests pass
 
 **Tests created:**
 - `tests/test_phase8b_mechanical_kernel.py` (31 tests)
@@ -571,8 +571,20 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-01-31
+**Last updated:** 2026-02-01
 **Next milestone:** L4 research or new features (L3 is complete with verified cross-substrate parity)
+
+**9-Agent Fresh Audit (2026-02-01):**
+All 9 agents ran destructive audits against current codebase with explicit file reads (not stale context):
+- **Verifier**: APPROVE - trace format identical between Python/JS, all loops marked with @host_iteration
+- **Adversary**: SECURE - no attack vectors found, all patterns properly enforced
+- **Expert**: MINIMAL - code appropriately sized
+- **Structural-proof**: PROVEN - all structural claims verified
+- **Grounding**: GROUNDED - test_js_parity_automated.py runs REAL subprocess calls to Node.js
+- **Fuzzer**: 3 Hypothesis fuzzers exist (roundtrip, kernel, mu_equal parity)
+- **Translator**: CLEAR - no scope creep or host smuggling
+- **Visualizer**: VERIFIED - no hidden state
+- **Advisor**: ON_TRACK - all strategic gaps closed
 
 **Completed (Steps 1-5):**
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)

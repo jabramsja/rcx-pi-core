@@ -6,12 +6,13 @@
 
 ## Why This Matters
 
-Self-hosting has three levels:
-- **L1 (Algorithmic)**: Projections encode the algorithm (match/substitute as Mu) ✓ DONE
-- **L2 (Operational)**: RCX executes projections structurally - NEXT
-- **L3 (Meta-circular)**: Kernel itself is projections - FUTURE
+Self-hosting has four levels:
+- **L1 (Algorithmic)**: Projections encode the algorithm (match/substitute as Mu) ✅ DONE
+- **L2 (Operational)**: RCX executes projections structurally ✅ FULL
+- **L3 (Substrate Portability)**: Same projections run on Python + JS ✅ COMPLETE
+- **L4 (True Self-Hosting)**: Bootstrap primitives eliminated - SINK (research)
 
-At L1, Python still runs the kernel loop. This creates ambiguity: which Python code is "acceptable scaffolding" and which is "semantic debt that smuggles emergence"?
+At L2, Python provides the bootstrap primitives (eval_step, mu_equal, etc.) that run projections. This creates ambiguity: which Python code is "acceptable scaffolding" and which is "semantic debt that smuggles emergence"?
 
 This document answers that question.
 
