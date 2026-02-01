@@ -10,14 +10,11 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mu_equal
-from .eval_seed import step
-from .kernel import get_step_budget
+from .mu_type import Mu, assert_mu
 from .match_mu import (
     normalize_for_match,
     denormalize_from_match,
     dict_to_bindings,
-    bindings_to_dict,
     _check_empty_var_names,
 )
 from .projection_loader import make_projection_loader

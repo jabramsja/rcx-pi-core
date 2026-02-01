@@ -10,14 +10,12 @@ import pytest
 from rcx_pi.eval_seed import (
     NO_MATCH,
     is_var,
-    get_var_name,
     match,
     substitute,
     apply_projection,
     step,
     create_step_handler,
     create_stall_handler,
-    create_eval_seed,
     # register_eval_seed removed - legacy Kernel class deleted
     assert_not_lambda_calculus,
 )
