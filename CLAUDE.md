@@ -201,7 +201,7 @@ Do NOT update individual agent files - they read STATUS.md.
 ## Governance & Invariants
 
 **See `TASKS.md`** for:
-- North Star invariants (12 items)
+- North Star invariants (13 items)
 - Governance rules (non-negotiable)
 - Promotion criteria (SINK → VECTOR → NEXT)
 

@@ -76,9 +76,15 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     # Walk the list to check:
     # 1. No circular references (projections can't handle these)
     # 2. All kv-pair keys are strings (projections can't verify Python types)
+    #
+    # BOUNDARY SCAFFOLDING: This while loop is a pre-validation check before
+    # projections run. It verifies preconditions that projections cannot check
+    # (Python types, circular refs). This is boundary scaffolding analogous to
+    # normalize_for_match/denormalize_from_match loops in match_mu.py.
+    # See STATUS.md "Boundary Scaffolding vs Semantic Debt" for policy.
     visited: set[int] = set()
     current = value
-    while current is not None:
+    while current is not None:  # @host_iteration: boundary pre-validation (9-agent review 2026-01-31)
         if not isinstance(current, dict):
             break
         node_id = id(current)
