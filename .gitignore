@@ -92,6 +92,10 @@ RCX_MINIMAL_SPINE_MANIFEST.json
 
 # local tooling
 .claude/
+# But track agent hooks and settings for reproducibility
+!.claude/hooks/
+!.claude/settings.json
+!.claude/agents/
 .agent_memory/
 experiments/
 # But track the JS POC for L3 parity (referenced by CI)

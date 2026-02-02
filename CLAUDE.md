@@ -65,17 +65,20 @@ These are the only two files that track current state. Do not duplicate status i
 | advisor | **opus** | Strategic advice, trade-offs | When stuck on design decisions |
 | verifier | **opus** | North Star invariant compliance | Every PR with rcx_pi/ changes |
 | adversary | **opus** | Red team attack testing | New modules, security-sensitive code |
-| expert | sonnet | Code quality, simplification | Complex code, major refactors |
+| expert | **opus** | Code quality, simplification | Complex code, major refactors |
 | structural-proof | sonnet | Verify Mu projection claims | When claiming "pure structural" |
 | grounding | sonnet | Convert claims to executable tests | Core kernel/seed code |
 | fuzzer | sonnet | Property-based testing (1000+ inputs) | Core kernel/seed code |
 | translator | sonnet | Plain English explanation | Founder review |
-| visualizer | haiku | Mermaid diagrams of Mu structures | Founder review |
+| visualizer | sonnet | Mermaid diagrams of Mu structures | Founder review |
 
 **Model selection rationale:**
-- **Opus** for core agents (advisor, verifier, adversary) - deeper reasoning for strategic/security analysis
+- **Opus** for core agents (advisor, verifier, adversary, expert) - deeper reasoning for strategic/security analysis
 - **Sonnet** for implementation agents - good balance of speed and quality
-- **Haiku** for visualizer - simple diagram generation, run often
+
+**Agent Guardrails (Anti-Hallucination):**
+All 9 agents follow `docs/agents/AgentGuardrails.v0.md` requiring FILE:LINE + code evidence.
+The validation hook (`.claude/hooks/validate-agent-compliance.sh`) automatically checks output format.
 
 **Mandatory for PRs:** verifier, adversary, expert, structural-proof (4)
 **For core code:** Add grounding, fuzzer (6)
