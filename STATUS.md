@@ -206,11 +206,11 @@ Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
 | Tier 2 | All tests including 200+ example fuzzers | Before push, CI |
 | Tier 3 | Deep nesting, wide structures, pathological inputs | Comprehensive validation |
 
-**Tier 1 includes (2026-01-30):**
-- `tests/structural/` (16 files) - structural claims grounding
-- `tests/tools/` (3 files) - security tool grounding tests
+**Tier 1 includes (2026-02-01):**
+- `tests/structural/` (17 files) - structural claims grounding
+- `tests/tools/` (4 files) - security tool grounding tests (including validator)
 - 20 core test files including adversarial and self-hosting tests
-- 33 CRITICAL_TEST_FILES protected from silent skipping
+- 34 CRITICAL_TEST_FILES protected from silent skipping
 
 **Fuzzer Settings (standardized 2026-01-28):**
 - `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
@@ -449,6 +449,14 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Updated audit_fast.sh to include security-critical tests in Tier 1
 - Single source of truth: THRESHOLD and INFRA_CEILING read from STATUS.md
 
+**Agent Guardrails (Anti-Hallucination, 2026-02-01):**
+- Created `docs/agents/AgentGuardrails.v0.md` - requires FILE:LINE + code evidence
+- Created `tools/validate_agent_compliance.py` - validates agent output format
+- Created `tests/tools/test_validate_agent_compliance.py` (43 tests)
+- Created `.claude/hooks/validate-agent-compliance.sh` - automatic SubagentStop hook
+- Updated all 9 agent prompts with MANDATORY verification protocol
+- Agent models: Opus (verifier, adversary, expert, advisor), Sonnet (others) - no Haiku
+
 **Known Security Limitations (9-agent consensus, 2026-01-30):**
 These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 1. **Unicode homoglyphs** (Cyrillic/Greek lookalikes): NOT_RELEVANT - Attack defeats itself.
@@ -571,7 +579,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-01
+**Last updated:** 2026-02-01 (1456+ tests, guardrails infrastructure added)
 **Next milestone:** L4 research or new features (L3 is complete with verified cross-substrate parity)
 
 **9-Agent Fresh Audit (2026-02-01):**

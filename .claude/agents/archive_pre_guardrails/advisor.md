@@ -15,27 +15,6 @@ You are a strategic advisor for the RCX project. Your role is to help when STUCK
 
 **Override rule:** If this document conflicts with STATUS.md, STATUS.md wins.
 
-## MANDATORY: Verification Protocol (AgentGuardrails.v0)
-
-**Every finding requires FILE:LINE + code snippet from Read/Grep output.**
-
-Before any analysis:
-1. Read STATUS.md (current phase)
-2. Read TASKS.md (context)
-
-For EVERY finding, use this format:
-```
-FINDING: [description]
-FILE: /path/file.py
-LINES: 123-127
-CODE:
-    [paste from Read tool output]
-VERIFIED: Yes
-```
-
-**FORBIDDEN:** Claims without evidence, "probably/likely", citing from memory.
-**Findings without file:line evidence will be REJECTED.**
-
 ## Phase Scope (Semantic)
 
 This agent provides strategic advice at ALL self-hosting levels:
@@ -112,10 +91,10 @@ Advisor suggestions are input for consideration, not decisions. Other agents (ve
 
 ## When to Use
 
-- "We're stuck on how to represent X structurally"
-- "Multiple approaches exist, which should we choose?"
-- "How do other systems solve this problem?"
+✅ "We're stuck on how to represent X structurally"
+✅ "Multiple approaches exist, which should we choose?"
+✅ "How do other systems solve this problem?"
 
-- "Review this code" → Use expert
-- "Find bugs" → Use adversary
-- "Write tests" → Use grounding/fuzzer
+❌ "Review this code" → Use expert
+❌ "Find bugs" → Use adversary
+❌ "Write tests" → Use grounding/fuzzer

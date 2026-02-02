@@ -36,8 +36,9 @@ from hypothesis.strategies import composite
 from rcx_pi.eval_seed import apply_projection, NO_MATCH
 from rcx_pi.mu_type import is_mu, mu_equal, MAX_MU_DEPTH
 
-# Import shared apply_mu from conftest
-from conftest import apply_mu
+# Import apply_mu from production code (9-agent Expert finding 2026-02-01)
+# Production version has assert_mu() validation that conftest version lacked
+from rcx_pi.step_mu import apply_mu
 
 
 # =============================================================================

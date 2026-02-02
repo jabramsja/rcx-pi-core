@@ -137,7 +137,7 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 - **Verdict:** ROBUST / FRAGILE / BROKEN
 
 ### 9. Visualizer (`visualizer.md`)
-- **Model:** Haiku (cheap, run often)
+- **Model:** Sonnet
 - **Purpose:** Draw Mu structures as Mermaid diagrams
 - **Focus:** Visual lie detection - linked lists show chains, Python lists show blobs
 - **Why:** Founder can't read code but CAN look at a picture
@@ -152,12 +152,40 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 - **Verdict:** OPTIONS_PROVIDED / RECOMMENDATION / NEEDS_MORE_CONTEXT
 - **Note:** Advisor PROPOSES, other agents VALIDATE
 
+## Agent Guardrails (Anti-Hallucination)
+
+All 9 review agents follow `AgentGuardrails.v0.md` which requires:
+
+1. **Mandatory evidence format** for every finding:
+   ```
+   FINDING: [description]
+   FILE: /absolute/path
+   LINES: start-end
+   CODE:
+       [paste from Read tool output]
+   VERIFIED: Yes
+   ```
+
+2. **Forbidden behaviors:**
+   - Claims without file:line evidence
+   - Hallucination words: probably, likely, seems, assume, maybe, might, presumably, appears, possibly, could, perhaps, believe, suggests
+   - Citing from memory instead of Read/Grep output
+
+3. **Automatic validation:**
+   - `.claude/hooks/validate-agent-compliance.sh` runs after SubagentStop
+   - Checks for required format patterns
+   - Blocks non-compliant output
+   - Tests in `tests/tools/test_validate_agent_compliance.py` (43 tests)
+
+**Why this matters:** LLMs can hallucinate plausible-sounding file paths and code. Requiring paste-from-tool-output ensures agents actually read files before making claims.
+
 ## Key Design Decisions
 
 ### Intelligence Balance
 - **Rule:** Reviewers must be at least as smart as the builder
-- **Before:** Expert=Sonnet, Adversary=Haiku (unsafe)
-- **After:** All agents use Sonnet (balanced)
+- **Model distribution (2026-02-01):**
+  - **Opus:** verifier, adversary, expert, advisor (core reasoning agents)
+  - **Sonnet:** structural-proof, grounding, fuzzer, translator, visualizer (implementation agents)
 
 ### Trust Model
 - We don't trust the Expert's code
@@ -180,6 +208,13 @@ Adversary may claim impossibility. Verifier decides whether that impossibility v
 - Structural-Proof must generate runnable code, not just text traces
 - Grounding must write actual pytest tests
 - Text can lie. Code that crashes doesn't lie.
+
+### Verification Protocol (NEW 2026-02-01)
+All agents MUST follow the verification protocol in `docs/agents/AgentGuardrails.v0.md`:
+- Every finding requires file:line citation
+- Every claim requires actual code snippet from Read/Grep
+- Findings marked VERIFIED: No are REJECTED
+- Summaries/docs alone are NOT sufficient evidence
 
 ### The Trusted Kernel Architecture
 - **The Law (Kernel):** `eval_seed.py` contains `step()`, `match()`, `substitute()`
@@ -308,3 +343,5 @@ python3 tools/ast_police.py
 | 2026-01-27 | Clarified scaffolding debt vs semantic debt distinction |
 | 2026-01-29 | Upgraded core agents (advisor, verifier, adversary) to Opus for deeper reasoning |
 | 2026-01-29 | Deployed v4.3 prompt updates: evidence requirements, A-K attack checklist, THEATER detection, North Star tracing |
+| 2026-02-01 | Created AgentGuardrails.v0.md with mandatory verification protocol (9-agent review finding) |
+| 2026-02-01 | Added anti-hallucination checklist and prompt template for all agents |

@@ -15,27 +15,6 @@ You are the liaison between the Code and the Founder. The Founder cannot read Py
 
 **Override rule:** If this document conflicts with STATUS.md, STATUS.md wins.
 
-## MANDATORY: Verification Protocol (AgentGuardrails.v0)
-
-**Every finding requires FILE:LINE + code snippet from Read/Grep output.**
-
-Before any analysis:
-1. Read STATUS.md (current phase)
-2. Read TASKS.md (context)
-
-For EVERY finding, use this format:
-```
-FINDING: [description]
-FILE: /path/file.py
-LINES: 123-127
-CODE:
-    [paste from Read tool output]
-VERIFIED: Yes
-```
-
-**FORBIDDEN:** Claims without evidence, "probably/likely", citing from memory.
-**Findings without file:line evidence will be REJECTED.**
-
 ## Phase Scope (Semantic)
 
 This agent's translation applies at ALL self-hosting levels:

@@ -113,6 +113,10 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "== 3. Bytecode Portability: Opcode Definitions =="
 
+# Gate: Skip if bytecode_vm.py doesn't exist (not all builds have bytecode)
+if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
+    echo "  (bytecode_vm.py not found - skipping bytecode checks)"
+else
 echo "Scanning bytecode VM for Python-specific builtins in opcodes..."
 
 # Opcodes should not directly reference Python builtins that wouldn't exist
@@ -147,6 +151,7 @@ done
 if [ $FAILED -eq 0 ]; then
     echo "  ✓ No non-portable Python builtins in bytecode VM"
 fi
+fi  # End bytecode_vm.py gate
 echo ""
 
 # -----------------------------------------------------------------------------
@@ -187,9 +192,11 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "== 5. Opcode Enum: Language-Agnostic Definitions =="
 
+# Gate: Skip if bytecode_vm.py doesn't exist
+if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
+    echo "  (bytecode_vm.py not found - skipping opcode enum checks)"
+else
 echo "Verifying opcodes are defined as language-agnostic constants..."
-
-if [ -f "rcx_pi/bytecode_vm.py" ]; then
     # Check that opcodes are simple enum values, not complex Python objects
     OPCODE_COUNT=$(grep -c "= auto()" rcx_pi/bytecode_vm.py 2>/dev/null || echo "0")
     echo "  Found $OPCODE_COUNT opcode definitions"
@@ -201,7 +208,7 @@ if [ -f "rcx_pi/bytecode_vm.py" ]; then
         echo "  WARNING: Opcode definition structure unclear"
         WARNINGS=$((WARNINGS + 1))
     fi
-fi
+fi  # End bytecode_vm.py gate
 echo ""
 
 # -----------------------------------------------------------------------------
@@ -234,6 +241,10 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "== 7. Reserved Opcode Discipline =="
 
+# Gate: Skip if bytecode_vm.py doesn't exist
+if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
+    echo "  (bytecode_vm.py not found - skipping reserved opcode checks)"
+else
 echo "Verifying reserved opcodes remain unimplemented..."
 
 # Note: STALL implemented in v1a, FIX/FIXED in v1b, ROUTE/CLOSE remain blocked
@@ -272,6 +283,7 @@ fi
 if [ $FAILED -eq 0 ]; then
     echo "  ✓ Reserved opcodes (ROUTE/CLOSE) remain unimplemented"
 fi
+fi  # End bytecode_vm.py gate
 echo ""
 
 # -----------------------------------------------------------------------------

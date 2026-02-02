@@ -2,6 +2,59 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-01
+
+### Agent Guardrails (Anti-Hallucination Infrastructure)
+
+**Problem:** LLMs can hallucinate plausible-sounding file paths and code snippets. Previous agent outputs weren't verified for evidence.
+
+**Solution:**
+- Created `docs/agents/AgentGuardrails.v0.md` - spec requiring FILE:LINE + code evidence
+- Created `tools/validate_agent_compliance.py` - regex-based output validator
+- Created `tests/tools/test_validate_agent_compliance.py` - 43 tests for validator
+- Created `.claude/hooks/validate-agent-compliance.sh` - automatic SubagentStop hook
+- Updated all 9 agent prompts with MANDATORY verification protocol section
+
+**Evidence Format (required for all findings):**
+```
+FINDING: [description]
+FILE: /absolute/path
+LINES: start-end
+CODE:
+    [paste from Read tool output]
+VERIFIED: Yes
+```
+
+**Validator Features:**
+- Line ending normalization (handles Windows/Mac/Unix)
+- CODE block validation (accepts tabs OR 2+ spaces)
+- Hallucination word detection (13 words blocked)
+- STATUS.md check (must be read in first 50 lines)
+
+**Files:**
+- `docs/agents/AgentGuardrails.v0.md` - specification
+- `tools/validate_agent_compliance.py` - validator script
+- `tests/tools/test_validate_agent_compliance.py` - 43 tests
+- `.claude/hooks/validate-agent-compliance.sh` - automatic hook
+- `.claude/settings.json` - hook configuration
+- `tools/agents/archive_pre_guardrails/` - archived old prompts
+
+**Agent Model Updates:**
+- Expert upgraded from Sonnet to Opus
+- Visualizer upgraded from Haiku to Sonnet
+- All agents now use Opus (4) or Sonnet (5) - no Haiku
+
+### Additional Fuzzer Tests (9-agent findings)
+
+- Created `tests/structural/test_entropy_budget_enforcement.py` - EntropyBudget.md grounding
+- Created `tests/test_denormalize_type_confusion_fuzzer.py` - type confusion attacks
+- Created `tests/test_normalize_malformed_fuzzer.py` - malformed structure handling
+
+### Git Tracking
+
+- `.claude/` directory now tracked (agents, hooks, settings.json) - was previously gitignored
+- Enables reproducible agent setup across machines
+
 ## 2026-01-31
 
 ### Cross-Substrate Parity Verification (9-agent Round 3 Fix)
