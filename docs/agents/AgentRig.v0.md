@@ -181,6 +181,13 @@ Adversary may claim impossibility. Verifier decides whether that impossibility v
 - Grounding must write actual pytest tests
 - Text can lie. Code that crashes doesn't lie.
 
+### Verification Protocol (NEW 2026-02-01)
+All agents MUST follow the verification protocol in `docs/agents/AgentGuardrails.v0.md`:
+- Every finding requires file:line citation
+- Every claim requires actual code snippet from Read/Grep
+- Findings marked VERIFIED: No are REJECTED
+- Summaries/docs alone are NOT sufficient evidence
+
 ### The Trusted Kernel Architecture
 - **The Law (Kernel):** `eval_seed.py` contains `step()`, `match()`, `substitute()`
 - **The Lawyers (Claude):** Claude writes JSON projections (data)
@@ -308,3 +315,5 @@ python3 tools/ast_police.py
 | 2026-01-27 | Clarified scaffolding debt vs semantic debt distinction |
 | 2026-01-29 | Upgraded core agents (advisor, verifier, adversary) to Opus for deeper reasoning |
 | 2026-01-29 | Deployed v4.3 prompt updates: evidence requirements, A-K attack checklist, THEATER detection, North Star tracing |
+| 2026-02-01 | Created AgentGuardrails.v0.md with mandatory verification protocol (9-agent review finding) |
+| 2026-02-01 | Added anti-hallucination checklist and prompt template for all agents |

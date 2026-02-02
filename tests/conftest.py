@@ -4,16 +4,13 @@ Pytest configuration for RCX tests.
 Provides:
 - Projection coverage tracking (enable with RCX_PROJECTION_COVERAGE=1)
 - Skips tests that require optional modules (rcx_omega, scripts)
-- Shared test utilities (apply_mu for Phase 4d integration)
+- Shared test utilities (run_until_done for kernel integration)
 - Hypothesis configuration for deterministic fuzzing
 """
 
 import os
 import pytest
 
-from rcx_pi.eval_seed import NO_MATCH
-from rcx_pi.match_mu import match_mu
-from rcx_pi.subst_mu import subst_mu
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.step_mu import clear_combined_kernel_cache
 
@@ -62,39 +59,9 @@ except ImportError:
 # =============================================================================
 # Shared Test Utilities
 # =============================================================================
-
-def apply_mu(projection: dict, value):
-    """
-    Apply a projection to a value using Mu-based match and substitute.
-
-    This is the integration of match_mu + subst_mu (Phase 4d).
-    Shared utility to avoid duplication across test files.
-
-    Args:
-        projection: Dict with "pattern" and "body" keys
-        value: The value to match against the pattern
-
-    Returns:
-        The substituted body if pattern matches, NO_MATCH otherwise
-
-    Raises:
-        TypeError: If projection is not a dict
-        KeyError: If projection missing pattern/body, or unbound variable in body
-    """
-    if not isinstance(projection, dict):
-        raise TypeError(f"Projection must be dict, got {type(projection).__name__}")
-    if "pattern" not in projection or "body" not in projection:
-        raise KeyError("Projection must have 'pattern' and 'body' keys")
-
-    pattern = projection["pattern"]
-    body = projection["body"]
-
-    bindings = match_mu(pattern, value)
-
-    if bindings is NO_MATCH:
-        return NO_MATCH
-
-    return subst_mu(body, bindings)
+# NOTE: apply_mu was removed from here (9-agent Expert finding 2026-02-01).
+# Tests should import from rcx_pi.step_mu which has assert_mu() validation.
+# The conftest version lacked this validation, creating a parity gap.
 
 # Skip tests that require optional modules not present in this repo
 collect_ignore = [
@@ -157,6 +124,13 @@ CRITICAL_TEST_FILES = frozenset({
     "test_eval_seed_v0.py",
     # Kernel recommended fuzzers - CRITICAL for kernel security (9-agent recommendations)
     "test_kernel_recommended_fuzzers.py",
+    # Boundary validation fuzzers - CRITICAL for malformed input rejection (9-agent round 4)
+    "test_normalize_malformed_fuzzer.py",
+    "test_denormalize_type_confusion_fuzzer.py",
+    # Entropy budget enforcement - CRITICAL for determinism (9-agent round 4)
+    "test_entropy_budget_enforcement.py",
+    # Agent compliance validator - CRITICAL for guardrail enforcement (9-agent self-review)
+    "test_validate_agent_compliance.py",
 })
 
 
