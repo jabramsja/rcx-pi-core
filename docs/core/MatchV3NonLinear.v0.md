@@ -285,18 +285,83 @@ The `match.lookup.found_same` projection uses a non-linear pattern:
 
 **Option A** for now. Accept that match.v3 is BOOTSTRAP. Document this as an irreducible layer (like Forth's NEXT). The goal is to enable enginenews/exhaust to become meta-circular, not to make match itself meta-circular (which may be impossible without infinite regress).
 
+### L4 Implications
+
+**match.v3 remains BOOTSTRAP forever in this architecture.** This is an irreducible bootstrap layer:
+
+- **What this means:** match.v3's own projections use non-linear patterns, so it requires `eval_seed.match()` to run
+- **Why it's acceptable:** Every computing system has irreducible primitives (Forth's NEXT, Lisp's EVAL, x86 microcode)
+- **L4 goal adjustment:** L4 becomes "minimize and document the bootstrap layer" not "eliminate it entirely"
+- **What match.v3 achieves:** Moves the bootstrap boundary DOWN one layer, enabling enginenews/exhaust to become META_CIRCULAR
+- **Trust boundary:** The security-critical code is `eval_seed.match()` binding conflict detection (~6 lines of Python/JS)
+
+This is NOT a compromise on L4 goals - it's a recognition that some bootstrap layer is mathematically irreducible.
+
+---
+
+## Security Requirements (9-Agent Adversary Review)
+
+### 1. KERNEL_RESERVED_FIELDS Update (CRITICAL)
+
+Before implementation, add these fields to `step_mu.py` KERNEL_RESERVED_FIELDS:
+
+```python
+# Match v3 lookup phase fields (MatchV3NonLinear.v0.md)
+"_lookup_name",        # Variable name being looked up
+"_lookup_value",       # Value to compare against existing binding
+"_lookup_bindings",    # Current position in bindings search
+"_original_bindings",  # Preserved for adding new binding
+```
+
+**Why:** Without this, domain data could inject forged lookup state to bypass match validation.
+
+### 2. Projection Ordering (SECURITY-CRITICAL)
+
+Lookup phase projections MUST be ordered (first-match-wins):
+
+1. `match.lookup.found_same` - Non-linear match for equal values
+2. `match.lookup.found_different` - Catch-all for found but different (→ NO_MATCH)
+3. `match.lookup.not_found_yet` - Continue searching bindings
+4. `match.lookup.not_found` - End of bindings (→ add new binding)
+
+**Why:** If `found_different` comes before `found_same`, ALL found bindings would be treated as conflicts (false positives).
+
+### 3. Variable Name Collision Mitigation
+
+User variable names (from `{"var": "x"}`) should NOT start with underscore to avoid confusion with reserved fields. Options:
+
+- **Option A (Validation):** Reject patterns with variables named `_mode`, `_phase`, etc.
+- **Option B (Prefixing):** Internally prefix user variables (e.g., `user_x`)
+- **Recommendation:** Option A (simpler, explicit error for bad patterns)
+
+### 4. Security Test Vectors
+
+Add these to the test suite:
+
+| Vector | Purpose | Expected |
+|--------|---------|----------|
+| `reserved_name_collision` | Pattern `{"a": {"var": "_mode"}}` | Match works (no state confusion) |
+| `lookup_injection` | Domain input with `_lookup_name` field | Rejected at kernel boundary |
+| `ordering_critical` | Non-linear with conflict | found_different fires, NO_MATCH |
+
 ---
 
 ## Reserved Fields
 
-New fields for match.v3:
-- `_phase`: "lookup_binding"
-- `_lookup_name`: variable name being looked up
-- `_lookup_value`: value to compare against existing binding
-- `_lookup_bindings`: current position in bindings search
-- `_original_bindings`: preserved for adding new binding
+New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implementation):
 
-These must be added to KERNEL_RESERVED_FIELDS if match.v3 is used in kernel context.
+| Field | Value/Type | Purpose |
+|-------|------------|---------|
+| `_phase` | `"lookup_binding"` | New phase value (field already exists) |
+| `_lookup_name` | string | Variable name being looked up |
+| `_lookup_value` | Mu | Value to compare against existing binding |
+| `_lookup_bindings` | linked list | Current position in bindings search |
+| `_original_bindings` | linked list | Preserved for adding new binding |
+
+**Implementation checklist:**
+1. [ ] Add 4 new fields to `KERNEL_RESERVED_FIELDS` in `rcx_pi/selfhost/step_mu.py`
+2. [ ] Add fields to JS equivalent in `substrates/js/eval_step.js`
+3. [ ] Add test verifying domain data with these fields is rejected
 
 ---
 
@@ -350,6 +415,12 @@ These must be added to KERNEL_RESERVED_FIELDS if match.v3 is used in kernel cont
 
 ## Changelog
 
+- **v0.1 (2026-02-02):** Added Security Requirements section from 9-agent adversary review:
+  - KERNEL_RESERVED_FIELDS update requirement
+  - Projection ordering specification
+  - Variable name collision mitigation
+  - Security test vectors
+  - L4 implications clarification ("BOOTSTRAP forever" is acceptable)
 - **v0 (2026-02-02):** Initial design doc created after 9-agent review discovered match.v2/enginenews incompatibility
 
 ---
@@ -357,12 +428,17 @@ These must be added to KERNEL_RESERVED_FIELDS if match.v3 is used in kernel cont
 ## Open Questions
 
 1. **Should match.v3 replace match.v2 or coexist?**
-   - Recommendation: Coexist. match.v2 is simpler and sufficient for linear-only seeds.
-   - Seeds declare which matcher they need.
+   - **Answer (9-agent consensus):** Coexist initially, consider unification after 6+ months
+   - match.v2 is simpler and sufficient for linear-only seeds
+   - Seeds declare `"requires_patterns": ["non-linear"]` to request match.v3
 
-2. **Is Option A (bootstrap the bootstrapper) acceptable?**
-   - Recommendation: Yes. This is analogous to Forth's NEXT or Lisp's EVAL.
-   - Some primitive must exist. The goal is minimizing it, not eliminating it.
+2. **Is Option A (bootstrap the bootstrapper) acceptable for L4?**
+   - **Answer (9-agent consensus):** Yes. This is analogous to Forth's NEXT or Lisp's EVAL
+   - Some primitive must exist - the goal is minimizing it, not eliminating it
+   - match.v3 being BOOTSTRAP is acceptable and documented
+   - L4 goal becomes: "minimize bootstrap layer to ~6 lines of auditable code"
 
 3. **Should KERNEL_RESERVED_FIELDS be extended now?**
-   - Recommendation: Wait until implementation. Design may change.
+   - **Answer (adversary finding):** YES - must be extended BEFORE implementation
+   - 4 new fields required (see Security Requirements section)
+   - Without this, domain data can inject forged lookup state

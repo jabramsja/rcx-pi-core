@@ -53,7 +53,8 @@ fi
 #       to distinguish internal state from domain data. See:
 #       - MetaCircularKernel.v0.md (kernel.v1.json, match.v2.json, subst.v2.json)
 #       - EngineNewsStructural.v0.md (enginenews.v1.json)
-KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json"
+#       - OperatorExhaustion.v0.md (exhaust.v1.json)
+KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json|exhaust.v1.json"
 if [ -n "$STAGED_JSON" ]; then
     echo "-- Checking for non-standard underscore keys in JSON..."
     for f in $STAGED_JSON; do
