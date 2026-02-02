@@ -5,7 +5,12 @@
 # Automatically validates agent output against AgentGuardrails.v0.md
 # Runs after SubagentStop events for review agents (verifier, adversary, etc.)
 #
+# SECURITY: This hook FAILS CLOSED - if validator is missing or crashes,
+# agent output is BLOCKED (not allowed). This prevents bypassing validation
+# by deleting the validator or causing it to crash.
+#
 # Created: 2026-02-01 (9-agent self-review recommendation)
+# Updated: 2026-02-02 (Critical fix: fail closed, not open)
 # =============================================================================
 
 set -euo pipefail
@@ -55,17 +60,44 @@ fi
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(dirname "$(dirname "$(dirname "$0")")")}"
 VALIDATOR="$PROJECT_DIR/tools/validate_agent_compliance.py"
 
+# =============================================================================
+# CRITICAL: Fail closed - if validator missing or crashes, BLOCK output
+# =============================================================================
+
 # Check if validator exists
 if [ ! -f "$VALIDATOR" ]; then
-  # Validator not found - allow without checking (don't break workflow)
+  # SECURITY: Validator not found - BLOCK (fail closed)
+  jq -n '{
+    "decision": "block",
+    "reason": "Validator script not found at tools/validate_agent_compliance.py - cannot verify compliance"
+  }'
   exit 0
 fi
 
-# Run compliance check
-RESULT=$(echo "$AGENT_OUTPUT" | python3 "$VALIDATOR" --json 2>/dev/null || echo '{"compliant": true}')
+# Run compliance check - capture exit code
+RESULT=$(echo "$AGENT_OUTPUT" | python3 "$VALIDATOR" --json 2>&1) || VALIDATOR_EXIT=$?
+VALIDATOR_EXIT=${VALIDATOR_EXIT:-0}
 
-# Check compliance status
-COMPLIANT=$(echo "$RESULT" | jq -r '.compliant // true')
+# If validator crashed, BLOCK (fail closed)
+if [ "$VALIDATOR_EXIT" -ne 0 ]; then
+  jq -n --arg error "$RESULT" '{
+    "decision": "block",
+    "reason": ("Validator script crashed: " + $error)
+  }'
+  exit 0
+fi
+
+# Check if result is valid JSON
+if ! echo "$RESULT" | jq -e . >/dev/null 2>&1; then
+  jq -n --arg output "$RESULT" '{
+    "decision": "block",
+    "reason": ("Validator produced invalid JSON: " + $output)
+  }'
+  exit 0
+fi
+
+# Check compliance status (default to false if missing - fail closed)
+COMPLIANT=$(echo "$RESULT" | jq -r '.compliant // false')
 
 if [ "$COMPLIANT" = "false" ]; then
   # Extract violations for the reason
