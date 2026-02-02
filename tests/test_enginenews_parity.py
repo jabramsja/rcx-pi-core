@@ -500,7 +500,7 @@ class TestEngineNewsClosureObjectStructure:
         return load_enginenews_projections()
 
     def test_closure_object_has_required_keys(self, projections):
-        """Closure object MUST have closure_detected and final_result keys."""
+        """Closure object MUST have closure_detected, tau_step, and final_result keys."""
         trace = {
             "head": {"step": 0, "state": "A", "projection": "p1"},
             "tail": {
@@ -512,9 +512,9 @@ class TestEngineNewsClosureObjectStructure:
         initial = {"_detect_closure": {"trace": trace, "result": "A"}}
         result = run_until_stable(projections, initial)
 
-        # Exact structure check
-        assert set(result.keys()) == {"closure_detected", "final_result"}, \
-            f"Omega(tau) must have exactly closure_detected and final_result, got {set(result.keys())}"
+        # Exact structure check (Step 6 v0: added tau_step for Operator Exhaustion)
+        assert set(result.keys()) == {"closure_detected", "tau_step", "final_result"}, \
+            f"Omega(tau) must have closure_detected, tau_step and final_result, got {set(result.keys())}"
 
     def test_closure_detected_is_boolean(self, projections):
         """closure_detected MUST be a boolean."""

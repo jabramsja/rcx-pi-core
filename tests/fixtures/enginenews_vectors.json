@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.0.0",
-    "description": "Parity vectors for EngineNews closure detection",
+    "version": "1.1.0",
+    "description": "Parity vectors for EngineNews closure detection (Step 6 v0: added tau_step)",
     "spec_ref": "RCXEngineNew.pdf Rule 2.2♢",
     "substrates": ["python", "javascript"]
   },
@@ -23,9 +23,10 @@
       },
       "expected": {
         "closure_detected": true,
+        "tau_step": 1,
         "final_result": "A"
       },
-      "notes": "State A appears twice -> closure detected"
+      "notes": "State A appears twice -> closure detected at step 1"
     },
     {
       "id": "engine.no_closure_single",
@@ -41,6 +42,7 @@
       },
       "expected": {
         "closure_detected": false,
+        "tau_step": null,
         "final_result": "X"
       },
       "notes": "Only one state, no repetition possible"
@@ -65,9 +67,10 @@
       },
       "expected": {
         "closure_detected": true,
+        "tau_step": 2,
         "final_result": "A"
       },
-      "notes": "A appears at step 0 and step 2 -> closure"
+      "notes": "A appears at step 0 and step 2 -> closure at step 2"
     },
     {
       "id": "engine.no_closure_distinct",
@@ -89,6 +92,7 @@
       },
       "expected": {
         "closure_detected": false,
+        "tau_step": null,
         "final_result": 3
       },
       "notes": "States 1, 2, 3 are all distinct"
@@ -113,9 +117,10 @@
       },
       "expected": {
         "closure_detected": true,
+        "tau_step": 2,
         "final_result": 0
       },
-      "notes": "0 appears at step 0 and step 2"
+      "notes": "0 appears at step 0 and step 2 -> closure at step 2"
     }
   ]
 }

@@ -48,6 +48,7 @@
       "body": {
         "_mode": "enginenews_done",
         "_closure": false,
+        "_tau_step": null,
         "_result": {"var": "result"}
       }
     },
@@ -156,6 +157,7 @@
       "body": {
         "_mode": "enginenews_done",
         "_closure": true,
+        "_tau_step": {"var": "step"},
         "_result": {"var": "result"}
       }
     },
@@ -212,14 +214,16 @@
     },
     {
       "id": "enginenews.unwrap",
-      "description": "Extract final closure detection result",
+      "description": "Extract final closure detection result with tau_step for exhaustion",
       "pattern": {
         "_mode": "enginenews_done",
         "_closure": {"var": "closure"},
+        "_tau_step": {"var": "tau"},
         "_result": {"var": "result"}
       },
       "body": {
         "closure_detected": {"var": "closure"},
+        "tau_step": {"var": "tau"},
         "final_result": {"var": "result"}
       }
     }

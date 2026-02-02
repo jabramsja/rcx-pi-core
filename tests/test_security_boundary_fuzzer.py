@@ -124,9 +124,9 @@ class TestReservedFieldsBasic:
                 validate_no_kernel_reserved_fields(malicious, "test")
 
     def test_reserved_fields_count(self):
-        """Verify exactly 12 reserved fields exist."""
-        assert len(KERNEL_RESERVED_FIELDS) == 12, (
-            f"Expected 12 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
+        """Verify exactly 20 reserved fields exist (12 kernel + 4 EngineNews + 4 Exhaustion)."""
+        assert len(KERNEL_RESERVED_FIELDS) == 20, (
+            f"Expected 20 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
         )
 
 
