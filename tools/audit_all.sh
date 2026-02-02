@@ -96,7 +96,8 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: kernel/match/subst seeds use underscore-prefixed fields for state (_mode, _phase, etc.)
 # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
 # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
-! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+# Note: mu/host/python is a symlink to rcx_pi/selfhost - exclude it to avoid scanning Python files
+! grep -RInE --include='*.json' '"_[a-zA-Z]+":' prototypes/ seeds/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 6) Fixture validation (v2 jsonl) =="
 # Count fixtures and verify none are empty
