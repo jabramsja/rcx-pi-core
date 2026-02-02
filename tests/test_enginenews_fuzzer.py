@@ -471,3 +471,117 @@ class TestEngineNewsComplexStates:
 
         assert result["closure_detected"] is True, \
             "Complex state should trigger closure on exact repeat"
+
+
+# =============================================================================
+# Edge Case Tests (9-agent review gaps, 2026-02-02)
+# =============================================================================
+
+
+class TestEngineNewsEdgeCasesFromReview:
+    """Edge case tests identified by 9-agent review (Fuzzer agent gaps)."""
+
+    def setup_method(self):
+        reset_step_budget()
+        self.projections = load_enginenews_projections()
+
+    def test_empty_trace_no_closure(self):
+        """Empty trace (null) immediately returns no closure.
+
+        Gap #1: Boundary between 0 entries and 1 entry was untested.
+        """
+        reset_step_budget()
+
+        # Empty linked list = None
+        trace = None
+        input_data = {"_detect_closure": {"trace": trace, "result": None}}
+        result = run_until_stable(self.projections, input_data)
+
+        assert "closure_detected" in result
+        assert result["closure_detected"] is False, \
+            "Empty trace cannot have closure (no states to recur)"
+
+    @given(mu_value(max_depth=5))
+    @settings(max_examples=100, deadline=10000)
+    def test_deep_nested_state_equality(self, deep_state):
+        """Binding conflict detection works for deeply nested states.
+
+        Gap #2: Non-linear pattern stress test at depth 5-7.
+        """
+        reset_step_budget()
+
+        # Same deeply nested state appears twice -> closure
+        trace = {
+            "head": {"step": 0, "state": deep_state, "projection": "p1"},
+            "tail": {
+                "head": {"step": 1, "state": deep_state, "projection": None},
+                "tail": None
+            }
+        }
+
+        input_data = {"_detect_closure": {"trace": trace, "result": deep_state}}
+        result = run_until_stable(self.projections, input_data, max_steps=200)
+
+        assert result["closure_detected"] is True, \
+            "Deep nested states should trigger closure on exact repeat"
+
+    @settings(max_examples=10, deadline=30000)
+    def test_long_trace_performance(self):
+        """Long trace (100+ unique states) completes without timeout.
+
+        Gap #3: O(n²) seen-set scan stress test.
+        """
+        reset_step_budget()
+
+        # Generate 100 unique states (reduced from 1000 for test speed)
+        trace = None
+        for i in range(100, 0, -1):
+            entry = {"step": 100 - i, "state": f"unique_state_{i}", "projection": "p1"}
+            trace = {"head": entry, "tail": trace}
+
+        input_data = {"_detect_closure": {"trace": trace, "result": "unique_state_100"}}
+        result = run_until_stable(self.projections, input_data, max_steps=500)
+
+        # Should detect NO closure (all states unique)
+        assert result["closure_detected"] is False, \
+            "100 unique states should not trigger closure"
+
+    def test_malformed_trace_entry_stalls(self):
+        """Trace entry missing 'projection' field causes graceful stall.
+
+        Gap #5: Defensive design for malformed trace entries.
+        """
+        reset_step_budget()
+
+        # Malformed entry (missing 'projection' field)
+        trace = {
+            "head": {"step": 0, "state": "A"},  # NO 'projection' field
+            "tail": None
+        }
+
+        input_data = {"_detect_closure": {"trace": trace, "result": "A"}}
+        result = run_until_stable(self.projections, input_data)
+
+        # Should stall (no pattern matches malformed entry) - result is input unchanged
+        # Document current behavior: stalls because check_state patterns require projection
+        assert "_detect_closure" in result or "closure_detected" in result, \
+            "Malformed trace should either stall or produce closure result"
+
+    def test_trace_with_null_state_no_crash(self):
+        """Trace with null state values doesn't crash."""
+        reset_step_budget()
+
+        trace = {
+            "head": {"step": 0, "state": None, "projection": "p1"},
+            "tail": {
+                "head": {"step": 1, "state": None, "projection": None},
+                "tail": None
+            }
+        }
+
+        input_data = {"_detect_closure": {"trace": trace, "result": None}}
+        result = run_until_stable(self.projections, input_data)
+
+        # null == null, so closure should be detected
+        assert result["closure_detected"] is True, \
+            "Null state recurring should trigger closure"

@@ -501,6 +501,31 @@ All blockers resolved 2026-01-28:
 
 **This proves:** All meaning is in projections. Host provides only mechanical execution. Emergence is structural, not a Python artifact. L3 Substrate Portability is COMPLETE.
 
+---
+
+### Step 6: Operator Exhaustion (Rule 3.1)
+
+**Promoted from VECTOR:** 2026-02-02
+**Rationale:** 9-agent review consensus - implementation scope bounded, security model clear.
+**Design Doc:** `docs/core/OperatorExhaustion.v0.md`
+
+**Goal:** Detect when operators are exhausted (Rule 3.1) - τ transitions to frozen state.
+
+**Projections to add to enginenews.v1.json:**
+- `enginenews.detect_exhaustion` - Entry point for exhaustion detection
+- `enginenews.count_operators` - Count active operators in operator pool
+- `enginenews.check_frozen` - Check if all operators frozen
+- `enginenews.mark_frozen` - Mark operator as frozen when it stalls twice
+
+**Success criteria (pending 9-agent review):**
+- [ ] Design doc reviewed by all 9 agents
+- [ ] `enginenews.v1.json` extended with exhaustion projections
+- [ ] Exhaustion detection is structural (projections, not Python)
+- [ ] Parity tests for Python and JavaScript
+- [ ] Property-based fuzzer tests for edge cases
+
+---
+
 **Cross-substrate verification (9-agent Round 3 fix, 2026-01-31):**
 - Previous tests just parsed strings from JS stdout (theater)
 - Now runs SAME 20 parity vectors through BOTH substrates via JSON API
@@ -524,7 +549,12 @@ All blockers resolved 2026-01-28:
 
 **Active designs:**
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
-- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - Rule 3.1 operator freeze mechanism (Step 6 candidate) - **Added 2026-02-01**
+
+**Promoted to NEXT:**
+- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - **Promoted 2026-02-02**
+  - 9-agent review consensus: Implementation scope bounded, security model clear
+  - Design doc: Rule 3.1 operator freeze mechanism (Step 6)
+  - See NEXT section for implementation plan
 
 **Promoted to NEXT:**
 - Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - **Promoted 2026-01-27**
