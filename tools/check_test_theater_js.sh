@@ -3,7 +3,7 @@
 # Catches vacuous assertions and fake tests in JS
 #
 # Usage: ./tools/check_test_theater_js.sh [file]
-#        Default: substrates/js/eval_step.js
+#        Default: mu/host/js/eval_step.js
 #
 # Test theater patterns:
 #   - assert(true) / assert(1) - always passes
@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-JS_FILE="${1:-substrates/js/eval_step.js}"
+JS_FILE="${1:-mu/host/js/eval_step.js}"
 
 if [ ! -f "$JS_FILE" ]; then
     echo "ERROR: $JS_FILE not found"

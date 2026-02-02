@@ -133,10 +133,67 @@ Agent outputs are checked for:
 
 ---
 
+## Cross-Seed Compatibility Check (MANDATORY for Seed Reviews)
+
+When reviewing any new or modified seed file, verify:
+
+### 1. Pattern Requirements
+```
+FINDING: Pattern requirements
+FILE: seeds/[name].json
+LINES: [meta section]
+CODE:
+    "requires_patterns": ["linear"] or ["non-linear"]
+VERIFIED: Yes/No
+```
+
+- **Linear patterns**: Same variable can only appear once per pattern
+- **Non-linear patterns**: Same variable appears twice (enforces equality via binding conflict)
+- match.v2.json is LINEAR ONLY - seeds requiring non-linear patterns are BOOTSTRAP-DEPENDENT
+
+### 2. Execution Layer Declaration
+```
+FINDING: Execution layer
+FILE: seeds/[name].json
+LINES: [meta section]
+CODE:
+    "execution_layer": "BOOTSTRAP" or "META_CIRCULAR"
+VERIFIED: Yes/No
+```
+
+- **BOOTSTRAP**: Runs via eval_seed.step() - Python/JS substrate provides non-linear support
+- **META_CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2)
+- If claiming META_CIRCULAR, show test that runs through step_kernel_mu
+
+### 3. Integration Shape Compatibility
+For seeds that chain together (e.g., enginenews → exhaust):
+
+```
+FINDING: Integration shape
+UPSTREAM: [seed A output format]
+DOWNSTREAM: [seed B input format]
+BRIDGE: [projection or host code that adapts]
+VERIFIED: Yes/No
+```
+
+- If no bridge exists, document as "requires host orchestration"
+
+### 4. Reserved Fields Compatibility
+```
+FINDING: Reserved fields
+FILE: seeds/[name].json
+FIELDS_USED: [list of _underscore fields]
+IN_KERNEL_RESERVED: Yes/No (check step_mu.py KERNEL_RESERVED_FIELDS)
+VERIFIED: Yes/No
+```
+
+---
+
 ## History
 
 | Date | Change |
 |------|--------|
+| 2026-02-02 | Added Cross-Seed Compatibility Check (architectural gap found in 9-agent review) |
 | 2026-02-01 | Initial version (9-agent review found hallucination issues) |
 | 2026-02-01 | Simplified from 319 lines to ~120 (Expert feedback) |
 | 2026-02-01 | Fixed tool references: Read/Grep not bash (Translator feedback) |

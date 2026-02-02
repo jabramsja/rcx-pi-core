@@ -91,14 +91,13 @@ echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
     grep -v '# ANTICHEAT_OK' || { echo "Found underscored import from rcx_pi"; exit 1; }
 
 echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
-# Note: _marker is allowed in seeds/ - it's a security feature for done-wrapper spoofing prevention
-# Note: _type is allowed in seeds/ - Phase 6c type tags for list/dict disambiguation
-# Note: kernel.v1.json is excluded - kernel state MUST use underscore-prefixed fields (_mode, _phase, etc.)
-#       to distinguish kernel state from domain data (see MetaCircularKernel.v0.md)
-# Note: match.v2.json and subst.v2.json are excluded - they use _match_ctx/_subst_ctx for kernel integration
-# Note: enginenews.v1.json is excluded - engine state uses underscore-prefixed fields (_mode, _phase, _seen, etc.)
-#       to distinguish engine state from domain data (see EngineNewsStructural.v0.md)
-! grep -RInE '"_[a-zA-Z]+":' prototypes/ seeds/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'enginenews.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+# Note: _marker is allowed - it's a security feature for done-wrapper spoofing prevention
+# Note: _type is allowed - Phase 6c type tags for list/dict disambiguation
+# Note: kernel/match/subst seeds use underscore-prefixed fields for state (_mode, _phase, etc.)
+# Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
+# Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
+# Note: mu/host/python is a symlink to rcx_pi/selfhost - exclude it to avoid scanning Python files
+! grep -RInE --include='*.json' '"_[a-zA-Z]+":' prototypes/ seeds/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 6) Fixture validation (v2 jsonl) =="
 # Count fixtures and verify none are empty
@@ -116,12 +115,12 @@ echo "Validated $FIXTURE_COUNT fixtures"
 [ "$EMPTY_COUNT" -eq 0 ] || { echo "Found $EMPTY_COUNT empty fixtures"; exit 1; }
 [ "$FIXTURE_COUNT" -ge 10 ] || { echo "Expected 10+ fixtures, found $FIXTURE_COUNT"; exit 1; }
 
-echo "== 7) CLI exec-summary spot-check (enginenews fixtures) =="
+echo "== 7) CLI exec-summary spot-check (recurrence/closure fixtures) =="
 fixtures=(
-  tests/fixtures/traces_v2/enginenews_spec_v0/progressive_refinement.v2.jsonl
-  tests/fixtures/traces_v2/enginenews_spec_v0/stall_pressure.v2.jsonl
-  tests/fixtures/traces_v2/enginenews_spec_v0/multi_cycle.v2.jsonl
-  tests/fixtures/traces_v2/enginenews_spec_v0/idempotent_cycle.v2.jsonl
+  tests/fixtures/traces_v2/recurrence_spec_v0/progressive_refinement.v2.jsonl
+  tests/fixtures/traces_v2/recurrence_spec_v0/stall_pressure.v2.jsonl
+  tests/fixtures/traces_v2/recurrence_spec_v0/multi_cycle.v2.jsonl
+  tests/fixtures/traces_v2/recurrence_spec_v0/idempotent_cycle.v2.jsonl
 )
 
 for f in "${fixtures[@]}"; do
@@ -153,8 +152,8 @@ echo "-- JS debt markers (must match Python) --"
 ./tools/check_js_debt.sh
 
 echo "-- JS tests (must all pass) --"
-node substrates/js/eval_step.js 2>&1 | tail -5 | head -1
-if node substrates/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+node mu/host/js/eval_step.js 2>&1 | tail -5 | head -1
+if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else
     echo "FAIL: JS tests failed"

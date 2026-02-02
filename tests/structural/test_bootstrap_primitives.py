@@ -523,13 +523,13 @@ class TestDocumentationClaims:
             "Missing scope section"
         )
 
-    def test_enginenews_section_exists(self):
-        """Document has EngineNews compatibility section."""
+    def test_recurrence_section_exists(self):
+        """Document has Recurrence compatibility section."""
         doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
         content = doc_path.read_text()
 
-        assert "EngineNews Compatibility" in content, (
-            "Missing EngineNews section"
+        assert "Recurrence Compatibility" in content, (
+            "Missing Recurrence section"
         )
 
 

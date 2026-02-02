@@ -23,9 +23,9 @@ class TestJSTestSuitePasses:
     """Verify the JavaScript test suite passes completely."""
 
     def test_js_eval_step_tests_pass(self):
-        """Run node substrates/js/eval_step.js and verify all tests pass."""
+        """Run node mu/host/js/eval_step.js and verify all tests pass."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -46,9 +46,9 @@ class TestJSTestSuitePasses:
         assert "0 failed" in security_line, f"JS security tests failed: {security_line}"
 
         # Verify EngineNews tests passed
-        assert "EngineNews parity tests:" in output, "EngineNews test output missing"
-        enginenews_line = [l for l in output.split('\n') if "EngineNews parity tests:" in l][0]
-        assert "0 failed" in enginenews_line, f"JS EngineNews tests failed: {enginenews_line}"
+        assert "Recurrence parity tests:" in output, "EngineNews test output missing"
+        enginenews_line = [l for l in output.split('\n') if "Recurrence parity tests:" in l][0]
+        assert "0 failed" in enginenews_line, f"JS Recurrence tests failed: {enginenews_line}"
 
         # Verify structural trace passes
         assert "PASS structural trace: true" in output, "JS structural trace failed"
@@ -56,7 +56,7 @@ class TestJSTestSuitePasses:
     def test_js_core_tests_pass(self):
         """Verify core JS test cases pass."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -139,7 +139,7 @@ class TestCrossSubstrateParity:
         9-agent Round 3 fix: Machine-readable output for actual comparison.
         """
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -156,7 +156,7 @@ class TestCrossSubstrateParity:
     def test_parity_vector_count_matches(self, parity_vectors):
         """Verify Python and JS test the same number of parity vectors."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -289,7 +289,7 @@ class TestJSSecurityParity:
     def test_js_rejects_nan(self):
         """JS should reject NaN values like Python."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -301,7 +301,7 @@ class TestJSSecurityParity:
     def test_js_rejects_infinity(self):
         """JS should reject Infinity values like Python."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -315,7 +315,7 @@ class TestJSSecurityParity:
         from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
 
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -338,7 +338,7 @@ class TestJSSecurityParity:
 
         # JS test output should confirm reserved fields are checked
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -348,27 +348,27 @@ class TestJSSecurityParity:
         assert "PASS kernel reserved fields: true" in result.stdout
 
 
-class TestJSEngineNewsParity:
-    """Verify JS EngineNews closure detection matches Python."""
+class TestJSRecurrenceParity:
+    """Verify JS Recurrence closure detection matches Python."""
 
-    def test_js_enginenews_projections_loaded(self):
-        """Verify JS loads EngineNews projections."""
+    def test_js_recurrence_projections_loaded(self):
+        """Verify JS loads Recurrence projections."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
             timeout=60
         )
 
-        assert "enginenews.v1.json: 9 projections" in result.stdout, (
-            "JS should load 9 EngineNews projections"
+        assert "recurrence.v1.json: 9 projections" in result.stdout, (
+            "JS should load 9 Recurrence projections"
         )
 
-    def test_js_enginenews_closure_detection_works(self):
+    def test_js_recurrence_closure_detection_works(self):
         """Verify JS closure detection matches Python behavior."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -376,8 +376,8 @@ class TestJSEngineNewsParity:
         )
 
         # Check EngineNews parity tests
-        assert "EngineNews parity tests:" in result.stdout
-        enginenews_line = [l for l in result.stdout.split('\n') if "EngineNews parity tests:" in l][0]
+        assert "Recurrence parity tests:" in result.stdout
+        enginenews_line = [l for l in result.stdout.split('\n') if "Recurrence parity tests:" in l][0]
         assert "5 passed" in enginenews_line, f"EngineNews parity incomplete: {enginenews_line}"
         assert "0 failed" in enginenews_line, f"EngineNews parity failed: {enginenews_line}"
 
@@ -388,7 +388,7 @@ class TestJSTraceFormatParity:
     def test_js_trace_stall_format(self):
         """JS stall trace should add new entry at step i+1 (not modify last)."""
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js"],
+            ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,

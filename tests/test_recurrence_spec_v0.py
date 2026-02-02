@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Set, Tuple
 import pytest
 
 
-FIXTURES_DIR = Path("tests/fixtures/traces_v2/enginenews_spec_v0")
+FIXTURES_DIR = Path("tests/fixtures/traces_v2/recurrence_spec_v0")
 
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -202,8 +202,8 @@ FIXTURE_EXPECTATIONS = {
 
 
 @pytest.mark.parametrize("fixture_name", list(FIXTURE_EXPECTATIONS.keys()))
-def test_enginenews_cli_replay_accepts_fixtures(fixture_name: str) -> None:
-    """CLI replay must accept all valid enginenews fixtures."""
+def test_recurrence_cli_replay_accepts_fixtures(fixture_name: str) -> None:
+    """CLI replay must accept all valid recurrence fixtures."""
     path = FIXTURES_DIR / fixture_name
     exit_code, output = _run_cli_replay(path)
     expected = FIXTURE_EXPECTATIONS[fixture_name]
@@ -212,7 +212,7 @@ def test_enginenews_cli_replay_accepts_fixtures(fixture_name: str) -> None:
 
 
 @pytest.mark.parametrize("fixture_name", list(FIXTURE_EXPECTATIONS.keys()))
-def test_enginenews_cli_summary_matches_expectation(fixture_name: str) -> None:
+def test_recurrence_cli_summary_matches_expectation(fixture_name: str) -> None:
     """CLI --print-exec-summary must match expected final_status."""
     path = FIXTURES_DIR / fixture_name
     exit_code, output = _run_cli_replay(path)
@@ -229,7 +229,7 @@ def test_enginenews_cli_summary_matches_expectation(fixture_name: str) -> None:
 
 
 @pytest.mark.parametrize("fixture_name", list(FIXTURE_EXPECTATIONS.keys()))
-def test_enginenews_metrics_from_events(fixture_name: str) -> None:
+def test_recurrence_metrics_from_events(fixture_name: str) -> None:
     """Metrics computed from events must match expectations."""
     path = FIXTURES_DIR / fixture_name
     events = _read_jsonl(path)
@@ -258,7 +258,7 @@ def test_enginenews_metrics_from_events(fixture_name: str) -> None:
 
 
 @pytest.mark.parametrize("fixture_name", list(FIXTURE_EXPECTATIONS.keys()))
-def test_enginenews_cli_determinism(fixture_name: str) -> None:
+def test_recurrence_cli_determinism(fixture_name: str) -> None:
     """CLI must produce identical JSON output across repeated runs."""
     path = FIXTURES_DIR / fixture_name
 
@@ -281,7 +281,7 @@ def test_enginenews_cli_determinism(fixture_name: str) -> None:
     )
 
 
-def test_enginenews_fixtures_are_distinct() -> None:
+def test_recurrence_fixtures_are_distinct() -> None:
     """Guardrail: fixtures must not be duplicates."""
     blobs = []
     for name in FIXTURE_EXPECTATIONS.keys():
@@ -291,7 +291,7 @@ def test_enginenews_fixtures_are_distinct() -> None:
     assert len(set(blobs)) == len(blobs), "Duplicate fixtures detected"
 
 
-def test_enginenews_fixtures_are_minimal() -> None:
+def test_recurrence_fixtures_are_minimal() -> None:
     """Fixtures must be minimal (2-6 events each per spec)."""
     for name in FIXTURE_EXPECTATIONS.keys():
         path = FIXTURES_DIR / name

@@ -1,0 +1,126 @@
+{
+  "meta": {
+    "version": "1.1.0",
+    "description": "Parity vectors for EngineNews closure detection (Step 6 v0: added tau_step)",
+    "spec_ref": "RCXEngineNew.pdf Rule 2.2♢",
+    "substrates": ["python", "javascript"]
+  },
+  "vectors": [
+    {
+      "id": "engine.closure_immediate_repeat",
+      "description": "Immediate repeat (A->A stall) - closure on second occurrence",
+      "input": {
+        "_detect_closure": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": null},
+            "tail": {
+              "head": {"step": 1, "state": "A", "projection": null, "stall": true},
+              "tail": null
+            }
+          },
+          "result": "A"
+        }
+      },
+      "expected": {
+        "closure_detected": true,
+        "tau_step": 1,
+        "final_result": "A"
+      },
+      "notes": "State A appears twice -> closure detected at step 1"
+    },
+    {
+      "id": "engine.no_closure_single",
+      "description": "Single state in trace - no closure possible",
+      "input": {
+        "_detect_closure": {
+          "trace": {
+            "head": {"step": 0, "state": "X", "projection": null, "stall": true},
+            "tail": null
+          },
+          "result": "X"
+        }
+      },
+      "expected": {
+        "closure_detected": false,
+        "tau_step": null,
+        "final_result": "X"
+      },
+      "notes": "Only one state, no repetition possible"
+    },
+    {
+      "id": "engine.closure_oscillation",
+      "description": "A->B->A oscillation - closure on third entry",
+      "input": {
+        "_detect_closure": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "to_b"},
+            "tail": {
+              "head": {"step": 1, "state": "B", "projection": "to_a"},
+              "tail": {
+                "head": {"step": 2, "state": "A", "projection": "to_b"},
+                "tail": null
+              }
+            }
+          },
+          "result": "A"
+        }
+      },
+      "expected": {
+        "closure_detected": true,
+        "tau_step": 2,
+        "final_result": "A"
+      },
+      "notes": "A appears at step 0 and step 2 -> closure at step 2"
+    },
+    {
+      "id": "engine.no_closure_distinct",
+      "description": "All distinct states - no closure",
+      "input": {
+        "_detect_closure": {
+          "trace": {
+            "head": {"step": 0, "state": 1, "projection": "inc"},
+            "tail": {
+              "head": {"step": 1, "state": 2, "projection": "inc"},
+              "tail": {
+                "head": {"step": 2, "state": 3, "projection": null, "stall": true},
+                "tail": null
+              }
+            }
+          },
+          "result": 3
+        }
+      },
+      "expected": {
+        "closure_detected": false,
+        "tau_step": null,
+        "final_result": 3
+      },
+      "notes": "States 1, 2, 3 are all distinct"
+    },
+    {
+      "id": "engine.closure_numeric",
+      "description": "Numeric oscillation 0->1->0",
+      "input": {
+        "_detect_closure": {
+          "trace": {
+            "head": {"step": 0, "state": 0, "projection": "to_1"},
+            "tail": {
+              "head": {"step": 1, "state": 1, "projection": "to_0"},
+              "tail": {
+                "head": {"step": 2, "state": 0, "projection": "to_1"},
+                "tail": null
+              }
+            }
+          },
+          "result": 0
+        }
+      },
+      "expected": {
+        "closure_detected": true,
+        "tau_step": 2,
+        "final_result": 0
+      },
+      "notes": "0 appears at step 0 and step 2 -> closure at step 2"
+    }
+  ]
+}

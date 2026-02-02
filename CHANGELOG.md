@@ -2,6 +2,98 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-02
+
+### mu/ Folder Reorganization
+
+**Problem:** Seeds were all in flat `seeds/` folder. Architecture wasn't visible from file structure. Closure detection seeds (enginenews, exhaust) had confusing names.
+
+**Solution:** Created `mu/` folder structure that makes architecture visible:
+- `mu/substrate/` - The VM: kernel.v1, match.v1, match.v2, subst.v1, subst.v2
+- `mu/closures/` - Closure detection: recurrence.v1 (renamed from enginenews), exhaustion.v1 (renamed from exhaust)
+- `mu/programs/` - Applications: rcx_engine.v1 (new, orchestrates closures)
+- `mu/utilities/` - Helpers: classify.v1, eval.v1
+- `mu/host/js/` - JavaScript bootstrap: eval_step.js (moved from substrates/js/)
+- `mu/host/python/` - Python bootstrap (symlink to rcx_pi/selfhost/)
+
+**Files Changed:**
+- All seeds copied to appropriate mu/ subfolders
+- `mu/closures/recurrence.v1.json` - renamed from enginenews, projection IDs updated (recurrence.*)
+- `mu/closures/exhaustion.v1.json` - renamed from exhaust, projection IDs updated (exhaustion.*)
+- `mu/programs/rcx_engine.v1.json` - new main program (6 projections)
+- `mu/host/js/eval_step.js` - updated to use mu/ paths, renamed to use recurrence/exhaustion
+- `rcx_pi/selfhost/seed_integrity.py` - added new checksums and get_seed_path() helper
+- `tests/fixtures/recurrence_vectors.json` - renamed from enginenews_vectors.json
+- `STATUS.md` - updated key files section
+
+**Backwards Compatibility:**
+- Legacy `seeds/` folder still works
+- Python imports unchanged (rcx_pi.selfhost via symlink)
+- `get_seed_path()` helper finds seeds in mu/ or falls back to seeds/
+
+---
+
+### Architectural Gap: match.v2 / Non-Linear Pattern Incompatibility
+
+**Problem (discovered in 9-agent review):** match.v2.json states "Linear patterns only (no conflict detection)", but enginenews.v1.json and exhaust.v1.json rely on non-linear patterns (same variable twice for equality). These seeds work via bootstrap (eval_seed) but CANNOT run through the meta-circular kernel.
+
+**Impact:** Seeds could not be declared META_CIRCULAR. Tests passed via bootstrap, hiding architectural incompatibility.
+
+**Solution:**
+- Added North Star #14 (execution layer declaration) and #15 (true self-hosting path)
+- Added Cross-Seed Compatibility Check to AgentGuardrails.v0.md
+- Updated enginenews.v1.json and exhaust.v1.json with `"execution_layer": "BOOTSTRAP"`
+- Created VECTOR item for match.v3 (non-linear pattern support)
+- Created design doc `docs/core/MatchV3NonLinear.v0.md`
+
+**Files:**
+- `TASKS.md` - Added North Star #14, #15; added match.v3 to VECTOR
+- `docs/agents/AgentGuardrails.v0.md` - Added Cross-Seed Compatibility Check section
+- `seeds/enginenews.v1.json` - Added execution_layer, requires_patterns, incompatible_with
+- `seeds/exhaust.v1.json` - Added execution_layer, requires_patterns, incompatible_with
+- `docs/core/MatchV3NonLinear.v0.md` - Design doc for non-linear pattern support
+
+**Lesson Learned:** 9-agent review verified correctness but not architectural fit. New guardrails require verifying execution path matches claims, not just that tests pass.
+
+---
+
+### Step 6: Operator Exhaustion (Rule 3.1) - COMPLETE
+
+**Problem:** Need to detect when an operator has been applied continuously since τ was logged without making progress (Rule 3.1 from RCXEngineNew.pdf).
+
+**Solution:**
+- Created `seeds/exhaust.v1.json` with 11 projections
+- Three-phase state machine: find_tau → scan → check_frozen → terminal
+- Non-linear patterns for equality detection (binding conflict detection)
+- First-match-wins ordering (scan_same before scan_different)
+- Frozen list as Mu linked-list, NOT Python set
+
+**Projections (exhaust.v1.json):**
+- `exhaust.init_null`, `exhaust.init` - Entry points
+- `exhaust.find_match`, `exhaust.find_continue`, `exhaust.find_not_found` - Find τ phase
+- `exhaust.scan_same`, `exhaust.scan_different`, `exhaust.scan_end` - Scan phase
+- `exhaust.frozen_found`, `exhaust.frozen_check_tail`, `exhaust.do_freeze` - Freeze phase
+
+**Testing:**
+- 17 parity tests in `tests/test_exhaustion_parity.py`
+- 10 fuzzer tests in `tests/test_exhaustion_fuzzer.py`
+- 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
+- 6 cross-substrate tests (Python and JS produce identical results)
+
+**Security:**
+- KERNEL_RESERVED_FIELDS updated to 20 (12 kernel + 4 EngineNews + 4 exhaustion)
+- Both Python and JavaScript have identical reserved fields
+- Automated parity test at `test_js_parity_automated.py::test_python_js_constants_match`
+
+**Files:**
+- `seeds/exhaust.v1.json` - 11 projections
+- `tests/test_exhaustion_parity.py` - 17 tests
+- `tests/test_exhaustion_fuzzer.py` - 10 tests
+- `tests/fixtures/exhaustion_vectors.json` - 6 vectors
+- `substrates/js/eval_step.js` - Updated with exhaust.v1.json loading
+- `rcx_pi/selfhost/seed_integrity.py` - Added exhaust.v1.json checksum
+- `docs/core/OperatorExhaustion.v0.md` - Design doc updated to IMPLEMENTED
+
 ## 2026-02-01
 
 ### Agent Guardrails (Anti-Hallucination Infrastructure)
