@@ -1,6 +1,6 @@
 # Operator Exhaustion Structural Specification v0
 
-**Status:** DESIGN (Step 6 candidate)
+**Status:** IMPLEMENTED (Step 6 complete 2026-02-02)
 **Created:** 2026-02-01
 **Origin:** RCXEngineNew.pdf Rule 3.1
 **Depends on:** Step 5 (EngineNews Rule 2.2♢) - COMPLETE
@@ -540,6 +540,17 @@ is safe. We can relax later without breaking correctness.
 
 ## Changelog
 
+- **v0.2 (2026-02-02):** IMPLEMENTED - Step 6 complete
+  - Created `seeds/exhaust.v1.json` with 11 projections (more than estimated due to three-phase state machine)
+  - Non-linear patterns for equality detection (step, operator, frozen membership)
+  - First-match-wins ordering for scan_same before scan_different
+  - 17 parity tests in `tests/test_exhaustion_parity.py`
+  - 10 fuzzer tests in `tests/test_exhaustion_fuzzer.py`
+  - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
+  - Cross-substrate parity: Python and JavaScript produce identical results
+  - JS loads exhaust.v1.json (47 total projections across all seeds)
+  - KERNEL_RESERVED_FIELDS updated to 20 (12 kernel + 4 EngineNews + 4 exhaustion)
+  - Automated parity test verifies Python/JS reserved fields match
 - **v0.1 (2026-02-01):** Address open questions and agent review findings:
   - Q1 RESOLVED: Pass operator_ids explicitly in input
   - Q2 RESOLVED: EngineNews returns tau_step in closure evidence

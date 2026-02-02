@@ -887,6 +887,7 @@ const kernel = JSON.parse(fs.readFileSync(path.join(seedsDir, 'kernel.v1.json'),
 const matchSeed = JSON.parse(fs.readFileSync(path.join(seedsDir, 'match.v2.json'), 'utf8'));
 const substSeed = JSON.parse(fs.readFileSync(path.join(seedsDir, 'subst.v2.json'), 'utf8'));
 const enginenewsSeed = JSON.parse(fs.readFileSync(path.join(seedsDir, 'enginenews.v1.json'), 'utf8'));
+const exhaustSeed = JSON.parse(fs.readFileSync(path.join(seedsDir, 'exhaust.v1.json'), 'utf8'));
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -898,6 +899,9 @@ const allProjections = [
 // EngineNews projections (separate - used for closure detection after trace)
 const enginenewsProjections = enginenewsSeed.projections;
 
+// Exhaustion projections (separate - used for operator exhaustion after EngineNews)
+const exhaustProjections = exhaustSeed.projections;
+
 // Combined projections for EngineNews execution (EngineNews + kernel + match + subst)
 // EngineNews projections must come FIRST so they match before kernel tries to process
 const allProjectionsWithEngineNews = [
@@ -905,14 +909,24 @@ const allProjectionsWithEngineNews = [
   ...allProjections
 ];
 
-console.log('=== RCX eval_step.js - Complete Kernel Cycle (v5 - L3 EngineNews Parity) ===\n');
+// Combined projections with Exhaustion (Exhaust + EngineNews + kernel + match + subst)
+// Exhaustion projections come first for _detect_exhaustion inputs
+const allProjectionsWithExhaust = [
+  ...exhaustProjections,
+  ...enginenewsProjections,
+  ...allProjections
+];
+
+console.log('=== RCX eval_step.js - Complete Kernel Cycle (v6 - L3 Exhaustion Parity) ===\n');
 console.log(`Loaded projections:`);
 console.log(`  - kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - match.v2.json: ${matchSeed.projections.length} projections`);
 console.log(`  - subst.v2.json: ${substSeed.projections.length} projections`);
 console.log(`  - enginenews.v1.json: ${enginenewsSeed.projections.length} projections`);
+console.log(`  - exhaust.v1.json: ${exhaustSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
-console.log(`  - Total (with EngineNews): ${allProjectionsWithEngineNews.length} projections\n`);
+console.log(`  - Total (with EngineNews): ${allProjectionsWithEngineNews.length} projections`);
+console.log(`  - Total (with Exhaustion): ${allProjectionsWithExhaust.length} projections\n`);
 
 // =============================================================================
 // Test: Complete match + subst cycle through kernel
@@ -1539,9 +1553,10 @@ console.log(`  1. kernel.v1.json runs on JavaScript ✓`);
 console.log(`  2. match.v2.json runs on JavaScript ✓`);
 console.log(`  3. subst.v2.json runs on JavaScript ✓`);
 console.log(`  4. enginenews.v1.json runs on JavaScript ✓`);
-console.log(`  5. Normalization/denormalization works ✓`);
-console.log(`  6. Complete kernel cycle works ✓`);
-console.log(`  7. Security parity with Python (5 bootstrap primitives) ✓`);
+console.log(`  5. exhaust.v1.json runs on JavaScript ✓`);
+console.log(`  6. Normalization/denormalization works ✓`);
+console.log(`  7. Complete kernel cycle works ✓`);
+console.log(`  8. Security parity with Python (5 bootstrap primitives) ✓`);
 console.log(`  8. EngineNews closure detection parity ✓`);
 console.log(`  9. Same projections, same semantics, two substrates ✓`);
 
@@ -1616,6 +1631,23 @@ if (process.argv.includes('--json-api')) {
       } catch (e) {
         response = { success: false, error: e.message };
       }
+    } else if (request.action === 'run_exhaustion') {
+      // Run Exhaustion detection on provided input
+      const { input, maxSteps } = request;
+      try {
+        let current = input;
+        let steps = 0;
+        const limit = maxSteps || 200;
+        while (steps < limit) {
+          const next = step(allProjectionsWithExhaust, current);
+          if (muEqual(current, next)) break;
+          current = next;
+          steps++;
+        }
+        response = { success: true, result: current };
+      } catch (e) {
+        response = { success: false, error: e.message };
+      }
     } else if (request.action === 'get_constants') {
       // Return constants for cross-substrate verification
       response = {
@@ -1625,7 +1657,8 @@ if (process.argv.includes('--json-api')) {
         kernel_projection_count: kernel.projections.length,
         match_projection_count: matchSeed.projections.length,
         subst_projection_count: substSeed.projections.length,
-        enginenews_projection_count: enginenewsSeed.projections.length
+        enginenews_projection_count: enginenewsSeed.projections.length,
+        exhaust_projection_count: exhaustSeed.projections.length
       };
     } else {
       response = { success: false, error: `Unknown action: ${request.action}` };

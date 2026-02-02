@@ -174,6 +174,7 @@ ALLOWED_SEEDS = {
     'match': ['match.'],             # match.v1.json, match.v2.json -> match.*
     'subst': ['subst.'],             # subst.v1.json, subst.v2.json -> subst.*
     'enginenews': ['enginenews.'],   # enginenews.v1.json -> enginenews.*
+    'exhaust': ['exhaust.'],         # exhaust.v1.json -> exhaust.* (Step 6: Rule 3.1)
 }
 
 # Get seed base name (kernel.v1.json -> kernel)

@@ -22,6 +22,7 @@ ALL_SEEDS = [
     "match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json", "kernel.v1.json",
     "match.v2.json", "subst.v2.json",  # Phase 7b: context passthrough
     "enginenews.v1.json",  # Step 5: structural closure detection (Rule 2.2♢)
+    "exhaust.v1.json",     # Step 6: operator exhaustion detection (Rule 3.1)
 ]
 
 # Self-hosting seeds (follow naming conventions)
@@ -40,6 +41,7 @@ EXPECTED_COUNTS = {
     "match.v2.json": 8,      # Phase 7b: 7 + match.fail
     "subst.v2.json": 12,     # Phase 7b: same count, added _subst_ctx
     "enginenews.v1.json": 9, # Step 5: closure detection (7 core + 2 entry variants)
+    "exhaust.v1.json": 11,   # Step 6: operator exhaustion (Rule 3.1)
 }
 
 # Expected namespace prefixes (self-hosting seeds only)

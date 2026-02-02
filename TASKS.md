@@ -20,10 +20,25 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, enginenews.v1 (all 36 projections)
+    - Same seeds: kernel.v1, match.v2, subst.v2, enginenews.v1, exhaust.v1 (all 47 projections)
     - Same bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
+14. **Seeds must declare their execution layer.** Every seed is either:
+    - **BOOTSTRAP**: Runs via eval_seed.step() only (Python/JS substrate provides non-linear pattern support)
+    - **META-CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2)
+    - If a seed claims META-CIRCULAR, tests MUST verify it through step_kernel_mu
+    - Seeds requiring non-linear patterns (same var twice for equality) are BOOTSTRAP until match.v3 exists
+    - Current BOOTSTRAP seeds: enginenews.v1, exhaust.v1 (require non-linear patterns)
+    - Current META-CIRCULAR seeds: kernel.v1, match.v2, subst.v2, classify.v1, eval.v1 (linear only)
+15. **True self-hosting is the path.** The goal is structural computation without host semantics:
+    - **L1 (Algorithmic)**: match/subst algorithms as Mu projections ✓ DONE
+    - **L2 (Operational)**: kernel loop as Mu projections ✓ DONE (with bootstrap primitive acceptance)
+    - **L3 (Substrate Portability)**: same projections run on Python AND JavaScript ✓ DONE
+    - **L4 (True Self-Hosting)**: eliminate bootstrap primitives OR make them substrate-independent
+    - Programs must run accurately and structurally, without host semantics (except irreducible bootstrap)
+    - Tests must verify the CLAIMED execution path, not just correctness
+    - If tests pass via bootstrap but fail via meta-circular kernel, that's a real bug (not theater)
 
 ---
 
@@ -503,26 +518,43 @@ All blockers resolved 2026-01-28:
 
 ---
 
-### Step 6: Operator Exhaustion (Rule 3.1)
+### Step 6: Operator Exhaustion (Rule 3.1) ✅ COMPLETE
 
-**Promoted from VECTOR:** 2026-02-02
-**Rationale:** 9-agent review consensus - implementation scope bounded, security model clear.
+**Completed:** 2026-02-02
 **Design Doc:** `docs/core/OperatorExhaustion.v0.md`
 
 **Goal:** Detect when operators are exhausted (Rule 3.1) - τ transitions to frozen state.
 
-**Projections to add to enginenews.v1.json:**
-- `enginenews.detect_exhaustion` - Entry point for exhaustion detection
-- `enginenews.count_operators` - Count active operators in operator pool
-- `enginenews.check_frozen` - Check if all operators frozen
-- `enginenews.mark_frozen` - Mark operator as frozen when it stalls twice
+**Implementation:**
+- Created `seeds/exhaust.v1.json` with 11 projections (separate seed, not added to enginenews)
+- Three-phase state machine: find_tau → scan → check_frozen → terminal
+- Non-linear patterns for equality (same var twice enforces binding conflict detection)
+- First-match-wins ordering (scan_same before scan_different, frozen_found before frozen_check_tail)
+- Frozen list as Mu linked-list, NOT Python set
 
-**Success criteria (pending 9-agent review):**
-- [ ] Design doc reviewed by all 9 agents
-- [ ] `enginenews.v1.json` extended with exhaustion projections
-- [ ] Exhaustion detection is structural (projections, not Python)
-- [ ] Parity tests for Python and JavaScript
-- [ ] Property-based fuzzer tests for edge cases
+**Projections in exhaust.v1.json:**
+- `exhaust.init_null` - No tau_step → continue (no exhaustion possible)
+- `exhaust.init` - Start find phase with tau_step
+- `exhaust.find_match` - Found tau_step in trace
+- `exhaust.find_continue` - Keep searching for tau_step
+- `exhaust.find_not_found` - tau_step not in trace → continue
+- `exhaust.scan_same` - Same operator, keep scanning (non-linear pattern)
+- `exhaust.scan_different` - Different operator → not exhausted
+- `exhaust.scan_end` - End of trace, check frozen list
+- `exhaust.frozen_found` - Operator already frozen (non-linear pattern)
+- `exhaust.frozen_check_tail` - Continue searching frozen list
+- `exhaust.do_freeze` - Freeze the operator
+
+**Success criteria (ALL MET):**
+- [x] Design doc reviewed by all 9 agents (2026-02-02)
+- [x] `seeds/exhaust.v1.json` created with 11 projections (2026-02-02)
+- [x] Exhaustion detection is structural (projections, not Python)
+- [x] Parity tests for Python (17 tests in `test_exhaustion_parity.py`)
+- [x] JavaScript loads exhaust.v1.json (47 total projections)
+- [x] Property-based fuzzer tests (10 tests in `test_exhaustion_fuzzer.py`)
+- [x] Cross-substrate parity vectors verified (6 cross-substrate tests pass)
+- [x] KERNEL_RESERVED_FIELDS updated to 20 fields (Python and JS match)
+- [x] Automated parity test verifies Python/JS reserved fields match
 
 ---
 
@@ -548,13 +580,19 @@ All blockers resolved 2026-01-28:
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
 **Active designs:**
+- **Match v3: Non-Linear Pattern Support** (`docs/core/MatchV3NonLinear.v0.md`) - **CRITICAL for meta-circularity**
+  - Enables enginenews.v1 and exhaust.v1 to run through meta-circular kernel
+  - Adds binding conflict detection as projections (~8-12 new projections)
+  - Required for North Star #14 (seeds declaring META_CIRCULAR execution layer)
+  - **Promotion criteria:** Design doc complete, 9-agent review, estimated projection count
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
+- Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
 
-**Promoted to NEXT:**
-- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - **Promoted 2026-02-02**
-  - 9-agent review consensus: Implementation scope bounded, security model clear
-  - Design doc: Rule 3.1 operator freeze mechanism (Step 6)
-  - See NEXT section for implementation plan
+**Completed (moved to Ra):**
+- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - **IMPLEMENTED 2026-02-02**
+  - Step 6 complete: 11 projections in `seeds/exhaust.v1.json`
+  - 27 tests (17 parity + 10 fuzzer), cross-substrate parity verified
+  - See Step 6 in NEXT section for details
 
 **Promoted to NEXT:**
 - Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - **Promoted 2026-01-27**
@@ -567,6 +605,8 @@ All blockers resolved 2026-01-28:
 - Structural Purity v0 (`docs/core/StructuralPurity.v0.md`)
 - Self-Hosting v0 (`docs/core/SelfHosting.v0.md`)
 - EVAL_SEED v0 (`docs/core/EVAL_SEED.v0.md`)
+- EngineNews Structural v0 (`docs/core/EngineNewsStructural.v0.md`) - Step 5 closure detection
+- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - Step 6 operator freeze
 - Second Independent Encounter (`docs/execution/IndependentEncounter.v0.md`)
 - Enginenews Spec Mapping (`docs/execution/EnginenewsSpecMapping.v0.md`)
 - Closure Evidence Events (`docs/execution/ClosureEvidence.v0.md`)

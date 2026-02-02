@@ -579,34 +579,39 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-01 (1456+ tests, guardrails infrastructure added)
-**Next milestone:** L4 research or new features (L3 is complete with verified cross-substrate parity)
+**Last updated:** 2026-02-02 (Step 6 complete, architectural gap discovered, match.v3 VECTOR created)
+**Next milestone:** match.v3 design review, then implementation (enables true meta-circularity)
 
-**9-Agent Fresh Audit (2026-02-01):**
-All 9 agents ran destructive audits against current codebase with explicit file reads (not stale context):
-- **Verifier**: APPROVE - trace format identical between Python/JS, all loops marked with @host_iteration
-- **Adversary**: SECURE - no attack vectors found, all patterns properly enforced
-- **Expert**: MINIMAL - code appropriately sized
-- **Structural-proof**: PROVEN - all structural claims verified
-- **Grounding**: GROUNDED - test_js_parity_automated.py runs REAL subprocess calls to Node.js
-- **Fuzzer**: 3 Hypothesis fuzzers exist (roundtrip, kernel, mu_equal parity)
-- **Translator**: CLEAR - no scope creep or host smuggling
-- **Visualizer**: VERIFIED - no hidden state
-- **Advisor**: ON_TRACK - all strategic gaps closed
+**Architectural Gap Discovery (2026-02-02):**
+9-agent review of Step 6 revealed: match.v2.json is "linear only" but enginenews.v1 and exhaust.v1 require non-linear patterns. These seeds work via bootstrap (eval_seed) but CANNOT run through the meta-circular kernel. This was documented but not caught because tests passed.
 
-**Completed (Steps 1-5):**
+**Response:**
+- Added North Star #14 (execution layer declaration) and #15 (true self-hosting path)
+- Added Cross-Seed Compatibility Check to AgentGuardrails.v0.md
+- Created VECTOR item for match.v3 (non-linear pattern support)
+- Updated seed meta sections with `"execution_layer": "BOOTSTRAP"`
+
+**Completed (Steps 1-6):**
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
 4. ✅ Ported trace to JS (runStructural in substrates/js/eval_step.js)
 5. ✅ EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
+6. ✅ Operator Exhaustion (seeds/exhaust.v1.json, 11 projections)
 
 **L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.
 
 **Proof:**
-- [x] kernel.v1.json: 7 projections (Python ✓, JS ✓)
-- [x] match.v2.json: 8 projections (Python ✓, JS ✓)
-- [x] subst.v2.json: 12 projections (Python ✓, JS ✓)
-- [x] enginenews.v1.json: 9 projections (Python ✓, JS ✓)
-- [x] 5 EngineNews parity vectors pass on both substrates
-- [x] End-to-end closure detection works on both substrates
+- [x] kernel.v1.json: 7 projections (Python ✓, JS ✓) - META_CIRCULAR
+- [x] match.v2.json: 8 projections (Python ✓, JS ✓) - META_CIRCULAR (linear only)
+- [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
+- [x] enginenews.v1.json: 9 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
+- [x] exhaust.v1.json: 11 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
+- [x] Total: 47 projections across 5 seeds
+- [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
+
+**Next: match.v3 (VECTOR)**
+- Design doc: `docs/core/MatchV3NonLinear.v0.md`
+- Adds binding conflict detection as projections (~12 total)
+- Enables enginenews.v1 and exhaust.v1 to become META_CIRCULAR
+- See TASKS.md VECTOR section for details

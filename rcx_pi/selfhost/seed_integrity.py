@@ -38,7 +38,11 @@ SEED_CHECKSUMS: dict[str, str] = {
     "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
     # Step 5: EngineNews structural closure detection (Rule 2.2♢)
     # Updated Step 6 v0: Added tau_step output for Operator Exhaustion
-    "enginenews.v1.json": "faa73d095f37b2a733021c056519baed09933da98b40cfb3b3b57481d200863f",
+    # Updated: Added execution_layer metadata (BOOTSTRAP - requires non-linear patterns)
+    "enginenews.v1.json": "1ef120680a76bdeca0a949de8cc65ded011d0022a2bd2472474cc10e416c2762",
+    # Step 6: Operator Exhaustion detection (Rule 3.1)
+    # Updated: Added execution_layer metadata (BOOTSTRAP - requires non-linear patterns)
+    "exhaust.v1.json": "28d211894bc74efda595977f8603041b867d6ebf116b61b73f87b0be523a56f4",
 }
 
 # Expected projection IDs for each seed.
@@ -122,6 +126,21 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "enginenews.not_in_head",        # State not in head -> check tail
         "enginenews.not_found",          # State not in seen -> add and advance
         "enginenews.unwrap",             # Exit: extract final result
+    ],
+    # Step 6: Operator Exhaustion detection (Rule 3.1)
+    # init_null is entry for no-tau case, do_freeze is terminal for exhaustion
+    "exhaust.v1.json": [
+        "exhaust.init_null",        # Entry: no tau_step -> continue
+        "exhaust.init",             # Entry: tau_step set -> find tau entry
+        "exhaust.find_match",       # Found step == tau_step (non-linear)
+        "exhaust.find_continue",    # Not at tau_step yet, advance
+        "exhaust.find_not_found",   # End of trace without finding tau
+        "exhaust.scan_same",        # Same operator (non-linear), continue
+        "exhaust.scan_different",   # Different operator -> not exhausted
+        "exhaust.scan_end",         # End of trace, all same -> check frozen
+        "exhaust.frozen_found",     # Operator in frozen list (non-linear)
+        "exhaust.frozen_check_tail",  # Check next in frozen list
+        "exhaust.do_freeze",        # Not frozen -> freeze it
     ],
 }
 

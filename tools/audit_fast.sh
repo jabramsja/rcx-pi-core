@@ -95,6 +95,7 @@ pytest $PARALLEL_FLAG -q \
     tests/test_self_hosting_v0.py \
     tests/test_phase8b_grounding_gaps.py \
     tests/test_enginenews_parity.py \
+    tests/test_exhaustion_parity.py \
     tests/test_js_parity_automated.py
 
 echo ""
