@@ -471,7 +471,7 @@ Phase 5 complete:
 - [ ] 8d: EngineNews trace model (in progress - see L3 plan below)
 
 **L3 Substrate Portability (7-agent reviewed 2026-01-30):**
-- [x] JS POC exists (`substrates/js/eval_step.js`, ~600 LOC core + inline tests)
+- [x] JS POC exists (`mu/host/js/eval_step.js`, ~600 LOC core + inline tests)
 - [x] Same projections run on Python AND JavaScript
 - [x] Step 1: Fix JS security gaps (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair)
 - [x] Step 2: Cross-substrate parity tests (`tests/test_parity_python.py`, 20 vectors)
@@ -481,14 +481,14 @@ Phase 5 complete:
 
 **EngineNews Structural Closure Detection (IMPLEMENTED 2026-01-30)**
 
-EngineNews rules are expressed as Mu projections in `seeds/enginenews.v1.json`:
+EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.json`:
 
 1. **Why this matters:** If EngineNews runs via Python loops/logic, emergence might be a Python artifact. For structural honesty, closure detection must be pattern matching on traces.
 
 2. **What's acceptable:** The bootstrap primitives (eval_step, mu_equal, for-loop driver) are fine - they're like Forth's NEXT. The LOGIC must be projections.
 
 3. **Success criteria (ALL MET):**
-   - [x] `seeds/enginenews.v1.json` exists with 9 projections
+   - [x] `mu/closures/recurrence.v1.json` exists with 9 projections
    - [x] EngineNews projections run via `eval_seed.step()`, NOT Python loops
    - [x] Closure detection is structural: projection matches trace pattern
    - [x] Seen-set is Mu linked-list, NOT Python set

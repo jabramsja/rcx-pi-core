@@ -1,5 +1,5 @@
 """
-Property-based fuzzer tests for exhaust.v1.json (Rule 3.1 Operator Exhaustion).
+Property-based fuzzer tests for exhaustion.v1.json (Rule 3.1 Operator Exhaustion).
 
 Uses Hypothesis to generate random traces and verify exhaustion detection
 behaves correctly across edge cases.
@@ -17,7 +17,7 @@ from hypothesis import given, settings, strategies as st, HealthCheck
 
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 # =============================================================================
@@ -28,8 +28,7 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
 @pytest.fixture(scope="module")
 def exhaust_projections() -> list:
     """Load exhaustion projections from seed file (module-scoped for Hypothesis)."""
-    seed_path = get_seeds_dir() / "exhaust.v1.json"
-    seed = load_verified_seed(seed_path)
+    seed = load_verified_seed(get_seed_path("exhaustion.v1.json"))
     return seed["projections"]
 
 
@@ -283,9 +282,9 @@ class TestExhaustionNonLinearPatterns:
     """Test non-linear pattern behavior (binding conflict detection)."""
 
     def test_find_match_uses_non_linear(self, exhaust_projections):
-        """exhaust.find_match uses non-linear pattern for step equality."""
+        """exhaustion.find_match uses non-linear pattern for step equality."""
         # Find the projection
-        proj = next(p for p in exhaust_projections if p["id"] == "exhaust.find_match")
+        proj = next(p for p in exhaust_projections if p["id"] == "exhaustion.find_match")
         pattern = proj["pattern"]
 
         # The pattern should have "step" appearing twice (in _trace.head.step and _tau_step)
@@ -296,8 +295,8 @@ class TestExhaustionNonLinearPatterns:
         assert trace_step == tau_step, "find_match should use non-linear pattern"
 
     def test_scan_same_uses_non_linear(self, exhaust_projections):
-        """exhaust.scan_same uses non-linear pattern for operator equality."""
-        proj = next(p for p in exhaust_projections if p["id"] == "exhaust.scan_same")
+        """exhaustion.scan_same uses non-linear pattern for operator equality."""
+        proj = next(p for p in exhaust_projections if p["id"] == "exhaustion.scan_same")
         pattern = proj["pattern"]
 
         # The pattern should have same var for projection and _tau_operator
@@ -307,8 +306,8 @@ class TestExhaustionNonLinearPatterns:
         assert trace_proj == tau_op, "scan_same should use non-linear pattern"
 
     def test_frozen_found_uses_non_linear(self, exhaust_projections):
-        """exhaust.frozen_found uses non-linear pattern for frozen membership."""
-        proj = next(p for p in exhaust_projections if p["id"] == "exhaust.frozen_found")
+        """exhaustion.frozen_found uses non-linear pattern for frozen membership."""
+        proj = next(p for p in exhaust_projections if p["id"] == "exhaustion.frozen_found")
         pattern = proj["pattern"]
 
         # The pattern should have same var for _operator and _frozen_check.head

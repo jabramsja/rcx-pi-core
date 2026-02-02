@@ -4,6 +4,35 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-02-02
 
+### mu/ Folder Reorganization
+
+**Problem:** Seeds were all in flat `seeds/` folder. Architecture wasn't visible from file structure. Closure detection seeds (enginenews, exhaust) had confusing names.
+
+**Solution:** Created `mu/` folder structure that makes architecture visible:
+- `mu/substrate/` - The VM: kernel.v1, match.v1, match.v2, subst.v1, subst.v2
+- `mu/closures/` - Closure detection: recurrence.v1 (renamed from enginenews), exhaustion.v1 (renamed from exhaust)
+- `mu/programs/` - Applications: rcx_engine.v1 (new, orchestrates closures)
+- `mu/utilities/` - Helpers: classify.v1, eval.v1
+- `mu/host/js/` - JavaScript bootstrap: eval_step.js (moved from substrates/js/)
+- `mu/host/python/` - Python bootstrap (symlink to rcx_pi/selfhost/)
+
+**Files Changed:**
+- All seeds copied to appropriate mu/ subfolders
+- `mu/closures/recurrence.v1.json` - renamed from enginenews, projection IDs updated (recurrence.*)
+- `mu/closures/exhaustion.v1.json` - renamed from exhaust, projection IDs updated (exhaustion.*)
+- `mu/programs/rcx_engine.v1.json` - new main program (6 projections)
+- `mu/host/js/eval_step.js` - updated to use mu/ paths, renamed to use recurrence/exhaustion
+- `rcx_pi/selfhost/seed_integrity.py` - added new checksums and get_seed_path() helper
+- `tests/fixtures/recurrence_vectors.json` - renamed from enginenews_vectors.json
+- `STATUS.md` - updated key files section
+
+**Backwards Compatibility:**
+- Legacy `seeds/` folder still works
+- Python imports unchanged (rcx_pi.selfhost via symlink)
+- `get_seed_path()` helper finds seeds in mu/ or falls back to seeds/
+
+---
+
 ### Architectural Gap: match.v2 / Non-Linear Pattern Incompatibility
 
 **Problem (discovered in 9-agent review):** match.v2.json states "Linear patterns only (no conflict detection)", but enginenews.v1.json and exhaust.v1.json rely on non-linear patterns (same variable twice for equality). These seeds work via bootstrap (eval_seed) but CANNOT run through the meta-circular kernel.

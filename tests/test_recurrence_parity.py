@@ -1,8 +1,8 @@
 """
-EngineNews Parity Tests - Verify structural closure detection
+Recurrence Parity Tests - Verify structural closure detection
 
 These tests verify that:
-1. EngineNews projections detect closure correctly
+1. Recurrence projections detect closure correctly
 2. Detection is structural (pattern matching on trace)
 3. Python and JS produce same results (cross-substrate parity)
 
@@ -13,7 +13,7 @@ import json
 import pytest
 from pathlib import Path
 
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
@@ -24,17 +24,16 @@ def get_fixtures_dir() -> Path:
     return Path(__file__).parent / "fixtures"
 
 
-def load_enginenews_projections():
-    """Load EngineNews projections from seed file."""
-    seeds_dir = get_seeds_dir()
-    seed = load_verified_seed(seeds_dir / "enginenews.v1.json")
+def load_recurrence_projections():
+    """Load Recurrence projections from seed file."""
+    seed = load_verified_seed(get_seed_path("recurrence.v1.json"))
     return seed["projections"]
 
 
 def load_parity_vectors():
     """Load parity test vectors."""
     fixtures_dir = get_fixtures_dir()
-    with open(fixtures_dir / "enginenews_vectors.json") as f:
+    with open(fixtures_dir / "recurrence_vectors.json") as f:
         data = json.load(f)
     return data["vectors"]
 
@@ -50,29 +49,29 @@ def run_until_stable(projections, initial, max_steps=100):
     return current
 
 
-class TestEngineNewsProjections:
-    """Test that EngineNews seed has correct structure."""
+class TestRecurrenceProjections:
+    """Test that Recurrence seed has correct structure."""
 
     def test_seed_loads(self):
         """Seed file loads and verifies."""
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
         assert len(projs) == 9, f"Expected exactly 9 projections, got {len(projs)}"
 
     def test_projection_ids_present(self):
         """Required projection IDs exist."""
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
         ids = {p["id"] for p in projs}
 
         required = {
-            "enginenews.init",
-            "enginenews.end_of_trace",
-            "enginenews.check_state_stall",
-            "enginenews.check_state_maxsteps",
-            "enginenews.check_state",
-            "enginenews.found_in_seen",
-            "enginenews.not_in_head",
-            "enginenews.not_found",
-            "enginenews.unwrap",
+            "recurrence.init",
+            "recurrence.end_of_trace",
+            "recurrence.check_state_stall",
+            "recurrence.check_state_maxsteps",
+            "recurrence.check_state",
+            "recurrence.found_in_seen",
+            "recurrence.not_in_head",
+            "recurrence.not_found",
+            "recurrence.unwrap",
         }
 
         missing = required - ids
@@ -80,14 +79,14 @@ class TestEngineNewsProjections:
 
     def test_all_projections_have_schema(self):
         """Each projection has id, pattern, body."""
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
         for p in projs:
             assert "id" in p, f"Missing id in projection"
             assert "pattern" in p, f"Missing pattern in {p.get('id', 'unknown')}"
             assert "body" in p, f"Missing body in {p.get('id', 'unknown')}"
 
 
-class TestEngineNewsParity:
+class TestRecurrenceParity:
     """Test parity vectors for closure detection."""
 
     def setup_method(self):
@@ -95,8 +94,8 @@ class TestEngineNewsParity:
 
     @pytest.fixture
     def projections(self):
-        """Load EngineNews projections."""
-        return load_enginenews_projections()
+        """Load Recurrence projections."""
+        return load_recurrence_projections()
 
     @pytest.fixture
     def vectors(self):
@@ -243,14 +242,14 @@ class TestEngineNewsParity:
             f"Vector {vector_id}: final_result mismatch"
 
 
-class TestEngineNewsIntegration:
+class TestRecurrenceIntegration:
     """Integration tests with run_mu_structural."""
 
     def setup_method(self):
         reset_step_budget()
 
     def test_with_run_mu_structural(self):
-        """EngineNews projections work with run_mu_structural trace."""
+        """Recurrence projections work with run_mu_structural trace."""
         from rcx_pi.selfhost.step_mu import run_mu_structural
 
         # Create oscillating projections
@@ -263,7 +262,7 @@ class TestEngineNewsIntegration:
         trace_result = run_mu_structural(toggle, "A", max_steps=5)
 
         # Now run closure detection on the trace
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
 
         closure_input = {
             "_detect_closure": {
@@ -290,7 +289,7 @@ class TestEngineNewsIntegration:
         assert trace_result["stall"] is True
 
         # Run closure detection
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
 
         closure_input = {
             "_detect_closure": {
@@ -307,7 +306,7 @@ class TestEngineNewsIntegration:
         assert "closure_detected" in result
 
 
-class TestEngineNewsSpecCompliance:
+class TestRecurrenceSpecCompliance:
     """Grounding tests for RCXEngineNew.pdf Rule 2.2♢ compliance.
 
     These tests verify the SECOND-demand semantics explicitly.
@@ -318,7 +317,7 @@ class TestEngineNewsSpecCompliance:
 
     @pytest.fixture
     def projections(self):
-        return load_enginenews_projections()
+        return load_recurrence_projections()
 
     def test_first_occurrence_no_closure(self, projections):
         """Rule 2.2♢: First occurrence MUST NOT trigger closure.
@@ -486,7 +485,7 @@ class TestEngineNewsSpecCompliance:
                 f"Type distinctness: {desc} must be distinct states"
 
 
-class TestEngineNewsClosureObjectStructure:
+class TestRecurrenceClosureObjectStructure:
     """Grounding tests for exact Omega(tau) closure object structure.
 
     Per A.10b: Closure object Omega(tau) must have specific structure.
@@ -497,7 +496,7 @@ class TestEngineNewsClosureObjectStructure:
 
     @pytest.fixture
     def projections(self):
-        return load_enginenews_projections()
+        return load_recurrence_projections()
 
     def test_closure_object_has_required_keys(self, projections):
         """Closure object MUST have closure_detected, tau_step, and final_result keys."""
@@ -546,42 +545,42 @@ class TestEngineNewsClosureObjectStructure:
             "final_result must equal input result"
 
 
-class TestEngineNewsExactProjectionCount:
+class TestRecurrenceExactProjectionCount:
     """Grounding test: exact projection count must be 9."""
 
     def test_exactly_nine_projections(self):
-        """enginenews.v1.json MUST have exactly 9 projections.
+        """recurrence.v1.json MUST have exactly 9 projections.
 
         Count breakdown:
-        1. enginenews.init - Entry point
-        2. enginenews.end_of_trace - End of trace (null)
-        3. enginenews.check_state_stall - Extract state from stall entry
-        4. enginenews.check_state_maxsteps - Extract state from max_steps entry
-        5. enginenews.check_state - Extract state from normal entry
-        6. enginenews.found_in_seen - State found in seen-set
-        7. enginenews.not_in_head - State not in head, check tail
-        8. enginenews.not_found - State not found, add to seen
-        9. enginenews.unwrap - Extract final result
+        1. recurrence.init - Entry point
+        2. recurrence.end_of_trace - End of trace (null)
+        3. recurrence.check_state_stall - Extract state from stall entry
+        4. recurrence.check_state_maxsteps - Extract state from max_steps entry
+        5. recurrence.check_state - Extract state from normal entry
+        6. recurrence.found_in_seen - State found in seen-set
+        7. recurrence.not_in_head - State not in head, check tail
+        8. recurrence.not_found - State not found, add to seen
+        9. recurrence.unwrap - Extract final result
         """
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
         assert len(projs) == 9, \
-            f"enginenews.v1.json must have exactly 9 projections, got {len(projs)}"
+            f"recurrence.v1.json must have exactly 9 projections, got {len(projs)}"
 
     def test_all_required_projection_ids(self):
         """All 9 required projection IDs must be present."""
-        projs = load_enginenews_projections()
+        projs = load_recurrence_projections()
         ids = {p["id"] for p in projs}
 
         required = {
-            "enginenews.init",
-            "enginenews.end_of_trace",
-            "enginenews.check_state_stall",
-            "enginenews.check_state_maxsteps",
-            "enginenews.check_state",
-            "enginenews.found_in_seen",
-            "enginenews.not_in_head",
-            "enginenews.not_found",
-            "enginenews.unwrap",
+            "recurrence.init",
+            "recurrence.end_of_trace",
+            "recurrence.check_state_stall",
+            "recurrence.check_state_maxsteps",
+            "recurrence.check_state",
+            "recurrence.found_in_seen",
+            "recurrence.not_in_head",
+            "recurrence.not_found",
+            "recurrence.unwrap",
         }
 
         assert ids == required, \

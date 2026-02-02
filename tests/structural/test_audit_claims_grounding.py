@@ -217,7 +217,7 @@ class TestUnderscoreKeyAudit:
 
     See:
     - MetaCircularKernel.v0.md (kernel.v1.json, match.v2.json, subst.v2.json)
-    - EngineNewsStructural.v0.md (enginenews.v1.json)
+    - RecurrenceStructural.v0.md (recurrence.v1.json)
     """
 
     # Seeds that are intentionally allowed to use underscore-prefixed keys
@@ -225,7 +225,7 @@ class TestUnderscoreKeyAudit:
         "kernel.v1.json",      # Kernel state: _mode, _phase, _remaining, etc.
         "match.v2.json",       # Match context: _match_ctx
         "subst.v2.json",       # Subst context: _subst_ctx
-        "enginenews.v1.json",  # Engine state: _mode, _phase, _seen, _current, etc.
+        "recurrence.v1.json",  # Engine state: _mode, _phase, _seen, _current, etc.
     ]
 
     def test_audit_all_excludes_kernel_seeds(self):
@@ -264,10 +264,10 @@ class TestUnderscoreKeyAudit:
             "kernel.v1.json must use _mode for state machine transitions"
         )
 
-    def test_enginenews_seed_uses_underscore_fields(self):
-        """enginenews.v1.json must use underscore-prefixed fields for engine state."""
+    def test_recurrence_seed_uses_underscore_fields(self):
+        """recurrence.v1.json must use underscore-prefixed fields for engine state."""
         import json
-        seed_path = REPO_ROOT / "seeds" / "enginenews.v1.json"
+        seed_path = REPO_ROOT / "mu" / "closures" / "recurrence.v1.json"
         content = seed_path.read_text()
         seed = json.loads(content)
 
@@ -276,7 +276,7 @@ class TestUnderscoreKeyAudit:
         required_fields = ["_mode", "_phase", "_seen", "_current", "_result"]
         for field in required_fields:
             assert f'"{field}"' in all_text, (
-                f"enginenews.v1.json must use {field} for engine state. "
+                f"recurrence.v1.json must use {field} for engine state. "
                 f"Underscore prefix distinguishes engine state from domain data."
             )
 
@@ -290,10 +290,10 @@ class TestUnderscoreKeyAudit:
                 "MetaCircularKernel.v0.md should document underscore prefix convention"
             )
 
-        # Check EngineNewsStructural.v0.md
-        doc2 = REPO_ROOT / "docs" / "core" / "EngineNewsStructural.v0.md"
+        # Check RecurrenceStructural.v0.md
+        doc2 = REPO_ROOT / "docs" / "core" / "RecurrenceStructural.v0.md"
         if doc2.exists():
             content2 = doc2.read_text()
             assert "_mode" in content2 or "underscore" in content2.lower(), (
-                "EngineNewsStructural.v0.md should document underscore prefix convention"
+                "RecurrenceStructural.v0.md should document underscore prefix convention"
             )

@@ -381,7 +381,7 @@ Options:
 - `docs/core/MetaCircularKernel.v0.md` - L2 kernel.v1.json design (DONE)
 - `docs/core/BootstrapPrimitives.v0.md` - The 5 irreducible primitives
 - `STATUS.md` - Current phase and L4 SINK status
-- `seeds/kernel.v1.json` - Current L2 kernel (7 projections)
+- `mu/substrate/kernel.v1.json` - Current L2 kernel (7 projections)
 
 ---
 

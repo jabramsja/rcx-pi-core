@@ -291,7 +291,7 @@ The five named primitives form the API boundary. The implicit primitives are the
 
 ---
 
-## EngineNews Compatibility
+## Recurrence Compatibility
 
 EngineNews (stall/fix/promote/closure) is **NOT** part of the bootstrap layer. It is a **PROGRAM** that runs ON TOP of the structural substrate.
 
@@ -332,7 +332,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## L3 Substrate Portability: JavaScript POC
 
-**Location:** `substrates/js/eval_step.js` (~600 LOC core + inline tests)
+**Location:** `mu/host/js/eval_step.js` (~600 LOC core + inline tests)
 
 **What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 

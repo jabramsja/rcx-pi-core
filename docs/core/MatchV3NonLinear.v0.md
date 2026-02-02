@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-match.v2.json explicitly states "Linear patterns only (no conflict detection)." However, enginenews.v1.json and exhaust.v1.json rely on non-linear patterns (same variable appears twice in pattern) to detect equality structurally.
+match.v2.json explicitly states "Linear patterns only (no conflict detection)." However, recurrence.v1.json and exhaustion.v1.json rely on non-linear patterns (same variable appears twice in pattern) to detect equality structurally.
 
 Currently, these seeds work because they run via `eval_seed.step()` which implements binding conflict detection in Python (lines 331-336, 351-355). But they **cannot** run through the meta-circular kernel (kernel.v1 + match.v2 + subst.v2).
 
@@ -25,11 +25,11 @@ match.v3 adds binding conflict detection as structural projections, enabling all
 ```
 match.v2.json line 12: "Linear patterns only (no conflict detection)"
 
-enginenews.v1.json projection "found_in_seen":
+recurrence.v1.json projection "found_in_seen":
   pattern: { "_state": {"var": "state"}, "_check_list": {"head": {"var": "state"}, ...} }
   ^^^^ Same variable "state" appears TWICE - requires binding conflict detection
 
-exhaust.v1.json projection "scan_same":
+exhaustion.v1.json projection "scan_same":
   pattern: { "_trace": {"head": {"projection": {"var": "proj"}}}, "_tau_operator": {"var": "proj"} }
   ^^^^ Same variable "proj" appears TWICE - requires binding conflict detection
 ```
@@ -360,7 +360,7 @@ New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implemen
 
 **Implementation checklist:**
 1. [ ] Add 4 new fields to `KERNEL_RESERVED_FIELDS` in `rcx_pi/selfhost/step_mu.py`
-2. [ ] Add fields to JS equivalent in `substrates/js/eval_step.js`
+2. [ ] Add fields to JS equivalent in `mu/host/js/eval_step.js`
 3. [ ] Add test verifying domain data with these fields is rejected
 
 ---
@@ -407,9 +407,9 @@ New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implemen
 
 - `docs/core/MetaCircularKernel.v0.md` - Kernel architecture
 - `docs/core/BootstrapPrimitives.v0.md` - Bootstrap layer definition
-- `seeds/match.v2.json` - Current linear-only matcher
-- `seeds/enginenews.v1.json` - Requires non-linear patterns
-- `seeds/exhaust.v1.json` - Requires non-linear patterns
+- `mu/substrate/match.v2.json` - Current linear-only matcher
+- `mu/closures/recurrence.v1.json` - Requires non-linear patterns
+- `mu/closures/exhaustion.v1.json` - Requires non-linear patterns
 
 ---
 

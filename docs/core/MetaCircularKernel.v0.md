@@ -481,7 +481,7 @@ Then kernel.unwrap:
 ## Implementation Plan
 
 ### Phase 7a: Kernel projections seed
-1. Create `seeds/kernel.v1.json` with 7 projections
+1. Create `mu/substrate/kernel.v1.json` with 7 projections
 2. Test kernel projections in isolation (manual trace tests)
 3. Verify linked-list cursor advancement works
 
@@ -502,7 +502,7 @@ Then kernel.unwrap:
 
 ## Success Criteria
 
-1. [ ] `seeds/kernel.v1.json` exists with 7 projections
+1. [ ] `mu/substrate/kernel.v1.json` exists with 7 projections
 2. [ ] Manual trace tests pass for success and failure cases
 3. [ ] Match/subst context passthrough tests pass
 4. [ ] Kernel projections pass parity tests with Python `step_mu`
@@ -807,4 +807,4 @@ The "guard" is implemented by **projection ordering**, not pattern syntax. Remov
 - `seeds/subst.v1.json` - Subst projections (12)
 - `seeds/classify.v1.json` - Classify projections (6)
 - `seeds/eval.v1.json` - Eval projections (7)
-- `seeds/kernel.v1.json` - Kernel projections (7)
+- `mu/substrate/kernel.v1.json` - Kernel projections (7)

@@ -49,8 +49,8 @@ If a task is not listed here, it is NOT to be implemented.
 - Do not leave broken files/tests behind and add replacements.
 - Minimize file creation. Prefer editing existing files.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
-- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `seeds/` MUST be mirrored in `substrates/js/eval_step.js`.
-  - Run `node substrates/js/eval_step.js` to verify all JS tests pass
+- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `seeds/` MUST be mirrored in `mu/host/js/eval_step.js`.
+  - Run `node mu/host/js/eval_step.js` to verify all JS tests pass
   - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
   - Run `./tools/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
   - Run `./tools/ast_police_js.sh` to catch JS patterns that bypass grep
@@ -283,7 +283,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 **Sub-phases:**
 
 - [x] **Phase 7a: Kernel Projections Seed** (DONE 2026-01-28)
-  - Created `seeds/kernel.v1.json` with 7 projections
+  - Created `mu/substrate/kernel.v1.json` with 7 projections
   - 30 manual trace tests pass (success, failure, empty projections)
   - Projection order regression tests pass
 
@@ -341,7 +341,7 @@ All blockers resolved 2026-01-28:
   - If L4 pursues CPS/trampolining, new tasks will be created
 
 **Success criteria:**
-- [x] `seeds/kernel.v1.json` exists with 7 projections
+- [x] `mu/substrate/kernel.v1.json` exists with 7 projections
 - [x] Manual trace tests pass for success/failure/empty cases
 - [x] Match/subst context passthrough tests pass
 - [x] Phase 7d blockers resolved (security, testing, debt tracking) - 2026-01-28
@@ -401,7 +401,7 @@ All blockers resolved 2026-01-28:
 | 2 | Create cross-substrate parity tests | **DONE** | ~120 LOC + 20 vectors (`tests/test_parity_python.py`) |
 | 3 | Phase 8d in Python (trace model) | **DONE** | ~80 LOC + 14 tests (`tests/test_structural_trace.py`) |
 | 4 | Port trace to JS POC | **DONE** | ~80 LOC + 5 tests |
-| 5 | EngineNews in Python | **DONE** | `seeds/enginenews.v1.json` (9 projections) |
+| 5 | EngineNews in Python | **DONE** | `mu/closures/recurrence.v1.json` (9 projections) |
 | 6 | EngineNews in JS (L3 parity) | **DONE** | JS POC v5 with EngineNews tests |
 | 7 | ACTUAL cross-substrate verification | **DONE** | JSON API + actual output comparison (9-agent Round 3 fix, 2026-01-31) |
 
@@ -409,7 +409,7 @@ All blockers resolved 2026-01-28:
 
 ### Step 1: Fix JS Security Gaps ✅ DONE
 
-**Location:** `substrates/js/eval_step.js`
+**Location:** `mu/host/js/eval_step.js`
 
 **Completed (2026-01-30):**
 - [x] Add `KERNEL_RESERVED_FIELDS` validation (12 fields)
@@ -456,7 +456,7 @@ All blockers resolved 2026-01-28:
 ### Step 4: Port Trace to JS POC ✅ DONE
 
 **Completed (2026-01-30):**
-- [x] `runStructural()` in `substrates/js/eval_step.js`
+- [x] `runStructural()` in `mu/host/js/eval_step.js`
 - [x] Returns `{result, trace, stall, steps}` matching Python
 - [x] Trace as Mu linked-list format
 - [x] 5 structural trace tests pass in JS
@@ -469,7 +469,7 @@ All blockers resolved 2026-01-28:
 - [x] Design doc: `docs/core/EngineNewsStructural.v0.md` (explicit criteria)
 - [x] Property-based fuzzer: `tests/test_structural_trace_fuzzer.py` (23 tests)
 - [x] CRITICAL_TEST_FILES updated: structural trace fuzzer protected
-- [x] Implementation: `seeds/enginenews.v1.json` (9 projections)
+- [x] Implementation: `mu/closures/recurrence.v1.json` (9 projections)
 - [x] Parity tests: `tests/test_enginenews_parity.py` (23+ tests)
 - [x] Fuzzer tests: `tests/test_enginenews_fuzzer.py` (property-based)
 
@@ -482,7 +482,7 @@ All blockers resolved 2026-01-28:
 
 **Implementation (COMPLETE):**
 
-1. Created `seeds/enginenews.v1.json` with 9 projections:
+1. Created `mu/closures/recurrence.v1.json` with 9 projections:
    - `enginenews.init` - Entry point: _detect_closure -> internal state
    - `enginenews.end_of_trace` - End of trace (null) -> no closure
    - `enginenews.check_state_stall` - Extract state from stall entry
@@ -499,7 +499,7 @@ All blockers resolved 2026-01-28:
    - This is bootstrap (like Forth's NEXT), not semantic debt
 
 3. Success criteria (ALL MET):
-   - [x] `enginenews.v1.json` exists with 9 projections
+   - [x] `recurrence.v1.json` exists with 9 projections
    - [x] EngineNews projections run via eval_seed.step(), NOT Python loops
    - [x] Closure detection is structural: projection matches trace pattern
    - [x] Seen-set is Mu linked-list, NOT Python set
@@ -526,13 +526,13 @@ All blockers resolved 2026-01-28:
 **Goal:** Detect when operators are exhausted (Rule 3.1) - τ transitions to frozen state.
 
 **Implementation:**
-- Created `seeds/exhaust.v1.json` with 11 projections (separate seed, not added to enginenews)
+- Created `mu/closures/exhaustion.v1.json` with 11 projections (separate seed, not added to enginenews)
 - Three-phase state machine: find_tau → scan → check_frozen → terminal
 - Non-linear patterns for equality (same var twice enforces binding conflict detection)
 - First-match-wins ordering (scan_same before scan_different, frozen_found before frozen_check_tail)
 - Frozen list as Mu linked-list, NOT Python set
 
-**Projections in exhaust.v1.json:**
+**Projections in exhaustion.v1.json:**
 - `exhaust.init_null` - No tau_step → continue (no exhaustion possible)
 - `exhaust.init` - Start find phase with tau_step
 - `exhaust.find_match` - Found tau_step in trace
@@ -547,10 +547,10 @@ All blockers resolved 2026-01-28:
 
 **Success criteria (ALL MET):**
 - [x] Design doc reviewed by all 9 agents (2026-02-02)
-- [x] `seeds/exhaust.v1.json` created with 11 projections (2026-02-02)
+- [x] `mu/closures/exhaustion.v1.json` created with 11 projections (2026-02-02)
 - [x] Exhaustion detection is structural (projections, not Python)
 - [x] Parity tests for Python (17 tests in `test_exhaustion_parity.py`)
-- [x] JavaScript loads exhaust.v1.json (47 total projections)
+- [x] JavaScript loads exhaustion.v1.json (47 total projections)
 - [x] Property-based fuzzer tests (10 tests in `test_exhaustion_fuzzer.py`)
 - [x] Cross-substrate parity vectors verified (6 cross-substrate tests pass)
 - [x] KERNEL_RESERVED_FIELDS updated to 20 fields (Python and JS match)
@@ -590,7 +590,7 @@ All blockers resolved 2026-01-28:
 
 **Completed (moved to Ra):**
 - Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - **IMPLEMENTED 2026-02-02**
-  - Step 6 complete: 11 projections in `seeds/exhaust.v1.json`
+  - Step 6 complete: 11 projections in `mu/closures/exhaustion.v1.json`
   - 27 tests (17 parity + 10 fuzzer), cross-substrate parity verified
   - See Step 6 in NEXT section for details
 

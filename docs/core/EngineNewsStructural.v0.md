@@ -1,4 +1,4 @@
-# EngineNews Structural Specification v0
+# Recurrence Structural Specification v0
 
 **Status:** IMPLEMENTED (Step 5 complete 2026-01-30)
 **Created:** 2026-01-30
@@ -9,12 +9,12 @@
 
 ## Purpose
 
-This document specifies the **structural requirements** for EngineNews (Step 5).
+This document specifies the **structural requirements** for Recurrence (Step 5).
 It exists to prevent "success theater" where Python implements closure detection
 instead of Mu projections.
 
 **Why this matters:**
-- If EngineNews runs via Python loops/logic, emergence might be a Python artifact
+- If Recurrence runs via Python loops/logic, emergence might be a Python artifact
 - For structural honesty, closure detection must be pattern matching on traces
 - The bootstrap (eval_step, mu_equal) is acceptable - the LOGIC must be projections
 
@@ -48,7 +48,7 @@ Our implementation must:
 > — TASKS.md, North Star #5
 
 This means:
-- EngineNews rules MUST be expressed as Mu projections in JSON
+- Recurrence rules MUST be expressed as Mu projections in JSON
 - Python provides only the 5 bootstrap primitives
 - Closure detection is structural pattern matching, NOT Python conditionals
 
@@ -56,21 +56,21 @@ This means:
 
 ## Implemented Projections
 
-`seeds/enginenews.v1.json` contains 9 projections:
+`mu/closures/recurrence.v1.json` contains 9 projections:
 
 | Projection ID | Purpose |
 |---------------|---------|
-| `enginenews.init` | Entry point: _detect_closure -> internal state |
-| `enginenews.end_of_trace` | End of trace (null) -> no closure |
-| `enginenews.check_state_stall` | Extract state from stall entry |
-| `enginenews.check_state_maxsteps` | Extract state from max_steps entry |
-| `enginenews.check_state` | Extract state from normal trace entry |
-| `enginenews.found_in_seen` | State found in seen-set -> closure detected! |
-| `enginenews.not_in_head` | State not in head -> check tail |
-| `enginenews.not_found` | State not found -> add to seen, advance |
-| `enginenews.unwrap` | Extract final closure evidence |
+| `recurrence.init` | Entry point: _detect_closure -> internal state |
+| `recurrence.end_of_trace` | End of trace (null) -> no closure |
+| `recurrence.check_state_stall` | Extract state from stall entry |
+| `recurrence.check_state_maxsteps` | Extract state from max_steps entry |
+| `recurrence.check_state` | Extract state from normal trace entry |
+| `recurrence.found_in_seen` | State found in seen-set -> closure detected! |
+| `recurrence.not_in_head` | State not in head -> check tail |
+| `recurrence.not_found` | State not found -> add to seen, advance |
+| `recurrence.unwrap` | Extract final closure evidence |
 
-**Key design:** Non-linear patterns for state equality. `enginenews.found_in_seen` uses
+**Key design:** Non-linear patterns for state equality. `recurrence.found_in_seen` uses
 `{"var": "state"}` twice - binding conflict detection in eval_seed.match() enforces equality.
 
 **Underscore prefix convention:** All engine state fields use underscore prefix (`_mode`, `_phase`,
@@ -80,9 +80,9 @@ kernel.v1.json, match.v2.json, subst.v2.json). See also MetaCircularKernel.v0.md
 
 ---
 
-## Trace Format (Input to EngineNews)
+## Trace Format (Input to Recurrence)
 
-EngineNews projections consume the trace produced by `run_mu_structural()`:
+Recurrence projections consume the trace produced by `run_mu_structural()`:
 
 ```json
 {
@@ -111,12 +111,12 @@ Each trace entry has:
 Step 5 is COMPLETE:
 
 ### 1. Projections Exist ✅
-- [x] `seeds/enginenews.v1.json` contains 9 projections
+- [x] `mu/closures/recurrence.v1.json` contains 9 projections
 - [x] Each projection has `id`, `pattern`, `body` fields
 - [x] SHA256 checksum verified on load (seed_integrity.py)
 
 ### 2. Execution is Structural ✅
-- [x] EngineNews runs via `eval_seed.step()`, NOT Python loops
+- [x] Recurrence runs via `eval_seed.step()`, NOT Python loops
 - [x] Closure detection uses pattern matching on trace
 - [x] No Python `if/for/while` in closure detection path (only in bootstrap)
 - [x] Seen-set is Mu linked-list, NOT Python set
@@ -125,11 +125,11 @@ Step 5 is COMPLETE:
 - [x] Same projections produce same results on Python
 - [x] Parity tests in `tests/test_enginenews_parity.py` (23+ tests)
 - [x] Fuzzer tests in `tests/test_enginenews_fuzzer.py`
-- [x] JS tests in `substrates/js/eval_step.js` (v5, with EngineNews support)
+- [x] JS tests in `mu/host/js/eval_step.js` (v5, with Recurrence support)
 - [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
 
 ### 4. Closure Evidence is Structural ✅
-- [x] Closure detection is a projection (`enginenews.found_in_seen`) using non-linear patterns
+- [x] Closure detection is a projection (`recurrence.found_in_seen`) using non-linear patterns
 - [x] Closure evidence is emitted as Mu data: `{closure_detected: bool, final_result: <state>}`
 - [x] Evidence can be consumed by other projections
 
@@ -166,7 +166,7 @@ Step 5 is COMPLETE:
 1. **Projection for seen-check:**
    ```json
    {
-     "id": "enginenews.check_seen",
+     "id": "recurrence.check_seen",
      "pattern": {"state": {"var": "s"}, "seen": {"head": {"var": "s"}, "tail": {"var": "_"}}},
      "body": {"found": true}
    }
@@ -197,7 +197,7 @@ These Python operations are ALLOWED (irreducible substrate):
 | `stack_guard` | `mu_type.MAX_MU_DEPTH` | Resource limit |
 | `projection_loader` | `seed_integrity.load_verified_seed()` | Load JSON seeds |
 
-All EngineNews logic must be **above** these primitives.
+All Recurrence logic must be **above** these primitives.
 
 ---
 
@@ -215,13 +215,13 @@ Minimum parity tests for Step 5:
 
 These vectors MUST pass on:
 - Python: `tests/test_enginenews_parity.py`
-- JavaScript: `substrates/js/eval_step.js`
+- JavaScript: `mu/host/js/eval_step.js`
 
 ---
 
 ## Implementation Sequence
 
-1. **Create `seeds/enginenews.v1.json`** with 4 initial projections
+1. **Create `mu/closures/recurrence.v1.json`** with 4 initial projections
 2. **Create parity vectors** in `tests/fixtures/enginenews_vectors.json`
 3. **Create Python tests** in `tests/test_enginenews_parity.py`
 4. **Verify kernel execution** (no Python control flow in closure path)
@@ -233,7 +233,7 @@ These vectors MUST pass on:
 ## Verification Commands
 
 ```bash
-# Run EngineNews parity tests
+# Run Recurrence parity tests
 pytest tests/test_enginenews_parity.py -v
 
 # Verify structural execution (no Python loops in closure path)
@@ -242,7 +242,7 @@ grep -n "for.*in.*trace\|if.*in.*seen" rcx_pi/selfhost/ --include="*.py"
 
 # Run cross-substrate demo
 python scripts/enginenews_demo.py
-node substrates/js/eval_step.js --test-enginenews
+node mu/host/js/eval_step.js --test-enginenews
 ```
 
 ---
@@ -251,7 +251,7 @@ node substrates/js/eval_step.js --test-enginenews
 
 Before Step 5 is COMPLETE, these grounding tests must exist:
 
-1. **Projection count test:** `enginenews.v1.json` has 4 projections
+1. **Projection count test:** `recurrence.v1.json` has 4 projections
 2. **Projection schema test:** Each projection has id/pattern/body
 3. **Kernel execution test:** Closure detection uses step_kernel_mu
 4. **No-Python-logic test:** Grep for forbidden patterns returns empty
@@ -278,7 +278,7 @@ From RCX Core Engine Stateless Specification:
 > that is independent of the first... Action: Project the closure object Ω(τ) and log ⟨closFix, τ⟩."
 
 **Our implementation:** The trace from `run_mu_structural()` captures repeated states.
-EngineNews projections must pattern-match on this trace to detect τ recurrence.
+Recurrence projections must pattern-match on this trace to detect τ recurrence.
 
 ### Rule 0.7c′ LeafInvariance
 > "If... the recursion is degenerate. Log a tracetoken τ, freeze the operator..."

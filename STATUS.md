@@ -69,7 +69,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **kernel.v1.json** | Kernel state machine (7 projections) | ✅ | ✅ |
 | **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
-| **enginenews.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
+| **recurrence.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
 | **Python Substrate** | ~2000 LOC, 2,100+ tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~600 LOC core + inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
@@ -84,7 +84,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Any change to Python projection behavior MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Parity vectors in `tests/fixtures/` are shared by both implementations
-- Run `node substrates/js/eval_step.js` after Python changes to verify JS parity
+- Run `node mu/host/js/eval_step.js` after Python changes to verify JS parity
 - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
 - Violation of parity breaks L3 and must be fixed before merge
 
@@ -132,7 +132,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `substrates/js/eval_step.js` (~600 LOC core + inline tests)
+**JS POC location:** `mu/host/js/eval_step.js` (~600 LOC core + inline tests)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -160,14 +160,14 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 Cross-substrate parity tests verify L3 (substrate portability):
 - [x] Shared JSON test vectors: `tests/fixtures/parity_vectors.json` (20 parity + 3 security = 23 vectors)
 - [x] Python tests: `tests/test_parity_python.py` (20 parity tests + 3 security tests)
-- [x] JS tests: `substrates/js/eval_step.js` (20 parity tests pass)
+- [x] JS tests: `mu/host/js/eval_step.js` (20 parity tests pass)
 - [x] Structural trace tests: `tests/test_structural_trace.py` (14 tests)
 - [x] **ACTUAL cross-substrate comparison** (9-agent Round 3 fix, 2026-01-31):
   - `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
   - Runs SAME 20 vectors through BOTH Python and JS kernels via JSON API
   - Compares actual outputs (not just string parsing)
   - Handles int/float normalization (JS doesn't distinguish)
-- [x] CI workflow runs both: Python pytest + `node substrates/js/eval_step.js`
+- [x] CI workflow runs both: Python pytest + `node mu/host/js/eval_step.js`
 
 **Security gaps in JS POC (adversary finding - FIXED 2026-01-30):**
 - [x] `KERNEL_RESERVED_FIELDS` validation (added v4)
@@ -351,8 +351,12 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 - Design doc: `docs/core/MetaCircularKernel.v0.md`
 - Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
-- Seeds (standalone): `seeds/match.v1.json`, `seeds/subst.v1.json`, `seeds/classify.v1.json`, `seeds/eval.v1.json`
-- Seeds (kernel): `seeds/kernel.v1.json`, `seeds/match.v2.json`, `seeds/subst.v2.json`
+- **mu/ folder (new organized structure):**
+  - Substrate: `mu/substrate/` (kernel.v1, match.v2, subst.v2)
+  - Closures: `mu/closures/` (recurrence.v1, exhaustion.v1)
+  - Programs: `mu/programs/` (rcx_engine.v1)
+  - Host: `mu/host/js/eval_step.js`, `mu/host/python/selfhost`
+- Seeds (legacy): `seeds/*.json` (still works, mu/ preferred)
 - Task list: `TASKS.md`
 - Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
@@ -367,10 +371,10 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Step 2 DONE: Cross-substrate parity tests - 20 vectors pass on both Python and JS
 - Step 3 DONE: Phase 8d trace model in Python - run_mu_structural() + 14 tests
 - Step 4 DONE: Port trace to JS POC - runStructural() + 5 tests
-- Step 5 DONE: EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
+- Step 5 DONE: EngineNews structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
 
 **Step 5 EngineNews Implementation (2026-01-30):**
-- Created `seeds/enginenews.v1.json` with 9 projections for structural closure detection
+- Created `mu/closures/recurrence.v1.json` with 9 projections for structural closure detection
 - Implements Rule 2.2 (Closure-on-Second-Demand) via pattern matching on traces
 - Closure detection uses non-linear patterns (same var twice) for state equality
 - Non-linear pattern enforcement provided by eval_seed.match() binding conflict detection
@@ -579,8 +583,17 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-02 (Step 6 complete, architectural gap discovered, match.v3 VECTOR created)
+**Last updated:** 2026-02-02 (mu/ folder reorganization complete)
 **Next milestone:** match.v3 design review, then implementation (enables true meta-circularity)
+
+**mu/ Folder Reorganization (2026-02-02):**
+New organized structure makes architecture visible:
+- `mu/substrate/` - Kernel VM: kernel.v1, match.v1, match.v2, subst.v1, subst.v2
+- `mu/closures/` - Closure detection: recurrence.v1 (was enginenews), exhaustion.v1 (was exhaust)
+- `mu/programs/` - Applications: rcx_engine.v1 (orchestrates recurrence + exhaustion)
+- `mu/utilities/` - Helpers: classify.v1, eval.v1
+- `mu/host/js/` - JavaScript bootstrap: eval_step.js
+- `mu/host/python/selfhost` - Python bootstrap (symlink to rcx_pi/selfhost)
 
 **Architectural Gap Discovery (2026-02-02):**
 9-agent review of Step 6 revealed: match.v2.json is "linear only" but enginenews.v1 and exhaust.v1 require non-linear patterns. These seeds work via bootstrap (eval_seed) but CANNOT run through the meta-circular kernel. This was documented but not caught because tests passed.
@@ -595,9 +608,9 @@ Simplified step_kernel_mu to MECHANICAL operation:
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
-4. ✅ Ported trace to JS (runStructural in substrates/js/eval_step.js)
-5. ✅ EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
-6. ✅ Operator Exhaustion (seeds/exhaust.v1.json, 11 projections)
+4. ✅ Ported trace to JS (runStructural in mu/host/js/eval_step.js)
+5. ✅ EngineNews structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
+6. ✅ Operator Exhaustion (mu/closures/exhaustion.v1.json, 11 projections)
 
 **L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.
 
@@ -605,8 +618,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - [x] kernel.v1.json: 7 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] match.v2.json: 8 projections (Python ✓, JS ✓) - META_CIRCULAR (linear only)
 - [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
-- [x] enginenews.v1.json: 9 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
-- [x] exhaust.v1.json: 11 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
+- [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
+- [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
 - [x] Total: 47 projections across 5 seeds
 - [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
 

@@ -3,7 +3,7 @@
 # Validates seed JSON files for structural integrity and theater detection
 #
 # Usage: ./tools/seed_police.sh [seed_dir]
-#        Default: seeds/
+#        Default: checks both seeds/ (legacy) and mu/ (new structure)
 #
 # Checks:
 #   1. Structure: Required fields (id, pattern, body)
@@ -13,22 +13,31 @@
 
 set -euo pipefail
 
-SEED_DIR="${1:-seeds}"
+# If specific directory given, use that; otherwise check both seeds/ and mu/
+if [ -n "${1:-}" ]; then
+    SEED_DIRS=("$1")
+else
+    SEED_DIRS=()
+    [ -d "seeds" ] && SEED_DIRS+=("seeds")
+    [ -d "mu" ] && SEED_DIRS+=("mu/substrate" "mu/closures" "mu/programs" "mu/utilities")
+fi
 
-if [ ! -d "$SEED_DIR" ]; then
-    echo "ERROR: $SEED_DIR not found"
+if [ ${#SEED_DIRS[@]} -eq 0 ]; then
+    echo "ERROR: No seed directories found"
     exit 1
 fi
 
-echo "Seed Police inspecting $SEED_DIR..."
+echo "Seed Police inspecting: ${SEED_DIRS[*]}"
 echo "   Checking: structure, theater, host leakage, security"
 echo ""
 
 ERRORS=0
 WARNINGS=0
 
-# Check each JSON seed file
-for seed_file in "$SEED_DIR"/*.json; do
+# Check each JSON seed file in all directories
+for SEED_DIR in "${SEED_DIRS[@]}"; do
+  [ -d "$SEED_DIR" ] || continue
+  for seed_file in "$SEED_DIR"/*.json; do
     [ -f "$seed_file" ] || continue
 
     filename=$(basename "$seed_file")
@@ -173,8 +182,11 @@ ALLOWED_SEEDS = {
     'kernel': ['kernel.'],           # kernel.v1.json -> kernel.*
     'match': ['match.'],             # match.v1.json, match.v2.json -> match.*
     'subst': ['subst.'],             # subst.v1.json, subst.v2.json -> subst.*
-    'enginenews': ['enginenews.'],   # enginenews.v1.json -> enginenews.*
-    'exhaust': ['exhaust.'],         # exhaust.v1.json -> exhaust.* (Step 6: Rule 3.1)
+    'enginenews': ['enginenews.'],   # enginenews.v1.json -> enginenews.* (legacy)
+    'exhaust': ['exhaust.'],         # exhaust.v1.json -> exhaust.* (legacy)
+    'recurrence': ['recurrence.'],   # recurrence.v1.json -> recurrence.* (mu/closures/)
+    'exhaustion': ['exhaustion.'],   # exhaustion.v1.json -> exhaustion.* (mu/closures/)
+    'rcx_engine': ['engine.'],       # rcx_engine.v1.json -> engine.* (mu/programs/)
 }
 
 # Get seed base name (kernel.v1.json -> kernel)
@@ -217,44 +229,50 @@ EOF
     if [ $? -ne 0 ]; then
         ERRORS=$((ERRORS + 1))
     fi
+  done
 done
 
 echo ""
 
 # 4. Cross-seed validation: check for ID collisions across seeds
 echo "-- Cross-seed ID collision check"
-# SECURITY: Pass seed_dir as argument, not in heredoc
-python3 - "$SEED_DIR" << 'EOF'
+# SECURITY: Pass seed_dirs as arguments, not in heredoc
+python3 - "${SEED_DIRS[@]}" << 'EOF'
 import json
 import os
 import sys
 
-seed_dir = sys.argv[1]
+seed_dirs = sys.argv[1:]
 all_ids = {}
 errors = 0
 
-for filename in os.listdir(seed_dir):
-    if not filename.endswith('.json'):
+for seed_dir in seed_dirs:
+    if not os.path.isdir(seed_dir):
         continue
-    filepath = os.path.join(seed_dir, filename)
-    try:
-        data = json.load(open(filepath))
-        for proj in data.get('projections', []):
-            pid = proj.get('id')
-            if pid:
-                if pid in all_ids:
-                    other_file = all_ids[pid]
-                    # Allow same ID across v1/v2 versions of same seed family
-                    # e.g., match.v1.json and match.v2.json can both have match.done
-                    base1 = filename.replace('.v1.json', '').replace('.v2.json', '')
-                    base2 = other_file.replace('.v1.json', '').replace('.v2.json', '')
-                    if base1 == base2:
-                        continue  # Same family, versioned - OK
-                    print(f"  ✗ ID COLLISION: '{pid}' in both {other_file} and {filename}")
-                    errors += 1
-                all_ids[pid] = filename
-    except Exception as e:
-        pass
+    for filename in os.listdir(seed_dir):
+        if not filename.endswith('.json'):
+            continue
+        filepath = os.path.join(seed_dir, filename)
+        try:
+            data = json.load(open(filepath))
+            for proj in data.get('projections', []):
+                pid = proj.get('id')
+                if pid:
+                    if pid in all_ids:
+                        other_file = all_ids[pid]
+                        # Allow same ID across v1/v2 versions of same seed family
+                        # e.g., match.v1.json and match.v2.json can both have match.done
+                        base1 = filename.replace('.v1.json', '').replace('.v2.json', '')
+                        base2 = other_file.replace('.v1.json', '').replace('.v2.json', '')
+                        if base1 == base2:
+                            continue  # Same family, versioned - OK
+                        # Allow renamed seeds (enginenews -> recurrence, exhaust -> exhaustion)
+                        # These have different prefixes so no collision
+                        print(f"  ✗ ID COLLISION: '{pid}' in both {other_file} and {filename}")
+                        errors += 1
+                    all_ids[pid] = filename
+        except Exception as e:
+            pass
 
 if errors == 0:
     print(f"  ✓ OK (no ID collisions across {len(all_ids)} total projections)")

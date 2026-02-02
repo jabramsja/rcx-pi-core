@@ -1,5 +1,5 @@
 """
-Parity tests for exhaust.v1.json (Rule 3.1 Operator Exhaustion).
+Parity tests for exhaustion.v1.json (Rule 3.1 Operator Exhaustion).
 
 These tests verify that the structural exhaustion detection projections
 produce correct results for various scenarios.
@@ -16,7 +16,7 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 import subprocess
 
@@ -35,8 +35,7 @@ ROOT = Path(__file__).parent.parent
 @pytest.fixture
 def exhaust_projections() -> list:
     """Load exhaustion projections from seed file."""
-    seed_path = get_seeds_dir() / "exhaust.v1.json"
-    seed = load_verified_seed(seed_path)
+    seed = load_verified_seed(get_seed_path("exhaustion.v1.json"))
     return seed["projections"]
 
 
@@ -128,15 +127,15 @@ class TestExhaustionStructure:
 
     def test_projection_order_matters(self, exhaust_projections):
         """Verify first-match-wins ordering for non-linear patterns."""
-        # exhaust.scan_same (non-linear) must come before exhaust.scan_different
+        # exhaustion.scan_same (non-linear) must come before exhaustion.scan_different
         ids = [p["id"] for p in exhaust_projections]
-        same_idx = ids.index("exhaust.scan_same")
-        diff_idx = ids.index("exhaust.scan_different")
+        same_idx = ids.index("exhaustion.scan_same")
+        diff_idx = ids.index("exhaustion.scan_different")
         assert same_idx < diff_idx, "scan_same must come before scan_different"
 
-        # exhaust.frozen_found (non-linear) must come before exhaust.frozen_check_tail
-        found_idx = ids.index("exhaust.frozen_found")
-        check_idx = ids.index("exhaust.frozen_check_tail")
+        # exhaustion.frozen_found (non-linear) must come before exhaustion.frozen_check_tail
+        found_idx = ids.index("exhaustion.frozen_found")
+        check_idx = ids.index("exhaustion.frozen_check_tail")
         assert found_idx < check_idx, "frozen_found must come before frozen_check_tail"
 
 
@@ -224,7 +223,7 @@ def _run_js_exhaustion(input_data: dict) -> dict:
     """Run exhaustion detection via JS JSON API."""
     request = {"action": "run_exhaustion", "input": input_data}
     result = subprocess.run(
-        ["node", "substrates/js/eval_step.js", "--json-api", json.dumps(request)],
+        ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request)],
         capture_output=True,
         text=True,
         cwd=ROOT,
@@ -244,11 +243,11 @@ def _run_js_exhaustion(input_data: dict) -> dict:
 class TestCrossSubstrateExhaustion:
     """Verify Python and JavaScript produce identical exhaustion results."""
 
-    def test_js_loads_exhaust_seed(self):
-        """Verify JS loads exhaust.v1.json correctly."""
+    def test_js_loads_exhaustion_seed(self):
+        """Verify JS loads exhaustion.v1.json correctly."""
         request = {"action": "get_constants"}
         result = subprocess.run(
-            ["node", "substrates/js/eval_step.js", "--json-api", json.dumps(request)],
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request)],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -259,8 +258,8 @@ class TestCrossSubstrateExhaustion:
             if line.startswith('JSON_API_RESPONSE:'):
                 response = json.loads(line[len('JSON_API_RESPONSE:'):])
                 assert response.get("success"), f"API failed: {response}"
-                assert response.get("exhaust_projection_count") == 11, \
-                    f"Expected 11 exhaust projections, got {response.get('exhaust_projection_count')}"
+                assert response.get("exhaustion_projection_count") == 11, \
+                    f"Expected 11 exhaustion projections, got {response.get('exhaustion_projection_count')}"
                 return
 
         pytest.fail("No JSON_API_RESPONSE found")
