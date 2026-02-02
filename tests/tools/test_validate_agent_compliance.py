@@ -131,7 +131,8 @@ VERIFIED: Yes
         assert result["findings"] == 1
         assert result["file_citations"] == 0
         assert result["compliant"] is False
-        assert any("FILE: citations" in v for v in result["violations"])
+        # New structured validation reports incomplete blocks
+        assert any("incomplete" in v.lower() for v in result["violations"])
 
     def test_no_findings_is_compliant(self):
         """Output with no findings should be compliant."""
@@ -202,6 +203,10 @@ STATUS.md mentioned.
 
 FINDING: This probably seems likely
 FILE: /path/file.py
+LINES: 1-5
+CODE:
+    def foo():
+        pass
 VERIFIED: Yes
 """
         result = check_compliance(output)
@@ -441,14 +446,23 @@ STATUS.md mentioned.
 
 FINDING: First issue
 FILE: /path/file1.py
+LINES: 1-5
+CODE:
+    code_block_1()
 VERIFIED: Yes
 
 FINDING: Second issue
 FILE: /path/file2.py
+LINES: 10-15
+CODE:
+    code_block_2()
 VERIFIED: Yes
 
 FINDING: Third issue
 FILE: /path/file3.py
+LINES: 20-25
+CODE:
+    code_block_3()
 VERIFIED: Yes
 """
         result = check_compliance(output)
@@ -456,3 +470,362 @@ VERIFIED: Yes
         assert result["file_citations"] == 3
         assert result["verified_yes"] == 3
         assert result["compliant"] is True
+
+
+class TestStructuredBlockParsing:
+    """Test structured FINDING block parsing (2026-02-02 critical fix)."""
+
+    def test_complete_block_is_compliant(self):
+        """Finding block with all components should pass."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Complete evidence
+FILE: /path/to/file.py
+LINES: 10-20
+CODE:
+    def foo():
+        pass
+VERIFIED: Yes
+"""
+        result = check_compliance(output)
+        assert result["compliant"] is True
+        assert result.get("incomplete_blocks", 0) == 0
+
+    def test_missing_file_marked_incomplete(self):
+        """Finding without FILE should be marked incomplete."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Missing file path
+LINES: 10-20
+CODE:
+    def foo():
+        pass
+VERIFIED: Yes
+"""
+        result = check_compliance(output)
+        assert result["compliant"] is False
+        assert result.get("incomplete_blocks", 0) == 1
+        assert any("FILE" in v for v in result["violations"])
+
+    def test_missing_lines_marked_incomplete(self):
+        """Finding without LINES should be marked incomplete."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Missing line numbers
+FILE: /path/to/file.py
+CODE:
+    def foo():
+        pass
+VERIFIED: Yes
+"""
+        result = check_compliance(output)
+        assert result["compliant"] is False
+        assert any("LINES" in v for v in result["violations"])
+
+    def test_missing_code_marked_incomplete(self):
+        """Finding without CODE should be marked incomplete."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Missing code block
+FILE: /path/to/file.py
+LINES: 10-20
+VERIFIED: Yes
+"""
+        result = check_compliance(output)
+        assert result["compliant"] is False
+        assert any("CODE" in v for v in result["violations"])
+
+    def test_verified_no_fails(self):
+        """VERIFIED: No should fail even in complete block."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Unverified finding
+FILE: /path/to/file.py
+LINES: 10-20
+CODE:
+    def foo():
+        pass
+VERIFIED: No
+"""
+        result = check_compliance(output)
+        assert result["compliant"] is False
+
+
+class TestCodeBlockEmptyLines:
+    """Test CODE blocks with empty lines (2026-02-02 critical fix)."""
+
+    def test_code_block_with_blank_line(self):
+        """CODE block with blank line inside should match."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Code with blank line
+FILE: /path/file.py
+LINES: 1-10
+CODE:
+    def foo():
+        pass
+
+    def bar():
+        pass
+VERIFIED: Yes
+"""
+        result = check_compliance(output)
+        assert result["code_blocks"] >= 1
+        assert result["compliant"] is True
+
+    def test_code_block_with_multiple_blank_lines(self):
+        """CODE block with multiple blank lines should match."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Code with multiple blanks
+FILE: /path/file.py
+LINES: 1-15
+CODE:
+    class Foo:
+        pass
+
+
+    class Bar:
+        pass
+VERIFIED: Yes
+"""
+        result = check_compliance(output)
+        assert result["code_blocks"] >= 1
+
+
+class TestFileVerification:
+    """Test FILE path verification (2026-02-02 critical fix)."""
+
+    def test_real_file_passes_verification(self):
+        """Real file path should pass when verify_files=True."""
+        import os
+        # Use this test file as a known existing file
+        this_file = os.path.abspath(__file__)
+        output = f"""
+STATUS.md reviewed.
+
+FINDING: Real file
+FILE: {this_file}
+LINES: 1-5
+CODE:
+    import pytest
+VERIFIED: Yes
+"""
+        result = check_compliance(output, verify_files=True)
+        assert result["compliant"] is True
+
+    def test_fake_file_fails_verification(self):
+        """Fake file path should fail when verify_files=True."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Fake file
+FILE: /this/path/definitely/does/not/exist/anywhere.py
+LINES: 1-5
+CODE:
+    import fake
+VERIFIED: Yes
+"""
+        result = check_compliance(output, verify_files=True)
+        assert result["compliant"] is False
+        assert any("file not found" in v.lower() for v in result["violations"])
+
+    def test_file_not_verified_by_default(self):
+        """File existence should NOT be checked by default."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Fake file but not verified
+FILE: /this/path/definitely/does/not/exist.py
+LINES: 1-5
+CODE:
+    import fake
+VERIFIED: Yes
+"""
+        result = check_compliance(output, verify_files=False)
+        assert result["compliant"] is True
+
+
+class TestFindingBlockExtraction:
+    """Test the extract_finding_blocks helper function."""
+
+    def test_single_block_extraction(self):
+        """Single finding block should be extracted correctly."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = """
+FINDING: Test finding
+FILE: /path/to/file.py
+LINES: 10-20
+CODE:
+    some_code()
+VERIFIED: Yes
+"""
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 1
+        assert blocks[0].finding == "Test finding"
+        assert blocks[0].file_path == "/path/to/file.py"
+        assert blocks[0].lines == "10-20"
+        assert "some_code()" in blocks[0].code
+        assert blocks[0].verified == "Yes"
+
+    def test_multiple_blocks_extraction(self):
+        """Multiple finding blocks should be extracted correctly."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = """
+FINDING: First
+FILE: /path/a.py
+LINES: 1
+CODE:
+    a()
+VERIFIED: Yes
+
+FINDING: Second
+FILE: /path/b.py
+LINES: 2
+CODE:
+    b()
+VERIFIED: Yes
+"""
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 2
+        assert blocks[0].finding == "First"
+        assert blocks[1].finding == "Second"
+
+    def test_no_findings(self):
+        """Text with no FINDING should return empty list."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = "Just some text without any findings."
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 0
+
+
+class TestHookIntegration:
+    """Integration tests for the validation hook (2026-02-02 advisor recommendation)."""
+
+    @pytest.fixture
+    def hook_path(self):
+        """Get path to hook script."""
+        import os
+        return os.path.join(
+            os.path.dirname(__file__), '..', '..',
+            '.claude', 'hooks', 'validate-agent-compliance.sh'
+        )
+
+    @pytest.fixture
+    def validator_path(self):
+        """Get path to validator script."""
+        import os
+        return os.path.join(
+            os.path.dirname(__file__), '..', '..',
+            'tools', 'validate_agent_compliance.py'
+        )
+
+    def test_hook_script_exists(self, hook_path):
+        """Hook script should exist at expected path."""
+        import os
+        assert os.path.exists(hook_path), f"Hook not found: {hook_path}"
+
+    def test_hook_is_executable(self, hook_path):
+        """Hook script should be executable."""
+        import os
+        assert os.access(hook_path, os.X_OK), f"Hook not executable: {hook_path}"
+
+    def test_validator_script_exists(self, validator_path):
+        """Validator script should exist at expected path."""
+        import os
+        assert os.path.exists(validator_path), f"Validator not found: {validator_path}"
+
+    def test_hook_contains_fail_closed_logic(self, hook_path):
+        """Hook should contain fail-closed security pattern."""
+        with open(hook_path, 'r') as f:
+            content = f.read()
+
+        # Check for fail-closed comments and logic
+        assert 'Fail closed' in content or 'fail closed' in content, \
+            "Hook should document fail-closed behavior"
+        assert '"decision": "block"' in content, \
+            "Hook should return block decisions"
+
+        # Check that missing validator causes block, not exit 0 silently
+        assert 'Validator script not found' in content or 'cannot verify' in content, \
+            "Hook should block when validator missing"
+
+    def test_hook_handles_review_agents(self, hook_path):
+        """Hook should validate review agent types."""
+        with open(hook_path, 'r') as f:
+            content = f.read()
+
+        # All 9 review agents should be handled
+        review_agents = ['verifier', 'adversary', 'expert', 'structural-proof',
+                        'grounding', 'fuzzer', 'translator', 'visualizer', 'advisor']
+        for agent in review_agents:
+            assert agent in content, f"Hook should handle {agent} agent"
+
+    def test_hook_skips_non_review_agents(self, hook_path):
+        """Hook should skip validation for non-review agent types."""
+        with open(hook_path, 'r') as f:
+            content = f.read()
+
+        # Should have logic to skip certain agent types
+        assert 'exit 0' in content and ('Explore' in content or 'Bash' in content or '*' in content), \
+            "Hook should skip non-review agents"
+
+
+class TestCodeBlockExtractionWithEmptyLines:
+    """Test that extract_finding_blocks handles empty lines correctly (2026-02-02 fix)."""
+
+    def test_extract_code_with_empty_line(self):
+        """extract_finding_blocks should capture CODE with empty lines."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = """
+FINDING: Code with blank
+FILE: /path/file.py
+LINES: 1-10
+CODE:
+    def foo():
+        pass
+
+    def bar():
+        pass
+VERIFIED: Yes
+"""
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 1
+        # The code block should include content after the empty line
+        assert blocks[0].code is not None
+        assert "foo" in blocks[0].code
+        assert "bar" in blocks[0].code
+
+    def test_extract_code_multiple_empty_lines(self):
+        """extract_finding_blocks should handle multiple consecutive empty lines."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = """
+FINDING: Multi-blank code
+FILE: /path/file.py
+LINES: 1-15
+CODE:
+    class A:
+        pass
+
+
+    class B:
+        pass
+VERIFIED: Yes
+"""
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 1
+        assert blocks[0].code is not None
+        assert "class A" in blocks[0].code
+        assert "class B" in blocks[0].code
