@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Check JavaScript debt markers for L3 parity with Python
 #
-# This script verifies that experiments/eval_step.js has proper debt tracking
+# This script verifies that substrates/js/eval_step.js has proper debt tracking
 # that matches Python's semantic debt markers.
 #
 # Usage: ./tools/check_js_debt.sh
 
 set -euo pipefail
 
-JS_FILE="experiments/eval_step.js"
+JS_FILE="substrates/js/eval_step.js"
 
 echo "=== Checking JavaScript Debt Markers ==="
 echo ""

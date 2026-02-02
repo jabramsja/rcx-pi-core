@@ -100,7 +100,7 @@ pytest $PARALLEL_FLAG -q \
 echo ""
 echo "== 5) JavaScript L3 parity check =="
 ./tools/check_js_debt.sh
-if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+if node substrates/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else
     echo "FAIL: JS tests failed"

@@ -61,5 +61,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node experiments/eval_step.js
+          node substrates/js/eval_step.js
           python -m pytest tests/test_js_parity_automated.py -v

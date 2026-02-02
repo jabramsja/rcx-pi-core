@@ -3,7 +3,7 @@
 # Catches patterns that grep-based contraband check misses
 #
 # Usage: ./tools/ast_police_js.sh [file]
-#        Default: experiments/eval_step.js
+#        Default: substrates/js/eval_step.js
 #
 # This catches sneaky patterns like:
 #   - Indirect eval: window['eval'], globalThis.eval, (0,eval)
@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-JS_FILE="${1:-experiments/eval_step.js}"
+JS_FILE="${1:-substrates/js/eval_step.js}"
 
 if [ ! -f "$JS_FILE" ]; then
     echo "ERROR: $JS_FILE not found"

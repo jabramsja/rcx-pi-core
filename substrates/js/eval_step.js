@@ -882,7 +882,7 @@ const path = require('path');
 
 // BOOTSTRAP_PRIMITIVE: projection_loader
 // Load all seed files (JSON parsing is the irreducible I/O primitive)
-const seedsDir = path.join(__dirname, '..', 'seeds');
+const seedsDir = path.join(__dirname, '..', '..', 'seeds');
 const kernel = JSON.parse(fs.readFileSync(path.join(seedsDir, 'kernel.v1.json'), 'utf8'));
 const matchSeed = JSON.parse(fs.readFileSync(path.join(seedsDir, 'match.v2.json'), 'utf8'));
 const substSeed = JSON.parse(fs.readFileSync(path.join(seedsDir, 'subst.v2.json'), 'utf8'));
@@ -1179,7 +1179,7 @@ console.log(`PASS strict detection: ${isNormalizedAsDict && isPreservedAsHeadTai
 console.log('\n=== Test 8: Cross-Substrate Parity Tests ===\n');
 
 // Load parity test vectors
-const parityVectorsPath = path.join(__dirname, '..', 'tests', 'fixtures', 'parity_vectors.json');
+const parityVectorsPath = path.join(__dirname, '..', '..', 'tests', 'fixtures', 'parity_vectors.json');
 let parityVectors;
 try {
   parityVectors = JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8'));
@@ -1393,7 +1393,7 @@ function detectClosureStructural(projections, input, maxSteps = 100) {
 }
 
 // Load EngineNews parity vectors
-const enginenewsVectorsPath = path.join(__dirname, '..', 'tests', 'fixtures', 'enginenews_vectors.json');
+const enginenewsVectorsPath = path.join(__dirname, '..', '..', 'tests', 'fixtures', 'enginenews_vectors.json');
 let enginenewsVectors;
 try {
   enginenewsVectors = JSON.parse(fs.readFileSync(enginenewsVectorsPath, 'utf8'));

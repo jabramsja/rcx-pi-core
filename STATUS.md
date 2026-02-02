@@ -84,7 +84,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Any change to Python projection behavior MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Parity vectors in `tests/fixtures/` are shared by both implementations
-- Run `node experiments/eval_step.js` after Python changes to verify JS parity
+- Run `node substrates/js/eval_step.js` after Python changes to verify JS parity
 - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
 - Violation of parity breaks L3 and must be fixed before merge
 
@@ -132,7 +132,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `experiments/eval_step.js` (~350 LOC core + tests)
+**JS POC location:** `substrates/js/eval_step.js` (~350 LOC core + tests)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -160,14 +160,14 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 Cross-substrate parity tests verify L3 (substrate portability):
 - [x] Shared JSON test vectors: `tests/fixtures/parity_vectors.json` (20 parity + 3 security = 23 vectors)
 - [x] Python tests: `tests/test_parity_python.py` (20 parity tests + 3 security tests)
-- [x] JS tests: `experiments/eval_step.js` (20 parity tests pass)
+- [x] JS tests: `substrates/js/eval_step.js` (20 parity tests pass)
 - [x] Structural trace tests: `tests/test_structural_trace.py` (14 tests)
 - [x] **ACTUAL cross-substrate comparison** (9-agent Round 3 fix, 2026-01-31):
   - `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
   - Runs SAME 20 vectors through BOTH Python and JS kernels via JSON API
   - Compares actual outputs (not just string parsing)
   - Handles int/float normalization (JS doesn't distinguish)
-- [x] CI workflow runs both: Python pytest + `node experiments/eval_step.js`
+- [x] CI workflow runs both: Python pytest + `node substrates/js/eval_step.js`
 
 **Security gaps in JS POC (adversary finding - FIXED 2026-01-30):**
 - [x] `KERNEL_RESERVED_FIELDS` validation (added v4)
@@ -598,7 +598,7 @@ All 9 agents ran destructive audits against current codebase with explicit file 
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
-4. ✅ Ported trace to JS (runStructural in experiments/eval_step.js)
+4. ✅ Ported trace to JS (runStructural in substrates/js/eval_step.js)
 5. ✅ EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
 
 **L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.

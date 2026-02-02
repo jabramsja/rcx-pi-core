@@ -34,8 +34,8 @@ If a task is not listed here, it is NOT to be implemented.
 - Do not leave broken files/tests behind and add replacements.
 - Minimize file creation. Prefer editing existing files.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
-- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `seeds/` MUST be mirrored in `experiments/eval_step.js`.
-  - Run `node experiments/eval_step.js` to verify all JS tests pass
+- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `seeds/` MUST be mirrored in `substrates/js/eval_step.js`.
+  - Run `node substrates/js/eval_step.js` to verify all JS tests pass
   - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
   - Run `./tools/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
   - Run `./tools/ast_police_js.sh` to catch JS patterns that bypass grep
@@ -394,7 +394,7 @@ All blockers resolved 2026-01-28:
 
 ### Step 1: Fix JS Security Gaps ✅ DONE
 
-**Location:** `experiments/eval_step.js`
+**Location:** `substrates/js/eval_step.js`
 
 **Completed (2026-01-30):**
 - [x] Add `KERNEL_RESERVED_FIELDS` validation (12 fields)
@@ -441,7 +441,7 @@ All blockers resolved 2026-01-28:
 ### Step 4: Port Trace to JS POC ✅ DONE
 
 **Completed (2026-01-30):**
-- [x] `runStructural()` in `experiments/eval_step.js`
+- [x] `runStructural()` in `substrates/js/eval_step.js`
 - [x] Returns `{result, trace, stall, steps}` matching Python
 - [x] Trace as Mu linked-list format
 - [x] 5 structural trace tests pass in JS

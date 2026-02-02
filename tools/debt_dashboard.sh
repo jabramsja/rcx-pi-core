@@ -43,7 +43,7 @@ if [ "$JSON_OUTPUT" = true ]; then
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
 
     # JavaScript debt
-    JS_FILE="experiments/eval_step.js"
+    JS_FILE="substrates/js/eval_step.js"
     JS_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" 2>/dev/null || echo 0)
     JS_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" 2>/dev/null || echo 0)
     JS_BUILTIN=$(grep -c "@host_builtin" "$JS_FILE" 2>/dev/null || echo 0)
@@ -151,9 +151,9 @@ else
     done
     echo ""
 
-    echo "JavaScript Debt (experiments/eval_step.js) - L3 Parity"
+    echo "JavaScript Debt (substrates/js/eval_step.js) - L3 Parity"
     echo "----------------------------------------------"
-    JS_FILE="experiments/eval_step.js"
+    JS_FILE="substrates/js/eval_step.js"
     if [ -f "$JS_FILE" ]; then
         JS_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" 2>/dev/null || echo 0)
         JS_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" 2>/dev/null || echo 0)

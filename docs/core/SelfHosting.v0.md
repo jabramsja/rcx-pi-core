@@ -471,7 +471,7 @@ Phase 5 complete:
 - [ ] 8d: EngineNews trace model (in progress - see L3 plan below)
 
 **L3 Substrate Portability (7-agent reviewed 2026-01-30):**
-- [x] JS POC exists (`experiments/eval_step.js`, ~300 LOC core)
+- [x] JS POC exists (`substrates/js/eval_step.js`, ~300 LOC core)
 - [x] Same projections run on Python AND JavaScript
 - [x] Step 1: Fix JS security gaps (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair)
 - [x] Step 2: Cross-substrate parity tests (`tests/test_parity_python.py`, 20 vectors)

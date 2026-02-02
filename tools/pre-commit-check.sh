@@ -186,7 +186,7 @@ fi
 STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
 if [ -n "$STAGED_JS" ] || [ -n "$STAGED_SEEDS" ]; then
     echo "-- Running JS parity tests..."
-    if ! node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    if ! node substrates/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
         echo "❌ JS parity tests failed"
         ERRORS=$((ERRORS + 1))
     else
