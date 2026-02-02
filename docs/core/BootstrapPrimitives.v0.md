@@ -332,7 +332,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## L3 Substrate Portability: JavaScript POC
 
-**Location:** `experiments/eval_step.js` (~300 LOC core)
+**Location:** `substrates/js/eval_step.js` (~600 LOC core + inline tests)
 
 **What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 
@@ -345,7 +345,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 | projection_loader | `seed_integrity.py` | `eval_step.js:JSON.parse()` |
 
 **Security hardening (completed 2026-01-30):**
-- [x] `KERNEL_RESERVED_FIELDS` validation (12 fields)
+- [x] `KERNEL_RESERVED_FIELDS` validation (20 fields)
 - [x] `validate_type_tag()` - whitelist enforcement
 - [x] Dict kv-pair normalization parity fix
 - [ ] Lambda calculus guard (future - not critical for L3)
@@ -357,7 +357,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 **Role clarification:**
 - **Python:** Primary development substrate (2,100+ tests, agent-reviewed)
-- **JavaScript:** Portability proof (auditable ~300 LOC, all parity tests pass)
+- **JavaScript:** Portability proof (auditable ~600 LOC core, all parity tests pass)
 
 ---
 

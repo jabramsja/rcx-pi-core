@@ -322,8 +322,8 @@ class TestKernelReservedFieldsFuzzer:
     """Verify KERNEL_RESERVED_FIELDS completeness."""
 
     def test_reserved_fields_count(self):
-        """Exactly 12 reserved fields (per STATUS.md)."""
-        assert len(KERNEL_RESERVED_FIELDS) == 12
+        """Exactly 20 reserved fields (12 kernel + 4 EngineNews + 4 Exhaustion)."""
+        assert len(KERNEL_RESERVED_FIELDS) == 20
 
     def test_reserved_fields_are_underscore_prefixed(self):
         """All reserved fields start with underscore."""

@@ -153,8 +153,8 @@ echo "-- JS debt markers (must match Python) --"
 ./tools/check_js_debt.sh
 
 echo "-- JS tests (must all pass) --"
-node experiments/eval_step.js 2>&1 | tail -5 | head -1
-if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+node substrates/js/eval_step.js 2>&1 | tail -5 | head -1
+if node substrates/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else
     echo "FAIL: JS tests failed"

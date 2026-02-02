@@ -23,9 +23,9 @@ class TestJSTestSuitePasses:
     """Verify the JavaScript test suite passes completely."""
 
     def test_js_eval_step_tests_pass(self):
-        """Run node experiments/eval_step.js and verify all tests pass."""
+        """Run node substrates/js/eval_step.js and verify all tests pass."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -56,7 +56,7 @@ class TestJSTestSuitePasses:
     def test_js_core_tests_pass(self):
         """Verify core JS test cases pass."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -139,7 +139,7 @@ class TestCrossSubstrateParity:
         9-agent Round 3 fix: Machine-readable output for actual comparison.
         """
         result = subprocess.run(
-            ["node", "experiments/eval_step.js", "--json-api", json.dumps(request_dict)],
+            ["node", "substrates/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -156,7 +156,7 @@ class TestCrossSubstrateParity:
     def test_parity_vector_count_matches(self, parity_vectors):
         """Verify Python and JS test the same number of parity vectors."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -289,7 +289,7 @@ class TestJSSecurityParity:
     def test_js_rejects_nan(self):
         """JS should reject NaN values like Python."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -301,7 +301,7 @@ class TestJSSecurityParity:
     def test_js_rejects_infinity(self):
         """JS should reject Infinity values like Python."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -315,7 +315,7 @@ class TestJSSecurityParity:
         from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
 
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -333,12 +333,12 @@ class TestJSSecurityParity:
         """JS should have same reserved field count as Python."""
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
-        # Python has 12 reserved fields
-        assert len(KERNEL_RESERVED_FIELDS) == 12, "Python reserved fields changed"
+        # Python has 20 reserved fields (12 kernel + 4 EngineNews + 4 Exhaustion)
+        assert len(KERNEL_RESERVED_FIELDS) == 20, "Python reserved fields changed"
 
         # JS test output should confirm reserved fields are checked
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -354,7 +354,7 @@ class TestJSEngineNewsParity:
     def test_js_enginenews_projections_loaded(self):
         """Verify JS loads EngineNews projections."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -368,7 +368,7 @@ class TestJSEngineNewsParity:
     def test_js_enginenews_closure_detection_works(self):
         """Verify JS closure detection matches Python behavior."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,
@@ -388,7 +388,7 @@ class TestJSTraceFormatParity:
     def test_js_trace_stall_format(self):
         """JS stall trace should add new entry at step i+1 (not modify last)."""
         result = subprocess.run(
-            ["node", "experiments/eval_step.js"],
+            ["node", "substrates/js/eval_step.js"],
             capture_output=True,
             text=True,
             cwd=ROOT,

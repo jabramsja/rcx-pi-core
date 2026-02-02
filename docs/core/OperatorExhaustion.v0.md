@@ -257,7 +257,7 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 ### 3. Cross-Substrate Parity
 - [ ] Same projections produce same results on Python and JS
 - [ ] Parity tests in `tests/test_exhaustion_parity.py`
-- [ ] JS tests in `experiments/eval_step.js`
+- [ ] JS tests in `substrates/js/eval_step.js`
 
 ### 4. Integration Tests
 - [ ] Single operator exhaustion detected and frozen

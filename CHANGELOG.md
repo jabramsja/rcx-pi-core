@@ -65,7 +65,7 @@ both Python and JavaScript and compared the outputs.
 
 **Fixes:**
 
-- **JS JSON API Mode** (`experiments/eval_step.js`)
+- **JS JSON API Mode** (`substrates/js/eval_step.js`)
   - Added `--json-api` command line option for machine-readable output
   - Actions: `run_vector`, `run_all_vectors`, `run_enginenews`, `get_constants`
   - Outputs JSON on single line for easy parsing by Python tests
@@ -78,7 +78,7 @@ both Python and JavaScript and compared the outputs.
   - New `test_python_js_constants_match` - verifies MAX_DEPTH=300 and KERNEL_RESERVED_FIELDS match
 
 - **Git Tracking** (`.gitignore`)
-  - `experiments/eval_step.js` now tracked in git (was previously gitignored)
+  - `substrates/js/eval_step.js` now tracked in git (was previously gitignored)
   - Required for CI to run JS parity tests
 
 **Test Results:**

@@ -125,7 +125,7 @@ Step 5 is COMPLETE:
 - [x] Same projections produce same results on Python
 - [x] Parity tests in `tests/test_enginenews_parity.py` (23+ tests)
 - [x] Fuzzer tests in `tests/test_enginenews_fuzzer.py`
-- [x] JS tests in `experiments/eval_step.js` (v5, with EngineNews support)
+- [x] JS tests in `substrates/js/eval_step.js` (v5, with EngineNews support)
 - [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
 
 ### 4. Closure Evidence is Structural ✅
@@ -215,7 +215,7 @@ Minimum parity tests for Step 5:
 
 These vectors MUST pass on:
 - Python: `tests/test_enginenews_parity.py`
-- JavaScript: `experiments/eval_step.js`
+- JavaScript: `substrates/js/eval_step.js`
 
 ---
 
@@ -242,7 +242,7 @@ grep -n "for.*in.*trace\|if.*in.*seen" rcx_pi/selfhost/ --include="*.py"
 
 # Run cross-substrate demo
 python scripts/enginenews_demo.py
-node experiments/eval_step.js --test-enginenews
+node substrates/js/eval_step.js --test-enginenews
 ```
 
 ---

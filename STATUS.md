@@ -40,7 +40,7 @@ NAME: Mechanical Kernel (Security Hardened)
 - [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 - [x] `step_kernel_mu()` wired to use structural kernel
-- [x] Security hardening complete (12 reserved fields, deep validation)
+- [x] Security hardening complete (20 reserved fields, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py:397-410`)
 
 **Seed version note:** `match_mu()` and `subst_mu()` standalone functions use v1 seeds for direct invocation. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
@@ -71,7 +71,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **enginenews.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
 | **Python Substrate** | ~2000 LOC, 2,100+ tests, production-ready | ✅ PRIMARY | - |
-| **JS Substrate** | ~350 LOC, auditable, portability proof | - | ✅ COMPLETE |
+| **JS Substrate** | ~600 LOC core + inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
 
 **What L3 proves:**
@@ -84,7 +84,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Any change to Python projection behavior MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Parity vectors in `tests/fixtures/` are shared by both implementations
-- Run `node experiments/eval_step.js` after Python changes to verify JS parity
+- Run `node substrates/js/eval_step.js` after Python changes to verify JS parity
 - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
 - Violation of parity breaks L3 and must be fixed before merge
 
@@ -132,7 +132,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `experiments/eval_step.js` (~350 LOC core + tests)
+**JS POC location:** `substrates/js/eval_step.js` (~600 LOC core + inline tests)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -149,9 +149,9 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **L4 Status:** Open research question in SINK. Not promised, not ruled out.
 
-**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~300 LOC in JS), we know exactly what would need to change.
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~600 LOC core in JS), we know exactly what would need to change.
 
-**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~300 LOC is our current answer - auditable, portable, mechanical.
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~600 LOC core is our current answer - auditable, portable, mechanical.
 
 ### Cross-Substrate Testing Strategy
 
@@ -160,14 +160,14 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 Cross-substrate parity tests verify L3 (substrate portability):
 - [x] Shared JSON test vectors: `tests/fixtures/parity_vectors.json` (20 parity + 3 security = 23 vectors)
 - [x] Python tests: `tests/test_parity_python.py` (20 parity tests + 3 security tests)
-- [x] JS tests: `experiments/eval_step.js` (20 parity tests pass)
+- [x] JS tests: `substrates/js/eval_step.js` (20 parity tests pass)
 - [x] Structural trace tests: `tests/test_structural_trace.py` (14 tests)
 - [x] **ACTUAL cross-substrate comparison** (9-agent Round 3 fix, 2026-01-31):
   - `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
   - Runs SAME 20 vectors through BOTH Python and JS kernels via JSON API
   - Compares actual outputs (not just string parsing)
   - Handles int/float normalization (JS doesn't distinguish)
-- [x] CI workflow runs both: Python pytest + `node experiments/eval_step.js`
+- [x] CI workflow runs both: Python pytest + `node substrates/js/eval_step.js`
 
 **Security gaps in JS POC (adversary finding - FIXED 2026-01-30):**
 - [x] `KERNEL_RESERVED_FIELDS` validation (added v4)
@@ -598,7 +598,7 @@ All 9 agents ran destructive audits against current codebase with explicit file 
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
-4. ✅ Ported trace to JS (runStructural in experiments/eval_step.js)
+4. ✅ Ported trace to JS (runStructural in substrates/js/eval_step.js)
 5. ✅ EngineNews structural closure detection (seeds/enginenews.v1.json, 9 projections)
 
 **L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.
