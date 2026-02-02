@@ -23,8 +23,9 @@ import pytest
 
 from rcx_pi.eval_seed import apply_projection, match, substitute, NO_MATCH
 
-# Import shared apply_mu from conftest (avoids duplication)
-from conftest import apply_mu
+# Import apply_mu from production code (9-agent Expert finding 2026-02-01)
+# Production version has assert_mu() validation that conftest version lacked
+from rcx_pi.step_mu import apply_mu
 
 
 class TestApplyMuParitySimple:
