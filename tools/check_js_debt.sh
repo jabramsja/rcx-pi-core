@@ -31,11 +31,22 @@ echo "  @host_builtin:      $HOST_BUILTIN"
 echo "  BOOTSTRAP_PRIMITIVE: $BOOTSTRAP_PRIMITIVE"
 echo ""
 
-# Expected counts (from debt summary header)
-EXPECTED_ITERATION=6
-EXPECTED_RECURSION=4
-EXPECTED_BUILTIN=2
-EXPECTED_BOOTSTRAP=5
+# Extract expected counts from DEBT SUMMARY header (self-documenting, no drift)
+# Uses portable grep (no -P flag which isn't available on macOS)
+EXPECTED_ITERATION=$(grep -o '@host_iteration: [0-9]*' "$JS_FILE" | head -1 | cut -d' ' -f2)
+EXPECTED_RECURSION=$(grep -o '@host_recursion: [0-9]*' "$JS_FILE" | head -1 | cut -d' ' -f2)
+EXPECTED_BUILTIN=$(grep -o '@host_builtin: [0-9]*' "$JS_FILE" | head -1 | cut -d' ' -f2)
+EXPECTED_BOOTSTRAP=$(grep -o 'BOOTSTRAP PRIMITIVES ([0-9]*' "$JS_FILE" | head -1 | grep -o '[0-9]*')
+
+# Validate we extracted the counts (fail if header is missing/malformed)
+if [ -z "$EXPECTED_ITERATION" ] || [ -z "$EXPECTED_RECURSION" ] || [ -z "$EXPECTED_BUILTIN" ] || [ -z "$EXPECTED_BOOTSTRAP" ]; then
+    echo "ERROR: Could not extract expected counts from DEBT SUMMARY header in $JS_FILE"
+    echo "  EXPECTED_ITERATION: ${EXPECTED_ITERATION:-MISSING}"
+    echo "  EXPECTED_RECURSION: ${EXPECTED_RECURSION:-MISSING}"
+    echo "  EXPECTED_BUILTIN: ${EXPECTED_BUILTIN:-MISSING}"
+    echo "  EXPECTED_BOOTSTRAP: ${EXPECTED_BOOTSTRAP:-MISSING}"
+    exit 1
+fi
 
 ERRORS=0
 
