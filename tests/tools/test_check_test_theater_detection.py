@@ -120,3 +120,113 @@ def test_not_none():
         code = ""
         result = run_theater_check_on_code(code)
         assert result.returncode == 0, "Empty file should pass"
+
+
+class TestTheaterDetectsTautologies:
+    """Verify check_test_theater.sh catches tautological assertions."""
+
+    def test_detects_assertTrue_True(self):
+        """assertTrue(True) is always true - theater."""  # THEATER_OK: docstring
+        # Use concatenation so THEATER_OK is on same line as pattern
+        code = "\n".join([
+            "def test_something():",
+            "    self.assertTrue(True)",  # THEATER_OK: test data
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on assertTrue(True)"  # THEATER_OK: docstring
+        assert "tautology" in result.stdout.lower() or "theater" in result.stdout.lower()
+
+    def test_detects_assertEqual_True_True(self):
+        """assertEqual(True, True) is always true - theater."""  # THEATER_OK: docstring
+        code = "\n".join([
+            "def test_something():",
+            "    self.assertEqual(True, True)",  # THEATER_OK: test data
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on assertEqual(True, True)"  # THEATER_OK: docstring
+
+    def test_detects_assertEqual_1_1(self):
+        """assertEqual(1, 1) is always true - theater."""  # THEATER_OK: docstring
+        code = "\n".join([
+            "def test_something():",
+            "    self.assertEqual(1, 1)",  # THEATER_OK: test data
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on assertEqual(1, 1)"  # THEATER_OK: docstring
+
+
+class TestTheaterDetectsEmptyTests:
+    """Verify check_test_theater.sh catches empty test bodies."""
+
+    def test_detects_pass_body(self):
+        """def test_foo(): pass is theater."""
+        code = "def test_something(): pass\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on empty test body with pass"
+
+    def test_detects_ellipsis_body(self):
+        """def test_foo(): ... is theater."""
+        code = "def test_something(): ...\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on empty test body with ellipsis"
+
+
+class TestTheaterDetectsSkipWithoutReason:
+    """Verify check_test_theater.sh catches skip decorators without reasons."""
+
+    def test_detects_pytest_skip_bare(self):
+        """@pytest.mark.skip without reason is theater."""  # THEATER_OK: docstring
+        code = "\n".join([
+            "@pytest.mark.skip",  # THEATER_OK: test data
+            "def test_something():",
+            "    x = 1",
+            "    assert x == 1",
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on @pytest.mark.skip without reason"  # THEATER_OK: docstring
+
+    def test_detects_pytest_skip_empty_parens(self):
+        """@pytest.mark.skip() without reason is theater."""  # THEATER_OK: docstring
+        code = "\n".join([
+            "@pytest.mark.skip()",  # THEATER_OK: test data
+            "def test_something():",
+            "    x = 1",
+            "    assert x == 1",
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on @pytest.mark.skip() without reason"  # THEATER_OK: docstring
+
+    def test_allows_pytest_skip_with_reason(self):
+        """@pytest.mark.skip(reason='...') is legitimate."""
+        code = "\n".join([
+            '@pytest.mark.skip(reason="Known bug, see issue #123")',
+            "def test_something():",
+            "    result = compute()",
+            "    assert result == expected",
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, "Should allow @pytest.mark.skip with reason"
+
+
+class TestTheaterDetectsCommentedAssertions:
+    """Verify check_test_theater.sh catches commented-out assertions."""
+
+    def test_detects_commented_assert(self):
+        """Commented-out assertion is theater."""
+        code = "\n".join([
+            "def test_something():",
+            "    result = do_thing()",
+            "    # assert result == expected",  # THEATER_OK: test data
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on commented-out assertion"
+
+    def test_detects_commented_self_assert(self):
+        """Commented-out self.assert is theater."""  # THEATER_OK: docstring
+        code = "\n".join([
+            "def test_something():",
+            "    result = do_thing()",
+            "    # self.assertEqual(result, expected)",  # THEATER_OK: test data
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on commented-out self.assert"  # THEATER_OK: docstring
