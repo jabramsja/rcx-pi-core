@@ -1,0 +1,90 @@
+name: Fixture Gates
+
+# Consolidated fixture validation - runs all gates in parallel
+# Only on PRs to dev - push to dev is covered by green_gate.yml
+on:
+  pull_request:
+    branches: ["dev"]
+  workflow_dispatch:  # Allow manual trigger
+
+concurrency:
+  group: fixture-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast gates (no special dependencies)
+  orbit-dot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Orbit DOT fixture gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/check_orbit_dot_fixture.sh
+
+  orbit-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Orbit provenance fixture gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/check_orbit_provenance.sh
+
+  engine-run-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Engine run schema gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/check_engine_run_schema.sh
+
+  # Graphviz-dependent gates (share install step pattern)
+  orbit-svg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Orbit SVG fixture gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/check_orbit_svg_fixture.sh
+
+  orbit-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Build artifacts
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/build_orbit_artifacts.sh
+      - name: Index semantic gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/check_orbit_index_fixture.sh
+
+  # Rust-dependent gate
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Replay fixture gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: ./scripts/check_replay_fixture.sh

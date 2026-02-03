@@ -1,13 +1,7 @@
 name: Rust Examples
 
+# Only run on PRs - push to dev is covered by green_gate.yml
 on:
-  push:
-    branches: ["dev"]
-    paths:
-      - "rcx_pi_rust/**"
-      - "scripts/green_examples.sh"
-      - "scripts/green_gate.sh"
-      - ".github/workflows/rust_examples.yml"
   pull_request:
     branches: ["dev"]
     paths:
@@ -15,6 +9,7 @@ on:
       - "scripts/green_examples.sh"
       - "scripts/green_gate.sh"
       - ".github/workflows/rust_examples.yml"
+  workflow_dispatch:  # Allow manual trigger
 
 concurrency:
   group: rust-examples-${{ github.event.pull_request.number || github.ref }}
