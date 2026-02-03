@@ -1,9 +1,9 @@
 # Operator Exhaustion Structural Specification v0
 
-**Status:** DESIGN (Step 6 candidate)
+**Status:** IMPLEMENTED (Step 6 complete 2026-02-02)
 **Created:** 2026-02-01
 **Origin:** RCXEngineNew.pdf Rule 3.1
-**Depends on:** Step 5 (EngineNews Rule 2.2♢) - COMPLETE
+**Depends on:** Step 5 (Recurrence Rule 2.2♢) - COMPLETE
 
 ---
 
@@ -48,7 +48,7 @@ introducing new structure.
 | Component | Status | Role in Rule 3.1 |
 |-----------|--------|------------------|
 | `run_mu_structural()` | DONE (Step 5) | Provides trace with projection IDs |
-| `enginenews.v1.json` | DONE (Step 5) | Detects state recurrence (τ logging) |
+| `recurrence.v1.json` | DONE (Step 5) | Detects state recurrence (τ logging) |
 | Trace format | DONE | Already has `projection` field per entry |
 | Frozen set | **NEW** | Track exhausted operators |
 | Exhaustion detection | **NEW** | Detect same-operator-since-τ pattern |
@@ -63,7 +63,7 @@ The trace from Step 5 already captures which projection matched at each step:
 ```
 
 Rule 3.1 needs to:
-1. Detect when τ is logged (state recurrence - already done by EngineNews)
+1. Detect when τ is logged (state recurrence - already done by Recurrence)
 2. Track which operator was active when τ was logged
 3. Detect if the same operator continues to be the sole contributor
 4. Freeze the operator when exhaustion is detected
@@ -102,20 +102,20 @@ After freezing, the kernel enters Post-Closure Recursion Mode:
 
 ## Structural Design
 
-### Input Format (Extension to EngineNews)
+### Input Format (Extension to Recurrence)
 
 ```json
 {
   "_detect_exhaustion": {
     "trace": <linked_list>,         // From run_mu_structural
     "frozen": <linked_list>,        // Currently frozen operator IDs
-    "tau_step": <int_or_null>,      // Step where τ was logged (from EngineNews)
+    "tau_step": <int_or_null>,      // Step where τ was logged (from Recurrence)
     "operator_ids": <linked_list>   // All known operator IDs (for globalstall)
   }
 }
 ```
 
-**Note:** `tau_step` comes from EngineNews output (see Q2 resolution below).
+**Note:** `tau_step` comes from Recurrence output (see Q2 resolution below).
 
 ### Output Format
 
@@ -135,20 +135,20 @@ logic. The simplified design:
 
 | Projection ID | Purpose |
 |---------------|---------|
-| `exhaust.init` | Entry: no tau_step → continue (no exhaustion possible) |
-| `exhaust.scan_start` | Begin scanning trace from tau_step |
-| `exhaust.scan_same` | Current entry has same operator, continue scan |
-| `exhaust.scan_different` | Different operator found → not exhausted |
-| `exhaust.exhausted` | End of scan, same operator throughout → freeze |
-| `exhaust.unwrap` | Extract final result |
+| `exhaustion.init` | Entry: no tau_step → continue (no exhaustion possible) |
+| `exhaustion.scan_start` | Begin scanning trace from tau_step |
+| `exhaustion.scan_same` | Current entry has same operator, continue scan |
+| `exhaustion.scan_different` | Different operator found → not exhausted |
+| `exhaustion.exhausted` | End of scan, same operator throughout → freeze |
+| `exhaustion.unwrap` | Extract final result |
 
 **Merged logic:**
-- `exhaust.init` handles both entry AND no-tau case (originally 2 projections)
-- `exhaust.scan_same` and `exhaust.scan_different` use non-linear patterns for
+- `exhaustion.init` handles both entry AND no-tau case (originally 2 projections)
+- `exhaustion.scan_same` and `exhaustion.scan_different` use non-linear patterns for
   operator equality checking (originally 4 projections)
-- Frozen list membership is checked via non-linear pattern in `exhaust.exhausted`
+- Frozen list membership is checked via non-linear pattern in `exhaustion.exhausted`
 
-**Estimated:** ~6 projections (simpler than EngineNews's 9)
+**Estimated:** ~6 projections (simpler than Recurrence's 9)
 
 **Note:** Globalstall detection can be added as a separate projection if needed,
 but the primary use case (single operator exhaustion) is served by the 6 above.
@@ -182,12 +182,12 @@ Given: trace (linked list), frozen (linked list), tau_step (int or null)
 
 ## Integration with Kernel
 
-### Option A: Separate exhaust.v1.json seed (Recommended)
+### Option A: Separate exhaustion.v1.json seed (Recommended)
 
-Create new seed file with exhaustion projections, loaded after enginenews.v1.json.
+Create new seed file with exhaustion projections, loaded after recurrence.v1.json.
 Keeps seeds modular and follows existing pattern.
 
-### Option B: Extend enginenews.v1.json
+### Option B: Extend recurrence.v1.json
 
 Add exhaustion projections to existing seed. Simpler but less modular.
 
@@ -197,7 +197,7 @@ Add exhaustion projections to existing seed. Simpler but less modular.
 
 ```
 1. run_mu_structural() produces trace
-2. EngineNews (_detect_closure) checks for state recurrence → may log τ
+2. Recurrence (_detect_closure) checks for state recurrence → may log τ
 3. Exhaustion (_detect_exhaustion) checks for operator exhaustion
 4. If exhaustion detected:
    a. Add operator to frozen set
@@ -226,10 +226,10 @@ null
 
 ### Membership Check (Structural)
 
-Uses same pattern as EngineNews seen-set:
+Uses same pattern as Recurrence seen-set:
 ```json
 {
-  "id": "exhaust.in_frozen",
+  "id": "exhaustion.in_frozen",
   "pattern": {
     "_check": {"var": "op_id"},
     "_frozen": {"head": {"var": "op_id"}, "tail": {"var": "_"}}
@@ -245,7 +245,7 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 ## Success Criteria
 
 ### 1. Projections Exist
-- [ ] `seeds/exhaust.v1.json` contains ~10 projections
+- [ ] `mu/closures/exhaustion.v1.json` contains ~10 projections
 - [ ] Each projection has `id`, `pattern`, `body` fields
 - [ ] SHA256 checksum verified on load
 
@@ -257,7 +257,7 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 ### 3. Cross-Substrate Parity
 - [ ] Same projections produce same results on Python and JS
 - [ ] Parity tests in `tests/test_exhaustion_parity.py`
-- [ ] JS tests in `experiments/eval_step.js`
+- [ ] JS tests in `mu/host/js/eval_step.js`
 
 ### 4. Integration Tests
 - [ ] Single operator exhaustion detected and frozen
@@ -271,12 +271,12 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 
 | Vector ID | Scenario | Expected |
 |-----------|----------|----------|
-| `exhaust.no_tau` | No τ logged | `action: "continue"` |
-| `exhaust.single_op_exhausted` | Same op since τ | `action: "freeze"` |
-| `exhaust.different_op` | Different op after τ | `action: "continue"` |
-| `exhaust.already_frozen` | Op already in frozen | Skip, try next |
-| `exhaust.globalstall` | All ops frozen | `action: "globalstall"` |
-| `exhaust.recovery` | New op after freeze | Normal execution |
+| `exhaustion.no_tau` | No τ logged | `action: "continue"` |
+| `exhaustion.single_op_exhausted` | Same op since τ | `action: "freeze"` |
+| `exhaustion.different_op` | Different op after τ | `action: "continue"` |
+| `exhaustion.already_frozen` | Op already in frozen | Skip, try next |
+| `exhaustion.globalstall` | All ops frozen | `action: "globalstall"` |
+| `exhaustion.recovery` | New op after freeze | Normal execution |
 
 ---
 
@@ -350,7 +350,7 @@ detection projections themselves, not accepted from external input.
 
 **Implementation approach:**
 1. Initialize `frozen` to `null` (empty) at the start of each run
-2. Only `exhaust.freeze` projection can add to the frozen list
+2. Only `exhaustion.freeze` projection can add to the frozen list
 3. Validate that frozen list entries are strings (operator IDs)
 4. Never accept pre-populated frozen list from domain input
 
@@ -374,8 +374,8 @@ def validate_frozen_list(frozen: Mu) -> None:
 ## Implementation Sequence
 
 1. **Update KERNEL_RESERVED_FIELDS** with exhaustion fields (V2 fix)
-2. **Update EngineNews** to return tau_step (Q2 resolution)
-3. **Create `seeds/exhaust.v1.json`** with ~6 projections (Expert simplification)
+2. **Update Recurrence** to return tau_step (Q2 resolution)
+3. **Create `mu/closures/exhaustion.v1.json`** with ~6 projections (Expert simplification)
 4. **Add frozen list validation** in step_mu.py (V3 fix)
 5. **Create parity vectors** in `tests/fixtures/exhaustion_vectors.json`
 6. **Create Python tests** in `tests/test_exhaustion_parity.py`
@@ -389,7 +389,7 @@ def validate_frozen_list(frozen: Mu) -> None:
 | Item | Estimate |
 |------|----------|
 | KERNEL_RESERVED_FIELDS update | 4 new fields |
-| EngineNews tau_step extension | 3 projection edits |
+| Recurrence tau_step extension | 3 projection edits |
 | Projections | ~6 new (down from 10) |
 | Frozen list validation | ~20 lines Python |
 | Test vectors | ~6 |
@@ -397,7 +397,7 @@ def validate_frozen_list(frozen: Mu) -> None:
 | Integration tests | ~10 |
 | JS port | ~50 lines |
 
-**Total effort:** Smaller than Step 5 (EngineNews had 9 projections, this has 6)
+**Total effort:** Smaller than Step 5 (Recurrence had 9 projections, this has 6)
 
 ---
 
@@ -435,12 +435,12 @@ exhaustion detection.
 
 ### Q2: τ logging coordination - Who sets tau_step?
 
-**Resolution: EngineNews returns tau_step in closure evidence**
+**Resolution: Recurrence returns tau_step in closure evidence**
 
-When EngineNews detects closure (`enginenews.found_in_seen`), it already has the
+When Recurrence detects closure (`recurrence.found_in_seen`), it already has the
 step number in the `_step` field. Extend the output format to include it.
 
-**Current EngineNews output:**
+**Current Recurrence output:**
 ```json
 {
   "closure_detected": true|false,
@@ -457,12 +457,12 @@ step number in the `_step` field. Extend the output format to include it.
 }
 ```
 
-**Required changes to enginenews.v1.json:**
+**Required changes to recurrence.v1.json:**
 
-1. Modify `enginenews.found_in_seen` to preserve step in output:
+1. Modify `recurrence.found_in_seen` to preserve step in output:
 ```json
 {
-  "id": "enginenews.found_in_seen",
+  "id": "recurrence.found_in_seen",
   "body": {
     "_mode": "enginenews_done",
     "_closure": true,
@@ -472,10 +472,10 @@ step number in the `_step` field. Extend the output format to include it.
 }
 ```
 
-2. Modify `enginenews.end_of_trace` to set tau_step null:
+2. Modify `recurrence.end_of_trace` to set tau_step null:
 ```json
 {
-  "id": "enginenews.end_of_trace",
+  "id": "recurrence.end_of_trace",
   "body": {
     "_mode": "enginenews_done",
     "_closure": false,
@@ -485,10 +485,10 @@ step number in the `_step` field. Extend the output format to include it.
 }
 ```
 
-3. Modify `enginenews.unwrap` to include tau_step:
+3. Modify `recurrence.unwrap` to include tau_step:
 ```json
 {
-  "id": "enginenews.unwrap",
+  "id": "recurrence.unwrap",
   "body": {
     "closure_detected": {"var": "closure"},
     "final_result": {"var": "result"},
@@ -498,7 +498,7 @@ step number in the `_step` field. Extend the output format to include it.
 ```
 
 **Rationale:**
-- EngineNews already detects the τ moment (state recurrence)
+- Recurrence already detects the τ moment (state recurrence)
 - Natural integration point - no separate phase needed
 - Backward compatible: existing tests still work (just ignore tau_step)
 
@@ -532,17 +532,28 @@ is safe. We can relax later without breaking correctness.
 ## Related Documents
 
 - **RCXEngineNew.pdf** - Rule 3.1 (page 10)
-- `docs/core/EngineNewsStructural.v0.md` - Step 5 (Rule 2.2♢)
+- `docs/core/RecurrenceStructural.v0.md` - Step 5 (Rule 2.2♢)
 - `docs/core/MetaCircularKernel.v0.md` - Kernel architecture
-- `seeds/enginenews.v1.json` - Closure detection projections
+- `mu/closures/recurrence.v1.json` - Closure detection projections
 
 ---
 
 ## Changelog
 
+- **v0.2 (2026-02-02):** IMPLEMENTED - Step 6 complete
+  - Created `mu/closures/exhaustion.v1.json` with 11 projections (more than estimated due to three-phase state machine)
+  - Non-linear patterns for equality detection (step, operator, frozen membership)
+  - First-match-wins ordering for scan_same before scan_different
+  - 17 parity tests in `tests/test_exhaustion_parity.py`
+  - 10 fuzzer tests in `tests/test_exhaustion_fuzzer.py`
+  - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
+  - Cross-substrate parity: Python and JavaScript produce identical results
+  - JS loads exhaustion.v1.json (47 total projections across all seeds)
+  - KERNEL_RESERVED_FIELDS updated to 20 (12 kernel + 4 Recurrence + 4 exhaustion)
+  - Automated parity test verifies Python/JS reserved fields match
 - **v0.1 (2026-02-01):** Address open questions and agent review findings:
   - Q1 RESOLVED: Pass operator_ids explicitly in input
-  - Q2 RESOLVED: EngineNews returns tau_step in closure evidence
+  - Q2 RESOLVED: Recurrence returns tau_step in closure evidence
   - Q3 RESOLVED: No automatic unfreezing in Step 6 (keep simple)
   - V2 FIX: Add exhaustion fields to KERNEL_RESERVED_FIELDS
   - V3 FIX: Add frozen list structure validation

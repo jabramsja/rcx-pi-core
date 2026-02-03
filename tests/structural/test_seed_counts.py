@@ -16,13 +16,23 @@ import pytest
 
 ROOT = Path(__file__).parent.parent.parent
 SEEDS_DIR = ROOT / "seeds"
+MU_DIR = ROOT / "mu"
 
-# All known seed files
+# All known seed files (legacy seeds/ location)
 ALL_SEEDS = [
     "match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json", "kernel.v1.json",
     "match.v2.json", "subst.v2.json",  # Phase 7b: context passthrough
-    "enginenews.v1.json",  # Step 5: structural closure detection (Rule 2.2♢)
+    "enginenews.v1.json",  # Step 5: structural closure detection (Rule 2.2♢) - legacy name
+    "exhaust.v1.json",     # Step 6: operator exhaustion detection (Rule 3.1) - legacy name
 ]
+
+# mu/ folder structure (new organized location)
+MU_SEEDS = {
+    "substrate": ["kernel.v1.json", "match.v1.json", "match.v2.json", "subst.v1.json", "subst.v2.json"],
+    "closures": ["recurrence.v1.json", "exhaustion.v1.json"],  # renamed from enginenews, exhaust
+    "programs": ["rcx_engine.v1.json"],  # main program
+    "utilities": ["classify.v1.json", "eval.v1.json"],
+}
 
 # Self-hosting seeds (follow naming conventions)
 SELFHOST_SEEDS = [
@@ -39,7 +49,12 @@ EXPECTED_COUNTS = {
     "kernel.v1.json": 7,     # Phase 7a (meta-circular kernel)
     "match.v2.json": 8,      # Phase 7b: 7 + match.fail
     "subst.v2.json": 12,     # Phase 7b: same count, added _subst_ctx
-    "enginenews.v1.json": 9, # Step 5: closure detection (7 core + 2 entry variants)
+    "enginenews.v1.json": 9, # Step 5: closure detection - legacy name in seeds/
+    "exhaust.v1.json": 11,   # Step 6: operator exhaustion - legacy name in seeds/
+    # mu/ folder structure (new organized location)
+    "recurrence.v1.json": 9,   # mu/closures/ - renamed from enginenews
+    "exhaustion.v1.json": 11,  # mu/closures/ - renamed from exhaust
+    "rcx_engine.v1.json": 6,   # mu/programs/ - main program
 }
 
 # Expected namespace prefixes (self-hosting seeds only)
@@ -54,8 +69,15 @@ EXPECTED_PREFIXES = {
 
 
 def load_seed(name: str) -> dict:
-    """Load a seed file and return parsed JSON."""
+    """Load a seed file from seeds/ and return parsed JSON."""
     seed_path = SEEDS_DIR / name
+    with open(seed_path) as f:
+        return json.load(f)
+
+
+def load_mu_seed(subfolder: str, name: str) -> dict:
+    """Load a seed file from mu/<subfolder>/ and return parsed JSON."""
+    seed_path = MU_DIR / subfolder / name
     with open(seed_path) as f:
         return json.load(f)
 
@@ -242,3 +264,62 @@ class TestProjectionOrder:
 # NOTE: Checksum verification tests are in tests/test_seed_integrity.py
 # (TestChecksumsCurrent class) using SEED_CHECKSUMS from seed_integrity.py.
 # This file focuses on projection count validation, not checksum enforcement.
+
+
+class TestMuFolderStructure:
+    """Verify mu/ folder structure seeds are correctly organized."""
+
+    @pytest.mark.parametrize("subfolder,seeds", list(MU_SEEDS.items()))
+    def test_mu_subfolder_exists(self, subfolder, seeds):
+        """Each mu/ subfolder should exist."""
+        subfolder_path = MU_DIR / subfolder
+        assert subfolder_path.exists(), f"mu/{subfolder}/ should exist"
+
+    @pytest.mark.parametrize("subfolder,seeds", list(MU_SEEDS.items()))
+    def test_mu_seeds_present(self, subfolder, seeds):
+        """Each expected seed in mu/<subfolder>/ should exist."""
+        for seed_name in seeds:
+            seed_path = MU_DIR / subfolder / seed_name
+            assert seed_path.exists(), f"mu/{subfolder}/{seed_name} should exist"
+
+    def test_recurrence_projection_count(self):
+        """mu/closures/recurrence.v1.json has expected count."""
+        seed = load_mu_seed("closures", "recurrence.v1.json")
+        ids = get_projection_ids(seed)
+        expected = EXPECTED_COUNTS["recurrence.v1.json"]
+        assert len(ids) == expected, f"recurrence.v1.json: expected {expected}, found {len(ids)}"
+
+    def test_exhaustion_projection_count(self):
+        """mu/closures/exhaustion.v1.json has expected count."""
+        seed = load_mu_seed("closures", "exhaustion.v1.json")
+        ids = get_projection_ids(seed)
+        expected = EXPECTED_COUNTS["exhaustion.v1.json"]
+        assert len(ids) == expected, f"exhaustion.v1.json: expected {expected}, found {len(ids)}"
+
+    def test_rcx_engine_projection_count(self):
+        """mu/programs/rcx_engine.v1.json has expected count."""
+        seed = load_mu_seed("programs", "rcx_engine.v1.json")
+        ids = get_projection_ids(seed)
+        expected = EXPECTED_COUNTS["rcx_engine.v1.json"]
+        assert len(ids) == expected, f"rcx_engine.v1.json: expected {expected}, found {len(ids)}"
+
+    def test_recurrence_ids_have_recurrence_prefix(self):
+        """recurrence.v1.json projections use recurrence.* prefix."""
+        seed = load_mu_seed("closures", "recurrence.v1.json")
+        ids = get_projection_ids(seed)
+        for proj_id in ids:
+            assert proj_id.startswith("recurrence."), f"ID '{proj_id}' should start with 'recurrence.'"
+
+    def test_exhaustion_ids_have_exhaustion_prefix(self):
+        """exhaustion.v1.json projections use exhaustion.* prefix."""
+        seed = load_mu_seed("closures", "exhaustion.v1.json")
+        ids = get_projection_ids(seed)
+        for proj_id in ids:
+            assert proj_id.startswith("exhaustion."), f"ID '{proj_id}' should start with 'exhaustion.'"
+
+    def test_rcx_engine_ids_have_engine_prefix(self):
+        """rcx_engine.v1.json projections use engine.* prefix."""
+        seed = load_mu_seed("programs", "rcx_engine.v1.json")
+        ids = get_projection_ids(seed)
+        for proj_id in ids:
+            assert proj_id.startswith("engine."), f"ID '{proj_id}' should start with 'engine.'"

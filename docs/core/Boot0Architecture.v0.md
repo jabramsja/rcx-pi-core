@@ -22,7 +22,7 @@ This document describes a Hex0-inspired staged bootstrap architecture for RCX. L
 ┌─────────────────────────────────────────────────────────────┐
 │ Boot2: Full System                                          │
 │   - kernel.v1.json (kernel state machine)                   │
-│   - enginenews.v1.json (closure detection)                  │
+│   - recurrence.v1.json (closure detection)                  │
 │   - eval.v1.json, classify.v1.json                          │
 │   Built using: Boot1 match/subst                            │
 ├─────────────────────────────────────────────────────────────┤
@@ -268,7 +268,7 @@ Boot2 adds the kernel state machine and EngineNews closure detection, built usin
 | Seed | Projections | Purpose |
 |------|-------------|---------|
 | `kernel.v1.json` | 7 | Kernel state machine (_mode, _phase) |
-| `enginenews.v1.json` | 9 | Closure detection (Rule 2.2) |
+| `recurrence.v1.json` | 9 | Closure detection (Rule 2.2) |
 | `eval.v1.json` | 7 | Evaluation orchestration |
 | `classify.v1.json` | 6 | Value classification |
 
@@ -292,7 +292,7 @@ Boot2.eval(projections, value) =
 ### Current Implementation Status
 
 - `kernel.v1.json`: EXISTS, 7 projections
-- `enginenews.v1.json`: EXISTS, 9 projections (Step 5 complete)
+- `recurrence.v1.json`: EXISTS, 9 projections (Step 5 complete)
 - Integration: `step_mu.py:step_kernel_mu()` orchestrates
 - Tests: `test_enginenews_parity.py`, `test_kernel_projections.py`
 
@@ -312,7 +312,7 @@ Boot2.eval(projections, value) =
 
 ### What Stays the Same
 
-- All seed files (match.v2.json, subst.v2.json, kernel.v1.json, enginenews.v1.json)
+- All seed files (match.v2.json, subst.v2.json, kernel.v1.json, recurrence.v1.json)
 - All parity tests
 - All grounding tests
 - The fundamental algorithms
@@ -378,7 +378,7 @@ This contract is verified by `tests/test_js_parity_automated.py` which runs the 
 |------------|---------------|-------|
 | Boot0 | `eval_seed.py` (match, substitute), `mu_type.py` (mu_equal), `kernel.py` (budget) | None (pure Python) |
 | Boot1 | `step_mu.py`, `match_mu.py`, `subst_mu.py` | `match.v2.json`, `subst.v2.json` |
-| Boot2 | `kernel.py`, `eval_seed.py` (step) | `kernel.v1.json`, `enginenews.v1.json`, `eval.v1.json`, `classify.v1.json` |
+| Boot2 | `kernel.py`, `eval_seed.py` (step) | `kernel.v1.json`, `recurrence.v1.json`, `eval.v1.json`, `classify.v1.json` |
 
 ## Risk Assessment
 

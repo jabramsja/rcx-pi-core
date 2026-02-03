@@ -94,13 +94,14 @@ pytest $PARALLEL_FLAG -q \
     tests/test_eval_seed_adversary.py \
     tests/test_self_hosting_v0.py \
     tests/test_phase8b_grounding_gaps.py \
-    tests/test_enginenews_parity.py \
+    tests/test_recurrence_parity.py \
+    tests/test_exhaustion_parity.py \
     tests/test_js_parity_automated.py
 
 echo ""
 echo "== 5) JavaScript L3 parity check =="
 ./tools/check_js_debt.sh
-if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else
     echo "FAIL: JS tests failed"

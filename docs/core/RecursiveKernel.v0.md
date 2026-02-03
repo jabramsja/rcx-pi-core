@@ -410,9 +410,9 @@ User calls: run_mu(user_projections, input)
 
 ## Appendix A: Current Code Locations
 
-- Kernel projections: `seeds/kernel.v1.json`
-- Match projections: `seeds/match.v2.json`
-- Subst projections: `seeds/subst.v2.json`
+- Kernel projections: `mu/substrate/kernel.v1.json`
+- Match projections: `mu/substrate/match.v2.json`
+- Subst projections: `mu/substrate/subst.v2.json`
 - Python execution loop: `rcx_pi/selfhost/step_mu.py:243-276`
 - Debt marker: `rcx_pi/selfhost/step_mu.py:190` (@host_iteration)
 

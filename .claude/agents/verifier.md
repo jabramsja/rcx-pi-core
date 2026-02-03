@@ -123,14 +123,28 @@ When invoked, you will:
 
 **To verify:** Run `./tools/check_docs_consistency.sh` or manually compare STATUS.md CURRENT value with debt_dashboard.sh Total.
 
-### G. Structural Implementability (CRITICAL for plans)
+### G. Cross-Seed Compatibility (CRITICAL for seed reviews)
+- [ ] Does the seed declare `execution_layer` (BOOTSTRAP or META_CIRCULAR)?
+- [ ] If seed uses non-linear patterns (same var twice), is it marked BOOTSTRAP?
+- [ ] Can this seed actually run through step_kernel_mu (kernel.v1 + match.v2)?
+- [ ] If NO, is `incompatible_with` documented in seed meta?
+- [ ] Do integration shapes match? (output of seed A compatible with input of seed B)
+
+**Red flags:**
+- Seed claims META_CIRCULAR but uses `{"var": "x"}` twice in same pattern
+- Tests pass via eval_seed but would fail via step_kernel_mu
+- No `execution_layer` field in seed meta section
+
+**See:** `docs/agents/AgentGuardrails.v0.md` Cross-Seed Compatibility Check section
+
+### H. Structural Implementability (CRITICAL for plans)
 - [ ] Can variable-length operations be done with FINITE projections?
 - [ ] Is there a concrete projection shown (actual JSON, not pseudocode)?
 - [ ] Does the projection work for edge cases (empty, single, many)?
 - [ ] Is list representation structural (linked `{"head":h,"tail":t}` not flat `[]`)?
 - [ ] Are there hidden host semantics ("lookup", "find", "iterate")?
 
-**If F fails, the plan is NOT VERIFIED regardless of other checks.**
+**If G or H fails, the plan is NOT VERIFIED regardless of other checks.**
 
 ## Evidence Requirement (v4.3)
 

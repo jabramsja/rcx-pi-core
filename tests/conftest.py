@@ -108,8 +108,8 @@ CRITICAL_TEST_FILES = frozenset({
     "test_parity_python.py",
     "test_step_mu_parity.py",
     # EngineNews tests - CRITICAL for closure detection (9-agent review 2026-01-31)
-    "test_enginenews_parity.py",
-    "test_enginenews_fuzzer.py",
+    "test_recurrence_parity.py",
+    "test_recurrence_fuzzer.py",
     # mu_equal parity fuzzer - CRITICAL for binding conflict detection (9-agent review 2026-01-31)
     "test_mu_equal_parity_fuzzer.py",
     # L3 JS automated parity - CRITICAL for substrate portability (9-agent round 2)

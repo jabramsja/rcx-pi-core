@@ -39,11 +39,11 @@ RCX is a native structural substrate, not a simulation on top of Python. Python 
 If Python provides the control flow, emergence might be a Python artifact. True emergence must come from structure alone.
 
 **L3 Parity Requirement (MANDATORY):**
-- Python (`rcx_pi/selfhost/`) and JavaScript (`experiments/eval_step.js`) must remain in parity
-- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `enginenews.v1.json`
+- Python (`rcx_pi/selfhost/`) and JavaScript (`mu/host/js/eval_step.js`) must remain in parity
+- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`
 - Any change to projection behavior in Python MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
-- Run `node experiments/eval_step.js` to verify JS parity after Python changes
+- Run `node mu/host/js/eval_step.js` to verify JS parity after Python changes
 - **ACTUAL verification:** `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison` runs same inputs through BOTH substrates
 
 ---
@@ -197,7 +197,7 @@ Do NOT update individual agent files - they read STATUS.md.
 | `docs/core/` | Design specs |
 | `docs/agents/AgentRig.v0.md` | Agent rig docs |
 | `rcx_pi/selfhost/` | Core implementation |
-| `seeds/*.json` | Mu projection definitions (including enginenews.v1.json) |
+| `seeds/*.json` | Mu projection definitions (including recurrence.v1.json) |
 
 ---
 

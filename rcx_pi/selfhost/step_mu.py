@@ -115,7 +115,11 @@ KERNEL_RESERVED_FIELDS = frozenset({  # AST_OK: security whitelist - frozen cons
     "_mode", "_phase", "_input", "_remaining",
     "_match_ctx", "_subst_ctx", "_kernel_ctx",
     "_status", "_result", "_stall",
-    "_step", "_projs"  # Kernel entry format fields (Phase 8b adversary fix)
+    "_step", "_projs",  # Kernel entry format fields (Phase 8b adversary fix)
+    # EngineNews closure detection fields (9-agent review, 2026-02-02)
+    "_detect_closure", "_seen", "_current", "_check_list",
+    # Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
+    "_detect_exhaustion", "_frozen", "_tau_step", "_operator_ids"
 })
 
 

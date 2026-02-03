@@ -57,11 +57,11 @@ run_python() {
   ./tools/ast_police_js.sh
   ./tools/check_test_theater_js.sh
   ./tools/seed_police.sh
-  if node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+  if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS parity tests pass"
   else
     echo "FAIL: JS parity tests failed"
-    node experiments/eval_step.js 2>&1 | tail -10
+    node mu/host/js/eval_step.js 2>&1 | tail -10
     exit 1
   fi
   echo

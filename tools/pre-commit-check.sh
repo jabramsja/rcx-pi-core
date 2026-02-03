@@ -52,12 +52,14 @@ fi
 # Note: Kernel/engine seeds use underscore-prefixed fields (_mode, _phase, etc.) by design
 #       to distinguish internal state from domain data. See:
 #       - MetaCircularKernel.v0.md (kernel.v1.json, match.v2.json, subst.v2.json)
-#       - EngineNewsStructural.v0.md (enginenews.v1.json)
-KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json"
+#       - EngineNewsStructural.v0.md (recurrence.v1.json, formerly enginenews.v1.json)
+#       - OperatorExhaustion.v0.md (exhaustion.v1.json, formerly exhaust.v1.json)
+#       - rcx_engine.v1.json (main program)
+KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json|exhaust.v1.json|recurrence.v1.json|exhaustion.v1.json|rcx_engine.v1.json"
 if [ -n "$STAGED_JSON" ]; then
     echo "-- Checking for non-standard underscore keys in JSON..."
     for f in $STAGED_JSON; do
-        if [[ "$f" == prototypes/* ]] || [[ "$f" == seeds/* ]]; then
+        if [[ "$f" == prototypes/* ]] || [[ "$f" == seeds/* ]] || [[ "$f" == mu/* ]]; then
             # Skip kernel/engine seeds - they legitimately use underscore-prefixed fields
             if echo "$f" | grep -qE "$KERNEL_SEEDS"; then
                 continue
@@ -186,7 +188,7 @@ fi
 STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
 if [ -n "$STAGED_JS" ] || [ -n "$STAGED_SEEDS" ]; then
     echo "-- Running JS parity tests..."
-    if ! node experiments/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    if ! node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
         echo "❌ JS parity tests failed"
         ERRORS=$((ERRORS + 1))
     else

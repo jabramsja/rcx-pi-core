@@ -293,7 +293,7 @@ The kernel is maximally general. Specific behaviors (EngineeNews, Wolfram-style,
 | Component | Role | Status |
 |-----------|------|--------|
 | `mu_type.py` | Implements Mu validation | Active |
-| `seeds/kernel.v1.json` | Structural kernel (7 Mu projections) | **Canonical kernel** |
+| `mu/substrate/kernel.v1.json` | Structural kernel (7 Mu projections) | **Canonical kernel** |
 | `rcx_pi/selfhost/step_mu.py` | step_kernel_mu() uses kernel.v1 | Active |
 | `rcx_pi/selfhost/kernel.py` | Step budget + legacy Kernel class | Legacy (step budget active) |
 | `seeds/` | Mu projection definitions | Active |

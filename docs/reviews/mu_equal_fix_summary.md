@@ -66,7 +66,7 @@ The key insight: **centralizing the call site is the win**, not reimplementing t
 
 ## L3 Parity Confirmed
 
-JavaScript (`experiments/eval_step.js`) already uses `muEqual` for binding conflicts:
+JavaScript (`mu/host/js/eval_step.js`) already uses `muEqual` for binding conflicts:
 
 ```javascript
 // Line 541 (list matching)
@@ -103,7 +103,7 @@ All tests deterministic with `PYTHONHASHSEED=0`.
 | `rcx_pi/selfhost/eval_seed.py` | Lines 20, 339, 358 - the actual fix |
 | `rcx_pi/selfhost/mu_type.py` | Lines 417-420 - mu_equal implementation |
 | `tests/test_mu_equal_parity_fuzzer.py` | The proof of correctness |
-| `experiments/eval_step.js` | Lines 541, 568 - JS parity |
+| `mu/host/js/eval_step.js` | Lines 541, 568 - JS parity |
 | `docs/core/Boot0Architecture.v0.md` | v0.4 spec updates |
 
 ---

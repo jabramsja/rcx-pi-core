@@ -1,0 +1,151 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "description": "Parity test vectors for exhaust.v1.json (Rule 3.1 Operator Exhaustion)",
+    "spec_ref": "RCXEngineNew.pdf Rule 3.1",
+    "created": "2026-02-02"
+  },
+  "vectors": [
+    {
+      "id": "exhaust.no_tau",
+      "description": "No tau_step (null) means no closure detected, no exhaustion possible",
+      "input": {
+        "_detect_exhaustion": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "tail": null
+          },
+          "frozen": null,
+          "tau_step": null,
+          "operator_ids": {"head": "op1", "tail": null}
+        }
+      },
+      "expected": {
+        "exhaustion_detected": false,
+        "operator_to_freeze": null,
+        "frozen": null,
+        "action": "continue"
+      }
+    },
+    {
+      "id": "exhaust.single_op_exhausted",
+      "description": "Same operator since tau_step, should be frozen",
+      "input": {
+        "_detect_exhaustion": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "tail": {
+              "head": {"step": 1, "state": "B", "projection": "op1"},
+              "tail": {
+                "head": {"step": 2, "state": "C", "projection": "op1"},
+                "tail": null
+              }
+            }
+          },
+          "frozen": null,
+          "tau_step": 0,
+          "operator_ids": {"head": "op1", "tail": null}
+        }
+      },
+      "expected": {
+        "exhaustion_detected": true,
+        "operator_to_freeze": "op1",
+        "frozen": {"head": "op1", "tail": null},
+        "action": "freeze"
+      }
+    },
+    {
+      "id": "exhaust.different_op",
+      "description": "Different operator after tau_step, not exhausted",
+      "input": {
+        "_detect_exhaustion": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "tail": {
+              "head": {"step": 1, "state": "B", "projection": "op2"},
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "tau_step": 0,
+          "operator_ids": {"head": "op1", "tail": {"head": "op2", "tail": null}}
+        }
+      },
+      "expected": {
+        "exhaustion_detected": false,
+        "operator_to_freeze": null,
+        "frozen": null,
+        "action": "continue"
+      }
+    },
+    {
+      "id": "exhaust.already_frozen",
+      "description": "Operator already in frozen list, should skip",
+      "input": {
+        "_detect_exhaustion": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "tail": {
+              "head": {"step": 1, "state": "B", "projection": "op1"},
+              "tail": null
+            }
+          },
+          "frozen": {"head": "op1", "tail": null},
+          "tau_step": 0,
+          "operator_ids": {"head": "op1", "tail": null}
+        }
+      },
+      "expected": {
+        "exhaustion_detected": false,
+        "operator_to_freeze": null,
+        "frozen": {"head": "op1", "tail": null},
+        "action": "already_frozen"
+      }
+    },
+    {
+      "id": "exhaust.tau_not_found",
+      "description": "tau_step not found in trace (edge case)",
+      "input": {
+        "_detect_exhaustion": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "tail": null
+          },
+          "frozen": null,
+          "tau_step": 99,
+          "operator_ids": {"head": "op1", "tail": null}
+        }
+      },
+      "expected": {
+        "exhaustion_detected": false,
+        "operator_to_freeze": null,
+        "frozen": null,
+        "action": "continue"
+      }
+    },
+    {
+      "id": "exhaust.tau_at_end",
+      "description": "tau_step is at last entry, no subsequent entries to check",
+      "input": {
+        "_detect_exhaustion": {
+          "trace": {
+            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "tail": {
+              "head": {"step": 1, "state": "B", "projection": "op1"},
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "tau_step": 1,
+          "operator_ids": {"head": "op1", "tail": null}
+        }
+      },
+      "expected": {
+        "exhaustion_detected": true,
+        "operator_to_freeze": "op1",
+        "frozen": {"head": "op1", "tail": null},
+        "action": "freeze"
+      }
+    }
+  ]
+}

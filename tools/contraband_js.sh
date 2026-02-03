@@ -3,7 +3,7 @@
 # Blocks forbidden patterns that would break L3 parity guarantees
 #
 # Usage: ./tools/contraband_js.sh [file]
-#        Default: experiments/eval_step.js
+#        Default: mu/host/js/eval_step.js
 #
 # Forbidden patterns (break determinism or purity):
 #   eval(           - Code injection
@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-JS_FILE="${1:-experiments/eval_step.js}"
+JS_FILE="${1:-mu/host/js/eval_step.js}"
 
 if [ ! -f "$JS_FILE" ]; then
     echo "ERROR: $JS_FILE not found"

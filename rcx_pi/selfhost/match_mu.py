@@ -10,10 +10,8 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mu_equal
-from .eval_seed import NO_MATCH, _NoMatch, step
-from .kernel import get_step_budget
-from .seed_integrity import get_seeds_dir  # load_verified_seed used via factory
+from .mu_type import Mu, assert_mu
+from .eval_seed import NO_MATCH, _NoMatch
 from .classify_mu import classify_linked_list
 from .projection_loader import make_projection_loader
 from .projection_runner import make_projection_runner

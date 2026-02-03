@@ -5,6 +5,10 @@
     "description": "Structural closure detection for Rule 2.2 (Closure-on-Second-Demand)",
     "doc": "docs/core/EngineNewsStructural.v0.md",
     "spec_ref": "RCXEngineNew.pdf Rule 2.2♢, A.10",
+    "execution_layer": "BOOTSTRAP",
+    "requires_patterns": ["non-linear"],
+    "incompatible_with": ["match.v2 (linear only)"],
+    "meta_circular_blocker": "Requires match.v3 with binding conflict detection",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "Closure detection uses pattern matching, NOT Python conditionals",
@@ -48,6 +52,7 @@
       "body": {
         "_mode": "enginenews_done",
         "_closure": false,
+        "_tau_step": null,
         "_result": {"var": "result"}
       }
     },
@@ -156,6 +161,7 @@
       "body": {
         "_mode": "enginenews_done",
         "_closure": true,
+        "_tau_step": {"var": "step"},
         "_result": {"var": "result"}
       }
     },
@@ -212,14 +218,16 @@
     },
     {
       "id": "enginenews.unwrap",
-      "description": "Extract final closure detection result",
+      "description": "Extract final closure detection result with tau_step for exhaustion",
       "pattern": {
         "_mode": "enginenews_done",
         "_closure": {"var": "closure"},
+        "_tau_step": {"var": "tau"},
         "_result": {"var": "result"}
       },
       "body": {
         "closure_detected": {"var": "closure"},
+        "tau_step": {"var": "tau"},
         "final_result": {"var": "result"}
       }
     }

@@ -116,17 +116,17 @@ class TestReservedFieldsBasic:
         with pytest.raises(ValueError, match="kernel-reserved field"):
             validate_no_kernel_reserved_fields(malicious, "test")
 
-    def test_all_12_reserved_fields_rejected(self):
-        """All 12 reserved fields are rejected."""
+    def test_all_20_reserved_fields_rejected(self):
+        """All 20 reserved fields are rejected (12 kernel + 4 EngineNews + 4 Exhaustion)."""
         for field in KERNEL_RESERVED_FIELDS:
             malicious = {field: "attack"}
             with pytest.raises(ValueError, match="kernel-reserved field"):
                 validate_no_kernel_reserved_fields(malicious, "test")
 
     def test_reserved_fields_count(self):
-        """Verify exactly 12 reserved fields exist."""
-        assert len(KERNEL_RESERVED_FIELDS) == 12, (
-            f"Expected 12 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
+        """Verify exactly 20 reserved fields exist (12 kernel + 4 EngineNews + 4 Exhaustion)."""
+        assert len(KERNEL_RESERVED_FIELDS) == 20, (
+            f"Expected 20 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
         )
 
 

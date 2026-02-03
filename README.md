@@ -16,7 +16,7 @@ A projection-based computational substrate where **structure is the primitive**.
 - **33 CRITICAL_TEST_FILES** protected from silent skipping
 
 **Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
-All logic is in `seeds/enginenews.v1.json` (9 projections). Bootstrap provides only mechanical execution.
+All logic is in `mu/closures/recurrence.v1.json` (9 projections). Bootstrap provides only mechanical execution.
 
 See `STATUS.md` for full details.
 
@@ -77,12 +77,12 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 
 | Seed | Purpose |
 |------|---------|
-| `seeds/kernel.v1.json` | Structural kernel (7 projections) - state machine |
-| `seeds/match.v2.json` | Pattern matching (8 projections) - with context passthrough |
-| `seeds/subst.v2.json` | Substitution (12 projections) - with context passthrough |
+| `mu/substrate/kernel.v1.json` | Structural kernel (7 projections) - state machine |
+| `mu/substrate/match.v2.json` | Pattern matching (8 projections) - with context passthrough |
+| `mu/substrate/subst.v2.json` | Substitution (12 projections) - with context passthrough |
 | `seeds/classify.v1.json` | Type classification (6 projections) |
 | `seeds/eval.v1.json` | Evaluation (7 projections) |
-| `seeds/enginenews.v1.json` | Closure detection (9 projections) - Rule 2.2♢ |
+| `mu/closures/recurrence.v1.json` | Closure detection (9 projections) - Rule 2.2♢ |
 
 ### Core Modules
 

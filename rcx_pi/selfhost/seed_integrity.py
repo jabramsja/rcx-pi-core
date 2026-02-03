@@ -37,7 +37,19 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Phase 7b: subst with kernel context passthrough
     "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
     # Step 5: EngineNews structural closure detection (Rule 2.2♢)
-    "enginenews.v1.json": "2a842d13342ed5a8514e5e0a7993afea01444e8ae15139096d96029f90b2c39d",
+    # Updated Step 6 v0: Added tau_step output for Operator Exhaustion
+    # Updated: Added execution_layer metadata (BOOTSTRAP - requires non-linear patterns)
+    "enginenews.v1.json": "1ef120680a76bdeca0a949de8cc65ded011d0022a2bd2472474cc10e416c2762",
+    # Step 6: Operator Exhaustion detection (Rule 3.1)
+    # Updated: Added execution_layer metadata (BOOTSTRAP - requires non-linear patterns)
+    "exhaust.v1.json": "28d211894bc74efda595977f8603041b867d6ebf116b61b73f87b0be523a56f4",
+    # mu/ folder reorganization: renamed seeds with updated projection IDs
+    # recurrence.v1.json = enginenews.v1.json with recurrence.* projection IDs
+    "recurrence.v1.json": "1f1febacf5f54cb7a8dc48cd7a5830ec21093ef19a73cef0809e60853279d467",
+    # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
+    "exhaustion.v1.json": "8857132af750da7efbc5532bdb95ec4223d2acefdd5d911cfd00efd6ca393fa7",
+    # RCX Engine: main program orchestrating recurrence + exhaustion
+    "rcx_engine.v1.json": "d5a1478739f9d6371b072f2cb937e311bd7ba1879729556f10a1d2e641e0b94f",
 }
 
 # Expected projection IDs for each seed.
@@ -121,6 +133,57 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "enginenews.not_in_head",        # State not in head -> check tail
         "enginenews.not_found",          # State not in seen -> add and advance
         "enginenews.unwrap",             # Exit: extract final result
+    ],
+    # Step 6: Operator Exhaustion detection (Rule 3.1)
+    # init_null is entry for no-tau case, do_freeze is terminal for exhaustion
+    "exhaust.v1.json": [
+        "exhaust.init_null",        # Entry: no tau_step -> continue
+        "exhaust.init",             # Entry: tau_step set -> find tau entry
+        "exhaust.find_match",       # Found step == tau_step (non-linear)
+        "exhaust.find_continue",    # Not at tau_step yet, advance
+        "exhaust.find_not_found",   # End of trace without finding tau
+        "exhaust.scan_same",        # Same operator (non-linear), continue
+        "exhaust.scan_different",   # Different operator -> not exhausted
+        "exhaust.scan_end",         # End of trace, all same -> check frozen
+        "exhaust.frozen_found",     # Operator in frozen list (non-linear)
+        "exhaust.frozen_check_tail",  # Check next in frozen list
+        "exhaust.do_freeze",        # Not frozen -> freeze it
+    ],
+    # mu/ folder reorganization: renamed seeds with updated projection IDs
+    # recurrence.v1.json = enginenews.v1.json with recurrence.* projection IDs
+    "recurrence.v1.json": [
+        "recurrence.init",               # Entry: _detect_closure -> internal state
+        "recurrence.end_of_trace",       # End of trace (null) -> no closure
+        "recurrence.check_state_stall",  # Extract state from stall entry
+        "recurrence.check_state_maxsteps",  # Extract state from max_steps entry
+        "recurrence.check_state",        # Extract state from trace entry
+        "recurrence.found_in_seen",      # State in seen-set -> closure!
+        "recurrence.not_in_head",        # State not in head -> check tail
+        "recurrence.not_found",          # State not in seen -> add and advance
+        "recurrence.unwrap",             # Exit: extract final result
+    ],
+    # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
+    "exhaustion.v1.json": [
+        "exhaustion.init_null",        # Entry: no tau_step -> continue
+        "exhaustion.init",             # Entry: tau_step set -> find tau entry
+        "exhaustion.find_match",       # Found step == tau_step (non-linear)
+        "exhaustion.find_continue",    # Not at tau_step yet, advance
+        "exhaustion.find_not_found",   # End of trace without finding tau
+        "exhaustion.scan_same",        # Same operator (non-linear), continue
+        "exhaustion.scan_different",   # Different operator -> not exhausted
+        "exhaustion.scan_end",         # End of trace, all same -> check frozen
+        "exhaustion.frozen_found",     # Operator in frozen list (non-linear)
+        "exhaustion.frozen_check_tail",  # Check next in frozen list
+        "exhaustion.do_freeze",        # Not frozen -> freeze it
+    ],
+    # RCX Engine: main program orchestrating recurrence + exhaustion
+    "rcx_engine.v1.json": [
+        "engine.init",            # Entry: default config
+        "engine.init_config",     # Entry: custom config
+        "engine.trace_done",      # Trace complete -> recurrence
+        "engine.recurrence_done", # Recurrence done -> exhaustion
+        "engine.exhaustion_done", # Exhaustion done -> final result
+        "engine.unwrap",          # Extract final result
     ],
 }
 
@@ -312,8 +375,68 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
 
 
 def get_seeds_dir() -> Path:
-    """Get the seeds directory path."""
+    """Get the seeds directory path (legacy location)."""
     return Path(__file__).parent.parent.parent / "seeds"
+
+
+def get_mu_dir() -> Path:
+    """Get the mu directory path (new organized structure)."""
+    return Path(__file__).parent.parent.parent / "mu"
+
+
+def get_seed_path(seed_name: str) -> Path:
+    """
+    Get the path to a seed file, checking both legacy and new locations.
+
+    Seed locations (new mu/ folder structure):
+    - mu/substrate/  : kernel.v1, match.v1, match.v2, subst.v1, subst.v2
+    - mu/closures/   : recurrence.v1, exhaustion.v1
+    - mu/utilities/  : classify.v1, eval.v1
+    - mu/programs/   : (future) rcx_engine.v1
+
+    Legacy location (seeds/):
+    - All seeds including enginenews.v1, exhaust.v1
+
+    Args:
+        seed_name: Name of seed file (e.g., "match.v2.json", "recurrence.v1.json")
+
+    Returns:
+        Path to the seed file (prefers mu/ if available, falls back to seeds/)
+    """
+    mu_dir = get_mu_dir()
+
+    # Map seed names to mu/ subfolders
+    MU_SEED_LOCATIONS = {
+        # Substrate seeds (the VM)
+        "kernel.v1.json": "substrate",
+        "match.v1.json": "substrate",
+        "match.v2.json": "substrate",
+        "subst.v1.json": "substrate",
+        "subst.v2.json": "substrate",
+        # Closure detection seeds
+        "recurrence.v1.json": "closures",
+        "exhaustion.v1.json": "closures",
+        # Utilities
+        "classify.v1.json": "utilities",
+        "eval.v1.json": "utilities",
+        # Programs
+        "rcx_engine.v1.json": "programs",
+    }
+
+    if seed_name in MU_SEED_LOCATIONS:
+        mu_path = mu_dir / MU_SEED_LOCATIONS[seed_name] / seed_name
+        if mu_path.exists():
+            return mu_path
+
+    # Fall back to legacy seeds/ folder
+    legacy_path = get_seeds_dir() / seed_name
+    if legacy_path.exists():
+        return legacy_path
+
+    # Return mu path even if it doesn't exist (for error messages)
+    if seed_name in MU_SEED_LOCATIONS:
+        return mu_dir / MU_SEED_LOCATIONS[seed_name] / seed_name
+    return legacy_path
 
 
 def verify_all_seeds() -> dict[str, bool]:
