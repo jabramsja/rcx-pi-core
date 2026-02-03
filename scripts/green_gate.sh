@@ -102,8 +102,9 @@ run_python() {
   ./tools/audit_semantic_purity.sh
   echo
 
-  echo "[PY 8/11] Python test suite"
-  python3 -m pytest $PARALLEL_FLAG
+  echo "[PY 8/11] Python test suite (excludes stress tests - those run in audit_all)"
+  # Stress tests have 60-120s deadlines per example, run separately in audit_all.sh
+  python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/
   echo
 
   echo "[PY 9/11] Fixture v2 validation"
