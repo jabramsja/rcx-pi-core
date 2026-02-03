@@ -17,9 +17,9 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 # Stall/Fix Trace Observability (v0)
 
-**Status: APPROVED FOR IMPLEMENTATION**
-
 This document defines trace event types to make existing stall/fix-like behavior OBSERVABLE without changing execution semantics.
+
+> **Implementation Status:** See STATUS.md for current state.
 
 ---
 
@@ -188,4 +188,3 @@ This keeps overhead minimal while providing auditability.
 
 Document version: v0
 Last updated: 2026-01-24
-Status: APPROVED FOR IMPLEMENTATION

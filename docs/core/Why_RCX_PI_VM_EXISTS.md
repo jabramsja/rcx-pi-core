@@ -104,20 +104,20 @@ It is part of the claim.
 
 ⸻
 
-6. Current State (Updated 2026-02-03)
+6. Implementation Status
 
 **See STATUS.md for authoritative current state.**
 
-**Summary of Progress:**
+**Summary (may drift - check STATUS.md):**
 - **L1 (Algorithmic):** COMPLETE - match, subst, step expressed as Mu projections
 - **L2 (Operational):** COMPLETE - kernel.v1 state machine (7 projections), recurrence.v1 closure detection (9 projections)
 - **L3 (Substrate Portability):** COMPLETE - Python and JavaScript run identical seeds with verified parity
 
 **Key Achievements:**
 - 5 bootstrap primitives identified and documented (see BootstrapPrimitives.v0.md)
-- 2,100+ tests with 1000+ fuzzer examples
+- Comprehensive test coverage with hypothesis fuzzer (see STATUS.md for counts)
 - Debt floor reached (12 irreducible markers - host scaffolding, not smuggled semantics)
-- Full seed suite: kernel.v1 (7), match.v2 (8), subst.v2 (12), recurrence.v1 (9), exhaustion.v1 (11)
+- Full seed suite: kernel.v1 (~7), match.v2 (~8), subst.v2 (~12), recurrence.v1 (~9), exhaustion.v1 (~11)
 
 **Current Phase:** Phase 8b complete. L4 (True Self-Hosting) is in SINK status - design captured, not immediate priority.
 

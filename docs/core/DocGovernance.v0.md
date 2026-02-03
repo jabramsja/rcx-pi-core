@@ -80,28 +80,56 @@ WorkingRCX/
 ├── README.md              # Entry point (links to STATUS.md)
 ├── CLAUDE.md              # AI instructions (links to STATUS.md)
 │
+├── .claude/
+│   └── agents/            # Agent configuration docs (GOVERNED)
+│       ├── adversary.md
+│       ├── verifier.md
+│       └── ...
+│
 ├── docs/
 │   ├── core/              # ACTIVE specs (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)
 │   │   ├── MuType.v0.md
 │   │   ├── BootstrapPrimitives.v0.md
 │   │   └── ...
 │   │
-│   ├── archive/           # SUPERSEDED and ARCHIVED docs
-│   │   ├── BytecodeVM.v0.md      # ARCHIVED - historical only
-│   │   └── OldApproach.v0.md     # SUPERSEDED by NewApproach.v0.md
+│   ├── archive/           # EXEMPT - historical, read-only
+│   │   ├── BytecodeVM.v0.md
+│   │   └── ...
 │   │
-│   ├── agents/            # Agent-specific docs
+│   ├── agents/            # Agent-specific docs (GOVERNED)
 │   │   └── AgentGuardrails.v0.md
 │   │
-│   └── audit/             # Audit reports (timestamped, immutable)
-│       └── MetaCircularReadiness.v1.md
+│   ├── audit/             # Audit reports (GOVERNED)
+│   │   └── MetaCircularReadiness.v1.md
+│   │
+│   ├── cli/               # CLI documentation (GOVERNED)
+│   │   └── cli_quickstart.md
+│   │
+│   ├── schemas/           # Schema documentation (GOVERNED)
+│   │   └── *.md
+│   │
+│   ├── reviews/           # Code review records (GOVERNED)
+│   │   └── *.md
+│   │
+│   └── execution/         # Execution specs (GOVERNED)
+│       └── *.md
 ```
 
+**Governed Folders** (require DOC_STATUS headers with all 5 fields):
+- `docs/core/`, `docs/agents/`, `docs/audit/`, `docs/execution/`
+- `docs/cli/`, `docs/schemas/`, `docs/reviews/`
+- `.claude/agents/`
+
+**Exempt Paths** (no governance required):
+- `docs/archive/` - Historical, read-only, frozen in time
+- `docs/TESTING_PERFORMANCE_ISSUE.md` - Historical context (resolved issue)
+- Generated files, subprojects (`rcx_pi_rust/`, etc.)
+
 **Rules:**
-1. `docs/core/` = Active docs only (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)
-2. `docs/archive/` = Superseded/archived docs (read-only, historical reference)
-3. Moving a doc to `archive/` requires updating all references to it
-4. New folders require updating `DOC_FOLDERS` in test_doc_governance.py
+1. `docs/core/` = Active specs only (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)
+2. `docs/archive/` = EXEMPT from governance (historical, read-only)
+3. Moving a doc to `archive/` removes it from governance but requires updating all references
+4. New folders require updating `GOVERNED_FOLDERS` in test_doc_governance.py
 
 ---
 
@@ -313,4 +341,4 @@ This governance is working when:
 - `TASKS.md` - The source of truth for work items
 - `tests/docs/test_doc_contracts.py` - Verifies code claims
 - `tests/docs/test_doc_freshness.py` - Catches semantic drift
-- `tests/docs/test_doc_governance.py` - Enforces this policy (TODO)
+- `tests/docs/test_doc_governance.py` - Enforces this policy

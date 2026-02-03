@@ -5,7 +5,7 @@
 # This hook:
 # 1. Runs check_docs_consistency.sh (validates STATUS.md matches reality) - BLOCKS on failure
 # 2. Checks debt ceiling is not exceeded - BLOCKS on failure
-# 3. Warns if rcx_pi/ or seeds/ changed but STATUS.md wasn't touched
+# 3. Warns if rcx_pi/ or mu/ changed but STATUS.md wasn't touched
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -48,7 +48,7 @@ fi
 STAGED_FILES=$(git diff --cached --name-only)
 
 RCX_CHANGED=$(echo "$STAGED_FILES" | grep -E '^rcx_pi/' || true)
-SEEDS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^seeds/' || true)
+SEEDS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^mu/' || true)
 STATUS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^STATUS\.md$' || true)
 TASKS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^TASKS\.md$' || true)
 TESTS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^tests/' || true)

@@ -24,7 +24,26 @@ from typing import NamedTuple
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-DOCS_CORE = REPO_ROOT / "docs" / "core"
+
+# All governed folders - must match DocGovernance.v0.md and test_doc_governance.py
+GOVERNED_FOLDERS = [
+    REPO_ROOT / "docs" / "core",
+    REPO_ROOT / "docs" / "agents",
+    REPO_ROOT / "docs" / "audit",
+    REPO_ROOT / "docs" / "execution",
+    REPO_ROOT / "docs" / "cli",
+    REPO_ROOT / "docs" / "schemas",
+    REPO_ROOT / "docs" / "reviews",
+    REPO_ROOT / ".claude" / "agents",
+]
+
+
+def iter_governed_docs():
+    """Iterate over all markdown files in governed folders."""
+    for folder in GOVERNED_FOLDERS:
+        if folder.exists():
+            for doc_path in sorted(folder.glob("*.md")):
+                yield doc_path
 
 
 # =============================================================================
@@ -49,15 +68,34 @@ FORBIDDEN_PATTERNS = [
         "Use mu/substrate/, mu/closures/, mu/utilities/, etc.",
     ),
     ForbiddenPattern(
-        r'bytecode_vm\.py',
-        "BytecodeVM was archived",
-        "Remove reference or mark as historical context",
+        r'`seeds/[a-z_]+\.v\d+\.json`',
+        "Root seeds/ directory deleted - seeds moved to mu/",
+        "Use mu/substrate/, mu/closures/, mu/utilities/, mu/bridge/, mu/programs/",
     ),
     ForbiddenPattern(
+        r'(?<![/a-z])seeds/(?:kernel|match|subst|classify|eval|recurrence|exhaustion)',
+        "Root seeds/ directory deleted - seeds moved to mu/",
+        "Use mu/substrate/, mu/closures/, mu/utilities/, etc.",
+    ),
+    # Script paths must include directory
+    ForbiddenPattern(
+        r'(?<![/a-z])`(?:green_gate|audit_fast|audit_all|contraband|seed_police)\.sh`',
+        "Script references must include directory path",
+        "Use scripts/green_gate.sh, tools/audit_fast.sh, etc.",
+    ),
+    # Doc paths must include full path from docs/
+    ForbiddenPattern(
+        r'`docs/(?:Stall|Rule|Engine|Bootstrap|Operator)[A-Za-z]+\.v\d+\.md`',
+        "Doc paths must include subdirectory (core/, execution/, etc.)",
+        "Use docs/execution/StallFixExecution.v0.md, docs/core/RuleAsMotif.v0.md, etc.",
+    ),
+    # Note: bytecode_vm.py still exists but is legacy code
+    # References are OK in historical context (audit docs, archive docs)
+    ForbiddenPattern(
         r'BytecodeVM',
-        "BytecodeVM was archived",
-        "Remove reference or mark as historical context",
-        exceptions=["MuType.v0.md"],  # Allow historical reference if marked
+        "BytecodeVM is legacy (prefer projection-based execution)",
+        "Use kernel/seed-based approach unless documenting historical context",
+        exceptions=["MuType.v0.md", "MetaCircularReadiness.v1.md"],  # Historical context OK
     ),
     ForbiddenPattern(
         r'docs/BytecodeExecution',
@@ -69,11 +107,8 @@ FORBIDDEN_PATTERNS = [
         "JavaScript substrate moved to mu/host/js/",
         "Use mu/host/js/eval_step.js",
     ),
-    ForbiddenPattern(
-        r'trace_canon\.py',
-        "trace_canon.py was removed/consolidated",
-        "Use mu_type.py for hashing functions",
-    ),
+    # Note: trace_canon.py still exists and is actively used for trace canonicalization
+    # No forbidden pattern needed - it's a valid reference
 
     # =========================================================================
     # Outdated terminology - old phase/level names
@@ -110,12 +145,52 @@ FORBIDDEN_PATTERNS = [
     ),
 
     # =========================================================================
+    # Law 3 Violations - Inline status claims that should be in STATUS.md/TASKS.md
+    # =========================================================================
+    ForbiddenPattern(
+        r'\*\*Status:\s*(?:APPROVED|IN PROGRESS|PENDING|BLOCKED|TODO)',
+        "Inline status claims violate Law 3 (docs describe WHAT, not progress)",
+        "Remove status line; reference STATUS.md for current state",
+    ),
+    ForbiddenPattern(
+        r'Status:\s*(?:APPROVED|IN PROGRESS|PENDING|BLOCKED|TODO)',
+        "Inline status claims violate Law 3 (docs describe WHAT, not progress)",
+        "Remove status line; reference STATUS.md for current state",
+    ),
+    ForbiddenPattern(
+        r'VECTOR #\d+',
+        "VECTOR references drift (VECTORs move to Ra when completed)",
+        "Remove VECTOR reference; work status belongs in TASKS.md only",
+    ),
+    ForbiddenPattern(
+        r'promotion path for (?:VECTOR|NEXT|SINK)',
+        "Promotion path references drift when work completes",
+        "Remove promotion reference; work status belongs in TASKS.md only",
+    ),
+
+    # =========================================================================
     # Duplicate status - sections that should defer to STATUS.md
     # =========================================================================
     ForbiddenPattern(
         r'Updated \d{4}-\d{2}-\d{2}\).*\n\n\*\*Completed:\*\*',
         "Inline status sections drift from STATUS.md",
         "Reference STATUS.md instead: 'See STATUS.md for current state'",
+    ),
+
+    # =========================================================================
+    # Hardcoded counts that drift - test counts, debt counts, etc.
+    # =========================================================================
+    ForbiddenPattern(
+        r'\b[1-9]\d{2,3}\+?\s+tests\b',
+        "Hardcoded test counts drift (e.g., '800+ tests', '1000+ tests')",
+        "Reference STATUS.md for test counts, or use 'comprehensive test coverage'",
+        exceptions=["DocGovernance.v0.md"],  # Meta-doc about governance can discuss counts
+    ),
+    ForbiddenPattern(
+        r'L[1-4]:\s*(?:DESIGN|FUTURE|BLOCKED|PENDING)',
+        "L-level status claims drift from STATUS.md",
+        "Use ACHIEVED/DONE for completed levels, or reference STATUS.md directly",
+        exceptions=["DocGovernance.v0.md"],  # Governance doc can discuss the concept
     ),
 ]
 
@@ -184,7 +259,7 @@ class TestForbiddenPatterns:
         violations = []
         pattern = re.compile(forbidden.pattern, re.IGNORECASE)
 
-        for doc_path in sorted(DOCS_CORE.glob("*.md")):
+        for doc_path in iter_governed_docs():
             if doc_path.name in forbidden.exceptions:
                 continue
 
@@ -193,7 +268,9 @@ class TestForbiddenPatterns:
             content_no_code = re.sub(r'```[\s\S]*?```', '', content)
             matches = pattern.findall(content_no_code)
             if matches:
-                violations.append((doc_path.name, matches[:2]))
+                # Include relative path for clarity across folders
+                rel_path = doc_path.relative_to(REPO_ROOT)
+                violations.append((str(rel_path), matches[:2]))
 
         if violations:
             msg = f"\nForbidden pattern: {forbidden.description}\n"
@@ -214,10 +291,17 @@ class TestRequiredPatterns:
     )
     def test_required_patterns(self, required: RequiredPattern):
         """Specific docs should contain required patterns."""
-        doc_path = DOCS_CORE / required.doc_name
-        if not doc_path.exists():
+        # Search all governed folders for the doc
+        doc_path = None
+        for folder in GOVERNED_FOLDERS:
+            candidate = folder / required.doc_name
+            if candidate.exists():
+                doc_path = candidate
+                break
+
+        if doc_path is None:
             # Skip if doc doesn't exist (covered by other tests)
-            pytest.skip(f"Doc {required.doc_name} not found")
+            pytest.skip(f"Doc {required.doc_name} not found in governed folders")
 
         content = doc_path.read_text()
         pattern = re.compile(required.pattern)
@@ -236,7 +320,7 @@ class TestPathReferences:
         """File paths mentioned in docs should exist."""
         violations = []
 
-        for doc_path in sorted(DOCS_CORE.glob("*.md")):
+        for doc_path in iter_governed_docs():
             content = doc_path.read_text()
 
             for pattern_str, path_type in PATH_PATTERNS:
@@ -250,7 +334,8 @@ class TestPathReferences:
                         continue
 
                     if not full_path.exists():
-                        violations.append((doc_path.name, file_path, path_type))
+                        rel_path = doc_path.relative_to(REPO_ROOT)
+                        violations.append((str(rel_path), file_path, path_type))
 
         if violations:
             # Group by doc for cleaner output
@@ -284,16 +369,17 @@ class TestStatusConsistency:
 
         # Check docs don't claim incomplete status for completed levels
         violations = []
-        for doc_path in sorted(DOCS_CORE.glob("*.md")):
+        for doc_path in iter_governed_docs():
             content = doc_path.read_text()
+            rel_path = doc_path.relative_to(REPO_ROOT)
 
             # Look for claims that contradict STATUS.md
             if l1_complete and re.search(r'L1[:\s]+(?:IN PROGRESS|TODO|PENDING)', content, re.I):
-                violations.append((doc_path.name, "Claims L1 incomplete but STATUS.md says COMPLETE"))
+                violations.append((str(rel_path), "Claims L1 incomplete but STATUS.md says COMPLETE"))
             if l2_complete and re.search(r'L2[:\s]+(?:IN PROGRESS|TODO|PENDING)', content, re.I):
-                violations.append((doc_path.name, "Claims L2 incomplete but STATUS.md says COMPLETE"))
+                violations.append((str(rel_path), "Claims L2 incomplete but STATUS.md says COMPLETE"))
             if l3_complete and re.search(r'L3[:\s]+(?:IN PROGRESS|TODO|PENDING)', content, re.I):
-                violations.append((doc_path.name, "Claims L3 incomplete but STATUS.md says COMPLETE"))
+                violations.append((str(rel_path), "Claims L3 incomplete but STATUS.md says COMPLETE"))
 
         if violations:
             msg = "\nDocs contradict STATUS.md:\n"
@@ -303,24 +389,37 @@ class TestStatusConsistency:
 
 
 class TestNoHardcodedCounts:
-    """Warn about hardcoded counts that should reference code/tests."""
+    """FAIL on hardcoded counts that should reference code/tests."""
 
-    def test_warn_hardcoded_projection_counts(self):
-        """Warn about hardcoded projection counts (prefer test references).
+    def test_no_hardcoded_projection_counts(self):
+        """FAIL on hardcoded projection counts (prefer test references).
 
         Convention:
         - Estimates use "~": "~6 projections" (acceptable)
         - Claims reference tests: "see test_seed_counts.py for count"
         - Historical context (changelog, revision history) is exempt
+        - Acceptable patterns: "originally N", "target N", "N edits", "with N projection" (trace descriptions)
+
+        This is a FAILURE, not a warning. Hardcoded counts drift and cause confusion.
         """
-        # This is a warning, not a failure - some counts are fine
-        warnings = []
+        violations = []
 
         # Pattern: "N projections" where N is a number (not preceded by ~)
         # This catches "7 projections" but not "~7 projections"
         count_pattern = re.compile(r'(?<!~)\b(\d+)\s+projections?\b', re.I)
 
-        for doc_path in sorted(DOCS_CORE.glob("*.md")):
+        # Patterns that indicate acceptable context (not actual seed count claims)
+        acceptable_context_patterns = [
+            r'originally\s+\d+\s+projections?',      # Historical: "originally 2 projections"
+            r'target\s+\d+[-–]\d+\s+projections?',   # Target range: "target 10-15 projections"
+            r'target\s+\d+\s+projections?',          # Target: "target 6 projections"
+            r'\d+\s+projection\s+edits?',            # Effort: "3 projection edits"
+            r'with\s+\d+\s+projection',              # Trace description: "Trace with 1 projection"
+            r'down\s+from\s+\d+',                    # Comparison: "down from 10"
+            r'not\s+\d+',                            # Negation: "not 37"
+        ]
+
+        for doc_path in iter_governed_docs():
             content = doc_path.read_text()
 
             # Remove changelog/history sections (these are historical context)
@@ -329,25 +428,32 @@ class TestNoHardcodedCounts:
                 '', content, flags=re.DOTALL | re.IGNORECASE
             )
 
-            matches = count_pattern.findall(content_no_history)
+            # Remove lines matching acceptable context patterns
+            content_filtered = content_no_history
+            for pattern in acceptable_context_patterns:
+                content_filtered = re.sub(pattern, '', content_filtered, flags=re.I)
+
+            matches = count_pattern.findall(content_filtered)
 
             # Filter out counts that are verified by grounding tests
-            # These are the actual seed projection counts
+            # These are the actual seed projection counts (from test_seed_counts.py)
             verified_counts = {"5", "6", "7", "8", "9", "11", "12"}
             suspicious = [m for m in matches if m not in verified_counts]
 
             if suspicious:
-                warnings.append((doc_path.name, suspicious))
+                rel_path = doc_path.relative_to(REPO_ROOT)
+                violations.append((str(rel_path), suspicious))
 
-        if warnings:
-            import warnings as warn_module
-            msg = "Docs with potentially hardcoded projection counts:\n"
-            for doc, counts in warnings:
+        if violations:
+            msg = "\nDocs with hardcoded projection counts (MUST be fixed):\n"
+            for doc, counts in violations:
                 msg += f"  {doc}: {counts}\n"
-            msg += "\nConvention for projection counts:\n"
-            msg += "  - Estimates: use '~' prefix (e.g., '~6 projections')\n"
-            msg += "  - Claims: reference tests (e.g., 'see test_seed_counts.py')\n"
-            warn_module.warn(msg)
+            msg += "\nHow to fix:\n"
+            msg += "  - Use '~' prefix for estimates: '~6 projections'\n"
+            msg += "  - Reference tests for actual counts: 'see test_seed_counts.py'\n"
+            msg += "  - Historical context is OK: 'originally N projections'\n"
+            msg += "  - Verified counts (from test_seed_counts.py): {5, 6, 7, 8, 9, 11, 12}\n"
+            pytest.fail(msg)
 
 
 # =============================================================================
@@ -356,7 +462,7 @@ class TestNoHardcodedCounts:
 
 def scan_for_drift() -> dict:
     """
-    Scan all docs and return a drift report.
+    Scan all governed docs and return a drift report.
 
     This can be called from tools/check_docs_consistency.sh or as a standalone script.
     Returns a dict with:
@@ -370,8 +476,9 @@ def scan_for_drift() -> dict:
         "missing_paths": [],
     }
 
-    for doc_path in sorted(DOCS_CORE.glob("*.md")):
+    for doc_path in iter_governed_docs():
         content = doc_path.read_text()
+        rel_path = str(doc_path.relative_to(REPO_ROOT))
 
         # Check forbidden patterns
         for forbidden in FORBIDDEN_PATTERNS:
@@ -381,7 +488,7 @@ def scan_for_drift() -> dict:
             matches = pattern.findall(content)
             if matches:
                 report["forbidden_violations"].append(
-                    (doc_path.name, forbidden.description, matches[:2])
+                    (rel_path, forbidden.description, matches[:2])
                 )
 
         # Check required patterns
@@ -391,7 +498,7 @@ def scan_for_drift() -> dict:
             pattern = re.compile(required.pattern)
             if not pattern.search(content):
                 report["missing_required"].append(
-                    (doc_path.name, required.description)
+                    (rel_path, required.description)
                 )
 
         # Check path references
@@ -403,7 +510,7 @@ def scan_for_drift() -> dict:
                 if "example" not in file_path.lower() and "{" not in file_path:
                     if not full_path.exists():
                         report["missing_paths"].append(
-                            (doc_path.name, file_path)
+                            (rel_path, file_path)
                         )
 
     return report

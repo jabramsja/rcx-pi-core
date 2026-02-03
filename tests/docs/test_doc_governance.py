@@ -2,13 +2,19 @@
 Documentation Governance Tests - Enforces the Three Laws across entire repo.
 
 Law 1: Two files own current state (STATUS.md, TASKS.md)
-Law 2: Every doc has a lifecycle (DOC_STATUS header)
+Law 2: Every doc has a lifecycle (DOC_STATUS header with ALL required fields)
 Law 3: Design docs describe WHAT, not progress
 
-This module uses TIERED governance:
-- FULL: docs/core/, docs/agents/, docs/audit/, docs/execution/ - all rules enforced
-- LIGHT: docs/cli/, docs/schemas/, READMEs - just needs header
-- EXEMPT: archives, generated files, tool prompts, .github/, .pytest_cache/
+This module enforces STRICT governance per DocGovernance.v0.md:
+- ALL docs in docs/ folders require DOC_STATUS headers
+- Headers must have ALL 5 required fields: TYPE, LAST_VERIFIED, OWNER, FOR_CURRENT_STATE, GROUNDING_TESTS
+- Only truly generated/test content is exempt
+
+Exempt paths (no governance required):
+- .pytest_cache/, .github/ - generated/config
+- /archive/ paths - historical, read-only
+- tests/golden/, tests/archive/ - test fixtures
+- rcx_pi_rust/, rcx_omega/, rcx_python_examples/ - separate governance
 
 See docs/core/DocGovernance.v0.md for full policy.
 
@@ -28,46 +34,36 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent.parent
 
 # =============================================================================
-# Tiered Governance Configuration
+# Strict Governance Configuration (per DocGovernance.v0.md)
 # =============================================================================
 
-# FULL governance - all Three Laws enforced
-FULL_GOVERNANCE_FOLDERS = [
+# ALL folders under governance - ALL Three Laws enforced
+# Per DocGovernance.v0.md: "Every .md file outside the root must declare its status"
+GOVERNED_FOLDERS = [
     "docs/core",
     "docs/agents",
     "docs/audit",
     "docs/execution",
-]
-
-# LIGHT governance - just needs DOC_STATUS header (Law 2 only)
-LIGHT_GOVERNANCE_FOLDERS = [
     "docs/cli",
     "docs/schemas",
     "docs/reviews",
+    ".claude/agents",  # Agent config docs
 ]
 
-# LIGHT governance for specific patterns (READMEs at various levels)
-LIGHT_GOVERNANCE_PATTERNS = [
-    r"^[^/]+/README\.md$",  # Subproject READMEs like rcx_pi/README.md
-    r"^docs/README\.md$",
-]
-
-# EXEMPT - no governance required
+# EXEMPT - truly no governance required (generated, archived, separate projects)
 EXEMPT_PATTERNS = [
     r"^\.pytest_cache/",           # pytest generated
     r"^\.github/",                 # GitHub templates
-    r"^\.claude/agents/archive",   # Archived agent configs
     r"^\.rcx_library/",            # Library files
-    r"/archive/",                  # Any archive folder
+    r"/archive/",                  # Any archive folder (historical, read-only)
     r"/archive_pre_guardrails/",   # Old agent archives
-    r"tools/agents/.*_prompt\.md$", # Agent prompt templates
+    r"tools/agents/.*_prompt\.md$", # Agent prompt templates (not docs)
     r"\.auto\.md$",                # Auto-generated docs
     r"^rcx_pi_rust/",              # Rust subproject (separate governance)
     r"^rcx_omega/",                # Omega subproject
     r"^rcx_python_examples/",      # Examples subproject
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files
-    r"^docs/README\.md$",          # Auto-generated docs index
     r"^docs/TESTING_PERFORMANCE_ISSUE\.md$",  # Historical context (resolved issue)
 ]
 
@@ -83,6 +79,9 @@ EXEMPT_ROOT_FILES = {
 # Valid DOC_STATUS types
 VALID_DOC_TYPES = {"REFERENCE", "DESIGN_SPEC", "IMPLEMENTATION", "SUPERSEDED", "ARCHIVED"}
 
+# Required header fields per DocGovernance.v0.md
+REQUIRED_HEADER_FIELDS = ["TYPE", "LAST_VERIFIED", "OWNER", "FOR_CURRENT_STATE", "GROUNDING_TESTS"]
+
 # Maximum days since LAST_VERIFIED before warning
 STALE_THRESHOLD_DAYS = 90
 
@@ -96,17 +95,11 @@ class DocHeader(NamedTuple):
     doc_type: str | None
     last_verified: str | None
     owner: str | None
+    for_current_state: str | None
     grounding_tests: str | None
     superseded_by: str | None
     archived_reason: str | None
     raw_content: str
-
-
-class GovernanceTier:
-    """Governance tier for a doc."""
-    FULL = "full"
-    LIGHT = "light"
-    EXEMPT = "exempt"
 
 
 def parse_doc_header(content: str) -> DocHeader | None:
@@ -125,6 +118,7 @@ def parse_doc_header(content: str) -> DocHeader | None:
         doc_type=extract_field("TYPE"),
         last_verified=extract_field("LAST_VERIFIED"),
         owner=extract_field("OWNER"),
+        for_current_state=extract_field("FOR_CURRENT_STATE"),
         grounding_tests=extract_field("GROUNDING_TESTS"),
         superseded_by=extract_field("SUPERSEDED_BY"),
         archived_reason=extract_field("ARCHIVED_REASON"),
@@ -132,37 +126,43 @@ def parse_doc_header(content: str) -> DocHeader | None:
     )
 
 
-def get_governance_tier(doc_path: Path) -> str:
-    """Determine governance tier for a doc."""
+def is_exempt(doc_path: Path) -> bool:
+    """Check if a doc is exempt from governance."""
     rel_path = str(doc_path.relative_to(REPO_ROOT))
 
-    # Check if root exempt file
+    # Root exempt files
     if doc_path.parent == REPO_ROOT and doc_path.name in EXEMPT_ROOT_FILES:
-        return GovernanceTier.EXEMPT
+        return True
 
-    # Check exempt patterns
+    # Exempt patterns
     for pattern in EXEMPT_PATTERNS:
         if re.search(pattern, rel_path):
-            return GovernanceTier.EXEMPT
+            return True
 
-    # Check full governance folders
-    for folder in FULL_GOVERNANCE_FOLDERS:
-        if rel_path.startswith(folder + "/"):
-            return GovernanceTier.FULL
+    return False
 
-    # Check light governance folders
-    for folder in LIGHT_GOVERNANCE_FOLDERS:
-        if rel_path.startswith(folder + "/"):
-            return GovernanceTier.LIGHT
 
-    # Check light governance patterns
-    for pattern in LIGHT_GOVERNANCE_PATTERNS:
-        if re.match(pattern, rel_path):
-            return GovernanceTier.LIGHT
+def is_governed(doc_path: Path) -> bool:
+    """Check if a doc is under governance (not exempt)."""
+    if is_exempt(doc_path):
+        return False
 
-    # Default: LIGHT governance for any other doc
-    # This ensures future docs are covered but not over-strict
-    return GovernanceTier.LIGHT
+    rel_path = str(doc_path.relative_to(REPO_ROOT))
+
+    # Check governed folders
+    for folder in GOVERNED_FOLDERS:
+        if rel_path.startswith(folder + "/") or rel_path.startswith(folder.replace("/", "\\") + "\\"):
+            return True
+
+    # Subproject READMEs (like rcx_pi/README.md) are governed
+    if re.match(r"^[^/]+/README\.md$", rel_path):
+        return True
+
+    # docs/README.md is governed
+    if rel_path == "docs/README.md":
+        return True
+
+    return False
 
 
 def get_all_md_files() -> list[Path]:
@@ -170,21 +170,14 @@ def get_all_md_files() -> list[Path]:
     return sorted(REPO_ROOT.rglob("*.md"))
 
 
-def get_governed_docs(tier: str | None = None) -> list[Path]:
-    """Get docs at a specific governance tier (or all governed if tier=None)."""
-    docs = []
-    for doc_path in get_all_md_files():
-        doc_tier = get_governance_tier(doc_path)
-        if doc_tier == GovernanceTier.EXEMPT:
-            continue
-        if tier is None or doc_tier == tier:
-            docs.append(doc_path)
-    return docs
+def get_governed_docs() -> list[Path]:
+    """Get all docs under governance."""
+    return [doc for doc in get_all_md_files() if is_governed(doc)]
 
 
-def get_full_governance_docs() -> list[Path]:
-    """Get docs under full governance."""
-    return get_governed_docs(GovernanceTier.FULL)
+def get_exempt_docs() -> list[Path]:
+    """Get all exempt docs."""
+    return [doc for doc in get_all_md_files() if is_exempt(doc)]
 
 
 # =============================================================================
@@ -203,7 +196,7 @@ class TestLaw1SingleSourceOfTruth:
         assert (REPO_ROOT / "TASKS.md").exists(), "TASKS.md missing from repo root"
 
     def test_no_inline_current_state_sections(self):
-        """FULL governance docs should not have 'Current State' sections."""
+        """ALL governed docs should not have 'Current State' sections."""
         violations = []
 
         # Patterns that indicate inline status sections
@@ -212,7 +205,7 @@ class TestLaw1SingleSourceOfTruth:
             (r'\*\*(?:Completed|In Progress|Awaiting):\*\*', "**Completed:**/**In Progress:** lists"),
         ]
 
-        for doc_path in get_full_governance_docs():
+        for doc_path in get_governed_docs():
             content = doc_path.read_text()
 
             # Remove code blocks before checking (they might contain examples)
@@ -241,17 +234,17 @@ class TestLaw1SingleSourceOfTruth:
 
 
 # =============================================================================
-# Law 2: Every Doc Has a Lifecycle
+# Law 2: Every Doc Has a Lifecycle (STRICT - all 5 required fields)
 # =============================================================================
 
 class TestLaw2DocLifecycle:
-    """Every governed doc must have a valid DOC_STATUS header."""
+    """Every governed doc must have a valid DOC_STATUS header with ALL required fields."""
 
-    def test_full_governance_docs_have_headers(self):
-        """FULL governance docs must have DOC_STATUS headers."""
+    def test_all_governed_docs_have_headers(self):
+        """ALL governed docs must have DOC_STATUS headers (no exceptions)."""
         missing = []
 
-        for doc_path in get_full_governance_docs():
+        for doc_path in get_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header is None:
@@ -259,31 +252,12 @@ class TestLaw2DocLifecycle:
                 missing.append(str(rel_path))
 
         if missing:
-            msg = f"\nFULL governance docs missing DOC_STATUS header:\n"
+            msg = f"\nGoverned docs missing DOC_STATUS header ({len(missing)} total):\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
             msg += "\nRun: python tools/add_doc_headers.py\n"
+            msg += "Per DocGovernance.v0.md: 'A doc without DOC_STATUS fails CI.'\n"
             pytest.fail(msg)
-
-    def test_light_governance_docs_have_headers(self):
-        """LIGHT governance docs should have headers (warning, not failure)."""
-        missing = []
-
-        for doc_path in get_governed_docs(GovernanceTier.LIGHT):
-            content = doc_path.read_text()
-            header = parse_doc_header(content)
-            if header is None:
-                rel_path = doc_path.relative_to(REPO_ROOT)
-                missing.append(str(rel_path))
-
-        if missing:
-            import warnings
-            msg = f"LIGHT governance docs without headers (recommended):\n"
-            for doc in sorted(missing)[:20]:
-                msg += f"  - {doc}\n"
-            if len(missing) > 20:
-                msg += f"  ... and {len(missing) - 20} more\n"
-            warnings.warn(msg)
 
     def test_headers_have_valid_type(self):
         """DOC_STATUS TYPE must be valid."""
@@ -302,19 +276,73 @@ class TestLaw2DocLifecycle:
             pytest.fail(msg)
 
     def test_headers_have_last_verified(self):
-        """FULL governance docs must have LAST_VERIFIED."""
+        """ALL governed docs must have LAST_VERIFIED."""
         missing = []
 
-        for doc_path in get_full_governance_docs():
+        for doc_path in get_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and not header.last_verified:
-                missing.append(doc_path.name)
+                rel_path = doc_path.relative_to(REPO_ROOT)
+                missing.append(str(rel_path))
 
         if missing:
-            msg = f"\nFULL governance docs missing LAST_VERIFIED:\n"
+            msg = f"\nGoverned docs missing LAST_VERIFIED:\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
+            pytest.fail(msg)
+
+    def test_headers_have_owner(self):
+        """ALL governed docs must have OWNER."""
+        missing = []
+
+        for doc_path in get_governed_docs():
+            content = doc_path.read_text()
+            header = parse_doc_header(content)
+            if header and not header.owner:
+                rel_path = doc_path.relative_to(REPO_ROOT)
+                missing.append(str(rel_path))
+
+        if missing:
+            msg = f"\nGoverned docs missing OWNER:\n"
+            for doc in sorted(missing):
+                msg += f"  - {doc}\n"
+            pytest.fail(msg)
+
+    def test_headers_have_for_current_state(self):
+        """ALL governed docs must have FOR_CURRENT_STATE."""
+        missing = []
+
+        for doc_path in get_governed_docs():
+            content = doc_path.read_text()
+            header = parse_doc_header(content)
+            if header and not header.for_current_state:
+                rel_path = doc_path.relative_to(REPO_ROOT)
+                missing.append(str(rel_path))
+
+        if missing:
+            msg = f"\nGoverned docs missing FOR_CURRENT_STATE:\n"
+            for doc in sorted(missing):
+                msg += f"  - {doc}\n"
+            msg += "\nPer DocGovernance.v0.md, should be: 'See STATUS.md and TASKS.md'\n"
+            pytest.fail(msg)
+
+    def test_headers_have_grounding_tests(self):
+        """ALL governed docs must have GROUNDING_TESTS (can be 'none')."""
+        missing = []
+
+        for doc_path in get_governed_docs():
+            content = doc_path.read_text()
+            header = parse_doc_header(content)
+            if header and not header.grounding_tests:
+                rel_path = doc_path.relative_to(REPO_ROOT)
+                missing.append(str(rel_path))
+
+        if missing:
+            msg = f"\nGoverned docs missing GROUNDING_TESTS:\n"
+            for doc in sorted(missing):
+                msg += f"  - {doc}\n"
+            msg += "\nPer DocGovernance.v0.md, use 'none' if no grounding tests exist.\n"
             pytest.fail(msg)
 
     def test_last_verified_format(self):
@@ -357,7 +385,7 @@ class TestLaw2DocLifecycle:
         stale = []
         threshold = datetime.now() - timedelta(days=STALE_THRESHOLD_DAYS)
 
-        for doc_path in get_full_governance_docs():
+        for doc_path in get_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and header.last_verified:
@@ -394,7 +422,7 @@ class TestLaw3NoProgressInDesignDocs:
             r'(?:Currently|Now)\s+(?:working on|implementing|building)',
         ]
 
-        for doc_path in get_full_governance_docs():
+        for doc_path in get_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
 
@@ -420,22 +448,36 @@ class TestLaw3NoProgressInDesignDocs:
 class TestGovernanceCoverage:
     """Report on governance coverage."""
 
-    def test_report_coverage(self):
-        """Report how many docs are in each tier."""
+    def test_governance_coverage_minimum(self):
+        """Verify minimum governance coverage is maintained."""
         all_docs = get_all_md_files()
+        governed_count = len(get_governed_docs())
+        exempt_count = len(get_exempt_docs())
+        total = len(all_docs)
 
-        full_count = len(get_governed_docs(GovernanceTier.FULL))
-        light_count = len(get_governed_docs(GovernanceTier.LIGHT))
-        exempt_count = len([d for d in all_docs if get_governance_tier(d) == GovernanceTier.EXEMPT])
+        # Governance coverage must meet minimum threshold
+        # Currently: 54 governed, 76 exempt = 41% governed
+        # This prevents accidental expansion of EXEMPT patterns
+        MIN_GOVERNED = 50  # At least 50 docs must be governed
+        MIN_GOVERNED_PERCENT = 35  # At least 35% of docs must be governed
 
-        # This is informational, not a failure
-        import warnings
-        msg = f"\nGovernance coverage:\n"
-        msg += f"  FULL (all laws): {full_count} docs\n"
-        msg += f"  LIGHT (header only): {light_count} docs\n"
-        msg += f"  EXEMPT: {exempt_count} docs\n"
-        msg += f"  TOTAL: {len(all_docs)} docs\n"
-        warnings.warn(msg)
+        governed_percent = (governed_count / total * 100) if total > 0 else 0
+
+        if governed_count < MIN_GOVERNED:
+            pytest.fail(
+                f"Governance coverage too low!\n"
+                f"  GOVERNED: {governed_count} (minimum: {MIN_GOVERNED})\n"
+                f"  EXEMPT: {exempt_count}\n"
+                f"  Check EXEMPT_PATTERNS in test_doc_governance.py - too many docs exempt?"
+            )
+
+        if governed_percent < MIN_GOVERNED_PERCENT:
+            pytest.fail(
+                f"Governance coverage percentage too low!\n"
+                f"  GOVERNED: {governed_count}/{total} ({governed_percent:.1f}%)\n"
+                f"  Minimum: {MIN_GOVERNED_PERCENT}%\n"
+                f"  Check EXEMPT_PATTERNS - too many docs exempt?"
+            )
 
 
 # =============================================================================
@@ -455,25 +497,35 @@ class TestDocStructure:
 
         for doc_path in docs_folder.rglob("*.md"):
             rel_path = doc_path.relative_to(REPO_ROOT)
-            tier = get_governance_tier(doc_path)
-
-            # Check if it's orphaned (not in a known folder)
             rel_str = str(rel_path)
-            in_known_folder = any(
+
+            # Skip if in archive
+            if "/archive/" in rel_str:
+                continue
+
+            # Skip if exempt
+            if is_exempt(doc_path):
+                continue
+
+            # docs/README.md is allowed at root level
+            if rel_str == "docs/README.md":
+                continue
+
+            # Check if it's in a governed folder
+            in_governed_folder = any(
                 rel_str.startswith(f + "/")
-                for f in FULL_GOVERNANCE_FOLDERS + LIGHT_GOVERNANCE_FOLDERS + ["docs/archive"]
+                for f in GOVERNED_FOLDERS + ["docs/archive"]
             )
 
-            if not in_known_folder and tier != GovernanceTier.EXEMPT:
+            if not in_governed_folder:
                 ungoverned.append(str(rel_path))
 
         if ungoverned:
-            import warnings
-            msg = f"Docs in docs/ not in a governed subfolder:\n"
+            msg = f"\nDocs in docs/ not in a governed subfolder:\n"
             for doc in sorted(ungoverned):
                 msg += f"  - {doc}\n"
-            msg += "Consider moving to docs/core/, docs/archive/, or adding to LIGHT_GOVERNANCE_FOLDERS\n"
-            warnings.warn(msg)
+            msg += "\nMove to docs/core/, docs/archive/, or add folder to GOVERNED_FOLDERS\n"
+            pytest.fail(msg)
 
 
 # =============================================================================

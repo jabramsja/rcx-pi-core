@@ -3,7 +3,7 @@
 # Validates seed JSON files for structural integrity and theater detection
 #
 # Usage: ./tools/seed_police.sh [seed_dir]
-#        Default: checks both seeds/ (legacy) and mu/ (new structure)
+#        Default: checks mu/ subdirectories (substrate, closures, programs, utilities, bridge)
 #
 # Checks:
 #   1. Structure: Required fields (id, pattern, body)
@@ -13,12 +13,11 @@
 
 set -euo pipefail
 
-# If specific directory given, use that; otherwise check both seeds/ and mu/
+# If specific directory given, use that; otherwise check mu/ subdirectories
 if [ -n "${1:-}" ]; then
     SEED_DIRS=("$1")
 else
     SEED_DIRS=()
-    [ -d "seeds" ] && SEED_DIRS+=("seeds")
     [ -d "mu" ] && SEED_DIRS+=("mu/substrate" "mu/closures" "mu/programs" "mu/utilities" "mu/bridge")
 fi
 

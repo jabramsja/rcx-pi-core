@@ -43,7 +43,7 @@ else
 fi
 echo ""
 
-echo "== 1) Contraband check =="
+echo "== 1a) Contraband check =="
 ./tools/contraband.sh rcx_pi
 
 echo "== 1b) Test theater check =="
@@ -61,16 +61,42 @@ echo "== 1e) JS test theater check =="
 echo "== 1f) Seed police =="
 ./tools/seed_police.sh
 
-echo "== 1g) Doc contract verification =="
+echo "== 1g) Anti-cheat scans =="
+# No private attr access in tests/ or prototypes/
+echo "-- no private attr access in tests/ or prototypes/"
+if grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ 2>/dev/null | \
+    grep -v 'self\._' | \
+    grep -v '_getframe.*CONTRABAND_OK' | \
+    grep -v '# ANTICHEAT_OK' | \
+    grep -v 'sys\._getframe\|sys\._current_frames' | \
+    grep -v 'test_contraband_detection.py.*"""' | \
+    grep -v '__pycache__'; then
+  echo "ERROR: Found private attr access"
+  exit 1
+fi
+echo "OK"
+
+# No underscored imports from rcx_pi in tests/ or prototypes/
+echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
+if grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ 2>/dev/null | \
+    grep -v 'test_type_tag_security.py' | \
+    grep -v '# ANTICHEAT_OK' | \
+    grep -v '__pycache__'; then
+  echo "ERROR: Found underscored import from rcx_pi"
+  exit 1
+fi
+echo "OK"
+
+echo "== 1h) Doc contract verification =="
 pytest tests/docs/test_doc_contracts.py -q
 
-echo "== 1h) Doc freshness check (semantic drift) =="
+echo "== 1i) Doc freshness check (semantic drift) =="
 pytest tests/docs/test_doc_freshness.py -q
 
-echo "== 1i) Doc governance check (Three Laws) =="
+echo "== 1j) Doc governance check (Three Laws) =="
 pytest tests/docs/test_doc_governance.py -q
 
-echo "== 1j) Root files governance check =="
+echo "== 1k) Root files governance check =="
 pytest tests/docs/test_root_files.py -q
 
 echo "== 2) AST police (Python) =="

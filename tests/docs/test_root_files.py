@@ -298,8 +298,8 @@ class TestTasksMd:
         tasks_path = REPO_ROOT / "TASKS.md"
         content = tasks_path.read_text()
 
-        # Find SINK section
-        sink_match = re.search(r'## SINK\s*\n(.*?)(?=\n## |\Z)', content, re.DOTALL)
+        # Find SINK section (header may have parenthetical text like "## SINK (ideas parked; ...)")
+        sink_match = re.search(r'## SINK[^\n]*\n(.*?)(?=\n## |\Z)', content, re.DOTALL)
         if not sink_match:
             pytest.skip("No SINK section found")
 
@@ -396,6 +396,277 @@ class TestRootFileConsistency:
                     pytest.fail(
                         f"README.md claims {level} is incomplete but STATUS.md says COMPLETE"
                     )
+
+    def test_critical_test_files_count_matches(self):
+        """CRITICAL_TEST_FILES count must match between README and STATUS."""
+        status_path = REPO_ROOT / "STATUS.md"
+        readme_path = REPO_ROOT / "README.md"
+
+        if not (status_path.exists() and readme_path.exists()):
+            pytest.skip("Missing files")
+
+        status_content = status_path.read_text()
+        readme_content = readme_path.read_text()
+
+        # Extract counts from both files
+        # Pattern: "N CRITICAL_TEST_FILES" or "**N CRITICAL_TEST_FILES**"
+        status_match = re.search(r'(\d+)\s*CRITICAL_TEST_FILES', status_content)
+        readme_match = re.search(r'(\d+)\s*CRITICAL_TEST_FILES', readme_content)
+
+        if status_match and readme_match:
+            status_count = int(status_match.group(1))
+            readme_count = int(readme_match.group(1))
+
+            if status_count != readme_count:
+                pytest.fail(
+                    f"CRITICAL_TEST_FILES count mismatch:\n"
+                    f"  STATUS.md: {status_count}\n"
+                    f"  README.md: {readme_count}\n"
+                    f"Update README.md to match STATUS.md (source of truth)"
+                )
+
+    def test_debt_count_matches(self):
+        """Debt count in README should match STATUS.md."""
+        status_path = REPO_ROOT / "STATUS.md"
+        readme_path = REPO_ROOT / "README.md"
+
+        if not (status_path.exists() and readme_path.exists()):
+            pytest.skip("Missing files")
+
+        status_content = status_path.read_text()
+        readme_content = readme_path.read_text()
+
+        # Extract debt counts
+        # STATUS: "CURRENT: N" or similar
+        status_match = re.search(r'CURRENT[:\s]+(\d+)', status_content)
+        # README: "N semantic debt" or "**N semantic debt**"
+        readme_match = re.search(r'(\d+)\s*semantic\s*debt', readme_content, re.I)
+
+        if status_match and readme_match:
+            status_count = int(status_match.group(1))
+            readme_count = int(readme_match.group(1))
+
+            if status_count != readme_count:
+                pytest.fail(
+                    f"Debt count mismatch:\n"
+                    f"  STATUS.md: {status_count}\n"
+                    f"  README.md: {readme_count}\n"
+                    f"Update README.md to match STATUS.md (source of truth)"
+                )
+
+
+# =============================================================================
+# Markdown Syntax Tests
+# =============================================================================
+
+class TestMarkdownSyntax:
+    """Verify markdown syntax is valid in root files."""
+
+    @pytest.mark.parametrize("filename", [f for f in ROOT_FILES.keys() if f != "CHANGELOG.md"])
+    def test_root_level_file_references_exist(self, filename: str):
+        """References to root-level files (FOO.md, BAR.md) should exist.
+
+        CHANGELOG.md is excluded as it contains historical references.
+        """
+        path = REPO_ROOT / filename
+        if not path.exists():
+            pytest.skip(f"{filename} doesn't exist")
+
+        content = path.read_text()
+        broken = []
+
+        # Find references to root-level .md files: `FOO.md` or see FOO.md or FOO.md (line start)
+        # Pattern: word boundary, ALLCAPS or CamelCase filename, .md extension
+        for match in re.finditer(r'`([A-Z][A-Z_]*\.md)`|(?:see|See)\s+`?([A-Z][A-Z_]*\.md)`?', content):
+            ref_file = match.group(1) or match.group(2)
+            if ref_file:
+                full_path = REPO_ROOT / ref_file
+                if not full_path.exists():
+                    broken.append(ref_file)
+
+        if broken:
+            pytest.fail(
+                f"{filename} references non-existent root files:\n" +
+                "\n".join(f"  - {b}" for b in set(broken)) +
+                "\n\nEither create these files or remove/update the references"
+            )
+
+    @pytest.mark.parametrize("filename", ROOT_FILES.keys())
+    def test_code_blocks_balanced(self, filename: str):
+        """Code fence markers (```) must be balanced (even count)."""
+        path = REPO_ROOT / filename
+        if not path.exists():
+            pytest.skip(f"{filename} doesn't exist")
+
+        content = path.read_text()
+        fence_count = content.count('```')
+
+        if fence_count % 2 != 0:
+            # Find the unclosed block for better error message
+            lines = content.split('\n')
+            open_blocks = []
+            for i, line in enumerate(lines, 1):
+                if line.strip().startswith('```'):
+                    if open_blocks and not lines[open_blocks[-1]-1].strip().startswith('```'):
+                        open_blocks.pop()
+                    else:
+                        open_blocks.append(i)
+
+            pytest.fail(
+                f"{filename} has unbalanced code fences ({fence_count} markers, should be even)\n"
+                f"Likely unclosed block near line(s): {open_blocks[-3:] if open_blocks else 'unknown'}"
+            )
+
+    @pytest.mark.parametrize("filename", [f for f in ROOT_FILES.keys() if f != "CHANGELOG.md"])
+    def test_inline_file_references_exist(self, filename: str):
+        """Inline file references (backtick paths with directories) should point to existing files.
+
+        Only checks paths with '/' to avoid false positives from bare filenames.
+        CHANGELOG.md is excluded as it contains historical references.
+        """
+        path = REPO_ROOT / filename
+        if not path.exists():
+            pytest.skip(f"{filename} doesn't exist")
+
+        content = path.read_text()
+        broken = []
+
+        # Find backtick references that look like file paths WITH directories
+        # Pattern: `path/to/file.ext` - must contain at least one /
+        for match in re.finditer(r'`([A-Za-z_][A-Za-z0-9_./]*?/[A-Za-z0-9_./]*\.[a-z]{1,5})`', content):
+            ref_path = match.group(1)
+            # Skip obvious non-paths
+            if ref_path.startswith(('http', 'example')):
+                continue
+            # Skip patterns with wildcards or variables
+            if '*' in ref_path or '{' in ref_path:
+                continue
+            # Skip test fixture patterns
+            if '.v2.jsonl' in ref_path:
+                continue
+
+            full_path = REPO_ROOT / ref_path
+            if not full_path.exists():
+                found = False
+
+                # Check common alternate locations for seed files
+                if ref_path.startswith('seeds/'):
+                    # seeds/ moved to mu/ subdirectories
+                    alt_paths = [
+                        ref_path.replace('seeds/', 'mu/substrate/'),
+                        ref_path.replace('seeds/', 'mu/utilities/'),
+                        ref_path.replace('seeds/', 'mu/closures/'),
+                        ref_path.replace('seeds/', 'mu/programs/'),
+                    ]
+                    if any((REPO_ROOT / alt).exists() for alt in alt_paths):
+                        found = True
+
+                # Check docs/ subdirectories for doc paths
+                if not found and ref_path.startswith('docs/'):
+                    # docs/Foo.md might be docs/core/Foo.md, docs/cli/Foo.md, etc.
+                    basename = ref_path.replace('docs/', '')
+                    for subdir in ['core', 'cli', 'audit', 'execution', 'schemas', 'archive']:
+                        if (REPO_ROOT / 'docs' / subdir / basename).exists():
+                            found = True
+                            break
+
+                if not found:
+                    broken.append(ref_path)
+
+        if broken:
+            pytest.fail(
+                f"{filename} references non-existent files:\n" +
+                "\n".join(f"  - {b}" for b in broken[:10]) +
+                "\n\nEither create these files, update the paths, or remove the references"
+            )
+
+
+# =============================================================================
+# Cross-Document L-Level Consistency
+# =============================================================================
+
+class TestLLevelConsistency:
+    """L-level claims must be consistent across ALL docs, not just README."""
+
+    def test_docs_dont_claim_outdated_l_levels(self):
+        """Docs in docs/core/ and docs/audit/ shouldn't claim outdated L-levels."""
+        status_path = REPO_ROOT / "STATUS.md"
+        if not status_path.exists():
+            pytest.skip("STATUS.md doesn't exist")
+
+        status_content = status_path.read_text()
+
+        # Determine current L-level status from STATUS.md
+        # Look for explicit status markers
+        l_status = {}
+        for level in ["L1", "L2", "L3", "L4"]:
+            if re.search(rf'{level}.*(?:DONE|COMPLETE|FULL|ACHIEVED)', status_content, re.I):
+                l_status[level] = "complete"
+            elif re.search(rf'{level}.*(?:FUTURE|SINK|TODO)', status_content, re.I):
+                l_status[level] = "future"
+            else:
+                l_status[level] = "unknown"
+
+        violations = []
+        for doc_dir in ["docs/core", "docs/audit"]:
+            doc_path = REPO_ROOT / doc_dir
+            if not doc_path.exists():
+                continue
+
+            for doc_file in doc_path.glob("*.md"):
+                content = doc_file.read_text()
+
+                # Check for outdated claims
+                for level, status in l_status.items():
+                    if status == "complete":
+                        # Doc shouldn't say this level is incomplete/in-progress
+                        if re.search(rf'(?:current|project)\s+(?:state|status).*{level}', content, re.I):
+                            # Found a claim about current state being at this level
+                            if re.search(rf'{level}.*(?:IN PROGRESS|TODO|PENDING|INCOMPLETE)', content, re.I):
+                                violations.append(
+                                    f"{doc_file.name}: Claims {level} is incomplete but STATUS.md says it's complete"
+                                )
+
+        if violations:
+            pytest.fail(
+                f"L-level inconsistencies found:\n" +
+                "\n".join(f"  - {v}" for v in violations[:5])
+            )
+
+
+# =============================================================================
+# Forbidden Patterns in Root Files
+# =============================================================================
+
+class TestForbiddenPatternsRootFiles:
+    """Root files should not contain certain patterns."""
+
+    def test_no_current_state_heading_in_docs(self):
+        """Docs should not have 'Current State' as a heading (use STATUS.md reference)."""
+        violations = []
+
+        for doc_dir in ["docs/core", "docs/audit", "docs/execution"]:
+            doc_path = REPO_ROOT / doc_dir
+            if not doc_path.exists():
+                continue
+
+            for doc_file in doc_path.glob("*.md"):
+                content = doc_file.read_text()
+
+                # Remove code blocks before checking (they might contain examples)
+                content_no_code = re.sub(r'```[\s\S]*?```', '', content)
+
+                # Look for "Current State" as a markdown heading
+                # Pattern: ## Current State or # Current State or ### Current State
+                if re.search(r'^#+\s*Current\s+State', content_no_code, re.MULTILINE | re.IGNORECASE):
+                    violations.append(doc_file.name)
+
+        if violations:
+            pytest.fail(
+                f"Docs with 'Current State' heading (forbidden - use STATUS.md reference):\n" +
+                "\n".join(f"  - {v}" for v in violations) +
+                "\n\nRename to 'Implementation Status' and add 'See STATUS.md for current state.'"
+            )
 
 
 # =============================================================================

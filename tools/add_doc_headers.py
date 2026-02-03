@@ -20,12 +20,22 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-# All folders under FULL governance (require headers)
-FULL_GOVERNANCE_FOLDERS = [
+# All folders under governance (require headers)
+GOVERNED_FOLDERS = [
     REPO_ROOT / "docs" / "core",
     REPO_ROOT / "docs" / "agents",
     REPO_ROOT / "docs" / "audit",
     REPO_ROOT / "docs" / "execution",
+    REPO_ROOT / "docs" / "cli",
+    REPO_ROOT / "docs" / "schemas",
+    REPO_ROOT / "docs" / "reviews",
+    REPO_ROOT / ".claude" / "agents",
+]
+
+# Specific standalone files that need headers
+GOVERNED_FILES = [
+    REPO_ROOT / "docs" / "README.md",
+    REPO_ROOT / "rcx_pi" / "README.md",
 ]
 
 # Doc classification based on content/folder
@@ -73,6 +83,36 @@ DOC_TYPES = {
     "StallFixExecution.v0.md": "REFERENCE",
     "StallFixObservability.v0.md": "REFERENCE",
     "TraceReadingPrimer.v0.md": "REFERENCE",
+
+    # docs/cli - REFERENCE (CLI documentation)
+    "cli_quickstart.md": "REFERENCE",
+    "cli_schema.md": "REFERENCE",
+    "Flags.md": "REFERENCE",
+    "orbit_viz_dot.md": "REFERENCE",
+    "orbit_viz_svg.md": "REFERENCE",
+
+    # docs/schemas - REFERENCE (schema documentation)
+    "program_descriptor_schema.md": "REFERENCE",
+    "program_run_schema.md": "REFERENCE",
+    "snapshot_json_schema.md": "REFERENCE",
+    "world_trace_json_schema.md": "REFERENCE",
+
+    # docs/reviews - REFERENCE (code review records)
+    "mu_equal_fix_summary.md": "REFERENCE",
+
+    # .claude/agents - REFERENCE (agent configurations)
+    "adversary.md": "REFERENCE",
+    "advisor.md": "REFERENCE",
+    "expert.md": "REFERENCE",
+    "fuzzer.md": "REFERENCE",
+    "grounding.md": "REFERENCE",
+    "structural-proof.md": "REFERENCE",
+    "translator.md": "REFERENCE",
+    "verifier.md": "REFERENCE",
+    "visualizer.md": "REFERENCE",
+
+    # README files
+    "README.md": "REFERENCE",
 }
 
 HEADER_TEMPLATE = """<!--
@@ -126,11 +166,15 @@ def add_header_to_doc(doc_path: Path, dry_run: bool = False) -> bool:
 
 
 def get_all_governed_docs() -> list[Path]:
-    """Get all docs in FULL governance folders."""
+    """Get all docs under governance."""
     docs = []
-    for folder in FULL_GOVERNANCE_FOLDERS:
+    for folder in GOVERNED_FOLDERS:
         if folder.exists():
             docs.extend(folder.glob("*.md"))
+    # Add standalone governed files
+    for f in GOVERNED_FILES:
+        if f.exists():
+            docs.append(f)
     return sorted(docs)
 
 

@@ -19,7 +19,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 > **Current status:** See `STATUS.md` for current phase and L-level. This doc defines the criteria.
 
-> ⚠️ **FUTURE ACCEPTANCE CRITERIA** — This document defines gates and criteria for meta-circular readiness (L3). No section implies current achievement unless explicitly marked PASS. Current project state is L1 (Algorithmic Self-Hosting). See `STATUS.md` for what is actually achieved vs planned.
+> ⚠️ **FUTURE ACCEPTANCE CRITERIA** — This document defines gates and criteria for meta-circular readiness (L4 - True Self-Hosting). No section implies current achievement unless explicitly marked PASS. See `STATUS.md` for what is actually achieved vs planned.
 
 **Status: DESIGN DOCUMENT — No code changes.**
 
@@ -108,17 +108,16 @@ The v1 meta-circular subset is intentionally minimal. It includes ONLY:
 
 | Component | Reason |
 |-----------|--------|
-| **Stall execution** | v2 observability exists (`reduction.stall`), but execution semantics blocked (VECTOR #6) |
-| **Fix execution** | v2 observability exists (`reduction.applied`), but execution semantics blocked (VECTOR #6) |
 | **Closure semantics** | Requires Stall → Fix loop execution |
 | **Bucket routing** | Requires execution semantics |
-| **Rule matching execution** | Observable via v2 events, but execution blocked |
 | **Pattern evaluation** | Requires closure semantics |
 | **Self-modifying behavior** | Requires meta loop stability first |
 | **Performance optimization** | Correctness before speed |
 | **Concurrency** | Forbidden by EntropyBudget.md |
 
-**Note on v2 Observability**: Stall/fix events are now OBSERVABLE via v2 trace events (`reduction.stall`, `reduction.applied`, `reduction.normal`) gated by `RCX_TRACE_V2=1`. These are debug-only and do NOT provide execution semantics. See `docs/StallFixObservability.v0.md`.
+**Note on v2 Observability**: Stall/fix events are now OBSERVABLE via v2 trace events (`reduction.stall`, `reduction.applied`, `reduction.normal`) gated by `RCX_TRACE_V2=1`. Execution semantics (v0) are implemented and gated by `RCX_EXECUTION_V0=1`. See `docs/execution/StallFixObservability.v0.md`.
+
+> **Implementation Status:** See STATUS.md and TASKS.md for current state.
 
 ---
 
@@ -176,14 +175,14 @@ To unblock Gate 5 and proceed to meta-circular implementation:
 2. ✅ **Add fix trace event type** — `reduction.applied` in v2 schema
 3. ✅ **v2 fixtures and gate** — `tests/fixtures/traces_v2/`, `tests/test_replay_gate_v2.py`
 
-### Blocked (Execution Semantics, VECTOR #6)
+### Completed (Execution Semantics v0)
 
-4. **Implement Stall → Fix → Closure execution loop** — requires VECTOR #6 promotion
-5. **Implement reference interpreter** with v0 opcodes — depends on (4)
-6. **Create golden fixtures** for opcode semantics — depends on (5)
-7. **Pass determinism gate** for interpreter output — depends on (6)
+4. ✅ **Implement Stall → Fix → Closure execution loop** — `RCX_EXECUTION_V0=1`
+5. ✅ **Execution engine with stall/fix events** — `docs/execution/StallFixExecution.v0.md`
+6. ✅ **Golden fixtures for execution semantics** — `tests/fixtures/traces_v2/recurrence_spec_v0/`
+7. ✅ **Determinism gate for execution output** — replay gate passes
 
-The execution semantics are documented in TASKS.md VECTOR #6.
+> **Note:** See TASKS.md Ra section for completion status.
 
 ---
 
@@ -223,11 +222,11 @@ The following are explicitly forbidden in meta-circular v1:
 
 | Level | Description | Status | Evidence |
 |-------|-------------|--------|----------|
-| **L1: Algorithmic** | Core algorithms (match, subst) expressed as Mu projections | ACHIEVED | seeds/match.v1.json, seeds/subst.v1.json |
-| **L2: Operational** | Iteration and selection as Mu projections (kernel loop) | DESIGN | docs/core/MetaCircularKernel.v0.md |
-| **L3: Full Bootstrap** | RCX evaluator runs itself with no Python | FUTURE | — |
+| **L1: Algorithmic** | Core algorithms (match, subst) expressed as Mu projections | ACHIEVED | mu/substrate/match.v2.json, mu/substrate/subst.v2.json |
+| **L2: Operational** | Kernel state machine expressed as Mu projections | ACHIEVED | mu/substrate/kernel.v1.json (for-loop accepted as bootstrap primitive) |
+| **L3: Substrate Portability** | Projections run on minimal, auditable substrate | ACHIEVED | JS parity (mu/host/js/eval_step.js) |
 
-**Current gap:** The kernel loop (`step_mu` for-loop) is still Python scaffolding. Phase 7 design addresses this.
+> **Note:** See STATUS.md for authoritative L-level definitions and current state.
 
 **Meta-circular requirement:** Both self-hosting AND meta-circularity are needed. The evaluator must run itself - projections select projections. If Python provides iteration, emergence might be a Python artifact.
 
@@ -238,18 +237,23 @@ The following are explicitly forbidden in meta-circular v1:
 **Bytecode is archived.** The kernel + seeds architecture has replaced bytecode as the path to self-hosting.
 
 **Architecture:**
-- Kernel has only 4 primitives: `compute_identity`, `detect_stall`, `record_trace`, `gate_dispatch`
 - Pattern matching is **seed responsibility**, not kernel
 - Seeds are pure Mu (no Python functions)
 - Self-hosting = EVAL_SEED runs EVAL_SEED
+- Bootstrap primitives: see `docs/core/BootstrapPrimitives.v0.md` for canonical list
 
-**Current Status (see STATUS.md for current phase):**
-- `seeds/kernel.v1.json` - Structural kernel (7 Mu projections) - **canonical kernel**
+**Seed Locations (mu/ directory):**
+- `mu/substrate/kernel.v1.json` - Structural kernel (~7 Mu projections) - **canonical kernel**
+- `mu/substrate/match.v2.json`, `mu/substrate/subst.v2.json` - Match/substitute with context passthrough
+- `mu/closures/recurrence.v1.json`, `mu/closures/exhaustion.v1.json` - Closure detection
+- `mu/utilities/classify.v1.json`, `mu/utilities/eval.v1.json` - Type classification, evaluation
+
+**Python Host:**
 - `rcx_pi/selfhost/step_mu.py` - step_kernel_mu uses kernel.v1 + match.v2 + subst.v2
 - `rcx_pi/selfhost/eval_seed.py` - EVAL_SEED evaluator (apply_projection, step)
-- `rcx_pi/selfhost/kernel.py` - Step budget + legacy Kernel class (not canonical)
-- `seeds/match.v2.json`, `seeds/subst.v2.json` - Match/substitute with context passthrough
-- 800+ tests including fuzzer coverage
+- Comprehensive test coverage including fuzzer (see STATUS.md for counts)
+
+> **Note:** See STATUS.md for current test count and implementation state.
 
 **Superseded:**
 - Gates 4 and 5 (bytecode) are superseded by kernel + seeds
@@ -268,7 +272,7 @@ Dependencies:
 - `docs/schemas/rcx-trace-event.v1.json` (replay, frozen)
 - `docs/schemas/rcx-trace-event.v2.json` (observability)
 - `docs/archive/bytecode/BytecodeMapping.v0.md` (archived)
-- `docs/StallFixObservability.v0.md`
+- `docs/execution/StallFixObservability.v0.md`
 - `docs/core/RCXKernel.v0.md` (kernel architecture)
 - `docs/core/SelfHosting.v0.md` (self-hosting design)
 - `docs/core/MetaCircularKernel.v0.md` (Phase 7 design, VECTOR)

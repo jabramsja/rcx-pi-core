@@ -20,7 +20,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 Status: COMPLETE (design + stress test harness)
 
 **Implementation status:**
-- ✅ Design doc complete (`docs/EnginenewsSpecMapping.v0.md`)
+- ✅ Design doc complete (`docs/execution/EnginenewsSpecMapping.v0.md`)
 - ✅ Stress test harness: `tests/test_recurrence_spec_v0.py` (18 tests)
 - ✅ Fixtures: progressive_refinement, stall_pressure, multi_cycle, idempotent_cycle
 - ✅ Metrics: stall_density, fix_efficacy, closure_evidence_count

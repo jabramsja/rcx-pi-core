@@ -59,7 +59,7 @@ KERNEL_SEEDS="kernel.v1.json|match.v2.json|subst.v2.json|enginenews.v1.json|exha
 if [ -n "$STAGED_JSON" ]; then
     echo "-- Checking for non-standard underscore keys in JSON..."
     for f in $STAGED_JSON; do
-        if [[ "$f" == prototypes/* ]] || [[ "$f" == seeds/* ]] || [[ "$f" == mu/* ]]; then
+        if [[ "$f" == prototypes/* ]] || [[ "$f" == mu/* ]]; then
             # Skip kernel/engine seeds - they legitimately use underscore-prefixed fields
             if echo "$f" | grep -qE "$KERNEL_SEEDS"; then
                 continue
@@ -174,8 +174,8 @@ if [ -n "$STAGED_JS" ]; then
     fi
 fi
 
-# 12. Check seed integrity if seed files changed
-STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
+# 12. Check seed integrity if seed/mu files changed
+STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'mu/.*\.json$' || true)
 if [ -n "$STAGED_SEEDS" ]; then
     echo "-- Checking seed police (structure, theater, host leakage)..."
     if ! ./tools/seed_police.sh 2>/dev/null; then
@@ -184,8 +184,8 @@ if [ -n "$STAGED_SEEDS" ]; then
     fi
 fi
 
-# 11. Run JS tests if JS file or seeds changed
-STAGED_SEEDS=$(git diff --cached --name-only --diff-filter=ACM | grep -E 'seeds/.*\.json$' || true)
+# 13. Run JS tests if JS file or mu/ changed
+# (STAGED_SEEDS already computed above - no duplicate)
 if [ -n "$STAGED_JS" ] || [ -n "$STAGED_SEEDS" ]; then
     echo "-- Running JS parity tests..."
     if ! node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then

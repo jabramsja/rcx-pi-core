@@ -13,7 +13,7 @@ A projection-based computational substrate where **structure is the primitive**.
 
 - **2,100+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
-- **33 CRITICAL_TEST_FILES** protected from silent skipping
+- **34 CRITICAL_TEST_FILES** protected from silent skipping
 
 **Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
 All logic is in `mu/closures/recurrence.v1.json` (9 projections). Bootstrap provides only mechanical execution.
@@ -23,7 +23,7 @@ See `STATUS.md` for full details.
 ### Development Rules (Enforced)
 
 - All changes go through PRs
-- CI green is mandatory (`green_gate.sh`)
+- CI green is mandatory (`scripts/green_gate.sh`)
 - Structural purity enforced: program IN RCX, not ABOUT RCX
 - Security tools have grounding tests (tests actually test what they claim)
 
@@ -45,9 +45,9 @@ All `--schema` emitters are validated via the canonical runner at `rcx_pi/cli_sc
 
 Before you open a PR, run the local gate:
 
-    make green
+    ./scripts/green_gate.sh
 
-Policy + definition of GREEN: see `CI_POLICY.md`.
+See `STATUS.md` for testing tiers and `CLAUDE.md` for development workflow.
 
 
 
@@ -80,8 +80,8 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/substrate/kernel.v1.json` | Structural kernel (7 projections) - state machine |
 | `mu/substrate/match.v2.json` | Pattern matching (8 projections) - with context passthrough |
 | `mu/substrate/subst.v2.json` | Substitution (12 projections) - with context passthrough |
-| `seeds/classify.v1.json` | Type classification (6 projections) |
-| `seeds/eval.v1.json` | Evaluation (7 projections) |
+| `mu/utilities/classify.v1.json` | Type classification (~6 projections) |
+| `mu/utilities/eval.v1.json` | Evaluation (~7 projections) |
 | `mu/closures/recurrence.v1.json` | Closure detection (9 projections) - Rule 2.2♢ |
 
 ### Core Modules
@@ -154,8 +154,9 @@ The **only supported correctness gate** for this repository is:
 
 ```bash
 scripts/green_gate.sh
+```
 
-If scripts/green_gate.sh finishes without red errors — RCX-π Core is healthy.
+If `scripts/green_gate.sh` finishes without errors, RCX-π Core is healthy.
 
 ## JSON diff / inspection
 

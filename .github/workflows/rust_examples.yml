@@ -1,18 +1,12 @@
 name: Rust Examples
 
-# Only run on PRs - push to dev is covered by green_gate.yml
+# Manual-only - green_gate.yml already runs rust tests on all PRs to dev
+# Use this for isolated rust testing without full green_gate overhead
 on:
-  pull_request:
-    branches: ["dev"]
-    paths:
-      - "rcx_pi_rust/**"
-      - "scripts/green_examples.sh"
-      - "scripts/green_gate.sh"
-      - ".github/workflows/rust_examples.yml"
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual trigger only - avoids duplicate runs with green_gate.yml
 
 concurrency:
-  group: rust-examples-${{ github.event.pull_request.number || github.ref }}
+  group: rust-examples-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

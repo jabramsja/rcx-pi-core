@@ -17,12 +17,11 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 # Recursive Kernel Design (Phase 8)
 
-**Status:** IMPLEMENTED (Phase 8a/8b complete as of 2026-02-03)
 **Goal:** Define honest boundaries for self-hosting while maximizing structural execution
 
-> **Note:** Phase 8a (document bootstrap primitives) and Phase 8b (simplify step_kernel_mu) are COMPLETE.
+> **Implementation Status:** See `STATUS.md` for current phase (8a/8b complete).
 > See `docs/core/BootstrapPrimitives.v0.md` for the 5 irreducible primitives.
-> The design below captures the completed approach.
+> The design below captures the approach.
 
 ---
 
@@ -153,10 +152,10 @@ The revised question acknowledges:
 
 Rather than trying to eliminate ALL loops (impossible), we specialize EACH loop:
 
-| Loop | Current State | Phase 8 Target | Method |
-|------|---------------|----------------|--------|
+| Loop | Current State | Phase 8 Decision | Method |
+|------|---------------|------------------|--------|
 | `run_mu` | Python for-loop | ACCEPT as L3 boundary | Scaffolding (outer cycle) |
-| `step_kernel_mu` | Python for-loop | STRUCTURAL | Specialize to single eval_step |
+| `step_kernel_mu` | Python for-loop | ACCEPT as PRIMITIVE | Like Forth's NEXT (irreducible per Phase 8) |
 | `eval_step` | Python for-loop | ACCEPT as PRIMITIVE | Bootstrap hardware |
 
 ### Key Insight: Specialize step_kernel_mu

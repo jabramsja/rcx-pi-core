@@ -17,7 +17,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 # EVAL_SEED Specification v0
 
-Status: IMPLEMENTED (rcx_pi/selfhost/eval_seed.py, 125+ tests)
+**Implementation:** `rcx_pi/selfhost/eval_seed.py` (see STATUS.md for test coverage)
 
 ## Purpose
 
@@ -298,11 +298,12 @@ This works. Pure structural, no arithmetic.
 
 **COMPLETE (L1 Algorithmic):**
 - `rcx_pi/selfhost/eval_seed.py` - Bootstrap match/substitute implementation
-- `mu/substrate/match.v2.json` - Pattern matching as projections (8 projections)
-- `mu/substrate/subst.v2.json` - Substitution as projections (12 projections)
-- 125+ tests covering match, substitute, and step operations
+- `mu/substrate/match.v2.json` - Pattern matching as projections (~8 projections)
+- `mu/substrate/subst.v2.json` - Substitution as projections (~12 projections)
+- Comprehensive test coverage for match, substitute, and step operations
 
 **Verification:**
 - Parity tests ensure Python bootstrap and Mu projections produce identical results
-- Fuzzer tests (1000+ inputs) verify robustness
+- Fuzzer tests with hypothesis profiles verify robustness
 - See `tests/test_match_v2_parity.py` and `tests/test_subst_v2_parity.py`
+- See STATUS.md for current test counts
