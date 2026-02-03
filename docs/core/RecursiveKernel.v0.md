@@ -1,7 +1,28 @@
+<!--
+DOC_STATUS
+TYPE: DESIGN_SPEC
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Recursive Kernel Design (Phase 8)
 
-**Status:** DESIGN - v2 (9-agent review 2026-01-28)
+**Status:** IMPLEMENTED (Phase 8a/8b complete as of 2026-02-03)
 **Goal:** Define honest boundaries for self-hosting while maximizing structural execution
+
+> **Note:** Phase 8a (document bootstrap primitives) and Phase 8b (simplify step_kernel_mu) are COMPLETE.
+> See `docs/core/BootstrapPrimitives.v0.md` for the 5 irreducible primitives.
+> The design below captures the completed approach.
 
 ---
 
@@ -67,6 +88,8 @@ The goal isn't "zero Python" - that's impossible. The goal is ensuring:
 ## Design: Minimal Python Substrate
 
 ### What Python MUST Provide (Bootstrap Primitives)
+
+**See `docs/core/BootstrapPrimitives.v0.md`** for the canonical documentation of these 5 irreducible primitives:
 
 | Primitive | Why Irreducible | Analogy |
 |-----------|-----------------|---------|
@@ -413,8 +436,8 @@ User calls: run_mu(user_projections, input)
 - Kernel projections: `mu/substrate/kernel.v1.json`
 - Match projections: `mu/substrate/match.v2.json`
 - Subst projections: `mu/substrate/subst.v2.json`
-- Python execution loop: `rcx_pi/selfhost/step_mu.py:243-276`
-- Debt marker: `rcx_pi/selfhost/step_mu.py:190` (@host_iteration)
+- Python execution loop: `rcx_pi/selfhost/step_mu.py:step_kernel_mu()`
+- Debt marker: `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` (@host_iteration)
 
 ## Appendix B: EngineNews Alignment
 

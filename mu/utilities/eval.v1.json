@@ -4,6 +4,8 @@
     "name": "EVAL_SEED",
     "description": "Deep evaluation projections for RCX work-stack machine",
     "doc": "docs/DeepStep.v0.md",
+    "execution_layer": "BOOTSTRAP",
+    "note": "Uses [] for context, not {head,tail} - requires bootstrap match/substitute",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",

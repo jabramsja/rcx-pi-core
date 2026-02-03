@@ -15,10 +15,7 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import NO_MATCH
 from rcx_pi.selfhost.match_mu import match_mu
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
-
-
-SEEDS_DIR = get_seeds_dir()
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 class TestMatchV2SeedStructure:
@@ -26,11 +23,11 @@ class TestMatchV2SeedStructure:
 
     @pytest.fixture
     def v1_seed(self):
-        return load_verified_seed(SEEDS_DIR / "match.v1.json")
+        return load_verified_seed(get_seed_path("match.v1.json"))
 
     @pytest.fixture
     def v2_seed(self):
-        return load_verified_seed(SEEDS_DIR / "match.v2.json")
+        return load_verified_seed(get_seed_path("match.v2.json"))
 
     def test_v2_has_all_v1_projection_ids(self, v1_seed, v2_seed):
         """All v1 projection IDs must exist in v2."""
@@ -141,7 +138,7 @@ class TestMatchV2FailCatchAll:
 
     def test_match_fail_projection_pattern(self):
         """match.fail pattern should match any in-progress match state."""
-        v2_seed = load_verified_seed(SEEDS_DIR / "match.v2.json")
+        v2_seed = load_verified_seed(get_seed_path("match.v2.json"))
         match_fail = next(
             p for p in v2_seed["projections"] if p["id"] == "match.fail"
         )
@@ -152,7 +149,7 @@ class TestMatchV2FailCatchAll:
 
     def test_match_fail_produces_no_match_status(self):
         """match.fail body should produce match_done with no_match status."""
-        v2_seed = load_verified_seed(SEEDS_DIR / "match.v2.json")
+        v2_seed = load_verified_seed(get_seed_path("match.v2.json"))
         match_fail = next(
             p for p in v2_seed["projections"] if p["id"] == "match.fail"
         )

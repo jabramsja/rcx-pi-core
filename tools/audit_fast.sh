@@ -61,6 +61,18 @@ echo "== 1e) JS test theater check =="
 echo "== 1f) Seed police =="
 ./tools/seed_police.sh
 
+echo "== 1g) Doc contract verification =="
+pytest tests/docs/test_doc_contracts.py -q
+
+echo "== 1h) Doc freshness check (semantic drift) =="
+pytest tests/docs/test_doc_freshness.py -q
+
+echo "== 1i) Doc governance check (Three Laws) =="
+pytest tests/docs/test_doc_governance.py -q
+
+echo "== 1j) Root files governance check =="
+pytest tests/docs/test_root_files.py -q
+
 echo "== 2) AST police (Python) =="
 python3 tools/ast_police.py
 
@@ -96,7 +108,10 @@ pytest $PARALLEL_FLAG -q \
     tests/test_phase8b_grounding_gaps.py \
     tests/test_recurrence_parity.py \
     tests/test_exhaustion_parity.py \
-    tests/test_js_parity_automated.py
+    tests/test_js_parity_automated.py \
+    tests/test_bootstrap_structural_bridge.py \
+    tests/test_meta_circular_gate6.py \
+    tests/test_execution_path_verification.py
 
 echo ""
 echo "== 5) JavaScript L3 parity check =="

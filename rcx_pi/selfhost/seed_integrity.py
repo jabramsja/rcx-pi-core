@@ -25,31 +25,37 @@ from typing import Any
 # Update these when seeds are intentionally modified.
 SEED_CHECKSUMS: dict[str, str] = {
     # Updated v1.1.0: added match.typed.descend for type-tagged head/tail structures
-    "match.v1.json": "e60a3f3184038147f6a065d025d8458e7a161acc8d9dde1ce6719771500bca8c",
+    # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
+    "match.v1.json": "c6cf4594c30d40e2b4a985ab1dfc2704d2d8dac9f601cc8185c4623be1e9083f",
     # Updated v1.2.0: added subst.typed.* projections for type-tagged structures (Phase 6c)
-    "subst.v1.json": "ff2acb1450b30a078a7cd2bdd42443b07e28075569a8b095f65165e23eb69893",
+    # Updated: Added execution_layer: META_CIRCULAR
+    "subst.v1.json": "16de6cdce97d26900365ab09f3af55146c4788d829b364a8020c6a3da931fe8f",
     # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
-    "classify.v1.json": "3216e28b2f28b8f9d2dfd2693dfecad2c2ba94783151bb4b8f920d29aa8e5cf1",
+    # Updated: Added execution_layer: META_CIRCULAR
+    "classify.v1.json": "b74f5d20b66e45003e06ef7e0dce4aceb16ed23631a6eb8afeb7f0658f92012e",
     # Phase 7a: meta-circular kernel projections (v1.0.1 - entry format output)
-    "kernel.v1.json": "8d9eb8a05da580f8652c7f0453fbf19e88eb7c36057a7e885bdeb3348bf0e9f6",
+    # Updated: Added execution_layer: META_CIRCULAR
+    "kernel.v1.json": "813cae10f2a7f19bd494e56e5c8cf2feaf92f32ae6988d626bca21ee01811daa",
     # Phase 7b: match with kernel context passthrough + match.fail (fixed var names)
-    "match.v2.json": "1fbd00c6988505a8369cec8f25968453cf3405855dfdf053756bd22375f7acc2",
+    # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
+    "match.v2.json": "55a6b58a6c8fe31d4c3a8c704603d453fc04c1a757a45fcf7f6570afa1fe27b1",
     # Phase 7b: subst with kernel context passthrough
-    "subst.v2.json": "372fd6552208f432f945214c65d3c4ae8c62113cef7541c070c039f373202f22",
-    # Step 5: EngineNews structural closure detection (Rule 2.2♢)
-    # Updated Step 6 v0: Added tau_step output for Operator Exhaustion
-    # Updated: Added execution_layer metadata (BOOTSTRAP - requires non-linear patterns)
-    "enginenews.v1.json": "1ef120680a76bdeca0a949de8cc65ded011d0022a2bd2472474cc10e416c2762",
-    # Step 6: Operator Exhaustion detection (Rule 3.1)
-    # Updated: Added execution_layer metadata (BOOTSTRAP - requires non-linear patterns)
-    "exhaust.v1.json": "28d211894bc74efda595977f8603041b867d6ebf116b61b73f87b0be523a56f4",
-    # mu/ folder reorganization: renamed seeds with updated projection IDs
-    # recurrence.v1.json = enginenews.v1.json with recurrence.* projection IDs
-    "recurrence.v1.json": "1f1febacf5f54cb7a8dc48cd7a5830ec21093ef19a73cef0809e60853279d467",
+    # Updated: Added execution_layer: META_CIRCULAR
+    "subst.v2.json": "e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621",
+    # mu/ folder reorganization: renamed from enginenews.v1/exhaust.v1 to recurrence.v1/exhaustion.v1
+    # Legacy names (enginenews.v1, exhaust.v1) removed - mu/ is now canonical
+    # Updated v1.2.0: HYBRID execution_layer (honest: production uses BOOTSTRAP, meta-circular proven)
+    "recurrence.v1.json": "3d4b07523eac31c9495c6601b5e4c11eabbd35235619173aabc0f28d33ce34a6",
     # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
-    "exhaustion.v1.json": "8857132af750da7efbc5532bdb95ec4223d2acefdd5d911cfd00efd6ca393fa7",
+    # Updated v1.2.0: HYBRID execution_layer (honest: production uses BOOTSTRAP, meta-circular proven)
+    "exhaustion.v1.json": "44dc13783f1b0481a1e8961ab7e0717d511dcc09ade5af4078e5750f83d5d749",
     # RCX Engine: main program orchestrating recurrence + exhaustion
-    "rcx_engine.v1.json": "d5a1478739f9d6371b072f2cb937e311bd7ba1879729556f10a1d2e641e0b94f",
+    # Updated: Added status: "design_only" marker
+    "rcx_engine.v1.json": "dfc3c8fcd4545687b614b9ee8d80d687a29d72e36c69f148615061d0341b0456",
+    # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
+    "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
+    # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
+    "eval.v1.json": "f5fe73011edcdcc5b1a71d7297175a6394e1238d1c4d29de5a8f5755f79cd441",
 }
 
 # Expected projection IDs for each seed.
@@ -121,36 +127,7 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "subst.primitive",
         "subst.wrap",       # Must be last (entry point)
     ],
-    # Step 5: EngineNews structural closure detection (Rule 2.2♢)
-    # init is entry point, unwrap is exit point (no .wrap catch-all)
-    "enginenews.v1.json": [
-        "enginenews.init",               # Entry: _detect_closure -> internal state
-        "enginenews.end_of_trace",       # End of trace (null) -> no closure
-        "enginenews.check_state_stall",  # Extract state from stall entry
-        "enginenews.check_state_maxsteps",  # Extract state from max_steps entry
-        "enginenews.check_state",        # Extract state from trace entry
-        "enginenews.found_in_seen",      # State in seen-set -> closure!
-        "enginenews.not_in_head",        # State not in head -> check tail
-        "enginenews.not_found",          # State not in seen -> add and advance
-        "enginenews.unwrap",             # Exit: extract final result
-    ],
-    # Step 6: Operator Exhaustion detection (Rule 3.1)
-    # init_null is entry for no-tau case, do_freeze is terminal for exhaustion
-    "exhaust.v1.json": [
-        "exhaust.init_null",        # Entry: no tau_step -> continue
-        "exhaust.init",             # Entry: tau_step set -> find tau entry
-        "exhaust.find_match",       # Found step == tau_step (non-linear)
-        "exhaust.find_continue",    # Not at tau_step yet, advance
-        "exhaust.find_not_found",   # End of trace without finding tau
-        "exhaust.scan_same",        # Same operator (non-linear), continue
-        "exhaust.scan_different",   # Different operator -> not exhausted
-        "exhaust.scan_end",         # End of trace, all same -> check frozen
-        "exhaust.frozen_found",     # Operator in frozen list (non-linear)
-        "exhaust.frozen_check_tail",  # Check next in frozen list
-        "exhaust.do_freeze",        # Not frozen -> freeze it
-    ],
-    # mu/ folder reorganization: renamed seeds with updated projection IDs
-    # recurrence.v1.json = enginenews.v1.json with recurrence.* projection IDs
+    # mu/ folder: recurrence.v1 (renamed from enginenews.v1)
     "recurrence.v1.json": [
         "recurrence.init",               # Entry: _detect_closure -> internal state
         "recurrence.end_of_trace",       # End of trace (null) -> no closure
@@ -184,6 +161,24 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "engine.recurrence_done", # Recurrence done -> exhaustion
         "engine.exhaustion_done", # Exhaustion done -> final result
         "engine.unwrap",          # Extract final result
+    ],
+    # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
+    "bootstrap_structural.v1.json": [
+        "bridge.var.check_existing",    # Entry: start lookup for variable
+        "bridge.lookup.found_same",     # Found binding with same value (non-linear OK)
+        "bridge.lookup.found_different",  # Found binding with different value -> NO_MATCH
+        "bridge.lookup.not_found_yet",  # Name not at head, continue searching
+        "bridge.lookup.not_found",      # Name not in bindings, add new
+    ],
+    # Utilities: eval.v1.json (legacy naming, BOOTSTRAP execution layer)
+    "eval.v1.json": [
+        "restart",              # ROOT_CHECK with changes -> restart traversal
+        "unwrap",               # ROOT_CHECK without changes -> done
+        "descend.dict",         # DESCEND into dict with head/tail structure
+        "sibling.to_tail",      # SIBLING after head done -> move to tail
+        "ascend.to_context",    # ASCEND -> pop context frame
+        "ascend.to_root",       # ASCEND when context empty -> root_check
+        "wrap",                 # Entry point - wrap raw value into state
     ],
 }
 
@@ -375,7 +370,14 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
 
 
 def get_seeds_dir() -> Path:
-    """Get the seeds directory path (legacy location)."""
+    """Get the seeds directory path (DEPRECATED - use get_seed_path instead)."""
+    import warnings
+    warnings.warn(
+        "get_seeds_dir() is deprecated. Use get_seed_path(seed_name) instead. "
+        "mu/ is now the canonical location for seeds.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     return Path(__file__).parent.parent.parent / "seeds"
 
 
@@ -386,26 +388,29 @@ def get_mu_dir() -> Path:
 
 def get_seed_path(seed_name: str) -> Path:
     """
-    Get the path to a seed file, checking both legacy and new locations.
+    Get the path to a seed file from the canonical mu/ location.
 
-    Seed locations (new mu/ folder structure):
+    Seed locations (mu/ folder structure - CANONICAL):
     - mu/substrate/  : kernel.v1, match.v1, match.v2, subst.v1, subst.v2
     - mu/closures/   : recurrence.v1, exhaustion.v1
+    - mu/bridge/     : bootstrap_structural.v1
     - mu/utilities/  : classify.v1, eval.v1
-    - mu/programs/   : (future) rcx_engine.v1
+    - mu/programs/   : rcx_engine.v1
 
-    Legacy location (seeds/):
-    - All seeds including enginenews.v1, exhaust.v1
+    Legacy seeds/ folder is DEPRECATED - do not use.
 
     Args:
         seed_name: Name of seed file (e.g., "match.v2.json", "recurrence.v1.json")
 
     Returns:
-        Path to the seed file (prefers mu/ if available, falls back to seeds/)
+        Path to the seed file in mu/
+
+    Raises:
+        ValueError: If seed_name is not in the known location map.
     """
     mu_dir = get_mu_dir()
 
-    # Map seed names to mu/ subfolders
+    # Map seed names to mu/ subfolders - this is the ONLY source of truth
     MU_SEED_LOCATIONS = {
         # Substrate seeds (the VM)
         "kernel.v1.json": "substrate",
@@ -413,6 +418,8 @@ def get_seed_path(seed_name: str) -> Path:
         "match.v2.json": "substrate",
         "subst.v1.json": "substrate",
         "subst.v2.json": "substrate",
+        # Bridge seeds
+        "bootstrap_structural.v1.json": "bridge",
         # Closure detection seeds
         "recurrence.v1.json": "closures",
         "exhaustion.v1.json": "closures",
@@ -423,35 +430,27 @@ def get_seed_path(seed_name: str) -> Path:
         "rcx_engine.v1.json": "programs",
     }
 
-    if seed_name in MU_SEED_LOCATIONS:
-        mu_path = mu_dir / MU_SEED_LOCATIONS[seed_name] / seed_name
-        if mu_path.exists():
-            return mu_path
+    if seed_name not in MU_SEED_LOCATIONS:
+        raise ValueError(
+            f"Unknown seed: {seed_name}. "
+            f"Known seeds: {sorted(MU_SEED_LOCATIONS.keys())}"
+        )
 
-    # Fall back to legacy seeds/ folder
-    legacy_path = get_seeds_dir() / seed_name
-    if legacy_path.exists():
-        return legacy_path
-
-    # Return mu path even if it doesn't exist (for error messages)
-    if seed_name in MU_SEED_LOCATIONS:
-        return mu_dir / MU_SEED_LOCATIONS[seed_name] / seed_name
-    return legacy_path
+    return mu_dir / MU_SEED_LOCATIONS[seed_name] / seed_name
 
 
 def verify_all_seeds() -> dict[str, bool]:
     """
-    Verify all known seeds.
+    Verify all known seeds from mu/ (canonical location).
 
     Returns:
         Dict mapping seed name to verification success.
     """
     results = {}
-    seeds_dir = get_seeds_dir()
 
     for seed_name in SEED_CHECKSUMS:
-        seed_path = seeds_dir / seed_name
         try:
+            seed_path = get_seed_path(seed_name)
             load_verified_seed(seed_path, verify=True)
             results[seed_name] = True
         except (FileNotFoundError, ValueError):

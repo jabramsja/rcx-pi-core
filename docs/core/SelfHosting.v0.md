@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Self-Hosting Specification v0
 
 > **Current status:** See `STATUS.md` for current phase and L-level. This doc is the detailed design spec.
@@ -382,7 +399,7 @@ Additional attack vectors addressed in security hardening pass:
 | Attack | Mitigation |
 |--------|------------|
 | Resource exhaustion (cascading calls) | Global step budget: MAX_PROJECTION_STEPS=50,000 |
-| Deep nesting DoS | MAX_MU_DEPTH=200 limit |
+| Deep nesting DoS | MAX_MU_DEPTH=300 limit |
 | Wide structure DoS | MAX_MU_WIDTH=1,000 limit |
 | Circular reference infinite loop | Cycle detection in normalize/denormalize |
 | Cross-thread budget contamination | Thread-local budget via `threading.local()` |
@@ -496,18 +513,18 @@ EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.j
    - [x] 7-agent review: All agents APPROVE
 
 4. **Implemented projections (9 total):**
-   - `enginenews.init` - Entry point
-   - `enginenews.end_of_trace` - End of trace (null)
-   - `enginenews.check_state_stall` - Extract state from stall entry
-   - `enginenews.check_state_maxsteps` - Extract state from max_steps entry
-   - `enginenews.check_state` - Extract state from normal entry
-   - `enginenews.found_in_seen` - State in seen-set -> closure detected!
-   - `enginenews.not_in_head` - State not in head -> check tail
-   - `enginenews.not_found` - State not found -> add and advance
-   - `enginenews.unwrap` - Extract final result
+   - `recurrence.init` - Entry point
+   - `recurrence.end_of_trace` - End of trace (null)
+   - `recurrence.check_state_stall` - Extract state from stall entry
+   - `recurrence.check_state_maxsteps` - Extract state from max_steps entry
+   - `recurrence.check_state` - Extract state from normal entry
+   - `recurrence.found_in_seen` - State in seen-set -> closure detected!
+   - `recurrence.not_in_head` - State not in head -> check tail
+   - `recurrence.not_found` - State not found -> add and advance
+   - `recurrence.unwrap` - Extract final result
 
 5. **Key design: Non-linear patterns for state equality**
-   - `enginenews.found_in_seen` uses `{"var": "state"}` twice in pattern
+   - `recurrence.found_in_seen` uses `{"var": "state"}` twice in pattern
    - eval_seed.match() binding conflict detection (lines 331-336, 351-355) enforces equality
    - This is bootstrap primitive (like Forth's NEXT), not semantic debt
    - Both Python and JS substrates handle binding conflicts identically

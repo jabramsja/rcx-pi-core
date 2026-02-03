@@ -18,7 +18,7 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import step, NO_MATCH
 from rcx_pi.selfhost.mu_type import assert_mu, mu_equal, mu_hash, is_mu, MAX_MU_DEPTH
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 # Project root
@@ -311,10 +311,8 @@ class TestProjectionLoaderPrimitive:
 
     def test_loader_validates_schema(self):
         """Loader validates seed structure (no interpretation)."""
-        seeds_dir = get_seeds_dir()
-
-        # Load a known-good seed
-        seed = load_verified_seed(seeds_dir / "match.v1.json")
+        # Load a known-good seed from mu/ canonical location
+        seed = load_verified_seed(get_seed_path("match.v1.json"))
 
         # Verify loader enforced schema
         assert "meta" in seed
@@ -323,10 +321,8 @@ class TestProjectionLoaderPrimitive:
 
     def test_loader_verifies_checksums(self):
         """Loader verifies integrity via checksum."""
-        seeds_dir = get_seeds_dir()
-
         # This should succeed (checksum matches)
-        seed = load_verified_seed(seeds_dir / "match.v1.json", verify=True)
+        seed = load_verified_seed(get_seed_path("match.v1.json"), verify=True)
         assert seed is not None
         # GROUNDING: Verify it actually loaded projections
         assert "projections" in seed
@@ -338,10 +334,8 @@ class TestProjectionLoaderPrimitive:
         import tempfile
         from pathlib import Path
 
-        seeds_dir = get_seeds_dir()
-
-        # Load a valid seed
-        valid_seed = load_verified_seed(seeds_dir / "match.v1.json", verify=False)
+        # Load a valid seed from mu/ canonical location
+        valid_seed = load_verified_seed(get_seed_path("match.v1.json"), verify=False)
 
         # Tamper with it - change a projection body
         tampered = json.loads(json.dumps(valid_seed))  # Deep copy
@@ -374,8 +368,7 @@ class TestProjectionLoaderPrimitive:
 
     def test_loader_produces_mu_projections(self):
         """Loaded projections are valid Mu."""
-        seeds_dir = get_seeds_dir()
-        seed = load_verified_seed(seeds_dir / "match.v1.json")
+        seed = load_verified_seed(get_seed_path("match.v1.json"))
 
         for proj in seed["projections"]:
             assert_mu(proj, f"projection {proj.get('id', '?')}")

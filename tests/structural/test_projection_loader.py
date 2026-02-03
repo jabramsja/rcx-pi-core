@@ -13,7 +13,7 @@ import pytest
 from pathlib import Path
 
 from rcx_pi.selfhost.projection_loader import make_projection_loader
-from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import get_seed_path
 
 
 class TestMakeProjectionLoader:
@@ -123,7 +123,7 @@ class TestSeedLoading:
         ("subst.v2.json", 12),
         ("classify.v1.json", 6),
         ("kernel.v1.json", 7),
-        # Note: eval.v1.json excluded - not registered in seed_integrity checksums
+        ("eval.v1.json", 7),  # Now registered in seed_integrity checksums
     ])
     def test_seed_projection_counts(self, seed_file: str, expected_count: int):
         """Each seed file has expected number of projections."""
@@ -135,10 +135,11 @@ class TestSeedLoading:
         )
 
     def test_invalid_seed_file_raises(self):
-        """Non-existent seed file raises error."""
+        """Non-existent seed file raises error (ValueError from get_seed_path)."""
         load_fn, clear_fn = make_projection_loader("nonexistent.json")
         clear_fn()
-        with pytest.raises(FileNotFoundError):
+        # get_seed_path() raises ValueError for unknown seed names
+        with pytest.raises(ValueError, match="Unknown seed"):
             load_fn()
 
 

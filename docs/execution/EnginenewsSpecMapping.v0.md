@@ -1,10 +1,27 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Enginenews Spec Mapping v0
 
 Status: COMPLETE (design + stress test harness)
 
 **Implementation status:**
 - ✅ Design doc complete (`docs/EnginenewsSpecMapping.v0.md`)
-- ✅ Stress test harness: `tests/test_enginenews_spec_v0.py` (18 tests)
+- ✅ Stress test harness: `tests/test_recurrence_spec_v0.py` (18 tests)
 - ✅ Fixtures: progressive_refinement, stall_pressure, multi_cycle, idempotent_cycle
 - ✅ Metrics: stall_density, fix_efficacy, closure_evidence_count
 - ✅ CLI contract verified: `--check-canon`, `--print-exec-summary`
@@ -151,5 +168,5 @@ Document version: v0
 Last updated: 2026-01-24
 Dependencies:
 - `docs/IndependentEncounter.v0.md` (closure evidence semantics)
-- `docs/BytecodeMapping.v1.md` (execution event definitions)
+- `docs/archive/bytecode/BytecodeMapping.v1.md` (execution event definitions, archived)
 - `rcx_pi.replay_cli` (public CLI interface)

@@ -5,6 +5,7 @@
     "description": "Main RCX engine combining recurrence and exhaustion detection",
     "doc": "docs/core/RCXEngine.v0.md",
     "spec_ref": "RCXEngineNew.pdf Rule 2.2♢, Rule 3.1",
+    "status": "design_only",
     "execution_layer": "APPLICATION",
     "requires_patterns": ["non-linear"],
     "dependencies": [

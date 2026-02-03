@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Universal Eval Seed (L4 Alternative Design)
 
 **Status:** SINK (research question) - 9-agent reviewed 2026-02-02
@@ -377,10 +394,10 @@ Options:
 
 ## References
 
-- `docs/core/RecursiveKernel.v0.md` - L4 "honest boundaries" approach (SELECTED)
-- `docs/core/MetaCircularKernel.v0.md` - L2 kernel.v1.json design (DONE)
-- `docs/core/BootstrapPrimitives.v0.md` - The 5 irreducible primitives
-- `STATUS.md` - Current phase and L4 SINK status
+- `docs/core/RecursiveKernel.v0.md` - L4 "honest boundaries" approach (implemented Phase 8a/8b)
+- `docs/core/MetaCircularKernel.v0.md` - L2 kernel.v1.json design (COMPLETE)
+- `docs/core/BootstrapPrimitives.v0.md` - The 5 irreducible primitives (canonical)
+- `STATUS.md` - Current phase (L1/L2/L3 complete, L4 SINK)
 - `mu/substrate/kernel.v1.json` - Current L2 kernel (7 projections)
 
 ---

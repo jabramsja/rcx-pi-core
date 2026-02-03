@@ -19,7 +19,7 @@ from rcx_pi.selfhost.seed_integrity import (
     validate_projection_ids,
     load_verified_seed,
     verify_all_seeds,
-    get_seeds_dir,
+    get_seed_path,
     SEED_CHECKSUMS,
     EXPECTED_PROJECTION_IDS,
 )
@@ -63,21 +63,21 @@ class TestChecksumVerification:
 
     def test_verify_checksum_match_seed_valid(self):
         """Valid match.v1.json passes checksum."""
-        seed_path = get_seeds_dir() / "match.v1.json"
+        seed_path = get_seed_path("match.v1.json")
         content = seed_path.read_bytes()
         # Should not raise
         verify_checksum("match.v1.json", content)
 
     def test_verify_checksum_subst_seed_valid(self):
         """Valid subst.v1.json passes checksum."""
-        seed_path = get_seeds_dir() / "subst.v1.json"
+        seed_path = get_seed_path("subst.v1.json")
         content = seed_path.read_bytes()
         # Should not raise
         verify_checksum("subst.v1.json", content)
 
     def test_verify_checksum_classify_seed_valid(self):
         """Valid classify.v1.json passes checksum."""
-        seed_path = get_seeds_dir() / "classify.v1.json"
+        seed_path = get_seed_path("classify.v1.json")
         content = seed_path.read_bytes()
         # Should not raise
         verify_checksum("classify.v1.json", content)
@@ -85,7 +85,7 @@ class TestChecksumVerification:
     def test_verify_checksum_tampered_fails(self):
         """Tampered content fails checksum."""
         # Start with valid content
-        seed_path = get_seeds_dir() / "match.v1.json"
+        seed_path = get_seed_path("match.v1.json")
         content = seed_path.read_bytes()
 
         # Tamper with it
@@ -171,7 +171,7 @@ class TestProjectionIdValidation:
 
     def test_match_seed_has_expected_ids(self):
         """match.v1.json has all expected projection IDs."""
-        seed_path = get_seeds_dir() / "match.v1.json"
+        seed_path = get_seed_path("match.v1.json")
         with open(seed_path) as f:
             seed = json.load(f)
         # Should not raise
@@ -179,7 +179,7 @@ class TestProjectionIdValidation:
 
     def test_subst_seed_has_expected_ids(self):
         """subst.v1.json has all expected projection IDs."""
-        seed_path = get_seeds_dir() / "subst.v1.json"
+        seed_path = get_seed_path("subst.v1.json")
         with open(seed_path) as f:
             seed = json.load(f)
         # Should not raise
@@ -187,7 +187,7 @@ class TestProjectionIdValidation:
 
     def test_classify_seed_has_expected_ids(self):
         """classify.v1.json has all expected projection IDs."""
-        seed_path = get_seeds_dir() / "classify.v1.json"
+        seed_path = get_seed_path("classify.v1.json")
         with open(seed_path) as f:
             seed = json.load(f)
         # Should not raise
@@ -237,7 +237,7 @@ class TestVerifiedLoad:
 
     def test_load_match_seed_verified(self):
         """Load match.v1.json with full verification."""
-        seed_path = get_seeds_dir() / "match.v1.json"
+        seed_path = get_seed_path("match.v1.json")
         seed = load_verified_seed(seed_path)
 
         assert "meta" in seed
@@ -246,7 +246,7 @@ class TestVerifiedLoad:
 
     def test_load_subst_seed_verified(self):
         """Load subst.v1.json with full verification."""
-        seed_path = get_seeds_dir() / "subst.v1.json"
+        seed_path = get_seed_path("subst.v1.json")
         seed = load_verified_seed(seed_path)
 
         assert "meta" in seed
@@ -255,7 +255,7 @@ class TestVerifiedLoad:
 
     def test_load_classify_seed_verified(self):
         """Load classify.v1.json with full verification."""
-        seed_path = get_seeds_dir() / "classify.v1.json"
+        seed_path = get_seed_path("classify.v1.json")
         seed = load_verified_seed(seed_path)
 
         assert "meta" in seed
@@ -354,7 +354,7 @@ class TestChecksumsMatchReality:
 
     def test_match_checksum_is_current(self):
         """match.v1.json checksum in SEED_CHECKSUMS matches file."""
-        seed_path = get_seeds_dir() / "match.v1.json"
+        seed_path = get_seed_path("match.v1.json")
         actual = compute_checksum(seed_path.read_bytes())
         expected = SEED_CHECKSUMS["match.v1.json"]
         assert actual == expected, (
@@ -366,7 +366,7 @@ class TestChecksumsMatchReality:
 
     def test_subst_checksum_is_current(self):
         """subst.v1.json checksum in SEED_CHECKSUMS matches file."""
-        seed_path = get_seeds_dir() / "subst.v1.json"
+        seed_path = get_seed_path("subst.v1.json")
         actual = compute_checksum(seed_path.read_bytes())
         expected = SEED_CHECKSUMS["subst.v1.json"]
         assert actual == expected, (
@@ -378,7 +378,7 @@ class TestChecksumsMatchReality:
 
     def test_classify_checksum_is_current(self):
         """classify.v1.json checksum in SEED_CHECKSUMS matches file."""
-        seed_path = get_seeds_dir() / "classify.v1.json"
+        seed_path = get_seed_path("classify.v1.json")
         actual = compute_checksum(seed_path.read_bytes())
         expected = SEED_CHECKSUMS["classify.v1.json"]
         assert actual == expected, (

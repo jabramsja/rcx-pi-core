@@ -1,0 +1,193 @@
+{
+  "meta": {
+    "description": "Test vectors for rcx_engine.v1.json projections",
+    "created": "2026-02-03",
+    "seed": "rcx_engine.v1.json"
+  },
+  "vectors": [
+    {
+      "id": "engine.init_default",
+      "description": "Initialize engine with default config",
+      "input": {
+        "_run_engine": {
+          "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
+          "input": {"value": 42}
+        }
+      },
+      "expected": {
+        "_mode": "engine",
+        "_phase": "run_trace",
+        "_projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
+        "_input": {"value": 42},
+        "_max_steps": 100,
+        "_frozen": null,
+        "_trace_result": null,
+        "_recurrence_result": null,
+        "_exhaustion_result": null
+      }
+    },
+    {
+      "id": "engine.init_custom",
+      "description": "Initialize engine with custom config",
+      "input": {
+        "_run_engine": {
+          "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
+          "input": {"value": 42},
+          "max_steps": 50,
+          "frozen": {"head": "op1", "tail": null}
+        }
+      },
+      "expected": {
+        "_mode": "engine",
+        "_phase": "run_trace",
+        "_projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
+        "_input": {"value": 42},
+        "_max_steps": 50,
+        "_frozen": {"head": "op1", "tail": null},
+        "_trace_result": null,
+        "_recurrence_result": null,
+        "_exhaustion_result": null
+      }
+    },
+    {
+      "id": "engine.trace_done",
+      "description": "Trace complete triggers recurrence detection",
+      "input": {
+        "_mode": "engine",
+        "_phase": "run_trace",
+        "_projections": [],
+        "_input": {"value": 42},
+        "_max_steps": 100,
+        "_frozen": null,
+        "_trace_result": {
+          "result": {"final": "value"},
+          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+          "stall": false
+        },
+        "_recurrence_result": null,
+        "_exhaustion_result": null
+      },
+      "expected": {
+        "_detect_closure": {
+          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+          "result": {"final": "value"}
+        },
+        "_engine_context": {
+          "frozen": null,
+          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+          "stall": false
+        }
+      }
+    },
+    {
+      "id": "engine.recurrence_done_to_exhaustion",
+      "description": "Recurrence result triggers exhaustion detection",
+      "input": {
+        "closure_detected": true,
+        "tau_step": 5,
+        "final_result": {"computed": "result"},
+        "_engine_context": {
+          "frozen": null,
+          "trace": {"head": {"step": 5, "state": "A", "projection": "op1"}, "tail": null},
+          "stall": false
+        }
+      },
+      "expected": {
+        "_detect_exhaustion": {
+          "trace": {"head": {"step": 5, "state": "A", "projection": "op1"}, "tail": null},
+          "frozen": null,
+          "tau_step": 5,
+          "operator_ids": null
+        },
+        "_engine_recurrence": {
+          "closure_detected": true,
+          "tau_step": 5,
+          "result": {"computed": "result"},
+          "stall": false
+        }
+      }
+    },
+    {
+      "id": "engine.exhaustion_done",
+      "description": "Exhaustion result produces final engine output",
+      "input": {
+        "exhaustion_detected": true,
+        "operator_to_freeze": "op1",
+        "frozen": {"head": "op1", "tail": null},
+        "action": "freeze",
+        "_engine_recurrence": {
+          "closure_detected": true,
+          "tau_step": 5,
+          "result": {"computed": "result"},
+          "stall": false
+        }
+      },
+      "expected": {
+        "engine_result": {
+          "value": {"computed": "result"},
+          "closure_detected": true,
+          "tau_step": 5,
+          "exhaustion_detected": true,
+          "operator_frozen": "op1",
+          "frozen_set": {"head": "op1", "tail": null},
+          "action": "freeze",
+          "stall": false
+        }
+      }
+    },
+    {
+      "id": "engine.unwrap",
+      "description": "Unwrap extracts final engine result",
+      "input": {
+        "engine_result": {
+          "value": {"computed": "result"},
+          "closure_detected": true,
+          "tau_step": 5,
+          "exhaustion_detected": true,
+          "operator_frozen": "op1",
+          "frozen_set": {"head": "op1", "tail": null},
+          "action": "freeze",
+          "stall": false
+        }
+      },
+      "expected": {
+        "value": {"computed": "result"},
+        "closure_detected": true,
+        "tau_step": 5,
+        "exhaustion_detected": true,
+        "operator_frozen": "op1",
+        "frozen_set": {"head": "op1", "tail": null},
+        "action": "freeze",
+        "stall": false
+      }
+    },
+    {
+      "id": "engine.no_closure",
+      "description": "No closure detected passes through to exhaustion",
+      "input": {
+        "closure_detected": false,
+        "tau_step": null,
+        "final_result": {"computed": "result"},
+        "_engine_context": {
+          "frozen": null,
+          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+          "stall": true
+        }
+      },
+      "expected": {
+        "_detect_exhaustion": {
+          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+          "frozen": null,
+          "tau_step": null,
+          "operator_ids": null
+        },
+        "_engine_recurrence": {
+          "closure_detected": false,
+          "tau_step": null,
+          "result": {"computed": "result"},
+          "stall": true
+        }
+      }
+    }
+  ]
+}

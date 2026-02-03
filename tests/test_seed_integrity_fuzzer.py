@@ -126,9 +126,9 @@ class TestChecksumFuzzing:
     @settings(max_examples=100, deadline=5000)
     def test_tampered_content_fails_verification(self, seed_name, tamper):
         """Any tampering with known seeds fails checksum verification."""
-        from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+        from rcx_pi.selfhost.seed_integrity import get_seed_path
 
-        seed_path = get_seeds_dir() / seed_name
+        seed_path = get_seed_path(seed_name)
         if not seed_path.exists():
             assume(False)  # Skip if seed doesn't exist
 
@@ -217,9 +217,9 @@ class TestProjectionIdValidationFuzzing:
     @settings(max_examples=50, deadline=5000)
     def test_real_seeds_pass_id_validation(self, seed_name):
         """Real seeds pass projection ID validation."""
-        from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+        from rcx_pi.selfhost.seed_integrity import get_seed_path
 
-        seed_path = get_seeds_dir() / seed_name
+        seed_path = get_seed_path(seed_name)
         if not seed_path.exists():
             assume(False)
 
@@ -236,9 +236,9 @@ class TestProjectionIdValidationFuzzing:
     @settings(max_examples=100, deadline=5000)
     def test_missing_projection_fails(self, seed_name, remove_idx):
         """Missing a projection fails validation."""
-        from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+        from rcx_pi.selfhost.seed_integrity import get_seed_path
 
-        seed_path = get_seeds_dir() / seed_name
+        seed_path = get_seed_path(seed_name)
         if not seed_path.exists():
             assume(False)
 
@@ -277,9 +277,9 @@ class TestProjectionOrderSecurity:
     @settings(max_examples=50, deadline=5000)
     def test_wrap_must_be_last(self, seed_name):
         """Wrap projection must be last (catch-all position)."""
-        from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+        from rcx_pi.selfhost.seed_integrity import get_seed_path
 
-        seed_path = get_seeds_dir() / seed_name
+        seed_path = get_seed_path(seed_name)
         if not seed_path.exists():
             assume(False)
 
@@ -305,9 +305,9 @@ class TestProjectionOrderSecurity:
 
     def test_kernel_wrap_must_be_first(self):
         """Kernel wrap must be first (entry point)."""
-        from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+        from rcx_pi.selfhost.seed_integrity import get_seed_path
 
-        seed_path = get_seeds_dir() / "kernel.v1.json"
+        seed_path = get_seed_path("kernel.v1.json")
         if not seed_path.exists():
             pytest.skip("kernel.v1.json not found")
 
@@ -333,9 +333,9 @@ class TestProjectionOrderSecurity:
 
     def test_kernel_unwrap_must_be_last(self):
         """Kernel unwrap must be last (exit point)."""
-        from rcx_pi.selfhost.seed_integrity import get_seeds_dir
+        from rcx_pi.selfhost.seed_integrity import get_seed_path
 
-        seed_path = get_seeds_dir() / "kernel.v1.json"
+        seed_path = get_seed_path("kernel.v1.json")
         if not seed_path.exists():
             pytest.skip("kernel.v1.json not found")
 

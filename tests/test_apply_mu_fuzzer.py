@@ -164,7 +164,7 @@ def has_nonlinear_vars(pattern) -> bool:
     Python's match() correctly returns NO_MATCH, but Mu's match_mu() incorrectly
     binds both (last wins). This is a design gap in the projections.
 
-    See: seeds/match.v2.json - match.var just adds bindings without conflict check.
+    See: mu/substrate/match.v2.json - match.var just adds bindings without conflict check.
     """
     var_counts = {}
 
@@ -336,7 +336,7 @@ def test_apply_mu_parity_fuzzer(projection, value):
     Mu uses JSON-based structural comparison, so 0.0 != -0.0 in Mu.
 
     Known limitation: non-linear patterns with binding conflicts.
-    Mu projections (match.var in seeds/match.v2.json) don't check for binding
+    Mu projections (match.var in mu/substrate/match.v2.json) don't check for binding
     conflicts. When the same variable appears twice in a pattern with different
     values, Python's match() correctly returns NO_MATCH, but Mu's match_mu()
     incorrectly binds both values. This is a design gap in the projections.
@@ -366,7 +366,7 @@ def test_apply_mu_parity_fuzzer(projection, value):
     # Known limitation: non-linear patterns with potential conflicts
     # Mu projections (match.var) don't check for binding conflicts.
     # Python's match() correctly fails when same var binds to different values,
-    # but Mu's match_mu() binds both (design gap in seeds/match.v2.json).
+    # but Mu's match_mu() binds both (design gap in mu/substrate/match.v2.json).
     if has_nonlinear_vars(pattern):
         return  # Skip - known divergence for non-linear patterns
 

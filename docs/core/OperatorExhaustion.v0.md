@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Operator Exhaustion Structural Specification v0
 
 **Status:** IMPLEMENTED (Step 6 complete 2026-02-02)
@@ -245,7 +262,7 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 ## Success Criteria
 
 ### 1. Projections Exist
-- [ ] `mu/closures/exhaustion.v1.json` contains ~10 projections
+- [x] `mu/closures/exhaustion.v1.json` exists (see `test_seed_counts.py` for count)
 - [ ] Each projection has `id`, `pattern`, `body` fields
 - [ ] SHA256 checksum verified on load
 
@@ -549,7 +566,7 @@ is safe. We can relax later without breaking correctness.
   - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
   - Cross-substrate parity: Python and JavaScript produce identical results
   - JS loads exhaustion.v1.json (47 total projections across all seeds)
-  - KERNEL_RESERVED_FIELDS updated to 20 (12 kernel + 4 Recurrence + 4 exhaustion)
+  - KERNEL_RESERVED_FIELDS updated to 24 (12 kernel + 4 Recurrence + 4 Exhaustion + 4 Bridge)
   - Automated parity test verifies Python/JS reserved fields match
 - **v0.1 (2026-02-01):** Address open questions and agent review findings:
   - Q1 RESOLVED: Pass operator_ids explicitly in input

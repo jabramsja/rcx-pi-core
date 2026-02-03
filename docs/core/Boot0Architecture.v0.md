@@ -1,14 +1,32 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Boot0 Architecture: Staged Bootstrap for RCX
 
 **Version:** 0.4
-**Status:** DESIGN PROPOSAL (not yet implemented)
-**Date:** 2026-01-31
+**Status:** DESIGN SPEC (conceptual layering documented, components implemented)
+**Date:** 2026-02-03
 
 **v0.4 changes:** Clarified "stable semantics, shrinking substrate" (primitives can migrate to smaller substrates), documented JSON as "Phase 0" format, explicit Boot0↔Boot1 handshake ABI, added security invariant for bootstrap code, added explicit L3 parity contract.
 
-> **NOTE:** This document describes a PROPOSED architecture for future migration.
-> The Boot0/Boot1/Boot2 modules do not exist yet. The components (seeds, primitives)
-> exist and are tested, but the explicit layering is not yet implemented in code.
+> **NOTE:** This document describes the conceptual Hex0-inspired architecture.
+> The explicit Boot0/Boot1/Boot2 module structure is not yet refactored in code,
+> but the components (seeds, primitives) exist and are tested. The current implementation
+> in `rcx_pi/selfhost/` already follows this layered approach conceptually.
 
 ## Overview
 
@@ -169,9 +187,9 @@ Boot0 is deliberately minimal. It can run projections but has no concept of "ker
 | Boundary | Layer | Validations | Current Implementation |
 |----------|-------|-------------|------------------------|
 | External → Boot0 | Boot0 | `is_mu()`, `MAX_MU_DEPTH`, `MAX_MU_WIDTH` | `mu_type.py:is_mu()` |
-| Boot0 → Boot1 | Boot0 | `assert_not_lambda_calculus()` | `eval_seed.py:176-215` |
-| Boot1 → Boot2 | Boot2 | `validate_kernel_projections_first()` | `step_mu.py:72-102` |
-| Boot2 → Domain | Boot2 | `validate_no_kernel_reserved_fields()` | `step_mu.py:122-166` |
+| Boot0 → Boot1 | Boot0 | `assert_not_lambda_calculus()` | `eval_seed.py:assert_not_lambda_calculus()` |
+| Boot1 → Boot2 | Boot2 | `validate_kernel_projections_first()` | `step_mu.py:validate_kernel_projections_first()` |
+| Boot2 → Domain | Boot2 | `validate_no_kernel_reserved_fields()` | `step_mu.py:validate_no_kernel_reserved_fields()` |
 
 **Key Security Properties:**
 
@@ -294,7 +312,7 @@ Boot2.eval(projections, value) =
 - `kernel.v1.json`: EXISTS, 7 projections
 - `recurrence.v1.json`: EXISTS, 9 projections (Step 5 complete)
 - Integration: `step_mu.py:step_kernel_mu()` orchestrates
-- Tests: `test_enginenews_parity.py`, `test_kernel_projections.py`
+- Tests: `test_recurrence_parity.py`, `test_kernel_projections.py`
 
 **Boot2 is ~80% complete.** The seeds exist. Migration clarifies the layering.
 
@@ -354,7 +372,7 @@ Boot2.eval(projections, value) =
 
 ### Boot2 Verification
 
-- **Integration tests:** `test_kernel_projections.py`, `test_enginenews_parity.py`
+- **Integration tests:** `test_kernel_projections.py`, `test_recurrence_parity.py`
 - **Closure detection:** `test_structural_trace_fuzzer.py`
 - **JS parity:** `test_js_parity_automated.py` (both substrates run same seeds)
 

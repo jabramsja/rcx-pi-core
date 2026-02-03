@@ -4,6 +4,7 @@
     "name": "MATCH_SEED_V2",
     "description": "Pattern matching with kernel context passthrough for Phase 7b",
     "doc": "docs/core/MetaCircularKernel.v0.md",
+    "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",
@@ -60,7 +61,7 @@
     },
     {
       "id": "match.equal",
-      "description": "Pattern equals value (non-linear: same var binds same value) - clears focus",
+      "description": "Pattern equals value (literal equality via first-match-wins) - clears focus",
       "pattern": {
         "mode": "match",
         "pattern_focus": {"var": "same"},

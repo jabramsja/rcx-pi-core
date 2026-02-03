@@ -2,7 +2,7 @@
 EVAL_SEED Parity Tests (Phase 3)
 
 These tests verify that:
-1. The Mu seed (seeds/eval.v1.json) loads correctly
+1. The Mu seed (mu/utilities/eval.v1.json) loads correctly
 2. Mu-EVAL produces identical results to Python-EVAL
 3. The evaluator can be expressed as pure Mu projections
 
@@ -21,6 +21,7 @@ from rcx_pi.deep_eval import (
 )
 from rcx_pi.eval_seed import step, NO_MATCH
 from rcx_pi.mu_type import is_mu, assert_mu, mu_equal
+from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 
 
 # =============================================================================
@@ -28,14 +29,12 @@ from rcx_pi.mu_type import is_mu, assert_mu, mu_equal
 # =============================================================================
 
 
-SEED_PATH = Path(__file__).parent.parent / "seeds" / "eval.v1.json"
+SEED_PATH = get_seed_path("eval.v1.json")
 
 
 def load_eval_seed():
-    """Load the EVAL_SEED from JSON file."""
-    with open(SEED_PATH) as f:
-        seed = json.load(f)
-    return seed
+    """Load the EVAL_SEED from mu/utilities/eval.v1.json."""
+    return load_verified_seed(SEED_PATH)
 
 
 def get_seed_projections(seed):

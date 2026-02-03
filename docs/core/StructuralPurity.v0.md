@@ -1,6 +1,23 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Structural Purity Guardrails v0
 
-Status: VECTOR (design-only)
+Status: IMPLEMENTED (enforced by audit scripts and tests)
 
 ## Purpose
 
@@ -193,9 +210,9 @@ Extend `tools/audit_semantic_purity.sh` with new checks:
 ### Check 1: No lambdas in seed definitions
 
 ```bash
-# Look for lambda in seed structures
-if grep -n "lambda" rcx_pi/seeds/*.py rcx_pi/kernel.py 2>/dev/null; then
-    echo "ERROR: Lambda found in seed/kernel code"
+# Look for lambda in seed structures (seeds are now in mu/ as JSON)
+if grep -n "lambda" rcx_pi/selfhost/*.py 2>/dev/null | grep -v "# allowed"; then
+    echo "ERROR: Lambda found in selfhost code"
     FAILED=1
 fi
 ```
@@ -223,8 +240,8 @@ fi
 ### Check 4: Seeds are loadable as JSON
 
 ```bash
-# Seeds must be pure JSON (Mu)
-for seed in mu/**/*.json; do
+# Seeds must be pure JSON (Mu) - located in mu/ directory
+for seed in mu/substrate/*.json mu/closures/*.json mu/utilities/*.json mu/bridge/*.json mu/programs/*.json; do
     if ! python -c "import json; json.load(open('$seed'))"; then
         echo "ERROR: Seed $seed is not valid JSON"
         FAILED=1

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .mu_type import Mu
-from .seed_integrity import load_verified_seed, get_seeds_dir
+from .seed_integrity import load_verified_seed, get_seed_path
 
 
 def make_projection_loader(seed_filename: str) -> tuple[
@@ -53,7 +53,8 @@ def make_projection_loader(seed_filename: str) -> tuple[
         if cache[0] is not None:
             return list(cache[0])  # Defensive copy prevents cache mutation
 
-        seed_path = get_seeds_dir() / seed_filename
+        # Use mu/ as canonical location via get_seed_path()
+        seed_path = get_seed_path(seed_filename)
         seed = load_verified_seed(seed_path)
 
         cache[0] = seed["projections"]

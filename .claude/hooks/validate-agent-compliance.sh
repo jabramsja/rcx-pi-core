@@ -5,12 +5,18 @@
 # Automatically validates agent output against AgentGuardrails.v0.md
 # Runs after SubagentStop events for review agents (verifier, adversary, etc.)
 #
+# CRITICAL: This hook validates TRUTH, not just FORMAT:
+# - --verify-files: Checks FILE paths actually exist
+# - --verify-code: Checks CODE actually appears at FILE:LINE
+# - Fabricated citations are DETECTED and BLOCKED
+#
 # SECURITY: This hook FAILS CLOSED - if validator is missing or crashes,
 # agent output is BLOCKED (not allowed). This prevents bypassing validation
 # by deleting the validator or causing it to crash.
 #
 # Created: 2026-02-01 (9-agent self-review recommendation)
 # Updated: 2026-02-02 (Critical fix: fail closed, not open)
+# Updated: 2026-02-03 (Critical: now verifies CODE matches actual files)
 # =============================================================================
 
 set -euo pipefail
@@ -74,8 +80,9 @@ if [ ! -f "$VALIDATOR" ]; then
   exit 0
 fi
 
-# Run compliance check - capture exit code
-RESULT=$(echo "$AGENT_OUTPUT" | python3 "$VALIDATOR" --json 2>&1) || VALIDATOR_EXIT=$?
+# Run compliance check with STRICT mode (verifies FILE exists AND CODE matches)
+# --strict enables --verify-files and --verify-code automatically
+RESULT=$(echo "$AGENT_OUTPUT" | python3 "$VALIDATOR" --json --strict 2>&1) || VALIDATOR_EXIT=$?
 VALIDATOR_EXIT=${VALIDATOR_EXIT:-0}
 
 # If validator crashed, BLOCK (fail closed)
@@ -100,6 +107,19 @@ fi
 COMPLIANT=$(echo "$RESULT" | jq -r '.compliant // false')
 
 if [ "$COMPLIANT" = "false" ]; then
+  # Check if fabrications were detected (this is the serious case)
+  FABRICATIONS=$(echo "$RESULT" | jq -r '.fabrications // 0')
+
+  if [ "$FABRICATIONS" != "0" ]; then
+    # CRITICAL: Fabricated citations detected
+    FABRICATION_DETAILS=$(echo "$RESULT" | jq -r '.fabrication_details | join("; ")' 2>/dev/null || echo "")
+    jq -n --arg reason "FABRICATION DETECTED: Agent cited code that doesn't match actual files. $FABRICATION_DETAILS" '{
+      "decision": "block",
+      "reason": $reason
+    }'
+    exit 0
+  fi
+
   # Extract violations for the reason
   VIOLATIONS=$(echo "$RESULT" | jq -r '.violations | join("; ")' 2>/dev/null || echo "Unknown violations")
 

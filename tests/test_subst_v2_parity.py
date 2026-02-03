@@ -14,10 +14,7 @@ backward compatibility with v1 behavior.
 import pytest
 
 from rcx_pi.selfhost.subst_mu import subst_mu
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
-
-
-SEEDS_DIR = get_seeds_dir()
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 class TestSubstV2SeedStructure:
@@ -25,11 +22,11 @@ class TestSubstV2SeedStructure:
 
     @pytest.fixture
     def v1_seed(self):
-        return load_verified_seed(SEEDS_DIR / "subst.v1.json")
+        return load_verified_seed(get_seed_path("subst.v1.json"))
 
     @pytest.fixture
     def v2_seed(self):
-        return load_verified_seed(SEEDS_DIR / "subst.v2.json")
+        return load_verified_seed(get_seed_path("subst.v2.json"))
 
     def test_v2_has_all_v1_projection_ids(self, v1_seed, v2_seed):
         """All v1 projection IDs must exist in v2."""
@@ -138,7 +135,7 @@ class TestSubstV2ContextDesign:
 
     def test_context_is_variable_bound(self):
         """_subst_ctx should be bound via variable pattern."""
-        v2_seed = load_verified_seed(SEEDS_DIR / "subst.v2.json")
+        v2_seed = load_verified_seed(get_seed_path("subst.v2.json"))
 
         for proj in v2_seed["projections"]:
             pattern = proj["pattern"]
@@ -158,7 +155,7 @@ class TestSubstV2ContextDesign:
 
     def test_done_preserves_context(self):
         """subst.done should preserve context in output."""
-        v2_seed = load_verified_seed(SEEDS_DIR / "subst.v2.json")
+        v2_seed = load_verified_seed(get_seed_path("subst.v2.json"))
         done_proj = next(p for p in v2_seed["projections"] if p["id"] == "subst.done")
 
         body = done_proj["body"]

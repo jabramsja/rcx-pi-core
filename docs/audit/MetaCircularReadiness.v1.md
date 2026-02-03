@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # RCX Meta-Circular Readiness Definition (v1)
 
 > **Current status:** See `STATUS.md` for current phase and L-level. This doc defines the criteria.
@@ -250,7 +267,7 @@ Last updated: 2026-01-27
 Dependencies:
 - `docs/schemas/rcx-trace-event.v1.json` (replay, frozen)
 - `docs/schemas/rcx-trace-event.v2.json` (observability)
-- `docs/BytecodeMapping.v0.md`
+- `docs/archive/bytecode/BytecodeMapping.v0.md` (archived)
 - `docs/StallFixObservability.v0.md`
 - `docs/core/RCXKernel.v0.md` (kernel architecture)
 - `docs/core/SelfHosting.v0.md` (self-hosting design)

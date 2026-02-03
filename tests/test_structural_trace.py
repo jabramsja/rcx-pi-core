@@ -8,7 +8,7 @@ execution history as Mu linked-list format that projections can analyze.
 import pytest
 from rcx_pi.selfhost.step_mu import run_mu_structural, list_to_linked as _list_to_linked
 from rcx_pi.selfhost.mu_type import mu_equal
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 class TestListToLinked:
@@ -56,11 +56,10 @@ class TestRunMuStructural:
 
     @pytest.fixture
     def kernel_projections(self):
-        """Full kernel + match + subst projections."""
-        seeds_dir = get_seeds_dir()
-        kernel = load_verified_seed(seeds_dir / "kernel.v1.json")
-        match_seed = load_verified_seed(seeds_dir / "match.v2.json")
-        subst_seed = load_verified_seed(seeds_dir / "subst.v2.json")
+        """Full kernel + match + subst projections from mu/ canonical location."""
+        kernel = load_verified_seed(get_seed_path("kernel.v1.json"))
+        match_seed = load_verified_seed(get_seed_path("match.v2.json"))
+        subst_seed = load_verified_seed(get_seed_path("subst.v2.json"))
         return kernel["projections"] + match_seed["projections"] + subst_seed["projections"]
 
     def test_returns_mu_compatible_structure(self, simple_projections):

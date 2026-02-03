@@ -49,7 +49,7 @@ class TestDeepNestingLimits:
     def test_deep_nesting_rejected_as_invalid_mu(self):
         """Deep nesting (beyond MAX_MU_DEPTH) is rejected as invalid Mu.
 
-        The is_mu() function now has a depth limit (MAX_MU_DEPTH=200) to
+        The is_mu() function now has a depth limit (MAX_MU_DEPTH=300) to
         prevent RecursionError attacks. Values exceeding this depth are
         rejected with TypeError rather than crashing.
         """

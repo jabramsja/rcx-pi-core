@@ -78,7 +78,9 @@ const KERNEL_RESERVED_FIELDS = new Set([
   // Recurrence closure detection fields (9-agent review, 2026-02-02)
   '_detect_closure', '_seen', '_current', '_check_list',
   // Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
-  '_detect_exhaustion', '_frozen', '_tau_step', '_operator_ids'
+  '_detect_exhaustion', '_frozen', '_tau_step', '_operator_ids',
+  // Bootstrap-Structural Bridge lookup phase fields (9-agent review, 2026-02-02)
+  '_lookup_name', '_lookup_value', '_lookup_bindings', '_original_bindings'
 ]);
 
 // Maximum depth for validation traversal (fail closed)
@@ -885,13 +887,16 @@ const path = require('path');
 // Seeds organized in mu/ folder structure:
 //   mu/substrate/ - kernel, match, subst (the VM)
 //   mu/closures/  - recurrence, exhaustion (closure detection)
+//   mu/bridge/    - bootstrap_structural (non-linear pattern support)
 const substrateDir = path.join(__dirname, '..', '..', 'substrate');
 const closuresDir = path.join(__dirname, '..', '..', 'closures');
+const bridgeDir = path.join(__dirname, '..', '..', 'bridge');
 const kernel = JSON.parse(fs.readFileSync(path.join(substrateDir, 'kernel.v1.json'), 'utf8'));
 const matchSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'match.v2.json'), 'utf8'));
 const substSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'subst.v2.json'), 'utf8'));
 const recurrenceSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'recurrence.v1.json'), 'utf8'));
 const exhaustionSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'exhaustion.v1.json'), 'utf8'));
+const bridgeSeed = JSON.parse(fs.readFileSync(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'utf8'));
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -900,17 +905,39 @@ const allProjections = [
   ...substSeed.projections
 ];
 
+// Bridge projections (non-linear pattern support for algorithms)
+const bridgeProjections = bridgeSeed.projections;
+
 // Recurrence projections (separate - used for closure detection after trace)
 const recurrenceProjections = recurrenceSeed.projections;
 
 // Exhaustion projections (separate - used for operator exhaustion after recurrence)
 const exhaustionProjections = exhaustionSeed.projections;
 
+// Combined projections WITH BRIDGE for meta-circular algorithm execution
+// Order: kernel -> bridge -> match -> subst (bridge extends match for non-linear patterns)
+const allProjectionsWithBridge = [
+  ...kernel.projections,
+  ...bridgeProjections,
+  ...matchSeed.projections,
+  ...substSeed.projections
+];
+
 // Combined projections for recurrence execution (recurrence + kernel + match + subst)
 // Recurrence projections must come FIRST so they match before kernel tries to process
 const allProjectionsWithRecurrence = [
   ...recurrenceProjections,
   ...allProjections
+];
+
+// Combined projections for recurrence with bridge (meta-circular path)
+// Order: recurrence -> kernel -> bridge -> match -> subst
+const allProjectionsWithRecurrenceAndBridge = [
+  ...recurrenceProjections,
+  ...kernel.projections,
+  ...bridgeProjections,
+  ...matchSeed.projections,
+  ...substSeed.projections
 ];
 
 // Combined projections with Exhaustion (Exhaustion + Recurrence + kernel + match + subst)
@@ -921,16 +948,31 @@ const allProjectionsWithExhaustion = [
   ...allProjections
 ];
 
-console.log('=== RCX eval_step.js - Complete Kernel Cycle (v7 - mu/ reorganization) ===\n');
+// Combined projections with Exhaustion AND bridge (full meta-circular path)
+// Order: exhaustion -> recurrence -> kernel -> bridge -> match -> subst
+const allProjectionsWithExhaustionAndBridge = [
+  ...exhaustionProjections,
+  ...recurrenceProjections,
+  ...kernel.projections,
+  ...bridgeProjections,
+  ...matchSeed.projections,
+  ...substSeed.projections
+];
+
+console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
 console.log(`Loaded projections from mu/ folder:`);
 console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
 console.log(`  - substrate/subst.v2.json: ${substSeed.projections.length} projections`);
+console.log(`  - bridge/bootstrap_structural.v1.json: ${bridgeSeed.projections.length} projections`);
 console.log(`  - closures/recurrence.v1.json: ${recurrenceSeed.projections.length} projections`);
 console.log(`  - closures/exhaustion.v1.json: ${exhaustionSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
+console.log(`  - Total (with Bridge): ${allProjectionsWithBridge.length} projections`);
 console.log(`  - Total (with Recurrence): ${allProjectionsWithRecurrence.length} projections`);
-console.log(`  - Total (with Exhaustion): ${allProjectionsWithExhaustion.length} projections\n`);
+console.log(`  - Total (with Recurrence+Bridge): ${allProjectionsWithRecurrenceAndBridge.length} projections`);
+console.log(`  - Total (with Exhaustion): ${allProjectionsWithExhaustion.length} projections`);
+console.log(`  - Total (with Exhaustion+Bridge): ${allProjectionsWithExhaustionAndBridge.length} projections\n`);
 
 // =============================================================================
 // Test: Complete match + subst cycle through kernel
@@ -1661,9 +1703,47 @@ if (process.argv.includes('--json-api')) {
         kernel_projection_count: kernel.projections.length,
         match_projection_count: matchSeed.projections.length,
         subst_projection_count: substSeed.projections.length,
+        bridge_projection_count: bridgeSeed.projections.length,
         recurrence_projection_count: recurrenceSeed.projections.length,
-        exhaustion_projection_count: exhaustionSeed.projections.length
+        exhaustion_projection_count: exhaustionSeed.projections.length,
+        total_with_bridge: allProjectionsWithBridge.length,
+        total_with_recurrence_bridge: allProjectionsWithRecurrenceAndBridge.length,
+        total_with_exhaustion_bridge: allProjectionsWithExhaustionAndBridge.length
       };
+    } else if (request.action === 'run_recurrence_with_bridge') {
+      // Run Recurrence with bridge (meta-circular path)
+      const { input, maxSteps } = request;
+      try {
+        let current = input;
+        let steps = 0;
+        const limit = maxSteps || 200;
+        while (steps < limit) {
+          const next = step(allProjectionsWithRecurrenceAndBridge, current);
+          if (muEqual(current, next)) break;
+          current = next;
+          steps++;
+        }
+        response = { success: true, result: current };
+      } catch (e) {
+        response = { success: false, error: e.message };
+      }
+    } else if (request.action === 'run_exhaustion_with_bridge') {
+      // Run Exhaustion with bridge (meta-circular path)
+      const { input, maxSteps } = request;
+      try {
+        let current = input;
+        let steps = 0;
+        const limit = maxSteps || 200;
+        while (steps < limit) {
+          const next = step(allProjectionsWithExhaustionAndBridge, current);
+          if (muEqual(current, next)) break;
+          current = next;
+          steps++;
+        }
+        response = { success: true, result: current };
+      } catch (e) {
+        response = { success: false, error: e.message };
+      }
     } else {
       response = { success: false, error: `Unknown action: ${request.action}` };
     }

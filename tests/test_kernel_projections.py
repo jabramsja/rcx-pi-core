@@ -17,7 +17,7 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import step, match, substitute
 from rcx_pi.selfhost.mu_type import Mu, is_mu, mu_equal
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 # =============================================================================
@@ -26,8 +26,8 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
 
 @pytest.fixture
 def kernel_projections() -> list[Mu]:
-    """Load kernel projections from seeds/kernel.v1.json."""
-    seed_path = get_seeds_dir() / "kernel.v1.json"
+    """Load kernel projections from mu/substrate/kernel.v1.json."""
+    seed_path = get_seed_path("kernel.v1.json")
     seed = load_verified_seed(seed_path)
     return seed["projections"]
 
@@ -35,7 +35,7 @@ def kernel_projections() -> list[Mu]:
 @pytest.fixture
 def kernel_seed() -> dict:
     """Load full kernel seed including meta."""
-    seed_path = get_seeds_dir() / "kernel.v1.json"
+    seed_path = get_seed_path("kernel.v1.json")
     return load_verified_seed(seed_path)
 
 

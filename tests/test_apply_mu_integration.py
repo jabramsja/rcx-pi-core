@@ -336,7 +336,7 @@ class TestApplyMuAdversarialEdgeCases:
     """Edge cases identified by adversary agent review."""
 
     def test_deeply_nested_structure(self):
-        """Test with moderately deep nesting (within MAX_MU_DEPTH=200)."""
+        """Test with moderately deep nesting (within MAX_MU_DEPTH=300)."""
         # Build 50-level deep structure
         deep_value = "leaf"
         for _ in range(50):

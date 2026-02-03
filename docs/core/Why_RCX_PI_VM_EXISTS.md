@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 Why the RCX VM Exists
 
 This document exists to prevent future confusion.
@@ -87,27 +104,22 @@ It is part of the claim.
 
 ⸻
 
-6. Current State (Updated 2026-01-25)
+6. Current State (Updated 2026-02-03)
 
-**Completed:**
-- Deterministic trace semantics (v1 frozen)
-- Replayable execution (replay gates enforced)
-- Entropy sealing (EntropyBudget.md contract)
-- Canonical trace contracts
-- Minimal Kernel (4 primitives: identity, stall, trace, dispatch)
-- EVAL_SEED Phase 2 (Python implementation: match, substitute, step)
-- Bytecode VM v0/v1a/v1b (replay + execution opcodes)
+**See STATUS.md for authoritative current state.**
 
-**In Progress:**
-- EVAL_SEED Phase 3: Express EVAL_SEED as Mu projections (not Python)
-- Key blocker: `deep_step` - need to traverse nested structures without host recursion
-- Solution path: work-stack approach (pure structural, no Python call stack)
+**Summary of Progress:**
+- **L1 (Algorithmic):** COMPLETE - match, subst, step expressed as Mu projections
+- **L2 (Operational):** COMPLETE - kernel.v1 state machine (7 projections), recurrence.v1 closure detection (9 projections)
+- **L3 (Substrate Portability):** COMPLETE - Python and JavaScript run identical seeds with verified parity
 
-**Awaiting:**
-- Phase 4: Self-hosting (Mu-EVAL runs Mu-EVAL)
-- Application seeds (EngineeNews runs on self-hosted EVAL)
+**Key Achievements:**
+- 5 bootstrap primitives identified and documented (see BootstrapPrimitives.v0.md)
+- 2,100+ tests with 1000+ fuzzer examples
+- Debt floor reached (12 irreducible markers - host scaffolding, not smuggled semantics)
+- Full seed suite: kernel.v1 (7), match.v2 (8), subst.v2 (12), recurrence.v1 (9), exhaustion.v1 (11)
 
-The foundation is now solid. Self-hosting is the next milestone.
+**Current Phase:** Phase 8b complete. L4 (True Self-Hosting) is in SINK status - design captured, not immediate priority.
 
 ⸻
 

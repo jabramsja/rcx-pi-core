@@ -103,7 +103,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Consume execution.fix from trace (true cycle replay)
 - Closure-as-termination fixture family (`stall_at_end.v2.jsonl`, `stall_then_fix_then_end.v2.jsonl`)
 - IndependentEncounter pathological fixtures + tests
-- Enginenews spec stress-test harness (`tests/test_enginenews_spec_v0.py`)
+- Recurrence spec stress-test harness (`tests/test_recurrence_spec_v0.py`)
 - CI audit gate (`tools/audit_all.sh` + `.github/workflows/audit_all.yml`)
 - Closure Evidence reporting flag + CLI test (`--print-closure-evidence`, `closure_evidence_v2()`)
 - Rule Motif Observability v0 (`rcx_pi/rule_motifs_v0.py`, `rules --print-rule-motifs`, 11 CLI tests)
@@ -111,7 +111,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Trace canon helper v1 (`canon_jsonl()`, 7 tests in `test_trace_canon_v1.py`)
 - Second Independent Encounter v0 (stall memory tracking, closure signal detection, 25 tests)
 - Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
-- Enginenews Spec v0 (stress test harness, 18 tests in `test_enginenews_spec_v0.py`, 4 fixtures)
+- Recurrence Spec v0 (stress test harness, 18 tests in `test_recurrence_spec_v0.py`, 4 fixtures)
 - Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
   - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
   - Docs: `docs/archive/bytecode/` (archived)
@@ -143,7 +143,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Thread-safe step budget: `threading.local()` for concurrent execution safety
   - Cycle detection in `normalize_for_match()` and `denormalize_from_match()`
   - Global projection step budget: `_ProjectionStepBudget` class (50,000 step limit)
-  - Resource exhaustion guardrails: MAX_MU_DEPTH=200, MAX_MU_WIDTH=1000
+  - Resource exhaustion guardrails: MAX_MU_DEPTH=300, MAX_MU_WIDTH=1000
   - Comprehensive fuzzer tests (`tests/test_selfhost_fuzzer.py`, 53 tests, 10,000+ examples):
     - `TestMatchMuParity`: match_mu == eval_seed.match (1,000 examples)
     - `TestSubstMuParity`: subst_mu == eval_seed.substitute (1,200 examples)
@@ -251,6 +251,11 @@ Items here are implemented and verified under current invariants. Changes requir
   - TestRunMuDeterminism: 2 tests (determinism, immediate stall)
   - 3000+ random examples stress-test kernel loop stability
   - Closes fuzzer gap identified by agents before Phase 7
+- rcx_engine.v1.json Test Coverage (2026-02-03):
+  - Created `tests/fixtures/rcx_engine_vectors.json` - 7 test vectors
+  - Created `tests/test_rcx_engine_parity.py` - 15 tests
+  - All 6 engine projections now tested (grounding agent finding addressed)
+  - Note: rcx_engine has `status: design_only` - projections tested but not in production
 
 ---
 
@@ -470,8 +475,8 @@ All blockers resolved 2026-01-28:
 - [x] Property-based fuzzer: `tests/test_structural_trace_fuzzer.py` (23 tests)
 - [x] CRITICAL_TEST_FILES updated: structural trace fuzzer protected
 - [x] Implementation: `mu/closures/recurrence.v1.json` (9 projections)
-- [x] Parity tests: `tests/test_enginenews_parity.py` (23+ tests)
-- [x] Fuzzer tests: `tests/test_enginenews_fuzzer.py` (property-based)
+- [x] Parity tests: `tests/test_recurrence_parity.py` (24 tests)
+- [x] Fuzzer tests: `tests/test_recurrence_fuzzer.py` (property-based)
 
 **REQUIREMENT:** EngineNews rules MUST be expressed as Mu projections, NOT Python code.
 
@@ -558,6 +563,87 @@ All blockers resolved 2026-01-28:
 
 ---
 
+### Step 7: Bootstrap-Structural Bridge (Non-Linear Pattern Support)
+
+**Promoted from VECTOR:** 2026-02-02
+**Rationale:** All 9 agents approved with security hardening applied. Design complete. Semantics locked (22 test vectors).
+
+**Design Doc:** `docs/core/BootstrapStructuralBridge.v0.md`
+**Location:** `mu/bridge/bootstrap_structural.v1.json`
+
+**Goal:** Enable recurrence.v1 and exhaustion.v1 to run through meta-circular kernel (step_kernel_mu) instead of bootstrap (eval_seed).
+
+**Why this matters:**
+- Currently, recurrence.v1 and exhaustion.v1 use non-linear patterns (same var twice for equality)
+- Non-linear patterns work via eval_seed.match() binding conflict detection (BOOTSTRAP)
+- match.v2.json is "linear only" - no binding conflict projections
+- Result: These seeds work but CANNOT run through step_kernel_mu
+- This bridge adds binding conflict detection as projections
+
+**Implementation plan (7 gates from Advisor):**
+1. [x] Gate 1: Create `mu/bridge/` directory structure (2026-02-02)
+2. [x] Gate 2-4: Implement bridge projections (5 projections in bootstrap_structural.v1.json) (2026-02-02)
+3. [x] Gate 5: Wire step_mu to use match.v2 + bootstrap_structural bridge (2026-02-02)
+4. [x] Gate 6: Update recurrence.v1 and exhaustion.v1 to META_CIRCULAR (2026-02-02)
+5. [x] Gate 7: Cross-substrate parity verification (JS port) (2026-02-03)
+
+**Projections (5 in bridge, combined with match.v2 at runtime):**
+- `bridge.var.check_existing` - Entry: start lookup for variable binding
+- `bridge.lookup.found_same` - Found binding with same value (non-linear OK)
+- `bridge.lookup.found_different` - Found binding with different value → NO_MATCH
+- `bridge.lookup.not_found_yet` - Name not at head, continue searching
+- `bridge.lookup.not_found` - Name not in bindings, add new binding
+
+**Security hardening (applied 2026-02-02):**
+- KERNEL_RESERVED_FIELDS updated: 20 → 24 fields
+- Added: `_lookup_name`, `_lookup_value`, `_lookup_bindings`, `_original_bindings`
+- Python and JS in parity (both have 24 fields)
+
+**Test vectors (22 total):**
+- Linear Parity Tests (5): linear_ok, linear_nested, linear_list, linear_catchall, linear_empty_dict
+- Non-Linear Detection Tests (8): nonlinear_same, nonlinear_diff, nested_nonlinear, triple_same, triple_one_diff, nonlinear_list, nonlinear_list_diff, nonlinear_complex
+- Edge Cases (4): empty_bindings_first, null_value_binding, empty_list_match, type_mismatch
+- Security Vectors (3): reserved_var_ok, lookup_injection, ordering_critical
+- Cross-Substrate Parity (3): parity_unicode, parity_float, parity_deep
+
+**9-agent review (2026-02-02):**
+| Agent | Verdict |
+|-------|---------|
+| Verifier | APPROVE |
+| Adversary | SECURE |
+| Expert | MINIMAL |
+| Structural-proof | STRUCTURALLY_SOUND |
+| Grounding | ADEQUATELY_GROUNDED |
+| Fuzzer | NEEDS_MORE (non-blocking) |
+| Translator | MATCHES_INTENT |
+| Visualizer | ARCHITECTURALLY_ALIGNED |
+| Advisor | READY_FOR_PROMOTION |
+
+**Success criteria:**
+- [x] `mu/bridge/bootstrap_structural.v1.json` created with 5 projections (2026-02-02)
+- [x] `load_combined_kernel_with_bridge_projections()` wires match.v2 + bootstrap_structural (2026-02-02)
+- [x] All 31 bridge test vectors pass (tests/test_bootstrap_structural_bridge.py) (2026-02-02)
+- [x] Binding conflict detection is structural (projections, not Python) (2026-02-02)
+- [x] recurrence.v1 and exhaustion.v1 declared META_CIRCULAR (Gate 6) (2026-02-02)
+- [x] Execution path verification: bridge projections ACTUALLY fire (2026-02-03)
+  - tests/test_execution_path_verification.py (9 tests)
+  - Tests use tracing to prove which projections execute
+  - Tests FAIL if bridge projections don't fire (even if behavior correct)
+- [x] Cross-substrate parity verified (Python and JS) (Gate 7) (2026-02-03)
+- [x] All tests pass (1622 fast audit, 2446 full audit) (2026-02-03)
+
+**Current architecture (2026-02-03):**
+- Bridge projections VERIFIED to fire for non-linear pattern matching
+- Algorithm execution (recurrence, exhaustion) uses Python match/substitute
+  - Reason: Structural normalization converts dict→linked-list, breaking algorithm state format
+  - This is documented scaffolding, not hidden debt
+- Two execution layers:
+  1. Structural layer: match.v2 + bridge (for pattern matching with non-linear support)
+  2. Practical layer: Python match/substitute (for algorithm execution)
+- Path to true meta-circular algorithm execution documented in BootstrapStructuralBridge.v0.md
+
+---
+
 **Cross-substrate verification (9-agent Round 3 fix, 2026-01-31):**
 - Previous tests just parsed strings from JS stdout (theater)
 - Now runs SAME 20 parity vectors through BOTH substrates via JSON API
@@ -580,12 +666,6 @@ All blockers resolved 2026-01-28:
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
 **Active designs:**
-- **Bootstrap-Structural Bridge** (`docs/core/BootstrapStructuralBridge.v0.md`) - **CRITICAL for meta-circularity**
-  - Location: `mu/bridge/bootstrap_structural.v1.json`
-  - Enables recurrence.v1 and exhaustion.v1 to run through meta-circular kernel
-  - Adds binding conflict detection as projections (~12 projections)
-  - Required for North Star #14 (seeds declaring META_CIRCULAR execution layer)
-  - **Promotion criteria:** Design doc complete, 9-agent review, estimated projection count
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
 

@@ -55,7 +55,7 @@ echo ""
 echo "3. Checking referenced files exist..."
 
 MISSING=0
-for file in "docs/core/MetaCircularKernel.v0.md" "rcx_pi/selfhost/match_mu.py" "seeds/match.v1.json"; do
+for file in "docs/core/MetaCircularKernel.v0.md" "rcx_pi/selfhost/match_mu.py" "mu/substrate/match.v1.json"; do
     if [ ! -f "$file" ]; then
         echo "   MISSING: $file (referenced in STATUS.md)"
         MISSING=$((MISSING + 1))
@@ -79,6 +79,18 @@ for section in "## North Star" "## Ra" "## NEXT" "## VECTOR"; do
     fi
 done
 echo "   OK: TASKS.md has expected sections"
+
+# 5. Run doc freshness tests (semantic drift detection)
+echo ""
+echo "5. Checking for semantic drift..."
+
+if PYTHONHASHSEED=0 python3 -m pytest tests/docs/test_doc_freshness.py -q --tb=no 2>/dev/null; then
+    echo "   OK: No semantic drift detected"
+else
+    echo "   WARNING: Doc freshness tests found issues"
+    echo "   → Run: PYTHONHASHSEED=0 pytest tests/docs/test_doc_freshness.py -v"
+    ERRORS=$((ERRORS + 1))
+fi
 
 # Summary
 echo ""

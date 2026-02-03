@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Agent Guardrails v0
 
 > **TL;DR:** Every finding needs `FILE:LINE` + code snippet. No citation = rejected.
@@ -189,10 +206,77 @@ VERIFIED: Yes/No
 
 ---
 
+## Execution Path Verification (MANDATORY for Integration Claims)
+
+**Problem identified and addressed (2026-02-03):** Tests were verifying BEHAVIOR but not EXECUTION PATH. All tests could pass via bootstrap layer even when claimed meta-circular path was never executed. The following verification protocol is now MANDATORY.
+
+### 1. Claim vs Reality Check
+```
+FINDING: Execution path verification
+CLAIMED_PATH: [e.g., "runs through step_kernel_mu with bootstrap_structural"]
+ACTUAL_TEST: [specific test file:line that verifies this path]
+VERIFIED: Yes/No
+
+If No: The claim is UNVERIFIED - behavior may be correct via different path
+```
+
+### 2. Projection Execution Evidence
+For any claim that specific projections are executed:
+```
+FINDING: Projection execution
+PROJECTION_ID: bridge.lookup.found_same
+TEST_FILE: tests/test_execution_path.py
+TEST_LINE: 45-67
+EVIDENCE_TYPE: [trace log | unique output only possible from this projection | structural marker]
+VERIFIED: Yes/No
+```
+
+**Valid evidence types:**
+- **Trace log**: Test captures which projection IDs fired during execution
+- **Unique output**: Test asserts output that can ONLY come from specific projection (not just correct behavior)
+- **Structural marker**: Projection leaves unique marker in output that no other projection produces
+
+**INVALID evidence:**
+- "Tests pass" (behavior-only verification)
+- "Documentation says X" (docs don't execute code)
+- "Seed file exists" (files don't execute themselves)
+
+### 3. Wiring Verification
+When claiming code is wired to use a specific path:
+```
+FINDING: Wiring verification
+FUNCTION: run_algorithm_meta_circular
+FILE: rcx_pi/selfhost/step_mu.py
+LINES: 400-420
+CALLS: [what does it actually call?]
+EXPECTED_CALL: step_kernel_mu with bootstrap_structural
+ACTUAL_CALL: eval_seed.step (different path!)
+VERIFIED: WIRING_MISMATCH
+```
+
+### 4. Integration Test Requirements
+For any META_CIRCULAR claim, require:
+```
+TEST REQUIREMENT: At least one test must:
+1. Run the specific claimed path (not just any path that works)
+2. Verify execution via trace/unique-output/marker (not just behavior)
+3. FAIL if the wrong path is used (even if behavior is correct)
+```
+
+### Anti-Pattern Detection
+**Reject these patterns:**
+- "Gate 6 complete" + "pending integration" (contradiction)
+- "Tests pass" without execution path evidence
+- "Declared META_CIRCULAR" without test showing meta-circular execution
+- "Bootstrap_structural wired" without test showing bridge projections fire
+
+---
+
 ## History
 
 | Date | Change |
 |------|--------|
+| 2026-02-03 | Added Execution Path Verification (discovered tests verify behavior not path) |
 | 2026-02-02 | Added Cross-Seed Compatibility Check (architectural gap found in 9-agent review) |
 | 2026-02-01 | Initial version (9-agent review found hallucination issues) |
 | 2026-02-01 | Simplified from 319 lines to ~120 (Expert feedback) |

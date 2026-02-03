@@ -6,38 +6,39 @@ If a seed file changes (projections added/removed), these tests
 will fail, prompting a review of whether the change is intentional.
 
 This prevents doc drift by making seed structure machine-verifiable.
+
+NOTE: All seeds are now loaded from mu/ (canonical location).
+The legacy seeds/ folder is deprecated.
 """
 
-import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+
 ROOT = Path(__file__).parent.parent.parent
-SEEDS_DIR = ROOT / "seeds"
 MU_DIR = ROOT / "mu"
 
-# All known seed files (legacy seeds/ location)
-ALL_SEEDS = [
-    "match.v1.json", "subst.v1.json", "classify.v1.json", "eval.v1.json", "kernel.v1.json",
-    "match.v2.json", "subst.v2.json",  # Phase 7b: context passthrough
-    "enginenews.v1.json",  # Step 5: structural closure detection (Rule 2.2♢) - legacy name
-    "exhaust.v1.json",     # Step 6: operator exhaustion detection (Rule 3.1) - legacy name
-]
-
-# mu/ folder structure (new organized location)
+# mu/ folder structure (canonical location for all seeds)
 MU_SEEDS = {
     "substrate": ["kernel.v1.json", "match.v1.json", "match.v2.json", "subst.v1.json", "subst.v2.json"],
-    "closures": ["recurrence.v1.json", "exhaustion.v1.json"],  # renamed from enginenews, exhaust
-    "programs": ["rcx_engine.v1.json"],  # main program
+    "closures": ["recurrence.v1.json", "exhaustion.v1.json"],
+    "programs": ["rcx_engine.v1.json"],
     "utilities": ["classify.v1.json", "eval.v1.json"],
+    "bridge": ["bootstrap_structural.v1.json"],
 }
+
+# All known seeds (flattened from MU_SEEDS)
+ALL_SEEDS = [
+    seed for seeds in MU_SEEDS.values() for seed in seeds
+]
 
 # Self-hosting seeds (follow naming conventions)
 SELFHOST_SEEDS = [
     "match.v1.json", "subst.v1.json", "classify.v1.json", "kernel.v1.json",
-    "match.v2.json", "subst.v2.json",  # Phase 7b
+    "match.v2.json", "subst.v2.json",
 ]
 
 # Expected projection counts (update intentionally when seeds change)
@@ -49,12 +50,13 @@ EXPECTED_COUNTS = {
     "kernel.v1.json": 7,     # Phase 7a (meta-circular kernel)
     "match.v2.json": 8,      # Phase 7b: 7 + match.fail
     "subst.v2.json": 12,     # Phase 7b: same count, added _subst_ctx
-    "enginenews.v1.json": 9, # Step 5: closure detection - legacy name in seeds/
-    "exhaust.v1.json": 11,   # Step 6: operator exhaustion - legacy name in seeds/
-    # mu/ folder structure (new organized location)
-    "recurrence.v1.json": 9,   # mu/closures/ - renamed from enginenews
-    "exhaustion.v1.json": 11,  # mu/closures/ - renamed from exhaust
-    "rcx_engine.v1.json": 6,   # mu/programs/ - main program
+    # mu/closures/ seeds
+    "recurrence.v1.json": 9,   # closure detection
+    "exhaustion.v1.json": 11,  # operator exhaustion
+    # mu/programs/
+    "rcx_engine.v1.json": 6,   # main program
+    # mu/bridge/
+    "bootstrap_structural.v1.json": 5,  # non-linear pattern support
 }
 
 # Expected namespace prefixes (self-hosting seeds only)
@@ -69,10 +71,9 @@ EXPECTED_PREFIXES = {
 
 
 def load_seed(name: str) -> dict:
-    """Load a seed file from seeds/ and return parsed JSON."""
-    seed_path = SEEDS_DIR / name
-    with open(seed_path) as f:
-        return json.load(f)
+    """Load a seed file from mu/ via get_seed_path() and return parsed JSON."""
+    seed_path = get_seed_path(name)
+    return load_verified_seed(seed_path, verify=True)
 
 
 def load_mu_seed(subfolder: str, name: str) -> dict:
@@ -85,13 +86,6 @@ def load_mu_seed(subfolder: str, name: str) -> dict:
 def get_projection_ids(seed: dict) -> list[str]:
     """Extract projection IDs from a seed."""
     return [p["id"] for p in seed.get("projections", [])]
-
-
-def compute_seed_checksum(name: str) -> str:
-    """Compute SHA256 checksum of seed file."""
-    seed_path = SEEDS_DIR / name
-    content = seed_path.read_bytes()
-    return hashlib.sha256(content).hexdigest()[:16]
 
 
 class TestSeedProjectionCounts:
@@ -215,26 +209,31 @@ class TestSeedSchema:
 
 
 class TestSeedFilesExist:
-    """Verify all expected seed files exist."""
+    """Verify all expected seed files exist in mu/."""
 
     @pytest.mark.parametrize("seed_name", ALL_SEEDS)
     def test_seed_file_exists(self, seed_name):
-        """Seed file must exist in seeds/ directory."""
-        seed_path = SEEDS_DIR / seed_name
+        """Seed file must exist in mu/ directory."""
+        seed_path = get_seed_path(seed_name)
         assert seed_path.exists(), f"Missing seed file: {seed_path}"
 
-    def test_no_unexpected_seed_files(self):
-        """No seed files exist that aren't in ALL_SEEDS.
+    @pytest.mark.parametrize("subfolder,seeds", list(MU_SEEDS.items()))
+    def test_no_unexpected_seed_files(self, subfolder, seeds):
+        """No seed files exist that aren't in MU_SEEDS.
 
-        If you add a new seed, add it to ALL_SEEDS at the top of this file.
+        If you add a new seed, add it to MU_SEEDS at the top of this file.
         """
-        actual_seeds = set(p.name for p in SEEDS_DIR.glob("*.json"))
-        expected_seeds = set(ALL_SEEDS)
+        subfolder_path = MU_DIR / subfolder
+        if not subfolder_path.exists():
+            pytest.skip(f"mu/{subfolder}/ does not exist")
+
+        actual_seeds = set(p.name for p in subfolder_path.glob("*.json"))
+        expected_seeds = set(seeds)
 
         unexpected = actual_seeds - expected_seeds
         assert not unexpected, (
-            f"Unexpected seed files found: {unexpected}\n"
-            f"Add them to ALL_SEEDS in test_seed_counts.py"
+            f"Unexpected seed files in mu/{subfolder}/: {unexpected}\n"
+            f"Add them to MU_SEEDS in test_seed_counts.py"
         )
 
 
@@ -323,3 +322,10 @@ class TestMuFolderStructure:
         ids = get_projection_ids(seed)
         for proj_id in ids:
             assert proj_id.startswith("engine."), f"ID '{proj_id}' should start with 'engine.'"
+
+    def test_bootstrap_structural_ids_have_bridge_prefix(self):
+        """bootstrap_structural.v1.json projections use bridge.* prefix."""
+        seed = load_mu_seed("bridge", "bootstrap_structural.v1.json")
+        ids = get_projection_ids(seed)
+        for proj_id in ids:
+            assert proj_id.startswith("bridge."), f"ID '{proj_id}' should start with 'bridge.'"

@@ -40,7 +40,7 @@ If Python provides the control flow, emergence might be a Python artifact. True 
 
 **L3 Parity Requirement (MANDATORY):**
 - Python (`rcx_pi/selfhost/`) and JavaScript (`mu/host/js/eval_step.js`) must remain in parity
-- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`
+- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`, `exhaustion.v1.json`
 - Any change to projection behavior in Python MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Run `node mu/host/js/eval_step.js` to verify JS parity after Python changes
@@ -197,14 +197,51 @@ Do NOT update individual agent files - they read STATUS.md.
 | `docs/core/` | Design specs |
 | `docs/agents/AgentRig.v0.md` | Agent rig docs |
 | `rcx_pi/selfhost/` | Core implementation |
-| `mu/` | Mu projections: substrate/, closures/, programs/, utilities/, host/ |
+| `mu/` | Mu projections: substrate/, closures/, bridge/, programs/, utilities/, host/ |
+| `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
+| `seeds/*.json` | Seed files (legacy location, mu/ preferred) |
+
+---
+
+## Documentation Verification (IMPORTANT)
+
+**Problem solved:** Docs in `docs/core/` contain code references that drift when code changes.
+
+**Solution:** DOC_CONTRACTS - executable tests that verify doc claims.
+
+**How it works:**
+1. Every doc has a `DOC_STATUS` header (TYPE, LAST_VERIFIED, etc.)
+2. `tests/docs/test_doc_contracts.py` defines claims for each doc
+3. Tests verify: functions exist, constants have expected values, seeds have expected projection counts
+4. CI fails if docs drift from reality
+
+**Doc types (from header):**
+- **REFERENCE** - Stable definitions (MuType, DebtCategories)
+- **DESIGN_SPEC** - Architectural intent, may diverge from implementation
+- **IMPLEMENTATION** - Active development, should match current code
+
+**When modifying code:**
+1. If you change a function name → update DOC_CONTRACTS
+2. If you change projection count → update DOC_CONTRACTS
+3. If you change a constant → update DOC_CONTRACTS
+
+**Verification:**
+```bash
+pytest tests/docs/test_doc_contracts.py -v  # Verify all doc claims
+python tools/add_doc_headers.py --check     # Verify all docs have headers
+```
+
+**DO NOT:**
+- Use line number references in docs (fragile, use function names instead)
+- Hardcode counts in docs (use "see DOC_CONTRACTS" or "verified by tests/...")
+- Duplicate operational state in design docs (that belongs in STATUS.md)
 
 ---
 
 ## Governance & Invariants
 
 **See `TASKS.md`** for:
-- North Star invariants (13 items)
+- North Star invariants (15 items)
 - Governance rules (non-negotiable)
 - Promotion criteria (SINK → VECTOR → NEXT)
 

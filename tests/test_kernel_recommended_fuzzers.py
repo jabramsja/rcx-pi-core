@@ -28,7 +28,7 @@ from rcx_pi.selfhost.step_mu import (
 )
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.mu_type import mu_equal, is_mu
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 # =============================================================================
@@ -36,8 +36,8 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
 # =============================================================================
 
 def _load_kernel_projs():
-    """Load kernel projections from seeds/kernel.v1.json."""
-    seed_path = get_seeds_dir() / "kernel.v1.json"
+    """Load kernel projections from mu/substrate/kernel.v1.json."""
+    seed_path = get_seed_path("kernel.v1.json")
     return load_verified_seed(seed_path)["projections"]
 
 
