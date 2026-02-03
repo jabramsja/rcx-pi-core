@@ -1,9 +1,12 @@
 name: CI
 
-# Light gate - push only (feature branch feedback)
+# Light gate - feature branch feedback only
 # PRs to dev are handled by green_gate.yml (more comprehensive)
+# Excludes dev branch to avoid duplicate runs (green_gate handles dev)
 on:
   push:
+    branches-ignore:
+      - dev
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

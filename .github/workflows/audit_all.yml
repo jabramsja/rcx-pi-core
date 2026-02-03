@@ -1,12 +1,11 @@
 name: Audit All
 
-# Heavy gate (includes fuzzer) - only run on dev path to save CI cost
-# Light gate (ci.yml) runs on all branches for quick feedback
+# Heavy gate (includes fuzzer) - only run on PRs to save CI cost
+# Push to dev is covered by green_gate.yml (avoids duplicate runs)
 on:
-  push:
-    branches: ["dev"]
   pull_request:
     branches: ["dev"]
+  workflow_dispatch:  # Allow manual trigger
 
 concurrency:
   group: audit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
