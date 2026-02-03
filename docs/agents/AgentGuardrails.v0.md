@@ -43,7 +43,7 @@ VERIFIED: Yes
 | **Verifier** | Grep `@host_` in `rcx_pi/` | No file:line for debt claims |
 | **Adversary** | Grep `isinstance` in `rcx_pi/selfhost/` | No exploit code path shown |
 | **Expert** | Grep function name in `tests/` | Dead code claim without usage search |
-| **Structural-Proof** | Read `mu/*.json` | Structural claim without projection evidence |
+| **Structural-Proof** | Read `mu/**/*.json` | Structural claim without projection evidence |
 | **Grounding** | Grep `def test_` in `tests/` | Gap claim without test search |
 | **Fuzzer** | Grep `@given` in `tests/` | Coverage claim without fuzzer count |
 | **Translator** | Read actual `.py` files | Explanation without code evidence |
