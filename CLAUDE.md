@@ -203,27 +203,34 @@ Do NOT update individual agent files - they read STATUS.md.
 
 ---
 
-## Documentation Verification (IMPORTANT)
+## Documentation Governance (IMPORTANT)
 
-**Problem solved:** Docs in `docs/core/` contain code references that drift when code changes.
+**Full policy:** `docs/core/DocGovernance.v0.md`
 
-**Solution:** DOC_CONTRACTS - executable tests that verify doc claims.
+**The Three Laws:**
+1. Two files own current state (STATUS.md, TASKS.md only)
+2. Every doc has a lifecycle (DOC_STATUS header)
+3. Design docs describe WHAT, not progress
 
-**How it works:**
-1. Every doc has a `DOC_STATUS` header (TYPE, LAST_VERIFIED, etc.)
-2. `tests/docs/test_doc_contracts.py` defines claims for each doc
-3. Tests verify: functions exist, constants have expected values, seeds have expected projection counts
-4. CI fails if docs drift from reality
+**Four-layer test defense (118 tests):**
+- `tests/docs/test_doc_contracts.py` - Verify code references exist
+- `tests/docs/test_doc_freshness.py` - Detect semantic drift
+- `tests/docs/test_doc_governance.py` - Enforce Three Laws
+- `tests/docs/test_root_files.py` - Govern source-of-truth files
 
-**Doc types (from header):**
+**Doc types (from DOC_STATUS header):**
 - **REFERENCE** - Stable definitions (MuType, DebtCategories)
 - **DESIGN_SPEC** - Architectural intent, may diverge from implementation
 - **IMPLEMENTATION** - Active development, should match current code
 
+**Projection count convention:**
+- Estimates use `~`: "~6 projections"
+- Claims reference tests: "see `test_seed_counts.py` for count"
+
 **When modifying code:**
 1. If you change a function name → update DOC_CONTRACTS
-2. If you change projection count → update DOC_CONTRACTS
-3. If you change a constant → update DOC_CONTRACTS
+2. If you change projection count → update grounding tests
+3. If you add a doc → add DOC_STATUS header
 
 **Verification:**
 ```bash

@@ -367,8 +367,9 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
   - Closures: `mu/closures/` (recurrence.v1, exhaustion.v1)
   - Programs: `mu/programs/` (rcx_engine.v1)
   - Host: `mu/host/js/eval_step.js`, `mu/host/python/selfhost`
-- Seeds (legacy): `seeds/*.json` (still works, mu/ preferred)
 - Task list: `TASKS.md`
+- **Documentation governance:** `docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
+- **Doc tests:** `tests/docs/` (118 tests: contracts, freshness, governance, root files)
 - Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
 ---
