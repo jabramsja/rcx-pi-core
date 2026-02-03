@@ -1,10 +1,11 @@
-# Match v3: Non-Linear Pattern Support
+# Bootstrap-Structural Bridge: Non-Linear Pattern Support
 
 **Status:** VECTOR (design-only)
 **Created:** 2026-02-02
 **Origin:** Architectural gap found in 9-agent review of Step 6
+**Location:** `mu/bridge/bootstrap_structural.v1.json`
 **Depends on:** match.v2.json (context passthrough)
-**Enables:** enginenews.v1, exhaust.v1 to become META-CIRCULAR
+**Enables:** recurrence.v1, exhaustion.v1 to become META-CIRCULAR
 
 ---
 
@@ -14,7 +15,7 @@ match.v2.json explicitly states "Linear patterns only (no conflict detection)." 
 
 Currently, these seeds work because they run via `eval_seed.step()` which implements binding conflict detection in Python (lines 331-336, 351-355). But they **cannot** run through the meta-circular kernel (kernel.v1 + match.v2 + subst.v2).
 
-match.v3 adds binding conflict detection as structural projections, enabling all seeds to be truly meta-circular.
+The bootstrap-structural bridge adds binding conflict detection as structural projections, enabling all seeds to be truly meta-circular.
 
 ---
 
@@ -42,7 +43,7 @@ exhaustion.v1.json projection "scan_same":
 
 ### Current Workaround
 
-enginenews and exhaust declare `"execution_layer": "BOOTSTRAP"` and document their dependency on eval_seed's Python binding conflict detection. This is honest but not a solution.
+recurrence and exhaustion seeds declare `"execution_layer": "BOOTSTRAP"` and document their dependency on eval_seed's Python binding conflict detection. This is honest but not a solution.
 
 ---
 
@@ -62,7 +63,7 @@ A non-linear pattern uses the same variable twice to assert equality:
 - Input `{"a": 1, "b": 1}` → matches, `x = 1`
 - **No equality check!**
 
-**Non-linear semantics (match.v3):** Binds `x` to `value.a`, then checks if `value.b` equals existing binding.
+**Non-linear semantics (bootstrap_structural):** Binds `x` to `value.a`, then checks if `value.b` equals existing binding.
 - Input `{"a": 1, "b": 2}` → **NO MATCH** (conflict: 1 ≠ 2)
 - Input `{"a": 1, "b": 1}` → matches, `x = 1`
 - **Equality is structural!**
@@ -84,7 +85,7 @@ match_state = {
 }
 ```
 
-### Required Changes for match.v3
+### Required Changes for Bootstrap-Structural Bridge
 
 When encountering `{"var": "name"}` in pattern:
 
@@ -92,7 +93,7 @@ When encountering `{"var": "name"}` in pattern:
 1. Add `{name, value, rest: bindings}` to bindings
 2. Clear focus, continue
 
-**match.v3 (proposed):**
+**bootstrap_structural (proposed):**
 1. Check if `name` already exists in bindings (new lookup phase)
 2. If NOT found: add binding as before
 3. If found: compare existing value to current value
@@ -104,7 +105,7 @@ When encountering `{"var": "name"}` in pattern:
 ```json
 [
   {
-    "id": "match.var.check_existing",
+    "id": "bridge.var.check_existing",
     "description": "Variable site - check if name already bound",
     "pattern": {
       "mode": "match",
@@ -126,7 +127,7 @@ When encountering `{"var": "name"}` in pattern:
     }
   },
   {
-    "id": "match.lookup.found_same",
+    "id": "bridge.lookup.found_same",
     "description": "Found existing binding with SAME value (non-linear OK)",
     "pattern": {
       "mode": "match",
@@ -152,7 +153,7 @@ When encountering `{"var": "name"}` in pattern:
     }
   },
   {
-    "id": "match.lookup.found_different",
+    "id": "bridge.lookup.found_different",
     "description": "Found existing binding with DIFFERENT value (conflict!)",
     "pattern": {
       "mode": "match",
@@ -175,7 +176,7 @@ When encountering `{"var": "name"}` in pattern:
     }
   },
   {
-    "id": "match.lookup.not_found_yet",
+    "id": "bridge.lookup.not_found_yet",
     "description": "Name not at head of bindings, continue searching",
     "pattern": {
       "mode": "match",
@@ -203,7 +204,7 @@ When encountering `{"var": "name"}` in pattern:
     }
   },
   {
-    "id": "match.lookup.not_found",
+    "id": "bridge.lookup.not_found",
     "description": "Name not in bindings (null), add new binding",
     "pattern": {
       "mode": "match",
@@ -235,22 +236,22 @@ When encountering `{"var": "name"}` in pattern:
 
 | Projection | Purpose |
 |------------|---------|
-| `match.var.check_existing` | Entry: start lookup phase |
-| `match.lookup.found_same` | Non-linear OK (same value) |
-| `match.lookup.found_different` | Binding conflict → NO_MATCH |
-| `match.lookup.not_found_yet` | Continue searching bindings |
-| `match.lookup.not_found` | First occurrence → add binding |
+| `bridge.var.check_existing` | Entry: start lookup phase |
+| `bridge.lookup.found_same` | Non-linear OK (same value) |
+| `bridge.lookup.found_different` | Binding conflict → NO_MATCH |
+| `bridge.lookup.not_found_yet` | Continue searching bindings |
+| `bridge.lookup.not_found` | First occurrence → add binding |
 
 **Total new projections:** 5 (replacing 1 existing `match.var`)
 **Net change:** +4 projections
 
-match.v3 would have: 8 (current) + 4 (new) = **12 projections**
+bootstrap_structural.v1 would have: 8 (match.v2 base) + 4 (new) = **12 projections**
 
 ---
 
 ## Critical Design Question: Non-Linear Patterns for Lookup
 
-The `match.lookup.found_same` projection uses a non-linear pattern:
+The `bridge.lookup.found_same` projection uses a non-linear pattern:
 
 ```json
 "pattern": {
@@ -262,14 +263,14 @@ The `match.lookup.found_same` projection uses a non-linear pattern:
 }
 ```
 
-**Problem:** match.v3 is supposed to ADD non-linear support, but we need it to IMPLEMENT non-linear support!
+**Problem:** The bridge is supposed to ADD non-linear support, but we need it to IMPLEMENT non-linear support!
 
 ### Options
 
 **Option A: Bootstrap the Bootstrapper**
-- match.v3 uses non-linear patterns (eval_seed)
-- Once match.v3 exists, enginenews/exhaust can use match.v3
-- But match.v3 itself remains BOOTSTRAP
+- bootstrap_structural uses non-linear patterns (eval_seed)
+- Once bootstrap_structural exists, recurrence/exhaustion can use it
+- But bootstrap_structural itself remains BOOTSTRAP
 
 **Option B: Structural Name Comparison**
 - Don't use non-linear pattern for name equality
@@ -277,22 +278,22 @@ The `match.lookup.found_same` projection uses a non-linear pattern:
 - Adds more projections but is truly meta-circular
 
 **Option C: Two-Phase Approach**
-- match.v3a: Linear lookup (string comparison via projections)
-- match.v3b: Non-linear support (uses v3a for its own lookup)
+- bootstrap_structural_a: Linear lookup (string comparison via projections)
+- bootstrap_structural_b: Non-linear support (uses v3a for its own lookup)
 - Then v3b can run v3b (truly self-hosting)
 
 ### Recommendation
 
-**Option A** for now. Accept that match.v3 is BOOTSTRAP. Document this as an irreducible layer (like Forth's NEXT). The goal is to enable enginenews/exhaust to become meta-circular, not to make match itself meta-circular (which may be impossible without infinite regress).
+**Option A** for now. Accept that bootstrap_structural is BOOTSTRAP. Document this as an irreducible layer (like Forth's NEXT). The goal is to enable recurrence/exhaustion to become meta-circular, not to make the bridge itself meta-circular (which may be impossible without infinite regress).
 
 ### L4 Implications
 
-**match.v3 remains BOOTSTRAP forever in this architecture.** This is an irreducible bootstrap layer:
+**bootstrap_structural remains BOOTSTRAP forever in this architecture.** This is an irreducible bootstrap layer:
 
-- **What this means:** match.v3's own projections use non-linear patterns, so it requires `eval_seed.match()` to run
+- **What this means:** The bridge's own projections use non-linear patterns, so it requires `eval_seed.match()` to run
 - **Why it's acceptable:** Every computing system has irreducible primitives (Forth's NEXT, Lisp's EVAL, x86 microcode)
 - **L4 goal adjustment:** L4 becomes "minimize and document the bootstrap layer" not "eliminate it entirely"
-- **What match.v3 achieves:** Moves the bootstrap boundary DOWN one layer, enabling enginenews/exhaust to become META_CIRCULAR
+- **What the bridge achieves:** Moves the bootstrap boundary DOWN one layer, enabling recurrence/exhaustion to become META_CIRCULAR
 - **Trust boundary:** The security-critical code is `eval_seed.match()` binding conflict detection (~6 lines of Python/JS)
 
 This is NOT a compromise on L4 goals - it's a recognition that some bootstrap layer is mathematically irreducible.
@@ -306,7 +307,7 @@ This is NOT a compromise on L4 goals - it's a recognition that some bootstrap la
 Before implementation, add these fields to `step_mu.py` KERNEL_RESERVED_FIELDS:
 
 ```python
-# Match v3 lookup phase fields (MatchV3NonLinear.v0.md)
+# Bootstrap-structural bridge lookup phase fields (BootstrapStructuralBridge.v0.md)
 "_lookup_name",        # Variable name being looked up
 "_lookup_value",       # Value to compare against existing binding
 "_lookup_bindings",    # Current position in bindings search
@@ -319,10 +320,10 @@ Before implementation, add these fields to `step_mu.py` KERNEL_RESERVED_FIELDS:
 
 Lookup phase projections MUST be ordered (first-match-wins):
 
-1. `match.lookup.found_same` - Non-linear match for equal values
-2. `match.lookup.found_different` - Catch-all for found but different (→ NO_MATCH)
-3. `match.lookup.not_found_yet` - Continue searching bindings
-4. `match.lookup.not_found` - End of bindings (→ add new binding)
+1. `bridge.lookup.found_same` - Non-linear match for equal values
+2. `bridge.lookup.found_different` - Catch-all for found but different (→ NO_MATCH)
+3. `bridge.lookup.not_found_yet` - Continue searching bindings
+4. `bridge.lookup.not_found` - End of bindings (→ add new binding)
 
 **Why:** If `found_different` comes before `found_same`, ALL found bindings would be treated as conflicts (false positives).
 
@@ -348,7 +349,7 @@ Add these to the test suite:
 
 ## Reserved Fields
 
-New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implementation):
+New fields for bootstrap_structural (must be added to KERNEL_RESERVED_FIELDS before implementation):
 
 | Field | Value/Type | Purpose |
 |-------|------------|---------|
@@ -367,13 +368,13 @@ New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implemen
 
 ## Success Criteria
 
-1. [ ] match.v3.json exists with ~12 projections
-2. [ ] `match.var` replaced with `match.var.check_existing` + lookup projections
-3. [ ] Parity tests: match.v3 gives same results as match.v2 for linear patterns
-4. [ ] Non-linear tests: match.v3 correctly detects binding conflicts
-5. [ ] enginenews.v1 can declare `"execution_layer": "META_CIRCULAR"` using match.v3
-6. [ ] exhaust.v1 can declare `"execution_layer": "META_CIRCULAR"` using match.v3
-7. [ ] Cross-substrate parity: Python and JS match.v3 produce identical results
+1. [ ] `mu/bridge/bootstrap_structural.v1.json` exists with ~12 projections
+2. [ ] `match.var` replaced with `bridge.var.check_existing` + lookup projections
+3. [ ] Parity tests: bridge gives same results as match.v2 for linear patterns
+4. [ ] Non-linear tests: bridge correctly detects binding conflicts
+5. [ ] recurrence.v1 can declare `"execution_layer": "META_CIRCULAR"` using bridge
+6. [ ] exhaustion.v1 can declare `"execution_layer": "META_CIRCULAR"` using bridge
+7. [ ] Cross-substrate parity: Python and JS bridge produce identical results
 
 ---
 
@@ -393,11 +394,11 @@ New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implemen
 ## Implementation Sequence
 
 1. **Design doc review** (this doc) - 9-agent review
-2. **Create match.v3.json** with new projections
-3. **Create parity tests** (v3 == v2 for linear patterns)
+2. **Create `mu/bridge/bootstrap_structural.v1.json`** with new projections
+3. **Create parity tests** (bridge == match.v2 for linear patterns)
 4. **Create non-linear tests** (binding conflict detection)
 5. **Port to JS** and verify parity
-6. **Update enginenews.v1 and exhaust.v1** to use match.v3
+6. **Update recurrence.v1 and exhaustion.v1** to use bridge
 7. **Update execution_layer** declarations to META_CIRCULAR
 8. **Add integration tests** verifying meta-circular execution
 
@@ -415,27 +416,31 @@ New fields for match.v3 (must be added to KERNEL_RESERVED_FIELDS before implemen
 
 ## Changelog
 
+- **v0.2 (2026-02-02):** Renamed from "Match v3" to "Bootstrap-Structural Bridge"
+  - File: `mu/bridge/bootstrap_structural.v1.json`
+  - Better reflects architectural role: bridge between bootstrap and structural execution
+  - Projection IDs changed from `match.*` to `bridge.*`
 - **v0.1 (2026-02-02):** Added Security Requirements section from 9-agent adversary review:
   - KERNEL_RESERVED_FIELDS update requirement
   - Projection ordering specification
   - Variable name collision mitigation
   - Security test vectors
   - L4 implications clarification ("BOOTSTRAP forever" is acceptable)
-- **v0 (2026-02-02):** Initial design doc created after 9-agent review discovered match.v2/enginenews incompatibility
+- **v0 (2026-02-02):** Initial design doc created after 9-agent review discovered match.v2/recurrence incompatibility
 
 ---
 
 ## Open Questions
 
-1. **Should match.v3 replace match.v2 or coexist?**
+1. **Should bootstrap_structural replace match.v2 or coexist?**
    - **Answer (9-agent consensus):** Coexist initially, consider unification after 6+ months
    - match.v2 is simpler and sufficient for linear-only seeds
-   - Seeds declare `"requires_patterns": ["non-linear"]` to request match.v3
+   - Seeds declare `"requires_patterns": ["non-linear"]` to request the bridge
 
 2. **Is Option A (bootstrap the bootstrapper) acceptable for L4?**
    - **Answer (9-agent consensus):** Yes. This is analogous to Forth's NEXT or Lisp's EVAL
    - Some primitive must exist - the goal is minimizing it, not eliminating it
-   - match.v3 being BOOTSTRAP is acceptable and documented
+   - bootstrap_structural being BOOTSTRAP is acceptable and documented
    - L4 goal becomes: "minimize bootstrap layer to ~6 lines of auditable code"
 
 3. **Should KERNEL_RESERVED_FIELDS be extended now?**

@@ -20,7 +20,7 @@ This revision addresses feedback from verifier, adversary, and expert agents:
 > — Expert Agent
 
 We don't need isinstance(). A projection that matches `{"head": ..., "tail": ...}`
-will ONLY match things with that structure. This is how `seeds/eval.v1.json` works.
+will ONLY match things with that structure. This is how `mu/utilities/eval.v1.json` works.
 
 ## Problem Statement
 
@@ -66,7 +66,7 @@ If EVAL runs EVAL and produces the same trace as Python running EVAL, self-hosti
 
 ## Design Approach: Leverage deep_eval
 
-The existing `seeds/eval.v1.json` shows how to express traversal as Mu projections.
+The existing `mu/utilities/eval.v1.json` shows how to express traversal as Mu projections.
 We follow the same pattern for match and substitute.
 
 ### Core Representations
@@ -299,9 +299,9 @@ We follow the same pattern for match and substitute.
 
 | Seed | File | Projections |
 |------|------|-------------|
-| Match | `seeds/match.v1.json` | (see grounding tests) |
-| Substitute | `seeds/subst.v1.json` | (see grounding tests) |
-| Classify | `seeds/classify.v1.json` | (see grounding tests) |
+| Match | `mu/substrate/match.v1.json` | (see grounding tests) |
+| Substitute | `mu/substrate/subst.v1.json` | (see grounding tests) |
+| Classify | `mu/utilities/classify.v1.json` | (see grounding tests) |
 
 Grounding tests fail if seed files change. This prevents doc drift.
 
@@ -311,12 +311,12 @@ Grounding tests fail if seed files change. This prevents doc drift.
 > Grounding tests verify structural claims; pytest verifies test existence.
 
 ### Phase 4a: Match as Mu ✅ COMPLETE
-- Match projections in `seeds/match.v1.json`
+- Match projections in `mu/substrate/match.v1.json`
 - Implementation: `rcx_pi/match_mu.py`
 - Parity tests in `tests/test_match_parity.py`
 
 ### Phase 4b: Substitute as Mu ✅ COMPLETE
-- Substitute projections in `seeds/subst.v1.json`
+- Substitute projections in `mu/substrate/subst.v1.json`
 - Implementation: `rcx_pi/subst_mu.py`
 - Parity tests in `tests/test_subst_parity.py`
 
@@ -342,7 +342,7 @@ Grounding tests fail if seed files change. This prevents doc drift.
 - Subst parity tests pass with structural lookup
 
 ### Phase 6b: Classification as Mu Projections ✅ COMPLETE
-- Created `seeds/classify.v1.json` for linked list classification
+- Created `mu/utilities/classify.v1.json` for linked list classification
 - Created `rcx_pi/selfhost/classify_mu.py`
 - Classification distinguishes dict-encoding from list-encoding
 - Tests in `tests/test_classify_mu.py`
@@ -400,8 +400,8 @@ Additional attack vectors addressed in security hardening pass:
 
 Phase 4a-4d complete:
 
-1. [x] `match()` expressed as Mu projections (`seeds/match.v1.json`, 7 projections)
-2. [x] `substitute()` expressed as Mu projections (`seeds/subst.v1.json`, 12 projections)
+1. [x] `match()` expressed as Mu projections (`mu/substrate/match.v1.json`, 7 projections)
+2. [x] `substitute()` expressed as Mu projections (`mu/substrate/subst.v1.json`, 12 projections)
 3. [x] Parity tests pass: Mu-match == Python-match (23 tests in `test_match_parity.py`)
 4. [x] Parity tests pass: Mu-subst == Python-subst (17 tests in `test_subst_parity.py`)
 5. [x] Integration tests: match_mu + subst_mu work together (67 tests total)
@@ -429,11 +429,11 @@ Phase 5 complete:
   - `step_mu.py` - Self-hosting step (uses kernel.v1 + match.v2 + subst.v2)
   - `classify_mu.py` - Linked list classification as Mu projections
 - `rcx_pi/deep_eval.py` - Deep evaluation machinery
-- `seeds/` - Mu projection definitions:
-  - `eval.v1.json` - EVAL_SEED traversal projections
-  - `match.v1.json` - Match projections (7 rules)
-  - `subst.v1.json` - Substitute projections (12 rules, includes lookup + typed)
-  - `classify.v1.json` - Classification projections (6 rules)
+- `mu/` - Mu projection definitions:
+  - `substrate/match.v1.json` - Match projections (7 rules)
+  - `substrate/subst.v1.json` - Substitute projections (12 rules, includes lookup + typed)
+  - `utilities/eval.v1.json` - EVAL_SEED traversal projections
+  - `utilities/classify.v1.json` - Classification projections (6 rules)
 
 ## Next Steps
 
@@ -441,8 +441,8 @@ Phase 5 complete:
 1. [x] Review this doc with agents (verifier, adversary, expert)
 2. [x] Decide on type dispatch approach - **Structure IS type**
 3. [x] Decide on dict iteration approach - **Fixed key patterns**
-4. [x] Phase 4a: match projections (`seeds/match.v1.json`, `rcx_pi/selfhost/match_mu.py`)
-5. [x] Phase 4b: substitute projections (`seeds/subst.v1.json`, `rcx_pi/selfhost/subst_mu.py`)
+4. [x] Phase 4a: match projections (`mu/substrate/match.v1.json`, `rcx_pi/selfhost/match_mu.py`)
+5. [x] Phase 4b: substitute projections (`mu/substrate/subst.v1.json`, `rcx_pi/selfhost/subst_mu.py`)
 6. [x] Phase 4d: Integration tests (67 tests across 3 test files)
 
 **Phase 5 (Self-Hosting): ✅ COMPLETE**

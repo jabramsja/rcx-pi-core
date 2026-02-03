@@ -224,7 +224,7 @@ fi
 
 ```bash
 # Seeds must be pure JSON (Mu)
-for seed in seeds/*.json; do
+for seed in mu/**/*.json; do
     if ! python -c "import json; json.load(open('$seed'))"; then
         echo "ERROR: Seed $seed is not valid JSON"
         FAILED=1

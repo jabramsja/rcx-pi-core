@@ -43,7 +43,7 @@ VERIFIED: Yes
 | **Verifier** | Grep `@host_` in `rcx_pi/` | No file:line for debt claims |
 | **Adversary** | Grep `isinstance` in `rcx_pi/selfhost/` | No exploit code path shown |
 | **Expert** | Grep function name in `tests/` | Dead code claim without usage search |
-| **Structural-Proof** | Read `seeds/*.json` | Structural claim without projection evidence |
+| **Structural-Proof** | Read `mu/*.json` | Structural claim without projection evidence |
 | **Grounding** | Grep `def test_` in `tests/` | Gap claim without test search |
 | **Fuzzer** | Grep `@given` in `tests/` | Coverage claim without fuzzer count |
 | **Translator** | Read actual `.py` files | Explanation without code evidence |
@@ -140,7 +140,7 @@ When reviewing any new or modified seed file, verify:
 ### 1. Pattern Requirements
 ```
 FINDING: Pattern requirements
-FILE: seeds/[name].json
+FILE: mu/[name].json
 LINES: [meta section]
 CODE:
     "requires_patterns": ["linear"] or ["non-linear"]
@@ -154,7 +154,7 @@ VERIFIED: Yes/No
 ### 2. Execution Layer Declaration
 ```
 FINDING: Execution layer
-FILE: seeds/[name].json
+FILE: mu/[name].json
 LINES: [meta section]
 CODE:
     "execution_layer": "BOOTSTRAP" or "META_CIRCULAR"
@@ -181,7 +181,7 @@ VERIFIED: Yes/No
 ### 4. Reserved Fields Compatibility
 ```
 FINDING: Reserved fields
-FILE: seeds/[name].json
+FILE: mu/[name].json
 FIELDS_USED: [list of _underscore fields]
 IN_KERNEL_RESERVED: Yes/No (check step_mu.py KERNEL_RESERVED_FIELDS)
 VERIFIED: Yes/No

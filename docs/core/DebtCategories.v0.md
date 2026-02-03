@@ -136,7 +136,7 @@ To reach L2, all semantic debt must become projections. See `docs/core/SelfHosti
 **Completed (Phase 6):**
 
 1. ✅ **Lookup** (~66 lines) - Phase 6a: `subst.lookup.found`, `subst.lookup.next` projections
-2. ✅ **Classification** (~52 lines) - Phase 6b: `seeds/classify.v1.json` (6 projections)
+2. ✅ **Classification** (~52 lines) - Phase 6b: `mu/utilities/classify.v1.json` (6 projections)
 3. ✅ **Normalization** (~140 lines) - Phase 6c: Iterative with explicit stack + type tags
 
 **Remaining:**
@@ -258,7 +258,7 @@ This is documented in classify_mu.py lines 167-173:
 # because dicts with None values are more common than lists of 2-element sublists.
 ```
 
-And in the seed file `seeds/classify.v1.json` meta/invariants:
+And in the seed file `mu/utilities/classify.v1.json` meta/invariants:
 ```json
 "Pre-condition: dict keys are strings (JSON constraint)"
 ```

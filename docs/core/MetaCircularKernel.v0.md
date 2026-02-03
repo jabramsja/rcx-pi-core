@@ -803,8 +803,8 @@ The "guard" is implemented by **projection ordering**, not pattern syntax. Remov
 - `docs/core/SelfHosting.v0.md` - Phase 5/6 self-hosting spec
 - `docs/core/RCXKernel.v0.md` - Original kernel spec
 - `rcx_pi/selfhost/step_mu.py` - Current Python implementation
-- `seeds/match.v1.json` - Match projections (7)
-- `seeds/subst.v1.json` - Subst projections (12)
-- `seeds/classify.v1.json` - Classify projections (6)
-- `seeds/eval.v1.json` - Eval projections (7)
+- `mu/substrate/match.v1.json` - Match projections (7)
+- `mu/substrate/subst.v1.json` - Subst projections (12)
+- `mu/utilities/classify.v1.json` - Classify projections (6)
+- `mu/utilities/eval.v1.json` - Eval projections (7)
 - `mu/substrate/kernel.v1.json` - Kernel projections (7)

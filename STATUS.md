@@ -555,7 +555,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Completed (Phase 7c):**
-- [x] Created `seeds/kernel.v1.json` with 7 kernel projections
+- [x] Created `mu/substrate/kernel.v1.json` with 7 kernel projections
 - [x] 30 manual trace tests pass (success, failure, empty, fallthrough)
 - [x] Created `match.v2.json` with context passthrough + match.fail catch-all
 - [x] Created `subst.v2.json` with context passthrough
@@ -584,7 +584,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Last updated:** 2026-02-02 (mu/ folder reorganization complete)
-**Next milestone:** match.v3 design review, then implementation (enables true meta-circularity)
+**Next milestone:** Bootstrap-Structural Bridge design review, then implementation (enables true meta-circularity)
 
 **mu/ Folder Reorganization (2026-02-02):**
 New organized structure makes architecture visible:
@@ -601,7 +601,7 @@ New organized structure makes architecture visible:
 **Response:**
 - Added North Star #14 (execution layer declaration) and #15 (true self-hosting path)
 - Added Cross-Seed Compatibility Check to AgentGuardrails.v0.md
-- Created VECTOR item for match.v3 (non-linear pattern support)
+- Created VECTOR item for Bootstrap-Structural Bridge (non-linear pattern support)
 - Updated seed meta sections with `"execution_layer": "BOOTSTRAP"`
 
 **Completed (Steps 1-6):**
@@ -623,8 +623,9 @@ New organized structure makes architecture visible:
 - [x] Total: 47 projections across 5 seeds
 - [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
 
-**Next: match.v3 (VECTOR)**
-- Design doc: `docs/core/MatchV3NonLinear.v0.md`
+**Next: Bootstrap-Structural Bridge (VECTOR)**
+- Design doc: `docs/core/BootstrapStructuralBridge.v0.md`
+- Location: `mu/bridge/bootstrap_structural.v1.json`
 - Adds binding conflict detection as projections (~12 total)
-- Enables enginenews.v1 and exhaust.v1 to become META_CIRCULAR
+- Enables recurrence.v1 and exhaustion.v1 to become META_CIRCULAR
 - See TASKS.md VECTOR section for details

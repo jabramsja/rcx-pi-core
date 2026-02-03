@@ -20,7 +20,7 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, enginenews.v1, exhaust.v1 (all 47 projections)
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, exhaustion.v1 (all 47 projections)
     - Same bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
@@ -28,8 +28,8 @@ If a task is not listed here, it is NOT to be implemented.
     - **BOOTSTRAP**: Runs via eval_seed.step() only (Python/JS substrate provides non-linear pattern support)
     - **META-CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2)
     - If a seed claims META-CIRCULAR, tests MUST verify it through step_kernel_mu
-    - Seeds requiring non-linear patterns (same var twice for equality) are BOOTSTRAP until match.v3 exists
-    - Current BOOTSTRAP seeds: enginenews.v1, exhaust.v1 (require non-linear patterns)
+    - Seeds requiring non-linear patterns (same var twice for equality) are BOOTSTRAP until bootstrap_structural bridge exists
+    - Current BOOTSTRAP seeds: recurrence.v1, exhaustion.v1 (require non-linear patterns)
     - Current META-CIRCULAR seeds: kernel.v1, match.v2, subst.v2, classify.v1, eval.v1 (linear only)
 15. **True self-hosting is the path.** The goal is structural computation without host semantics:
     - **L1 (Algorithmic)**: match/subst algorithms as Mu projections ✓ DONE
@@ -49,7 +49,7 @@ If a task is not listed here, it is NOT to be implemented.
 - Do not leave broken files/tests behind and add replacements.
 - Minimize file creation. Prefer editing existing files.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
-- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `seeds/` MUST be mirrored in `mu/host/js/eval_step.js`.
+- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `mu/` MUST be mirrored in `mu/host/js/eval_step.js`.
   - Run `node mu/host/js/eval_step.js` to verify all JS tests pass
   - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
   - Run `./tools/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
@@ -58,7 +58,7 @@ If a task is not listed here, it is NOT to be implemented.
   - Run `./tools/seed_police.sh` to verify seed integrity and no host leakage
   - New seeds must be loaded in both Python and JavaScript
   - Parity vectors must pass on both substrates before merge
-- **Pre-commit doc review**: Before committing changes to `rcx_pi/`, `prototypes/`, or `seeds/`:
+- **Pre-commit doc review**: Before committing changes to `rcx_pi/`, `prototypes/`, or `mu/`:
   1. Read relevant docs in `docs/` (e.g., EVAL_SEED.v0.md, DeepStep.v0.md)
   2. Update docs if implementation differs from spec
   3. Update TASKS.md status if completing/progressing items
@@ -133,8 +133,8 @@ Items here are implemented and verified under current invariants. Changes requir
   - PR verification reminder workflow (auto-comment on sensitive file changes)
   - RATCHET debt policy: threshold can only decrease, never increase
 - RCX Kernel Phase 4-5: Algorithmic Self-Hosting (L1) Done:
-  - Phase 4a: `match_mu()` as Mu projections (`seeds/match.v1.json`, 23 parity tests)
-  - Phase 4b: `subst_mu()` as Mu projections (`seeds/subst.v1.json`, 17 parity tests)
+  - Phase 4a: `match_mu()` as Mu projections (`mu/substrate/match.v1.json`, 23 parity tests)
+  - Phase 4b: `subst_mu()` as Mu projections (`mu/substrate/subst.v1.json`, 17 parity tests)
   - Phase 4d: Integration tests (67 total: 28 parity + 27 grounding + 12 fuzzer)
   - Phase 5: `step_mu()` uses match_mu + subst_mu (33 tests: 22 parity + 11 self-hosting)
   - `tests/structural/test_apply_mu_grounding.py` - direct `step()` execution tests
@@ -179,7 +179,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Lookup is now structural: pattern matching with non-linear vars (same name binds same value)
   - Removed 2 `@host_builtin` decorators from subst_mu.py
 - Phase 6b: Classification as Mu Projections:
-  - Created `seeds/classify.v1.json` with 6 projections for linked list classification
+  - Created `mu/utilities/classify.v1.json` with 6 projections for linked list classification
   - Created `rcx_pi/selfhost/classify_mu.py` for projection-based classification
   - `denormalize_from_match()` now uses `classify_linked_list()` instead of `is_dict_linked_list()`
   - Classification distinguishes dict-encoding (all kv-pairs with string keys) from list-encoding
@@ -283,7 +283,7 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 **Sub-phases:**
 
 - [x] **Phase 7a: Kernel Projections Seed** (DONE 2026-01-28)
-  - Created `mu/substrate/kernel.v1.json` with 7 projections
+  - Created `mu/substrate/kernel.v1.json` with 7 projections (in mu/substrate/)
   - 30 manual trace tests pass (success, failure, empty projections)
   - Projection order regression tests pass
 
@@ -580,19 +580,19 @@ All blockers resolved 2026-01-28:
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
 **Active designs:**
-- **Match v3: Non-Linear Pattern Support** (`docs/core/MatchV3NonLinear.v0.md`) - **CRITICAL for meta-circularity**
-  - Enables enginenews.v1 and exhaust.v1 to run through meta-circular kernel
-  - Adds binding conflict detection as projections (~8-12 new projections)
+- **Bootstrap-Structural Bridge** (`docs/core/BootstrapStructuralBridge.v0.md`) - **CRITICAL for meta-circularity**
+  - Location: `mu/bridge/bootstrap_structural.v1.json`
+  - Enables recurrence.v1 and exhaustion.v1 to run through meta-circular kernel
+  - Adds binding conflict detection as projections (~12 projections)
   - Required for North Star #14 (seeds declaring META_CIRCULAR execution layer)
   - **Promotion criteria:** Design doc complete, 9-agent review, estimated projection count
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
 
 **Completed (moved to Ra):**
-- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - **IMPLEMENTED 2026-02-02**
+- ~~Operator Exhaustion v0~~ (`docs/core/OperatorExhaustion.v0.md`) - **MOVED TO Ra** (IMPLEMENTED 2026-02-02)
   - Step 6 complete: 11 projections in `mu/closures/exhaustion.v1.json`
   - 27 tests (17 parity + 10 fuzzer), cross-substrate parity verified
-  - See Step 6 in NEXT section for details
 
 **Promoted to NEXT:**
 - Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - **Promoted 2026-01-27**
