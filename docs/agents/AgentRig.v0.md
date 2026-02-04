@@ -23,6 +23,8 @@ The Agent Rig is a multi-agent system that validates code changes before merge. 
 
 **Key Insight:** We don't trust any single agent. We trust the **fight** between agents.
 
+**Operational shortcut:** Use `docs/agents/AgentRunbook.v0.md` for trigger map, gate rules, and practical usage.
+
 ## STATUS.md: Single Source of Truth
 
 **All agents MUST read `STATUS.md` before any assessment.**

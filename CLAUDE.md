@@ -18,6 +18,7 @@ This file is read by Claude Code at session start.
 **At session START:**
 1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
 2. Read `TASKS.md` - know what's in progress, what's next
+3. Read `docs/agents/AgentRunbook.v0.md` before running agents
 
 **At session END (before signing off):**
 1. Did phase or debt change? → Update `STATUS.md`
