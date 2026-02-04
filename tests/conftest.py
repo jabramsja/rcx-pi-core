@@ -131,6 +131,8 @@ CRITICAL_TEST_FILES = frozenset({
     "test_entropy_budget_enforcement.py",
     # Agent compliance validator - CRITICAL for guardrail enforcement (9-agent self-review)
     "test_validate_agent_compliance.py",
+    # Spec ground truth tests - CRITICAL for catching "both wrong in same way" bugs
+    "test_spec_ground_truth.py",
 })
 
 
@@ -185,6 +187,27 @@ def reset_state_between_tests():
     yield
     reset_step_budget()
     clear_combined_kernel_cache()
+
+
+# =============================================================================
+# CI Skip Hardening (RCX_CI=1 converts skips to failures)
+# =============================================================================
+
+def skip_or_fail_in_ci(reason: str):
+    """
+    Skip test locally, but FAIL in CI (when RCX_CI=1).
+
+    Use this for tests that skip on external failures (e.g., CLI failures).
+    In CI, we want these to be hard failures so regressions aren't masked.
+
+    Usage:
+        if exit_code != 0:
+            skip_or_fail_in_ci(f"CLI failed with exit code {exit_code}")
+    """
+    if os.environ.get("RCX_CI") == "1":
+        pytest.fail(f"CI FAILURE (would skip locally): {reason}")
+    else:
+        pytest.skip(reason)
 
 
 # =============================================================================

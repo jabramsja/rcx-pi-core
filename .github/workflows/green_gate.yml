@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
+      RCX_CI: "1"  # Convert test skips to failures (skip hardening)
 
     steps:
       - name: Checkout

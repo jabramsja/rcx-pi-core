@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
+      RCX_CI: "1"  # Convert test skips to failures (skip hardening)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,4 +54,17 @@ jobs:
           # - goldens (via pytest)
           # - JS parity (eval_step.js + test_js_parity_automated.py)
           # - all other python tests
+          # RCX_CI=1 ensures CLI failures fail tests instead of skipping
           scripts/green_gate.sh python-only
+
+      - name: Branch coverage report (rcx_pi/selfhost/)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Report branch coverage for critical modules (not gating yet)
+          python -m pytest tests/test_spec_ground_truth.py \
+            --cov=rcx_pi/selfhost \
+            --cov-report=term-missing \
+            --cov-branch \
+            -q || true
+          echo "Coverage report generated (not gating - informational only)"
