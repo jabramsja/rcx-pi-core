@@ -436,6 +436,17 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     # SECURITY: Validate projection order
     validate_kernel_projections_first(projections)
 
+    # SECURITY: Reject kernel projections - step_kernel_mu expects DOMAIN projections only
+    # Kernel projections are loaded separately via load_combined_kernel_projections().
+    # Check by ID (kernel.*) not by _mode pattern because algorithm projections use _mode.
+    for i, proj in enumerate(projections):
+        proj_id = proj.get("id", "") if isinstance(proj, dict) else ""
+        if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+            raise ValueError(
+                f"SECURITY: step_kernel_mu expects DOMAIN projections only, "
+                f"got kernel projection at index {i}: {proj_id}"
+            )
+
     # SECURITY: Validate each domain projection's pattern and body for reserved fields
     # This matches JS stepKernel validation (parity requirement)
     for i, proj in enumerate(projections):

@@ -310,3 +310,18 @@ class TestProjectionReservedFieldValidation:
         # Should not raise (may not match, but validation passes)
         result = step_kernel_mu([good_proj], {"data": "test"})
         assert result is not None  # Either matched or returned input
+
+    def test_kernel_projection_in_input_rejected(self):
+        """Kernel projection (by ID) in input list is rejected."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        # Kernel projection should not be passed to step_kernel_mu
+        # step_kernel_mu expects DOMAIN projections only
+        kernel_proj = {
+            "id": "kernel.wrap",
+            "pattern": {"_step": {"var": "x"}},
+            "body": {"_mode": "try"}
+        }
+
+        with pytest.raises(ValueError, match="DOMAIN projections only"):
+            step_kernel_mu([kernel_proj], {"test": "input"})
