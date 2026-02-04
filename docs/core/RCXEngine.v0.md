@@ -1,12 +1,21 @@
-# RCX Engine
+<!--
+DOC_STATUS
+TYPE: DESIGN_SPEC
+LAST_VERIFIED: 2026-02-04
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/test_rcx_engine_integration.py
 
-```
-DOC_STATUS:
-  TYPE: DESIGN_SPEC
-  LAST_VERIFIED: 2026-02-04
-  VERIFIES_AGAINST: mu/programs/rcx_engine.v1.json
-  VERIFIED_BY: tests/test_rcx_engine_integration.py
-```
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
+# RCX Engine
 
 ## Overview
 
