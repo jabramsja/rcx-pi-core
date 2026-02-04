@@ -52,6 +52,19 @@ SEEDS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^mu/' || true)
 STATUS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^STATUS\.md$' || true)
 TASKS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^TASKS\.md$' || true)
 TESTS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^tests/' || true)
+DOCS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(docs/|\.claude/agents/|README\.md|STATUS\.md|TASKS\.md|CLAUDE\.md|CHANGELOG\.md)' || true)
+
+# === 3b. Run doc tests if docs changed (BLOCKING, ~2s) ===
+if [ -n "$DOCS_CHANGED" ]; then
+    echo "Running doc governance tests (docs changed)..."
+    if ! PYTHONHASHSEED=0 python3 -m pytest tests/docs -q 2>/dev/null; then
+        echo ""
+        echo "❌ Doc governance tests FAILED"
+        echo "   Run: PYTHONHASHSEED=0 pytest tests/docs -v"
+        echo ""
+        FAILED=1
+    fi
+fi
 
 # === 4. Warn if core code changed without STATUS.md (warning only) ===
 if [ -n "$RCX_CHANGED" ] || [ -n "$SEEDS_CHANGED" ]; then
