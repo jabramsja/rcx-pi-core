@@ -18,6 +18,7 @@ jobs:
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
       RCX_CI: "1"  # Convert test skips to failures (skip hardening)
+      HYPOTHESIS_PROFILE: "ci_fast"  # Fast feedback for feature branches
     steps:
       - name: Checkout
         uses: actions/checkout@v4
