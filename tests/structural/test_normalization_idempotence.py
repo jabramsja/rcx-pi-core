@@ -44,7 +44,7 @@ class TestNormalizationIdempotence:
     """Normalization must be idempotent: normalize(normalize(x)) == normalize(x)."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_idempotent(self, value):
         """normalize(normalize(x)) == normalize(x) for all Mu."""
         assume(is_mu(value))
@@ -56,7 +56,7 @@ class TestNormalizationIdempotence:
             f"Normalization not idempotent: {value} → {once} → {twice}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalize_inverse(self, value):
         """denormalize(normalize(x)) produces equivalent result."""
         assume(is_mu(value))
@@ -131,7 +131,7 @@ class TestNormalizationDeterminism:
     """Normalization must be deterministic."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_deterministic(self, value):
         """Same input always produces same normalized output."""
         assume(is_mu(value))
@@ -143,7 +143,7 @@ class TestNormalizationDeterminism:
             f"Normalization not deterministic: {value} → {result1} vs {result2}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalize_deterministic(self, value):
         """Same normalized input always produces same denormalized output."""
         assume(is_mu(value))

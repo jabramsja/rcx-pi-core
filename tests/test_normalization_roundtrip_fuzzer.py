@@ -114,7 +114,7 @@ class TestNormalizationRoundtripFuzzer:
     """Property-based tests for normalize/denormalize roundtrip."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_roundtrip_property(self, value):
         """Property: denormalize(normalize(x)) == x for all valid Mu."""
         assume(is_mu(value))
@@ -130,7 +130,7 @@ class TestNormalizationRoundtripFuzzer:
         )
 
     @given(mu_values_with_empties(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_roundtrip_with_empties(self, value):
         """Property: roundtrip works for values with empty containers."""
         assume(is_mu(value))
@@ -149,7 +149,7 @@ class TestNormalizationIdempotencyFuzzer:
     """Property-based tests for normalization idempotency."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_idempotency_property(self, value):
         """Property: normalize(normalize(x)) == normalize(x)."""
         assume(is_mu(value))
@@ -164,7 +164,7 @@ class TestNormalizationIdempotencyFuzzer:
         )
 
     @given(mu_values_with_empties(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_idempotency_with_empties(self, value):
         """Property: idempotency holds for values with empty containers."""
         assume(is_mu(value))
@@ -183,7 +183,7 @@ class TestTypePreservationFuzzer:
     """Property-based tests for type preservation through roundtrip."""
 
     @given(st.lists(mu_values(max_depth=2), max_size=5))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_list_type_preserved(self, value):
         """Property: lists remain lists after roundtrip."""
         assume(is_mu(value))
@@ -200,7 +200,7 @@ class TestTypePreservationFuzzer:
         mu_values(max_depth=2),
         max_size=5
     ))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_dict_type_preserved(self, value):
         """Property: dicts remain dicts after roundtrip."""
         assume(is_mu(value))
@@ -217,7 +217,7 @@ class TestNormalizedOutputValidityFuzzer:
     """Property-based tests that normalized output is valid Mu."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalized_is_mu(self, value):
         """Property: normalize produces valid Mu."""
         assume(is_mu(value))
@@ -229,7 +229,7 @@ class TestNormalizedOutputValidityFuzzer:
         )
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalized_is_mu(self, value):
         """Property: denormalize produces valid Mu."""
         assume(is_mu(value))
@@ -246,7 +246,7 @@ class TestEdgeCaseFuzzer:
     """Property-based tests for edge cases."""
 
     @given(st.lists(st.just([]), min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_nested_empty_lists(self, value):
         """Property: nested empty lists roundtrip correctly."""
         result = denormalize_from_match(normalize_for_match(value))
@@ -256,7 +256,7 @@ class TestEdgeCaseFuzzer:
             assert item == []
 
     @given(st.lists(st.just({}), min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_nested_empty_dicts(self, value):
         """Property: nested empty dicts roundtrip correctly."""
         result = denormalize_from_match(normalize_for_match(value))
@@ -271,7 +271,7 @@ class TestEdgeCaseFuzzer:
         min_size=1,
         max_size=5
     ))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_dict_with_empty_list_values(self, value):
         """Property: dicts with empty list values roundtrip correctly."""
         result = denormalize_from_match(normalize_for_match(value))
@@ -286,7 +286,7 @@ class TestEdgeCaseFuzzer:
         min_size=1,
         max_size=5
     ))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_dict_with_empty_dict_values(self, value):
         """Property: dicts with empty dict values roundtrip correctly."""
         result = denormalize_from_match(normalize_for_match(value))

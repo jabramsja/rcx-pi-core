@@ -102,7 +102,7 @@ class TestKernelLoopTermination:
         reset_step_budget()
 
     @given(value=simple_mu)
-    @settings(max_examples=200, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_kernel_terminates_with_real_projections(self, value):
         """Kernel loop terminates on any input with real projections."""
         # Use step_mu with empty projection list (will stall)
@@ -113,7 +113,7 @@ class TestKernelLoopTermination:
         assert mu_equal(result, value)
 
     @given(value=simple_mu, projs=projection_lists(max_size=3))
-    @settings(max_examples=200, deadline=60000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=60000, suppress_health_check=[HealthCheck.too_slow])
     def test_kernel_terminates_with_custom_projections(self, value, projs):
         """Kernel loop terminates with arbitrary projection lists (no hang, no unexpected crash)."""
         # Termination verified by reaching end of function without timeout (deadline=60s)
@@ -128,7 +128,7 @@ class TestKernelLoopTermination:
             raise AssertionError(f"Unexpected exception: {type(e).__name__}: {e}")
 
     @given(value=simple_mu)
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_kernel_step_terminates(self, value):
         """Single kernel step terminates."""
         kernel_projs = load_combined_kernel_projections()
@@ -152,21 +152,21 @@ class TestTerminalStateDetection:
     """Test is_kernel_terminal helper."""
 
     @given(result=simple_mu, stall=st.booleans())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_done_state_is_terminal(self, result, stall):
         """States with _mode='done' are terminal."""
         state = {"_mode": "done", "_result": result, "_stall": stall}
         assert is_kernel_terminal(state) is True
 
     @given(phase=st.sampled_from(["try", "match", "subst"]))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_non_done_state_is_not_terminal(self, phase):
         """States with _mode != 'done' are not terminal."""
         state = {"_mode": "kernel", "_phase": phase, "_input": 42}
         assert is_kernel_terminal(state) is False
 
     @given(value=simple_mu)
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_primitives_are_not_terminal(self, value):
         """Primitive values (non-dict) are not terminal."""
         if not isinstance(value, dict):
@@ -181,7 +181,7 @@ class TestResultExtraction:
     """Test extract_kernel_result helper."""
 
     @given(result=simple_mu)
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_success_extracts_result(self, result):
         """Successful terminal state extracts and denormalizes result."""
         terminal = {"_mode": "done", "_result": normalize_for_match(result), "_stall": False}
@@ -192,7 +192,7 @@ class TestResultExtraction:
         assert extracted != original or result == original
 
     @given(result=simple_mu, original=simple_mu)
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_stall_returns_original(self, result, original):
         """Stall terminal state returns original input."""
         terminal = {"_mode": "done", "_result": result, "_stall": True}
@@ -213,7 +213,7 @@ class TestLinkedListCursor:
         reset_step_budget()
 
     @given(projs=projection_lists(min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_linked_list_preserves_projection_count(self, projs):
         """Converting to linked list preserves projection count."""
         normalized = [normalize_projection(p) for p in projs]
@@ -237,7 +237,7 @@ class TestLinkedListCursor:
         assert linked is None
 
     @given(projs=projection_lists(min_size=1, max_size=3))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_first_projection_is_head(self, projs):
         """First projection in list is head of linked list."""
         normalized = [normalize_projection(p) for p in projs]
@@ -267,7 +267,7 @@ class TestStallDetection:
         assert result == 42
 
     @given(value=simple_mu)
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_no_matching_projection_stalls(self, value):
         """When no projection matches, kernel stalls."""
         # Projection that won't match anything

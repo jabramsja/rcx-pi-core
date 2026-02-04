@@ -82,7 +82,7 @@ class TestListToLinkedFuzzer:
         assert result == {"head": 1, "tail": {"head": 2, "tail": None}}
 
     @given(items=st.lists(mu_primitive, min_size=0, max_size=10))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_length_preserved(self, items):
         """Length of linked list equals length of input list."""
         linked = list_to_linked(items)
@@ -100,7 +100,7 @@ class TestListToLinkedFuzzer:
         assert count == len(items)
 
     @given(items=st.lists(mu_primitive, min_size=1, max_size=10))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_order_preserved(self, items):
         """Order of elements is preserved in linked list."""
         linked = list_to_linked(items)
@@ -115,14 +115,14 @@ class TestListToLinkedFuzzer:
         assert extracted == items
 
     @given(items=st.lists(mu_value(max_depth=1), min_size=0, max_size=5))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_result_is_valid_mu(self, items):
         """Result is always valid Mu."""
         result = list_to_linked(items)
         assert is_mu(result)
 
     @given(items=st.lists(mu_primitive, min_size=0, max_size=10))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_all_nodes_have_head_tail(self, items):
         """All non-None nodes have exactly head and tail keys."""
         linked = list_to_linked(items)
@@ -162,7 +162,7 @@ class TestNormalizeProjectionFuzzer:
         assert result["body"] == normalize_for_match(2)
 
     @given(proj=projection_dict(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_has_pattern_and_body(self, proj):
         """Result always has pattern and body keys."""
         result = normalize_projection(proj)
@@ -170,14 +170,14 @@ class TestNormalizeProjectionFuzzer:
         assert "body" in result
 
     @given(proj=projection_dict(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_result_is_valid_mu(self, proj):
         """Result is always valid Mu."""
         result = normalize_projection(proj)
         assert is_mu(result)
 
     @given(proj=projection_dict(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_pattern_matches_normalize_for_match(self, proj):
         """Pattern equals normalize_for_match of original pattern."""
         result = normalize_projection(proj)
@@ -185,7 +185,7 @@ class TestNormalizeProjectionFuzzer:
         assert result["pattern"] == expected_pattern
 
     @given(proj=projection_dict(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_body_matches_normalize_for_match(self, proj):
         """Body equals normalize_for_match of original body."""
         result = normalize_projection(proj)
@@ -271,7 +271,7 @@ class TestKernelBridgeIntegration:
         assert "body" in second
 
     @given(projs=st.lists(projection_dict(max_depth=1), min_size=0, max_size=5))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_projection_list_round_trip(self, projs):
         """Projections survive normalize -> list_to_linked."""
         # Normalize

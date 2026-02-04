@@ -94,7 +94,7 @@ class TestMatchContextPreservation:
         self.match_v2_projs = load_match_projections()  # Uses match.v2.json
 
     @given(ctx=match_contexts())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_context_preserved_on_equal_match(self, ctx):
         """Context preserved when matching equal values."""
         # State: matching 42 against 42 with context
@@ -117,7 +117,7 @@ class TestMatchContextPreservation:
             assert mu_equal(final["_match_ctx"], ctx)
 
     @given(ctx=match_contexts())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_context_preserved_on_var_match(self, ctx):
         """Context preserved when matching variable."""
         initial = {
@@ -137,7 +137,7 @@ class TestMatchContextPreservation:
             assert mu_equal(final["_match_ctx"], ctx)
 
     @given(ctx=match_contexts())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_context_preserved_on_match_failure(self, ctx):
         """Context preserved when match fails."""
         # 5 != 6, so this will fail
@@ -172,7 +172,7 @@ class TestSubstContextPreservation:
         self.subst_v2_projs = load_subst_projections()  # Uses subst.v2.json
 
     @given(ctx=subst_contexts())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_context_preserved_on_simple_subst(self, ctx):
         """Context preserved on simple value substitution."""
         initial = {
@@ -193,7 +193,7 @@ class TestSubstContextPreservation:
             assert mu_equal(final["_subst_ctx"], ctx)
 
     @given(ctx=subst_contexts(), value=simple_values)
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_context_preserved_through_var_lookup(self, ctx, value):
         """Context preserved when looking up variable."""
         # Bindings with a variable
@@ -228,7 +228,7 @@ class TestModeTransitionContext:
         reset_step_budget()
 
     @given(input_val=simple_values, body=simple_values, remaining=st.one_of(st.none(), simple_values))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_match_to_kernel_transition(self, input_val, body, remaining):
         """Context in match_done can be consumed by kernel."""
         # Simulate what kernel.match_success expects
@@ -252,7 +252,7 @@ class TestModeTransitionContext:
         assert result is None or isinstance(result, (bool, int, float, str, list, dict))
 
     @given(input_val=simple_values, remaining=st.one_of(st.none(), simple_values))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_subst_to_kernel_transition(self, input_val, remaining):
         """Context in subst_done can be consumed by kernel."""
         subst_done_state = {
@@ -287,7 +287,7 @@ class TestContextFieldIntegrity:
         body_val=context_values,
         remaining_val=st.one_of(st.none(), context_values)
     )
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_match_ctx_fields_unchanged(self, input_val, body_val, remaining_val):
         """Individual _match_ctx fields remain unchanged through match."""
         ctx = {
@@ -320,7 +320,7 @@ class TestContextFieldIntegrity:
         input_val=context_values,
         remaining_val=st.one_of(st.none(), context_values)
     )
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_subst_ctx_fields_unchanged(self, input_val, remaining_val):
         """Individual _subst_ctx fields remain unchanged through subst."""
         ctx = {

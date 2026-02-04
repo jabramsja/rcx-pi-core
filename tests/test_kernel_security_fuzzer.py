@@ -116,25 +116,25 @@ class TestIsKernelProjectionFuzzer:
     """Property-based tests for is_kernel_projection classification."""
 
     @given(kernel_projection())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_kernel_projections_classified_as_kernel(self, proj):
         """Projections with _mode in pattern root are kernel projections."""
         assert is_kernel_projection(proj), f"Should be kernel: {proj}"
 
     @given(domain_projection())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_domain_projections_not_classified_as_kernel(self, proj):
         """Projections without _mode in pattern are NOT kernel projections."""
         assert not is_kernel_projection(proj), f"Should NOT be kernel: {proj}"
 
     @given(fake_kernel_projection())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_fake_kernel_projections_rejected(self, proj):
         """Projections with _mode in wrong location are NOT kernel."""
         assert not is_kernel_projection(proj), f"Should NOT be kernel: {proj}"
 
     @given(st.integers() | st.text() | st.none() | st.lists(st.integers()))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_non_dict_never_kernel(self, value):
         """Non-dict values are never kernel projections."""
         # is_kernel_projection expects a projection dict with pattern/body
@@ -146,7 +146,7 @@ class TestIsKernelProjectionFuzzer:
             assert not result
 
     @given(st.dictionaries(st.text(min_size=1, max_size=5), st.integers(), max_size=3))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_random_pattern_classification_deterministic(self, pattern):
         """Classification is deterministic for any pattern."""
         proj = {"pattern": pattern, "body": {"x": 1}}
@@ -163,14 +163,14 @@ class TestValidateKernelProjectionsFirstFuzzer:
     """Property-based tests for kernel projection ordering enforcement."""
 
     @given(st.lists(kernel_projection(), min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_kernel_only_list_valid(self, projs):
         """List of only kernel projections is valid."""
         # Should not raise
         validate_kernel_projections_first(projs)
 
     @given(st.lists(domain_projection(), min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_domain_only_list_valid(self, projs):
         """List of only domain projections is valid."""
         # Should not raise
@@ -180,7 +180,7 @@ class TestValidateKernelProjectionsFirstFuzzer:
         st.lists(kernel_projection(), min_size=1, max_size=3),
         st.lists(domain_projection(), min_size=1, max_size=3)
     )
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_kernel_before_domain_valid(self, kernel_projs, domain_projs):
         """Kernel projections before domain projections is valid."""
         combined = kernel_projs + domain_projs
@@ -191,7 +191,7 @@ class TestValidateKernelProjectionsFirstFuzzer:
         st.lists(domain_projection(), min_size=1, max_size=3),
         st.lists(kernel_projection(), min_size=1, max_size=3)
     )
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_domain_before_kernel_invalid(self, domain_projs, kernel_projs):
         """Domain projections before kernel projections is INVALID."""
         combined = domain_projs + kernel_projs
@@ -203,7 +203,7 @@ class TestValidateKernelProjectionsFirstFuzzer:
         domain_projection(),
         kernel_projection()
     )
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_interleaved_kernel_domain_invalid(self, k1, d1, k2):
         """Kernel-domain-kernel pattern is INVALID (kernel after domain)."""
         combined = [k1, d1, k2]
@@ -219,7 +219,7 @@ class TestExtractKernelResultFuzzer:
     """Property-based tests for kernel terminal state extraction."""
 
     @given(terminal_state(), st.integers())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_valid_terminal_extracts(self, state, original_input):
         """Valid terminal states extract without error."""
         # Should not raise
@@ -231,7 +231,7 @@ class TestExtractKernelResultFuzzer:
             assert result == state.get("_result")
 
     @given(malformed_terminal_state(), st.integers())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_malformed_terminal_handled(self, state, original_input):
         """Malformed terminal states raise expected errors or return gracefully."""
         raised_expected = False
@@ -256,7 +256,7 @@ class TestExtractKernelResultFuzzer:
         assert raised_expected or returned_value, "Function must either return or raise expected error"
 
     @given(st.integers() | st.text() | st.none(), st.integers())
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_non_dict_terminal_handled(self, value, original_input):
         """Non-dict values raise expected errors (no silent failures or crashes)."""
         raised_expected = False
@@ -286,19 +286,19 @@ class TestKernelStateClassificationFuzzer:
     """Property-based tests for kernel state classification."""
 
     @given(terminal_state())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_terminal_state_is_terminal(self, state):
         """Terminal states are classified as terminal."""
         assert is_kernel_terminal(state)
 
     @given(terminal_state())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_terminal_state_not_intermediate(self, state):
         """Terminal states are NOT intermediate."""
         assert not is_kernel_intermediate(state)
 
     @given(st.sampled_from(["wrap", "try", "match_ok", "match_fail"]))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_intermediate_modes_are_intermediate(self, mode):
         """Intermediate modes are classified as intermediate."""
         state = {"_mode": mode, "_input": 42}
@@ -306,7 +306,7 @@ class TestKernelStateClassificationFuzzer:
         assert not is_kernel_terminal(state)
 
     @given(st.dictionaries(st.text(min_size=1, max_size=5), st.integers(), max_size=3))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_non_kernel_state_classification(self, data):
         """Non-kernel data is neither terminal nor intermediate."""
         assume("_mode" not in data)
@@ -331,7 +331,7 @@ class TestKernelReservedFieldsFuzzer:
             assert field.startswith("_"), f"Reserved field {field} must start with _"
 
     @given(st.sampled_from(list(KERNEL_RESERVED_FIELDS)))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_reserved_field_makes_projection_look_kernel(self, field):
         """Reserved fields in pattern trigger kernel classification for _mode."""
         if field == "_mode":

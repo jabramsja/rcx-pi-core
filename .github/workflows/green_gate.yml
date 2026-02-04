@@ -25,6 +25,8 @@ jobs:
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
       RCX_CI: "1"  # Convert test skips to failures (skip hardening)
+      # CI Split: fast for PRs (~50 examples), full for dev/nightly (~500 examples)
+      HYPOTHESIS_PROFILE: ${{ github.event_name == 'pull_request' && 'ci_fast' || 'ci_full' }}
 
     steps:
       - name: Checkout

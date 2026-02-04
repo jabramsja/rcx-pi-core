@@ -153,7 +153,7 @@ class TestLinearParityFuzzer:
     """Verify match.v2 + bridge preserves match.v2 behavior for linear patterns."""
 
     @given(pattern=linear_patterns(), value=mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_linear_parity_with_v2(self, match_v2_projections, match_with_bridge_projections, pattern, value):
         """Property: (match.v2 + bridge)(linear_pattern, value) == match.v2(linear_pattern, value)."""
         reset_step_budget()
@@ -180,7 +180,7 @@ class TestNonLinearCorrectnessFuzzer:
     """Verify non-linear patterns enforce binding equality."""
 
     @given(var=variable_names(), val=mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_same_values_match(self, match_with_bridge_projections, var, val):
         """Property: Non-linear pattern with matching values → success."""
         pattern = {"a": {"var": var}, "b": {"var": var}}
@@ -196,7 +196,7 @@ class TestNonLinearCorrectnessFuzzer:
         )
 
     @given(var=variable_names(), val1=mu_values(max_depth=2), val2=mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_different_values_no_match(self, match_with_bridge_projections, var, val1, val2):
         """Property: Non-linear pattern with conflicting values → no_match."""
         assume(not mu_equal(val1, val2))
@@ -214,7 +214,7 @@ class TestNonLinearCorrectnessFuzzer:
         )
 
     @given(var=variable_names(), val=mu_values(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_triple_occurrence_same(self, match_with_bridge_projections, var, val):
         """Property: Same var 3 times with matching values → success."""
         pattern = {"a": {"var": var}, "b": {"var": var}, "c": {"var": var}}
@@ -235,7 +235,7 @@ class TestDeterminismFuzzer:
     """Verify match is deterministic."""
 
     @given(pattern=mu_values(max_depth=2), value=mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_deterministic_match(self, match_with_bridge_projections, pattern, value):
         """Property: Running twice with same inputs gives same result."""
         reset_step_budget()
@@ -260,7 +260,7 @@ class TestNoCrashFuzzer:
     """Verify match never crashes on valid Mu inputs."""
 
     @given(pattern=mu_values(max_depth=2), value=mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_never_crashes(self, match_with_bridge_projections, pattern, value):
         """Property: match never crashes, always returns terminal state or stalls."""
         reset_step_budget()
@@ -290,7 +290,7 @@ class TestEdgeCasesFuzzer:
     """Verify edge cases are handled correctly."""
 
     @given(var=variable_names())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_null_value_binding(self, match_with_bridge_projections, var):
         """Non-linear with null values should match."""
         pattern = {"a": {"var": var}, "b": {"var": var}}
@@ -302,7 +302,7 @@ class TestEdgeCasesFuzzer:
         assert result.get("_status") == "success"
 
     @given(var=variable_names())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_list_binding(self, match_with_bridge_projections, var):
         """Non-linear with empty list values should match."""
         pattern = {"a": {"var": var}, "b": {"var": var}}
@@ -314,7 +314,7 @@ class TestEdgeCasesFuzzer:
         assert result.get("_status") == "success"
 
     @given(var=variable_names())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_dict_binding(self, match_with_bridge_projections, var):
         """Non-linear with empty dict values should match."""
         pattern = {"a": {"var": var}, "b": {"var": var}}

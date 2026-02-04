@@ -135,7 +135,7 @@ class TestKernelProjectionOrderingFuzzer:
         st.lists(kernel_projection(), min_size=1, max_size=5),
         st.lists(domain_projection(), min_size=1, max_size=5)
     )
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_valid_ordering_kernel_then_domain(self, kernel_projs, domain_projs):
         """Kernel projections followed by domain projections is VALID."""
         combined = kernel_projs + domain_projs
@@ -146,7 +146,7 @@ class TestKernelProjectionOrderingFuzzer:
         st.lists(domain_projection(), min_size=1, max_size=5),
         st.lists(kernel_projection(), min_size=1, max_size=5)
     )
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_invalid_ordering_domain_then_kernel(self, domain_projs, kernel_projs):
         """Domain projections followed by kernel projections is INVALID."""
         combined = domain_projs + kernel_projs
@@ -158,7 +158,7 @@ class TestKernelProjectionOrderingFuzzer:
         domain_projection(),
         st.lists(kernel_projection(), min_size=1, max_size=3),
     )
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_interleaved_ordering_invalid(self, k1, d1, k2):
         """Any kernel projection after domain projection is INVALID."""
         combined = k1 + [d1] + k2
@@ -166,14 +166,14 @@ class TestKernelProjectionOrderingFuzzer:
             validate_kernel_projections_first(combined)
 
     @given(st.lists(domain_projection(), min_size=1, max_size=10))
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_domain_only_valid(self, domain_projs):
         """List containing only domain projections is valid."""
         # Should not raise
         validate_kernel_projections_first(domain_projs)
 
     @given(st.lists(kernel_projection(), min_size=1, max_size=10))
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_kernel_only_valid(self, kernel_projs):
         """List containing only kernel projections is valid."""
         # Should not raise
@@ -193,7 +193,7 @@ class TestModeTransitionCompletenessFuzzer:
     """
 
     @given(domain_dict())
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_kernel_wrap_always_transitions(self, input_val):
         """kernel.wrap always produces kernel state from entry format."""
         kernel_projs = _load_kernel_projs()
@@ -204,7 +204,7 @@ class TestModeTransitionCompletenessFuzzer:
         assert result.get("_phase") == "try"
 
     @given(domain_dict())
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_kernel_stall_on_null_remaining(self, input_val):
         """kernel.stall matches when _remaining is null."""
         kernel_projs = _load_kernel_projs()
@@ -220,7 +220,7 @@ class TestModeTransitionCompletenessFuzzer:
         assert result.get("_stall") is True
 
     @given(domain_dict())
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_kernel_try_extracts_projection(self, input_val):
         """kernel.try extracts first projection from linked list."""
         kernel_projs = _load_kernel_projs()
@@ -237,7 +237,7 @@ class TestModeTransitionCompletenessFuzzer:
         assert "_match_ctx" in result
 
     @given(domain_dict(), st.booleans())
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_kernel_unwrap_extracts_result(self, result_val, is_stall):
         """kernel.unwrap extracts result from done state."""
         kernel_projs = _load_kernel_projs()
@@ -268,7 +268,7 @@ class TestContextPassthroughStressFuzzer:
         domain_dict(),
         st.lists(domain_dict(), min_size=0, max_size=3)
     )
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_match_ctx_preserves_input_and_body(self, input_val, body_val, remaining_vals):
         """_match_ctx preserves input, body, and remaining across match."""
         kernel_projs = _load_kernel_projs()
@@ -293,7 +293,7 @@ class TestContextPassthroughStressFuzzer:
         assert mu_equal(ctx.get("_body"), body_val)
 
     @given(domain_dict(), domain_dict())
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_match_success_preserves_bindings(self, body_val, input_val):
         """kernel.match_success transfers bindings to subst."""
         kernel_projs = _load_kernel_projs()
@@ -317,7 +317,7 @@ class TestContextPassthroughStressFuzzer:
         assert mu_equal(result["subst"]["body"], body_val)
 
     @given(domain_dict())
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_match_fail_preserves_remaining(self, input_val):
         """kernel.match_fail preserves remaining projections for retry."""
         kernel_projs = _load_kernel_projs()
@@ -353,7 +353,7 @@ class TestStepProjsFieldFuzzer:
     """
 
     @given(mu_value())
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_step_accepts_any_mu_value(self, input_val):
         """_step can be any Mu value."""
         kernel_projs = _load_kernel_projs()
@@ -374,7 +374,7 @@ class TestStepProjsFieldFuzzer:
             max_size=5
         )
     )
-    @settings(max_examples=500, deadline=10000)
+    @settings(deadline=10000)
     def test_projs_wraps_to_linked_list(self, input_val, projs):
         """_projs list becomes linked list in _remaining."""
         kernel_projs = _load_kernel_projs()
@@ -393,7 +393,7 @@ class TestStepProjsFieldFuzzer:
             assert remaining == projs  # kernel.wrap preserves _projs format
 
     @given(domain_dict(), domain_dict())
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_step_with_single_projection(self, input_val, body_val):
         """Single projection in _projs works correctly."""
         kernel_projs = _load_kernel_projs()
@@ -434,7 +434,7 @@ class TestDepthBoundaryFuzzer:
         return result
 
     @given(st.integers(min_value=95, max_value=99))
-    @settings(max_examples=100, deadline=10000)
+    @settings(deadline=10000)
     def test_deep_nesting_under_limit_passes(self, depth):
         """Nesting depths 95-99 (under MAX=100) should pass validation."""
         nested = self.build_nested_dict(depth)
@@ -442,7 +442,7 @@ class TestDepthBoundaryFuzzer:
         validate_no_kernel_reserved_fields(nested, "test input")
 
     @given(st.integers(min_value=101, max_value=105))
-    @settings(max_examples=100, deadline=10000)
+    @settings(deadline=10000)
     def test_deep_nesting_over_limit_fails(self, depth):
         """Nesting depths 101-105 (over MAX=100) should fail validation."""
         nested = self.build_nested_dict(depth)
@@ -462,7 +462,7 @@ class TestDepthBoundaryFuzzer:
             validate_no_kernel_reserved_fields(nested, "test input")
 
     @given(st.integers(min_value=95, max_value=99))
-    @settings(max_examples=100, deadline=10000)
+    @settings(deadline=10000)
     def test_deep_nesting_with_reserved_field_at_depth(self, depth):
         """Reserved field at depth < 100 should be detected."""
         # Build nested structure with _mode at specified depth
@@ -477,7 +477,7 @@ class TestDepthBoundaryFuzzer:
         st.integers(min_value=0, max_value=50),
         st.sampled_from(list(KERNEL_RESERVED_FIELDS))
     )
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_reserved_field_at_various_depths(self, depth, reserved_field):
         """Any reserved field at any reasonable depth should be caught."""
         # Build nested structure with reserved field at specified depth
@@ -497,13 +497,13 @@ class TestKernelStateClassificationEdgeCases:
     """Additional edge cases for kernel state classification."""
 
     @given(domain_dict())
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_domain_dict_not_terminal(self, d):
         """Domain dicts without _mode are never terminal."""
         assert not is_kernel_terminal(d)
 
     @given(domain_dict())
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_domain_dict_not_intermediate(self, d):
         """Domain dicts without kernel fields are never intermediate."""
         # Ensure no kernel fields
@@ -516,7 +516,7 @@ class TestKernelStateClassificationEdgeCases:
         st.sampled_from(["kernel", "wrap", "try", "match_done", "subst_done"]),
         domain_dict()
     )
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_non_done_mode_is_intermediate(self, mode, input_val):
         """_mode values other than 'done' indicate intermediate state."""
         state = {"_mode": mode, "_input": input_val}
@@ -525,7 +525,7 @@ class TestKernelStateClassificationEdgeCases:
             assert not is_kernel_terminal(state)
 
     @given(domain_dict(), st.booleans())
-    @settings(max_examples=200, deadline=10000)
+    @settings(deadline=10000)
     def test_done_mode_is_terminal(self, result_val, stall):
         """_mode='done' with _result and _stall is terminal."""
         state = {

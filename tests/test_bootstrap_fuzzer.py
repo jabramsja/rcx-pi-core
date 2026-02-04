@@ -139,7 +139,7 @@ class TestEvalStepProperties:
     """Property-based tests for eval_step primitive."""
 
     @given(valid_projections(), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_eval_step_single_projection_determinism(self, projection, value):
         """eval_step with single projection is deterministic."""
         assume(is_mu(value))
@@ -154,7 +154,7 @@ class TestEvalStepProperties:
             pass
 
     @given(st.lists(valid_projections(), min_size=2, max_size=5), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_eval_step_order_matters(self, projections, value):
         """First-match-wins: projection order is observable."""
         assume(is_mu(value))
@@ -179,7 +179,7 @@ class TestEvalStepProperties:
             pass
 
     @given(mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_eval_step_empty_projections_is_identity(self, value):
         """eval_step with empty projection list returns input unchanged (stall)."""
         assume(is_mu(value))
@@ -188,7 +188,7 @@ class TestEvalStepProperties:
         assert mu_equal(result, value), "Empty projections should stall (identity)"
 
     @given(st.lists(valid_projections(), min_size=1, max_size=10), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_eval_step_never_crashes(self, projections, value):
         """eval_step should never crash on valid inputs."""
         assume(is_mu(value))
@@ -210,14 +210,14 @@ class TestMuEqualProperties:
     """Property-based tests for mu_equal primitive."""
 
     @given(mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_reflexive(self, value):
         """mu_equal(a, a) is always True."""
         assume(is_mu(value))
         assert mu_equal(value, value), "Equality must be reflexive"
 
     @given(mu_values(), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_symmetric(self, a, b):
         """mu_equal(a, b) == mu_equal(b, a)."""
         assume(is_mu(a) and is_mu(b))
@@ -225,7 +225,7 @@ class TestMuEqualProperties:
         assert mu_equal(a, b) == mu_equal(b, a), "Equality must be symmetric"
 
     @given(mu_values(), mu_values(), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_transitive(self, a, b, c):
         """If mu_equal(a, b) and mu_equal(b, c), then mu_equal(a, c)."""
         assume(is_mu(a) and is_mu(b) and is_mu(c))
@@ -234,7 +234,7 @@ class TestMuEqualProperties:
             assert mu_equal(a, c), "Equality must be transitive"
 
     @given(mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_hash_consistency(self, value):
         """Same value produces same hash."""
         assume(is_mu(value))
@@ -245,7 +245,7 @@ class TestMuEqualProperties:
         assert hash1 == hash2, "Hash must be consistent"
 
     @given(mu_values(), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_hash_correspondence(self, a, b):
         """If mu_equal(a, b), then mu_hash(a) == mu_hash(b)."""
         assume(is_mu(a) and is_mu(b))
@@ -254,7 +254,7 @@ class TestMuEqualProperties:
             assert mu_hash(a) == mu_hash(b), "Equal values must have equal hashes"
 
     @given(st.data())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_type_coercion_resistance(self, data):
         """mu_equal avoids Python type coercion (True != 1, etc.)."""
         # Generate pairs that Python == would coerce
@@ -283,7 +283,7 @@ class TestMaxStepsGuard:
     """Property-based tests for max_steps primitive."""
 
     @given(mu_values(), st.integers(min_value=1, max_value=100))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_max_steps_enforced(self, value, max_steps):
         """run_mu respects max_steps limit."""
         assume(is_mu(value))
@@ -297,7 +297,7 @@ class TestMaxStepsGuard:
         assert len(trace) <= max_steps + 2, f"Trace exceeded max_steps: {len(trace)} > {max_steps + 2}"
 
     @given(mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_max_steps_cycle_detection(self, value):
         """run_mu detects stalls via mu_equal (fixed point)."""
         assume(is_mu(value))
@@ -320,7 +320,7 @@ class TestStackGuard:
     """Property-based tests for stack overflow protection."""
 
     @given(st.integers(min_value=MAX_MU_DEPTH + 1, max_value=MAX_MU_DEPTH + 50))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_is_mu_rejects_too_deep(self, depth):
         """is_mu rejects structures deeper than MAX_MU_DEPTH."""
         # Build nested structure
@@ -332,7 +332,7 @@ class TestStackGuard:
         assert not is_mu(result), f"is_mu should reject depth {depth} > {MAX_MU_DEPTH}"
 
     @given(st.integers(min_value=10, max_value=MAX_MU_DEPTH - 10))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_is_mu_accepts_valid_depth(self, depth):
         """is_mu accepts structures within MAX_MU_DEPTH."""
         # Build nested structure
@@ -352,7 +352,7 @@ class TestBootstrapBoundary:
     """Tests that verify primitives work together correctly."""
 
     @given(st.lists(valid_projections(), min_size=1, max_size=5), mu_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_eval_step_result_equality(self, projections, value):
         """eval_step result should be comparable with mu_equal."""
         assume(is_mu(value))
@@ -372,7 +372,7 @@ class TestBootstrapBoundary:
             pass
 
     @given(mu_values(), st.integers(min_value=5, max_value=20))
-    @settings(max_examples=200, deadline=None)
+    @settings(deadline=None)
     def test_max_steps_uses_mu_equal_for_stall(self, value, max_steps):
         """run_mu uses mu_equal to detect stalls.
 

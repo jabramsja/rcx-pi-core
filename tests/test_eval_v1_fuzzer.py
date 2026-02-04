@@ -164,7 +164,7 @@ class TestEvalDeterminism:
     """Verify eval.v1 produces deterministic results."""
 
     @given(value=mu_value(max_depth=3))
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_same_input_same_output(self, eval_projections, value):
         """Same input should always produce same output."""
         reset_step_budget()
@@ -179,7 +179,7 @@ class TestEvalDeterminism:
         )
 
     @given(state=deep_eval_state(max_context_depth=2))
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_intermediate_state_determinism(self, eval_projections, state):
         """Intermediate states should produce deterministic results."""
         reset_step_budget()
@@ -198,7 +198,7 @@ class TestEvalNoCrash:
     """Verify eval.v1 doesn't crash on random inputs."""
 
     @given(value=mu_value(max_depth=4))
-    @settings(max_examples=200, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_arbitrary_value_no_crash(self, eval_projections, value):
         """Arbitrary Mu values should not crash eval.v1."""
         reset_step_budget()
@@ -210,7 +210,7 @@ class TestEvalNoCrash:
         assert is_mu(result), f"Result is not valid Mu: {result}"
 
     @given(state=deep_eval_state(max_context_depth=3))
-    @settings(max_examples=200, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_intermediate_state_no_crash(self, eval_projections, state):
         """Intermediate states should not crash."""
         reset_step_budget()
@@ -222,7 +222,7 @@ class TestEvalNoCrash:
         focus=mu_value(max_depth=2),
         changed=st.booleans()
     )
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_root_check_no_crash(self, eval_projections, focus, changed):
         """Root check states should not crash."""
         reset_step_budget()
@@ -253,7 +253,7 @@ class TestEvalTermination:
     """
 
     @given(value=head_tail_structure(max_depth=4))
-    @settings(max_examples=50, deadline=15000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=15000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_head_tail_no_crash(self, eval_projections, value):
         """Head/tail structures should be handled without crash.
 
@@ -275,7 +275,7 @@ class TestEvalTermination:
         assert steps <= 200, f"Should complete within max_steps"
 
     @given(changed=st.booleans())
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_root_check_with_simple_focus(self, eval_projections, changed):
         """Root check with simple focus should not crash.
 
@@ -324,7 +324,7 @@ class TestEvalStateInvariants:
     """Verify eval.v1 state machine invariants."""
 
     @given(value=mu_primitive())
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_wrap_creates_deep_eval_state(self, eval_projections, value):
         """wrap projection should create deep_eval state from any value."""
         reset_step_budget()
@@ -342,7 +342,7 @@ class TestEvalStateInvariants:
         head=mu_value(max_depth=2),
         tail=mu_value(max_depth=2)
     )
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_descend_creates_context(self, eval_projections, head, tail):
         """descend.dict should create context when traversing head/tail."""
         reset_step_budget()
@@ -367,7 +367,7 @@ class TestEvalStateInvariants:
                 assert frame.get("type") == "dict_head"
 
     @given(focus=mu_value(max_depth=2))
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_restart_on_changed(self, eval_projections, focus):
         """restart projection should restart traversal when changed=True."""
         reset_step_budget()
@@ -389,7 +389,7 @@ class TestEvalStateInvariants:
         assert result.get("focus") == focus  # Focus preserved
 
     @given(focus=mu_value(max_depth=2))
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_unwrap_produces_done(self, eval_projections, focus):
         """unwrap projection should produce done state when changed=False."""
         reset_step_budget()
@@ -418,7 +418,7 @@ class TestEvalEdgeCases:
     """Test edge cases for eval.v1."""
 
     @given(st.lists(mu_primitive(), min_size=0, max_size=5))
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_list_values_handled(self, eval_projections, value):
         """List values should be handled without crash."""
         reset_step_budget()
@@ -432,7 +432,7 @@ class TestEvalEdgeCases:
         min_size=0,
         max_size=5
     ))
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_dict_values_handled(self, eval_projections, value):
         """Dict values (not head/tail) should be handled without crash."""
         reset_step_budget()

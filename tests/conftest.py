@@ -23,32 +23,69 @@ from rcx_pi.selfhost.step_mu import clear_combined_kernel_cache
 # NOTE: Do NOT set database=None - that DISABLES the database. Omit to use default.
 
 try:
-    from hypothesis import settings  # Expert finding: removed unused Verbosity, Phase
+    from hypothesis import settings, HealthCheck
 
-    # CI profile: full fuzzing (default example counts from test decorators)
+    # ==========================================================================
+    # Hypothesis Profiles for CI Split
+    # ==========================================================================
+    # ci_fast: Quick feedback for PRs (~50 examples per test)
+    # ci_full: Comprehensive fuzzing for dev merges/nightly (~500 examples)
+    #
+    # Usage:
+    #   HYPOTHESIS_PROFILE=ci_fast pytest ...  # Fast gate (~3-5 min)
+    #   HYPOTHESIS_PROFILE=ci_full pytest ...  # Full fuzz (~15-18 min)
+    # ==========================================================================
+
+    # Fast CI profile: quick feedback for PRs (50 examples)
     settings.register_profile(
-        "ci",
+        "ci_fast",
+        max_examples=50,
+        deadline=5000,
+        suppress_health_check=[HealthCheck.too_slow],
         print_blob=True,
         derandomize=False,
     )
 
-    # Dev profile: fast fuzzing (50 examples max for rapid iteration)
+    # Full CI profile: comprehensive fuzzing for dev/nightly (500 examples)
+    settings.register_profile(
+        "ci_full",
+        max_examples=500,
+        deadline=5000,
+        suppress_health_check=[HealthCheck.too_slow],
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Aliases for backward compatibility
     settings.register_profile(
         "dev",
         max_examples=50,
+        deadline=5000,
+        suppress_health_check=[HealthCheck.too_slow],
         print_blob=True,
         derandomize=False,
     )
 
-    # Default profile (same as CI)
+    settings.register_profile(
+        "ci",
+        max_examples=500,
+        deadline=5000,
+        suppress_health_check=[HealthCheck.too_slow],
+        print_blob=True,
+        derandomize=False,
+    )
+
+    # Default profile: same as ci_full for local development (full coverage)
     settings.register_profile(
         "default",
+        max_examples=500,
+        deadline=5000,
+        suppress_health_check=[HealthCheck.too_slow],
         print_blob=True,
         derandomize=False,
     )
 
-    # Load profile from environment: HYPOTHESIS_PROFILE=dev for fast local runs
-    # Note: uses os imported at module level (line 11)
+    # Load profile from environment: HYPOTHESIS_PROFILE=ci_fast for fast CI
     profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
     settings.load_profile(profile)
 

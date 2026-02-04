@@ -164,7 +164,7 @@ class TestNormalizationRoundtripFuzzer:
     """
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=1000, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=1000, deadline=5000, suppress_health_check=[HealthCheck.too_slow])  # INTENTIONAL: high count for edge cases
     def test_roundtrip_all_mu_types(self, value):
         """Normalization roundtrip preserves ALL Mu values."""
         assume(is_mu(value))
@@ -180,7 +180,7 @@ class TestNormalizationRoundtripFuzzer:
         )
 
     @given(empty_containers())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_roundtrip_empty_containers(self, empty):
         """Empty and nested-empty containers roundtrip correctly."""
         assume(is_mu(empty))
@@ -204,7 +204,7 @@ class TestNormalizationRoundtripFuzzer:
         )
 
     @given(mu_primitives)
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_roundtrip_primitives_unchanged(self, primitive):
         """Primitives pass through normalization unchanged."""
         assume(is_mu(primitive))
@@ -232,7 +232,7 @@ class TestNormalizationIdempotencyFuzzer:
     """
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=1000, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=1000, deadline=5000, suppress_health_check=[HealthCheck.too_slow])  # INTENTIONAL: high count for edge cases
     def test_normalize_idempotent_all_types(self, value):
         """normalize(normalize(x)) == normalize(x) for all Mu."""
         assume(is_mu(value))
@@ -248,7 +248,7 @@ class TestNormalizationIdempotencyFuzzer:
         )
 
     @given(typed_sentinel_values())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_typed_sentinels_not_renormalized(self, sentinel):
         """Typed sentinels {"_type": "list"} stay unchanged under normalization."""
         assume(is_mu(sentinel))
@@ -263,7 +263,7 @@ class TestNormalizationIdempotencyFuzzer:
         )
 
     @given(empty_containers())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_container_idempotent(self, empty):
         """Empty containers become typed sentinels, which are then stable."""
         assume(is_mu(empty))
@@ -293,7 +293,7 @@ class TestTypePreservationFuzzer:
     """
 
     @given(st.lists(mu_primitives, max_size=0))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_list_type_preserved(self, empty_list):
         """Empty list [] preserves list type through roundtrip."""
         assert empty_list == []
@@ -309,7 +309,7 @@ class TestTypePreservationFuzzer:
         assert denormalized == [], f"Empty list became {denormalized}"
 
     @given(st.dictionaries(st.text(), st.none(), max_size=0))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_dict_type_preserved(self, empty_dict):
         """Empty dict {} preserves dict type through roundtrip."""
         assert empty_dict == {}
@@ -337,7 +337,7 @@ class TestTypedSentinelSafetyFuzzer:
     """
 
     @given(malicious_type_tags())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_invalid_type_tags_rejected(self, malicious_tag):
         """validate_type_tag rejects non-whitelisted tags."""
         assume(malicious_tag not in VALID_TYPE_TAGS)
@@ -346,14 +346,14 @@ class TestTypedSentinelSafetyFuzzer:
             validate_type_tag(malicious_tag, "fuzzer_test")
 
     @given(st.sampled_from(list(VALID_TYPE_TAGS)))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_valid_type_tags_accepted(self, valid_tag):
         """validate_type_tag accepts whitelisted tags."""
         # Should not raise
         validate_type_tag(valid_tag, "fuzzer_test")
 
     @given(malicious_type_tags(), mu_values())
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_malicious_typed_sentinel_rejected_in_denormalize(self, malicious_tag, value):
         """Denormalize rejects structures with invalid _type tags."""
         assume(is_mu(value))
@@ -384,7 +384,7 @@ class TestKernelTerminalDetectionFuzzer:
     """
 
     @given(kernel_state_forgery_attempts())
-    @settings(max_examples=1000, deadline=5000)
+    @settings(max_examples=1000, deadline=5000)  # INTENTIONAL: high count for edge cases
     def test_is_kernel_terminal_consistent(self, state):
         """is_kernel_terminal behaves consistently on all inputs."""
         # Should not crash
@@ -398,7 +398,7 @@ class TestKernelTerminalDetectionFuzzer:
         assert result == result2, "is_kernel_terminal not deterministic"
 
     @given(kernel_state_forgery_attempts())
-    @settings(max_examples=1000, deadline=5000)
+    @settings(max_examples=1000, deadline=5000)  # INTENTIONAL: high count for edge cases
     def test_only_valid_terminal_states_detected(self, state):
         """Only states with EXACT structure {"_mode": "done", "_result": X, "_stall": Y} are terminal."""
         is_terminal = is_kernel_terminal(state)
@@ -418,7 +418,7 @@ class TestKernelTerminalDetectionFuzzer:
         )
 
     @given(mu_primitives)
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_primitives_never_terminal(self, primitive):
         """Primitives are never kernel terminal states."""
         assert not is_kernel_terminal(primitive), (
@@ -426,7 +426,7 @@ class TestKernelTerminalDetectionFuzzer:
         )
 
     @given(st.lists(mu_primitives, max_size=5))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_lists_never_terminal(self, lst):
         """Lists are never kernel terminal states."""
         assert not is_kernel_terminal(lst), (
@@ -446,7 +446,7 @@ class TestExtractKernelResultFuzzer:
     """
 
     @given(mu_values(), mu_values(), st.booleans())
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_extract_respects_stall_flag(self, result_value, original_input, stall_flag):
         """When _stall is True, return original; else denormalize result."""
         assume(is_mu(result_value))
@@ -472,7 +472,7 @@ class TestExtractKernelResultFuzzer:
             assert is_mu(extracted), "Extracted result must be valid Mu"
 
     @given(empty_containers())
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_extract_preserves_empty_container_type_on_stall(self, empty):
         """When stalled, empty containers preserve their type."""
         assume(is_mu(empty))
@@ -505,7 +505,7 @@ class TestKernelLoopIntegrationFuzzer:
     """
 
     @given(mu_values())
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_empty_projections_is_identity(self, value):
         """Empty projection list returns input unchanged (always stalls)."""
         assume(is_mu(value))
@@ -519,7 +519,7 @@ class TestKernelLoopIntegrationFuzzer:
         )
 
     @given(mu_values())
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_identity_projection_is_stable(self, value):
         """Identity projection {var: x} -> {var: x} is stable (stalls immediately)."""
         assume(is_mu(value))
@@ -535,7 +535,7 @@ class TestKernelLoopIntegrationFuzzer:
         )
 
     @given(mu_values())
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_deterministic(self, value):
         """step_mu is deterministic - same input gives same output."""
         assume(is_mu(value))

@@ -405,7 +405,7 @@ class TestMuEqualEquivalence:
     """Tests for mu_equal equivalence relation properties."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_reflexivity(self, value):
         """mu_equal(x, x) must be True (reflexivity)."""
         assume(is_mu(value))
@@ -459,7 +459,7 @@ class TestMuHashDeterminism:
     """Tests for mu_hash determinism."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_hash_is_deterministic(self, value):
         """mu_hash is deterministic - same value gives same hash."""
         assume(is_mu(value))
@@ -480,7 +480,7 @@ class TestNormalizationRoundtrip:
     """Tests for normalization roundtrip property."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=1000, deadline=5000)
+    @settings(max_examples=1000, deadline=5000)  # INTENTIONAL: high count for edge cases
     def test_normalize_denormalize_roundtrip(self, value):
         """denormalize(normalize(x)) == x for most Mu values.
 
@@ -521,7 +521,7 @@ class TestNormalizationRoundtrip:
         assert denormalized == value, f"Roundtrip failed: {value} -> {normalized} -> {denormalized}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalization_preserves_validity(self, value):
         """Normalized values are valid Mu."""
         assume(is_mu(value))
@@ -530,7 +530,7 @@ class TestNormalizationRoundtrip:
         assert is_mu(normalized), f"Normalized value is not Mu: {normalized}"
 
     @given(mu_values(max_depth=3, allow_head_tail=True))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalization_preserves_validity(self, value):
         """Denormalized values are valid Mu.
 
@@ -580,7 +580,7 @@ class TestNormalizationIdempotency:
     """Tests for normalization idempotency."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_idempotency(self, value):
         """normalize(normalize(x)) denormalizes to same value."""
         assume(is_mu(value))
@@ -687,7 +687,7 @@ class TestVariableBindingConsistency:
     """Tests for variable binding consistency."""
 
     @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=10), mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_subst_mu_same_var_consistency(self, var_name, value):
         """Same variable in body gets same value everywhere."""
         assume(is_mu(value))
@@ -801,14 +801,14 @@ class TestLimitEnforcement:
         assert not is_mu(wide_dict), f"is_mu accepted dict width {width} > {MAX_MU_WIDTH}"
 
     @given(st.integers(min_value=1, max_value=min(50, MAX_MU_DEPTH)))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_is_mu_accepts_within_depth_limit(self, depth):
         """is_mu accepts structures within MAX_MU_DEPTH."""
         structure = self.build_deep_structure(depth)
         assert is_mu(structure), f"is_mu rejected valid depth {depth} <= {MAX_MU_DEPTH}"
 
     @given(st.integers(min_value=1, max_value=min(100, MAX_MU_WIDTH)))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_is_mu_accepts_within_width_limit(self, width):
         """is_mu accepts lists/dicts within MAX_MU_WIDTH."""
         wide_list = list(range(width))
@@ -826,14 +826,14 @@ class TestNoCrashOnValidInputs:
     """Tests that valid inputs don't cause crashes."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=1000, deadline=5000)
+    @settings(max_examples=1000, deadline=5000)  # INTENTIONAL: high count for edge cases
     def test_is_mu_never_crashes(self, value):
         """is_mu should never crash, just return bool."""
         result = is_mu(value)
         assert isinstance(result, bool)
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_type_name_never_crashes(self, value):
         """mu_type_name should never crash."""
         result = mu_type_name(value)
@@ -841,7 +841,7 @@ class TestNoCrashOnValidInputs:
         assert result in ["null", "bool", "int", "float", "str", "list", "dict", "INVALID"]
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_has_callable_never_crashes(self, value):
         """has_callable should never crash."""
         result = has_callable(value)
@@ -865,7 +865,7 @@ class TestBindingsConversionRoundtrip:
     """Tests for bindings conversion roundtrip."""
 
     @given(mu_bindings_dict(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_bindings_dict_roundtrip(self, bindings):
         """dict_to_bindings -> bindings_to_dict roundtrip."""
         # Skip empty dict edge case (it becomes None)
@@ -886,7 +886,7 @@ class TestTypeDiscrimination:
     """Tests for type discrimination in mu_equal."""
 
     @given(st.integers(), st.booleans())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_discriminates_bool_int(self, n, b):
         """mu_equal discriminates True/1 and False/0 (unlike Python ==)."""
         if b is True and n == 1:
@@ -903,7 +903,7 @@ class TestJSONRoundtripConsistency:
     """Tests for JSON roundtrip consistency."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_json_roundtrip_consistency(self, value):
         """Valid Mu values should roundtrip through JSON."""
         assume(is_mu(value))
@@ -934,7 +934,7 @@ class TestDictKeyOrderingDeterminism:
         mu_values(max_depth=2),
         max_size=5
     ))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_dict_ordering_deterministic(self, d):
         """Dict normalization is deterministic regardless of key insertion order."""
         assume(is_mu(d))
@@ -966,14 +966,14 @@ class TestHostileUnicodeHandling:
     """Tests for hostile/edge-case unicode string handling."""
 
     @given(hostile_mu_values(max_depth=2))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_hostile_unicode_is_valid_mu(self, value):
         """Hostile unicode values should still be valid Mu (if JSON-compatible)."""
         # All our generated hostile values should be valid Mu
         assert is_mu(value), f"Hostile unicode value rejected: {repr(value)}"
 
     @given(hostile_mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_hostile_unicode_hash_deterministic(self, value):
         """mu_hash is deterministic for hostile unicode."""
         assume(is_mu(value))
@@ -996,7 +996,7 @@ class TestHostileUnicodeHandling:
         assert mu_equal(a, b) == mu_equal(b, a)
 
     @given(hostile_mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_hostile_unicode_normalize_roundtrip(self, value):
         """Normalization roundtrip works for hostile unicode.
 
@@ -1035,7 +1035,7 @@ class TestHostileUnicodeHandling:
         assert denormalized == value, f"Roundtrip failed for {repr(value)}"
 
     @given(hostile_unicode_strings)
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_hostile_unicode_as_dict_key(self, key):
         """Hostile unicode strings work as dict keys."""
         d = {key: "value"}
@@ -1149,7 +1149,7 @@ class TestMatchMuParity:
             pass
 
     @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_parity_simple_variable(self, var_name):
         """Simple variable binding has parity."""
         pattern = {"var": var_name}
@@ -1162,7 +1162,7 @@ class TestMatchMuParity:
         assert mu_result == {var_name: value}
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_parity_literal_match(self, value):
         """Literal (non-variable) pattern match has parity."""
         assume(is_mu(value))
@@ -1247,7 +1247,7 @@ class TestSubstMuParity:
         st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=5),
         mu_values(max_depth=3)
     )
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_parity_simple_variable_subst(self, var_name, value):
         """Simple variable substitution has parity."""
         assume(is_mu(value))
@@ -1263,7 +1263,7 @@ class TestSubstMuParity:
         assert mu_equal(python_result, mu_result), "Parity violation"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_parity_no_vars_subst(self, body):
         """Body with no variables substitutes to itself (parity)."""
         assume(is_mu(body))
@@ -1311,7 +1311,7 @@ class TestSubstMuParity:
             pass
 
     @given(mu_bindings_dict(max_depth=3))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_parity_nested_vars_subst(self, bindings):
         """Nested variable structure has parity."""
         assume(bindings)  # Need at least one binding
@@ -1444,7 +1444,7 @@ class TestApplyMuDeterminism:
     """Property-based tests for apply_mu determinism."""
 
     @given(mu_patterns(max_depth=3), mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_apply_mu_deterministic(self, pattern, value):
         """apply_mu must be deterministic - same inputs give same outputs."""
         # Skip empty var names (would raise ValueError)
@@ -1469,7 +1469,7 @@ class TestApplyMuDeterminism:
             pass  # Expected for some inputs (unbound vars, empty var names)
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_apply_mu_var_pattern_always_matches(self, value):
         """A variable pattern should always match any value."""
         if contains_empty_var_name(value):
@@ -1487,7 +1487,7 @@ class TestApplyMuDeterminism:
         assert mu_equal(result, value), f"Identity substitution failed: {result} != {value}"
 
     @given(mu_values(max_depth=3), mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_apply_mu_literal_match_exact(self, value1, value2):
         """Literal pattern only matches exact value."""
         if contains_empty_var_name(value1) or contains_empty_var_name(value2):
@@ -1510,7 +1510,7 @@ class TestApplyMuParity:
     """Property-based tests for apply_mu parity with apply_projection."""
 
     @given(mu_patterns(max_depth=2), mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_apply_mu_parity_with_apply_projection(self, pattern, value):
         """apply_mu produces same result as apply_projection."""
         if contains_empty_var_name(pattern) or contains_empty_var_name(value):
@@ -1563,7 +1563,7 @@ class TestStepMuDeterminism:
     """Property-based tests for step_mu determinism."""
 
     @given(st.lists(mu_patterns(max_depth=2), max_size=5), mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_deterministic(self, patterns, value):
         """step_mu must be deterministic."""
         if contains_empty_var_name(value):
@@ -1588,7 +1588,7 @@ class TestStepMuDeterminism:
             pass  # Expected for some inputs
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_empty_projections_stalls(self, value):
         """Empty projection list always stalls (returns input unchanged)."""
         if contains_empty_var_name(value):
@@ -1599,7 +1599,7 @@ class TestStepMuDeterminism:
         assert mu_equal(result, value), "Empty projections should stall (return input)"
 
     @given(st.lists(mu_patterns(max_depth=2), max_size=5), mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_stall_idempotent(self, patterns, value):
         """If step_mu stalls, repeating gives same result."""
         if contains_empty_var_name(value):
@@ -1629,7 +1629,7 @@ class TestStepMuParity:
     """Property-based tests for step_mu parity with step."""
 
     @given(st.lists(mu_patterns(max_depth=2), max_size=3), mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_parity_with_step(self, patterns, value):
         """step_mu produces same result as step."""
         if contains_empty_var_name(value):
@@ -1665,7 +1665,7 @@ class TestStepMuParity:
             pass  # Expected for some inputs
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_first_match_wins(self, value):
         """step_mu returns result of first matching projection."""
         if contains_empty_var_name(value):
@@ -1687,7 +1687,7 @@ class TestRunMuDeterminism:
     """Property-based tests for run_mu (kernel loop) determinism."""
 
     @given(st.lists(mu_patterns(max_depth=2), max_size=3), mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=10000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=10000, suppress_health_check=[HealthCheck.too_slow])
     def test_run_mu_deterministic(self, patterns, value):
         """run_mu must be deterministic."""
         if contains_empty_var_name(value):
@@ -1713,7 +1713,7 @@ class TestRunMuDeterminism:
             pass
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=200, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_run_mu_empty_projections_immediate_stall(self, value):
         """Empty projection list causes immediate stall."""
         if contains_empty_var_name(value):

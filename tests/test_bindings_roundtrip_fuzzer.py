@@ -93,7 +93,7 @@ class TestBindingsRoundtripFuzzer:
     """Property-based tests for bindings conversion roundtrip."""
 
     @given(bindings_dicts())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_roundtrip_property(self, bindings):
         """Property: bindings_to_dict(dict_to_bindings(d)) == d."""
         # Convert to linked list
@@ -110,7 +110,7 @@ class TestBindingsRoundtripFuzzer:
         )
 
     @given(bindings_dicts())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_all_keys_preserved(self, bindings):
         """Property: all keys are preserved in roundtrip."""
         linked = dict_to_bindings(bindings)
@@ -123,7 +123,7 @@ class TestBindingsRoundtripFuzzer:
         )
 
     @given(bindings_dicts())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_all_values_preserved(self, bindings):
         """Property: all values are preserved in roundtrip."""
         linked = dict_to_bindings(bindings)
@@ -141,7 +141,7 @@ class TestLinkedListFormatFuzzer:
     """Property-based tests for linked list format validity."""
 
     @given(bindings_dicts())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_linked_list_is_mu(self, bindings):
         """Property: dict_to_bindings produces valid Mu."""
         linked = dict_to_bindings(bindings)
@@ -151,7 +151,7 @@ class TestLinkedListFormatFuzzer:
         )
 
     @given(bindings_dicts())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_linked_list_structure(self, bindings):
         """Property: linked list has correct structure."""
         linked = dict_to_bindings(bindings)
@@ -184,7 +184,7 @@ class TestDeterminismFuzzer:
     """Property-based tests for deterministic conversion."""
 
     @given(bindings_dicts())
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_deterministic_conversion(self, bindings):
         """Property: same dict produces same linked list."""
         linked1 = dict_to_bindings(bindings)
@@ -199,7 +199,7 @@ class TestDeterminismFuzzer:
         )
 
     @given(st.data())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_key_order_invariance(self, data):
         """Property: dict key insertion order doesn't affect linked list content."""
         # Generate keys and values
@@ -237,7 +237,7 @@ class TestEdgeCaseFuzzer:
         assert result == {}
 
     @given(variable_names(), mu_binding_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_single_binding(self, name, value):
         """Single binding roundtrips correctly."""
         bindings = {name: value}
@@ -246,7 +246,7 @@ class TestEdgeCaseFuzzer:
         assert result == bindings
 
     @given(st.lists(variable_names(), min_size=5, max_size=10, unique=True))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_many_bindings(self, names):
         """Many bindings roundtrip correctly."""
         bindings = {name: i for i, name in enumerate(names)}
@@ -255,7 +255,7 @@ class TestEdgeCaseFuzzer:
         assert result == bindings
 
     @given(variable_names())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_none_value_binding(self, name):
         """Binding with None value roundtrips correctly."""
         bindings = {name: None}
@@ -265,7 +265,7 @@ class TestEdgeCaseFuzzer:
         assert result[name] is None
 
     @given(variable_names())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_list_value_binding(self, name):
         """Binding with empty list value roundtrips correctly."""
         bindings = {name: []}
@@ -275,7 +275,7 @@ class TestEdgeCaseFuzzer:
         assert result[name] == []
 
     @given(variable_names())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_dict_value_binding(self, name):
         """Binding with empty dict value roundtrips correctly."""
         bindings = {name: {}}
@@ -289,7 +289,7 @@ class TestUnicodeBindingsFuzzer:
     """Property-based tests for Unicode variable names and values."""
 
     @given(st.text(min_size=1, max_size=20))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_unicode_variable_names(self, name):
         """Unicode variable names roundtrip correctly."""
         assume(name)  # Non-empty
@@ -299,7 +299,7 @@ class TestUnicodeBindingsFuzzer:
         assert result == bindings
 
     @given(st.text(max_size=100))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_unicode_string_values(self, value):
         """Unicode string values roundtrip correctly."""
         bindings = {"x": value}

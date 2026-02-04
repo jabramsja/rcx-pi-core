@@ -99,7 +99,7 @@ class TestChecksumFuzzing:
     """Fuzz tests for checksum computation and verification."""
 
     @given(content=st.binary(min_size=0, max_size=10000))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_checksum_is_64_hex_chars(self, content):
         """Checksum is always 64 hex characters (SHA256)."""
         checksum = compute_checksum(content)
@@ -107,7 +107,7 @@ class TestChecksumFuzzing:
         assert all(c in "0123456789abcdef" for c in checksum)
 
     @given(content=st.binary(min_size=1, max_size=10000))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_checksum_is_deterministic(self, content):
         """Same content always produces same checksum."""
         c1 = compute_checksum(content)
@@ -115,7 +115,7 @@ class TestChecksumFuzzing:
         assert c1 == c2
 
     @given(c1=st.binary(min_size=1, max_size=1000), c2=st.binary(min_size=1, max_size=1000))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_different_content_different_checksum(self, c1, c2):
         """Different content produces different checksum (with high probability)."""
         assume(c1 != c2)
@@ -123,7 +123,7 @@ class TestChecksumFuzzing:
 
     @given(seed_name=st.sampled_from(list(SEED_CHECKSUMS.keys())),
            tamper=st.binary(min_size=1, max_size=100))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_tampered_content_fails_verification(self, seed_name, tamper):
         """Any tampering with known seeds fails checksum verification."""
         from rcx_pi.selfhost.seed_integrity import get_seed_path
@@ -142,7 +142,7 @@ class TestChecksumFuzzing:
         whitelist_categories=("L", "N"),
         whitelist_characters=("_", "-")
     )))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_unknown_seed_name_rejected(self, seed_prefix):
         """Unknown seed names are rejected."""
         seed_name = f"unknown_{seed_prefix}.json"
@@ -159,7 +159,7 @@ class TestStructureValidationFuzzing:
     """Fuzz tests for seed structure validation."""
 
     @given(seed=malformed_seed())
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_malformed_seeds_handled(self, seed):
         """Malformed seeds either pass (if valid) or raise ValueError."""
         try:
@@ -173,7 +173,7 @@ class TestStructureValidationFuzzing:
             pass
 
     @given(meta=valid_meta, projections=st.lists(valid_projection, min_size=0, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_valid_structure_always_passes(self, meta, projections):
         """Valid structure always passes validation."""
         seed = {"meta": meta, "projections": projections}
@@ -181,7 +181,7 @@ class TestStructureValidationFuzzing:
         validate_seed_structure("test.json", seed)
 
     @given(projections=st.lists(valid_projection, min_size=1, max_size=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_missing_meta_always_fails(self, projections):
         """Missing meta always fails."""
         seed = {"projections": projections}
@@ -189,7 +189,7 @@ class TestStructureValidationFuzzing:
             validate_seed_structure("test.json", seed)
 
     @given(meta=valid_meta)
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_missing_projections_always_fails(self, meta):
         """Missing projections always fails."""
         seed = {"meta": meta}
@@ -197,7 +197,7 @@ class TestStructureValidationFuzzing:
             validate_seed_structure("test.json", seed)
 
     @given(meta=valid_meta, non_list=st.one_of(st.integers(), st.text(), st.dictionaries(st.text(), st.text())))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_projections_not_list_fails(self, meta, non_list):
         """Projections that aren't a list always fail."""
         assume(not isinstance(non_list, list))
@@ -214,7 +214,7 @@ class TestProjectionIdValidationFuzzing:
     """Fuzz tests for projection ID validation."""
 
     @given(seed_name=st.sampled_from(list(EXPECTED_PROJECTION_IDS.keys())))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_real_seeds_pass_id_validation(self, seed_name):
         """Real seeds pass projection ID validation."""
         from rcx_pi.selfhost.seed_integrity import get_seed_path
@@ -233,7 +233,7 @@ class TestProjectionIdValidationFuzzing:
         seed_name=st.sampled_from(list(EXPECTED_PROJECTION_IDS.keys())),
         remove_idx=st.integers(min_value=0, max_value=10)
     )
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_missing_projection_fails(self, seed_name, remove_idx):
         """Missing a projection fails validation."""
         from rcx_pi.selfhost.seed_integrity import get_seed_path
@@ -258,7 +258,7 @@ class TestProjectionIdValidationFuzzing:
     @given(unknown_seed=st.text(min_size=1, max_size=30).filter(
         lambda x: x not in EXPECTED_PROJECTION_IDS
     ))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_unknown_seed_skips_validation(self, unknown_seed):
         """Unknown seed names skip projection ID validation (for extensibility)."""
         seed = {"projections": []}
@@ -274,7 +274,7 @@ class TestProjectionOrderSecurity:
     """Tests that projection order is validated (security critical)."""
 
     @given(seed_name=st.sampled_from([k for k in EXPECTED_PROJECTION_IDS.keys() if "kernel" not in k]))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_wrap_must_be_last(self, seed_name):
         """Wrap projection must be last (catch-all position)."""
         from rcx_pi.selfhost.seed_integrity import get_seed_path
@@ -369,7 +369,7 @@ class TestFullLoadPipelineFuzzing:
     """Fuzz tests for the full verified load pipeline."""
 
     @given(content=st.binary(min_size=0, max_size=1000))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_random_bytes_rejected(self, content):
         """Random bytes are rejected (not valid JSON or seed)."""
         import tempfile
@@ -387,7 +387,7 @@ class TestFullLoadPipelineFuzzing:
             os.unlink(seed_file)
 
     @given(seed=malformed_seed())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_malformed_json_seeds_handled(self, seed):
         """Malformed JSON seeds are properly handled."""
         import tempfile
@@ -417,7 +417,7 @@ class TestInjectionAttacks:
     """Tests for various injection attack attempts."""
 
     @given(injection=st.text(min_size=1, max_size=100))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_path_traversal_in_seed_name_rejected(self, injection):
         """Path traversal attempts in seed name are rejected."""
         # Try to inject path traversal
@@ -427,7 +427,7 @@ class TestInjectionAttacks:
             verify_checksum(malicious_name, b"test")
 
     @given(null_bytes=st.integers(min_value=1, max_value=10))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_null_byte_injection_rejected(self, null_bytes):
         """Null byte injection in seed name is rejected."""
         malicious_name = f"match.v1\x00.json"
@@ -440,7 +440,7 @@ class TestInjectionAttacks:
         whitelist_categories=("L", "N"),
         whitelist_characters=(".", "_", "-")
     ), min_size=1, max_size=20))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_unicode_seed_name_variations(self, unicode_injection):
         """Unicode variations in seed names are rejected."""
         assume(unicode_injection not in SEED_CHECKSUMS)

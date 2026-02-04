@@ -78,7 +78,7 @@ class TestClassifyLinkedListProperties:
     """Property-based tests for classify_linked_list."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_classify_deterministic(self, value):
         """classify_linked_list is deterministic."""
         assume(is_mu(value))
@@ -90,7 +90,7 @@ class TestClassifyLinkedListProperties:
             f"Classification not deterministic: {value} → {result1} vs {result2}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_classify_returns_valid_type(self, value):
         """classify_linked_list returns 'list' or 'dict'."""
         assume(is_mu(value))
@@ -101,7 +101,7 @@ class TestClassifyLinkedListProperties:
             f"Invalid classification result: {result} for {value}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_classify_never_crashes(self, value):
         """classify_linked_list never crashes on valid Mu."""
         assume(is_mu(value))

@@ -284,7 +284,6 @@ def contains_signed_zero_mismatch(pattern, value):
 
 @given(mu_projections(), mu_values(max_depth=3))
 @settings(
-    max_examples=500,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
 )
@@ -318,7 +317,6 @@ def test_apply_mu_determinism(projection, value):
 
 @given(mu_projections(), mu_values(max_depth=3))
 @settings(
-    max_examples=500,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
 )
@@ -408,7 +406,6 @@ def test_apply_mu_parity_fuzzer(projection, value):
 
 @given(mu_projections(), mu_values(max_depth=3))
 @settings(
-    max_examples=500,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
 )
@@ -432,7 +429,6 @@ def test_apply_mu_result_is_valid_mu_on_success(projection, value):
 
 @given(mu_projections(), mu_values(max_depth=3))
 @settings(
-    max_examples=500,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
 )
@@ -458,7 +454,7 @@ def test_apply_mu_never_crashes_on_valid_mu(projection, value):
 # =============================================================================
 
 @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=10), mu_values(max_depth=3))
-@settings(max_examples=300, deadline=5000)
+@settings(deadline=5000)
 def test_same_var_multiple_times_consistency(var_name, value):
     """If same variable appears multiple times in body, all get same value."""
     assume(is_mu(value))
@@ -486,7 +482,7 @@ def test_same_var_multiple_times_consistency(var_name, value):
 # =============================================================================
 
 @given(mu_values(max_depth=3), mu_values(max_depth=3))
-@settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.filter_too_much])
+@settings(deadline=5000, suppress_health_check=[HealthCheck.filter_too_much])
 def test_literal_pattern_only_matches_exact(pattern_literal, test_value):
     """Literal pattern (no vars) only matches exact value.
 
@@ -565,7 +561,7 @@ def edge_case_mu_values(draw):
 
 
 @given(mu_projections(), edge_case_mu_values())
-@settings(max_examples=300, deadline=5000)
+@settings(deadline=5000)
 def test_apply_mu_edge_cases_fuzzer(projection, value):
     """Test apply_mu with edge case values."""
     assume(is_mu(projection))
@@ -584,7 +580,7 @@ def test_apply_mu_edge_cases_fuzzer(projection, value):
 # =============================================================================
 
 @given(st.integers(min_value=1, max_value=50))
-@settings(max_examples=50, deadline=10000)
+@settings(deadline=10000)
 def test_apply_mu_handles_depth(depth):
     """Test apply_mu with structures at various depths."""
     # Build structure at specified depth
@@ -607,7 +603,7 @@ def test_apply_mu_handles_depth(depth):
 # =============================================================================
 
 @given(st.integers(min_value=0, max_value=50))
-@settings(max_examples=50, deadline=10000)
+@settings(deadline=10000)
 def test_apply_mu_handles_wide_dicts(num_keys):
     """Test apply_mu with dicts having many keys."""
     value = {f"key{i}": f"value{i}" for i in range(num_keys)}
