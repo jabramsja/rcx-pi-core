@@ -70,17 +70,36 @@ const VALID_TYPE_TAGS = new Set(['list', 'dict']);
 
 // Kernel reserved fields - domain data MUST NOT contain these (matches Python step_mu.py)
 // Prevents domain data from forging kernel state
+//
+// Gate 3 (2026-02-04): Entry points renamed to remove underscore prefix:
+// - _detect_closure -> detect_closure
+// - _detect_exhaustion -> detect_exhaustion
+//
+// Gate 3 Security Fix: Reserved fields are allowed ONLY inside algorithm
+// entrypoint subtrees (detect_closure, detect_exhaustion), NOT globally.
+// This prevents forgery via spoofed _mode/_phase values at top level.
+// See ALGORITHM_ENTRYPOINT_KEYS and validateNoKernelReservedFields().
 const KERNEL_RESERVED_FIELDS = new Set([
   '_mode', '_phase', '_input', '_remaining',
   '_match_ctx', '_subst_ctx', '_kernel_ctx',
   '_status', '_result', '_stall',
   '_step', '_projs',
   // Recurrence closure detection fields (9-agent review, 2026-02-02)
-  '_detect_closure', '_seen', '_current', '_check_list',
+  // Gate 3: Entry point detect_closure (no underscore) NOT reserved
+  '_seen', '_current', '_check_list',
   // Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
-  '_detect_exhaustion', '_frozen', '_tau_step', '_operator_ids',
+  // Gate 3: Entry point detect_exhaustion (no underscore) NOT reserved
+  '_frozen', '_tau_step', '_operator_ids',
   // Bootstrap-Structural Bridge lookup phase fields (9-agent review, 2026-02-02)
   '_lookup_name', '_lookup_value', '_lookup_bindings', '_original_bindings'
+]);
+
+// Algorithm entrypoint keys - these are the ONLY keys where reserved fields are allowed
+// Gate 3 security fix: Reserved fields allowed ONLY inside these subtrees, not globally.
+// This prevents forgery via spoofed _mode/_phase values at top level.
+const ALGORITHM_ENTRYPOINT_KEYS = new Set([
+  'detect_closure',      // Recurrence algorithm entry point
+  'detect_exhaustion',   // Exhaustion algorithm entry point
 ]);
 
 // Maximum depth for validation traversal (fail closed)
@@ -107,8 +126,15 @@ function validateTypeTag(tag, context = '') {
  * Validate that a value does not contain kernel-reserved fields.
  * Deep recursive check with depth guard (fail closed).
  * Matches Python step_mu.py:validate_no_kernel_reserved_fields()
+ *
+ * Gate 3 security fix: Reserved fields are allowed ONLY inside algorithm
+ * entrypoint subtrees (detect_closure, detect_exhaustion). This prevents
+ * forgery via spoofed _mode/_phase values at top level.
+ *
+ * Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
+ * Allowed: {"detect_closure": {"_mode": "recurrence", ...}}
  */
-function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
+function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _inAlgorithmSubtree = false) {
   // Depth guard - fail CLOSED (reject on deep structures)
   if (_depth > MAX_VALIDATION_DEPTH) {
     throw new Error(
@@ -125,20 +151,33 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
   // Arrays: validate each element
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      validateNoKernelReservedFields(value[i], `${context}[${i}]`, _depth + 1);
+      validateNoKernelReservedFields(value[i], `${context}[${i}]`, _depth + 1, _inAlgorithmSubtree);
     }
     return;
   }
 
   // Objects: check keys and recurse into values
   for (const [key, val] of Object.entries(value)) {
-    if (KERNEL_RESERVED_FIELDS.has(key)) {
+    // Check if this key is an algorithm entrypoint
+    const enteringAlgorithm = ALGORITHM_ENTRYPOINT_KEYS.has(key);
+
+    // Reserved fields only allowed inside algorithm subtrees
+    if (KERNEL_RESERVED_FIELDS.has(key) && !_inAlgorithmSubtree) {
       throw new Error(
         `Kernel-reserved field '${key}' found in domain data at ${context}. ` +
+        `Reserved fields are only allowed inside algorithm entrypoints ` +
+        `(${[...ALGORITHM_ENTRYPOINT_KEYS].sort().join(', ')}). ` +
         `Domain input must not contain kernel state fields.`
       );
     }
-    validateNoKernelReservedFields(val, `${context}.${key}`, _depth + 1);
+
+    // Recurse - pass flag if entering algorithm subtree
+    validateNoKernelReservedFields(
+      val,
+      `${context}.${key}`,
+      _depth + 1,
+      _inAlgorithmSubtree || enteringAlgorithm
+    );
   }
 }
 
@@ -1558,9 +1597,9 @@ console.log('\n=== Test 10: Recurrence Closure Detection (L3 Parity) ===\n');
  * @returns {Object} - {closure_detected: bool, final_result: value}
  */
 function runRecurrence(traceResult) {
-  // Wrap in _detect_closure format for Recurrence projections
+  // Wrap in detect_closure format for Recurrence projections (Gate 3: entry point renamed)
   const recurrenceInput = {
-    _detect_closure: {
+    detect_closure: {
       trace: traceResult.trace,
       result: traceResult.result
     }
@@ -1601,7 +1640,7 @@ let recurrenceFailed = 0;
 for (const vector of recurrenceVectors.vectors) {
   try {
     // Run Recurrence projections directly on the input
-    // (vectors already have _detect_closure wrapper with trace)
+    // (vectors already have detect_closure wrapper with trace, Gate 3 renamed)
     const { result } = run(recurrenceProjections, vector.input, 1000);
 
     // Compare with expected
@@ -1903,6 +1942,15 @@ if (process.argv.includes('--json-api')) {
         response = { success: true, result: current };
       } catch (e) {
         response = { success: false, error: e.message };
+      }
+    } else if (request.action === 'validate_reserved_fields') {
+      // Validate reserved fields - for cross-substrate parity testing (Gate 3 security fix)
+      const { value } = request;
+      try {
+        validateNoKernelReservedFields(value, 'test');
+        response = { success: true, valid: true, error: '' };
+      } catch (e) {
+        response = { success: true, valid: false, error: e.message };
       }
     } else {
       response = { success: false, error: `Unknown action: ${request.action}` };

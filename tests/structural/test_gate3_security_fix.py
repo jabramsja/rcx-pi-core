@@ -1,0 +1,263 @@
+"""
+Gate 3 Security Fix Regression Tests
+
+These tests verify the security fix for the context-aware validation vulnerability
+identified during external review. The original implementation allowed any input
+with _mode="recurrence" to bypass reserved field validation entirely.
+
+Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
+Allowed: {"detect_closure": {"_mode": "recurrence", ...}}
+
+The fix scopes the exception to algorithm entrypoint subtrees ONLY:
+- Reserved fields allowed ONLY inside detect_closure / detect_exhaustion
+- Top-level _mode/_phase spoofing is rejected
+"""
+
+import pytest
+import subprocess
+import json
+from pathlib import Path
+
+from rcx_pi.selfhost.step_mu import (
+    validate_no_kernel_reserved_fields,
+    KERNEL_RESERVED_FIELDS,
+    ALGORITHM_ENTRYPOINT_KEYS,
+)
+
+
+# Root directory for JS tests
+ROOT = Path(__file__).parent.parent.parent
+
+
+class TestSpoofedModeAttack:
+    """Test that spoofed _mode at top level is rejected."""
+
+    def test_spoofed_recurrence_mode_rejected(self):
+        """Spoofed _mode="recurrence" at top level MUST fail."""
+        spoofed = {"_mode": "recurrence", "_result": "pwned", "_stall": True}
+
+        with pytest.raises(ValueError, match="SECURITY.*_mode"):
+            validate_no_kernel_reserved_fields(spoofed, "test")
+
+    def test_spoofed_exhaustion_mode_rejected(self):
+        """Spoofed _mode="exhaustion" at top level MUST fail."""
+        spoofed = {"_mode": "exhaustion", "_result": "pwned"}
+
+        with pytest.raises(ValueError, match="SECURITY.*_mode"):
+            validate_no_kernel_reserved_fields(spoofed, "test")
+
+    def test_spoofed_recurrence_done_mode_rejected(self):
+        """Spoofed _mode="recurrence_done" at top level MUST fail."""
+        spoofed = {"_mode": "recurrence_done", "_result": "pwned"}
+
+        with pytest.raises(ValueError, match="SECURITY.*_mode"):
+            validate_no_kernel_reserved_fields(spoofed, "test")
+
+    def test_spoofed_phase_rejected(self):
+        """Spoofed _phase="scan" at top level MUST fail."""
+        spoofed = {"_phase": "scan", "_result": "pwned"}
+
+        with pytest.raises(ValueError, match="SECURITY.*_phase"):
+            validate_no_kernel_reserved_fields(spoofed, "test")
+
+    def test_kernel_forgery_still_rejected(self):
+        """Plain kernel forgery (_mode="done") still rejected."""
+        forgery = {"_mode": "done", "_result": "pwned", "_stall": False}
+
+        with pytest.raises(ValueError, match="SECURITY.*_mode"):
+            validate_no_kernel_reserved_fields(forgery, "test")
+
+    def test_all_reserved_fields_rejected_at_top_level(self):
+        """Every reserved field is rejected at top level."""
+        for field in KERNEL_RESERVED_FIELDS:
+            attack = {field: "attack_value"}
+            with pytest.raises(ValueError, match=f"SECURITY.*{field}"):
+                validate_no_kernel_reserved_fields(attack, "test")
+
+
+class TestEntrypointSubtreeAllowed:
+    """Test that algorithm states inside entrypoints are allowed."""
+
+    def test_detect_closure_allows_reserved_fields(self):
+        """Reserved fields inside detect_closure are allowed."""
+        legitimate = {
+            "detect_closure": {
+                "_mode": "recurrence",
+                "_phase": "scan",
+                "_seen": {"head": "A", "tail": None},
+                "_current": None,
+                "_result": "final"
+            }
+        }
+
+        # Should NOT raise
+        validate_no_kernel_reserved_fields(legitimate, "test")
+
+    def test_detect_exhaustion_allows_reserved_fields(self):
+        """Reserved fields inside detect_exhaustion are allowed."""
+        legitimate = {
+            "detect_exhaustion": {
+                "_mode": "exhaustion",
+                "_phase": "find_tau",
+                "_frozen": None,
+                "_tau_step": 0,
+                "_operator_ids": None
+            }
+        }
+
+        # Should NOT raise
+        validate_no_kernel_reserved_fields(legitimate, "test")
+
+    def test_nested_algorithm_state_allowed(self):
+        """Deeply nested reserved fields inside entrypoint are allowed."""
+        legitimate = {
+            "detect_closure": {
+                "_mode": "recurrence",
+                "_seen": {
+                    "head": {"_mode": "recurrence"},  # Nested _mode OK inside entrypoint
+                    "tail": None
+                }
+            }
+        }
+
+        # Should NOT raise
+        validate_no_kernel_reserved_fields(legitimate, "test")
+
+    def test_real_recurrence_input_allowed(self):
+        """Real recurrence algorithm input passes validation."""
+        real_input = {
+            "detect_closure": {
+                "trace": {
+                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "tail": {
+                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "tail": None
+                    }
+                },
+                "result": "B"
+            }
+        }
+
+        # Should NOT raise
+        validate_no_kernel_reserved_fields(real_input, "test")
+
+
+class TestMixedScenarios:
+    """Test mixed scenarios combining legitimate and attack patterns."""
+
+    def test_reserved_outside_entrypoint_still_rejected(self):
+        """Reserved fields outside entrypoint subtree are rejected even if entrypoint exists."""
+        mixed = {
+            "detect_closure": {"trace": None, "result": "X"},
+            "_mode": "recurrence"  # Attack: reserved field OUTSIDE entrypoint
+        }
+
+        with pytest.raises(ValueError, match="SECURITY.*_mode"):
+            validate_no_kernel_reserved_fields(mixed, "test")
+
+    def test_sibling_attack_rejected(self):
+        """Reserved fields in sibling of entrypoint are rejected."""
+        sibling_attack = {
+            "detect_closure": {"trace": None, "result": "X"},
+            "other_key": {"_result": "pwned"}  # Attack in sibling
+        }
+
+        with pytest.raises(ValueError, match="SECURITY.*_result"):
+            validate_no_kernel_reserved_fields(sibling_attack, "test")
+
+    def test_nested_spoof_outside_entrypoint_rejected(self):
+        """Reserved fields nested in non-entrypoint key MUST fail.
+
+        Security invariant: {"outer": {"_phase": "scan", "_result": 1}} must be rejected
+        because "outer" is not an algorithm entrypoint key.
+        """
+        nested_spoof = {"outer": {"_phase": "scan", "_result": 1}}
+
+        with pytest.raises(ValueError, match="SECURITY.*_phase"):
+            validate_no_kernel_reserved_fields(nested_spoof, "test")
+
+    def test_clean_data_with_entrypoint_passes(self):
+        """Clean data alongside entrypoint passes."""
+        clean = {
+            "detect_closure": {"_mode": "recurrence", "_result": "X"},
+            "metadata": {"timestamp": 12345, "version": "1.0"}
+        }
+
+        # Should NOT raise
+        validate_no_kernel_reserved_fields(clean, "test")
+
+
+class TestAlgorithmEntrypointKeys:
+    """Test the ALGORITHM_ENTRYPOINT_KEYS constant."""
+
+    def test_entrypoint_keys_are_correct(self):
+        """Verify entrypoint keys match expected values."""
+        expected = {"detect_closure", "detect_exhaustion"}
+        assert ALGORITHM_ENTRYPOINT_KEYS == expected
+
+    def test_entrypoint_keys_not_in_reserved(self):
+        """Entrypoint keys themselves are NOT reserved (they're entry points)."""
+        for key in ALGORITHM_ENTRYPOINT_KEYS:
+            assert key not in KERNEL_RESERVED_FIELDS
+
+
+class TestCrossSubstrateParity:
+    """Verify Python and JS validation accept/reject the same shapes."""
+
+    def _run_js_validation(self, value):
+        """Run JS validation and return (success, error_msg)."""
+        request = json.dumps({"action": "validate_reserved_fields", "value": value})
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", request],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=30
+        )
+
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                response = json.loads(line[len('JSON_API_RESPONSE:'):])
+                return response.get('valid', False), response.get('error', '')
+
+        return False, f"No JSON_API_RESPONSE: {result.stdout[:200]}"
+
+    def test_parity_spoofed_mode_rejected(self):
+        """Both Python and JS reject spoofed _mode."""
+        spoofed = {"_mode": "recurrence", "_result": "pwned"}
+
+        # Python rejects
+        with pytest.raises(ValueError):
+            validate_no_kernel_reserved_fields(spoofed, "test")
+
+        # JS should also reject
+        valid, error = self._run_js_validation(spoofed)
+        assert not valid, f"JS should reject spoofed _mode, but got valid=True"
+        assert "_mode" in error or "reserved" in error.lower()
+
+    def test_parity_entrypoint_allowed(self):
+        """Both Python and JS allow entrypoint subtrees."""
+        legitimate = {
+            "detect_closure": {
+                "_mode": "recurrence",
+                "_result": "X"
+            }
+        }
+
+        # Python allows
+        validate_no_kernel_reserved_fields(legitimate, "test")  # Should not raise
+
+        # JS should also allow
+        valid, error = self._run_js_validation(legitimate)
+        assert valid, f"JS should allow entrypoint subtree, but got error: {error}"
+
+    def test_parity_clean_data_allowed(self):
+        """Both Python and JS allow clean data."""
+        clean = {"x": 1, "y": {"z": 2}}
+
+        # Python allows
+        validate_no_kernel_reserved_fields(clean, "test")
+
+        # JS should also allow
+        valid, error = self._run_js_validation(clean)
+        assert valid, f"JS should allow clean data, but got error: {error}"
