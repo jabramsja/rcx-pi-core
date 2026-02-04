@@ -16,7 +16,7 @@ export PYTHONHASHSEED=0
 # This script runs Tier 1 only:
 # - Syntax/structure checks (contraband, AST police)
 # - Core algorithm tests (match, subst, step, kernel)
-# - Skips fuzzer tests (those run in Tier 2)
+# - Skips most fuzzer tests (except kernel_security_fuzzer - critical for security)
 # - Skips stress tests (those run in Tier 3)
 #
 # Use this for rapid iteration. Run audit_all.sh before pushing.
@@ -134,16 +134,20 @@ pytest $PARALLEL_FLAG -q \
     tests/test_phase8b_grounding_gaps.py \
     tests/test_recurrence_parity.py \
     tests/test_exhaustion_parity.py \
-    tests/test_js_parity_automated.py \
     tests/test_bootstrap_structural_bridge.py \
     tests/test_meta_circular_gate6.py \
     tests/test_execution_path_verification.py
 
 echo ""
-echo "== 5) JavaScript debt check =="
-# Note: JS parity is already tested via test_js_parity_automated.py in pytest above
-# The check_js_debt.sh verifies debt markers match Python
+echo "== 5) JavaScript L3 parity check =="
 ./tools/check_js_debt.sh
+if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    echo "OK: JS tests pass"
+else
+    echo "FAIL: JS tests failed"
+    node mu/host/js/eval_step.js 2>&1 | tail -10
+    exit 1
+fi
 
 echo ""
 echo "✅ Fast audit pass"

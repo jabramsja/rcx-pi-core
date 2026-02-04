@@ -36,7 +36,8 @@ echo "== 0b) Doc consistency check =="
 echo "== 1a) Core + Fuzzer tests (hash-seeded) =="
 # Run all tests EXCEPT stress tests (those have very long timeouts)
 # Stress tests are for edge case validation, not CI blocking
-pytest $PARALLEL_FLAG -q --ignore=tests/stress/
+# Also exclude test_js_parity_automated.py - JS parity verified via node run below
+pytest $PARALLEL_FLAG -q --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
 test -z "$(git status --porcelain)" || { echo "Dirty after core pytest"; git status --porcelain; exit 1; }
 
 echo "== 1b) Stress tests (deep/wide edge cases, optional) =="
@@ -151,9 +152,14 @@ print("OK:", j["final_status"], j["counts"])
 '
 done
 
-echo "== 8) JavaScript debt check =="
-# Note: JS parity is already tested via test_js_parity_automated.py in full pytest above
-# The check_js_debt.sh verifies debt markers match Python
+echo "== 8) JavaScript L3 parity check =="
 ./tools/check_js_debt.sh
+if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
+    echo "OK: JS tests pass"
+else
+    echo "FAIL: JS tests failed"
+    node mu/host/js/eval_step.js 2>&1 | tail -10
+    exit 1
+fi
 
 echo "✅ audit_all pass"
