@@ -63,6 +63,11 @@ If a task is not listed here, it is NOT to be implemented.
   2. Update docs if implementation differs from spec
   3. Update TASKS.md status if completing/progressing items
   4. Verify JS parity if projection behavior changed
+- **Roadmap rule**: Documents in `roadmap/` define SEQUENCE and DESIGN only.
+  - Current state lives in STATUS.md; authorization lives in TASKS.md
+  - Gate completion updates TASKS.md (Ra/NEXT/VECTOR), not roadmap docs
+  - Draft specs live in `roadmap/`; approved specs migrate to `docs/core/`
+  - See `roadmap/MANIFEST.md` for reading order and linking rules
 
 ---
 

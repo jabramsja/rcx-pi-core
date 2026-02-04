@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-04
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_governance.py
@@ -124,6 +124,12 @@ WorkingRCX/
 - `docs/archive/` - Historical, read-only, frozen in time
 - `docs/TESTING_PERFORMANCE_ISSUE.md` - Historical context (resolved issue)
 - Generated files, subprojects (`rcx_pi_rust/`, etc.)
+
+**Special Folder: `roadmap/`** (separate lightweight governance):
+- Roadmap docs define SEQUENCE and DESIGN only, not current state
+- They follow different rules: link UP to STATUS.md/TASKS.md, no DOC_STATUS headers
+- Enforced by `tests/docs/test_roadmap_governance.py` (not test_doc_governance.py)
+- See `roadmap/MANIFEST.md` for linking rules and reading order
 
 **Rules:**
 1. `docs/core/` = Active specs only (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)

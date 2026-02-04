@@ -2,6 +2,8 @@
 
 **This is the single source of truth for project phase. Agents MUST read this file.**
 
+> **Document Architecture**: See [`roadmap/MANIFEST.md`](roadmap/MANIFEST.md) for reading order and linking rules across STATUS.md, TASKS.md, and roadmap docs.
+
 ---
 
 ## Current Phase

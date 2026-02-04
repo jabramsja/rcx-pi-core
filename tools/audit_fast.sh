@@ -99,6 +99,9 @@ pytest tests/docs/test_doc_governance.py -q
 echo "== 1k) Root files governance check =="
 pytest tests/docs/test_root_files.py -q
 
+echo "== 1l) Roadmap governance check =="
+pytest tests/docs/test_roadmap_governance.py -q
+
 echo "== 2) AST police (Python) =="
 python3 tools/ast_police.py
 
