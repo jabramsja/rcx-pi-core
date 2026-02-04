@@ -317,22 +317,42 @@ function classifyLegacyLinkedList(value) {
       return 'list';
     }
 
-    // Check if head is a valid kv-pair with string key
+    // Check if head is a valid kv-pair with string key and proper tail structure
+    // kv-pair format: {head: string_key, tail: {head: value, tail: null}}
     const head = current.head;
     if (typeof head === 'object' && head !== null) {
       const headKeys = Object.keys(head).sort();
-      // kv-pair format: {head: key, tail: {head: value, tail: null}}
-      if (headKeys.length === 2 && headKeys[0] === 'head' && headKeys[1] === 'tail') {
-        const key = head.head;
-        if (typeof key !== 'string') {
-          // Key is not a string - not a valid dict encoding
-          return 'list';
-        }
-        // Valid kv-pair with string key - continue checking
-      } else {
+      // Must have exactly {head, tail}
+      if (headKeys.length !== 2 || headKeys[0] !== 'head' || headKeys[1] !== 'tail') {
         // Head is object but not kv-pair structure - it's a list
         return 'list';
       }
+
+      // Validate the key is a string
+      const key = head.head;
+      if (typeof key !== 'string') {
+        // Key is not a string - not a valid dict encoding
+        return 'list';
+      }
+
+      // P2 fix: Validate tail structure is {head: value, tail: null}
+      // Without this, malformed elements like {head: "k", tail: {head: 1, tail: {head: 2}}}
+      // would be incorrectly classified as dict
+      const kvTail = head.tail;
+      if (typeof kvTail !== 'object' || kvTail === null) {
+        // tail must be an object
+        return 'list';
+      }
+      const kvTailKeys = Object.keys(kvTail).sort();
+      if (kvTailKeys.length !== 2 || kvTailKeys[0] !== 'head' || kvTailKeys[1] !== 'tail') {
+        // tail must have exactly {head, tail}
+        return 'list';
+      }
+      if (kvTail.tail !== null) {
+        // kv-pair tail.tail must be null (value wrapper terminates)
+        return 'list';
+      }
+      // Valid kv-pair with string key and proper structure - continue checking
     } else {
       // Head is primitive - not a kv-pair, so it's a list
       return 'list';
