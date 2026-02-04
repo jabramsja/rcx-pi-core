@@ -54,7 +54,7 @@ DOC_CONTRACTS: dict[str, dict[str, Any]] = {
         ],
         "constants": {
             # max_steps and stack_guard are constants, not functions
-            "rcx_pi.selfhost.step_mu.KERNEL_RESERVED_FIELDS": 24,  # Security boundary
+            "rcx_pi.selfhost.step_mu.KERNEL_RESERVED_FIELDS": 22,  # Security boundary (Gate 3: entry points moved out)
         },
         "seeds": {},  # No specific seed counts claimed
     },

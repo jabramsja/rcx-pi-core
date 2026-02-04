@@ -139,7 +139,8 @@ pytest $PARALLEL_FLAG -q \
     tests/test_exhaustion_parity.py \
     tests/test_bootstrap_structural_bridge.py \
     tests/test_meta_circular_gate6.py \
-    tests/test_execution_path_verification.py
+    tests/test_execution_path_verification.py \
+    tests/test_js_parity_automated.py
 
 echo ""
 echo "== 5) JavaScript L3 parity check =="

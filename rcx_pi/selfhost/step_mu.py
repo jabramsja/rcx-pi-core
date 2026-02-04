@@ -111,21 +111,39 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
 # The bypass functions (is_kernel_intermediate, _is_kernel_internal_state) check
 # for these to skip validation of kernel states, but domain data with these keys
 # cannot forge kernel state because kernel projections require specific patterns.
+#
+# Gate 3 (2026-02-04) Security fix: Entry point keys (_detect_closure, _detect_exhaustion)
+# moved to ALGORITHM_ENTRYPOINT_KEYS. Reserved fields allowed ONLY inside entrypoint subtrees.
+# See validate_no_kernel_reserved_fields() for subtree-scoped validation.
 KERNEL_RESERVED_FIELDS = frozenset({  # AST_OK: security whitelist - frozen constant
     "_mode", "_phase", "_input", "_remaining",
     "_match_ctx", "_subst_ctx", "_kernel_ctx",
     "_status", "_result", "_stall",
     "_step", "_projs",  # Kernel entry format fields (Phase 8b adversary fix)
-    # EngineNews closure detection fields (9-agent review, 2026-02-02)
-    "_detect_closure", "_seen", "_current", "_check_list",
+    # Recurrence closure detection fields (9-agent review, 2026-02-02)
+    "_seen", "_current", "_check_list",
     # Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
-    "_detect_exhaustion", "_frozen", "_tau_step", "_operator_ids",
+    "_frozen", "_tau_step", "_operator_ids",
     # Bootstrap-Structural Bridge lookup phase fields (9-agent review, 2026-02-02)
     "_lookup_name", "_lookup_value", "_lookup_bindings", "_original_bindings"
 })
 
+# Algorithm entrypoint keys - reserved fields are ONLY allowed inside these subtrees.
+# Gate 3 (2026-02-04) Security fix: Prevents spoofed _mode/_phase at top level from
+# bypassing validation. Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
+# Allowed: {"_detect_closure": {"_mode": "recurrence", ...}}
+ALGORITHM_ENTRYPOINT_KEYS = frozenset({  # AST_OK: security whitelist - frozen constant
+    "_detect_closure",      # Recurrence algorithm entry point
+    "_detect_exhaustion",   # Exhaustion algorithm entry point
+})
 
-def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth: int = 0) -> None:
+
+def validate_no_kernel_reserved_fields(
+    value: Mu,
+    context: str = "input",
+    _depth: int = 0,
+    _in_algorithm_subtree: bool = False
+) -> None:
     """
     Validate that a value does not contain kernel-reserved fields (DEEP).
 
@@ -133,8 +151,10 @@ def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth
     fields like _mode, _match_ctx, etc. If domain input contains these
     at ANY nesting level, it could potentially confuse the kernel state machine.
 
-    Phase 8b fix: Now checks recursively to prevent nested smuggling attacks.
-    Attack vector blocked: {"outer": {"_mode": "done", "_result": "pwned"}}
+    Gate 3 (2026-02-04) Security fix: Reserved fields are now allowed ONLY inside
+    algorithm entrypoint subtrees (_detect_closure, _detect_exhaustion).
+    Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
+    Allowed: {"_detect_closure": {"_mode": "recurrence", ...}}
 
     This validation is called at the kernel entry point (step_kernel_mu)
     to ensure domain inputs are clean at all depths.
@@ -143,9 +163,10 @@ def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth
         value: The Mu value to validate.
         context: Description for error message (e.g., "input", "projection body").
         _depth: Internal recursion depth tracker (prevents stack overflow).
+        _in_algorithm_subtree: True if we're inside an algorithm entrypoint subtree.
 
     Raises:
-        ValueError: If value contains kernel-reserved fields at any depth.
+        ValueError: If value contains kernel-reserved fields outside entrypoint subtrees.
     """
     # Depth guard - FAIL CLOSED on pathological inputs (Phase 8b expert fix)
     # Adversary model: Domain inputs may be untrusted (e.g., from network).
@@ -160,16 +181,23 @@ def validate_no_kernel_reserved_fields(value: Mu, context: str = "input", _depth
 
     if isinstance(value, dict):
         for key, val in value.items():
-            if key in KERNEL_RESERVED_FIELDS:
+            # Check if we're entering an algorithm entrypoint subtree
+            entering_algorithm = key in ALGORITHM_ENTRYPOINT_KEYS
+
+            # Reserved fields are only allowed inside algorithm entrypoint subtrees
+            if key in KERNEL_RESERVED_FIELDS and not _in_algorithm_subtree:
                 raise ValueError(
                     f"SECURITY: {context} cannot contain kernel-reserved field: {key}. "
                     f"Reserved fields: {sorted(KERNEL_RESERVED_FIELDS)}"
                 )
-            # Recurse into nested values
-            validate_no_kernel_reserved_fields(val, context, _depth + 1)
+            # Recurse into nested values, tracking if we're in an entrypoint subtree
+            validate_no_kernel_reserved_fields(
+                val, context, _depth + 1,
+                _in_algorithm_subtree=(_in_algorithm_subtree or entering_algorithm)
+            )
     elif isinstance(value, list):
         for item in value:
-            validate_no_kernel_reserved_fields(item, context, _depth + 1)
+            validate_no_kernel_reserved_fields(item, context, _depth + 1, _in_algorithm_subtree)
 
 
 # =============================================================================

@@ -116,17 +116,25 @@ class TestReservedFieldsBasic:
         with pytest.raises(ValueError, match="kernel-reserved field"):
             validate_no_kernel_reserved_fields(malicious, "test")
 
-    def test_all_24_reserved_fields_rejected(self):
-        """All 24 reserved fields are rejected (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)."""
+    def test_all_22_reserved_fields_rejected(self):
+        """All 22 reserved fields are rejected (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge).
+
+        Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
+        to ALGORITHM_ENTRYPOINT_KEYS.
+        """
         for field in KERNEL_RESERVED_FIELDS:
             malicious = {field: "attack"}
             with pytest.raises(ValueError, match="kernel-reserved field"):
                 validate_no_kernel_reserved_fields(malicious, "test")
 
     def test_reserved_fields_count(self):
-        """Verify exactly 24 reserved fields exist (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)."""
-        assert len(KERNEL_RESERVED_FIELDS) == 24, (
-            f"Expected 24 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
+        """Verify exactly 22 reserved fields exist (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge).
+
+        Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
+        to ALGORITHM_ENTRYPOINT_KEYS.
+        """
+        assert len(KERNEL_RESERVED_FIELDS) == 22, (
+            f"Expected 22 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
         )
 
 
