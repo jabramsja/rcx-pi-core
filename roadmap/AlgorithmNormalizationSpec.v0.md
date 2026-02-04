@@ -4,7 +4,7 @@
 > **Authorization**: See [`TASKS.md`](../TASKS.md)
 > **Scope**: This document defines DESIGN only. Draft specs live in `roadmap/`; approved specs migrate to `docs/core/`.
 
-Status: draft. Location: `roadmap/` only. If approved, migrate to `docs/core/`.
+Status: **Gate 1 complete** (2026-02-04). Open questions resolved. Ready for approval and migration to `docs/core/`.
 
 ## Purpose
 Define a single canonical normalized representation for algorithm state used by recurrence, exhaustion, and rcx_engine so these algorithms can run via structural match/subst without hybrid host execution.
@@ -146,12 +146,27 @@ Define a single canonical normalized representation for algorithm state used by 
 2. Execution-path tests that fail if structural match/subst are not used.
 3. Updated parity vectors for recurrence/exhaustion and JS parity cross-checks.
 
-## Open Questions (Must resolve for Gate 1 exit)
+## Open Questions (Resolved 2026-02-04)
 
-**These questions must have explicit answers before Gate 1 is complete.**
+**These questions have been answered. Gate 1 exit criteria met.**
 
 1. Should engine outputs remain normalized end-to-end, or is denormalization permitted only at external I/O boundaries?
-   - **Answer:** _(TBD - required for Gate 1 exit)_
+   - **Answer:** **Option B - Denormalize at external I/O boundaries only.**
+   - Internal execution remains fully normalized (structural purity).
+   - Denormalization occurs only when outputting to users, logs, or external tools.
+   - This provides a single clean boundary and avoids dual-path drift.
 
 2. Is there any algorithm state that must remain raw for observability tooling?
-   - **Answer:** _(TBD - required for Gate 1 exit)_
+   - **Answer:** **Option A - No exceptions.**
+   - All internal state is normalized. Observability tools consume denormalized output.
+   - No alternate raw truth path exists (prevents drift from structural runtime).
+   - The denormalizer becomes the sole readability boundary.
+
+## Denormalizer Requirements (Added per Gate 1 review)
+
+The denormalizer (`denormalize_for_output()` and JS equivalent) is part of the trusted I/O boundary:
+
+1. **Deterministic**: Same normalized input must always produce identical denormalized output.
+2. **Tested**: Round-trip tests required (`normalize → denormalize → normalize` must be stable).
+3. **Audited**: Changes to denormalizer require full 9-agent review (it's a trust boundary).
+4. **Parity**: Python and JS denormalizers must produce identical output for same input.
