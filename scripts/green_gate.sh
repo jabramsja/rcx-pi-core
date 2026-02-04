@@ -104,7 +104,8 @@ run_python() {
 
   echo "[PY 8/11] Python test suite (excludes stress tests - those run in audit_all)"
   # Stress tests have 60-120s deadlines per example, run separately in audit_all.sh
-  python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/
+  # Also exclude test_js_parity_automated.py - JS parity verified via node run in step 11
+  python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
   echo
 
   echo "[PY 9/11] Fixture v2 validation"

@@ -263,8 +263,8 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 
 ### 1. Projections Exist
 - [x] `mu/closures/exhaustion.v1.json` exists (see `test_seed_counts.py` for count)
-- [ ] Each projection has `id`, `pattern`, `body` fields
-- [ ] SHA256 checksum verified on load
+- [x] Each projection has `id`, `pattern`, `body` fields (enforced by `seed_integrity.py`)
+- [x] SHA256 checksum verified on load (enforced by `seed_integrity.py`)
 
 ### 2. Execution is Structural (HYBRID)
 - [x] Exhaustion detection runs via `eval_seed.step()` (bootstrap primitive)
@@ -276,7 +276,7 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 - [x] Same projections produce same results on Python and JS
 - [x] Parity tests in `tests/test_exhaustion_parity.py`
 - [x] JS loads exhaustion.v1.json in `mu/host/js/eval_step.js`
-- **Note:** JS uses bootstrap path (Python match/substitute via JSON API, or native bootstrap). Both produce identical results.
+- **Note:** JS uses its own bootstrap match/substitute implementation. Cross-substrate parity tests verify identical results.
 
 ### 4. Integration Tests
 - [ ] Single operator exhaustion detected and frozen

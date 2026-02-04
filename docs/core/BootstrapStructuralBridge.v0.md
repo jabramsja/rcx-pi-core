@@ -459,7 +459,7 @@ Both paths produce identical results. The execution path verification tests (`te
 4. **Create non-linear tests** (binding conflict detection)
 5. **Port to JS** and verify parity
 6. **Update recurrence.v1 and exhaustion.v1** to use bridge
-7. **Update execution_layer** declarations to META_CIRCULAR
+7. **Update execution_layer** declarations to META_CIRCULAR (currently HYBRID; requires non-linear kernel support)
 8. **Add integration tests** verifying meta-circular execution
 
 ---
