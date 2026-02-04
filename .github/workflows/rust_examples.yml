@@ -1,7 +1,7 @@
 name: Rust Examples
 
-# Manual-only - green_gate.yml already runs rust tests on all PRs to dev
-# Use this for isolated rust testing without full green_gate overhead
+# Manual-only - green_gate.yml runs python-only mode (no rust)
+# Use this workflow to run rust tests, or run scripts/green_gate.sh rust-only locally
 on:
   workflow_dispatch:  # Manual trigger only - avoids duplicate runs with green_gate.yml
 
