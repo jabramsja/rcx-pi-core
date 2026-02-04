@@ -333,8 +333,8 @@ class TestJSSecurityParity:
         """JS should have same reserved field count as Python."""
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
-        # Python has 20 reserved fields (12 kernel + 4 EngineNews + 4 Exhaustion)
-        assert len(KERNEL_RESERVED_FIELDS) == 20, "Python reserved fields changed"
+        # Python has 24 reserved fields (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)
+        assert len(KERNEL_RESERVED_FIELDS) == 24, "Python reserved fields changed"
 
         # JS test output should confirm reserved fields are checked
         result = subprocess.run(
@@ -403,3 +403,254 @@ class TestJSTraceFormatParity:
         # Specific checks
         assert "Trace entries have step/state/projection: true" in result.stdout
         assert "Stall detected correctly: true" in result.stdout
+
+
+class TestJSBridgeParity:
+    """Verify JS bridge execution matches Python (Gate 7: L3 Bridge Parity).
+
+    9-agent finding (Grounding): Bridge projections were loaded but not tested
+    via automated cross-substrate comparison. These tests verify that recurrence
+    and exhaustion run identically through both Python and JS bridge paths.
+    """
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        """Call JS with JSON API and parse response."""
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=60
+        )
+
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+
+        raise RuntimeError(f"No JSON_API_RESPONSE found in JS output: {result.stdout[:500]}")
+
+    def test_js_bridge_projections_loaded(self):
+        """Verify JS loads bridge projections."""
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=60
+        )
+
+        assert "bootstrap_structural.v1.json: 5 projections" in result.stdout, (
+            "JS should load 5 bridge projections"
+        )
+        assert "Total (with Bridge): 32 projections" in result.stdout, (
+            "JS combined kernel+bridge should be 32 projections"
+        )
+
+    def test_js_bridge_constants_reported(self):
+        """Verify JS reports bridge projection count via JSON API."""
+        js_response = self._run_js_json_api({"action": "get_constants"})
+        assert js_response["success"], f"JS get_constants failed: {js_response}"
+        assert js_response["bridge_projection_count"] == 5, (
+            f"Expected 5 bridge projections, got {js_response['bridge_projection_count']}"
+        )
+        assert js_response["total_with_bridge"] == 32, (
+            f"Expected 32 total with bridge, got {js_response['total_with_bridge']}"
+        )
+
+    def test_recurrence_with_bridge_no_closure(self):
+        """Python and JS recurrence-with-bridge should match for no-closure case."""
+        from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
+        from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+
+        recurrence_projs = load_verified_seed(get_seed_path("recurrence.v1.json"))["projections"]
+
+        # Input with no closure (all unique states)
+        input_data = {
+            "_detect_closure": {
+                "trace": {
+                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "tail": {
+                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "tail": None
+                    }
+                },
+                "result": "final"
+            }
+        }
+
+        # Run Python (using bootstrap path which handles non-linear patterns)
+        py_result = input_data
+        for _ in range(100):
+            next_result = run_algorithm_meta_circular(recurrence_projs, py_result)
+            if next_result == py_result:
+                break
+            py_result = next_result
+
+        # Run JS with bridge
+        js_response = self._run_js_json_api({
+            "action": "run_recurrence_with_bridge",
+            "input": input_data,
+            "maxSteps": 100
+        })
+        assert js_response["success"], f"JS run_recurrence_with_bridge failed: {js_response}"
+        js_result = js_response["result"]
+
+        # Compare results
+        assert _cross_substrate_equal(py_result, js_result), (
+            f"Recurrence (no closure) mismatch:\n"
+            f"  Python: {py_result}\n"
+            f"  JS: {js_result}"
+        )
+
+    def test_recurrence_with_bridge_closure_detected(self):
+        """Python and JS recurrence-with-bridge should match for closure case."""
+        from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
+        from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+
+        recurrence_projs = load_verified_seed(get_seed_path("recurrence.v1.json"))["projections"]
+
+        # Input with closure (state A repeats)
+        input_data = {
+            "_detect_closure": {
+                "trace": {
+                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "tail": {
+                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "tail": {
+                            "head": {"step": 2, "state": "A", "projection": "p3"},
+                            "tail": None
+                        }
+                    }
+                },
+                "result": "final"
+            }
+        }
+
+        # Run Python
+        py_result = input_data
+        for _ in range(100):
+            next_result = run_algorithm_meta_circular(recurrence_projs, py_result)
+            if next_result == py_result:
+                break
+            py_result = next_result
+
+        # Run JS with bridge
+        js_response = self._run_js_json_api({
+            "action": "run_recurrence_with_bridge",
+            "input": input_data,
+            "maxSteps": 100
+        })
+        assert js_response["success"], f"JS run_recurrence_with_bridge failed: {js_response}"
+        js_result = js_response["result"]
+
+        # Compare results
+        assert _cross_substrate_equal(py_result, js_result), (
+            f"Recurrence (closure) mismatch:\n"
+            f"  Python: {py_result}\n"
+            f"  JS: {js_result}"
+        )
+
+        # Both should detect closure
+        assert py_result.get("closure_detected") is True, "Python should detect closure"
+        assert js_result.get("closure_detected") is True, "JS should detect closure"
+
+    def test_exhaustion_with_bridge_no_exhaustion(self):
+        """Python and JS exhaustion-with-bridge should match for no-exhaustion case."""
+        from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
+        from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+
+        exhaustion_projs = load_verified_seed(get_seed_path("exhaustion.v1.json"))["projections"]
+
+        # Input with different operators (no exhaustion)
+        input_data = {
+            "_detect_exhaustion": {
+                "trace": {
+                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "tail": {
+                        "head": {"step": 1, "state": "B", "projection": "op2"},
+                        "tail": None
+                    }
+                },
+                "frozen": None,
+                "tau_step": 0,
+                "operator_ids": {
+                    "head": "op1",
+                    "tail": {"head": "op2", "tail": None}
+                }
+            }
+        }
+
+        # Run Python
+        py_result = input_data
+        for _ in range(100):
+            next_result = run_algorithm_meta_circular(exhaustion_projs, py_result)
+            if next_result == py_result:
+                break
+            py_result = next_result
+
+        # Run JS with bridge
+        js_response = self._run_js_json_api({
+            "action": "run_exhaustion_with_bridge",
+            "input": input_data,
+            "maxSteps": 100
+        })
+        assert js_response["success"], f"JS run_exhaustion_with_bridge failed: {js_response}"
+        js_result = js_response["result"]
+
+        # Compare results
+        assert _cross_substrate_equal(py_result, js_result), (
+            f"Exhaustion (no exhaust) mismatch:\n"
+            f"  Python: {py_result}\n"
+            f"  JS: {js_result}"
+        )
+
+    def test_exhaustion_with_bridge_exhausted(self):
+        """Python and JS exhaustion-with-bridge should match for exhaustion case."""
+        from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
+        from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+
+        exhaustion_projs = load_verified_seed(get_seed_path("exhaustion.v1.json"))["projections"]
+
+        # Input with same operator (should exhaust)
+        input_data = {
+            "_detect_exhaustion": {
+                "trace": {
+                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "tail": {
+                        "head": {"step": 1, "state": "B", "projection": "op1"},
+                        "tail": None
+                    }
+                },
+                "frozen": None,
+                "tau_step": 0,
+                "operator_ids": {"head": "op1", "tail": None}
+            }
+        }
+
+        # Run Python
+        py_result = input_data
+        for _ in range(100):
+            next_result = run_algorithm_meta_circular(exhaustion_projs, py_result)
+            if next_result == py_result:
+                break
+            py_result = next_result
+
+        # Run JS with bridge
+        js_response = self._run_js_json_api({
+            "action": "run_exhaustion_with_bridge",
+            "input": input_data,
+            "maxSteps": 100
+        })
+        assert js_response["success"], f"JS run_exhaustion_with_bridge failed: {js_response}"
+        js_result = js_response["result"]
+
+        # Compare results
+        assert _cross_substrate_equal(py_result, js_result), (
+            f"Exhaustion (exhausted) mismatch:\n"
+            f"  Python: {py_result}\n"
+            f"  JS: {js_result}"
+        )
+
+        # Both should detect exhaustion
+        assert py_result.get("exhaustion_detected") is True, "Python should detect exhaustion"
+        assert js_result.get("exhaustion_detected") is True, "JS should detect exhaustion"

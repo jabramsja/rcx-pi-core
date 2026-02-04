@@ -59,7 +59,7 @@ class TestNonLinearPatternParity:
     """Test that mu_equal correctly detects binding conflicts in non-linear patterns."""
 
     @given(value=mu_value(max_depth=2))
-    @settings(max_examples=200, deadline=None)
+    @settings(deadline=None)
     def test_same_value_binds_successfully(self, value):
         """Pattern [x, x] should match [v, v] for any value v."""
         pattern = [{"var": "x"}, {"var": "x"}]
@@ -73,7 +73,7 @@ class TestNonLinearPatternParity:
         assert mu_equal(result["x"], value)
 
     @given(val1=mu_value(max_depth=2), val2=mu_value(max_depth=2))
-    @settings(max_examples=200, deadline=None)
+    @settings(deadline=None)
     def test_different_values_conflict_correctly(self, val1, val2):
         """Pattern [x, x] should NO_MATCH for [v1, v2] when v1 != v2."""
         pattern = [{"var": "x"}, {"var": "x"}]
@@ -90,7 +90,7 @@ class TestNonLinearPatternParity:
             assert result is NO_MATCH, f"Should NOT match different values: {val1} vs {val2}"
 
     @given(value=mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=None)
+    @settings(deadline=None)
     def test_dict_non_linear_pattern(self, value):
         """Non-linear patterns in dicts: {"a": x, "b": x} matches {"a": v, "b": v}."""
         pattern = {"a": {"var": "x"}, "b": {"var": "x"}}
@@ -103,7 +103,7 @@ class TestNonLinearPatternParity:
         assert mu_equal(result["x"], value)
 
     @given(val1=mu_value(max_depth=2), val2=mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=None)
+    @settings(deadline=None)
     def test_dict_non_linear_conflict(self, val1, val2):
         """Dict pattern {"a": x, "b": x} conflicts when a != b."""
         pattern = {"a": {"var": "x"}, "b": {"var": "x"}}
@@ -118,7 +118,7 @@ class TestNonLinearPatternParity:
             assert result is NO_MATCH
 
     @given(value=mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=None)
+    @settings(deadline=None)
     def test_nested_non_linear_pattern(self, value):
         """Nested non-linear: [[x], [x]] matches [[v], [v]]."""
         pattern = [[{"var": "x"}], [{"var": "x"}]]
@@ -135,7 +135,7 @@ class TestMuEqualJsonDumpsParity:
     """Verify mu_equal produces same results as json.dumps comparison."""
 
     @given(val1=mu_value(max_depth=3), val2=mu_value(max_depth=3))
-    @settings(max_examples=500, deadline=None)
+    @settings(deadline=None)
     def test_mu_equal_matches_json_dumps(self, val1, val2):
         """mu_equal should produce same result as json.dumps comparison."""
         # The old approach

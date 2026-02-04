@@ -2,7 +2,197 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-03
+
+### rcx_engine.v1.json Test Coverage: 6 Projections Now Tested
+
+**Addressed grounding agent finding:** rcx_engine.v1.json had 6 untested projections.
+
+**Created:**
+- `tests/fixtures/rcx_engine_vectors.json` - 7 test vectors covering all engine phases
+- `tests/test_rcx_engine_parity.py` - 15 tests verifying engine projection behavior
+
+**Tests cover:**
+- `engine.init` - Initialize with default config
+- `engine.init_config` - Initialize with custom config
+- `engine.trace_done` - Trace complete triggers recurrence
+- `engine.recurrence_done` - Recurrence result triggers exhaustion
+- `engine.exhaustion_done` - Exhaustion result produces final output
+- `engine.unwrap` - Extract final engine result
+
+**Note:** rcx_engine.v1.json has `status: "design_only"` - projections are tested but not yet integrated into production execution.
+
+---
+
+### Agent Validator: Now Verifies TRUTH, Not Just FORMAT
+
+**Problem discovered:** The agent validator only checked FORMAT (FINDING/FILE/LINES/CODE blocks exist) but never verified if cited code actually appears at the claimed location. Agents could produce perfectly formatted fabrications.
+
+**Fix applied:**
+- `tools/validate_agent_compliance.py` now reads actual files and compares CODE
+- New `--verify-code` flag checks if CODE matches FILE:LINE (anti-fabrication)
+- New `--strict` flag enables all verifications (recommended for CI)
+- Similarity matching with 80% threshold for formatting differences
+- Clear "FABRICATION DETECTED" errors with details
+
+**Agent prompts updated:**
+- All 9 agents now warned: "Your citations will be MACHINE-VERIFIED"
+- Agents must use Read tool and paste EXACTLY from output
+- structural-proof agent must write tests to `tests/agent_verification/`
+- grounding agent must write tests to `tests/structural/`
+
+**Hook updated:**
+- `.claude/hooks/validate-agent-compliance.sh` now runs with `--strict`
+- Fabricated citations are blocked with clear error message
+
+---
+
+### Bootstrap-Structural Bridge: Wiring Verified
+
+**Structural matching with bridge WORKS.** Execution path tests prove bridge projections fire:
+- `bridge.var.check_existing` intercepts variable patterns
+- `bridge.lookup.not_found` adds new bindings
+- `bridge.lookup.found_same` handles non-linear match (same value)
+- `bridge.lookup.found_different` detects binding conflicts
+
+**Algorithm execution wiring clarified:**
+- `run_algorithm_meta_circular()` uses Python match/substitute for practical execution
+- Python match/substitute ALREADY handle non-linear patterns correctly
+- The bridge PROVES this CAN be structural (capability demonstration)
+- For TRUE meta-circular algorithm execution, algorithm projections would need to work with normalized format
+
+**What's needed for TRUE meta-circular algorithm execution:**
+1. Algorithm projections (recurrence.v1, exhaustion.v1) work with linked-list format internally
+2. Structural match/subst normalizes everything to linked-list format
+3. To wire algorithms through structural match/subst, either:
+   - Rewrite algorithm projections to expect fully normalized state, OR
+   - Create a normalization-free structural matcher for algorithm use
+
+---
+
+### Execution Path Verification: Tests Verify What Actually Runs (FIXED)
+
+**Problem identified and FIXED:** Tests had verified BEHAVIOR but not EXECUTION PATH. All tests passed because Python's `eval_seed.match()` provides binding conflict detection, but we claimed bootstrap_structural projections were providing it. This was "test theater."
+
+**Solution implemented:**
+- Created `tests/test_execution_path_verification.py` with 9 tests
+- Tests use tracing to prove WHICH projections fire
+- Tests FAIL if bridge projections don't execute (even if behavior is correct)
+- Fixed wiring: bridge projections now come BEFORE match.v2 in combined kernel
+
+**Agent guardrails updated:**
+- Added "Execution Path Verification" section to `docs/agents/AgentGuardrails.v0.md`
+- Agents must now verify execution path, not just behavior
+- Claims like "runs through X" require tests that fail if X isn't used
+
+**match.v3 cleanup:**
+- Removed all references to match.v3.json (file was incorrectly created)
+- We use match.v2.json + bootstrap_structural.v1.json directly
+- Updated all tests, docs, and seed_integrity.py
+
+---
+
+### Cleanup: Removed Stale substrates/js/ Directory
+
+**Removed:** `substrates/js/eval_step.js` (stale duplicate)
+
+The canonical JS substrate location is now `mu/host/js/eval_step.js`. The old `substrates/js/eval_step.js` was left behind after the mu/ folder reorganization (2026-02-02) and was 478 bytes behind the canonical version. All tests and documentation already reference the correct path.
+
+---
+
 ## 2026-02-02
+
+### Step 7: Bootstrap-Structural Bridge IMPLEMENTED
+
+**Core implementation complete.** Non-linear pattern support via binding conflict detection as structural projections.
+
+**Files created:**
+- `mu/bridge/bootstrap_structural.v1.json` - 5 bridge projections for binding lookup
+- `tests/test_bootstrap_structural_bridge.py` - 31 tests covering all 22 design vectors
+
+**Architecture note:** We use match.v2 + bootstrap_structural.v1 directly (loaded at runtime)
+rather than a combined match.v3 file. This keeps the bridge modular.
+
+**How it works:**
+- When pattern has `{"var": "x"}`, bridge checks if `x` is already bound
+- If not bound: add new binding (same as match.v2)
+- If bound with same value: continue (non-linear pattern OK)
+- If bound with different value: NO_MATCH (binding conflict detected)
+
+**Test coverage:**
+- Linear parity tests (5): verify bridge matches match.v2 for linear patterns
+- Non-linear detection tests (8): verify binding conflict detection works
+- Edge cases (4): null values, empty collections, type mismatches
+- Security vectors (3): reserved field handling, ordering verification
+- Cross-substrate parity (3): unicode, float, deep nesting
+
+**Still pending (Gates 6-7):**
+- Update recurrence.v1/exhaustion.v1 to declare META_CIRCULAR
+- Port bridge to JavaScript for L3 parity
+
+**Files updated:**
+- `rcx_pi/selfhost/seed_integrity.py` - Added checksums for new seeds
+- `tools/seed_police.sh` - Added bridge.* to allowed prefixes, v3 version handling
+- `docs/core/BootstrapStructuralBridge.v0.md` - Updated status to IMPLEMENTED
+
+---
+
+### Bootstrap-Structural Bridge: Promoted to NEXT (Step 7)
+
+**Promoted from VECTOR** after 9-agent verification review confirmed all fixes applied correctly.
+
+**Final verdicts (verification round):**
+| Agent | Verdict |
+|-------|---------|
+| Verifier | APPROVE |
+| Adversary | SECURE |
+| Expert | MINIMAL |
+| Structural-proof | STRUCTURALLY_SOUND |
+| Grounding | ADEQUATELY_GROUNDED |
+| Fuzzer | NEEDS_MORE (non-blocking) |
+| Translator | MATCHES_INTENT |
+| Visualizer | ARCHITECTURALLY_ALIGNED |
+| Advisor | READY_FOR_PROMOTION |
+
+**Files updated:**
+- `TASKS.md` - Added Step 7 to NEXT section with full implementation plan
+- `STATUS.md` - Updated next milestone to Step 7 implementation
+
+**Implementation plan:** 7 gates defined by Advisor agent, ~12 projections total.
+See `TASKS.md` Step 7 for details.
+
+---
+
+### Bootstrap-Structural Bridge: 9-Agent Review Complete
+
+**Review completed** for `docs/core/BootstrapStructuralBridge.v0.md` with all 9 agents:
+- Verifier: APPROVE (all 15 North Star invariants pass)
+- Adversary: NEEDS HARDENING → FIXED
+- Expert: MINIMAL
+- Structural-proof: DESIGN SOUND
+- Grounding: PARTIALLY_GROUNDED → FIXED
+- Fuzzer: DESIGN COMPLETE
+- Translator: MATCHES_INTENT
+- Visualizer: 3 DIAGRAMS
+- Advisor: PROMOTE TO NEXT
+
+**Security hardening applied:**
+- KERNEL_RESERVED_FIELDS updated from 20 to 24 fields (both Python and JS)
+- Added: `_lookup_name`, `_lookup_value`, `_lookup_bindings`, `_original_bindings`
+- Test vector table expanded from 6 to 22 vectors
+
+**Files changed:**
+- `rcx_pi/selfhost/step_mu.py` - Added 4 bridge reserved fields
+- `mu/host/js/eval_step.js` - Added 4 bridge reserved fields (L3 parity)
+- `substrates/js/eval_step.js` - Added 4 bridge reserved fields (L3 parity)
+- `tests/test_security_boundary_fuzzer.py` - Updated reserved field count (20→24)
+- `tests/test_kernel_security_fuzzer.py` - Updated reserved field count (20→24)
+- `tests/test_js_parity_automated.py` - Updated reserved field count (20→24)
+- `tests/structural/test_step_mu_kernel_integration.py` - Updated expected reserved fields set
+- `docs/core/BootstrapStructuralBridge.v0.md` - Expanded test vectors, updated checklist
+- `TASKS.md` - Marked 9-agent review complete, design ready for NEXT
+
+---
 
 ### mu/ Folder Reorganization
 
@@ -43,15 +233,15 @@ All notable changes to RCX are documented in this file.
 - Added North Star #14 (execution layer declaration) and #15 (true self-hosting path)
 - Added Cross-Seed Compatibility Check to AgentGuardrails.v0.md
 - Updated enginenews.v1.json and exhaust.v1.json with `"execution_layer": "BOOTSTRAP"`
-- Created VECTOR item for match.v3 (non-linear pattern support)
-- Created design doc `docs/core/MatchV3NonLinear.v0.md`
+- Created VECTOR item for bootstrap_structural bridge (non-linear pattern support)
+- Created design doc `docs/core/BootstrapStructuralBridge.v0.md`
 
 **Files:**
-- `TASKS.md` - Added North Star #14, #15; added match.v3 to VECTOR
+- `TASKS.md` - Added North Star #14, #15; added bootstrap_structural to VECTOR
 - `docs/agents/AgentGuardrails.v0.md` - Added Cross-Seed Compatibility Check section
 - `seeds/enginenews.v1.json` - Added execution_layer, requires_patterns, incompatible_with
 - `seeds/exhaust.v1.json` - Added execution_layer, requires_patterns, incompatible_with
-- `docs/core/MatchV3NonLinear.v0.md` - Design doc for non-linear pattern support
+- `docs/core/BootstrapStructuralBridge.v0.md` - Design doc for non-linear pattern support
 
 **Lesson Learned:** 9-agent review verified correctness but not architectural fit. New guardrails require verifying execution path matches claims, not just that tests pass.
 
@@ -202,21 +392,21 @@ both Python and JavaScript and compared the outputs.
 - Both Python and JS substrates handle binding conflicts identically
 
 **Tests:**
-- `tests/test_enginenews_parity.py` - 23+ parity tests including:
-  - TestEngineNewsProjections: seed structure validation
-  - TestEngineNewsParity: parity vector tests
-  - TestEngineNewsIntegration: integration with run_mu_structural
-  - TestEngineNewsSpecCompliance: Rule 2.2 grounding tests
-  - TestEngineNewsClosureObjectStructure: exact Omega(tau) structure
-  - TestEngineNewsExactProjectionCount: 9 projections exactly
-- `tests/test_enginenews_fuzzer.py` - Property-based fuzzer tests:
-  - TestEngineNewsDeterminism: same input -> same output
-  - TestEngineNewsClosureSemantics: Rule 2.2 semantics
-  - TestEngineNewsEdgeCases: numeric, string, null states
-  - TestEngineNewsTypeDistinctness: 0 vs false vs null
-  - TestEngineNewsTraceFormats: stall, max_steps entries
-  - TestEngineNewsComplexStates: nested state equality
-- `tests/fixtures/enginenews_vectors.json` - 5 parity vectors
+- `tests/test_recurrence_parity.py` - 24 parity tests including:
+  - TestRecurrenceProjections: seed structure validation
+  - TestRecurrenceParity: parity vector tests
+  - TestRecurrenceIntegration: integration with run_mu_structural
+  - TestRecurrenceSpecCompliance: Rule 2.2 grounding tests
+  - TestRecurrenceClosureObjectStructure: exact Omega(tau) structure
+  - TestRecurrenceExactProjectionCount: 9 projections exactly
+- `tests/test_recurrence_fuzzer.py` - Property-based fuzzer tests:
+  - TestRecurrenceDeterminism: same input -> same output
+  - TestRecurrenceClosureSemantics: Rule 2.2 semantics
+  - TestRecurrenceEdgeCases: numeric, string, null states
+  - TestRecurrenceTypeDistinctness: 0 vs false vs null
+  - TestRecurrenceTraceFormats: stall, max_steps entries
+  - TestRecurrenceComplexStates: nested state equality
+- `tests/fixtures/recurrence_vectors.json` - 22 parity vectors
 
 **7-Agent Review (Second Pass):**
 | Agent | Verdict | Summary |
@@ -625,7 +815,7 @@ both Python and JavaScript and compared the outputs.
 
 - **Resource Exhaustion Guardrails** (PR #149)
   - Global projection step budget: MAX_PROJECTION_STEPS = 50,000
-  - Mu depth limit: MAX_MU_DEPTH = 200
+  - Mu depth limit: MAX_MU_DEPTH = 300
   - Mu width limit: MAX_MU_WIDTH = 1,000
   - Empty variable name rejection in match_mu/subst_mu
 

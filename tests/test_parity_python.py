@@ -17,7 +17,7 @@ import pytest
 from rcx_pi.selfhost.mu_type import Mu, mu_equal
 from rcx_pi.selfhost.match_mu import normalize_for_match
 from rcx_pi.selfhost.subst_mu import denormalize_from_match
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.step_mu import (
     validate_no_kernel_reserved_fields,
     list_to_linked,        # Use canonical implementation (Expert finding: avoid duplication)
@@ -50,11 +50,10 @@ class TestParityVectors:
 
     @pytest.fixture(scope="class")
     def kernel_projections(self):
-        """Load combined kernel + match + subst projections."""
-        seeds_dir = get_seeds_dir()
-        kernel = load_verified_seed(seeds_dir / "kernel.v1.json")
-        match_seed = load_verified_seed(seeds_dir / "match.v2.json")
-        subst_seed = load_verified_seed(seeds_dir / "subst.v2.json")
+        """Load combined kernel + match + subst projections from mu/ canonical location."""
+        kernel = load_verified_seed(get_seed_path("kernel.v1.json"))
+        match_seed = load_verified_seed(get_seed_path("match.v2.json"))
+        subst_seed = load_verified_seed(get_seed_path("subst.v2.json"))
         return kernel["projections"] + match_seed["projections"] + subst_seed["projections"]
 
     @pytest.mark.parametrize("vector_id", [

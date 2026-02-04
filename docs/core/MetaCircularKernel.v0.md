@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Meta-Circular Kernel Specification v0
 
 Status: **DONE** (promoted 2026-01-27, Phase 7 COMPLETE, L2 FULL achieved via explicit acceptance of for-loop as bootstrap primitive)
@@ -381,11 +398,11 @@ These are **additive changes** to existing seeds - no breaking changes to curren
 **Kernel projections (7):** wrap, stall, try, match_success, match_fail, subst_success, unwrap
 
 **Modified existing:**
-- match.* (7 projections) + context passthrough
-- subst.* (12 projections) + context passthrough
-- classify.* (6 projections) - unchanged
+- match.* projections + context passthrough
+- subst.* projections + context passthrough
+- classify.* projections - unchanged
 
-**Total: 32 projections** for fully self-hosted kernel step
+**Total:** See `tests/structural/test_seed_counts.py` for verified projection counts per seed.
 
 ## Manual Trace: Concrete Example
 
@@ -803,8 +820,8 @@ The "guard" is implemented by **projection ordering**, not pattern syntax. Remov
 - `docs/core/SelfHosting.v0.md` - Phase 5/6 self-hosting spec
 - `docs/core/RCXKernel.v0.md` - Original kernel spec
 - `rcx_pi/selfhost/step_mu.py` - Current Python implementation
-- `seeds/match.v1.json` - Match projections (7)
-- `seeds/subst.v1.json` - Subst projections (12)
-- `seeds/classify.v1.json` - Classify projections (6)
-- `seeds/eval.v1.json` - Eval projections (7)
+- `mu/substrate/match.v1.json` - Match projections (7)
+- `mu/substrate/subst.v1.json` - Subst projections (12)
+- `mu/utilities/classify.v1.json` - Classify projections (6)
+- `mu/utilities/eval.v1.json` - Eval projections (7)
 - `mu/substrate/kernel.v1.json` - Kernel projections (7)

@@ -4,6 +4,7 @@
     "name": "SUBST_SEED_V2",
     "description": "Variable substitution with kernel context passthrough for Phase 7b",
     "doc": "docs/core/MetaCircularKernel.v0.md",
+    "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",

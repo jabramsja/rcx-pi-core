@@ -14,7 +14,7 @@ from rcx_pi.selfhost.step_mu import (
     is_kernel_projection,
     validate_kernel_projections_first,
 )
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
 # =============================================================================
@@ -137,7 +137,7 @@ class TestRealSeedProjectionOrder:
 
     def test_kernel_seed_all_kernel_projections(self):
         """All kernel.v1.json projections are kernel projections."""
-        seed = load_verified_seed(get_seeds_dir() / "kernel.v1.json")
+        seed = load_verified_seed(get_seed_path("kernel.v1.json"))
         projections = seed["projections"]
 
         for proj in projections:
@@ -145,7 +145,7 @@ class TestRealSeedProjectionOrder:
 
     def test_match_seed_all_domain_projections(self):
         """All match.v1.json projections are domain projections."""
-        seed = load_verified_seed(get_seeds_dir() / "match.v1.json")
+        seed = load_verified_seed(get_seed_path("match.v1.json"))
         projections = seed["projections"]
 
         for proj in projections:
@@ -153,7 +153,7 @@ class TestRealSeedProjectionOrder:
 
     def test_subst_seed_all_domain_projections(self):
         """All subst.v1.json projections are domain projections."""
-        seed = load_verified_seed(get_seeds_dir() / "subst.v1.json")
+        seed = load_verified_seed(get_seed_path("subst.v1.json"))
         projections = seed["projections"]
 
         for proj in projections:
@@ -161,9 +161,9 @@ class TestRealSeedProjectionOrder:
 
     def test_combined_kernel_match_subst_valid_order(self):
         """Kernel + match + subst in correct order passes validation."""
-        kernel_seed = load_verified_seed(get_seeds_dir() / "kernel.v1.json")
-        match_seed = load_verified_seed(get_seeds_dir() / "match.v1.json")
-        subst_seed = load_verified_seed(get_seeds_dir() / "subst.v1.json")
+        kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
+        match_seed = load_verified_seed(get_seed_path("match.v1.json"))
+        subst_seed = load_verified_seed(get_seed_path("subst.v1.json"))
 
         # Correct order: kernel first, then domain
         combined = (
@@ -177,8 +177,8 @@ class TestRealSeedProjectionOrder:
 
     def test_combined_match_kernel_invalid_order(self):
         """Match + kernel in wrong order fails validation."""
-        kernel_seed = load_verified_seed(get_seeds_dir() / "kernel.v1.json")
-        match_seed = load_verified_seed(get_seeds_dir() / "match.v1.json")
+        kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
+        match_seed = load_verified_seed(get_seed_path("match.v1.json"))
 
         # Wrong order: domain first
         combined = (
@@ -199,7 +199,7 @@ class TestProjectionOrderAttackPrevention:
 
     def test_malicious_entry_interceptor_blocked(self):
         """Malicious projection intercepting entry point is blocked."""
-        kernel_seed = load_verified_seed(get_seeds_dir() / "kernel.v1.json")
+        kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
 
         # Attacker tries to inject projection before kernel.wrap
         # This projection matches the kernel entry point signature
@@ -222,7 +222,7 @@ class TestProjectionOrderAttackPrevention:
 
     def test_forged_kernel_state_blocked(self):
         """Projection that outputs kernel-like state doesn't bypass validation."""
-        kernel_seed = load_verified_seed(get_seeds_dir() / "kernel.v1.json")
+        kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
 
         # Attacker tries to forge kernel done state
         # This is a domain projection that outputs kernel-like structure

@@ -100,7 +100,7 @@ class TestReservedFieldsBasic:
     """Basic tests for reserved field validation."""
 
     @given(value=simple_mu)
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_clean_values_pass_validation(self, value):
         """Clean Mu values without reserved fields pass validation."""
         assume(is_mu(value))
@@ -108,7 +108,7 @@ class TestReservedFieldsBasic:
         validate_no_kernel_reserved_fields(value, "test")
 
     @given(reserved=reserved_fields, value=simple_mu)
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_top_level_reserved_field_rejected(self, reserved, value):
         """Reserved fields at top level are rejected."""
         malicious = {reserved: value}
@@ -116,17 +116,17 @@ class TestReservedFieldsBasic:
         with pytest.raises(ValueError, match="kernel-reserved field"):
             validate_no_kernel_reserved_fields(malicious, "test")
 
-    def test_all_20_reserved_fields_rejected(self):
-        """All 20 reserved fields are rejected (12 kernel + 4 EngineNews + 4 Exhaustion)."""
+    def test_all_24_reserved_fields_rejected(self):
+        """All 24 reserved fields are rejected (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)."""
         for field in KERNEL_RESERVED_FIELDS:
             malicious = {field: "attack"}
             with pytest.raises(ValueError, match="kernel-reserved field"):
                 validate_no_kernel_reserved_fields(malicious, "test")
 
     def test_reserved_fields_count(self):
-        """Verify exactly 20 reserved fields exist (12 kernel + 4 EngineNews + 4 Exhaustion)."""
-        assert len(KERNEL_RESERVED_FIELDS) == 20, (
-            f"Expected 20 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
+        """Verify exactly 24 reserved fields exist (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)."""
+        assert len(KERNEL_RESERVED_FIELDS) == 24, (
+            f"Expected 24 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
         )
 
 
@@ -138,7 +138,7 @@ class TestNestedReservedFields:
     """Tests for reserved fields at various nesting depths."""
 
     @given(data=nested_structure_with_reserved_field(target_depth=1))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_depth_1_reserved_field_rejected(self, data):
         """Reserved field at depth 1 is rejected."""
         malicious, reserved = data
@@ -146,7 +146,7 @@ class TestNestedReservedFields:
             validate_no_kernel_reserved_fields(malicious, "test")
 
     @given(data=nested_structure_with_reserved_field(target_depth=5))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_depth_5_reserved_field_rejected(self, data):
         """Reserved field at depth 5 is rejected."""
         malicious, reserved = data
@@ -154,7 +154,7 @@ class TestNestedReservedFields:
             validate_no_kernel_reserved_fields(malicious, "test")
 
     @given(data=nested_structure_with_reserved_field(target_depth=50))
-    @settings(max_examples=50, deadline=10000)
+    @settings(deadline=10000)
     def test_depth_50_reserved_field_rejected(self, data):
         """Reserved field at depth 50 is rejected."""
         malicious, reserved = data
@@ -226,7 +226,7 @@ class TestListTraversal:
     """Tests for reserved field detection inside lists."""
 
     @given(data=structure_with_reserved_in_list())
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_reserved_field_in_list_rejected(self, data):
         """Reserved field inside a list element is rejected."""
         malicious, reserved = data

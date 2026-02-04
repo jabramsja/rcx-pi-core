@@ -93,7 +93,7 @@ class TestStructureValidity:
         reset_step_budget()
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_returns_required_fields(self, value, projs):
         """Result always has result, trace, stall, steps."""
         result = run_mu_structural(projs, value, max_steps=5)
@@ -104,14 +104,14 @@ class TestStructureValidity:
         assert "steps" in result, "Missing 'steps' field"
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_stall_is_boolean(self, value, projs):
         """Stall field is always boolean."""
         result = run_mu_structural(projs, value, max_steps=5)
         assert isinstance(result["stall"], bool)
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_steps_is_positive_int(self, value, projs):
         """Steps field is always positive integer."""
         result = run_mu_structural(projs, value, max_steps=5)
@@ -130,7 +130,7 @@ class TestTraceFormat:
         reset_step_budget()
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_is_linked_list(self, value, projs):
         """Trace is Mu linked-list (head/tail structure)."""
         result = run_mu_structural(projs, value, max_steps=5)
@@ -145,7 +145,7 @@ class TestTraceFormat:
             node = node["tail"]
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_entries_have_required_fields(self, value, projs):
         """Each trace entry has step, state, projection."""
         result = run_mu_structural(projs, value, max_steps=5)
@@ -159,7 +159,7 @@ class TestTraceFormat:
             node = node["tail"]
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_length_matches_steps(self, value, projs):
         """Trace has steps + 1 entries (initial + each step)."""
         result = run_mu_structural(projs, value, max_steps=5)
@@ -186,7 +186,7 @@ class TestTermination:
         reset_step_budget()
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_always_terminates(self, value, projs):
         """Always terminates within max_steps."""
         # This test passes if we reach this point without timeout
@@ -196,7 +196,7 @@ class TestTermination:
         assert result["steps"] <= 5
 
     @given(value=simple_mu, max_steps=st.integers(min_value=1, max_value=10))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_respects_max_steps(self, value, max_steps):
         """Never exceeds max_steps."""
         # Oscillating projections to force max_steps
@@ -223,7 +223,7 @@ class TestStallDetection:
         reset_step_budget()
 
     @given(value=simple_mu)
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_empty_projections_stall(self, value):
         """Empty projection list causes immediate stall."""
         result = run_mu_structural([], value, max_steps=5)
@@ -232,7 +232,7 @@ class TestStallDetection:
         assert result["steps"] == 1
 
     @given(value=simple_mu)
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_no_match_stalls(self, value):
         """No matching projection causes stall."""
         never_match = [{"id": "never", "pattern": {"impossible": "match"}, "body": "never"}]
@@ -253,7 +253,7 @@ class TestStallDetection:
         assert result["steps"] == 1
 
     @given(value=simple_mu, projs=projection_lists(min_size=1, max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_stall_result_equals_final_state(self, value, projs):
         """When stall=True, result equals the state that caused stall."""
         result = run_mu_structural(projs, value, max_steps=5)
@@ -281,7 +281,7 @@ class TestDeterminism:
         reset_step_budget()
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_deterministic_result(self, value, projs):
         """Same input produces same result."""
         reset_step_budget()
@@ -295,7 +295,7 @@ class TestDeterminism:
         assert result1["steps"] == result2["steps"]
 
     @given(value=simple_mu, projs=projection_lists(max_size=2))
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_deterministic_trace(self, value, projs):
         """Same input produces same trace."""
         reset_step_budget()
@@ -447,7 +447,7 @@ class TestEdgeCases:
         assert result["steps"] == 2
 
     @given(value=simple_mu)
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_immediate_stall_preserves_input(self, value):
         """Immediate stall preserves original input."""
         result = run_mu_structural([], value, max_steps=5)

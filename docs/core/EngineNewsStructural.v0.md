@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Recurrence Structural Specification v0
 
 **Status:** IMPLEMENTED (Step 5 complete 2026-01-30)
@@ -115,16 +132,18 @@ Step 5 is COMPLETE:
 - [x] Each projection has `id`, `pattern`, `body` fields
 - [x] SHA256 checksum verified on load (seed_integrity.py)
 
-### 2. Execution is Structural ✅
-- [x] Recurrence runs via `eval_seed.step()`, NOT Python loops
+### 2. Execution is Structural (HYBRID) ✅
+- [x] Recurrence LOGIC is expressed as projections (recurrence.v1.json, 9 projections)
+- [x] Recurrence runs via `eval_seed.step()` (bootstrap primitive)
 - [x] Closure detection uses pattern matching on trace
 - [x] No Python `if/for/while` in closure detection path (only in bootstrap)
 - [x] Seen-set is Mu linked-list, NOT Python set
+- **Note:** Uses `run_algorithm_meta_circular()` which delegates to Python match/substitute for projection application. This is the HYBRID execution model - projections define semantics, bootstrap provides execution.
 
 ### 3. Cross-Substrate Parity ✅
 - [x] Same projections produce same results on Python
-- [x] Parity tests in `tests/test_enginenews_parity.py` (23+ tests)
-- [x] Fuzzer tests in `tests/test_enginenews_fuzzer.py`
+- [x] Parity tests in `tests/test_recurrence_parity.py` (24 tests)
+- [x] Fuzzer tests in `tests/test_recurrence_fuzzer.py`
 - [x] JS tests in `mu/host/js/eval_step.js` (v5, with Recurrence support)
 - [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
 
@@ -193,7 +212,7 @@ These Python operations are ALLOWED (irreducible substrate):
 |-----------|----------|-------------|
 | `eval_step` | `eval_seed.step()` | Applies projections |
 | `mu_equal` | `mu_type.mu_equal()` | Structural equality |
-| `max_steps` | `step_mu.py:241` | Termination guarantee |
+| `max_steps` | `step_mu.py:step_kernel_mu()` | Termination guarantee |
 | `stack_guard` | `mu_type.MAX_MU_DEPTH` | Resource limit |
 | `projection_loader` | `seed_integrity.load_verified_seed()` | Load JSON seeds |
 
@@ -214,7 +233,7 @@ Minimum parity tests for Step 5:
 | `engine.max_steps` | Infinite cycle | `stall: false, steps: max` | Termination |
 
 These vectors MUST pass on:
-- Python: `tests/test_enginenews_parity.py`
+- Python: `tests/test_recurrence_parity.py`
 - JavaScript: `mu/host/js/eval_step.js`
 
 ---
@@ -222,8 +241,8 @@ These vectors MUST pass on:
 ## Implementation Sequence
 
 1. **Create `mu/closures/recurrence.v1.json`** with 4 initial projections
-2. **Create parity vectors** in `tests/fixtures/enginenews_vectors.json`
-3. **Create Python tests** in `tests/test_enginenews_parity.py`
+2. **Create parity vectors** in `tests/fixtures/recurrence_vectors.json`
+3. **Create Python tests** in `tests/test_recurrence_parity.py`
 4. **Verify kernel execution** (no Python control flow in closure path)
 5. **Port to JS** and verify same results
 6. **Demo script** showing closure detection on both substrates
@@ -234,7 +253,7 @@ These vectors MUST pass on:
 
 ```bash
 # Run Recurrence parity tests
-pytest tests/test_enginenews_parity.py -v
+pytest tests/test_recurrence_parity.py -v
 
 # Verify structural execution (no Python loops in closure path)
 grep -n "for.*in.*trace\|if.*in.*seen" rcx_pi/selfhost/ --include="*.py"
@@ -251,7 +270,7 @@ node mu/host/js/eval_step.js --test-enginenews
 
 Before Step 5 is COMPLETE, these grounding tests must exist:
 
-1. **Projection count test:** `recurrence.v1.json` has 4 projections
+1. **Projection count test:** `recurrence.v1.json` projection count (see `test_seed_counts.py`)
 2. **Projection schema test:** Each projection has id/pattern/body
 3. **Kernel execution test:** Closure detection uses step_kernel_mu
 4. **No-Python-logic test:** Grep for forbidden patterns returns empty

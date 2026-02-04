@@ -1,18 +1,12 @@
 name: Rust Examples
 
-# Only run on PRs - push to dev is covered by green_gate.yml
+# Manual-only - green_gate.yml runs python-only mode (no rust)
+# Use this workflow to run rust tests, or run scripts/green_gate.sh rust-only locally
 on:
-  pull_request:
-    branches: ["dev"]
-    paths:
-      - "rcx_pi_rust/**"
-      - "scripts/green_examples.sh"
-      - "scripts/green_gate.sh"
-      - ".github/workflows/rust_examples.yml"
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual trigger only - avoids duplicate runs with green_gate.yml
 
 concurrency:
-  group: rust-examples-${{ github.event.pull_request.number || github.ref }}
+  group: rust-examples-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

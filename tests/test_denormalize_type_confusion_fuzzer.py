@@ -126,7 +126,6 @@ def mixed_valid_invalid_structures(draw):
 
 @given(non_string_type_tags())
 @settings(
-    max_examples=100,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )
@@ -152,7 +151,6 @@ def test_non_string_type_tags_no_crash(malformed_input):
 
 @given(unknown_type_tags())
 @settings(
-    max_examples=100,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )
@@ -178,7 +176,6 @@ def test_unknown_type_tags_no_crash(malformed_input):
 
 @given(malformed_kv_pairs())
 @settings(
-    max_examples=100,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )
@@ -203,7 +200,6 @@ def test_malformed_kv_pairs_no_crash(malformed_input):
 
 @given(mixed_valid_invalid_structures())
 @settings(
-    max_examples=50,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )

@@ -408,20 +408,20 @@ fi
 echo ""
 
 # -----------------------------------------------------------------------------
-# 11. Seed Purity (when seeds/ directory exists)
+# 11. Seed Purity (mu/ directory)
 # -----------------------------------------------------------------------------
 echo "== 11. Seed Purity: Seeds as Pure Mu =="
 
-if [ -d "seeds" ]; then
-    echo "Checking seeds/ directory..."
+if [ -d "mu" ]; then
+    echo "Checking mu/ directory..."
 
-    # Seeds should be JSON files
-    SEED_COUNT=$(ls -1 seeds/*.json 2>/dev/null | wc -l | tr -d ' ')
+    # Seeds should be JSON files in mu/ subdirectories
+    SEED_COUNT=$(find mu -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')
     if [ "$SEED_COUNT" -gt 0 ]; then
         echo "  Found $SEED_COUNT seed JSON files"
 
         # Validate each seed is valid JSON
-        for seed in seeds/*.json; do
+        for seed in $(find mu -name '*.json' -type f 2>/dev/null); do
             if ! python3 -c "import json; json.load(open('$seed'))" 2>/dev/null; then
                 echo "  ERROR: Seed $seed is not valid JSON"
                 FAILED=1
@@ -434,15 +434,8 @@ if [ -d "seeds" ]; then
     else
         echo "  (No seed JSON files yet)"
     fi
-
-    # No .py files in seeds/ (seeds should be data, not code)
-    PY_COUNT=$(ls -1 seeds/*.py 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$PY_COUNT" -gt 0 ]; then
-        echo "  WARNING: Found Python files in seeds/ - seeds should be pure Mu (JSON)"
-        WARNINGS=$((WARNINGS + 1))
-    fi
 else
-    echo "  (seeds/ directory not yet created - will check when it exists)"
+    echo "  (mu/ directory not yet created - will check when it exists)"
 fi
 
 echo ""
@@ -1012,7 +1005,7 @@ echo "  7. Reserved opcodes: ROUTE/CLOSE blocked, STALL/FIX/FIXED implemented (v
 echo "  8. Mu type: Basic validation guardrails"
 echo "  9. Structural purity: Programming IN RCX guardrails"
 echo "  10. Kernel purity: No host logic (when kernel.py exists)"
-echo "  11. Seed purity: Seeds as pure Mu (when seeds/ exists)"
+echo "  11. Seed purity: Seeds as pure Mu (mu/ directory)"
 echo "  12. Python equality: No == on Mu values (use mu_equal)"
 echo "  13. isinstance dispatch: No host type dispatch in kernel"
 echo "  14. Bare except: No swallowed validation errors"

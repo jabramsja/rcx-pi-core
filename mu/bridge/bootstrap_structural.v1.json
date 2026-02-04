@@ -1,0 +1,154 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "BOOTSTRAP_STRUCTURAL_BRIDGE",
+    "description": "Non-linear pattern support via binding conflict detection",
+    "doc": "docs/core/BootstrapStructuralBridge.v0.md",
+    "execution_layer": "BOOTSTRAP",
+    "requires_bootstrap": "This bridge uses non-linear patterns internally, so it requires eval_seed",
+    "enables": ["recurrence.v1", "exhaustion.v1"],
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Non-linear patterns use binding conflict detection (same var twice = equality check)",
+      "Lookup phase iterates through bindings structurally",
+      "First-match-wins ordering is security-critical",
+      "Reserved fields: _lookup_name, _lookup_value, _lookup_bindings, _original_bindings"
+    ],
+    "security_notes": [
+      "bridge.lookup.found_same MUST come before bridge.lookup.found_different",
+      "Projection ordering ensures non-linear patterns work correctly",
+      "Uses non-linear patterns internally (BOOTSTRAP layer is irreducible)"
+    ]
+  },
+  "projections": [
+    {
+      "id": "bridge.var.check_existing",
+      "description": "Variable site - check if name already bound (entry point for lookup phase)",
+      "pattern": {
+        "mode": "match",
+        "pattern_focus": {"var": {"var": "name"}},
+        "value_focus": {"var": "value"},
+        "bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "_phase": "lookup_binding",
+        "_lookup_name": {"var": "name"},
+        "_lookup_value": {"var": "value"},
+        "_lookup_bindings": {"var": "bindings"},
+        "_original_bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "bridge.lookup.found_same",
+      "description": "Found existing binding with SAME value (non-linear OK) - uses non-linear pattern",
+      "note": "SECURITY-CRITICAL: Must come BEFORE found_different. Uses non-linear pattern (name and value appear twice).",
+      "pattern": {
+        "mode": "match",
+        "_phase": "lookup_binding",
+        "_lookup_name": {"var": "name"},
+        "_lookup_value": {"var": "value"},
+        "_lookup_bindings": {
+          "name": {"var": "name"},
+          "value": {"var": "value"},
+          "rest": {"var": "_"}
+        },
+        "_original_bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": null,
+        "value_focus": null,
+        "bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "bridge.lookup.found_different",
+      "description": "Found existing binding with DIFFERENT value (conflict!) - catch-all after found_same",
+      "note": "SECURITY-CRITICAL: Must come AFTER found_same. Catches case where name matches but value differs.",
+      "pattern": {
+        "mode": "match",
+        "_phase": "lookup_binding",
+        "_lookup_name": {"var": "name"},
+        "_lookup_value": {"var": "value"},
+        "_lookup_bindings": {
+          "name": {"var": "name"},
+          "value": {"var": "other_value"},
+          "rest": {"var": "_"}
+        },
+        "_original_bindings": {"var": "_ob"},
+        "stack": {"var": "_s"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "_mode": "match_done",
+        "_status": "no_match",
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "bridge.lookup.not_found_yet",
+      "description": "Name not at head of bindings, continue searching rest",
+      "note": "Names don't match, so we skip this binding and check the rest of the list.",
+      "pattern": {
+        "mode": "match",
+        "_phase": "lookup_binding",
+        "_lookup_name": {"var": "name"},
+        "_lookup_value": {"var": "value"},
+        "_lookup_bindings": {
+          "name": {"var": "other_name"},
+          "value": {"var": "_ov"},
+          "rest": {"var": "rest"}
+        },
+        "_original_bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "_phase": "lookup_binding",
+        "_lookup_name": {"var": "name"},
+        "_lookup_value": {"var": "value"},
+        "_lookup_bindings": {"var": "rest"},
+        "_original_bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    },
+    {
+      "id": "bridge.lookup.not_found",
+      "description": "Name not in bindings (reached null), add new binding",
+      "note": "First occurrence of this variable - add it to bindings like match.var does.",
+      "pattern": {
+        "mode": "match",
+        "_phase": "lookup_binding",
+        "_lookup_name": {"var": "name"},
+        "_lookup_value": {"var": "value"},
+        "_lookup_bindings": null,
+        "_original_bindings": {"var": "bindings"},
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "match",
+        "pattern_focus": null,
+        "value_focus": null,
+        "bindings": {
+          "name": {"var": "name"},
+          "value": {"var": "value"},
+          "rest": {"var": "bindings"}
+        },
+        "stack": {"var": "stack"},
+        "_match_ctx": {"var": "ctx"}
+      }
+    }
+  ]
+}

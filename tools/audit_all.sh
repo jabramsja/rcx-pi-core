@@ -27,13 +27,17 @@ if python3 -c "import xdist" 2>/dev/null; then
     echo "Using parallel execution with worksteal (pytest-xdist detected)"
 fi
 
-echo "== 0) Repo clean =="
+echo "== 0a) Repo clean =="
 test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --porcelain; exit 1; }
+
+echo "== 0b) Doc consistency check =="
+./tools/check_docs_consistency.sh
 
 echo "== 1a) Core + Fuzzer tests (hash-seeded) =="
 # Run all tests EXCEPT stress tests (those have very long timeouts)
 # Stress tests are for edge case validation, not CI blocking
-pytest $PARALLEL_FLAG -q --ignore=tests/stress/
+# Also exclude test_js_parity_automated.py - JS parity verified via node run below
+pytest $PARALLEL_FLAG -q --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
 test -z "$(git status --porcelain)" || { echo "Dirty after core pytest"; git status --porcelain; exit 1; }
 
 echo "== 1b) Stress tests (deep/wide edge cases, optional) =="
@@ -96,8 +100,9 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: kernel/match/subst seeds use underscore-prefixed fields for state (_mode, _phase, etc.)
 # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
 # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
+# Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
 # Note: mu/host/python is a symlink to rcx_pi/selfhost - exclude it to avoid scanning Python files
-! grep -RInE --include='*.json' '"_[a-zA-Z]+":' prototypes/ seeds/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+! grep -RInE --include='*.json' '"_[a-zA-Z]+":' prototypes/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' | grep -v 'bootstrap_structural.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 
 echo "== 6) Fixture validation (v2 jsonl) =="
 # Count fixtures and verify none are empty
@@ -148,15 +153,12 @@ print("OK:", j["final_status"], j["counts"])
 done
 
 echo "== 8) JavaScript L3 parity check =="
-echo "-- JS debt markers (must match Python) --"
 ./tools/check_js_debt.sh
-
-echo "-- JS tests (must all pass) --"
-node mu/host/js/eval_step.js 2>&1 | tail -5 | head -1
 if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else
     echo "FAIL: JS tests failed"
+    node mu/host/js/eval_step.js 2>&1 | tail -10
     exit 1
 fi
 

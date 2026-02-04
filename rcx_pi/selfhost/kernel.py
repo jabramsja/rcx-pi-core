@@ -5,7 +5,7 @@ This file contains the global projection step budget for resource accounting.
 The step budget prevents resource exhaustion from nested/cascading match_mu/subst_mu calls.
 
 STRUCTURAL KERNEL:
-  The structural kernel is in seeds/kernel.v1.json (7 Mu projections).
+  The structural kernel is in mu/substrate/kernel.v1.json (7 Mu projections).
   It is executed by step_kernel_mu() in step_mu.py.
   See docs/core/MetaCircularKernel.v0.md for details.
 

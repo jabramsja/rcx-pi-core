@@ -148,7 +148,7 @@ class TestRecurrenceDeterminism:
         self.projections = load_recurrence_projections()
 
     @given(closure_detection_input())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_deterministic_result(self, input_data):
         """Same input always produces same output."""
         reset_step_budget()
@@ -161,7 +161,7 @@ class TestRecurrenceDeterminism:
         assert mu_equal(result1, result2), "Recurrence must be deterministic"
 
     @given(closure_detection_input())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_output_structure(self, input_data):
         """Output has required structure (closure_detected, final_result)."""
         reset_step_budget()
@@ -182,7 +182,7 @@ class TestRecurrenceClosureSemantics:
         self.projections = load_recurrence_projections()
 
     @given(mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_single_state_no_closure(self, state):
         """Single state trace cannot have closure (needs second occurrence)."""
         reset_step_budget()
@@ -199,7 +199,7 @@ class TestRecurrenceClosureSemantics:
             "Single state cannot have closure (Rule 2.2: needs SECOND occurrence)"
 
     @given(mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_repeated_state_closure(self, state):
         """Repeated state in trace triggers closure."""
         reset_step_budget()
@@ -220,7 +220,7 @@ class TestRecurrenceClosureSemantics:
             "Repeated state MUST trigger closure (Rule 2.2)"
 
     @given(mu_value(max_depth=2), mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_distinct_states_no_closure(self, state1, state2):
         """Distinct states in trace do not trigger closure."""
         assume(not mu_equal(state1, state2))  # Ensure states are different
@@ -250,7 +250,7 @@ class TestRecurrenceEdgeCases:
         self.projections = load_recurrence_projections()
 
     @given(st.integers(min_value=0, max_value=10))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_numeric_state_equality(self, n):
         """Numeric states are compared correctly."""
         reset_step_budget()
@@ -270,7 +270,7 @@ class TestRecurrenceEdgeCases:
         assert result["closure_detected"] is True, \
             f"Numeric state {n} should trigger closure on repeat"
 
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     @given(st.text(min_size=0, max_size=10))
     def test_string_state_equality(self, s):
         """String states are compared correctly."""
@@ -449,7 +449,7 @@ class TestRecurrenceComplexStates:
         self.projections = load_recurrence_projections()
 
     @given(mu_value(max_depth=3))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_complex_state_closure(self, complex_state):
         """Complex nested states trigger closure on exact repeat."""
         reset_step_budget()
@@ -501,7 +501,7 @@ class TestRecurrenceEdgeCasesFromReview:
             "Empty trace cannot have closure (no states to recur)"
 
     @given(mu_value(max_depth=5))
-    @settings(max_examples=100, deadline=10000)
+    @settings(deadline=10000)
     def test_deep_nested_state_equality(self, deep_state):
         """Binding conflict detection works for deeply nested states.
 

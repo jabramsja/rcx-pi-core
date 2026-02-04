@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Debt Categories v0
 
 > **Current debt counts:** See `STATUS.md` for current debt threshold and counts. This doc explains the categories.
@@ -136,7 +153,7 @@ To reach L2, all semantic debt must become projections. See `docs/core/SelfHosti
 **Completed (Phase 6):**
 
 1. ✅ **Lookup** (~66 lines) - Phase 6a: `subst.lookup.found`, `subst.lookup.next` projections
-2. ✅ **Classification** (~52 lines) - Phase 6b: `seeds/classify.v1.json` (6 projections)
+2. ✅ **Classification** (~52 lines) - Phase 6b: `mu/utilities/classify.v1.json` (6 projections)
 3. ✅ **Normalization** (~140 lines) - Phase 6c: Iterative with explicit stack + type tags
 
 **Remaining:**
@@ -258,7 +275,7 @@ This is documented in classify_mu.py lines 167-173:
 # because dicts with None values are more common than lists of 2-element sublists.
 ```
 
-And in the seed file `seeds/classify.v1.json` meta/invariants:
+And in the seed file `mu/utilities/classify.v1.json` meta/invariants:
 ```json
 "Pre-condition: dict keys are strings (JSON constraint)"
 ```

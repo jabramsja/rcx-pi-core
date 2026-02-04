@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: DESIGN_SPEC
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Bootstrap Primitives (Phase 8a)
 
 **Status:** IMPLEMENTATION - 9-agent review v2
@@ -74,7 +91,7 @@ def eval_step(projections: list[Projection], value: Mu) -> Mu:
 - When a variable like `{"var": "x"}` appears twice in a pattern, both occurrences must bind to equal values
 - eval_seed.match() implements this via binding conflict detection (lines 331-336, 351-355)
 - If `x` is already bound to `A`, and the pattern tries to bind `x` to `B`, match FAILS
-- This is how `enginenews.found_in_seen` detects state equality structurally
+- This is how `recurrence.found_in_seen` detects state equality structurally
 - Both Python and JS substrates handle binding conflicts identically
 
 **Analogy:** CPU instruction fetch-decode-execute cycle
@@ -344,8 +361,8 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 | stack_guard | `mu_type.py:MAX_MU_DEPTH` | `eval_step.js:MAX_DEPTH` |
 | projection_loader | `seed_integrity.py` | `eval_step.js:JSON.parse()` |
 
-**Security hardening (completed 2026-01-30):**
-- [x] `KERNEL_RESERVED_FIELDS` validation (20 fields)
+**Security hardening (completed 2026-01-30, updated 2026-02-02):**
+- [x] `KERNEL_RESERVED_FIELDS` validation (24 fields: 12 base + 4 EngineNews + 4 Exhaustion + 4 Bridge)
 - [x] `validate_type_tag()` - whitelist enforcement
 - [x] Dict kv-pair normalization parity fix
 - [ ] Lambda calculus guard (future - not critical for L3)
@@ -356,7 +373,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 - `tests/fixtures/parity_vectors.json` - shared test vectors (23 total)
 
 **Role clarification:**
-- **Python:** Primary development substrate (2,100+ tests, agent-reviewed)
+- **Python:** Primary development substrate (comprehensive test coverage, agent-reviewed - see STATUS.md)
 - **JavaScript:** Portability proof (auditable ~600 LOC core, all parity tests pass)
 
 ---
@@ -389,7 +406,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 |-----------|------------------|--------|
 | `eval_step` | `rcx_pi/selfhost/eval_seed.py:step()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
-| `max_steps` | `rcx_pi/selfhost/step_mu.py:389` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
+| `max_steps` | `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `stack_guard` | `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `projection_loader` | `rcx_pi/selfhost/seed_integrity.py` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 

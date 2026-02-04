@@ -16,7 +16,7 @@ export PYTHONHASHSEED=0
 # This script runs Tier 1 only:
 # - Syntax/structure checks (contraband, AST police)
 # - Core algorithm tests (match, subst, step, kernel)
-# - Skips fuzzer tests (those run in Tier 2)
+# - Skips most fuzzer tests (except kernel_security_fuzzer - critical for security)
 # - Skips stress tests (those run in Tier 3)
 #
 # Use this for rapid iteration. Run audit_all.sh before pushing.
@@ -43,7 +43,7 @@ else
 fi
 echo ""
 
-echo "== 1) Contraband check =="
+echo "== 1a) Contraband check =="
 ./tools/contraband.sh rcx_pi
 
 echo "== 1b) Test theater check =="
@@ -60,6 +60,44 @@ echo "== 1e) JS test theater check =="
 
 echo "== 1f) Seed police =="
 ./tools/seed_police.sh
+
+echo "== 1g) Anti-cheat scans =="
+# No private attr access in tests/ or prototypes/
+echo "-- no private attr access in tests/ or prototypes/"
+if grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ 2>/dev/null | \
+    grep -v 'self\._' | \
+    grep -v '_getframe.*CONTRABAND_OK' | \
+    grep -v '# ANTICHEAT_OK' | \
+    grep -v 'sys\._getframe\|sys\._current_frames' | \
+    grep -v 'test_contraband_detection.py.*"""' | \
+    grep -v '__pycache__'; then
+  echo "ERROR: Found private attr access"
+  exit 1
+fi
+echo "OK"
+
+# No underscored imports from rcx_pi in tests/ or prototypes/
+echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
+if grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ 2>/dev/null | \
+    grep -v 'test_type_tag_security.py' | \
+    grep -v '# ANTICHEAT_OK' | \
+    grep -v '__pycache__'; then
+  echo "ERROR: Found underscored import from rcx_pi"
+  exit 1
+fi
+echo "OK"
+
+echo "== 1h) Doc contract verification =="
+pytest tests/docs/test_doc_contracts.py -q
+
+echo "== 1i) Doc freshness check (semantic drift) =="
+pytest tests/docs/test_doc_freshness.py -q
+
+echo "== 1j) Doc governance check (Three Laws) =="
+pytest tests/docs/test_doc_governance.py -q
+
+echo "== 1k) Root files governance check =="
+pytest tests/docs/test_root_files.py -q
 
 echo "== 2) AST police (Python) =="
 python3 tools/ast_police.py
@@ -96,7 +134,9 @@ pytest $PARALLEL_FLAG -q \
     tests/test_phase8b_grounding_gaps.py \
     tests/test_recurrence_parity.py \
     tests/test_exhaustion_parity.py \
-    tests/test_js_parity_automated.py
+    tests/test_bootstrap_structural_bridge.py \
+    tests/test_meta_circular_gate6.py \
+    tests/test_execution_path_verification.py
 
 echo ""
 echo "== 5) JavaScript L3 parity check =="
@@ -105,6 +145,7 @@ if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else
     echo "FAIL: JS tests failed"
+    node mu/host/js/eval_step.js 2>&1 | tail -10
     exit 1
 fi
 

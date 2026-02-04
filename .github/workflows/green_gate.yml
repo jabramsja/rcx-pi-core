@@ -24,6 +24,9 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
+      RCX_CI: "1"  # Convert test skips to failures (skip hardening)
+      # CI Split: fast for PRs (~50 examples), full for dev/nightly (~500 examples)
+      HYPOTHESIS_PROFILE: ${{ github.event_name == 'pull_request' && 'ci_fast' || 'ci_full' }}
 
     steps:
       - name: Checkout
@@ -40,19 +43,8 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      # Note: Rust setup removed - python-only mode doesn't need it
+      # Run rust_examples.yml manually or scripts/green_gate.sh rust-only locally
 
       - name: Install system deps
         shell: bash
@@ -71,9 +63,17 @@ jobs:
           fi
           python -m pip install -e ".[test]"
 
+      - name: Doc consistency check
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/check_docs_consistency.sh
+
       - name: Run green gate
         shell: bash
         run: |
           set -euo pipefail
           export PAGER=cat GIT_PAGER=cat LESS='-FRSX'
-          scripts/green_gate.sh
+          # Run python-only mode - Rust tests run via rust_examples.yml (manual)
+          # Rust hasn't changed frequently; saves ~3-5 min CI time
+          scripts/green_gate.sh python-only

@@ -1,8 +1,25 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Stall/Fix Execution Semantics (v0)
 
-**Status: APPROVED FOR IMPLEMENTATION**
+This document defines execution semantics for the Stall → Fix loop.
 
-This document defines execution semantics for the Stall → Fix loop. It is the promotion path for VECTOR #6.
+> **Implementation Status:** See STATUS.md for current state.
 
 ---
 
@@ -374,7 +391,7 @@ Partial reduction deferred.
 
 ## 13. Success Criteria
 
-VECTOR #6 is considered complete when:
+This specification is complete when:
 
 1. `execution.stall`, `execution.fix`, `execution.fixed` events defined in v2 schema
 2. STALL and FIX opcodes implemented in VM
@@ -383,15 +400,16 @@ VECTOR #6 is considered complete when:
 5. v1 replay gates remain green (no regression)
 6. `MetaCircularReadiness.v1.md` Gate 5 can be marked PASS
 
+> **Note:** See STATUS.md and TASKS.md for current implementation state.
+
 ---
 
 ## Version
 
 Document version: v0
 Last updated: 2026-01-24
-Status: APPROVED FOR IMPLEMENTATION
 Dependencies:
-- `docs/BytecodeMapping.v0.md`
-- `docs/StallFixObservability.v0.md`
+- `docs/archive/bytecode/BytecodeMapping.v0.md` (archived)
+- `docs/execution/StallFixObservability.v0.md`
 - `docs/schemas/rcx-trace-event.v2.json`
 - `EntropyBudget.md`

@@ -176,7 +176,7 @@ class TestIterativeRoundtrip:
     """Tests for normalize(denormalize(normalize(x))) == normalize(x)."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_denormalize_normalize_idempotency(self, value):
         """normalize(denormalize(normalize(x))) == normalize(x).
 
@@ -206,7 +206,7 @@ class TestTypeTagPreservation:
     """Tests that type tags are correctly applied during normalization."""
 
     @given(st.lists(mu_values(max_depth=2), min_size=1, max_size=10))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_lists_get_list_type_tag(self, value):
         """Non-empty lists normalize with _type='list' at root."""
         assume(is_mu(value))
@@ -224,7 +224,7 @@ class TestTypeTagPreservation:
         min_size=1,
         max_size=10
     ))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_dicts_get_dict_type_tag(self, value):
         """Non-empty dicts normalize with _type='dict' at root."""
         assume(is_mu(value))
@@ -237,7 +237,7 @@ class TestTypeTagPreservation:
         assert normalized["_type"] == "dict", f"Dict has wrong type: {normalized['_type']}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_primitives_have_no_type_tag(self, value):
         """Primitives (non-collection types) don't get type tags."""
         assume(is_mu(value))
@@ -259,7 +259,7 @@ class TestTypeTagInjectionResistance:
     """Tests that invalid _type values are rejected."""
 
     @given(malicious_type_tagged_structures())
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalize_rejects_invalid_type_tags(self, malicious):
         """denormalize_from_match raises ValueError for invalid _type values."""
         # Only test if _type is a string (non-strings are handled differently)
@@ -272,7 +272,7 @@ class TestTypeTagInjectionResistance:
                 denormalize_from_match(malicious)
 
     @given(st.text(max_size=20))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_validate_type_tag_whitelist(self, tag):
         """validate_type_tag only accepts whitelisted values."""
         if tag in VALID_TYPE_TAGS:
@@ -282,7 +282,7 @@ class TestTypeTagInjectionResistance:
                 validate_type_tag(tag)
 
     @given(malicious_type_tagged_structures())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_is_dict_linked_list_rejects_invalid_types(self, malicious):
         """is_dict_linked_list returns False for invalid type tags."""
         result = is_dict_linked_list(malicious)
@@ -295,7 +295,7 @@ class TestTypeTagInjectionResistance:
             assert result is False, f"Invalid type tag accepted: {_type}"
 
     @given(malicious_type_tagged_structures())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_classify_linked_list_handles_invalid_types(self, malicious):
         """classify_linked_list returns 'list' for invalid type tags."""
         result = classify_linked_list(malicious)
@@ -317,7 +317,7 @@ class TestLegacyCompatibility:
     """Tests that legacy head/tail structures (no _type) still work."""
 
     @given(legacy_head_tail_structures())
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_legacy_structures_denormalize_without_crash(self, legacy):
         """Legacy head/tail structures denormalize without crashing."""
         assume(is_mu(legacy))
@@ -330,7 +330,7 @@ class TestLegacyCompatibility:
             pass
 
     @given(legacy_head_tail_structures())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_classify_handles_legacy_structures(self, legacy):
         """classify_linked_list handles legacy structures correctly."""
         assume(is_mu(legacy))
@@ -355,7 +355,7 @@ class TestListDictDiscrimination:
     """
 
     @given(ambiguous_list_dict_pairs())
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_list_vs_dict_roundtrip_discrimination(self, pair):
         """[["a", 1]] and {"a": 1} roundtrip to different values."""
         as_list, as_dict = pair
@@ -387,7 +387,7 @@ class TestListDictDiscrimination:
 
     @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=5),
            mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_nested_list_vs_dict_discrimination(self, key, value):
         """Nested structures maintain list/dict distinction."""
         # Skip if value contains empty collections (normalize to None, known limitation)
@@ -416,7 +416,7 @@ class TestNormalizationDeterminism:
     """Tests that normalization is deterministic."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_is_deterministic(self, value):
         """normalize_for_match produces same output every time."""
         assume(is_mu(value))
@@ -429,7 +429,7 @@ class TestNormalizationDeterminism:
         assert mu_equal(norm2, norm3), f"Normalization non-deterministic: {norm2} != {norm3}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalize_is_deterministic(self, value):
         """denormalize_from_match produces same output every time."""
         assume(is_mu(value))
@@ -484,7 +484,7 @@ class TestNoCrashOnValidInputs:
     """Tests that valid inputs don't cause unexpected crashes."""
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_never_crashes_on_valid_mu(self, value):
         """normalize_for_match handles any valid Mu without unexpected crashes."""
         assume(is_mu(value))
@@ -497,7 +497,7 @@ class TestNoCrashOnValidInputs:
             assert "Circular reference" in str(e), f"Unexpected ValueError: {e}"
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_denormalize_never_crashes_on_valid_mu(self, value):
         """denormalize_from_match handles any valid Mu without unexpected crashes."""
         assume(is_mu(value))

@@ -3,16 +3,21 @@
 Agent Output Compliance Validator
 
 Validates that agent outputs follow AgentGuardrails.v0.md requirements.
-Run on agent output text to check for required evidence format.
+This validator checks TRUTH, not just FORMAT:
+- Verifies FILE paths exist
+- Verifies CODE actually appears at FILE:LINE
+- Verifies line numbers are accurate
 
 Usage:
     python tools/validate_agent_compliance.py < agent_output.txt
     python tools/validate_agent_compliance.py --file agent_output.txt
+    python tools/validate_agent_compliance.py --strict  # Fail on any mismatch
 
 Created: 2026-02-01 (9-agent review recommendation)
 Updated: 2026-02-01 (9-agent self-review fixes: line endings, tabs, hallucination words)
 Updated: 2026-02-02 (Critical fixes: structured blocks, file verification, empty lines)
 Updated: 2026-02-02 (Fix: CODE regex in extract_finding_blocks now matches global pattern)
+Updated: 2026-02-03 (CRITICAL: Now verifies CODE actually appears at FILE:LINE - not just format)
 """
 
 import os
@@ -21,6 +26,7 @@ import sys
 import argparse
 from pathlib import Path
 from typing import NamedTuple
+from difflib import SequenceMatcher
 
 
 def normalize_line_endings(text: str) -> str:
@@ -128,13 +134,128 @@ def verify_file_paths(blocks: list[FindingBlock], check_exists: bool = True) -> 
     return invalid_paths
 
 
-def check_compliance(output: str, verify_files: bool = False) -> dict:
+def normalize_code_for_comparison(code: str) -> str:
+    """
+    Normalize code for comparison by removing common formatting differences.
+
+    - Strips leading/trailing whitespace from each line
+    - Removes empty lines
+    - Normalizes whitespace within lines
+    """
+    lines = code.strip().split('\n')
+    normalized = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped:  # Skip empty lines
+            normalized.append(stripped)
+    return '\n'.join(normalized)
+
+
+def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
+    """
+    CRITICAL: Verify that CODE actually appears at FILE:LINE.
+
+    This is the key anti-hallucination check. An agent can fabricate
+    a convincing-looking citation, but this function reads the actual
+    file and checks if the claimed code is really there.
+
+    Returns:
+        (is_valid, error_message)
+        - (True, "") if code matches
+        - (False, "reason") if mismatch or error
+    """
+    if not block.file_path:
+        return False, "No FILE path provided"
+
+    if not block.code:
+        return False, "No CODE block provided"
+
+    if not block.lines:
+        return False, "No LINES provided"
+
+    # Check file exists
+    if not os.path.exists(block.file_path):
+        return False, f"File not found: {block.file_path}"
+
+    try:
+        # Read the actual file
+        with open(block.file_path, 'r') as f:
+            file_lines = f.readlines()
+
+        # Parse line range (e.g., "123" or "123-127")
+        if '-' in block.lines:
+            start, end = block.lines.split('-')
+            start_line = int(start)
+            end_line = int(end)
+        else:
+            start_line = int(block.lines)
+            end_line = start_line
+
+        # Validate line numbers
+        if start_line < 1 or end_line > len(file_lines):
+            return False, f"Line range {block.lines} out of bounds (file has {len(file_lines)} lines)"
+
+        # Extract actual code at that location (1-indexed to 0-indexed)
+        actual_lines = file_lines[start_line - 1:end_line]
+        actual_code = ''.join(actual_lines)
+
+        # Normalize both for comparison
+        claimed_normalized = normalize_code_for_comparison(block.code)
+        actual_normalized = normalize_code_for_comparison(actual_code)
+
+        # Check for exact match after normalization
+        if claimed_normalized == actual_normalized:
+            return True, ""
+
+        # Check for substring match (agent may have excerpted)
+        if claimed_normalized in actual_normalized or actual_normalized in claimed_normalized:
+            return True, ""
+
+        # Check similarity ratio
+        similarity = SequenceMatcher(None, claimed_normalized, actual_normalized).ratio()
+
+        if similarity >= 0.8:
+            # Close enough - minor formatting differences
+            return True, ""
+
+        # Code doesn't match - this is a FABRICATION
+        return False, (
+            f"CODE MISMATCH at {block.file_path}:{block.lines}\n"
+            f"  Claimed ({len(claimed_normalized)} chars): {claimed_normalized[:100]}...\n"
+            f"  Actual ({len(actual_normalized)} chars): {actual_normalized[:100]}...\n"
+            f"  Similarity: {similarity:.1%}"
+        )
+
+    except Exception as e:
+        return False, f"Error reading file: {e}"
+
+
+def verify_all_code_citations(blocks: list[FindingBlock]) -> list[str]:
+    """
+    Verify all CODE citations in finding blocks.
+
+    Returns list of fabrication errors (empty if all valid).
+    """
+    fabrications = []
+
+    for block in blocks:
+        if block.file_path and block.code and block.lines:
+            is_valid, error = verify_code_at_location(block)
+            if not is_valid:
+                fabrications.append(error)
+
+    return fabrications
+
+
+def check_compliance(output: str, verify_files: bool = False, verify_code: bool = False, strict: bool = False) -> dict:
     """
     Check agent output for guardrail compliance.
 
     Args:
         output: Agent output text to validate
         verify_files: If True, check that cited FILE paths actually exist
+        verify_code: If True, verify CODE actually appears at FILE:LINE (CRITICAL)
+        strict: If True, any mismatch is a violation (recommended for CI)
 
     Returns dict with metrics and compliance status.
     """
@@ -170,6 +291,7 @@ def check_compliance(output: str, verify_files: bool = False) -> dict:
 
     # Determine compliance
     violations = []
+    fabrications = []
 
     # === CRITICAL: Check each finding block has required components ===
     incomplete_blocks = []
@@ -203,6 +325,15 @@ def check_compliance(output: str, verify_files: bool = False) -> dict:
             for path in invalid_paths[:3]:
                 violations.append(f"  - {path}")
 
+    # === CRITICAL: Verify CODE actually appears at FILE:LINE ===
+    # This is the key anti-fabrication check
+    if verify_code and finding_blocks:
+        fabrications = verify_all_code_citations(finding_blocks)
+        if fabrications:
+            violations.append(f"FABRICATION DETECTED: {len(fabrications)} code citations don't match actual files")
+            for fab in fabrications[:3]:
+                violations.append(f"  - {fab}")
+
     # Legacy count-based checks (kept for backwards compatibility)
     if verified_no > 0:
         violations.append(f"Contains {verified_no} VERIFIED: No entries (should be 0)")
@@ -212,6 +343,13 @@ def check_compliance(output: str, verify_files: bool = False) -> dict:
 
     if hallucination_words > 3:
         violations.append(f"High hallucination word count: {hallucination_words}")
+
+    # Strict mode: require all verifications to pass
+    if strict and finding_blocks:
+        if not verify_files:
+            violations.append("STRICT MODE: --verify-files required but not enabled")
+        if not verify_code:
+            violations.append("STRICT MODE: --verify-code required but not enabled")
 
     return {
         "findings": findings,
@@ -230,15 +368,18 @@ def check_compliance(output: str, verify_files: bool = False) -> dict:
         "blocks_with_code": blocks_with_code,
         "blocks_with_verified_yes": blocks_with_verified_yes,
         "incomplete_blocks": len(incomplete_blocks),
+        # Fabrication detection
+        "fabrications": len(fabrications),
+        "fabrication_details": fabrications,
     }
 
 
 def format_report(metrics: dict) -> str:
     """Format compliance check results as readable report."""
     lines = [
-        "=" * 50,
+        "=" * 60,
         "AGENT COMPLIANCE REPORT",
-        "=" * 50,
+        "=" * 60,
         "",
         "METRICS:",
         f"  Findings:            {metrics['findings']}",
@@ -257,7 +398,20 @@ def format_report(metrics: dict) -> str:
         f"  Blocks verified:     {metrics.get('blocks_with_verified_yes', 'N/A')}",
         f"  Incomplete blocks:   {metrics.get('incomplete_blocks', 'N/A')}",
         "",
+        "FABRICATION DETECTION:",
+        f"  Code mismatches:     {metrics.get('fabrications', 'NOT CHECKED')}",
+        "",
     ]
+
+    if metrics.get('fabrications', 0) > 0:
+        lines.extend([
+            "*** FABRICATIONS FOUND ***",
+            "The following CODE citations do not match the actual file contents:",
+            "",
+        ])
+        for detail in metrics.get('fabrication_details', []):
+            lines.append(f"  {detail}")
+        lines.append("")
 
     if metrics['compliant']:
         lines.extend([
@@ -278,7 +432,7 @@ def format_report(metrics: dict) -> str:
             "Agent output requires revision before acceptance.",
         ])
 
-    lines.append("=" * 50)
+    lines.append("=" * 60)
     return '\n'.join(lines)
 
 
@@ -306,8 +460,23 @@ def main():
         action='store_true',
         help="Verify that cited FILE paths actually exist on disk"
     )
+    parser.add_argument(
+        '--verify-code', '-c',
+        action='store_true',
+        help="CRITICAL: Verify CODE actually appears at FILE:LINE (catches fabrications)"
+    )
+    parser.add_argument(
+        '--strict', '-s',
+        action='store_true',
+        help="Strict mode: require all verifications, fail on any mismatch (recommended for CI)"
+    )
 
     args = parser.parse_args()
+
+    # Strict mode implies all verifications
+    if args.strict:
+        args.verify_files = True
+        args.verify_code = True
 
     # Read input
     if args.file:
@@ -316,7 +485,12 @@ def main():
         output = sys.stdin.read()
 
     # Check compliance
-    metrics = check_compliance(output, verify_files=args.verify_files)
+    metrics = check_compliance(
+        output,
+        verify_files=args.verify_files,
+        verify_code=args.verify_code,
+        strict=args.strict
+    )
 
     # Output results
     if args.json:

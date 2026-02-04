@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "name": "CLASSIFY_SEED",
     "description": "Linked list classification as Mu projections for Phase 6b self-hosting",
-    "doc": "docs/SelfHosting.v0.md",
+    "doc": "docs/core/SelfHosting.v0.md",
+    "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",

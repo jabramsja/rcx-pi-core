@@ -1,6 +1,23 @@
+<!--
+DOC_STATUS
+TYPE: DESIGN_SPEC
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # RCX Kernel Specification v0
 
-Status: VECTOR (design-only)
+Status: IMPLEMENTED (mu/substrate/kernel.v1.json, 7 projections)
 
 ## Purpose
 
@@ -119,6 +136,8 @@ The kernel provides exactly these operations:
 - `apply_projection` - This is SEED responsibility, not kernel
 
 Note: Memory management (get_mem, copy_mem) is handled by the host language (Python). The kernel doesn't expose raw memory operations.
+
+**See `docs/core/BootstrapPrimitives.v0.md`** for the canonical list of 5 irreducible bootstrap primitives (eval_step, mu_equal, max_steps, stack_guard, projection_loader).
 
 ## Why apply_projection is NOT in the Kernel
 
@@ -288,17 +307,19 @@ The kernel is maximally general. Specific behaviors (EngineeNews, Wolfram-style,
 
 ## Relationship to Existing Code
 
-**Note:** This section was written during Phase 1-2 design. See STATUS.md for current phase.
+**Note:** See STATUS.md for current phase (L1/L2/L3 complete).
 
 | Component | Role | Status |
 |-----------|------|--------|
-| `mu_type.py` | Implements Mu validation | Active |
+| `rcx_pi/selfhost/mu_type.py` | Implements Mu validation | Active |
 | `mu/substrate/kernel.v1.json` | Structural kernel (7 Mu projections) | **Canonical kernel** |
-| `rcx_pi/selfhost/step_mu.py` | step_kernel_mu() uses kernel.v1 | Active |
-| `rcx_pi/selfhost/kernel.py` | Step budget + legacy Kernel class | Legacy (step budget active) |
-| `seeds/` | Mu projection definitions | Active |
-| `trace_canon.py` | Implements `compute_identity` | Legacy |
-| `bytecode_vm.py` | Bytecode VM | Archived |
+| `mu/substrate/match.v2.json` | Pattern matching (8 projections) | Active |
+| `mu/substrate/subst.v2.json` | Substitution (12 projections) | Active |
+| `mu/closures/recurrence.v1.json` | Closure detection (9 projections) | Active |
+| `mu/closures/exhaustion.v1.json` | Exhaustion handling (11 projections) | Active |
+| `rcx_pi/selfhost/step_mu.py` | step_kernel_mu() orchestrates projections | Active |
+| `rcx_pi/selfhost/eval_seed.py` | Bootstrap match/substitute (5 primitives) | Active |
+| `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) | Active |
 
 ## Implementation Order
 
@@ -347,10 +368,10 @@ Each step gets tests. Failure at any step → stop, understand, adjust.
 - `test_eval_runs_eval` - EVAL_SEED evaluates EVAL_SEED
 - `test_trace_equivalence` - Python and self-hosted traces match
 
-### Phase 4 Tests (EngineeNews)
-- `test_enginenews_basic_reduction`
-- `test_enginenews_stall_detection`
-- `test_enginenews_closure_formation`
+### Phase 4 Tests (Recurrence)
+- `test_recurrence_basic_reduction`
+- `test_recurrence_stall_detection`
+- `test_recurrence_closure_formation`
 
 ## Open Questions
 
@@ -382,8 +403,8 @@ Each step gets tests. Failure at any step → stop, understand, adjust.
 
 ## References
 
-- `docs/MuType.v0.md` - Mu type definition
-- `docs/BytecodeExecution.v1c.md` - Current VM design (R0 register)
-- `RCXEngineNew.pdf` - EngineeNews formal specification
-- `true_minimal_kernel.asm` - Earlier kernel sketch (7 primitives)
-- `rcxpiframework.txt` - Motif/Projection/Closure framework
+- `docs/core/MuType.v0.md` - Mu type definition
+- `docs/core/BootstrapPrimitives.v0.md` - 5 irreducible bootstrap primitives
+- `docs/core/MetaCircularKernel.v0.md` - Kernel state machine design
+- `docs/core/EngineNewsStructural.v0.md` - Recurrence closure detection
+- `RCXEngineNew.pdf` - Recurrence formal specification (canonical reference)

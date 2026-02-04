@@ -294,7 +294,9 @@ class TestKernelReservedFieldsValidation:
             # EngineNews closure detection fields (9-agent review, 2026-02-02)
             "_detect_closure", "_seen", "_current", "_check_list",
             # Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
-            "_detect_exhaustion", "_frozen", "_tau_step", "_operator_ids"
+            "_detect_exhaustion", "_frozen", "_tau_step", "_operator_ids",
+            # Bootstrap-Structural Bridge lookup phase fields (9-agent review, 2026-02-02)
+            "_lookup_name", "_lookup_value", "_lookup_bindings", "_original_bindings"
         }
         assert KERNEL_RESERVED_FIELDS == expected
 

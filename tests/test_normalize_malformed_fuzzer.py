@@ -104,7 +104,6 @@ def mixed_type_structures(draw):
 
 @given(malformed_type_tags())
 @settings(
-    max_examples=100,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )
@@ -125,7 +124,6 @@ def test_malformed_type_tags_no_crash(malformed_input):
 
 @given(malformed_linked_lists())
 @settings(
-    max_examples=100,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )
@@ -152,7 +150,6 @@ def test_malformed_linked_lists_no_crash(malformed_input):
 
 @given(mixed_type_structures())
 @settings(
-    max_examples=100,
     deadline=5000,
     suppress_health_check=[HealthCheck.too_slow]
 )

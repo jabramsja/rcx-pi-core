@@ -3,7 +3,7 @@
 # Validates seed JSON files for structural integrity and theater detection
 #
 # Usage: ./tools/seed_police.sh [seed_dir]
-#        Default: checks both seeds/ (legacy) and mu/ (new structure)
+#        Default: checks mu/ subdirectories (substrate, closures, programs, utilities, bridge)
 #
 # Checks:
 #   1. Structure: Required fields (id, pattern, body)
@@ -13,13 +13,12 @@
 
 set -euo pipefail
 
-# If specific directory given, use that; otherwise check both seeds/ and mu/
+# If specific directory given, use that; otherwise check mu/ subdirectories
 if [ -n "${1:-}" ]; then
     SEED_DIRS=("$1")
 else
     SEED_DIRS=()
-    [ -d "seeds" ] && SEED_DIRS+=("seeds")
-    [ -d "mu" ] && SEED_DIRS+=("mu/substrate" "mu/closures" "mu/programs" "mu/utilities")
+    [ -d "mu" ] && SEED_DIRS+=("mu/substrate" "mu/closures" "mu/programs" "mu/utilities" "mu/bridge")
 fi
 
 if [ ${#SEED_DIRS[@]} -eq 0 ]; then
@@ -180,13 +179,14 @@ seed_filename = os.path.basename(sys.argv[1])  # e.g., "kernel.v1.json"
 # Allowed seed files and their valid projection ID prefixes:
 ALLOWED_SEEDS = {
     'kernel': ['kernel.'],           # kernel.v1.json -> kernel.*
-    'match': ['match.'],             # match.v1.json, match.v2.json -> match.*
+    'match': ['match.', 'bridge.'],  # match.v1-v3.json -> match.* (v3 includes bridge.*)
     'subst': ['subst.'],             # subst.v1.json, subst.v2.json -> subst.*
     'enginenews': ['enginenews.'],   # enginenews.v1.json -> enginenews.* (legacy)
     'exhaust': ['exhaust.'],         # exhaust.v1.json -> exhaust.* (legacy)
     'recurrence': ['recurrence.'],   # recurrence.v1.json -> recurrence.* (mu/closures/)
     'exhaustion': ['exhaustion.'],   # exhaustion.v1.json -> exhaustion.* (mu/closures/)
     'rcx_engine': ['engine.'],       # rcx_engine.v1.json -> engine.* (mu/programs/)
+    'bootstrap_structural': ['bridge.'],  # bootstrap_structural.v1.json -> bridge.* (mu/bridge/)
 }
 
 # Get seed base name (kernel.v1.json -> kernel)
@@ -246,6 +246,10 @@ seed_dirs = sys.argv[1:]
 all_ids = {}
 errors = 0
 
+# No allowlist needed - bootstrap_structural.v1.json is the only bridge seed
+# (match.v3.json was deleted - we use match.v2 + bootstrap_structural directly)
+ALLOWED_CROSS_SEED_IDS = {}
+
 for seed_dir in seed_dirs:
     if not os.path.isdir(seed_dir):
         continue
@@ -260,12 +264,17 @@ for seed_dir in seed_dirs:
                 if pid:
                     if pid in all_ids:
                         other_file = all_ids[pid]
-                        # Allow same ID across v1/v2 versions of same seed family
+                        # Allow same ID across v1/v2/v3 versions of same seed family
                         # e.g., match.v1.json and match.v2.json can both have match.done
-                        base1 = filename.replace('.v1.json', '').replace('.v2.json', '')
-                        base2 = other_file.replace('.v1.json', '').replace('.v2.json', '')
+                        base1 = filename.replace('.v1.json', '').replace('.v2.json', '').replace('.v3.json', '')
+                        base2 = other_file.replace('.v1.json', '').replace('.v2.json', '').replace('.v3.json', '')
                         if base1 == base2:
                             continue  # Same family, versioned - OK
+                        # Check allowlist for intentional cross-seed sharing
+                        if pid in ALLOWED_CROSS_SEED_IDS:
+                            allowed_files = ALLOWED_CROSS_SEED_IDS[pid]
+                            if filename in allowed_files and other_file in allowed_files:
+                                continue  # Intentionally shared - OK
                         # Allow renamed seeds (enginenews -> recurrence, exhaust -> exhaustion)
                         # These have different prefixes so no collision
                         print(f"  ✗ ID COLLISION: '{pid}' in both {other_file} and {filename}")

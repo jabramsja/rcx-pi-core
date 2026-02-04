@@ -4,6 +4,7 @@
     "name": "KERNEL_SEED",
     "description": "Meta-circular kernel projections for Phase 7 self-hosting",
     "doc": "docs/core/MetaCircularKernel.v0.md",
+    "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "Kernel projections run FIRST (match on _mode prefix)",

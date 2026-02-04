@@ -60,7 +60,7 @@ The test suite, which used to run quickly, now takes 8+ minutes and often gets s
 |------|----------|-------|
 | `rcx_pi/selfhost/step_mu.py` | `run_mu()`, `step_kernel_mu()` | May infinite loop on certain inputs |
 | `rcx_pi/selfhost/match_mu.py` | `normalize_for_match()` | Creates deeply nested structures |
-| `rcx_pi/selfhost/mu_type.py` | `is_mu()`, `MAX_MU_DEPTH=200` | Depth guard exists but may not catch all cases |
+| `rcx_pi/selfhost/mu_type.py` | `is_mu()`, `MAX_MU_DEPTH=300` | Depth guard exists but may not catch all cases |
 
 ### Audit Scripts
 | File | Purpose | Status |

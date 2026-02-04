@@ -1,3 +1,20 @@
+<!--
+DOC_STATUS
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Operator Exhaustion Structural Specification v0
 
 **Status:** IMPLEMENTED (Step 6 complete 2026-02-02)
@@ -245,19 +262,21 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 ## Success Criteria
 
 ### 1. Projections Exist
-- [ ] `mu/closures/exhaustion.v1.json` contains ~10 projections
-- [ ] Each projection has `id`, `pattern`, `body` fields
-- [ ] SHA256 checksum verified on load
+- [x] `mu/closures/exhaustion.v1.json` exists (see `test_seed_counts.py` for count)
+- [x] Each projection has `id`, `pattern`, `body` fields (enforced by `seed_integrity.py`)
+- [x] SHA256 checksum verified on load (enforced by `seed_integrity.py`)
 
-### 2. Execution is Structural
-- [ ] Exhaustion detection runs via `eval_seed.step()`, NOT Python loops
-- [ ] Frozen set is Mu linked-list, NOT Python set
-- [ ] No Python `if/for/while` in exhaustion detection path
+### 2. Execution is Structural (HYBRID)
+- [x] Exhaustion detection runs via `eval_seed.step()` (bootstrap primitive)
+- [x] Frozen set is Mu linked-list, NOT Python set
+- [x] Exhaustion LOGIC is in projections (exhaustion.v1.json)
+- **Note:** Uses `run_algorithm_meta_circular()` which delegates to Python match/substitute. This is the HYBRID execution model - projections define semantics, bootstrap provides execution. True meta-circular requires non-linear pattern support in structural kernel.
 
 ### 3. Cross-Substrate Parity
-- [ ] Same projections produce same results on Python and JS
-- [ ] Parity tests in `tests/test_exhaustion_parity.py`
-- [ ] JS tests in `mu/host/js/eval_step.js`
+- [x] Same projections produce same results on Python and JS
+- [x] Parity tests in `tests/test_exhaustion_parity.py`
+- [x] JS loads exhaustion.v1.json in `mu/host/js/eval_step.js`
+- **Note:** JS uses its own bootstrap match/substitute implementation. Cross-substrate parity tests verify identical results.
 
 ### 4. Integration Tests
 - [ ] Single operator exhaustion detected and frozen
@@ -549,7 +568,7 @@ is safe. We can relax later without breaking correctness.
   - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
   - Cross-substrate parity: Python and JavaScript produce identical results
   - JS loads exhaustion.v1.json (47 total projections across all seeds)
-  - KERNEL_RESERVED_FIELDS updated to 20 (12 kernel + 4 Recurrence + 4 exhaustion)
+  - KERNEL_RESERVED_FIELDS updated to 24 (12 kernel + 4 Recurrence + 4 Exhaustion + 4 Bridge)
   - Automated parity test verifies Python/JS reserved fields match
 - **v0.1 (2026-02-01):** Address open questions and agent review findings:
   - Q1 RESOLVED: Pass operator_ids explicitly in input

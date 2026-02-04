@@ -15,7 +15,7 @@ See docs/core/MetaCircularKernel.v0.md for design.
 """
 
 import pytest
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seeds_dir
+from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.eval_seed import step, apply_projection
 from rcx_pi.selfhost.mu_type import Mu, mu_equal
 from rcx_pi.selfhost.match_mu import normalize_for_match
@@ -34,21 +34,21 @@ from conftest import run_until_done  # Use shared implementation (Expert finding
 @pytest.fixture
 def kernel_projections() -> list[Mu]:
     """Load kernel.v1 projections."""
-    seed = load_verified_seed(get_seeds_dir() / "kernel.v1.json")
+    seed = load_verified_seed(get_seed_path("kernel.v1.json"))
     return seed["projections"]
 
 
 @pytest.fixture
 def match_v2_projections() -> list[Mu]:
     """Load match.v2 projections with context passthrough."""
-    seed = load_verified_seed(get_seeds_dir() / "match.v2.json")
+    seed = load_verified_seed(get_seed_path("match.v2.json"))
     return seed["projections"]
 
 
 @pytest.fixture
 def subst_v2_projections() -> list[Mu]:
     """Load subst.v2 projections with context passthrough."""
-    seed = load_verified_seed(get_seeds_dir() / "subst.v2.json")
+    seed = load_verified_seed(get_seed_path("subst.v2.json"))
     return seed["projections"]
 
 

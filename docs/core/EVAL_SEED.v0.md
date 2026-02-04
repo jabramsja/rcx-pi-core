@@ -1,6 +1,23 @@
+<!--
+DOC_STATUS
+TYPE: DESIGN_SPEC
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # EVAL_SEED Specification v0
 
-Status: NEXT (Phase 2 - Python implementation)
+**Implementation:** `rcx_pi/selfhost/eval_seed.py` (see STATUS.md for test coverage)
 
 ## Purpose
 
@@ -216,7 +233,7 @@ This is tractable.
 - `test_countdown_with_projections` - countdown to zero
 - `test_add_with_projections` - simple addition via projections
 
-## Non-Goals (Phase 2)
+## Non-Goals (Current Implementation)
 
 - No unification (bidirectional matching)
 - No higher-order patterns (pattern matching on patterns)
@@ -277,16 +294,16 @@ projections = [
 
 This works. Pure structural, no arithmetic.
 
-## Phase 2 Deliverables
+## Implementation Status
 
-1. `rcx_pi/eval_seed.py` - EVAL_SEED implementation (~100 lines)
-2. `tests/test_eval_seed_v0.py` - Tests (~40 tests)
-3. Update `tools/audit_semantic_purity.sh` if needed
+**COMPLETE (L1 Algorithmic):**
+- `rcx_pi/selfhost/eval_seed.py` - Bootstrap match/substitute implementation
+- `mu/substrate/match.v2.json` - Pattern matching as projections (~8 projections)
+- `mu/substrate/subst.v2.json` - Substitution as projections (~12 projections)
+- Comprehensive test coverage for match, substitute, and step operations
 
-## Promotion Checklist (Phase 2 → Phase 3)
-
-- [ ] All tests pass
-- [ ] Countdown example works
-- [ ] At least one non-trivial example works (e.g., list append)
-- [ ] Complexity is tractable (< 200 lines)
-- [ ] No host language leakage (pure Mu in/out)
+**Verification:**
+- Parity tests ensure Python bootstrap and Mu projections produce identical results
+- Fuzzer tests with hypothesis profiles verify robustness
+- See `tests/test_match_v2_parity.py` and `tests/test_subst_v2_parity.py`
+- See STATUS.md for current test counts

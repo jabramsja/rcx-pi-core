@@ -65,14 +65,14 @@ class TestAssertSeedPureFuzzer:
     """Property-based tests for assert_seed_pure."""
 
     @given(value=mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_valid_mu_accepted(self, value):
         """All valid Mu values should be accepted."""
         # Should not raise
         assert_seed_pure(value, "test")
 
     @given(value=mu_value(max_depth=2))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_pure_mu_roundtrip(self, value):
         """assert_seed_pure is idempotent."""
         # First call should not raise
@@ -117,7 +117,7 @@ class TestAssertSeedPureFuzzer:
             assert_seed_pure(seed, "proj_lambda")
 
     @given(projections=st.lists(valid_projection(), min_size=0, max_size=3))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_valid_projections_accepted(self, projections):
         """Valid projection lists should be accepted."""
         seed = {"projections": projections}
@@ -160,7 +160,7 @@ class TestValidateTypeTagFuzzer:
         validate_type_tag("dict")  # Should not raise
 
     @given(tag=st.text(min_size=1, max_size=20).filter(lambda x: x not in VALID_TYPE_TAGS))
-    @settings(max_examples=100, deadline=5000)
+    @settings(deadline=5000)
     def test_invalid_tags_rejected(self, tag):
         """All tags not in whitelist must be rejected."""
         with pytest.raises(ValueError, match="Invalid type tag"):
@@ -214,7 +214,7 @@ class TestGetVarNameFuzzer:
     """Property-based tests for get_var_name."""
 
     @given(name=st.text(min_size=1, max_size=50))
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.filter_too_much])
     def test_valid_var_sites(self, name):
         """Valid variable sites should return their name."""
         var_site = {"var": name}
@@ -256,7 +256,7 @@ class TestGetVarNameFuzzer:
             get_var_name({"var": ["x"]})
 
     @given(name=st.text(min_size=1, max_size=20))
-    @settings(max_examples=50, deadline=5000)
+    @settings(deadline=5000)
     def test_unicode_var_names_handled(self, name):
         """Unicode variable names should be handled correctly."""
         var_site = {"var": name}

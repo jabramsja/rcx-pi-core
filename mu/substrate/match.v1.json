@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "name": "MATCH_SEED",
     "description": "Pattern matching as Mu projections for Phase 4 self-hosting",
-    "doc": "docs/SelfHosting.v0.md",
+    "doc": "docs/core/SelfHosting.v0.md",
+    "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",
@@ -55,7 +56,7 @@
     },
     {
       "id": "match.equal",
-      "description": "Pattern equals value (non-linear: same var binds same value) - clears focus",
+      "description": "Pattern equals value (literal equality via first-match-wins) - clears focus",
       "pattern": {
         "mode": "match",
         "pattern_focus": {"var": "same"},

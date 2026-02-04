@@ -1,6 +1,23 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-03
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
 # Mu Type Definition v0
 
-Status: VECTOR (design-only)
+Status: IMPLEMENTED (rcx_pi/selfhost/mu_type.py, 58+ tests)
 
 ## Purpose
 
@@ -111,14 +128,14 @@ def validate_mu(value: Any) -> bool:
 3. **Portability**: Any language with JSON support can represent Mu
 4. **No host leakage**: Python-specific types cannot enter the Mu space
 
-## Application to R0
+## Application to Kernel
 
-The R0 register in BytecodeVM should:
-1. Only hold Mu values
-2. Validate on `load_value()` that the value is a valid Mu
-3. Fail loudly if non-Mu value is loaded
+All values flowing through the RCX kernel must be valid Mu:
+1. Seeds load as Mu (JSON files in `mu/` directory)
+2. Projections transform Mu to Mu
+3. `assert_mu()` guardrails enforce boundaries
 
-This ensures the VM cannot accidentally become dependent on Python-specific features.
+This ensures the system cannot accidentally become dependent on Python-specific features.
 
 ## Open Questions
 
@@ -137,5 +154,6 @@ The semantic purity audit (`tools/audit_semantic_purity.sh`) verifies these guar
 ## Next Steps
 
 1. ~~Implement `is_mu()` and `validate_mu()` in `rcx_pi/mu_type.py`~~ ✅
-2. Add guardrail to BytecodeVM `load_value()` (see `docs/BytecodeExecution.v1c.md`)
-3. ~~Extend `audit_semantic_purity.sh` to check Mu type guardrails~~ ✅
+2. ~~Extend `audit_semantic_purity.sh` to check Mu type guardrails~~ ✅
+
+All core Mu type functionality is implemented. See `rcx_pi/selfhost/mu_type.py`.

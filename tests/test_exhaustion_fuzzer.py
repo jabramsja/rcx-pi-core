@@ -154,7 +154,7 @@ class TestExhaustionProperties:
     """Property-based tests for exhaustion detection."""
 
     @given(exhaustion_input_strategy())
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_always_terminates(self, exhaust_projections, input_data):
         """Exhaustion detection always terminates (no infinite loops)."""
         reset_step_budget()
@@ -163,7 +163,7 @@ class TestExhaustionProperties:
         assert result is not None
 
     @given(exhaustion_input_strategy())
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_result_has_valid_structure(self, exhaust_projections, input_data):
         """Result has valid structure (action field or kernel intermediate)."""
         reset_step_budget()
@@ -175,7 +175,7 @@ class TestExhaustionProperties:
         assert has_action or has_mode, f"Result must have action or _mode: {result.keys()}"
 
     @given(exhaustion_input_strategy())
-    @settings(max_examples=100, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_frozen_list_is_preserved_or_extended(self, exhaust_projections, input_data):
         """Frozen list is never shortened, only preserved or extended."""
         reset_step_budget()
@@ -202,7 +202,7 @@ class TestExhaustionProperties:
             f"Frozen list shrunk from {orig_count} to {result_count}"
 
     @given(st.lists(operator_id_strategy, min_size=1, max_size=3))
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_null_tau_always_continues(self, exhaust_projections, operator_ids):
         """When tau_step is null, action is always 'continue'."""
         reset_step_budget()
@@ -220,7 +220,7 @@ class TestExhaustionProperties:
         assert result.get("action") == "continue", f"Expected continue, got {result}"
 
     @given(operator_id_strategy)
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_same_operator_exhausts(self, exhaust_projections, op_id):
         """Single operator since tau_step should exhaust."""
         reset_step_budget()
@@ -241,7 +241,7 @@ class TestExhaustionProperties:
         assert result.get("operator_to_freeze") == op_id
 
     @given(st.lists(operator_id_strategy, min_size=2, max_size=2, unique=True))
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_different_operators_no_exhaust(self, exhaust_projections, op_ids):
         """Different operators after tau_step should not exhaust."""
         reset_step_budget()
@@ -266,7 +266,7 @@ class TestExhaustionDeterminism:
     """Test that exhaustion detection is deterministic."""
 
     @given(exhaustion_input_strategy())
-    @settings(max_examples=50, deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_same_input_same_output(self, exhaust_projections, input_data):
         """Same input always produces same output."""
         reset_step_budget()

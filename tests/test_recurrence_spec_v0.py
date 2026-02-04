@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
+from conftest import skip_or_fail_in_ci
+
 
 FIXTURES_DIR = Path("tests/fixtures/traces_v2/recurrence_spec_v0")
 
@@ -219,7 +221,7 @@ def test_recurrence_cli_summary_matches_expectation(fixture_name: str) -> None:
     expected = FIXTURE_EXPECTATIONS[fixture_name]
 
     if exit_code != 0:
-        pytest.skip(f"CLI failed with exit code {exit_code}")
+        skip_or_fail_in_ci(f"CLI failed with exit code {exit_code}")
 
     summary = _parse_exec_summary(output)
     assert summary["final_status"] == expected["final_status"], (
@@ -269,7 +271,7 @@ def test_recurrence_cli_determinism(fixture_name: str) -> None:
     assert exit1 == exit2, f"Exit codes differ for {fixture_name}"
 
     if exit1 != 0:
-        pytest.skip(f"CLI failed with exit code {exit1}")
+        skip_or_fail_in_ci(f"CLI failed with exit code {exit1}")
 
     summary1 = _parse_exec_summary(output1)
     summary2 = _parse_exec_summary(output2)

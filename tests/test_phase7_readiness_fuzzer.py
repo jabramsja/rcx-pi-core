@@ -256,7 +256,7 @@ class TestSeedProjectionCoverage:
     """
 
     @given(mu_patterns(max_depth=2), mu_values(max_depth=2))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_match_mu_never_unintended_stall(self, pattern, value):
         """
         match_mu should either match or return NO_MATCH.
@@ -290,7 +290,7 @@ class TestSeedProjectionCoverage:
                mu_primitives,
                max_size=5
            ))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_subst_mu_never_unintended_stall(self, body, bindings):
         """
         subst_mu should either substitute or raise KeyError for unbound vars.
@@ -317,7 +317,7 @@ class TestSeedProjectionCoverage:
             pass  # Expected for some edge cases
 
     @given(projection_lists(min_size=1, max_size=3), mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_step_mu_projection_coverage(self, projections, value):
         """
         step_mu should try all projections in order without crashing.
@@ -347,7 +347,7 @@ class TestKernelTraceIntegrity:
     """
 
     @given(projection_lists(min_size=1, max_size=3), mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=10000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=10000, suppress_health_check=[HealthCheck.too_slow])
     def test_run_mu_trace_completeness(self, projections, initial):
         """
         run_mu traces should capture all intermediate states.
@@ -372,7 +372,7 @@ class TestKernelTraceIntegrity:
         assert is_mu(result), f"run_mu result is invalid Mu"
 
     @given(projection_lists(min_size=1, max_size=3), mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=10000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=10000, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_step_numbers_sequential(self, projections, initial):
         """
         Trace step numbers should be sequential 0, 1, 2, ...
@@ -390,7 +390,7 @@ class TestKernelTraceIntegrity:
             assert entry["step"] == i, f"Step number mismatch at index {i}: got {entry['step']}"
 
     @given(mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_empty_projections_immediate_stall(self, value):
         """
         Empty projection list should immediately stall (return input unchanged).
@@ -421,7 +421,7 @@ class TestKernelStateInjectionResistance:
     """
 
     @given(kernel_mode_injection_attempts(), projection_lists(max_size=3))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_domain_data_cannot_forge_kernel_mode(self, malicious_value, projections):
         """
         Domain data with _mode/_phase/_input keys should not break kernel.
@@ -439,7 +439,7 @@ class TestKernelStateInjectionResistance:
             pass  # Some errors acceptable for malformed input
 
     @given(mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_legitimate_underscore_keys_still_work(self, value):
         """
         Legitimate domain data with underscore keys should still work.
@@ -460,7 +460,7 @@ class TestKernelStateInjectionResistance:
         assert is_mu(result), "step_mu failed on legitimate underscore key"
 
     @given(kernel_mode_injection_attempts())
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_normalize_denormalize_preserves_kernel_keys(self, malicious_value):
         """
         Normalization should preserve kernel-internal keys in domain data.
@@ -491,7 +491,7 @@ class TestNonLinearPatternFuzzing:
     """
 
     @given(nonlinear_mu_patterns(), mu_primitives)
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_nonlinear_pattern_match_consistency(self, pattern_and_var, bound_value):
         """
         Non-linear patterns should enforce consistency.
@@ -543,7 +543,7 @@ class TestNonLinearPatternFuzzing:
 
     @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=3),
            mu_primitives)
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_nonlinear_pattern_accepts_consistent(self, var_name, value):
         """
         Non-linear pattern should accept consistent values.
@@ -581,7 +581,7 @@ class TestProjectionOrderSecurity:
     """
 
     @given(projection_lists(min_size=2, max_size=4), mu_values(max_depth=2))
-    @settings(max_examples=500, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_first_match_wins_deterministic(self, projections, value):
         """
         First matching projection should always win.
@@ -604,7 +604,7 @@ class TestProjectionOrderSecurity:
         assert mu_equal(result2, result3), "First-match-wins not deterministic (2 vs 3)"
 
     @given(mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_projection_order_matters(self, value):
         """
         Reversing projection order changes which one matches first.
@@ -640,7 +640,7 @@ class TestContextPreservation:
     """
 
     @given(mu_patterns(max_depth=2), mu_values(max_depth=2))
-    @settings(max_examples=300, deadline=5000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow])
     def test_match_subst_roundtrip_produces_valid_mu_on_success(self, pattern, value):
         """
         match_mu -> subst_mu roundtrip produces valid Mu when successful (exceptions acceptable).
@@ -670,7 +670,7 @@ class TestContextPreservation:
             pass  # Expected errors - test only verifies invariant on success path
 
     @given(projection_lists(min_size=2, max_size=3))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_projection_list_not_modified_by_step(self, projections):
         """
         Projection list should not be modified by step_mu.
@@ -770,7 +770,7 @@ class TestKnownRegressions:
             validate_type_tag("malicious", "test")
 
     @given(mu_values(max_depth=2))
-    @settings(max_examples=200, deadline=5000)
+    @settings(deadline=5000)
     def test_mu_equal_reflexive(self, value):
         """mu_equal should be reflexive (x == x)."""
         assume(is_mu(value))
@@ -907,21 +907,21 @@ class TestFuzzerCoverage:
     """
 
     @given(mu_values(max_depth=3))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_fuzzer_generates_diverse_types(self, value):
         """Fuzzer should generate diverse Mu types."""
         assume(is_mu(value))
         assert is_mu(value), "Fuzzer generated invalid Mu"
 
     @given(mu_patterns(max_depth=2))
-    @settings(max_examples=500, deadline=5000)
+    @settings(deadline=5000)
     def test_fuzzer_generates_diverse_patterns(self, pattern):
         """Fuzzer should generate diverse patterns with var sites."""
         assume(is_mu(pattern))
         assert is_mu(pattern), "Fuzzer generated invalid pattern"
 
     @given(projection_lists(min_size=1, max_size=4))
-    @settings(max_examples=300, deadline=5000)
+    @settings(deadline=5000)
     def test_fuzzer_generates_diverse_projection_lists(self, projections):
         """Fuzzer should generate diverse projection lists."""
         assert len(projections) >= 1, "Empty projection list"

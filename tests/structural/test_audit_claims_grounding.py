@@ -254,7 +254,7 @@ class TestUnderscoreKeyAudit:
     def test_kernel_seed_uses_underscore_mode(self):
         """kernel.v1.json must use _mode for state machine transitions."""
         import json
-        seed_path = REPO_ROOT / "seeds" / "kernel.v1.json"
+        seed_path = REPO_ROOT / "mu" / "substrate" / "kernel.v1.json"
         content = seed_path.read_text()
         seed = json.loads(content)
 
