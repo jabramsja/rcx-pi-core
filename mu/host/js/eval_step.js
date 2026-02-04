@@ -170,9 +170,16 @@ function isVar(mu) {
 /**
  * Check if value is a valid Mu type.
  * Rejects NaN, Infinity, functions, undefined, symbols.
+ * Enforces depth and width limits matching Python (MAX_DEPTH=300, MAX_WIDTH=1000).
+ * Rejects objects with Symbol keys (not valid Mu).
  * @host_builtin - BOOTSTRAP: type validation primitive
  */
-function isValidMu(value) {
+const MAX_MU_WIDTH = 1000;
+
+function isValidMu(value, _depth = 0) {
+  // Depth guard (matches Python MAX_MU_DEPTH)
+  if (_depth > MAX_DEPTH) return false;
+
   if (value === null) return true;
   if (value === undefined) return false;
 
@@ -182,11 +189,20 @@ function isValidMu(value) {
   if (t === 'function' || t === 'symbol') return false;
 
   if (Array.isArray(value)) {
-    return value.every(isValidMu);
+    // Width guard (matches Python MAX_MU_WIDTH)
+    if (value.length > MAX_MU_WIDTH) return false;
+    return value.every(v => isValidMu(v, _depth + 1));
   }
 
   if (t === 'object') {
-    return Object.values(value).every(isValidMu);
+    const keys = Object.keys(value);
+    // Width guard (matches Python MAX_MU_WIDTH)
+    if (keys.length > MAX_MU_WIDTH) return false;
+    // Reject Symbol keys (not valid Mu - Object.keys ignores them but we check explicitly)
+    if (Object.getOwnPropertySymbols(value).length > 0) return false;
+    // Validate all string keys are actually strings (defensive)
+    if (!keys.every(k => typeof k === 'string')) return false;
+    return keys.every(k => isValidMu(value[k], _depth + 1));
   }
 
   return false;
@@ -723,7 +739,7 @@ function listToLinked(arr) {
  * @param {Array} projections - Combined kernel + match + subst projections
  * @param {*} domainInput - User domain data (will be validated)
  * @param {Array} domainProjections - User projections to apply
- * @param {Object} options - { maxSteps, normalize: bool }
+ * @param {Object} options - { maxSteps, shouldNormalize: bool }
  * @throws {Error} If domain input contains kernel-reserved fields
  */
 function stepKernel(projections, domainInput, domainProjections, options = {}) {
@@ -1709,6 +1725,32 @@ if (process.argv.includes('--json-api')) {
         total_with_bridge: allProjectionsWithBridge.length,
         total_with_recurrence_bridge: allProjectionsWithRecurrenceAndBridge.length,
         total_with_exhaustion_bridge: allProjectionsWithExhaustionAndBridge.length
+      };
+    } else if (request.action === 'normalize_roundtrip') {
+      // Normalize and denormalize a value - for cross-substrate parity testing
+      // PARITY REQUIREMENT: Python and JS must produce identical results
+      const { value } = request;
+      try {
+        const normalized = normalize(value);
+        const denormalized = denormalize(normalized);
+        response = {
+          success: true,
+          normalized: normalized,
+          denormalized: denormalized
+        };
+      } catch (e) {
+        response = { success: false, error: e.message };
+      }
+    } else if (request.action === 'validate_mu') {
+      // Validate a value against Mu type rules - for cross-substrate parity testing
+      // PARITY REQUIREMENT: JS isValidMu must match Python is_mu
+      const { value } = request;
+      const isValid = isValidMu(value);
+      response = {
+        success: true,
+        is_valid: isValid,
+        max_depth: MAX_DEPTH,
+        max_width: MAX_MU_WIDTH
       };
     } else if (request.action === 'run_recurrence_with_bridge') {
       // Run Recurrence with bridge (meta-circular path)

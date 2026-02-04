@@ -170,3 +170,29 @@ The denormalizer (`denormalize_for_output()` and JS equivalent) is part of the t
 2. **Tested**: Round-trip tests required (`normalize → denormalize → normalize` must be stable).
 3. **Audited**: Changes to denormalizer require full 9-agent review (it's a trust boundary).
 4. **Parity**: Python and JS denormalizers must produce identical output for same input.
+
+## Cross-Substrate Parity Requirement (MANDATORY)
+
+**Parity scope:**
+- **REQUIRED** = normalize/denormalize equivalence + projection execution results
+- **NOT REQUIRED** = adapter-level validation (temporary Python-only migration scaffolding)
+
+**HARD REQUIREMENT**: The JavaScript bootstrap must produce identical results to Python for all in-scope operations. This is not optional.
+
+Rationale:
+- JS is the "smaller bootstrap" that proves substrate independence
+- If JS and Python diverge, we have two different runtimes (not one portable system)
+- Any parity violation is a blocking bug that must be fixed before proceeding
+
+Required parity tests:
+1. `test_python_js_normalization_matches` - normalize/denormalize round-trip parity
+2. `test_actual_cross_substrate_comparison` - projection execution parity
+3. `test_python_js_constants_match` - MAX_DEPTH, KERNEL_RESERVED_FIELDS parity
+
+When adding new functionality:
+1. Add to Python first
+2. Add equivalent to JS
+3. Add cross-substrate parity test
+4. Both must pass before merge
+
+Test location: `tests/test_js_parity_automated.py`
