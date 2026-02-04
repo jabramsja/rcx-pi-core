@@ -280,6 +280,72 @@ function isTypedEmptySentinel(obj) {
 }
 
 /**
+ * Classify a legacy (untyped) head/tail linked list as 'list' or 'dict'.
+ *
+ * PARITY: Matches Python classify_linked_list behavior.
+ * Policy: "classify" - treat {head: X, tail: Y} as linked-list format.
+ *
+ * A linked list is classified as 'dict' if ALL elements are kv-pairs
+ * with string keys. kv-pair format: {head: string_key, tail: {head: value, tail: null}}
+ *
+ * Otherwise classified as 'list' (including empty, primitives, circular).
+ */
+function classifyLegacyLinkedList(value) {
+  // Non-object or null is list
+  if (typeof value !== 'object' || value === null) {
+    return 'list';
+  }
+
+  // Walk the list checking if all heads are valid kv-pairs with string keys
+  const visited = new Set();
+  let current = value;
+  let depth = 0;
+
+  while (current !== null && typeof current === 'object') {
+    // Depth guard
+    if (depth++ > MAX_DEPTH) {
+      return 'list';
+    }
+
+    // Cycle detection
+    // Note: Can't use object identity in same way as Python, but we can check structure
+    // For simplicity, just use depth guard as protection
+    const keys = Object.keys(current).sort();
+
+    // Must be exactly {head, tail}
+    if (keys.length !== 2 || keys[0] !== 'head' || keys[1] !== 'tail') {
+      return 'list';
+    }
+
+    // Check if head is a valid kv-pair with string key
+    const head = current.head;
+    if (typeof head === 'object' && head !== null) {
+      const headKeys = Object.keys(head).sort();
+      // kv-pair format: {head: key, tail: {head: value, tail: null}}
+      if (headKeys.length === 2 && headKeys[0] === 'head' && headKeys[1] === 'tail') {
+        const key = head.head;
+        if (typeof key !== 'string') {
+          // Key is not a string - not a valid dict encoding
+          return 'list';
+        }
+        // Valid kv-pair with string key - continue checking
+      } else {
+        // Head is object but not kv-pair structure - it's a list
+        return 'list';
+      }
+    } else {
+      // Head is primitive - not a kv-pair, so it's a list
+      return 'list';
+    }
+
+    current = current.tail;
+  }
+
+  // All elements were valid kv-pairs with string keys
+  return 'dict';
+}
+
+/**
  * Normalize a Mu value for structural matching.
  *
  * Converts dicts and lists to type-tagged head/tail linked lists:
@@ -487,12 +553,43 @@ function denormalize(value, _depth = 0) {
     // If _type is non-string or invalid, fall through to regular object handling
   }
 
-  // Non-typed head/tail (EXACTLY 2 keys) - preserve structure but denormalize children
+  // Non-typed head/tail (EXACTLY 2 keys) - classify and convert to list/dict
+  // PARITY: Matches Python classify_linked_list behavior
+  // Policy decision: "classify" - treat {head: X, tail: Y} as linked-list format
   if (isLinkedListNode(value) && !('_type' in value)) {
-    return {
-      head: denormalize(value.head, _depth + 1),
-      tail: denormalize(value.tail, _depth + 1)
-    };
+    // Check if this looks like a dict encoding (head elements are kv-pairs with string keys)
+    const isDictEncoding = classifyLegacyLinkedList(value) === 'dict';
+
+    if (isDictEncoding) {
+      // Dict encoding - extract kv-pairs
+      const result = {};
+      let node = value;
+      let nodeDepth = 0;
+      while (node && typeof node === 'object' && 'head' in node) {
+        if (nodeDepth++ > MAX_DEPTH) {
+          throw new Error(`Max depth exceeded in dict denormalization`);
+        }
+        const kv = node.head;
+        if (kv && typeof kv === 'object' && 'head' in kv && kv.tail && 'head' in kv.tail) {
+          result[kv.head] = denormalize(kv.tail.head, _depth + 1);
+        }
+        node = node.tail;
+      }
+      return result;
+    } else {
+      // List encoding - extract elements
+      const result = [];
+      let node = value;
+      let nodeDepth = 0;
+      while (node && typeof node === 'object' && 'head' in node) {
+        if (nodeDepth++ > MAX_DEPTH) {
+          throw new Error(`Max depth exceeded in list denormalization`);
+        }
+        result.push(denormalize(node.head, _depth + 1));
+        node = node.tail;
+      }
+      return result;
+    }
   }
 
   // Regular object - denormalize values
@@ -1715,6 +1812,7 @@ if (process.argv.includes('--json-api')) {
       response = {
         success: true,
         MAX_DEPTH,
+        max_width: MAX_MU_WIDTH,  // Added for Tooling Delta parity check
         KERNEL_RESERVED_FIELDS: [...KERNEL_RESERVED_FIELDS],
         kernel_projection_count: kernel.projections.length,
         match_projection_count: matchSeed.projections.length,

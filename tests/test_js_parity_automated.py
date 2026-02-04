@@ -239,10 +239,10 @@ class TestCrossSubstrateParity:
     def test_python_js_constants_match(self):
         """Verify Python and JS have matching security constants.
 
-        9-agent Round 3: Verify constants like MAX_DEPTH and KERNEL_RESERVED_FIELDS
-        are actually identical, not just claimed to be.
+        9-agent Round 3: Verify constants like MAX_DEPTH, MAX_WIDTH and
+        KERNEL_RESERVED_FIELDS are actually identical, not just claimed to be.
         """
-        from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
+        from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH, MAX_MU_WIDTH
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
         js_response = self._run_js_json_api({"action": "get_constants"})
@@ -251,6 +251,12 @@ class TestCrossSubstrateParity:
         # MAX_DEPTH must match
         assert js_response["MAX_DEPTH"] == MAX_MU_DEPTH, (
             f"MAX_DEPTH mismatch: Python={MAX_MU_DEPTH}, JS={js_response['MAX_DEPTH']}"
+        )
+
+        # MAX_WIDTH must match (Tooling Delta checklist item)
+        js_max_width = js_response.get("max_width") or js_response.get("MAX_WIDTH") or js_response.get("MAX_MU_WIDTH")
+        assert js_max_width == MAX_MU_WIDTH, (
+            f"MAX_WIDTH mismatch: Python={MAX_MU_WIDTH}, JS={js_max_width}"
         )
 
         # KERNEL_RESERVED_FIELDS must match
@@ -329,6 +335,79 @@ class TestCrossSubstrateParity:
             # Roundtrip should recover original
             assert _cross_substrate_equal(case, py_roundtrip), f"Python roundtrip failed for {case}"
             assert _cross_substrate_equal(case, js_roundtrip), f"JS roundtrip failed for {case}"
+
+    def test_head_tail_classify_policy_parity(self):
+        """
+        Verify Python and JS have identical head/tail handling policy.
+
+        POLICY DECISION: "Classify" - treat {head: X, tail: Y} as linked-list format.
+
+        Both substrates MUST:
+        1. Treat {"head": X, "tail": Y} as linked-list representation (not domain data)
+        2. Denormalize such structures back to Python/JS lists
+        3. Handle untyped head/tail consistently (classify as linked-list)
+
+        This test documents the policy as intentional and verifies cross-substrate parity.
+        If domain data legitimately uses "head"/"tail" keys, it will be classified as
+        linked-list format. This is a known design decision, not a bug.
+
+        See roadmap/ToolingDelta.md for policy rationale.
+        """
+        from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
+
+        # Test cases that exercise head/tail classification
+        test_cases = [
+            # Explicit linked-list structures
+            {"head": 1, "tail": None},
+            {"head": "a", "tail": {"head": "b", "tail": None}},
+            {"head": {"x": 1}, "tail": {"head": {"y": 2}, "tail": None}},
+
+            # Deeply nested linked-lists
+            {"head": 1, "tail": {"head": 2, "tail": {"head": 3, "tail": None}}},
+
+            # Empty list representation (null/None tail at end)
+            {"head": "only", "tail": None},
+
+            # Mixed: dict containing head/tail keys (WILL be classified as linked-list)
+            # This documents the policy - these get treated as linked-lists
+        ]
+
+        for case in test_cases:
+            # Python: normalize then denormalize
+            # Note: These are already in head/tail format, so normalization may be identity
+            # The key test is denormalization: does it convert to Python list?
+            py_denorm = denormalize_from_match(case)
+
+            # JS: same operation via JSON API
+            request = json.dumps({"action": "normalize_roundtrip", "value": case})
+            result = subprocess.run(
+                ["node", "mu/host/js/eval_step.js", "--json-api", request],
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                timeout=30
+            )
+
+            js_response = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('JSON_API_RESPONSE:'):
+                    js_response = json.loads(line[len('JSON_API_RESPONSE:'):])
+                    break
+
+            assert js_response is not None, f"No JSON API response for head/tail case {case}"
+            assert js_response.get('success'), f"JS failed for head/tail case {case}: {js_response.get('error')}"
+
+            js_denorm = js_response['denormalized']
+
+            # PARITY CHECK: Both substrates must produce identical output
+            # This verifies the "classify" policy is consistent
+            assert _cross_substrate_equal(py_denorm, js_denorm), (
+                f"HEAD/TAIL POLICY VIOLATION: denormalize differs\n"
+                f"  Input:  {case}\n"
+                f"  Python: {py_denorm}\n"
+                f"  JS:     {js_denorm}\n"
+                f"  Policy: Both should treat head/tail as linked-list (classify policy)"
+            )
 
 
 class TestJSSecurityParity:
