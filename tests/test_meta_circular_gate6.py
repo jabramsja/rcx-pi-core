@@ -1,25 +1,21 @@
 """
-Gate 6 Integration Tests: META_CIRCULAR Recurrence and Exhaustion.
+Gate 6 Integration Tests: HYBRID Recurrence and Exhaustion.
 
 These tests verify that recurrence.v1 and exhaustion.v1 are declared as
-META_CIRCULAR now that the Bootstrap-Structural Bridge provides non-linear
-pattern support.
+HYBRID and can run with bridge support for non-linear pattern matching.
 
 Key verification:
-1. Seeds declare execution_layer: META_CIRCULAR
+1. Seeds declare execution_layer: HYBRID (meta-circular capable but uses hybrid path)
 2. Seeds require bootstrap_structural.v1 bridge for non-linear pattern support
 3. Kernel with bridge (kernel.v1 + match.v2 + bootstrap_structural + subst.v2) loads correctly
 
 EXECUTION MODEL:
-Algorithm seeds are declared META_CIRCULAR because they CAN run through
-the meta-circular kernel infrastructure. For practical execution, they
-use run_algorithm_meta_circular() which delegates to eval_seed.step().
-This provides:
-- Non-linear pattern support (binding conflict detection)
-- Direct pattern matching without normalization overhead
-- Parity with the bootstrap layer tests
+Algorithm seeds are declared HYBRID because:
+- They CAN run through meta-circular kernel (bridge provides non-linear support)
+- They CURRENTLY run via Python match/substitute (practical execution)
+- Reserved kernel fields (_detect_closure, _mode, etc.) block kernel entry
 
-See: docs/core/BootstrapStructuralBridge.v0.md
+See: roadmap/MetaCircular_Boot0_GatePlan.md "Known Architectural Constraints"
 """
 
 from __future__ import annotations

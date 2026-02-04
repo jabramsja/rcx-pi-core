@@ -274,10 +274,48 @@ TEST REQUIREMENT: At least one test must:
 
 ---
 
+## Cross-Substrate Parity (MANDATORY)
+
+**HARD REQUIREMENT**: JavaScript and Python must produce identical results for ALL operations.
+
+This is not optional. The JS bootstrap exists to prove substrate independence. If JS and Python diverge, we have two different runtimes instead of one portable system.
+
+### Parity Verification Protocol
+
+When reviewing any code change:
+```
+FINDING: Cross-substrate parity
+PYTHON_FILE: /path/to/python_impl.py
+JS_FILE: mu/host/js/eval_step.js
+PARITY_TEST: tests/test_js_parity_automated.py::[TestClass]::[test_name]
+VERIFIED: Yes/No
+```
+
+### Required Parity Tests
+
+| Operation | Test |
+|-----------|------|
+| normalize/denormalize | `test_python_js_normalization_matches` |
+| projection execution | `test_actual_cross_substrate_comparison` |
+| constants (MAX_DEPTH, etc.) | `test_python_js_constants_match` |
+| recurrence algorithm | `test_recurrence_with_bridge_*` |
+| exhaustion algorithm | `test_exhaustion_with_bridge_*` |
+
+### Anti-Pattern Detection
+
+**Reject these patterns:**
+- Python-only feature without JS equivalent
+- JS-only feature without Python equivalent
+- "JS parity not needed" claims (always needed)
+- Tests that only run one substrate
+
+---
+
 ## History
 
 | Date | Change |
 |------|--------|
+| 2026-02-04 | Added Cross-Substrate Parity section (JS/Python parity is mandatory) |
 | 2026-02-03 | Added Execution Path Verification (discovered tests verify behavior not path) |
 | 2026-02-02 | Added Cross-Seed Compatibility Check (architectural gap found in 9-agent review) |
 | 2026-02-01 | Initial version (9-agent review found hallucination issues) |

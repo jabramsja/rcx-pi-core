@@ -63,6 +63,7 @@ Exit criteria:
 1. Round-trip normalization tests pass.
 2. No existing behavior changes before seed refactor.
 3. **Adapter window closure rule:** Adapters must be removed or strictly gated before Gate 4 begins (hard requirement per adversary review).
+4. **Parity scope:** REQUIRED = normalize/denormalize equivalence + projection execution. NOT REQUIRED = adapter-level validation (temporary Python-only scaffolding).
 
 ---
 
@@ -100,6 +101,37 @@ Exit criteria:
 3. Gate 2 adapter window is confirmed closed (no adapter code in production path).
 
 **Optional:** If touching `run_algorithm_meta_circular()`, consider renaming to clarify execution path (per translator review).
+
+---
+
+## Known Architectural Constraints (Gate 2–5 Context)
+
+These are **intentional constraints** in the current architecture. They are **not bugs**. They exist until Gates 3–5 are completed.
+
+### 1. Kernel reserved fields block algorithm entry
+
+Algorithm states use fields like `_detect_closure`, `_detect_exhaustion`, `_mode`, `_phase`.
+`step_kernel_mu()` rejects any input containing reserved kernel fields.
+**Result:** algorithm states **cannot enter the kernel**, so algorithms run via bootstrap `match/substitute`.
+
+### 2. Kernel-internal bypass exists to keep hybrid execution safe
+
+`eval_seed._is_kernel_internal_state()` treats `_mode`/`_phase` states as kernel-internal and skips deep Mu validation.
+This keeps hybrid execution viable but **allows non-Mu values to slip through**.
+This bypass must be removed once algorithms run structurally.
+
+### 3. Trace "matched_id" uses a different matcher than execution
+
+`run_mu_structural()` uses `match.v1` (via `match_mu`) to find `matched_id`, but execution uses kernel + `match.v2`.
+If v1 and v2 diverge, traces can misreport which projection fired.
+
+### Resolution Path
+
+- **Gate 3:** Rewrite algorithm state format (or define an algorithm-specific entry path) so it no longer conflicts with kernel reserved fields.
+- **Gate 4:** Run recurrence/exhaustion through structural kernel + bridge.
+- **Gate 5:** Remove `_is_kernel_internal_state` bypass and align trace matching with the execution path.
+
+**Note:** Gate 2 adapters do **not** remove these constraints. They only prepare the migration.
 
 ---
 

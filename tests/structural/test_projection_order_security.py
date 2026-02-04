@@ -241,3 +241,87 @@ class TestProjectionOrderAttackPrevention:
         # Note: The forging_proj can still produce kernel-like output,
         # but that's handled by kernel.unwrap matching first (first-match-wins)
         # The ORDER enforcement ensures kernel projections match first
+
+
+# =============================================================================
+# Projection Reserved Field Validation Tests (Gate 2 addition)
+# =============================================================================
+
+class TestProjectionReservedFieldValidation:
+    """
+    Test that step_kernel_mu rejects projections with reserved fields in pattern/body.
+
+    This is a parity requirement with JS stepKernel (Gate 2 security fix).
+    """
+
+    def test_projection_pattern_with_reserved_field_rejected(self):
+        """Projection pattern containing reserved field is rejected."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        # Projection with _mode in pattern (reserved kernel field)
+        bad_proj = {
+            "id": "bad.pattern",
+            "pattern": {"_mode": "attack", "data": {"var": "x"}},
+            "body": {"result": {"var": "x"}}
+        }
+
+        with pytest.raises(ValueError, match="reserved"):
+            step_kernel_mu([bad_proj], {"test": "input"})
+
+    def test_projection_body_with_reserved_field_rejected(self):
+        """Projection body containing reserved field is rejected."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        # Projection with _result in body (reserved kernel field)
+        bad_proj = {
+            "id": "bad.body",
+            "pattern": {"data": {"var": "x"}},
+            "body": {"_result": {"var": "x"}, "_stall": False}
+        }
+
+        with pytest.raises(ValueError, match="reserved"):
+            step_kernel_mu([bad_proj], {"test": "input"})
+
+    def test_projection_nested_reserved_field_rejected(self):
+        """Projection with deeply nested reserved field is rejected."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        # Projection with _phase nested in body
+        bad_proj = {
+            "id": "bad.nested",
+            "pattern": {"data": {"var": "x"}},
+            "body": {"outer": {"inner": {"_phase": "forged"}}}
+        }
+
+        with pytest.raises(ValueError, match="reserved"):
+            step_kernel_mu([bad_proj], {"test": "input"})
+
+    def test_valid_projection_accepted(self):
+        """Projection without reserved fields passes validation."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        # Valid domain projection
+        good_proj = {
+            "id": "valid.proj",
+            "pattern": {"data": {"var": "x"}},
+            "body": {"result": {"var": "x"}}
+        }
+
+        # Should not raise (may not match, but validation passes)
+        result = step_kernel_mu([good_proj], {"data": "test"})
+        assert result is not None  # Either matched or returned input
+
+    def test_kernel_projection_in_input_rejected(self):
+        """Kernel projection (by ID) in input list is rejected."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        # Kernel projection should not be passed to step_kernel_mu
+        # step_kernel_mu expects DOMAIN projections only
+        kernel_proj = {
+            "id": "kernel.wrap",
+            "pattern": {"_step": {"var": "x"}},
+            "body": {"_mode": "try"}
+        }
+
+        with pytest.raises(ValueError, match="DOMAIN projections only"):
+            step_kernel_mu([kernel_proj], {"test": "input"})

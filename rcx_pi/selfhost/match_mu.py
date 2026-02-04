@@ -108,7 +108,9 @@ def normalize_for_match(value: Mu) -> Mu:
     the ambiguity where [["a", 1]] and {"a": 1} would otherwise normalize to
     identical structures.
 
-    Note: Empty collections ({} and []) both normalize to null (no type tag needed).
+    Empty collections use typed sentinels (not null):
+    - {} -> {"_type": "dict"}
+    - [] -> {"_type": "list"}
 
     This function uses iterative traversal with an explicit stack (Phase 6c).
     The isinstance() checks at the boundary are scaffolding debt, not semantic debt.

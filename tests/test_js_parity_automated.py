@@ -263,7 +263,13 @@ class TestCrossSubstrateParity:
         )
 
     def test_python_js_normalization_matches(self):
-        """Verify Python and JS normalize identically for test cases."""
+        """
+        Verify Python and JS normalize/denormalize identically.
+
+        PARITY REQUIREMENT: This is a HARD requirement per project policy.
+        The JS bootstrap must produce identical results to Python for all
+        normalization operations. Any divergence is a blocking bug.
+        """
         from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 
         test_cases = [
@@ -273,14 +279,56 @@ class TestCrossSubstrateParity:
             {"a": 1, "b": 2},
             [{"x": []}, {"y": {}}],
             {"nested": {"deep": [1, 2]}},
+            # Algorithm state shapes
+            {"_detect_closure": {"trace": None, "result": "X"}},
+            {"_detect_closure": {"trace": [{"step": 0, "state": "A"}], "result": "A"}},
+            {"_detect_exhaustion": {"trace": None, "frozen": None, "tau_step": 0}},
         ]
 
         for case in test_cases:
+            # Python normalization
             py_normalized = normalize_for_match(case)
             py_roundtrip = denormalize_from_match(py_normalized)
 
-            # Python roundtrip should work
-            assert py_roundtrip == case, f"Python roundtrip failed for {case}"
+            # JS normalization via JSON API
+            request = json.dumps({"action": "normalize_roundtrip", "value": case})
+            result = subprocess.run(
+                ["node", "mu/host/js/eval_step.js", "--json-api", request],
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                timeout=30
+            )
+
+            # Parse JS response
+            js_response = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('JSON_API_RESPONSE:'):
+                    js_response = json.loads(line[len('JSON_API_RESPONSE:'):])
+                    break
+
+            assert js_response is not None, f"No JSON API response for {case}"
+            assert js_response.get('success'), f"JS normalize failed for {case}: {js_response.get('error')}"
+
+            js_normalized = js_response['normalized']
+            js_roundtrip = js_response['denormalized']
+
+            # PARITY CHECK: Python and JS must produce identical results
+            assert _cross_substrate_equal(py_normalized, js_normalized), (
+                f"PARITY VIOLATION: normalize differs for {case}\n"
+                f"  Python: {py_normalized}\n"
+                f"  JS:     {js_normalized}"
+            )
+
+            assert _cross_substrate_equal(py_roundtrip, js_roundtrip), (
+                f"PARITY VIOLATION: denormalize differs for {case}\n"
+                f"  Python: {py_roundtrip}\n"
+                f"  JS:     {js_roundtrip}"
+            )
+
+            # Roundtrip should recover original
+            assert _cross_substrate_equal(case, py_roundtrip), f"Python roundtrip failed for {case}"
+            assert _cross_substrate_equal(case, js_roundtrip), f"JS roundtrip failed for {case}"
 
 
 class TestJSSecurityParity:
@@ -346,6 +394,85 @@ class TestJSSecurityParity:
         )
 
         assert "PASS kernel reserved fields: true" in result.stdout
+
+    def test_js_mu_validation_parity(self):
+        """
+        Verify JS isValidMu matches Python is_mu for edge cases.
+
+        PARITY REQUIREMENT (Gate 2): JS must enforce same depth/width limits.
+        """
+        from rcx_pi.selfhost.mu_type import is_mu, MAX_MU_DEPTH, MAX_MU_WIDTH
+
+        # Test cases: (value, expected_valid, description)
+        test_cases = [
+            # Valid cases
+            (None, True, "null"),
+            (True, True, "boolean"),
+            (42, True, "integer"),
+            (3.14, True, "float"),
+            ("hello", True, "string"),
+            ([], True, "empty list"),
+            ({}, True, "empty dict"),
+            ([1, 2, 3], True, "simple list"),
+            ({"a": 1}, True, "simple dict"),
+
+            # Invalid cases - these should be rejected by both
+            # Note: We can't easily send undefined/NaN/Infinity via JSON,
+            # so we test structural limits instead
+        ]
+
+        for value, expected, desc in test_cases:
+            # Python validation
+            py_valid = is_mu(value)
+
+            # JS validation via JSON API
+            request = json.dumps({"action": "validate_mu", "value": value})
+            result = subprocess.run(
+                ["node", "mu/host/js/eval_step.js", "--json-api", request],
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                timeout=30
+            )
+
+            js_response = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('JSON_API_RESPONSE:'):
+                    js_response = json.loads(line[len('JSON_API_RESPONSE:'):])
+                    break
+
+            assert js_response is not None, f"No JSON API response for {desc}"
+            assert js_response.get('success'), f"JS validate_mu failed for {desc}"
+
+            js_valid = js_response['is_valid']
+
+            # PARITY CHECK
+            assert py_valid == js_valid, (
+                f"PARITY VIOLATION: is_mu differs for {desc}\n"
+                f"  Python: {py_valid}\n"
+                f"  JS:     {js_valid}"
+            )
+
+        # Verify constants match
+        request = json.dumps({"action": "validate_mu", "value": None})
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", request],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=30
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                js_response = json.loads(line[len('JSON_API_RESPONSE:'):])
+                break
+
+        assert js_response['max_depth'] == MAX_MU_DEPTH, (
+            f"MAX_DEPTH mismatch: Python={MAX_MU_DEPTH}, JS={js_response['max_depth']}"
+        )
+        assert js_response['max_width'] == MAX_MU_WIDTH, (
+            f"MAX_WIDTH mismatch: Python={MAX_MU_WIDTH}, JS={js_response['max_width']}"
+        )
 
 
 class TestJSRecurrenceParity:

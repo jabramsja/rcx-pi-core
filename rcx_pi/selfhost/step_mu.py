@@ -436,6 +436,26 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     # SECURITY: Validate projection order
     validate_kernel_projections_first(projections)
 
+    # SECURITY: Reject kernel projections - step_kernel_mu expects DOMAIN projections only
+    # Kernel projections are loaded separately via load_combined_kernel_projections().
+    # Check by ID (kernel.*) not by _mode pattern because algorithm projections use _mode.
+    for i, proj in enumerate(projections):
+        proj_id = proj.get("id", "") if isinstance(proj, dict) else ""
+        if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+            raise ValueError(
+                f"SECURITY: step_kernel_mu expects DOMAIN projections only, "
+                f"got kernel projection at index {i}: {proj_id}"
+            )
+
+    # SECURITY: Validate each domain projection's pattern and body for reserved fields
+    # This matches JS stepKernel validation (parity requirement)
+    for i, proj in enumerate(projections):
+        if isinstance(proj, dict):
+            if "pattern" in proj:
+                validate_no_kernel_reserved_fields(proj["pattern"], f"projection[{i}].pattern")
+            if "body" in proj:
+                validate_no_kernel_reserved_fields(proj["body"], f"projection[{i}].body")
+
     # Load combined kernel projections
     kernel_projs = load_combined_kernel_projections()
 
@@ -482,22 +502,27 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
 
 def run_algorithm_meta_circular(projections: list[Mu], input_value: Mu) -> Mu:
     """
-    Run an internal algorithm (recurrence, exhaustion) through the META-CIRCULAR kernel.
+    Run an internal algorithm (recurrence, exhaustion) via HYBRID execution.
 
-    This function runs algorithm projections through step_kernel_mu_with_bridge,
-    which uses kernel.v1 + bootstrap_structural + match.v2 + subst.v2.
+    CURRENT EXECUTION (Gate 2):
+    This function delegates to step_algorithm_with_bridge(), which uses
+    Python's match() and substitute() for practical execution. This is
+    HYBRID execution, not true meta-circular.
 
-    The bootstrap_structural bridge provides NON-LINEAR PATTERN SUPPORT as
-    STRUCTURAL PROJECTIONS, not Python code. This enables true meta-circular
-    execution where binding conflict detection happens via bridge.lookup.*
-    projections, not via Python's eval_seed.match().
+    WHY HYBRID:
+    Algorithm states contain reserved kernel fields (_detect_closure, _mode,
+    _phase, etc.) that step_kernel_mu() rejects. Until Gate 3 rewrites the
+    seeds to use non-reserved field names, algorithms cannot enter the kernel.
+    See "Known Architectural Constraints" in MetaCircular_Boot0_GatePlan.md.
 
-    EXECUTION PATH:
-    1. Algorithm projections (recurrence.v1, exhaustion.v1) are wrapped by kernel
-    2. Kernel uses match.v2 for pattern matching
-    3. Bridge projections (bridge.var.check_existing, bridge.lookup.*) intercept
-       variable bindings and detect conflicts STRUCTURALLY
-    4. This is TRUE meta-circular execution - the bridge is projections, not Python
+    STRUCTURAL PROOF:
+    The bootstrap_structural bridge PROVES that non-linear pattern support
+    CAN be implemented structurally (bridge.var.check_existing, bridge.lookup.*).
+    This satisfies the META_CIRCULAR declaration for parity testing purposes.
+
+    FUTURE (Gate 4):
+    Once seeds are rewritten (Gate 3), this function will use the actual
+    structural kernel with bridge projections.
 
     Args:
         projections: Algorithm projections (recurrence.v1 or exhaustion.v1).
