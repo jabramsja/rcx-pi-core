@@ -55,7 +55,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     # RCX Engine: main program orchestrating recurrence + exhaustion
     # Updated: Added status: "design_only" marker
     # Updated: Fixed meta.doc path (docs/core/RCXEngine.v0.md -> docs/core/EngineNewsStructural.v0.md)
-    "rcx_engine.v1.json": "af168cf0932e2aae521444eb1b34a7249f47bf750db941a659398964de29adb2",
+    "rcx_engine.v1.json": "dfc3c8fcd4545687b614b9ee8d80d687a29d72e36c69f148615061d0341b0456",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
