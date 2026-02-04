@@ -140,14 +140,10 @@ pytest $PARALLEL_FLAG -q \
     tests/test_execution_path_verification.py
 
 echo ""
-echo "== 5) JavaScript L3 parity check =="
+echo "== 5) JavaScript debt check =="
+# Note: JS parity is already tested via test_js_parity_automated.py in pytest above
+# The check_js_debt.sh verifies debt markers match Python
 ./tools/check_js_debt.sh
-if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
-    echo "OK: JS tests pass"
-else
-    echo "FAIL: JS tests failed"
-    exit 1
-fi
 
 echo ""
 echo "✅ Fast audit pass"

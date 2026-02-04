@@ -27,8 +27,11 @@ if python3 -c "import xdist" 2>/dev/null; then
     echo "Using parallel execution with worksteal (pytest-xdist detected)"
 fi
 
-echo "== 0) Repo clean =="
+echo "== 0a) Repo clean =="
 test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --porcelain; exit 1; }
+
+echo "== 0b) Doc consistency check =="
+./tools/check_docs_consistency.sh
 
 echo "== 1a) Core + Fuzzer tests (hash-seeded) =="
 # Run all tests EXCEPT stress tests (those have very long timeouts)
@@ -148,18 +151,9 @@ print("OK:", j["final_status"], j["counts"])
 '
 done
 
-echo "== 8) JavaScript L3 parity check =="
-echo "-- JS debt markers (must match Python) --"
+echo "== 8) JavaScript debt check =="
+# Note: JS parity is already tested via test_js_parity_automated.py in full pytest above
+# The check_js_debt.sh verifies debt markers match Python
 ./tools/check_js_debt.sh
-
-echo "-- JS tests (must all pass) --"
-JS_OUTPUT=$(node mu/host/js/eval_step.js 2>&1)
-echo "$JS_OUTPUT" | tail -5 | head -1
-if echo "$JS_OUTPUT" | grep -q "All tests passed: true"; then
-    echo "OK: JS tests pass"
-else
-    echo "FAIL: JS tests failed"
-    exit 1
-fi
 
 echo "✅ audit_all pass"
