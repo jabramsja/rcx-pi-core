@@ -283,7 +283,11 @@ class TestKernelReservedFieldsValidation:
         reset_step_budget()
 
     def test_reserved_fields_constant_complete(self):
-        """KERNEL_RESERVED_FIELDS contains all expected fields."""
+        """KERNEL_RESERVED_FIELDS contains all expected fields.
+
+        Gate 3 (2026-02-04): Entry points (detect_closure, detect_exhaustion)
+        moved OUT of reserved fields. They're now normal domain entry points.
+        """
         # Note: 'subst' and 'match' are NOT reserved - they're too generic.
         # Domain data with these keys cannot forge kernel state.
         expected = {
@@ -291,10 +295,10 @@ class TestKernelReservedFieldsValidation:
             "_match_ctx", "_subst_ctx", "_kernel_ctx",
             "_status", "_result", "_stall",
             "_step", "_projs",  # Kernel entry format fields (Phase 8b)
-            # EngineNews closure detection fields (9-agent review, 2026-02-02)
-            "_detect_closure", "_seen", "_current", "_check_list",
-            # Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
-            "_detect_exhaustion", "_frozen", "_tau_step", "_operator_ids",
+            # Recurrence closure detection fields (Gate 3: entry point moved out)
+            "_seen", "_current", "_check_list",
+            # Operator Exhaustion fields (Gate 3: entry point moved out)
+            "_frozen", "_tau_step", "_operator_ids",
             # Bootstrap-Structural Bridge lookup phase fields (9-agent review, 2026-02-02)
             "_lookup_name", "_lookup_value", "_lookup_bindings", "_original_bindings"
         }
