@@ -44,6 +44,8 @@ echo ""
 
 echo -e "${GREEN}To run agents, copy/paste these commands into Claude Code:${NC}"
 echo ""
+echo "  See docs/agents/AgentRunbook.v0.md for agent selection rules"
+echo ""
 echo "────────────────────────────────────────────────────────────────"
 echo ""
 echo "  Run verifier on $FILES"

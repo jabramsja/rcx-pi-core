@@ -63,6 +63,7 @@ If a task is not listed here, it is NOT to be implemented.
   2. Update docs if implementation differs from spec
   3. Update TASKS.md status if completing/progressing items
   4. Verify JS parity if projection behavior changed
+- **Agent runbook**: Agent usage follows `docs/agents/AgentRunbook.v0.md` (trigger map, gate rules, and evidence requirements)
 - **Roadmap rule**: Documents in `roadmap/` define SEQUENCE and DESIGN only.
   - Current state lives in STATUS.md; authorization lives in TASKS.md
   - Gate completion updates TASKS.md (Ra/NEXT/VECTOR), not roadmap docs

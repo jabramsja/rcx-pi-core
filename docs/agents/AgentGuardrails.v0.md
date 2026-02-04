@@ -21,6 +21,8 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 ---
 
+**Operational shortcut:** Use `docs/agents/AgentRunbook.v0.md` for trigger map and gate rules.
+
 ## Core Rule
 
 ```
