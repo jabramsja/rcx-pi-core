@@ -3,7 +3,7 @@
     "version": "1.1.0",
     "name": "SUBST_SEED",
     "description": "Variable substitution as Mu projections for Phase 4 self-hosting",
-    "doc": "docs/SelfHosting.v0.md",
+    "doc": "docs/core/SelfHosting.v0.md",
     "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",

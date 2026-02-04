@@ -26,13 +26,16 @@ from typing import Any
 SEED_CHECKSUMS: dict[str, str] = {
     # Updated v1.1.0: added match.typed.descend for type-tagged head/tail structures
     # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
-    "match.v1.json": "c6cf4594c30d40e2b4a985ab1dfc2704d2d8dac9f601cc8185c4623be1e9083f",
+    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> docs/core/SelfHosting.v0.md)
+    "match.v1.json": "9614ec7e802005dc3322dc7af474abf4f137a506efc57f52781157210e76e190",
     # Updated v1.2.0: added subst.typed.* projections for type-tagged structures (Phase 6c)
     # Updated: Added execution_layer: META_CIRCULAR
-    "subst.v1.json": "16de6cdce97d26900365ab09f3af55146c4788d829b364a8020c6a3da931fe8f",
+    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> docs/core/SelfHosting.v0.md)
+    "subst.v1.json": "d8626f8ffddda711124205a761dd64d6781ebec53567e74a11f2ce8cf0ce75df",
     # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
     # Updated: Added execution_layer: META_CIRCULAR
-    "classify.v1.json": "b74f5d20b66e45003e06ef7e0dce4aceb16ed23631a6eb8afeb7f0658f92012e",
+    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> docs/core/SelfHosting.v0.md)
+    "classify.v1.json": "2008556c09105d0dc46f19e38382870a60ced7d88549dbd989f5d613d5db1968",
     # Phase 7a: meta-circular kernel projections (v1.0.1 - entry format output)
     # Updated: Added execution_layer: META_CIRCULAR
     "kernel.v1.json": "813cae10f2a7f19bd494e56e5c8cf2feaf92f32ae6988d626bca21ee01811daa",
@@ -51,11 +54,13 @@ SEED_CHECKSUMS: dict[str, str] = {
     "exhaustion.v1.json": "44dc13783f1b0481a1e8961ab7e0717d511dcc09ade5af4078e5750f83d5d749",
     # RCX Engine: main program orchestrating recurrence + exhaustion
     # Updated: Added status: "design_only" marker
-    "rcx_engine.v1.json": "dfc3c8fcd4545687b614b9ee8d80d687a29d72e36c69f148615061d0341b0456",
+    # Updated: Fixed meta.doc path (docs/core/RCXEngine.v0.md -> docs/core/EngineNewsStructural.v0.md)
+    "rcx_engine.v1.json": "af168cf0932e2aae521444eb1b34a7249f47bf750db941a659398964de29adb2",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
-    "eval.v1.json": "f5fe73011edcdcc5b1a71d7297175a6394e1238d1c4d29de5a8f5755f79cd441",
+    # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> docs/core/EVAL_SEED.v0.md)
+    "eval.v1.json": "22232b172f883271845d013d8e39b1b75555bd94899deb8276548c5f0d10f53e",
 }
 
 # Expected projection IDs for each seed.

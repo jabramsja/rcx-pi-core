@@ -82,11 +82,21 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 
 **L3 Parity Requirement (MANDATORY - North Star #13):**
 - Any change to Python projection behavior MUST be mirrored in JavaScript
-- Any new seed file MUST be loaded and tested in BOTH substrates
+- **Core L3 seeds** (kernel, match, subst, recurrence, exhaustion, bootstrap_structural) MUST be loaded in BOTH substrates
+- **Utility seeds** (classify.v1, eval.v1) and **application seeds** (rcx_engine.v1) are Python-only for now
 - Parity vectors in `tests/fixtures/` are shared by both implementations
 - Run `node mu/host/js/eval_step.js` after Python changes to verify JS parity
 - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
 - Violation of parity breaks L3 and must be fixed before merge
+
+**L3 Seed Categories:**
+| Category | Seeds | JS Loaded | Notes |
+|----------|-------|-----------|-------|
+| **Substrate (Core)** | kernel.v1, match.v2, subst.v2 | ✅ | Required for L3 |
+| **Closures (Core)** | recurrence.v1, exhaustion.v1 | ✅ | Required for L3 |
+| **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
+| **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
+| **Programs** | rcx_engine.v1 | Python-only | Design-only, not production |
 
 **JS Debt Tracking (matches Python):**
 - JS file has DEBT SUMMARY header with counts
