@@ -607,8 +607,14 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-03 (Bridge wiring verified; agent validator enhanced)
-**Next milestone:** True meta-circular algorithm execution (see path below)
+**Last updated:** 2026-02-04 (Gate 2 complete; tooling delta items)
+**Next milestone:** Gate 3 - Rewrite Algorithm Seeds for Normalized State
+
+**Known Architectural Constraints:** See "Known Architectural Constraints" section in [`roadmap/MetaCircular_Boot0_GatePlan.md`](roadmap/MetaCircular_Boot0_GatePlan.md) for authoritative documentation of:
+- Why kernel reserved fields block algorithm entry
+- Why kernel-internal bypass exists for hybrid execution
+- Why trace matching uses different matcher than execution
+- Resolution path through Gates 3-5
 
 **mu/ Folder Reorganization (2026-02-02):**
 New organized structure makes architecture visible:
