@@ -103,3 +103,4 @@ experiments/
 RCXEngineNew.pdf
 *.pdf
 .gemini/
+.testmondata

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Run the RCX structural-proof agent on a claim.
+Run the RCX grounding agent on specified files.
 
-This agent demands CONCRETE PROOF that operations can be done structurally.
-Use this BEFORE approving any plan that claims pattern matching works.
+This agent converts abstract structural claims into concrete executable tests.
+Use this to lock in behavior with real tests, not just verbal claims.
 
 Usage:
-    python tools/run_structural_proof.py "linked list append can be done with finite projections"
-    python tools/run_structural_proof.py "match can be expressed as Mu projections"
+    python tools/run_grounding.py rcx_pi/selfhost/eval_seed.py
+    python tools/run_grounding.py rcx_pi/selfhost/match_mu.py rcx_pi/selfhost/subst_mu.py
 """
 
 import sys
@@ -18,7 +18,7 @@ from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 
-STRUCTURAL_PROOF_PROMPT = Path("tools/agents/structural_proof_prompt.md").read_text()
+GROUNDING_PROMPT = Path("tools/agents/grounding_prompt.md").read_text()
 
 
 def validate_compliance(output: str) -> tuple[bool, str]:
@@ -48,19 +48,20 @@ def validate_compliance(output: str) -> tuple[bool, str]:
         return False, f"Validation error: {e}"
 
 
-async def run_structural_proof(claim: str) -> str:
-    """Run the structural-proof agent on a claim."""
+async def run_grounding(files: list[str]) -> str:
+    """Run the grounding agent on the specified files."""
 
-    prompt = f"""You are the RCX Structural Proof Agent. Your instructions are:
+    file_list = ", ".join(files)
+    prompt = f"""You are the RCX Grounding Agent. Your instructions are:
 
-{STRUCTURAL_PROOF_PROMPT}
+{GROUNDING_PROMPT}
 
 ---
 
-Verify this claim: "{claim}"
+Now ground the claims in these files: {file_list}
 
-Search the codebase for relevant projections and trace through them manually.
-Produce a structural proof report following the format in your instructions.
+Read each file, identify claims in docs/comments, and verify they have executable tests.
+Produce a grounding report following the format in your instructions.
 """
 
     result_text = ""
@@ -80,15 +81,15 @@ Produce a structural proof report following the format in your instructions.
 
 async def main():
     if len(sys.argv) < 2:
-        print("Usage: python tools/run_structural_proof.py \"<claim to verify>\"")
-        print("Example: python tools/run_structural_proof.py \"linked list append works with finite projections\"")
+        print("Usage: python tools/run_grounding.py <file1> [file2] ...")
+        print("Example: python tools/run_grounding.py rcx_pi/selfhost/eval_seed.py")
         sys.exit(1)
 
-    claim = " ".join(sys.argv[1:])
-    print(f"Verifying claim: {claim}")
+    files = sys.argv[1:]
+    print(f"Running grounding on: {', '.join(files)}")
     print("=" * 60)
 
-    result = await run_structural_proof(claim)
+    result = await run_grounding(files)
 
     print(result)
     print("=" * 60)
@@ -101,16 +102,18 @@ async def main():
         sys.exit(3)
 
     # Check verdict
-    if "PROVEN" in result:
-        print("\nCLAIM PROVEN")
-    elif "UNPROVEN" in result:
-        print("\nCLAIM UNPROVEN - need concrete projections")
+    if "UNGROUNDED" in result and "PARTIALLY" not in result:
+        print("\nUNGROUNDED - claims lack tests")
         sys.exit(1)
-    elif "IMPOSSIBLE" in result:
-        print("\nCLAIM IMPOSSIBLE - cannot be done structurally")
+    elif "THEATER" in result:
+        print("\nTHEATER - tests exist but don't verify claims")
         sys.exit(2)
+    elif "PARTIALLY_GROUNDED" in result:
+        print("\nPARTIALLY_GROUNDED - some claims verified")
+    elif "GROUNDED" in result:
+        print("\nGROUNDED - all claims have executable tests")
     else:
-        print("\nSTRUCTURAL PROOF REVIEW COMPLETE")
+        print("\nGROUNDING REVIEW COMPLETE")
 
 
 if __name__ == "__main__":

@@ -10,12 +10,41 @@ Usage:
 """
 
 import sys
+import json
+import subprocess
 import anyio
 from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 
 ADVERSARY_PROMPT = Path("tools/agents/adversary_prompt.md").read_text()
+
+
+def validate_compliance(output: str) -> tuple[bool, str]:
+    """Run compliance validation on agent output.
+
+    Returns (is_compliant, error_message).
+    """
+    try:
+        result = subprocess.run(
+            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
+            input=output,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0 and not result.stdout:
+            return False, f"Validator crashed: {result.stderr}"
+
+        metrics = json.loads(result.stdout)
+        if not metrics.get("compliant", False):
+            violations = metrics.get("violations", ["Unknown violation"])
+            return False, "; ".join(violations)
+
+        return True, ""
+    except Exception as e:
+        return False, f"Validation error: {e}"
 
 
 async def run_adversary(files: list[str]) -> str:
@@ -62,6 +91,14 @@ async def main():
     print(result)
     print("=" * 60)
 
+    # Compliance validation
+    is_compliant, error = validate_compliance(result)
+    if not is_compliant:
+        print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
+        print("Agent output did not meet AgentGuardrails.v0 requirements.")
+        sys.exit(3)
+
+    # Check verdict
     if "VULNERABLE" in result:
         print("\nVULNERABILITIES FOUND - review required")
         sys.exit(1)

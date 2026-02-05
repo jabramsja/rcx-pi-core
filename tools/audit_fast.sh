@@ -43,6 +43,14 @@ else
 fi
 echo ""
 
+echo "== 0) Agent review check =="
+if ./tools/check_agent_review_needed.sh; then
+    echo ""
+else
+    echo "(This is a reminder - continuing with audit)"
+    echo ""
+fi
+
 echo "== 1a) Contraband check =="
 ./tools/contraband.sh rcx_pi
 

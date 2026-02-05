@@ -206,6 +206,118 @@ def clear_old(days: int = 30):
     print(f"✓ Removed {removed} findings older than {days} days")
 
 
+def show_hotspots(limit: int = 10, include_fixed: bool = False):
+    """Show files with the most findings (hotspots).
+
+    Helps identify problem areas in the codebase.
+    """
+    findings = load_findings()
+
+    if not include_fixed:
+        findings = [f for f in findings if not f.get("fixed")]
+
+    if not findings:
+        print("No findings in memory.")
+        return
+
+    # Group by file
+    by_file: dict[str, dict] = {}
+    for f in findings:
+        file_path = f.get("file", "unknown")
+        if file_path not in by_file:
+            by_file[file_path] = {
+                "total": 0,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+                "agents": set(),
+            }
+
+        by_file[file_path]["total"] += 1
+        severity = f.get("severity", "info")
+        by_file[file_path][severity] = by_file[file_path].get(severity, 0) + 1
+        by_file[file_path]["agents"].add(f.get("agent", "unknown"))
+
+    # Sort by weighted score (critical=5, high=3, medium=2, low=1, info=0)
+    def score(stats):
+        return (stats["critical"] * 5 + stats["high"] * 3 +
+                stats["medium"] * 2 + stats["low"] * 1)
+
+    sorted_files = sorted(by_file.items(), key=lambda x: score(x[1]), reverse=True)
+
+    print(f"═══ Hotspot Report ({len(findings)} findings across {len(by_file)} files) ═══\n")
+
+    # Summary by severity
+    total_critical = sum(s["critical"] for s in by_file.values())
+    total_high = sum(s["high"] for s in by_file.values())
+    total_medium = sum(s["medium"] for s in by_file.values())
+
+    if total_critical or total_high:
+        print(f"🔴 Critical: {total_critical}  🟠 High: {total_high}  🟡 Medium: {total_medium}\n")
+
+    print(f"Top {min(limit, len(sorted_files))} hotspots:\n")
+
+    for i, (file_path, stats) in enumerate(sorted_files[:limit], 1):
+        # Build severity indicators
+        indicators = []
+        if stats["critical"]:
+            indicators.append(f"🔴{stats['critical']}")
+        if stats["high"]:
+            indicators.append(f"🟠{stats['high']}")
+        if stats["medium"]:
+            indicators.append(f"🟡{stats['medium']}")
+        if stats["low"]:
+            indicators.append(f"🟢{stats['low']}")
+
+        severity_str = " ".join(indicators) if indicators else "⚪ info only"
+        agents_str = ", ".join(sorted(stats["agents"]))
+
+        print(f"{i:2}. {file_path}")
+        print(f"    {stats['total']} findings  {severity_str}")
+        print(f"    Agents: {agents_str}")
+        print()
+
+    if len(sorted_files) > limit:
+        print(f"... and {len(sorted_files) - limit} more files with findings")
+
+
+def show_agent_stats():
+    """Show statistics by agent."""
+    findings = load_findings()
+
+    if not findings:
+        print("No findings in memory.")
+        return
+
+    # Group by agent
+    by_agent: dict[str, dict] = {}
+    for f in findings:
+        agent = f.get("agent", "unknown")
+        if agent not in by_agent:
+            by_agent[agent] = {"total": 0, "fixed": 0, "open": 0}
+
+        by_agent[agent]["total"] += 1
+        if f.get("fixed"):
+            by_agent[agent]["fixed"] += 1
+        else:
+            by_agent[agent]["open"] += 1
+
+    print(f"═══ Agent Statistics ═══\n")
+    print(f"{'Agent':<20} {'Total':>8} {'Open':>8} {'Fixed':>8}")
+    print("-" * 48)
+
+    for agent, stats in sorted(by_agent.items(), key=lambda x: x[1]["total"], reverse=True):
+        print(f"{agent:<20} {stats['total']:>8} {stats['open']:>8} {stats['fixed']:>8}")
+
+    print("-" * 48)
+    total = sum(s["total"] for s in by_agent.values())
+    open_count = sum(s["open"] for s in by_agent.values())
+    fixed = sum(s["fixed"] for s in by_agent.values())
+    print(f"{'TOTAL':<20} {total:>8} {open_count:>8} {fixed:>8}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Agent Memory - Store and retrieve findings")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -241,6 +353,14 @@ def main():
     clear_parser = subparsers.add_parser("clear", help="Clear old findings")
     clear_parser.add_argument("--days", "-d", type=int, default=30, help="Days to keep")
 
+    # Hotspots command
+    hotspot_parser = subparsers.add_parser("hotspots", help="Show files with most findings")
+    hotspot_parser.add_argument("--limit", "-n", type=int, default=10, help="Number of files to show")
+    hotspot_parser.add_argument("--include-fixed", action="store_true", help="Include fixed findings")
+
+    # Stats command
+    subparsers.add_parser("stats", help="Show statistics by agent")
+
     args = parser.parse_args()
 
     if args.command == "store":
@@ -267,6 +387,10 @@ def main():
         check_regressions(args.files if args.files else None)
     elif args.command == "clear":
         clear_old(args.days)
+    elif args.command == "hotspots":
+        show_hotspots(limit=args.limit, include_fixed=args.include_fixed)
+    elif args.command == "stats":
+        show_agent_stats()
 
 
 if __name__ == "__main__":

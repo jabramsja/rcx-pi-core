@@ -109,7 +109,7 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 - **Why:** Grep reads text. AST reads grammar. Can't fool grammar.
 
 ### 2. Expert (`expert.md`)
-- **Model:** Sonnet
+- **Model:** Opus (upgraded for deeper complexity analysis)
 - **Purpose:** Write code, identify complexity, suggest simplifications
 - **Focus:** Minimalism, emergent patterns, self-hosting readiness
 - **Verdict:** MINIMAL / COULD_SIMPLIFY / OVER_ENGINEERED
@@ -187,14 +187,14 @@ All 9 review agents follow `AgentGuardrails.v0.md` which requires:
 
 2. **Forbidden behaviors:**
    - Claims without file:line evidence
-   - Hallucination words: probably, likely, seems, assume, maybe, might, presumably, appears, possibly, could, perhaps, believe, suggests
+   - Hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS`)
    - Citing from memory instead of Read/Grep output
 
 3. **Automatic validation:**
    - `.claude/hooks/validate-agent-compliance.sh` runs after SubagentStop
    - Checks for required format patterns
    - Blocks non-compliant output
-   - Tests in `tests/tools/test_validate_agent_compliance.py` (43 tests)
+   - Tests in `tests/tools/test_validate_agent_compliance.py`
 
 **Why this matters:** LLMs can hallucinate plausible-sounding file paths and code. Requiring paste-from-tool-output ensures agents actually read files before making claims.
 

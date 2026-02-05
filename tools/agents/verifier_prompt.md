@@ -30,8 +30,12 @@ FILE: /path/file.py
 LINES: 123-127
 CODE:
     [paste from Read tool output]
+PROPOSED_FIX:
+    [concrete fix suggestion - actual code, not vague advice]
 VERIFIED: Yes
 ```
+
+**PROPOSED_FIX is REQUIRED for FAIL items.** Show the actual fix, not just "add marker" - show WHERE and WHAT.
 
 **FORBIDDEN:** Claims without evidence, "probably/likely", citing from memory.
 **Findings without file:line evidence will be REJECTED.**
@@ -158,9 +162,20 @@ Example:
 ### FAIL
 - [invariant violations - MUST fix before merge]
 
-### What I Did NOT Check
-- [explicit blind spots with reasoning]
+### CHECKED
+- [explicit list of what you verified, with file:line]
+- [be specific: "Reserved field validation in step_mu.py:45-67"]
+- [minimum 3 items for APPROVE verdict]
+
+### NOT_CHECKED
+- [explicit blind spots - REQUIRED for any approval]
+- [what you did NOT verify and why]
+- [e.g., "JS parity - didn't verify mu/host/js/"]
+- [e.g., "Performance implications - outside scope"]
 
 ### VERDICT
 [APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION]
 ```
+
+**IMPORTANT:** APPROVE verdicts require both CHECKED (3+ items) and NOT_CHECKED sections.
+An approval without acknowledging limitations is overconfident and will be challenged.

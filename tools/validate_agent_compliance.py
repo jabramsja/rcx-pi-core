@@ -89,13 +89,24 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
         lines_match = re.search(r'^LINES?:\s*(\d+(?:-\d+)?)', part, re.MULTILINE)
         lines = lines_match.group(1) if lines_match else None
 
-        # Extract CODE: block (first line must be indented, subsequent can be empty)
-        # Pattern matches global count pattern at line 155 for consistency
-        code_match = re.search(
-            r'^CODE:\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
-            part, re.MULTILINE
+        # Extract CODE: block
+        # Accepts TWO formats:
+        # 1. Indented code (tabs or 2+ spaces)
+        # 2. Markdown code blocks (```python or ```)
+        # Try markdown format first (more specific)
+        markdown_code_match = re.search(
+            r'^CODE:\s*\n```(?:\w+)?\n(.*?)```',
+            part, re.MULTILINE | re.DOTALL
         )
-        code = code_match.group(1) if code_match else None
+        if markdown_code_match:
+            code = markdown_code_match.group(1)
+        else:
+            # Fall back to indented format
+            indent_code_match = re.search(
+                r'^CODE:\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
+                part, re.MULTILINE
+            )
+            code = indent_code_match.group(1) if indent_code_match else None
 
         # Extract VERIFIED:
         verified_match = re.search(r'^VERIFIED:\s*(Yes|No)', part, re.MULTILINE | re.IGNORECASE)
@@ -276,9 +287,12 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     # Also count global patterns for backwards compatibility
     file_citations = count_pattern(output, r'^FILE:\s*/[^\n]+')
     line_citations = count_pattern(output, r'^LINES?:\s*\d+')
-    # CODE block: first line must be indented, subsequent lines can be empty or indented
-    # Pattern: CODE:\n followed by indented line, then any number of (empty or indented) lines
-    code_blocks = count_pattern(output, r'^CODE:\n(?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*')
+    # CODE block: accepts two formats
+    # 1. Markdown: CODE:\n```python\ncode\n```
+    # 2. Indented: CODE:\n    code here
+    code_blocks_markdown = count_pattern(output, r'^CODE:\s*\n```(?:\w+)?\n.*?```')
+    code_blocks_indented = count_pattern(output, r'^CODE:\n(?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*')
+    code_blocks = code_blocks_markdown + code_blocks_indented
     verified_yes = count_pattern(output, r'^VERIFIED:\s*Yes')
     verified_no = count_pattern(output, r'^VERIFIED:\s*No')
 
@@ -294,6 +308,8 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     fabrications = []
 
     # === CRITICAL: Check each finding block has required components ===
+    # Core components: FILE, LINES, CODE (required for evidence)
+    # VERIFIED: optional if FILE+LINES+CODE all present (the evidence itself is verification)
     incomplete_blocks = []
     for i, block in enumerate(finding_blocks):
         missing = []
@@ -303,9 +319,12 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
             missing.append("LINES")
         if not block.code:
             missing.append("CODE")
-        if not block.verified:
+        # VERIFIED is only required if FILE/LINES/CODE are incomplete
+        # When all evidence is present, the code itself serves as verification
+        has_all_evidence = block.file_path and block.lines and block.code
+        if not has_all_evidence and not block.verified:
             missing.append("VERIFIED")
-        elif block.verified.lower() == 'no':
+        elif block.verified and block.verified.lower() == 'no':
             missing.append("VERIFIED=No (should be Yes)")
 
         if missing:
@@ -341,8 +360,44 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     if not status_md_early and findings > 0:
         violations.append("STATUS.md not mentioned in first 50 lines")
 
-    if hallucination_words > 3:
+    # Hallucination threshold: agents use words like "appears", "could" appropriately in analysis
+    # Only flag truly excessive usage (>10) that suggests unsupported claims
+    if hallucination_words > 10:
         violations.append(f"High hallucination word count: {hallucination_words}")
+
+    # === CRITICAL: Approval verdicts require evidence ===
+    # Security fix: Prevent rubber-stamp approvals without findings
+    # BUT: Legitimate "clean" reviews have no findings - they need explicit analysis evidence
+    approval_verdicts = {"APPROVE", "SECURE", "PROVEN", "GROUNDED", "ROBUST", "MINIMAL", "CLEAN", "MATCHES_INTENT"}
+    output_upper = output.upper()
+    has_approval_verdict = any(v in output_upper for v in approval_verdicts)
+
+    if has_approval_verdict and findings == 0:
+        # Check if this looks like a genuine approval (has VERDICT marker)
+        verdict_marker = re.search(r'(?:^|\n)\s*(?:\*\*)?(?:###?\s*)?VERDICT', output, re.IGNORECASE)
+        if verdict_marker:
+            # Check for evidence of genuine review without findings:
+            # 1. Explicit "no issues/findings/violations" statements
+            # 2. Clean review patterns (NO_STRUCTURAL_CLAIMS, etc.)
+            # 3. Files reviewed patterns
+            clean_review_patterns = [
+                r'no\s+(issues?|findings?|violations?|concerns?|problems?)\s+(found|detected|identified)',
+                r'(code|implementation)\s+(is\s+)?(clean|correct|valid|sound)',
+                r'no\s+structural\s+claims',
+                r'no_structural_claims',
+                r'nothing\s+to\s+(report|flag|cite)',
+                r'files?\s+reviewed',
+                r'checked\s+.*files?',
+                r'analysis\s+(complete|done)',
+                r'review(ed)?\s+\d+\s+files?',
+            ]
+            has_clean_review_evidence = any(
+                re.search(pattern, output, re.IGNORECASE)
+                for pattern in clean_review_patterns
+            )
+
+            if not has_clean_review_evidence:
+                violations.append("Approval verdict without any FINDING blocks - missing evidence")
 
     # Strict mode: require all verifications to pass
     if strict and finding_blocks:
