@@ -410,6 +410,107 @@ class TestCrossSubstrateParity:
             )
 
 
+class TestJSReservedFieldValidationParity:
+    """Verify JS reserved field validation matches Python (Gate 3 security fix).
+
+    Security invariant: Both Python and JS must reject reserved fields outside
+    algorithm entrypoint subtrees (_detect_closure, _detect_exhaustion).
+
+    These tests catch the class of vulnerability where spoofed _mode/_phase values
+    could bypass validation entirely.
+    """
+
+    def _run_js_validation(self, value):
+        """Run JS validation and return (success, error_msg)."""
+        request = json.dumps({"action": "validate_reserved_fields", "value": value})
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", request],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=30
+        )
+
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                response = json.loads(line[len('JSON_API_RESPONSE:'):])
+                return response.get('valid', False), response.get('error', '')
+
+        return False, f"No JSON_API_RESPONSE: {result.stdout[:200]}"
+
+    def test_parity_spoofed_mode_rejected(self):
+        """SECURITY: Spoofed _mode at top level MUST be rejected by both substrates.
+
+        Attack vector: {"_mode": "recurrence", "_result": "pwned"}
+        This should NEVER pass validation.
+        """
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        spoofed = {"_mode": "recurrence", "_result": "pwned"}
+
+        # Python rejects
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_no_kernel_reserved_fields(spoofed, "test")
+
+        # JS must also reject
+        valid, error = self._run_js_validation(spoofed)
+        assert not valid, f"JS should reject spoofed _mode, but got valid=True"
+        assert "_mode" in error or "reserved" in error.lower()
+
+    def test_parity_entrypoint_subtree_allowed(self):
+        """SECURITY: Reserved fields inside entrypoint subtrees MUST be allowed.
+
+        Legitimate input: {"_detect_closure": {"_mode": "recurrence", ...}}
+        """
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        legitimate = {
+            "_detect_closure": {
+                "_mode": "recurrence",
+                "_result": "X"
+            }
+        }
+
+        # Python allows
+        validate_no_kernel_reserved_fields(legitimate, "test")
+
+        # JS must also allow
+        valid, error = self._run_js_validation(legitimate)
+        assert valid, f"JS should allow entrypoint subtree, but got error: {error}"
+
+    def test_parity_nested_spoof_rejected(self):
+        """SECURITY: Reserved fields nested in non-entrypoint key MUST be rejected.
+
+        Attack vector: {"outer": {"_phase": "scan", "_result": 1}}
+        "outer" is not an entrypoint, so this must fail.
+        """
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        nested_spoof = {"outer": {"_phase": "scan", "_result": 1}}
+
+        # Python rejects
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_no_kernel_reserved_fields(nested_spoof, "test")
+
+        # JS must also reject
+        valid, error = self._run_js_validation(nested_spoof)
+        assert not valid, f"JS should reject nested spoof, but got valid=True"
+        assert "_phase" in error or "reserved" in error.lower()
+
+    def test_parity_clean_data_allowed(self):
+        """Clean data without reserved fields MUST be allowed by both substrates."""
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        clean = {"x": 1, "y": {"z": 2}}
+
+        # Python allows
+        validate_no_kernel_reserved_fields(clean, "test")
+
+        # JS must also allow
+        valid, error = self._run_js_validation(clean)
+        assert valid, f"JS should allow clean data, but got error: {error}"
+
+
 class TestJSSecurityParity:
     """Verify JS implements the same security checks as Python."""
 
@@ -457,11 +558,15 @@ class TestJSSecurityParity:
         assert "Deep (350 levels) rejected: true" in result.stdout
 
     def test_js_reserved_fields_count_matches_python(self):
-        """JS should have same reserved field count as Python."""
+        """JS should have same reserved field count as Python.
+
+        Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
+        to ALGORITHM_ENTRYPOINT_KEYS. Now 22 reserved fields.
+        """
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
-        # Python has 24 reserved fields (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)
-        assert len(KERNEL_RESERVED_FIELDS) == 24, "Python reserved fields changed"
+        # Python has 22 reserved fields (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge)
+        assert len(KERNEL_RESERVED_FIELDS) == 22, "Python reserved fields changed"
 
         # JS test output should confirm reserved fields are checked
         result = subprocess.run(

@@ -322,8 +322,12 @@ class TestKernelReservedFieldsFuzzer:
     """Verify KERNEL_RESERVED_FIELDS completeness."""
 
     def test_reserved_fields_count(self):
-        """Exactly 24 reserved fields (12 kernel + 4 EngineNews + 4 Exhaustion + 4 Bridge)."""
-        assert len(KERNEL_RESERVED_FIELDS) == 24
+        """Exactly 22 reserved fields (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge).
+
+        Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
+        to ALGORITHM_ENTRYPOINT_KEYS.
+        """
+        assert len(KERNEL_RESERVED_FIELDS) == 22
 
     def test_reserved_fields_are_underscore_prefixed(self):
         """All reserved fields start with underscore."""
