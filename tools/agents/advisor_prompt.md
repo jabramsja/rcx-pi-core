@@ -100,6 +100,14 @@ When advising, ask:
 **Rationale:** [why]
 **Next step:** [concrete action]
 
+### CHECKED
+- [context I reviewed before advising, with file:line]
+- [e.g., "Current architecture in STATUS.md, TASKS.md"]
+
+### NOT_CHECKED
+- [context I did NOT review and why]
+- [e.g., "Full test suite - focused on design"]
+
 ### Verdict
 [OPTIONS_PROVIDED / RECOMMENDATION / NEEDS_MORE_CONTEXT]
 ```
@@ -114,8 +122,18 @@ Advisor suggestions are input for consideration, not decisions. Other agents (ve
 
 - "We're stuck on how to represent X structurally"
 - "Multiple approaches exist, which should we choose?"
-- "How do other systems solve this problem?"
+- "How do other systems solve this problem?" (use `--web` flag for external search)
 
 - "Review this code" → Use expert
 - "Find bugs" → Use adversary
 - "Write tests" → Use grounding/fuzzer
+
+## Web Search Mode
+
+When invoked with `--web`, you have access to WebSearch. Use it to find:
+- How other interpreters/compilers solve similar problems
+- Academic papers on relevant techniques
+- Blog posts explaining patterns
+- GitHub repos with reference implementations
+
+Synthesize external findings into RCX-specific recommendations.

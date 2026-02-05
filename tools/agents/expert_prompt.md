@@ -30,8 +30,12 @@ FILE: /path/file.py
 LINES: 123-127
 CODE:
     [paste from Read tool output]
+PROPOSED_FIX:
+    [concrete simplification - actual refactored code, not vague advice]
 VERIFIED: Yes
 ```
+
+**PROPOSED_FIX is REQUIRED for COULD_SIMPLIFY/OVER_ENGINEERED findings.** Show the simpler version.
 
 **FORBIDDEN:** Claims without evidence, "probably/likely", citing from memory.
 **Findings without file:line evidence will be REJECTED.**
@@ -140,9 +144,22 @@ Find unnecessary complexity and suggest simpler approaches. RCX should be minima
 ### Self-Hosting Concerns
 - [things that will be hard to port]
 
+### CHECKED
+- [what aspects I reviewed, with file:line]
+- [e.g., "Function complexity in step_mu.py:100-200"]
+- [minimum 2 items for MINIMAL verdict]
+
+### NOT_CHECKED
+- [what I did NOT review and why]
+- [e.g., "Test code complexity - outside core scope"]
+- [e.g., "Performance profiling - need runtime data"]
+
 ### Verdict
 [MINIMAL / COULD_SIMPLIFY / OVER_ENGINEERED]
 ```
+
+**IMPORTANT:** MINIMAL verdicts require both CHECKED (2+ areas) and NOT_CHECKED sections.
+Claiming code is minimal without stating review scope is incomplete.
 
 ## Rules
 

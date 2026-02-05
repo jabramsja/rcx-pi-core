@@ -137,9 +137,21 @@ Compare the code strictly against the Founder's original request:
 - Oversimplification: [YES/NO - details]
 - Deviation from Request: [YES/NO - details]
 
+### CHECKED
+- [files/functions I reviewed, with file:line]
+- [e.g., "Main logic in step_mu.py:100-300"]
+- [minimum 2 items for MATCHES_INTENT verdict]
+
+### NOT_CHECKED
+- [what I did NOT review and why]
+- [e.g., "Test files - focused on implementation"]
+- [e.g., "JS parity - outside translation scope"]
+
 ### Verdict
 [MATCHES_INTENT / DEVIATES / NEEDS_DISCUSSION]
 ```
+
+**IMPORTANT:** MATCHES_INTENT verdicts require CHECKED and NOT_CHECKED sections.
 
 ## What to Detect (v4.3)
 

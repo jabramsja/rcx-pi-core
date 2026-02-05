@@ -77,6 +77,39 @@ if [ -n "$RCX_CHANGED" ] || [ -n "$SEEDS_CHANGED" ]; then
     fi
 fi
 
+# === 5. Check if agents were run on staged core files (WARNING) ===
+CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/)' || true)
+if [ -n "$CORE_FILES_CHANGED" ]; then
+    MEMORY_FILE=".agent_memory/findings.json"
+    AGENT_RUN_RECENT=false
+
+    if [ -f "$MEMORY_FILE" ]; then
+        # Check if agent memory was updated in last 30 minutes
+        if [ "$(uname)" = "Darwin" ]; then
+            MEMORY_AGE=$(( $(date +%s) - $(stat -f %m "$MEMORY_FILE") ))
+        else
+            MEMORY_AGE=$(( $(date +%s) - $(stat -c %Y "$MEMORY_FILE") ))
+        fi
+
+        if [ "$MEMORY_AGE" -lt 1800 ]; then
+            AGENT_RUN_RECENT=true
+        fi
+    fi
+
+    if [ "$AGENT_RUN_RECENT" = "false" ]; then
+        echo ""
+        echo "⚠️  AGENT REVIEW REMINDER:"
+        echo "   Core files staged: $(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')"
+        echo "   No recent agent review detected (.agent_memory older than 30min or missing)"
+        echo ""
+        echo "   Run before commit:"
+        echo "     python tools/run_review.py <files> --depth full"
+        echo ""
+        echo "   Skip this check with --no-verify (not recommended for core changes)"
+        echo ""
+    fi
+fi
+
 # Exit with failure if any blocking check failed
 if [ "$FAILED" -eq 1 ]; then
     echo "Pre-commit checks failed. Use --no-verify to bypass (not recommended)."

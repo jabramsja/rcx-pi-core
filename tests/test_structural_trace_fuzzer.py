@@ -50,13 +50,13 @@ simple_mu = st.recursive(
 @st.composite
 def projections_with_id(draw, max_depth=3):
     """Generate a valid projection with pattern, body, and id."""
-    # Simple patterns
+    # Simple patterns - use domain_safe_keys to avoid kernel-reserved _fields
     pattern = draw(st.one_of(
         st.just({"var": "x"}),  # Catch-all
         st.integers(min_value=0, max_value=100),
-        st.text(max_size=10),
+        st.text(max_size=10).filter(lambda s: not s.startswith("_")),
         st.dictionaries(
-            st.text(min_size=1, max_size=5),
+            domain_safe_keys,
             st.one_of(st.just({"var": "v"}), st.integers()),
             max_size=2
         ),

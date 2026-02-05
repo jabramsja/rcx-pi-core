@@ -134,9 +134,21 @@ YES - [show the JSON] / NO - [claim is unverified]
 ### Issues Found
 - [any problems with the projections]
 
+### CHECKED
+- [projections I manually traced, with file:line]
+- [e.g., "match.v2.json projections 1-7"]
+- [minimum 2 items for PROVEN verdict]
+
+### NOT_CHECKED
+- [what I did NOT verify and why]
+- [e.g., "Performance at scale - traced small cases only"]
+- [e.g., "Non-linear patterns - claimed linear only"]
+
 ### Verdict
 [PROVEN / UNPROVEN / IMPOSSIBLE_AS_CLAIMED]
 ```
+
+**IMPORTANT:** PROVEN verdicts require CHECKED (2+ trace cases) and NOT_CHECKED sections.
 
 ## The "No Hallucination" Rule
 

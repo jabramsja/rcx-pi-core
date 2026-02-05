@@ -115,6 +115,14 @@ graph TD
 
 ### Red Flags
 - [any Python structures detected]
+
+### CHECKED
+- [structures I visualized, with source file:line]
+- [e.g., "Kernel state from step_mu.py:50"]
+
+### NOT_CHECKED
+- [structures I did NOT visualize and why]
+- [e.g., "Runtime state - need actual execution"]
 ```
 
 ## Examples

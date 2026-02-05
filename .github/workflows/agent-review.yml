@@ -1,0 +1,96 @@
+# RCX Agent Review Workflow
+#
+# Automatically runs agent-based code review on PRs.
+# Uses the Claude Agent SDK to run specialized review agents.
+#
+# Trigger: Manual dispatch (to control costs)
+# Future: Can be changed to trigger on PR events
+#
+# Required secrets:
+#   ANTHROPIC_API_KEY - API key for Claude Agent SDK
+
+name: Agent Review
+
+on:
+  # Manual trigger with options
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+        type: string
+      depth:
+        description: 'Review depth'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - quick
+          - full
+      post_comment:
+        description: 'Post review comment to PR'
+        required: false
+        default: true
+        type: boolean
+
+  # Uncomment to auto-trigger on PR (costs money per run)
+  # pull_request:
+  #   types: [opened, synchronize, reopened]
+  #   paths:
+  #     - 'rcx_pi/**'
+  #     - 'mu/**'
+
+jobs:
+  agent-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for diff analysis
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install claude-agent-sdk
+          pip install hypothesis pytest  # For fuzzer tests
+
+      - name: Run CI Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+        run: |
+          python tools/run_ci_review.py \
+            --pr-number $PR_NUMBER \
+            ${{ github.event.inputs.post_comment == 'true' && '--post-comment' || '' }} \
+            --output review-report.md
+
+      - name: Upload review report
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-review-report
+          path: review-report.md
+          retention-days: 30
+
+      - name: Comment on PR (if not using --post-comment)
+        if: ${{ github.event.inputs.post_comment != 'true' && github.event.pull_request.number }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('review-report.md', 'utf8');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: report
+            });

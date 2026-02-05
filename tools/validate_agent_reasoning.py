@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""
+Agent Reasoning Validator - Enforces accountability in agent decisions.
+
+This validator goes beyond format compliance (AgentGuardrails) to check
+the QUALITY and COMPLETENESS of agent reasoning.
+
+Enforcement:
+1. Reasoning Trace - Agents must show CHECKED/NOT_CHECKED sections
+2. Uncertainty Acknowledgment - Agents must state limitations
+3. Evidence Density - Claims must have proportional evidence
+
+Usage:
+    python tools/validate_agent_reasoning.py < agent_output.txt
+    python tools/validate_agent_reasoning.py --file output.txt
+    python tools/validate_agent_reasoning.py --json  # Machine-readable
+
+Created: 2026-02-04
+"""
+
+import sys
+import re
+import json
+import argparse
+from pathlib import Path
+from dataclasses import dataclass, asdict
+from typing import Literal
+
+
+# =============================================================================
+# Reasoning Requirements by Verdict
+# =============================================================================
+
+# APPROVE is high-stakes (false negative = bad code ships)
+# So APPROVE requires MORE evidence than rejection
+
+VERDICT_REQUIREMENTS = {
+    # Approval verdicts need rigorous justification
+    "APPROVE": {"min_checked": 3, "requires_not_checked": True, "min_evidence": 2},
+    "SECURE": {"min_checked": 3, "requires_not_checked": True, "min_evidence": 2},
+    "MINIMAL": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+    "PROVEN": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 2},
+    "GROUNDED": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+    "ROBUST": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+    "MATCHES_INTENT": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+
+    # Rejection verdicts - still need evidence but less burden
+    "REQUEST_CHANGES": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "VULNERABLE": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "OVER_ENGINEERED": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "UNPROVEN": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "UNGROUNDED": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "BROKEN": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "DEVIATES": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+
+    # Soft/neutral verdicts - minimal requirements
+    "COULD_SIMPLIFY": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
+    "PARTIALLY_GROUNDED": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
+    "NEEDS_DISCUSSION": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
+    "FRAGILE": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+}
+
+# Approval verdicts that trigger skeptic challenge
+APPROVAL_VERDICTS = {
+    "APPROVE", "SECURE", "MINIMAL", "PROVEN", "GROUNDED", "ROBUST", "MATCHES_INTENT"
+}
+
+
+# =============================================================================
+# Extraction
+# =============================================================================
+
+def extract_verdict(output: str) -> str | None:
+    """Extract the verdict from agent output."""
+    # Look for common verdict patterns
+    patterns = [
+        r'\*\*(?:VERDICT|Verdict)\*\*[:\s]+(\w+)',
+        r'^(?:VERDICT|Verdict)[:\s]+(\w+)',
+        r'###\s*(?:VERDICT|Verdict)[:\s]*(\w+)',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, output, re.MULTILINE)
+        if match:
+            return match.group(1).upper()
+
+    # Fallback: look for known verdicts in text
+    for verdict in VERDICT_REQUIREMENTS.keys():
+        if verdict in output.upper():
+            return verdict
+
+    return None
+
+
+def extract_checked_items(output: str) -> list[str]:
+    """Extract items from CHECKED section."""
+    items = []
+
+    # Look for CHECKED: section
+    checked_match = re.search(
+        r'(?:^|\n)(?:CHECKED|What I Checked|Verified)[:\s]*\n((?:[-*]\s*.+\n?)+)',
+        output,
+        re.MULTILINE | re.IGNORECASE
+    )
+
+    if checked_match:
+        section = checked_match.group(1)
+        items = re.findall(r'[-*]\s*(.+?)(?:\n|$)', section)
+
+    return [item.strip() for item in items if item.strip()]
+
+
+def extract_not_checked_items(output: str) -> list[str]:
+    """Extract items from NOT_CHECKED section."""
+    items = []
+
+    # Look for NOT_CHECKED: section
+    not_checked_match = re.search(
+        r'(?:^|\n)(?:NOT_CHECKED|Not Checked|What I Did NOT Check|Limitations|Blind Spots)[:\s]*\n((?:[-*]\s*.+\n?)+)',
+        output,
+        re.MULTILINE | re.IGNORECASE
+    )
+
+    if not_checked_match:
+        section = not_checked_match.group(1)
+        items = re.findall(r'[-*]\s*(.+?)(?:\n|$)', section)
+
+    return [item.strip() for item in items if item.strip()]
+
+
+def count_evidence_citations(output: str) -> int:
+    """Count FILE:LINE evidence citations."""
+    # Pattern: FILE: /path or file.py:123
+    file_citations = len(re.findall(r'(?:FILE:|\.py:\d+|\.json:\d+|\.js:\d+)', output))
+    return file_citations
+
+
+def detect_hedging_language(output: str) -> list[str]:
+    """Detect hedging/uncertain language that should be explicit."""
+    hedges = []
+
+    hedge_patterns = [
+        (r'\bprobably\b', "probably"),
+        (r'\blikely\b', "likely"),
+        (r'\bmight\b', "might"),
+        (r'\bcould be\b', "could be"),
+        (r'\bseems to\b', "seems to"),
+        (r'\bappears to\b', "appears to"),
+        (r'\bI think\b', "I think"),
+        (r'\bI believe\b', "I believe"),
+        (r'\bshould be\b', "should be (without verification)"),
+    ]
+
+    for pattern, label in hedge_patterns:
+        if re.search(pattern, output, re.IGNORECASE):
+            hedges.append(label)
+
+    return hedges
+
+
+# =============================================================================
+# Validation
+# =============================================================================
+
+@dataclass
+class ReasoningValidation:
+    """Result of reasoning validation."""
+    verdict: str | None
+    is_approval: bool
+    checked_items: list[str]
+    not_checked_items: list[str]
+    evidence_count: int
+    hedging_detected: list[str]
+    violations: list[str]
+    is_valid: bool
+    requires_challenge: bool  # Should this be challenged by skeptic?
+
+
+def validate_reasoning(output: str) -> ReasoningValidation:
+    """Validate the reasoning quality of agent output."""
+
+    verdict = extract_verdict(output)
+    is_approval = verdict in APPROVAL_VERDICTS if verdict else False
+    checked = extract_checked_items(output)
+    not_checked = extract_not_checked_items(output)
+    evidence = count_evidence_citations(output)
+    hedging = detect_hedging_language(output)
+
+    violations = []
+
+    # Get requirements for this verdict
+    if verdict and verdict in VERDICT_REQUIREMENTS:
+        reqs = VERDICT_REQUIREMENTS[verdict]
+
+        # Check minimum CHECKED items
+        if len(checked) < reqs["min_checked"]:
+            violations.append(
+                f"Verdict {verdict} requires {reqs['min_checked']}+ CHECKED items, found {len(checked)}"
+            )
+
+        # Check NOT_CHECKED requirement
+        if reqs["requires_not_checked"] and len(not_checked) == 0:
+            violations.append(
+                f"Verdict {verdict} requires NOT_CHECKED section (acknowledge limitations)"
+            )
+
+        # Check evidence density
+        if evidence < reqs["min_evidence"]:
+            violations.append(
+                f"Verdict {verdict} requires {reqs['min_evidence']}+ FILE:LINE citations, found {evidence}"
+            )
+
+    elif verdict is None:
+        violations.append("No verdict found in output")
+
+    # Hedging in approval is suspicious
+    if is_approval and hedging:
+        violations.append(
+            f"Approval verdict uses hedging language: {', '.join(hedging)}. "
+            f"Either verify or move to NOT_CHECKED."
+        )
+
+    # Approval without NOT_CHECKED is overconfident
+    if is_approval and len(not_checked) == 0:
+        violations.append(
+            "Approval without NOT_CHECKED section suggests overconfidence. "
+            "What WASN'T verified?"
+        )
+
+    is_valid = len(violations) == 0
+
+    # Challenge approvals that pass validation (skeptic review)
+    requires_challenge = is_approval and is_valid
+
+    return ReasoningValidation(
+        verdict=verdict,
+        is_approval=is_approval,
+        checked_items=checked,
+        not_checked_items=not_checked,
+        evidence_count=evidence,
+        hedging_detected=hedging,
+        violations=violations,
+        is_valid=is_valid,
+        requires_challenge=requires_challenge,
+    )
+
+
+# =============================================================================
+# Skeptic Challenge
+# =============================================================================
+
+SKEPTIC_PROMPT = """You are a SKEPTIC reviewing another agent's APPROVAL decision.
+
+Your job is NOT to reject everything. Your job is to:
+1. Identify what the approving agent might have MISSED
+2. Surface RISKS that weren't explicitly addressed
+3. Challenge ASSUMPTIONS that weren't verified
+
+The approving agent said:
+---
+{agent_output}
+---
+
+They checked: {checked_items}
+They did NOT check: {not_checked_items}
+
+Questions to consider:
+- Are the CHECKED items actually sufficient for this verdict?
+- Are the NOT_CHECKED items actually safe to skip?
+- What edge cases might break this?
+- Is there anything suspicious in the code that wasn't mentioned?
+
+Output format:
+CHALLENGE_RESULT: CONFIRMED | CONCERNS | REJECTED
+
+If CONFIRMED: The approval is well-reasoned, proceed.
+If CONCERNS: List specific concerns that should be addressed.
+If REJECTED: The approval is flawed, explain why.
+
+Be SPECIFIC. Cite FILE:LINE if you find issues.
+"""
+
+
+def generate_skeptic_prompt(agent_output: str, validation: ReasoningValidation) -> str:
+    """Generate a prompt for the skeptic agent."""
+    checked = ", ".join(validation.checked_items) if validation.checked_items else "(none listed)"
+    not_checked = ", ".join(validation.not_checked_items) if validation.not_checked_items else "(none listed)"
+
+    return SKEPTIC_PROMPT.format(
+        agent_output=agent_output[:3000],  # Truncate for context
+        checked_items=checked,
+        not_checked_items=not_checked,
+    )
+
+
+# =============================================================================
+# Output
+# =============================================================================
+
+def format_report(validation: ReasoningValidation) -> str:
+    """Format validation result as human-readable report."""
+    lines = [
+        "=" * 60,
+        "AGENT REASONING VALIDATION",
+        "=" * 60,
+        "",
+        f"Verdict: {validation.verdict or 'NOT FOUND'}",
+        f"Is Approval: {validation.is_approval}",
+        "",
+        f"CHECKED items: {len(validation.checked_items)}",
+    ]
+
+    for item in validation.checked_items[:5]:
+        lines.append(f"  - {item[:60]}")
+    if len(validation.checked_items) > 5:
+        lines.append(f"  ... and {len(validation.checked_items) - 5} more")
+
+    lines.append("")
+    lines.append(f"NOT_CHECKED items: {len(validation.not_checked_items)}")
+
+    for item in validation.not_checked_items[:5]:
+        lines.append(f"  - {item[:60]}")
+
+    lines.extend([
+        "",
+        f"Evidence citations: {validation.evidence_count}",
+        f"Hedging language: {', '.join(validation.hedging_detected) or 'none'}",
+        "",
+    ])
+
+    if validation.is_valid:
+        lines.append("STATUS: VALID REASONING")
+    else:
+        lines.append("STATUS: INVALID REASONING")
+        lines.append("")
+        lines.append("VIOLATIONS:")
+        for v in validation.violations:
+            lines.append(f"  - {v}")
+
+    if validation.requires_challenge:
+        lines.extend([
+            "",
+            "NOTE: Approval verdict - should be challenged by skeptic agent",
+        ])
+
+    lines.append("=" * 60)
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Validate agent reasoning quality"
+    )
+    parser.add_argument(
+        '--file', '-f',
+        type=Path,
+        help="File containing agent output (default: stdin)"
+    )
+    parser.add_argument(
+        '--json', '-j',
+        action='store_true',
+        help="Output as JSON"
+    )
+    parser.add_argument(
+        '--generate-skeptic-prompt',
+        action='store_true',
+        help="If approval, output a skeptic challenge prompt"
+    )
+
+    args = parser.parse_args()
+
+    # Read input
+    if args.file:
+        output = args.file.read_text()
+    else:
+        output = sys.stdin.read()
+
+    # Validate
+    validation = validate_reasoning(output)
+
+    # Output
+    if args.json:
+        result = asdict(validation)
+        print(json.dumps(result, indent=2))
+    elif args.generate_skeptic_prompt and validation.requires_challenge:
+        print(generate_skeptic_prompt(output, validation))
+    else:
+        print(format_report(validation))
+
+    # Exit code
+    sys.exit(0 if validation.is_valid else 1)
+
+
+if __name__ == "__main__":
+    main()

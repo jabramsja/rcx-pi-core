@@ -30,8 +30,14 @@ FILE: /path/file.py
 LINES: 123-127
 CODE:
     [paste from Read tool output]
+EXPLOIT:
+    [concrete attack input or steps to trigger the vulnerability]
+PROPOSED_FIX:
+    [concrete fix - actual code, not vague advice]
 VERIFIED: Yes
 ```
+
+**EXPLOIT and PROPOSED_FIX are REQUIRED for vulnerabilities.** Show HOW to break it and HOW to fix it.
 
 **FORBIDDEN:** Claims without evidence, "probably/likely", citing from memory.
 **Findings without file:line evidence will be REJECTED.**
@@ -147,14 +153,27 @@ Simply citing defensive-looking code without showing an attack attempt = NOT_ATT
    - Details: [what happened]
 
 ### Vulnerabilities Found
-- [list of actual issues]
+- [list of actual issues with FILE:LINE]
 
 ### Recommendations
 - [how to fix]
 
+### CHECKED
+- [attack vectors I tested, with file:line evidence]
+- [e.g., "Type confusion in step_mu.py:234 - BLOCKED"]
+- [minimum 3 items for SECURE verdict]
+
+### NOT_CHECKED
+- [attack vectors I did NOT test and why]
+- [e.g., "Network-based attacks - outside kernel scope"]
+- [e.g., "Timing attacks - need runtime analysis"]
+
 ### Verdict
 [SECURE / VULNERABLE / NEEDS HARDENING]
 ```
+
+**IMPORTANT:** SECURE verdicts require both CHECKED (3+ attack vectors) and NOT_CHECKED sections.
+Claiming security without acknowledging untested vectors is overconfident.
 
 ## Rules
 

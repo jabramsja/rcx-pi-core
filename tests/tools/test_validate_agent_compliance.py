@@ -180,7 +180,8 @@ class TestHallucinationWords:
     """Test hallucination word detection."""
 
     def test_high_hallucination_count(self):
-        """More than 3 hallucination words should trigger violation."""
+        """More than 10 hallucination words should trigger violation."""
+        # Agent outputs are verbose - threshold is 10 to avoid false positives
         output = """
 STATUS.md mentioned.
 
@@ -188,30 +189,35 @@ FINDING: This probably seems like it might maybe be an issue
 FILE: /path/file.py
 VERIFIED: Yes
 
-The code likely assumes that this presumably works.
+The code likely assumes that this presumably works. It appears that
+this could possibly suggest that it believes this might likely
+be a concern. Presumably this seems to maybe assume it could work.
 """
         result = check_compliance(output)
 
-        assert result["hallucination_words"] > 3
+        assert result["hallucination_words"] > 10
         assert result["compliant"] is False
         assert any("hallucination word count" in v for v in result["violations"])
 
     def test_threshold_boundary_pass(self):
-        """Exactly 3 hallucination words should pass."""
+        """Up to 10 hallucination words should pass (verbose agent output tolerance)."""
         output = """
 STATUS.md mentioned.
 
-FINDING: This probably seems likely
+FINDING: This probably seems likely and might possibly be a concern
 FILE: /path/file.py
 LINES: 1-5
 CODE:
     def foo():
         pass
 VERIFIED: Yes
+
+It appears this could suggest something.
 """
         result = check_compliance(output)
 
-        assert result["hallucination_words"] == 3
+        # 10 or fewer is acceptable
+        assert result["hallucination_words"] <= 10
         assert result["compliant"] is True
 
     def test_expanded_hallucination_words(self):

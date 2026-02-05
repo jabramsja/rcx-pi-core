@@ -30,8 +30,12 @@ FILE: /path/file.py
 LINES: 123-127
 CODE:
     [paste from Read tool output]
+PROPOSED_TEST:
+    [complete, runnable pytest test that would catch this gap]
 VERIFIED: Yes
 ```
+
+**PROPOSED_TEST is REQUIRED for UNGROUNDED findings.** Show the actual test code that should exist.
 
 **FORBIDDEN:** Claims without evidence, "probably/likely", citing from memory.
 **Findings without file:line evidence will be REJECTED.**

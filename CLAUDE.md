@@ -18,7 +18,8 @@ This file is read by Claude Code at session start.
 **At session START:**
 1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
 2. Read `TASKS.md` - know what's in progress, what's next
-3. Read `docs/agents/AgentRunbook.v0.md` before running agents
+3. Run `./tools/check_agent_review_needed.sh` - check for uncommitted core changes needing agent review
+4. Read `docs/agents/AgentRunbook.v0.md` before running agents
 
 **At session END (before signing off):**
 1. Did phase or debt change? → Update `STATUS.md`
@@ -61,31 +62,33 @@ These are the only two files that track current state. Do not duplicate status i
 
 ## Agents
 
-| Agent | Model | Purpose | When to Use |
-|-------|-------|---------|-------------|
-| advisor | **opus** | Strategic advice, trade-offs | When stuck on design decisions |
-| verifier | **opus** | North Star invariant compliance | Every PR with rcx_pi/ changes |
-| adversary | **opus** | Red team attack testing | New modules, security-sensitive code |
-| expert | **opus** | Code quality, simplification | Complex code, major refactors |
-| structural-proof | sonnet | Verify Mu projection claims | When claiming "pure structural" |
-| grounding | sonnet | Convert claims to executable tests | Core kernel/seed code |
-| fuzzer | sonnet | Property-based testing (1000+ inputs) | Core kernel/seed code |
-| translator | sonnet | Plain English explanation | Founder review |
-| visualizer | sonnet | Mermaid diagrams of Mu structures | Founder review |
+**Quick start:** `./tools/agents.sh` | **Full docs:** `docs/agents/AgentRunbook.v0.md`
 
-**Model selection rationale:**
-- **Opus** for core agents (advisor, verifier, adversary, expert) - deeper reasoning for strategic/security analysis
-- **Sonnet** for implementation agents - good balance of speed and quality
+### When to Run Agents
 
-**Agent Guardrails (Anti-Hallucination):**
-All 9 agents follow `docs/agents/AgentGuardrails.v0.md` requiring FILE:LINE + code evidence.
-The validation hook (`.claude/hooks/validate-agent-compliance.sh`) automatically checks output format.
+**The rule:** If you touched `rcx_pi/selfhost/` or `mu/`, run agents before saying "done."
 
-**Mandatory for PRs:** verifier, adversary, expert, structural-proof (4)
-**For core code:** Add grounding, fuzzer (6)
-**For founder review:** Add translator, visualizer (8)
+| Change Type | Command |
+|-------------|---------|
+| Core code (`rcx_pi/selfhost/`, `mu/`) | `python tools/run_review.py <files> --depth full` |
+| Security-sensitive / major refactor | `python tools/run_review.py <files> --rigorous` |
+| PR prep for founder | `python tools/run_review.py <files> --founder` |
+| Docs/tooling only | Skip agents, just run tests |
 
-See `docs/agents/AgentRig.v0.md` for full documentation.
+### Key Commands
+
+```bash
+# Orchestrated review (parallel, 6 agents)
+python tools/run_review.py rcx_pi/selfhost/ --depth full
+
+# Rigorous mode (challenges approvals with skeptic)
+python tools/run_review.py rcx_pi/selfhost/ --rigorous
+
+# Interactive session
+python tools/run_interactive.py verifier rcx_pi/selfhost/
+```
+
+See `docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mode details, agent memory, and CI integration.
 
 ---
 

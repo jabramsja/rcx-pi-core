@@ -31,8 +31,13 @@ FILE: /absolute/path/file.py
 LINES: 123-127
 CODE:
     actual_code_from_read_tool()
+PROPOSED_FIX:
+    [concrete fix - actual code, not vague advice]
 VERIFIED: Yes
 ```
+
+**PROPOSED_FIX is REQUIRED for FAIL/VULNERABLE/OVER_ENGINEERED findings.**
+Show the actual fix, not just "add marker" - show WHERE and WHAT.
 
 **Findings without this format are REJECTED by the human reviewer.**
 
@@ -133,9 +138,37 @@ Agent outputs are checked for:
 - [ ] At least 1 `CODE:` block per finding
 - [ ] Zero `VERIFIED: No` entries
 - [ ] `STATUS.md` mentioned in first 50 lines
-- [ ] No hallucination words (`probably`, `likely`, `seems`, `assume`, `appears`, `possibly`, `could`, `perhaps`, `suggests`)
+- [ ] No hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS` for current list)
 
 **Non-compliant outputs require revision before acceptance.**
+
+---
+
+## Reasoning Requirements (MANDATORY for Approvals)
+
+**Approval verdicts require explicit reasoning traces:**
+
+```
+### CHECKED
+- [what you verified, with file:line]
+- [minimum 3 items for APPROVE/SECURE/PROVEN verdicts]
+- [minimum 2 items for MINIMAL/GROUNDED verdicts]
+
+### NOT_CHECKED
+- [what you did NOT verify and why]
+- [REQUIRED for any approval - acknowledges limitations]
+```
+
+**Why this matters:**
+- Prevents overconfident approvals
+- Makes review scope explicit
+- Enables skeptic challenge on approvals
+- Catches "rubber stamp" verdicts
+
+**Enforcement:**
+- `tools/validate_agent_reasoning.py` checks for CHECKED/NOT_CHECKED sections
+- `run_review.py --rigorous` challenges approvals missing these sections
+- Approval without NOT_CHECKED = overconfident = challenged by skeptic
 
 ---
 
