@@ -29,7 +29,7 @@ See docs/core/MetaCircularKernel.v0.md for kernel design.
 
 from __future__ import annotations
 
-from .eval_seed import NO_MATCH, host_iteration, step as eval_step, match as eval_seed_match
+from .eval_seed import NO_MATCH, host_iteration, step as eval_step
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_equal
@@ -855,13 +855,13 @@ def run_mu_structural(
 
     for i in range(max_steps):
         # Find which projection will match (for trace)
-        # FIXED (9-agent review 2026-02-05): Use eval_seed.match() instead of match_mu()
-        # to ensure trace detection uses same matching semantics as step_kernel_mu().
-        # The kernel's match.v2 projections are parity with eval_seed.match().
-        # Using match_mu (match.v1) could diverge, causing traces to lie.
+        # Use match_mu() which has LINEAR-ONLY semantics matching step_kernel_mu().
+        # Both match.v1 (match_mu) and match.v2 (kernel) are linear-only.
+        # DO NOT use eval_seed.match() here - it has conflict detection which
+        # the kernel's match.v2 does NOT have. See BootstrapStructuralBridge.v0.md.
         matched_id = None
         for proj in projections:
-            bindings = eval_seed_match(proj.get("pattern"), current)
+            bindings = match_mu(proj.get("pattern"), current)
             if bindings is not NO_MATCH:
                 matched_id = proj.get("id")
                 break
