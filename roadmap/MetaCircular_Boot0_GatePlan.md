@@ -17,8 +17,10 @@ This is a sequential gate plan with explicit dependencies and exit criteria. Gat
 
 ---
 
-## Gate 1: Canonical Algorithm Normalization Spec
+## Gate 1: Canonical Algorithm Normalization Spec ✅ COMPLETE
 Goal: define the normalized schema for algorithm state.
+
+**Status:** COMPLETE (2026-02-04). Spec at `roadmap/AlgorithmNormalizationSpec.v0.md`.
 
 Work:
 1. Write a full spec in `roadmap/AlgorithmNormalizationSpec.v0.md` for normalized algorithm state.
@@ -33,8 +35,10 @@ Exit criteria:
 
 ---
 
-## Gate 0: Baseline Freeze
+## Gate 0: Baseline Freeze ✅ COMPLETE
 Goal: lock current behavior and verify parity baselines before refactor.
+
+**Status:** COMPLETE (2026-02-04). Baseline at `roadmap/Gate0_Baseline_2026-02-04.md`.
 
 **Timing:** Run immediately before Gate 2 begins. Do not run standalone.
 
@@ -52,8 +56,10 @@ Exit criteria:
 
 ---
 
-## Gate 2: Normalization Adapters
+## Gate 2: Normalization Adapters ✅ COMPLETE
 Goal: implement safe conversion between raw algorithm state and normalized form.
+
+**Status:** COMPLETE (2026-02-04). Adapters at `rcx_pi/selfhost/algorithm_adapters.py`, tests at `tests/structural/test_algorithm_normalization.py` (29 tests).
 
 Work:
 1. Add adapter functions in `rcx_pi/selfhost/step_mu.py` or a dedicated helper module.
@@ -188,10 +194,10 @@ Exit criteria:
 **Execution order (reordered per 9-agent review):**
 ```
 L2/L3 GATES (Active):
-Gate 1: Normalization Spec      [##]       ← START HERE
-Gate 0: Baseline Freeze         [##]       ← Run immediately before Gate 2
-Gate 2: Adapters                [###]
-Gate 3: Rewrite Seeds + Fuzzers [#####]
+Gate 1: Normalization Spec      [##]       ✅ COMPLETE (2026-02-04)
+Gate 0: Baseline Freeze         [##]       ✅ COMPLETE (2026-02-04)
+Gate 2: Adapters                [###]      ✅ COMPLETE (2026-02-04)
+Gate 3: Rewrite Seeds + Fuzzers [#####]    ← NEXT
 Gate 4: Structural Execution    [####]
 Gate 5: Meta-Circular Parity    [###]      ← Hemisphere unblocked after this
 
