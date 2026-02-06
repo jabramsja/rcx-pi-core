@@ -122,9 +122,13 @@ function iterNormalizedDictPairs(value) {
   const pairs = [];
   let current = value;
   let steps = 0;
+  const visited = new Set();
 
   while (true) {
     if (current === null || typeof current !== 'object' || Array.isArray(current)) return null;
+    // Security hardening: reject cyclic structures to avoid infinite loops.
+    if (visited.has(current)) return null;
+    visited.add(current);
     if ('_type' in current && current._type !== 'dict') return null;
     if (!('head' in current) || !('tail' in current)) return null;
 

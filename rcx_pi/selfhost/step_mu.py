@@ -184,9 +184,15 @@ def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
 
     pairs: list[tuple[str, Mu]] = []
     current: Mu = value
+    visited_nodes: set[int] = set()
     while True:
         if not isinstance(current, dict):
             return None
+        # Security hardening: reject cyclic structures to avoid infinite loops.
+        node_id = id(current)
+        if node_id in visited_nodes:
+            return None
+        visited_nodes.add(node_id)
         if "_type" in current and current.get("_type") != "dict":
             return None
         if "head" not in current or "tail" not in current:
@@ -395,6 +401,53 @@ def clear_combined_kernel_cache() -> None:
 _combined_kernel_bridge_cache: list[Mu] | None = None
 
 
+def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
+    """
+    Validate critical ordering invariants for bridge-enabled kernel composition.
+
+    These checks are runtime guardrails for future seed/config changes:
+    - Bridge projections must exist.
+    - Bridge variable interception must run before match.var.
+    - Bridge lookup success must run before lookup conflict branch.
+    """
+    ids = [p.get("id") for p in projections if isinstance(p, dict)]
+
+    required_bridge_ids = (
+        "bridge.var.check_existing",
+        "bridge.lookup.found_same",
+        "bridge.lookup.found_different",
+        "bridge.lookup.not_found_yet",
+        "bridge.lookup.not_found",
+    )
+    missing = [proj_id for proj_id in required_bridge_ids if proj_id not in ids]
+    if missing:
+        raise ValueError(
+            "SECURITY: Bridge ordering invariant failed; missing bridge projections: "
+            f"{missing}"
+        )
+
+    if "match.var" not in ids:
+        raise ValueError("SECURITY: Bridge ordering invariant failed; missing match.var")
+
+    match_var_idx = ids.index("match.var")
+    for bridge_id in required_bridge_ids:
+        bridge_idx = ids.index(bridge_id)
+        if bridge_idx >= match_var_idx:
+            raise ValueError(
+                "SECURITY: Bridge ordering invariant failed; "
+                f"{bridge_id} (index {bridge_idx}) must be before match.var "
+                f"(index {match_var_idx})"
+            )
+
+    found_same_idx = ids.index("bridge.lookup.found_same")
+    found_diff_idx = ids.index("bridge.lookup.found_different")
+    if found_same_idx > found_diff_idx:
+        raise ValueError(
+            "SECURITY: Bridge ordering invariant failed; "
+            "bridge.lookup.found_same must precede bridge.lookup.found_different"
+        )
+
+
 def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     """
     Load and cache combined kernel + match.v2 + bootstrap_structural + subst.v2 projections.
@@ -417,6 +470,7 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     """
     global _combined_kernel_bridge_cache
     if _combined_kernel_bridge_cache is not None:
+        _validate_combined_bridge_ordering(_combined_kernel_bridge_cache)
         # Deep copy via JSON round-trip (Mu is JSON-compatible)
         return json.loads(json.dumps(_combined_kernel_bridge_cache))
 
@@ -437,6 +491,7 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
         match_seed["projections"] +
         subst_seed["projections"]
     )
+    _validate_combined_bridge_ordering(_combined_kernel_bridge_cache)
     # Deep copy via JSON round-trip (Mu is JSON-compatible)
     return json.loads(json.dumps(_combined_kernel_bridge_cache))
 
@@ -857,16 +912,26 @@ def run_mu_structural(
     current = initial
 
     for i in range(max_steps):
-        # Find which projection will match (for trace)
-        # Use match_mu() which has LINEAR-ONLY semantics matching step_kernel_mu().
-        # Both match.v1 (match_mu) and match.v2 (kernel) are linear-only.
-        # DO NOT use eval_seed.match() here - it has conflict detection which
-        # the kernel's match.v2 does NOT have. See BootstrapStructuralBridge.v0.md.
+        # Single-pass structural step: identify first match and apply it once.
+        # This avoids the previous double-evaluation path (pre-match + step_mu).
         matched_id = None
+        result = current
         for proj in projections:
-            bindings = match_mu(proj.get("pattern"), current)
+            if not isinstance(proj, dict):
+                continue
+            pattern = proj.get("pattern")
+            body = proj.get("body")
+            if pattern is None or body is None:
+                continue
+            bindings = match_mu(pattern, current)
             if bindings is not NO_MATCH:
                 matched_id = proj.get("id")
+                try:
+                    result = subst_mu(body, bindings)
+                except KeyError:
+                    # Parity with step_mu: unresolved substitution stalls and
+                    # returns original input rather than bubbling an exception.
+                    result = current
                 break
 
         trace_entries.append({
@@ -874,8 +939,6 @@ def run_mu_structural(
             "state": current,
             "projection": matched_id
         })
-
-        result = step_mu(projections, current)
 
         # Check for stall (no change)
         if mu_equal(result, current):

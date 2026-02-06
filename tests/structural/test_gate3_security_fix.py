@@ -22,6 +22,7 @@ from rcx_pi.selfhost.step_mu import (
     validate_no_kernel_reserved_fields,
     KERNEL_RESERVED_FIELDS,
     ALGORITHM_ENTRYPOINT_KEYS,
+    _iter_normalized_dict_pairs,
 )
 
 
@@ -208,6 +209,18 @@ class TestMixedScenarios:
 
         # Should NOT raise
         validate_no_kernel_reserved_fields(clean, "test")
+
+
+class TestNormalizedDictCycleHandling:
+    """Cycle handling for normalized dict validation helper."""
+
+    def test_iter_normalized_dict_pairs_rejects_cycle(self):
+        """Cyclic normalized dict-like structures must fail closed."""
+        kv = {"head": "safe_key", "tail": {"head": 1, "tail": None}}
+        root = {"_type": "dict", "head": kv}
+        root["tail"] = root  # explicit cycle
+
+        assert _iter_normalized_dict_pairs(root) is None
 
 
 class TestAlgorithmEntrypointKeys:
