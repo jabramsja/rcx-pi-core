@@ -410,7 +410,10 @@ def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
     - Bridge variable interception must run before match.var.
     - Bridge lookup success must run before lookup conflict branch.
     """
-    ids = [p.get("id") for p in projections if isinstance(p, dict)]
+    ids: list[Mu] = []
+    for proj in projections:
+        if isinstance(proj, dict):
+            ids.append(proj.get("id"))
 
     required_bridge_ids = (
         "bridge.var.check_existing",
@@ -419,7 +422,10 @@ def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
         "bridge.lookup.not_found_yet",
         "bridge.lookup.not_found",
     )
-    missing = [proj_id for proj_id in required_bridge_ids if proj_id not in ids]
+    missing: list[str] = []
+    for proj_id in required_bridge_ids:
+        if proj_id not in ids:
+            missing.append(proj_id)
     if missing:
         raise ValueError(
             "SECURITY: Bridge ordering invariant failed; missing bridge projections: "

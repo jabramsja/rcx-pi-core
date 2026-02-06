@@ -406,7 +406,8 @@ class TestWiringVerification:
         """
         Runtime guard should reject bridge ordering regressions.
         """
-        from rcx_pi.selfhost.step_mu import _validate_combined_bridge_ordering
+        import rcx_pi.selfhost.step_mu as step_mu_module
+        validate_ordering = getattr(step_mu_module, "_validate_combined_bridge_ordering")
 
         invalid = [
             {"id": "kernel.wrap"},
@@ -419,7 +420,7 @@ class TestWiringVerification:
         ]
 
         with pytest.raises(ValueError, match="Bridge ordering invariant failed"):
-            _validate_combined_bridge_ordering(invalid)
+            validate_ordering(invalid)
 
 
 # =============================================================================
