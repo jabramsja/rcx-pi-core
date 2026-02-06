@@ -25,7 +25,7 @@ GOVERNED_FOLDER_NAMES = [
     "docs/cli",
     "docs/schemas",
     "docs/reviews",
-    ".claude/agents",
+    "tools/agents",
 ]
 
 

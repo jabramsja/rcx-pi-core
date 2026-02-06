@@ -29,7 +29,7 @@ See docs/core/MetaCircularKernel.v0.md for kernel design.
 
 from __future__ import annotations
 
-from .eval_seed import NO_MATCH, host_iteration, step as eval_step
+from .eval_seed import NO_MATCH, host_iteration, step as eval_step, match as eval_seed_match
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_equal
@@ -561,10 +561,10 @@ def run_algorithm_meta_circular(projections: list[Mu], input_value: Mu) -> Mu:
     """
     assert_mu(input_value, "run_algorithm_meta_circular.input")
 
-    # Run through structural match/subst with bridge projections.
-    # Bridge projections provide non-linear pattern support STRUCTURALLY.
-    # Pattern matching uses match.v2 + bridge (not Python match).
-    # Substitution uses subst.v2 (not Python substitute).
+    # HYBRID EXECUTION: Uses Python match/substitute for practical execution.
+    # Bridge projections PROVE structural non-linear support is possible,
+    # but for algorithms we use Python match() which already handles non-linear
+    # patterns correctly. See step_algorithm_with_bridge docstring for details.
     return step_algorithm_with_bridge(projections, input_value)
 
 
@@ -855,10 +855,13 @@ def run_mu_structural(
 
     for i in range(max_steps):
         # Find which projection will match (for trace)
-        # Uses match_mu to stay structural (9-agent review 2026-01-31: avoid Python match())
+        # FIXED (9-agent review 2026-02-05): Use eval_seed.match() instead of match_mu()
+        # to ensure trace detection uses same matching semantics as step_kernel_mu().
+        # The kernel's match.v2 projections are parity with eval_seed.match().
+        # Using match_mu (match.v1) could diverge, causing traces to lie.
         matched_id = None
         for proj in projections:
-            bindings = match_mu(proj.get("pattern"), current)
+            bindings = eval_seed_match(proj.get("pattern"), current)
             if bindings is not NO_MATCH:
                 matched_id = proj.get("id")
                 break

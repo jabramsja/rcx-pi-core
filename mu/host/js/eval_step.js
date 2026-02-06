@@ -1599,7 +1599,8 @@ function runRecurrence(traceResult) {
 
 /**
  * Detect closure directly from input (wrapper for convenience).
- * This matches the Python detect_closure_structural() API.
+ * Combines runStructural() + runRecurrence() for end-to-end closure detection.
+ * Python equivalent: run_mu_structural() + run_recurrence_algorithm().
  */
 function detectClosureStructural(projections, input, maxSteps = 100) {
   // First run the projections to get a structural trace

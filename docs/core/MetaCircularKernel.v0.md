@@ -25,9 +25,9 @@ Status: **DONE** (promoted 2026-01-27, Phase 7 COMPLETE, L2 FULL achieved via ex
 
 **Agent Review Summary:**
 - structural-proof: Linked-list cursor PROVEN STRUCTURAL
-- adversary: Mode namespace collision (HIGH) - addressed with `_kernel_` prefix
+- adversary: Mode namespace collision (HIGH) - addressed with reserved underscore fields (`_mode`, `_phase`, etc.)
 - expert: Simplify from 11 to 5-7 projections - addressed
-- verifier: Context preservation gap - addressed with `kernel_ctx` field
+- verifier: Context preservation gap - addressed with `_kernel_ctx` field
 
 ---
 

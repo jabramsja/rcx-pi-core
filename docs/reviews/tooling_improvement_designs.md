@@ -46,7 +46,7 @@ GOVERNED_FOLDER_NAMES = [
     "docs/cli",
     "docs/schemas",
     "docs/reviews",
-    ".claude/agents",
+    "tools/agents",
 ]
 
 def get_governed_folders_as_paths() -> list[Path]:

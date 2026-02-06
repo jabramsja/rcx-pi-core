@@ -42,7 +42,7 @@ NAME: Mechanical Kernel (Security Hardened)
 - [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 - [x] `step_kernel_mu()` wired to use structural kernel
-- [x] Security hardening complete (24 reserved fields, deep validation)
+- [x] Security hardening complete (22 reserved fields, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py:397-410`)
 
 **Seed version note:** `match_mu()` and `subst_mu()` standalone functions use v1 seeds for direct invocation. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.

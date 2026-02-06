@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-05
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -33,6 +33,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [archive/](#archive) | Historical/archived documentation |
 | [fixtures/](#fixtures) | Test fixtures |
 | [latex/](#latex) | LaTeX source files (paper) |
+| [reviews/](#reviews) |  |
 
 ## core
 
@@ -40,14 +41,23 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 | File | Title |
 |------|-------|
+| [Boot0Architecture.v0.md](core/Boot0Architecture.v0.md) | Boot0 Architecture: Staged Bootstrap for RCX |
+| [BootstrapPrimitives.v0.md](core/BootstrapPrimitives.v0.md) | Bootstrap Primitives (Phase 8a) |
+| [BootstrapStructuralBridge.v0.md](core/BootstrapStructuralBridge.v0.md) | Bootstrap-Structural Bridge: Non-Linear Pattern Support |
 | [DebtCategories.v0.md](core/DebtCategories.v0.md) | Debt Categories v0 |
+| [DocGovernance.v0.md](core/DocGovernance.v0.md) | Documentation Governance v0 |
 | [EVAL_SEED.v0.md](core/EVAL_SEED.v0.md) | EVAL_SEED Specification v0 |
+| [EngineNewsStructural.v0.md](core/EngineNewsStructural.v0.md) | Recurrence Structural Specification v0 |
 | [EntropyBudget.md](core/EntropyBudget.md) | RCX Entropy Budget (Contract) |
 | [MetaCircularKernel.v0.md](core/MetaCircularKernel.v0.md) | Meta-Circular Kernel Specification v0 |
 | [MuType.v0.md](core/MuType.v0.md) | Mu Type Definition v0 |
+| [OperatorExhaustion.v0.md](core/OperatorExhaustion.v0.md) | Operator Exhaustion Structural Specification v0 |
+| [RCXEngine.v0.md](core/RCXEngine.v0.md) | RCX Engine |
 | [RCXKernel.v0.md](core/RCXKernel.v0.md) | RCX Kernel Specification v0 |
+| [RecursiveKernel.v0.md](core/RecursiveKernel.v0.md) | Recursive Kernel Design (Phase 8) |
 | [SelfHosting.v0.md](core/SelfHosting.v0.md) | Self-Hosting Specification v0 |
 | [StructuralPurity.v0.md](core/StructuralPurity.v0.md) | Structural Purity Guardrails v0 |
+| [UniversalEval.v0.md](core/UniversalEval.v0.md) | Universal Eval Seed (L4 Alternative Design) |
 | [Why_RCX_PI_VM_EXISTS.md](core/Why_RCX_PI_VM_EXISTS.md) | Why RCX PI VM EXISTS |
 
 ## execution
@@ -97,7 +107,9 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 | File | Title |
 |------|-------|
+| [AgentGuardrails.v0.md](agents/AgentGuardrails.v0.md) | Agent Guardrails v0 |
 | [AgentRig.v0.md](agents/AgentRig.v0.md) | RCX Agent Rig - Lead Architect Workflow |
+| [AgentRunbook.v0.md](agents/AgentRunbook.v0.md) | Agent Runbook v0 |
 
 ## audit
 
@@ -140,6 +152,13 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 *LaTeX source files (paper)*
 
 *13 files (non-markdown)*
+
+## reviews
+
+| File | Title |
+|------|-------|
+| [mu_equal_fix_summary.md](reviews/mu_equal_fix_summary.md) | mu_equal Binding Conflict Fix - Summary for Review |
+| [tooling_improvement_designs.md](reviews/tooling_improvement_designs.md) | Tooling Improvement Designs |
 
 ---
 
