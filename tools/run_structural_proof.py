@@ -11,41 +11,13 @@ Usage:
 """
 
 import sys
-import json
-import subprocess
 import anyio
 from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
+from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
 
 STRUCTURAL_PROOF_PROMPT = Path("tools/agents/structural_proof_prompt.md").read_text()
-
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations)
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
 
 
 async def run_structural_proof(claim: str) -> str:
@@ -93,24 +65,29 @@ async def main():
     print(result)
     print("=" * 60)
 
-    # Compliance validation
-    is_compliant, error = validate_compliance(result)
+    # Compliance validation (shared_agent_utils returns 3-tuple)
+    is_compliant, error, _ = validate_compliance(result)
     if not is_compliant:
         print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
         print("Agent output did not meet AgentGuardrails.v0 requirements.")
         sys.exit(3)
 
-    # Check verdict
-    if "PROVEN" in result:
+    # Check verdict using secure marker-based extraction (shared_agent_utils)
+    verdict = extract_verdict_secure(result, agent_name="structural-proof")
+    if verdict == "PROVEN":
         print("\nCLAIM PROVEN")
-    elif "UNPROVEN" in result:
+    elif verdict == "UNPROVEN":
         print("\nCLAIM UNPROVEN - need concrete projections")
         sys.exit(1)
-    elif "IMPOSSIBLE" in result:
+    elif verdict == "IMPOSSIBLE_AS_CLAIMED":
         print("\nCLAIM IMPOSSIBLE - cannot be done structurally")
         sys.exit(2)
+    elif verdict == "NO_STRUCTURAL_CLAIMS":
+        print("\nNO STRUCTURAL CLAIMS - nothing to verify")
+    elif verdict == "REQUIRES_CI_VERIFICATION":
+        print("\nREQUIRES CI VERIFICATION - execution unavailable")
     else:
-        print("\nSTRUCTURAL PROOF REVIEW COMPLETE")
+        print(f"\nSTRUCTURAL PROOF REVIEW COMPLETE (verdict: {verdict})")
 
 
 if __name__ == "__main__":

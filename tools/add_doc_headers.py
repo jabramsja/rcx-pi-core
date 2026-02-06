@@ -18,19 +18,11 @@ import re
 from datetime import date
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+from tools.shared_doc_config import REPO_ROOT, get_governed_folders_as_paths
 
 # All folders under governance (require headers)
-GOVERNED_FOLDERS = [
-    REPO_ROOT / "docs" / "core",
-    REPO_ROOT / "docs" / "agents",
-    REPO_ROOT / "docs" / "audit",
-    REPO_ROOT / "docs" / "execution",
-    REPO_ROOT / "docs" / "cli",
-    REPO_ROOT / "docs" / "schemas",
-    REPO_ROOT / "docs" / "reviews",
-    REPO_ROOT / ".claude" / "agents",
-]
+# Single source of truth: tools/shared_doc_config.py
+GOVERNED_FOLDERS = get_governed_folders_as_paths()
 
 # Specific standalone files that need headers
 GOVERNED_FILES = [
@@ -136,8 +128,14 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 
 def has_doc_header(content: str) -> bool:
-    """Check if content already has a DOC_STATUS header."""
-    header_pattern = re.compile(r'<!--[\s\S]*?DOC_STATUS[\s\S]*?-->', re.MULTILINE)
+    """Check if content already has a DOC_STATUS header.
+
+    Uses the same strict pattern as test_doc_governance.py:parse_doc_header()
+    to ensure consistency between detection and validation.
+    """
+    # Strict pattern: <!-- followed by whitespace+newline, DOC_STATUS on its own line
+    # Must match test_doc_governance.py:108 pattern
+    header_pattern = re.compile(r'<!--\s*\nDOC_STATUS\n.*?\n-->', re.DOTALL)
     match = header_pattern.search(content[:1500])
     return match is not None
 

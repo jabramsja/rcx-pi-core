@@ -161,6 +161,16 @@ Find unnecessary complexity and suggest simpler approaches. RCX should be minima
 **IMPORTANT:** MINIMAL verdicts require both CHECKED (2+ areas) and NOT_CHECKED sections.
 Claiming code is minimal without stating review scope is incomplete.
 
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with 2+ areas for MINIMAL verdict
+2. Missing NOT_CHECKED section for any approval verdict
+3. Any finding without FILE:LINE + CODE block + PROPOSED_FIX
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.
+
 ## Rules
 
 1. Be specific - point to exact code, suggest exact changes

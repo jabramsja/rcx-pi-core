@@ -154,16 +154,22 @@ class TestStatusMdCheck:
         assert result["status_md_early"] is True
 
     def test_status_md_not_early(self):
-        """STATUS.md not in first 50 lines should trigger violation."""
+        """STATUS.md not in first 50 lines - metric tracked but non-blocking.
+
+        Note: STATUS.md requirement was downgraded to non-blocking (advisory only)
+        because agents reviewing tooling files may not need to read STATUS.md.
+        The metric is still tracked for visibility.
+        """
         # Create 51 lines without STATUS.md
         long_header = "\n".join([f"Line {i}" for i in range(51)])
         output = long_header + "\n\nFINDING: Issue\nFILE: /path/file.py\nVERIFIED: Yes"
 
         result = check_compliance(output)
 
+        # Metric is still tracked
         assert result["status_md_early"] is False
-        assert result["compliant"] is False
-        assert any("STATUS.md not mentioned" in v for v in result["violations"])
+        # But no violation for STATUS.md specifically (non-blocking)
+        assert not any("STATUS.md" in v for v in result["violations"])
 
     def test_status_md_exactly_line_50(self):
         """STATUS.md on exactly line 50 should pass."""

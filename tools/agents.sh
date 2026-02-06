@@ -14,7 +14,7 @@ show_help() {
 ║  ORCHESTRATORS (run multiple agents)                                         ║
 ║  ───────────────────────────────────                                         ║
 ║  python tools/run_review.py <files>           Full parallel review           ║
-║  python tools/run_review.py <files> --quick   4 core agents only             ║
+║  python tools/run_review.py <files> --depth quick   4 core agents only       ║
 ║  python tools/run_review.py --pr              Review current PR diff         ║
 ║  python tools/run_review.py <files> --founder Include translator/visualizer ║
 ║                                                                              ║

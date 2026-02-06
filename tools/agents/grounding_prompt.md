@@ -61,13 +61,28 @@ This agent writes tests based on self-hosting level:
 
 Take structural claims and convert them into permanent regression tests. The test becomes the proof - if it passes, the claim is grounded. If it fails, the claim was false.
 
-## The "No Mocking" Rule
+## The "No Mocking" Rule (With Design Phase Exception)
 
-You are FORBIDDEN from using Python mocks or stubs. You must:
+You are FORBIDDEN from using Python mocks or stubs EXCEPT for design-phase projections.
+
+**Standard rule (projections exist in seeds/):**
 1. Construct the actual Mu terms (JSON)
 2. Run them through the actual Kernel `step()` function
 3. Assert the output matches the structural expectation exactly
 4. Assert that `assert_mu(output)` passes
+
+**Design phase exception (projection in docs but not in seeds/):**
+1. Load JSON from design doc if shown
+2. Create standalone Python dict version of projection
+3. Call `step(projections=[dict_version], state=test_state)`
+4. Mark test with `@pytest.mark.design_phase`
+5. Include comment: `"Verifies design - test moves to tests/structural/ once seed exists"`
+6. Verdict: `UNGROUNDED (DESIGN ONLY)` - not a failure, honest acknowledgment
+
+**Never:**
+- Use `unittest.mock` or `pytest.mock`
+- Fabricate test data to make untestable claims pass
+- Skip tests because projections don't exist (use design phase exception instead)
 
 ## Verification Pattern
 
@@ -220,3 +235,13 @@ If you can't write a test because:
 3. Use actual RCX kernel functions
 4. Test file goes in `tests/structural/`
 5. If you can't write the test, explain why
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with coverage mapping for GROUNDED verdict
+2. Missing "What I Did NOT Check" section for any verdict
+3. Any finding without FILE:LINE + CODE block + PROPOSED_TEST
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.

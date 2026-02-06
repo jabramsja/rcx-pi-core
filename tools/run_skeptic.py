@@ -26,6 +26,7 @@ import argparse
 from pathlib import Path
 
 from claude_agent_sdk import query, ClaudeAgentOptions
+from tools.shared_agent_utils import sanitize_for_prompt, validate_compliance
 
 
 # =============================================================================
@@ -96,33 +97,7 @@ VERIFIED: Yes
 """
 
 
-# =============================================================================
-# Compliance Validation
-# =============================================================================
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on skeptic output."""
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations[:3])
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
-
+# validate_compliance imported from shared_agent_utils
 
 # =============================================================================
 # Skeptic Runner
@@ -135,7 +110,13 @@ async def run_skeptic(
 ) -> dict:
     """Run the skeptic agent to challenge an approval."""
 
-    file_list = ", ".join(files)
+    # Security: Sanitize file list to prevent prompt injection via file paths
+    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:100] for f in files]
+    file_list = ", ".join(safe_files)
+
+    # Security: Sanitize agent output to prevent prompt injection
+    safe_output = sanitize_for_prompt(agent_output)
+    safe_agent = original_agent.replace('`', '').replace('\n', ' ')[:50]
 
     prompt = f"""{SKEPTIC_SYSTEM_PROMPT}
 
@@ -143,11 +124,11 @@ async def run_skeptic(
 
 ## Context
 
-The **{original_agent}** agent reviewed these files: {file_list}
+The **{safe_agent}** agent reviewed these files: {file_list}
 
 Their output was:
 ```
-{agent_output[:4000]}
+{safe_output}
 ```
 
 Now, read the actual files yourself and challenge this approval.
@@ -169,21 +150,38 @@ Look for what they might have missed.
     except Exception as e:
         result_text = f"Skeptic error: {e}"
 
-    # Extract verdict
+    # Extract verdict using secure marker parsing (no substring matching)
+    import re
     verdict = "UNKNOWN"
-    if "CONFIRMED" in result_text:
-        verdict = "CONFIRMED"
-    elif "OVERRIDE" in result_text:
-        verdict = "OVERRIDE"
-    elif "CONCERNS" in result_text:
-        verdict = "CONCERNS"
+
+    # Look for explicit verdict markers only
+    verdict_pattern = re.compile(
+        r'(?:^|\n)\s*(?:\*\*)?(?:Skeptic\s+)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?[:\s]+(\w+)',
+        re.MULTILINE
+    )
+    for match in verdict_pattern.finditer(result_text):
+        found = match.group(1).upper()
+        if found in {"CONFIRMED", "OVERRIDE", "CONCERNS"}:
+            verdict = found
+            break
+
+    # Also check CHALLENGE_RESULT: marker (from validate_agent_reasoning)
+    challenge_pattern = re.compile(
+        r'CHALLENGE_RESULT[:\s]+(\w+)',
+        re.IGNORECASE
+    )
+    challenge_match = challenge_pattern.search(result_text)
+    if challenge_match and verdict == "UNKNOWN":
+        found = challenge_match.group(1).upper()
+        if found in {"CONFIRMED", "CONCERNS", "REJECTED"}:
+            verdict = "OVERRIDE" if found == "REJECTED" else found
 
     # Count high severity concerns
     high_severity = result_text.count("SEVERITY: HIGH")
     medium_severity = result_text.count("SEVERITY: MEDIUM")
 
-    # Compliance check
-    is_compliant, compliance_error = validate_compliance(result_text)
+    # Compliance check (shared_agent_utils returns 3-tuple)
+    is_compliant, compliance_error, _ = validate_compliance(result_text, json_output=True)
 
     return {
         "verdict": verdict,

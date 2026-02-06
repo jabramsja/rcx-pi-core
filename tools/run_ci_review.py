@@ -33,36 +33,7 @@ from dataclasses import dataclass
 
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
-
-# =============================================================================
-# Compliance Validation
-# =============================================================================
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations[:3])  # First 3 violations
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
+from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
 
 
 # =============================================================================
@@ -117,6 +88,9 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
         cmd = ["git", "diff", "--name-only", "main...HEAD"]
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    # Security: Check for command failure - don't fail silently
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to get diff: {result.stderr}")
     files = [f for f in result.stdout.strip().split('\n') if f]
 
     # Filter to relevant files
@@ -129,6 +103,7 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
         stat_cmd = ["git", "diff", "--stat", "main...HEAD"]
 
     stat_result = subprocess.run(stat_cmd, capture_output=True, text=True, timeout=30)
+    # Note: stat failure is non-critical - we can proceed with 0 line counts
 
     lines_added = 0
     lines_removed = 0
@@ -198,7 +173,9 @@ async def run_agent(agent_name: str, files: list[str]) -> dict:
 
     prompt_text = load_agent_prompt(agent_name.replace("-", "_"))
 
-    file_list = ", ".join(files[:20])  # Limit for context
+    # Security: Sanitize file paths to prevent prompt injection via newlines
+    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
+    file_list = ", ".join(safe_files)  # Limit for context
     prompt = f"""You are the RCX {agent_name.replace('-', ' ').title()} Agent.
 
 {prompt_text}
@@ -225,25 +202,16 @@ Produce a brief report (max 500 words) following your format.
     except Exception as e:
         result_text = f"Error: {e}"
 
-    # Extract verdict
-    verdict = "UNKNOWN"
-    verdict_map = {
-        "verifier": ["APPROVE", "REQUEST_CHANGES"],
-        "adversary": ["SECURE", "VULNERABLE"],
-        "expert": ["MINIMAL", "OVER_ENGINEERED"],
-        "structural-proof": ["PROVEN", "UNPROVEN"],
-        "grounding": ["GROUNDED", "UNGROUNDED"],
-        "fuzzer": ["ROBUST", "BROKEN"],
-    }
-    for v in verdict_map.get(agent_name, []):
-        if v in result_text:
-            verdict = v
-            break
+    # Extract verdict using secure VERDICT: marker parsing (shared_agent_utils)
+    verdict = extract_verdict_secure(result_text, agent_name=agent_name)
 
+    # NEEDS_HARDENING is NOT a pass - requires security fixes
     passed = verdict in {"APPROVE", "SECURE", "MINIMAL", "PROVEN", "GROUNDED", "ROBUST", "COULD_SIMPLIFY", "PARTIALLY_GROUNDED"}
 
-    # Compliance validation
-    is_compliant, compliance_error = validate_compliance(result_text)
+    # Compliance validation (shared_agent_utils returns 3-tuple)
+    is_compliant, compliance_error, _ = validate_compliance(
+        result_text, verify_files=True, verify_code=True
+    )
     if not is_compliant:
         passed = False  # Compliance failure = not passed
 
@@ -337,10 +305,12 @@ def post_pr_comment(pr_number: int, body: str) -> bool:
             for comment in comments:
                 if "RCX Automated Review" in comment.get("body", ""):
                     # Delete old comment
+                    # Security: Validate comment_id is numeric to prevent injection
                     comment_id = comment.get("id")
-                    if comment_id:
+                    if comment_id and str(comment_id).isdigit():
+                        # Use gh api which handles escaping properly
                         subprocess.run(
-                            ["gh", "api", "-X", "DELETE", f"/repos/{{owner}}/{{repo}}/issues/comments/{comment_id}"],
+                            ["gh", "api", "-X", "DELETE", f"repos/:owner/:repo/issues/comments/{comment_id}"],
                             capture_output=True,
                             timeout=30
                         )
@@ -374,7 +344,11 @@ async def main():
     # Get PR number from env if not specified
     pr_number = args.pr_number or os.environ.get("PR_NUMBER")
     if pr_number:
-        pr_number = int(pr_number)
+        try:
+            pr_number = int(pr_number)
+        except (ValueError, TypeError):
+            print(f"⚠️ Invalid PR_NUMBER: {pr_number}. Running without PR context.")
+            pr_number = None
 
     print("=" * 60)
     print("RCX CI REVIEW")
@@ -405,6 +379,16 @@ async def main():
 
     # Save report
     if args.output:
+        # Security: Validate output path to prevent arbitrary file write
+        try:
+            output_path = args.output.resolve()
+            cwd = Path.cwd().resolve()
+            if not output_path.is_relative_to(cwd):
+                print(f"\n⚠️ Output path must be within project directory: {args.output}")
+                sys.exit(1)
+        except (OSError, ValueError) as e:
+            print(f"\n⚠️ Invalid output path: {e}")
+            sys.exit(1)
         args.output.write_text(report)
         print(f"\n📄 Report saved to: {args.output}")
 

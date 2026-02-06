@@ -62,7 +62,20 @@ These are the only two files that track current state. Do not duplicate status i
 
 ## Agents
 
-**Quick start:** `./tools/agents.sh` | **Full docs:** `docs/agents/AgentRunbook.v0.md`
+**What agents are:** RCX uses a multi-agent code review system - specialized AI agents that each check different aspects of code changes. The key agents are:
+- **verifier** - Checks code against North Star invariants
+- **adversary** - Red-team security review (tries to break things)
+- **expert** - Complexity and simplification review
+- **structural-proof** - Verifies that structural claims have actual projections
+
+**Why agents exist:** We don't trust any single reviewer. We trust the *fight* between specialized agents that check each other's blind spots.
+
+**Canonical docs:**
+- `docs/agents/AgentRunbook.v0.md` - **Start here** - Tool overview, which tool when, commands, depth levels
+- `docs/agents/AgentRig.v0.md` - Architecture and trust model
+- `docs/agents/AgentGuardrails.v0.md` - Output format requirements
+
+**Quick start:** `./tools/agents.sh`
 
 ### When to Run Agents
 
@@ -73,6 +86,7 @@ These are the only two files that track current state. Do not duplicate status i
 | Core code (`rcx_pi/selfhost/`, `mu/`) | `python tools/run_review.py <files> --depth full` |
 | Security-sensitive / major refactor | `python tools/run_review.py <files> --rigorous` |
 | PR prep for founder | `python tools/run_review.py <files> --founder` |
+| Monthly / pre-release health check | `python tools/run_deep_analysis.py` |
 | Docs/tooling only | Skip agents, just run tests |
 
 ### Key Commands
@@ -86,6 +100,9 @@ python tools/run_review.py rcx_pi/selfhost/ --rigorous
 
 # Interactive session
 python tools/run_interactive.py verifier rcx_pi/selfhost/
+
+# Full-stack health analysis (monthly/pre-release)
+python tools/run_deep_analysis.py
 ```
 
 See `docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mode details, agent memory, and CI integration.
@@ -157,12 +174,13 @@ pytest -n auto --dist worksteal
 - Full suite (1000+ tests): Parallel is 6x faster (44s vs 255s)
 - Audit scripts auto-detect xdist and enable parallel when available
 
-**Pre-commit scripts:**
+**Git hooks:**
 
 | Script | Purpose | When |
 |--------|---------|------|
+| `tools/pre-commit-doc-check` | Doc consistency, debt ceiling | Auto on `git commit` (~5s) |
+| `tools/pre-push-fast` | Fast audit (audit_fast.sh) | Auto on `git push` (~2-3 min) |
 | `tools/pre-commit-check.sh` | Syntax, contraband, AST, docs | Run manually |
-| `tools/pre-commit-doc-check` | Doc consistency, debt ceiling | Auto git hook |
 
 **Consistency tools:**
 - `./tools/check_docs_consistency.sh` - Validate STATUS.md matches reality
@@ -177,6 +195,7 @@ pytest -n auto --dist worksteal
 ```bash
 pip install pytest-xdist  # 2-3x faster test execution
 ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
+ln -sf ../../tools/pre-push-fast .git/hooks/pre-push
 ```
 
 ---

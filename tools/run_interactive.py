@@ -45,39 +45,7 @@ from dataclasses import dataclass, asdict
 
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
-
-# =============================================================================
-# Compliance Validation
-# =============================================================================
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            fabrications = metrics.get("fabrications", 0)
-            if fabrications > 0:
-                return False, f"FABRICATION DETECTED: {violations[0]}"
-            return False, "; ".join(violations[:2])
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
+from tools.shared_agent_utils import validate_compliance
 
 
 # =============================================================================
@@ -98,9 +66,28 @@ class Session:
     sdk_session_id: str | None = None
 
 
+def _validate_session_id(session_id: str) -> bool:
+    """Validate session ID to prevent path traversal.
+
+    Security: Only allow alphanumeric and underscore characters.
+    """
+    import re
+    return bool(re.match(r'^[a-zA-Z0-9_]+$', session_id)) and len(session_id) <= 50
+
+
 def load_session(session_id: str) -> Session | None:
     """Load a session from disk."""
+    # Security: Validate session ID to prevent path traversal
+    if not _validate_session_id(session_id):
+        return None
     path = SESSIONS_DIR / f"{session_id}.json"
+    # Security: Verify resolved path is within SESSIONS_DIR
+    try:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(SESSIONS_DIR.resolve()):
+            return None
+    except (OSError, ValueError):
+        return None
     if path.exists():
         data = json.loads(path.read_text())
         return Session(**data)
@@ -109,8 +96,18 @@ def load_session(session_id: str) -> Session | None:
 
 def save_session(session: Session):
     """Save a session to disk."""
+    # Security: Validate session ID to prevent path traversal
+    if not _validate_session_id(session.id):
+        raise ValueError(f"Invalid session ID: {session.id}")
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     path = SESSIONS_DIR / f"{session.id}.json"
+    # Security: Verify resolved path is within SESSIONS_DIR
+    try:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(SESSIONS_DIR.resolve()):
+            raise ValueError(f"Path traversal attempt detected: {session.id}")
+    except (OSError, ValueError) as e:
+        raise ValueError(f"Invalid session path: {e}")
     path.write_text(json.dumps(asdict(session), indent=2))
 
 
@@ -183,7 +180,9 @@ class InteractiveSession:
 
     def _build_initial_prompt(self) -> str:
         """Build the initial prompt for the agent."""
-        file_list = ", ".join(self.files)
+        # Security: Sanitize file paths to prevent prompt injection via newlines
+        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in self.files[:20]]
+        file_list = ", ".join(safe_files)
         return f"""You are the RCX {self.agent_name.replace('-', ' ').title()} Agent in INTERACTIVE mode.
 
 {load_agent_prompt(self.agent_name)}
@@ -237,8 +236,8 @@ Start by giving a brief overview of what you see in these files.
         self.session.messages.append({"role": "user", "content": user_message})
         self.session.messages.append({"role": "assistant", "content": result_text})
 
-        # Compliance validation (warn but don't block in interactive mode)
-        is_compliant, error = validate_compliance(result_text)
+        # Compliance validation (shared_agent_utils returns 3-tuple, warn but don't block in interactive mode)
+        is_compliant, error, _ = validate_compliance(result_text)
         if not is_compliant:
             result_text += f"\n\n⚠️ COMPLIANCE WARNING: {error}"
 

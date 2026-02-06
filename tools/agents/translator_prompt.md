@@ -167,3 +167,13 @@ Compare the code strictly against the Founder's original request:
 3. Flag every host operation, even if it's "temporary"
 4. Don't assume the Expert was right - verify against the request
 5. If something looks suspicious, say so
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with 2+ items for MATCHES_INTENT verdict
+2. Missing NOT_CHECKED section for any verdict
+3. Any finding without FILE:LINE + CODE block
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.

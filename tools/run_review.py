@@ -55,12 +55,19 @@ from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
 
+# Ensure tools directory is importable when run directly
+_tools_dir = Path(__file__).parent
+if str(_tools_dir.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent))
+
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
 # Import agent memory for persistent finding storage
 from tools.agent_memory import (
     store_finding,
     load_findings,
+    get_context_for_files,
+    get_pattern_context,
 )
 
 # Import shared FINDING extraction (single source of truth)
@@ -166,7 +173,7 @@ PARALLEL_GROUPS = [
     ["advisor"],                                               # Group 4: Advisory
 ]
 
-HARD_GATE_AGENTS = {"verifier", "adversary", "expert", "structural-proof"}
+HARD_GATE_AGENTS = {"verifier", "adversary", "structural-proof"}  # expert is soft gate per AgentRunbook
 
 
 # =============================================================================
@@ -180,7 +187,12 @@ def validate_compliance(output: str) -> tuple[bool, str, dict]:
     """
     try:
         result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
+            [
+                "python3", "tools/validate_agent_compliance.py",
+                "--json", "--strict",
+                "--verify-files",  # Verify FILE paths exist
+                "--verify-code",   # Verify CODE appears at FILE:LINE
+            ],
             input=output,
             capture_output=True,
             text=True,
@@ -315,12 +327,9 @@ def extract_verdict(agent_name: str, output: str) -> str:
         found = match.group(1).upper()
         if found in valid_verdicts:
             return found
-        # Check if this is start of a compound verdict
-        for v in valid_verdicts:
-            if v.startswith(found) or found in v:
-                context = output[match.start():match.start()+100]
-                if v in context.upper():
-                    return v
+        # Security: Removed startswith recovery - it allowed partial verdict spoofing
+        # e.g., "Verdict: RO" with "ROBUST" nearby would incorrectly match ROBUST
+        # Only exact verdict matches are accepted now
 
     # Priority 2: Multi-line verdict (verdict on next line after header)
     # Pattern: "### Verdict\n\n**NO_STRUCTURAL_CLAIMS**" or "### Verdict\nAPPROVE"
@@ -333,12 +342,9 @@ def extract_verdict(agent_name: str, output: str) -> str:
         if found in valid_verdicts:
             return found
 
-    # Priority 3: Fallback to substring match in last 500 chars
-    tail = output[-500:] if len(output) > 500 else output
-    for verdict in verdicts.get(agent_name, []):
-        if verdict in tail:
-            return verdict
-
+    # Priority 3: NO FALLBACK - only explicit VERDICT: markers count
+    # Removed substring fallback to prevent verdict spoofing via incidental mentions
+    # e.g., "This code is NOT ROBUST" should NOT match as ROBUST verdict
     return "UNKNOWN"
 
 
@@ -349,7 +355,7 @@ def agent_passed(agent_name: str, verdict: str) -> bool:
     """
     pass_verdicts = {
         "verifier": {"APPROVE"},
-        "adversary": {"SECURE", "NEEDS_HARDENING"},  # NEEDS_HARDENING = soft pass (advisory)
+        "adversary": {"SECURE"},  # NEEDS_HARDENING is NOT a pass - requires fixes
         "expert": {"MINIMAL", "COULD_SIMPLIFY"},
         "structural-proof": {
             "PROVEN",
@@ -373,16 +379,19 @@ class ReviewOrchestrator:
     """Orchestrates parallel agent execution and result synthesis."""
 
     def __init__(self, files: list[str], depth: str = "full", verbose: bool = False,
-                 use_memory: bool = True, pr_number: int | None = None):
+                 use_memory: bool = True, pr_number: int | None = None,
+                 show_warnings: bool = False):
         self.files = files
         self.depth = depth
         self.verbose = verbose
         self.use_memory = use_memory
         self.pr_number = pr_number
+        self.show_warnings = show_warnings
         self.agents_to_run = DEPTH_AGENTS.get(depth, DEPTH_AGENTS["full"])
         self.agent_definitions = create_agent_definitions()
         self.results: list[AgentResult] = []
         self.regression_warnings: list[dict] = []
+        self.soft_warnings: list[dict] = []  # Non-hard-gate failures
         self.total_findings_stored: int = 0
 
     async def run_single_agent(self, agent_name: str) -> AgentResult:
@@ -390,13 +399,23 @@ class ReviewOrchestrator:
         if self.verbose:
             print(f"  Starting {agent_name}...")
 
-        file_list = ", ".join(self.files)
+        # Security: Sanitize file paths to prevent prompt injection via newlines
+        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in self.files]
+        file_list = ", ".join(safe_files)
         agent_def = self.agent_definitions[agent_name]
+
+        # Build memory context (past findings + patterns)
+        memory_context = ""
+        if self.use_memory:
+            file_context = get_context_for_files(self.files)
+            pattern_context = get_pattern_context()
+            if file_context or pattern_context:
+                memory_context = file_context + pattern_context
 
         prompt = f"""You are the RCX {agent_name.replace('-', ' ').title()} Agent.
 
 {agent_def.prompt}
-
+{memory_context}
 ---
 
 Now review these files: {file_list}
@@ -471,7 +490,10 @@ Produce a report following the format in your instructions.
         return await asyncio.gather(*tasks)
 
     def check_for_regressions(self) -> list[dict]:
-        """Check if any files being reviewed have previously-fixed issues."""
+        """Check if any files being reviewed have previously-fixed issues.
+
+        Security: Uses proper path normalization to prevent path traversal attacks.
+        """
         if not self.use_memory:
             return []
 
@@ -481,22 +503,35 @@ Produce a report following the format in your instructions.
         # Get fixed findings for files we're reviewing
         fixed_findings = [f for f in all_findings if f.get("fixed")]
 
+        # Normalize review file paths for safe comparison
+        normalized_review_files = set()
+        for review_file in self.files:
+            try:
+                normalized_review_files.add(Path(review_file).resolve())
+            except (OSError, ValueError):
+                # Skip invalid paths
+                continue
+
         for finding in fixed_findings:
             finding_file = finding.get("file", "")
             if not finding_file:
                 continue
 
-            # Check if any of our review files match this fixed finding
-            for review_file in self.files:
-                if finding_file in review_file or review_file in finding_file:
-                    warnings.append({
-                        "finding_id": finding.get("id"),
-                        "file": finding_file,
-                        "message": finding.get("message", ""),
-                        "agent": finding.get("agent", ""),
-                        "severity": finding.get("severity", "info"),
-                    })
-                    break
+            # Normalize finding file path and check for exact match
+            try:
+                finding_path = Path(finding_file).resolve()
+            except (OSError, ValueError):
+                continue
+
+            # Check for exact path match (no substring matching)
+            if finding_path in normalized_review_files:
+                warnings.append({
+                    "finding_id": finding.get("id"),
+                    "file": finding_file,
+                    "message": finding.get("message", ""),
+                    "agent": finding.get("agent", ""),
+                    "severity": finding.get("severity", "info"),
+                })
 
         return warnings
 
@@ -515,11 +550,21 @@ Produce a report following the format in your instructions.
         if self.use_memory:
             self.regression_warnings = self.check_for_regressions()
             if self.regression_warnings:
-                print(f"⚠️  REGRESSION CHECK: {len(self.regression_warnings)} previously-fixed issue(s) in reviewed files:")
-                for w in self.regression_warnings[:5]:  # Show first 5
-                    print(f"   #{w['finding_id']} [{w['agent']}] {w['message'][:50]}...")
-                if len(self.regression_warnings) > 5:
-                    print(f"   ... and {len(self.regression_warnings) - 5} more")
+                # Progressive disclosure: summary by default, details with --show-warnings
+                high_sev = sum(1 for w in self.regression_warnings if w.get('severity') in ('critical', 'high'))
+                other = len(self.regression_warnings) - high_sev
+                if self.show_warnings:
+                    print(f"⚠️  REGRESSION CHECK: {len(self.regression_warnings)} previously-fixed issue(s):")
+                    for w in self.regression_warnings:
+                        sev = w.get('severity', 'unknown').upper()
+                        print(f"   [{sev}] #{w['finding_id']} [{w['agent']}] {w['file']}")
+                        print(f"         {w['message'][:80]}...")
+                else:
+                    sev_summary = f"{high_sev} HIGH" if high_sev else ""
+                    if other:
+                        sev_summary += ", " if sev_summary else ""
+                        sev_summary += f"{other} other"
+                    print(f"⚠️  REGRESSION CHECK: {len(self.regression_warnings)} warning(s) ({sev_summary}) — use --show-warnings for details")
                 print()
 
         all_results = []
@@ -533,14 +578,94 @@ Produce a report following the format in your instructions.
             group_results = await self.run_agent_group(group_agents)
             all_results.extend(group_results)
 
-            # Check hard gate failures - stop early if critical failure
+            # Check hard gate failures - retry compliance failures once, then stop if still failing
             hard_gate_failures = [r for r in group_results if r.is_hard_gate and not r.passed]
             if hard_gate_failures and i == 0:  # Only stop after first group
-                print(f"\n⚠️  Hard gate failure(s) detected. Stopping early.")
-                break
+                # Separate compliance failures from verdict failures
+                compliance_failures = [r for r in hard_gate_failures if not r.is_compliant]
+                verdict_failures = [r for r in hard_gate_failures if r.is_compliant]
+
+                # Retry compliance failures with explicit feedback
+                if compliance_failures:
+                    print(f"\n🔄 Retrying {len(compliance_failures)} agent(s) with compliance failures...")
+                    for r in compliance_failures:
+                        error_preview = (r.compliance_error or "unknown")[:100]
+                        print(f"   - {r.name}: {error_preview}")
+
+                    retry_results = []
+                    for r in compliance_failures:
+                        print(f"   Retrying {r.name}...")
+                        retry = await self.run_single_agent(r.name)
+                        retry_results.append(retry)
+
+                        if retry.is_compliant:
+                            print(f"   ✓ {r.name}: Retry passed compliance")
+                            # Replace in all_results
+                            idx = all_results.index(r)
+                            all_results[idx] = retry
+                        else:
+                            print(f"   ✗ {r.name}: Retry still non-compliant")
+                            error_preview = (retry.compliance_error or "unknown")[:100]
+                            print(f"     └─ {error_preview}")
+
+                # Re-check hard gate failures after retry
+                hard_gate_failures = [r for r in all_results if r.is_hard_gate and not r.passed]
+
+                if hard_gate_failures:
+                    print(f"\n⚠️  Hard gate failure(s) after retry:")
+                    for r in hard_gate_failures:
+                        reason = "verdict" if r.is_compliant else "compliance"
+                        print(f"   - {r.name}: {r.verdict} ({reason} failure)")
+                        if not r.is_compliant and r.compliance_error:
+                            error_preview = r.compliance_error[:200]
+                            print(f"     └─ {error_preview}{'...' if len(r.compliance_error) > 200 else ''}")
+                    print(f"\n   Run with --verbose for full details")
+                    self.results = all_results
+                    self.total_findings_stored = sum(r.findings_stored for r in all_results)
+                    self._hard_gate_failed = True
+                    return all_results
 
         self.results = all_results
+        self._hard_gate_failed = False
         self.total_findings_stored = sum(r.findings_stored for r in all_results)
+
+        # Collect soft warnings (non-hard-gate failures)
+        self.soft_warnings = [
+            {
+                'agent': r.name,
+                'verdict': r.verdict,
+                'severity': 'medium' if r.verdict in ('COULD_SIMPLIFY', 'PARTIALLY_GROUNDED', 'DEVIATES') else 'low',
+            }
+            for r in all_results if not r.is_hard_gate and not r.passed
+        ]
+
+        # End-of-run warning summary (progressive disclosure)
+        total_warnings = len(self.regression_warnings) + len(self.soft_warnings)
+        if total_warnings > 0:
+            high_count = sum(1 for w in self.regression_warnings if w.get('severity') in ('critical', 'high'))
+            high_count += sum(1 for w in self.soft_warnings if w.get('severity') in ('critical', 'high'))
+            med_count = sum(1 for w in self.soft_warnings if w.get('severity') == 'medium')
+            other_count = total_warnings - high_count - med_count
+
+            if self.show_warnings:
+                print(f"\n{'='*60}")
+                print(f"⚠️  WARNING SUMMARY: {total_warnings} total warning(s)")
+                print(f"{'='*60}")
+                if self.soft_warnings:
+                    print("\nSoft gate warnings (non-blocking):")
+                    for w in self.soft_warnings:
+                        print(f"  - {w['agent']}: {w['verdict']} [{w['severity'].upper()}]")
+            else:
+                parts = []
+                if high_count:
+                    parts.append(f"{high_count} HIGH")
+                if med_count:
+                    parts.append(f"{med_count} MEDIUM")
+                if other_count:
+                    parts.append(f"{other_count} other")
+                sev_summary = ", ".join(parts) if parts else "all low"
+                print(f"\n⚠️  {total_warnings} warning(s) ({sev_summary}) — use --show-warnings for details")
+
         return all_results
 
     def synthesize_report(self) -> str:
@@ -648,7 +773,11 @@ Produce a report following the format in your instructions.
 # =============================================================================
 
 def get_changed_files() -> list[str]:
-    """Get files changed in current branch vs main."""
+    """Get files changed in current branch vs main.
+
+    Raises:
+        RuntimeError: If git command fails (don't fail silently)
+    """
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", "main...HEAD"],
@@ -656,13 +785,16 @@ def get_changed_files() -> list[str]:
             text=True,
             timeout=10
         )
-        if result.returncode == 0:
-            files = [f for f in result.stdout.strip().split('\n') if f]
-            # Filter to relevant files
-            return [f for f in files if f.endswith('.py') or f.endswith('.json')]
-    except Exception:
-        pass
-    return []
+        if result.returncode != 0:
+            # Don't fail silently - this could cause bad PRs to pass
+            raise RuntimeError(f"git diff failed: {result.stderr}")
+        files = [f for f in result.stdout.strip().split('\n') if f]
+        # Filter to relevant files
+        return [f for f in files if f.endswith('.py') or f.endswith('.json')]
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("git diff timed out")
+    except FileNotFoundError:
+        raise RuntimeError("git not found - cannot determine changed files")
 
 
 def auto_select_depth(files: list[str]) -> str:
@@ -742,6 +874,11 @@ Examples:
         help="Disable agent memory (finding storage and regression checking)"
     )
     parser.add_argument(
+        "--show-warnings",
+        action="store_true",
+        help="Show full warning details (default: summary only)"
+    )
+    parser.add_argument(
         "--pr-number",
         type=int,
         help="PR number to associate with findings (for tracking)"
@@ -778,16 +915,18 @@ Examples:
         verbose=args.verbose,
         use_memory=not args.no_memory,
         pr_number=args.pr_number,
+        show_warnings=args.show_warnings,
     )
     await orchestrator.run_all()
 
-    # Rigorous mode: validate reasoning and challenge approvals
-    if args.rigorous:
-        print("\n🔬 RIGOROUS MODE: Validating reasoning quality...")
+    # Skip reasoning validation if hard gate already failed (no point retrying)
+    if not getattr(orchestrator, '_hard_gate_failed', False):
+        # Always validate reasoning quality (Layer 2: Detection)
+        print("\n📋 Validating reasoning quality...")
 
         from tools.validate_agent_reasoning import validate_reasoning
-        from tools.run_skeptic import run_skeptic
 
+        reasoning_failures = []
         approvals_to_challenge = []
 
         for result in orchestrator.results:
@@ -795,19 +934,47 @@ Examples:
             reasoning = validate_reasoning(result.output)
 
             if not reasoning.is_valid:
+                reasoning_failures.append((result, reasoning.violations[0]))
                 print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
-                result.passed = False  # Downgrade to failed
+                # Don't downgrade yet - Layer 3 will retry
 
-            elif reasoning.requires_challenge:
+            elif reasoning.requires_challenge and args.rigorous:
                 approvals_to_challenge.append(result)
                 print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
 
             else:
                 print(f"  ✓ {result.name}: Reasoning valid")
 
-        # Challenge approvals with skeptic
-        if approvals_to_challenge:
-            print(f"\n🔍 Challenging {len(approvals_to_challenge)} approval(s) with skeptic...")
+        # Layer 3: Correction - retry hard gate agents with reasoning failures
+        if reasoning_failures:
+            hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.is_hard_gate]
+
+            if hard_gate_failures:
+                print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
+
+                for result, violation in hard_gate_failures:
+                    print(f"  Retrying {result.name}...")
+
+                    # Re-run with stronger format reminder
+                    retry_result = await orchestrator.run_single_agent(result.name)
+
+                    # Check if retry fixed the issue
+                    retry_reasoning = validate_reasoning(retry_result.output)
+
+                    if retry_reasoning.is_valid:
+                        print(f"  ✓ {result.name}: Retry successful")
+                        # Replace the result
+                        idx = orchestrator.results.index(result)
+                        orchestrator.results[idx] = retry_result
+                    else:
+                        print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
+                        result.passed = False  # Downgrade to failed
+
+        # Rigorous mode: challenge approvals with skeptic
+        if args.rigorous and approvals_to_challenge:
+            print(f"\n🔍 RIGOROUS: Challenging {len(approvals_to_challenge)} approval(s) with skeptic...")
+
+            from tools.run_skeptic import run_skeptic
 
             for result in approvals_to_challenge:
                 skeptic_result = await run_skeptic(
@@ -827,6 +994,41 @@ Examples:
                         result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
                 else:
                     print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
+
+        # CONVERGENCE CHECK: If ALL agents pass after skeptic challenges, verify convergence
+        all_passed_after_skeptic = all(r.passed for r in orchestrator.results)
+        if all_passed_after_skeptic and args.rigorous:
+            print(f"\n🎯 CONVERGENCE CHECK: All {len(orchestrator.results)} agents passed. Verifying...")
+
+            # Run a meta-skeptic check on the full convergence
+            from tools.run_skeptic import run_skeptic
+
+            convergence_summaries = [
+                f"{r.name}: {r.verdict}" for r in orchestrator.results
+            ]
+            meta_prompt = (
+                f"All agents approved these files: {', '.join(files[:5])}\n"
+                f"Results: {'; '.join(convergence_summaries)}\n"
+                f"This is suspicious - verify there's no blind spot or groupthink."
+            )
+
+            convergence_check = await run_skeptic(
+                agent_output=meta_prompt,
+                files=files,
+                original_agent="convergence",
+            )
+
+            if convergence_check["verdict"] == "OVERRIDE":
+                print(f"  ❌ Convergence check FAILED - skeptic found blind spots")
+                # Mark as needing review but don't block
+                for r in orchestrator.results:
+                    r.verdict = f"{r.verdict} (CONVERGENCE_SUSPECT)"
+            elif convergence_check["verdict"] == "CONCERNS":
+                print(f"  ⚠️ Convergence check raised {convergence_check.get('concern_count', 0)} concern(s)")
+            else:
+                print(f"  ✅ Convergence VERIFIED - no blind spots detected")
+    else:
+        print("\n⏭️  Skipping reasoning validation (hard gate already failed)")
 
     # Generate report
     report = orchestrator.synthesize_report()

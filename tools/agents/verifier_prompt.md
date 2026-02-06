@@ -179,3 +179,13 @@ Example:
 
 **IMPORTANT:** APPROVE verdicts require both CHECKED (3+ items) and NOT_CHECKED sections.
 An approval without acknowledging limitations is overconfident and will be challenged.
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with 3+ items for APPROVE verdict
+2. Missing NOT_CHECKED section for any approval verdict
+3. Any finding without FILE:LINE + CODE block
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.

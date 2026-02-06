@@ -52,7 +52,7 @@ SEEDS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^mu/' || true)
 STATUS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^STATUS\.md$' || true)
 TASKS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^TASKS\.md$' || true)
 TESTS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^tests/' || true)
-DOCS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(docs/|\.claude/agents/|README\.md|STATUS\.md|TASKS\.md|CLAUDE\.md|CHANGELOG\.md)' || true)
+DOCS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(docs/|roadmap/|\.claude/agents/|README\.md|STATUS\.md|TASKS\.md|CLAUDE\.md|CHANGELOG\.md)' || true)
 
 # === 3b. Run doc tests if docs changed (BLOCKING, ~2s) ===
 if [ -n "$DOCS_CHANGED" ]; then

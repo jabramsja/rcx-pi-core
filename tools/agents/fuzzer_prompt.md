@@ -235,3 +235,13 @@ Output: Ranked list of 5-10 fuzz targets with file:line and justification.
 
 ## What I Did NOT Fuzz
 [Explicit list of functions/modules not covered with reasoning]
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing "What I Did NOT Fuzz" section for any verdict
+2. Missing pytest statistics output for ROBUST verdict (must show actual run, not self-reported)
+3. Any finding without FILE:LINE + CODE block
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.

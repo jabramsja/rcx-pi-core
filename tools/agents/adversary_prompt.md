@@ -65,7 +65,22 @@ Find ways to violate RCX invariants. If you can't break something, say so clearl
 
 You MUST attempt each attack and report BLOCKED / SUCCEEDED / NOT_ATTEMPTED:
 
-**NOT_ATTEMPTED GUIDANCE:** Prefer BLOCKED or SUCCEEDED over NOT_ATTEMPTED. If you cannot attempt an attack, explain WHY (e.g., "requires runtime execution", "code path not reachable"). Honest NOT_ATTEMPTED with explanation is better than fabricated BLOCKED.
+**NOT_ATTEMPTED GUIDANCE:** Prefer BLOCKED or SUCCEEDED over NOT_ATTEMPTED.
+
+**VALID NOT_ATTEMPTED reasons:**
+- "Requires network I/O" - attacks needing external network access
+- "Requires external process" - attacks needing subprocess/exec
+- "Timing analysis needed" - clock-based attacks need profiling environment
+- "Hardware-dependent" - attacks specific to CPU/memory architecture
+
+**INVALID NOT_ATTEMPTED reasons (you MUST attempt these):**
+- "Might work" - TRY IT
+- "Hard to construct exploit" - THAT'S YOUR JOB
+- "Code looks protected" - STILL TRY TO BREAK IT
+- "Requires reading many files" - READ THEM, NO BUDGET LIMITS
+- "Complex attack" - COMPLEXITY IS NOT AN EXCUSE
+
+**RULE:** If you can READ the code, you MUST ATTEMPT the attack. Only defer if attack requires capabilities outside your tool set (network, external execution, timing).
 
 **BLOCKED EVIDENCE REQUIREMENT:** BLOCKED verdicts must include:
 1. The specific attack input you tried
@@ -174,6 +189,16 @@ Simply citing defensive-looking code without showing an attack attempt = NOT_ATT
 
 **IMPORTANT:** SECURE verdicts require both CHECKED (3+ attack vectors) and NOT_CHECKED sections.
 Claiming security without acknowledging untested vectors is overconfident.
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with 3+ attack vectors for SECURE verdict
+2. Missing NOT_CHECKED section for any approval verdict
+3. Any finding without FILE:LINE + CODE block + EXPLOIT
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.
 
 ## Rules
 

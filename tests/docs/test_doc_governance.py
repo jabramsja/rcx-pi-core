@@ -24,6 +24,16 @@ Usage:
 
 from __future__ import annotations
 
+# PATH SETUP - Ensure repo root is at position 0 for 'tools' imports
+# pytest adds tests/ to sys.path which shadows repo root's tools package
+import sys as _sys
+from pathlib import Path as _Path
+_repo_root = str(_Path(__file__).parent.parent.parent)
+if _sys.path[0] != _repo_root:
+    if _repo_root in _sys.path:
+        _sys.path.remove(_repo_root)
+    _sys.path.insert(0, _repo_root)
+
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,24 +41,15 @@ from typing import NamedTuple
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tools.shared_doc_config import REPO_ROOT, get_governed_folders_as_strings
 
 # =============================================================================
 # Strict Governance Configuration (per DocGovernance.v0.md)
 # =============================================================================
 
 # ALL folders under governance - ALL Three Laws enforced
-# Per DocGovernance.v0.md: "Every .md file outside the root must declare its status"
-GOVERNED_FOLDERS = [
-    "docs/core",
-    "docs/agents",
-    "docs/audit",
-    "docs/execution",
-    "docs/cli",
-    "docs/schemas",
-    "docs/reviews",
-    ".claude/agents",  # Agent config docs
-]
+# Single source of truth: tools/shared_doc_config.py
+GOVERNED_FOLDERS = get_governed_folders_as_strings()
 
 # EXEMPT - truly no governance required (generated, archived, separate projects)
 EXEMPT_PATTERNS = [

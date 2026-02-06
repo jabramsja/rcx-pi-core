@@ -150,6 +150,16 @@ YES - [show the JSON] / NO - [claim is unverified]
 
 **IMPORTANT:** PROVEN verdicts require CHECKED (2+ trace cases) and NOT_CHECKED sections.
 
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with 2+ trace cases for PROVEN verdict
+2. Missing NOT_CHECKED section for any approval verdict
+3. Any finding without FILE:LINE + CODE block
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.
+
 ## The "No Hallucination" Rule
 
 Text can lie. Code that crashes doesn't lie.
@@ -177,6 +187,18 @@ assert result == expected, f"Empty case failed: {result}"
 # Test case 2: Single element
 ...
 ```
+
+## Execution Mode Selection (MANDATORY)
+
+You MUST determine execution availability before choosing a mode:
+
+1. **Attempt import**: Try `from rcx_pi.eval_seed import step`
+2. **If import succeeds** → Use Mode A (execution available)
+3. **If import fails** → Use Mode B with explicit reason
+4. **Mode B requires**: `REQUIRES_CI_VERIFICATION` in verdict AND expected outputs for each test case
+5. **Code MUST be syntactically valid** even if not executed
+
+**Non-compliance**: Mode B without expected outputs will be rejected by CI as `MISSING_EXPECTED_OUTPUTS`.
 
 ## Execution Modes
 

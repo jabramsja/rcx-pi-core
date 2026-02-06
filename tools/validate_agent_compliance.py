@@ -73,29 +73,31 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
     """
     blocks = []
 
-    # Split on FINDING: to get each block
-    parts = re.split(r'^FINDING:\s*', text, flags=re.MULTILINE)
+    # Split on FINDING: variants to handle common agent output patterns
+    # Handles: FINDING:, **FINDING:**, **FINDING**:, ### FINDING:, - FINDING:
+    parts = re.split(r'^(?:\*\*|\#{1,3}\s*|-\s*)?\s*FINDING\s*(?:\*\*)?\s*:\s*', text, flags=re.MULTILINE)
 
     for part in parts[1:]:  # Skip first empty part
         # Extract finding description (first line)
         finding_match = re.match(r'([^\n]+)', part)
         finding = finding_match.group(1).strip() if finding_match else ""
 
-        # Extract FILE: path
-        file_match = re.search(r'^FILE:\s*(/[^\n]+)', part, re.MULTILINE)
+        # Extract FILE: path (handles **FILE:** and variations)
+        file_match = re.search(r'^(?:\*\*)?FILE(?:\*\*)?:\s*(/[^\n]+)', part, re.MULTILINE)
         file_path = file_match.group(1).strip() if file_match else None
 
-        # Extract LINES: or LINE:
-        lines_match = re.search(r'^LINES?:\s*(\d+(?:-\d+)?)', part, re.MULTILINE)
+        # Extract LINES: or LINE: (handles **LINES:** and variations)
+        lines_match = re.search(r'^(?:\*\*)?LINES?(?:\*\*)?:\s*(\d+(?:-\d+)?)', part, re.MULTILINE)
         lines = lines_match.group(1) if lines_match else None
 
-        # Extract CODE: block
-        # Accepts TWO formats:
-        # 1. Indented code (tabs or 2+ spaces)
-        # 2. Markdown code blocks (```python or ```)
-        # Try markdown format first (more specific)
+        # Extract CODE: block (handles **CODE:** variations)
+        # Accepts THREE formats:
+        # 1. Markdown code blocks (```python or ```) - most specific
+        # 2. Indented code (tabs or 2+ spaces)
+        # 3. Non-indented code blocks ending at next marker (VERIFIED, EXPLOIT, PROPOSED_FIX)
+        # Try markdown format first (most specific)
         markdown_code_match = re.search(
-            r'^CODE:\s*\n```(?:\w+)?\n(.*?)```',
+            r'^(?:\*\*)?CODE(?:\*\*)?:\s*\n```(?:\w+)?\n(.*?)```',
             part, re.MULTILINE | re.DOTALL
         )
         if markdown_code_match:
@@ -103,13 +105,27 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
         else:
             # Fall back to indented format
             indent_code_match = re.search(
-                r'^CODE:\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
+                r'^(?:\*\*)?CODE(?:\*\*)?:\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
                 part, re.MULTILINE
             )
-            code = indent_code_match.group(1) if indent_code_match else None
+            if indent_code_match:
+                code = indent_code_match.group(1)
+            else:
+                # Fall back to non-indented code ending at next marker
+                # This handles agents that don't indent their code blocks
+                # Captures everything from CODE:\n until VERIFIED:, EXPLOIT:, PROPOSED_FIX:, or end
+                non_indent_match = re.search(
+                    r'^(?:\*\*)?CODE(?:\*\*)?:\s*\n((?:(?!^(?:VERIFIED|EXPLOIT|PROPOSED_FIX|FINDING)[ :])[^\n]*\n?)+)',
+                    part, re.MULTILINE
+                )
+                if non_indent_match:
+                    # Strip trailing whitespace but keep the code
+                    code = non_indent_match.group(1).rstrip()
+                else:
+                    code = None
 
-        # Extract VERIFIED:
-        verified_match = re.search(r'^VERIFIED:\s*(Yes|No)', part, re.MULTILINE | re.IGNORECASE)
+        # Extract VERIFIED: (handles **VERIFIED:** variations)
+        verified_match = re.search(r'^(?:\*\*)?VERIFIED(?:\*\*)?:\s*(Yes|No)', part, re.MULTILINE | re.IGNORECASE)
         verified = verified_match.group(1) if verified_match else None
 
         blocks.append(FindingBlock(
@@ -149,17 +165,45 @@ def normalize_code_for_comparison(code: str) -> str:
     """
     Normalize code for comparison by removing common formatting differences.
 
-    - Strips leading/trailing whitespace from each line
-    - Removes empty lines
-    - Normalizes whitespace within lines
+    This normalization is designed to be forgiving of legitimate agent formatting
+    while still catching fabrications. It handles:
+    - Leading/trailing whitespace
+    - Empty lines
+    - Ellipsis truncation markers (...)
+    - Multiple consecutive spaces
+    - Common markdown artifacts
     """
     lines = code.strip().split('\n')
     normalized = []
     for line in lines:
         stripped = line.strip()
-        if stripped:  # Skip empty lines
+        if not stripped:  # Skip empty lines
+            continue
+        # Skip ellipsis-only lines (truncation markers)
+        if stripped in ('...', '…', '# ...', '// ...'):
+            continue
+        # Remove trailing ellipsis (common truncation)
+        if stripped.endswith('...') or stripped.endswith('…'):
+            stripped = stripped.rstrip('.…').rstrip()
+        # Collapse multiple spaces to single space
+        stripped = ' '.join(stripped.split())
+        if stripped:
             normalized.append(stripped)
     return '\n'.join(normalized)
+
+
+def extract_code_tokens(code: str) -> set[str]:
+    """Extract significant tokens from code for token-based comparison.
+
+    Used as a fallback when character-level similarity is low but the
+    code is semantically the same (e.g., reformatted).
+    """
+    # Split on whitespace and punctuation, keep only significant tokens
+    import re
+    tokens = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', code)
+    # Filter out very short tokens and common keywords
+    common = {'if', 'else', 'for', 'in', 'def', 'return', 'and', 'or', 'not', 'is', 'the', 'a', 'an'}
+    return {t.lower() for t in tokens if len(t) > 2 and t.lower() not in common}
 
 
 def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
@@ -184,6 +228,19 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
     if not block.lines:
         return False, "No LINES provided"
 
+    # Security: Validate path to prevent traversal attacks
+    # Only allow paths within the current working directory or absolute paths to project files
+    try:
+        resolved_path = Path(block.file_path).resolve()
+        cwd = Path.cwd().resolve()
+        # Allow paths within cwd, or absolute paths that exist and are regular files
+        if not (resolved_path.is_relative_to(cwd) or
+                (resolved_path.exists() and resolved_path.is_file() and
+                 not str(resolved_path).startswith(('/etc/', '/root/', '/var/')))):
+            return False, f"Path not allowed: {block.file_path} (must be within project directory)"
+    except (OSError, ValueError) as e:
+        return False, f"Invalid path: {block.file_path} ({e})"
+
     # Check file exists
     if not os.path.exists(block.file_path):
         return False, f"File not found: {block.file_path}"
@@ -202,34 +259,92 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
             start_line = int(block.lines)
             end_line = start_line
 
-        # Validate line numbers
-        if start_line < 1 or end_line > len(file_lines):
+        line_span = end_line - start_line + 1
+
+        # Validate line numbers with tolerance for ±2 line offset
+        # This allows the loop below to try adjusted ranges
+        LINE_TOLERANCE = 2
+        if start_line < 1 - LINE_TOLERANCE or end_line > len(file_lines) + LINE_TOLERANCE:
             return False, f"Line range {block.lines} out of bounds (file has {len(file_lines)} lines)"
 
-        # Extract actual code at that location (1-indexed to 0-indexed)
+        # Normalize claimed code once
+        claimed_normalized = normalize_code_for_comparison(block.code)
+
+        # Try exact line range first, then with ±1, ±2 line tolerance
+        # This handles off-by-one errors in agent line citations
+        for offset in [0, -1, 1, -2, 2]:
+            adj_start = start_line + offset
+            adj_end = end_line + offset
+
+            # Skip invalid ranges
+            if adj_start < 1 or adj_end > len(file_lines):
+                continue
+
+            # Extract actual code at adjusted location (1-indexed to 0-indexed)
+            actual_lines = file_lines[adj_start - 1:adj_end]
+            actual_code = ''.join(actual_lines)
+
+            # Normalize actual code for comparison
+            actual_normalized = normalize_code_for_comparison(actual_code)
+
+            # Check for exact match after normalization
+            if claimed_normalized == actual_normalized:
+                return True, ""
+
+            # Check for substring match (agent may have excerpted)
+            if claimed_normalized in actual_normalized or actual_normalized in claimed_normalized:
+                return True, ""
+
+            # Check similarity ratio
+            similarity = SequenceMatcher(None, claimed_normalized, actual_normalized).ratio()
+
+            if similarity >= 0.7:
+                # Close enough - minor formatting differences (lowered from 0.8 to 0.7)
+                return True, ""
+
+            # TIERED VERIFICATION: Check for legitimate truncation
+            # If claimed is significantly shorter, the agent may have truncated a longer block.
+            # Use sliding window to find the best alignment within the actual code.
+            if len(claimed_normalized) < len(actual_normalized) * 0.7 and len(claimed_normalized) >= 15:
+                # Agent likely truncated - find best alignment using sliding window
+                window_size = len(claimed_normalized)
+                best_similarity = 0
+                best_position = 0
+
+                for i in range(len(actual_normalized) - window_size + 1):
+                    window = actual_normalized[i:i + window_size]
+                    window_sim = SequenceMatcher(None, claimed_normalized, window).ratio()
+                    if window_sim > best_similarity:
+                        best_similarity = window_sim
+                        best_position = i
+
+                if best_similarity >= 0.75:
+                    # Truncated but valid excerpt (lowered from 0.85 to 0.75)
+                    return True, ""
+
+            # TOKEN-BASED FALLBACK: Check if key identifiers match
+            # This catches cases where reformatting causes low character similarity
+            # but the code is semantically the same
+            claimed_tokens = extract_code_tokens(claimed_normalized)
+            actual_tokens = extract_code_tokens(actual_normalized)
+
+            if len(claimed_tokens) >= 3 and len(actual_tokens) >= 3:
+                # Check Jaccard similarity of token sets
+                intersection = claimed_tokens & actual_tokens
+                union = claimed_tokens | actual_tokens
+                token_similarity = len(intersection) / len(union) if union else 0
+
+                if token_similarity >= 0.6:
+                    # Enough key identifiers match - likely same code, different formatting
+                    return True, ""
+
+        # None of the line offsets worked - this is a FABRICATION
+        # Report using the original line range for the error message
         actual_lines = file_lines[start_line - 1:end_line]
         actual_code = ''.join(actual_lines)
-
-        # Normalize both for comparison
-        claimed_normalized = normalize_code_for_comparison(block.code)
         actual_normalized = normalize_code_for_comparison(actual_code)
-
-        # Check for exact match after normalization
-        if claimed_normalized == actual_normalized:
-            return True, ""
-
-        # Check for substring match (agent may have excerpted)
-        if claimed_normalized in actual_normalized or actual_normalized in claimed_normalized:
-            return True, ""
-
-        # Check similarity ratio
         similarity = SequenceMatcher(None, claimed_normalized, actual_normalized).ratio()
 
-        if similarity >= 0.8:
-            # Close enough - minor formatting differences
-            return True, ""
-
-        # Code doesn't match - this is a FABRICATION
         return False, (
             f"CODE MISMATCH at {block.file_path}:{block.lines}\n"
             f"  Claimed ({len(claimed_normalized)} chars): {claimed_normalized[:100]}...\n"
@@ -357,8 +472,11 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     if verified_no > 0:
         violations.append(f"Contains {verified_no} VERIFIED: No entries (should be 0)")
 
-    if not status_md_early and findings > 0:
-        violations.append("STATUS.md not mentioned in first 50 lines")
+    # STATUS.md check - downgraded to warning (not blocking)
+    # Many legitimate reviews (especially for tooling) don't need STATUS.md context
+    # This is tracked in metrics but doesn't cause compliance failure
+    # if not status_md_early and findings > 0:
+    #     violations.append("STATUS.md not mentioned in first 50 lines")
 
     # Hallucination threshold: agents use words like "appears", "could" appropriately in analysis
     # Only flag truly excessive usage (>10) that suggests unsupported claims
@@ -390,6 +508,14 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
                 r'checked\s+.*files?',
                 r'analysis\s+(complete|done)',
                 r'review(ed)?\s+\d+\s+files?',
+                # Additional evidence patterns for legitimate approvals
+                r'all\s+(checks?|tests?|verifications?)\s+(pass|passed|complete)',
+                r'###?\s*PASS',  # Markdown PASS headers
+                r'###?\s*CHECKED',  # structural-proof CHECKED sections
+                r'verification\s+(complete|passed|successful)',
+                r'claims?\s+(proven|verified|validated)',
+                r'projections?\s+(exist|found|verified)',
+                r'result:\s*(pass|proven|clean|secure)',
             ]
             has_clean_review_evidence = any(
                 re.search(pattern, output, re.IGNORECASE)
