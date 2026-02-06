@@ -137,3 +137,13 @@ When invoked with `--web`, you have access to WebSearch. Use it to find:
 - GitHub repos with reference implementations
 
 Synthesize external findings into RCX-specific recommendations.
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section showing context reviewed (STATUS.md, TASKS.md, relevant code)
+2. Missing NOT_CHECKED section for any verdict
+3. Recommendations without grounding in actual codebase (must cite file:line for constraints)
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.

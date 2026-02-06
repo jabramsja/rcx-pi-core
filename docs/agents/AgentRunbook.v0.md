@@ -21,6 +21,23 @@ Purpose: practical instructions for running RCX agents via SDK runners.
 
 **Quick Reference:** `./tools/agents.sh`
 
+## Tool Overview
+
+Which tool to use and when:
+
+| Tool | What it is | When to use | Time |
+|------|------------|-------------|------|
+| `run_review.py` | Multi-agent code review orchestrator | After changing core code (`rcx_pi/selfhost/`, `mu/`) | ~2-6 min |
+| `run_deep_analysis.py` | Full codebase health scan | Monthly, pre-release, or after large refactors | ~5-10 min |
+| `run_ci_review.py` | Lightweight CI review | Auto-triggered in GitHub Actions on PR | ~2-4 min |
+| `run_interactive.py` | Conversational agent session | When you want to dig deeper with follow-up questions | Interactive |
+
+**Decision guide:**
+- Changed core code? → `run_review.py --depth full`
+- Security-sensitive change? → `run_review.py --rigorous`
+- Monthly health check? → `run_deep_analysis.py`
+- Want to explore a finding? → `run_interactive.py <agent> <files>`
+
 ## Quick Start
 
 ```bash
@@ -37,6 +54,31 @@ python tools/run_review.py --pr
 python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 ```
 
+## What is run_review.py?
+
+`run_review.py` is the **main orchestrator** - it's the "one command to rule them all" for code review.
+
+**What it does:**
+1. Runs multiple specialized agents **in parallel** (3-4x faster than sequential)
+2. Each agent checks a different aspect of your code changes
+3. Synthesizes all findings into a unified report
+4. Stores findings in memory for regression tracking
+5. "Hard gate" agents (verifier, adversary, structural-proof) can block merge if they fail
+
+**Depth levels control how many agents run:**
+- `--depth quick` - 4 core agents (fast feedback)
+- `--depth full` - 6 agents (+ grounding, fuzzer)
+- `--founder` - 8 agents (+ translator, visualizer for founder review)
+- `--depth all` - All 9 agents
+
+**Key parameters:**
+- `--rigorous` - Validates reasoning quality, challenges approvals with skeptic agent
+- `--pr` - Auto-detects changed files from git diff
+- `--no-memory` - Disable finding storage
+- `--show-warnings` - Show full warning details
+
+**Architecture:** See `docs/agents/AgentRig.v0.md` for trust model.
+
 ## Orchestrators
 
 | Command | Purpose | Agents |
@@ -47,6 +89,7 @@ python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 | `run_review.py --depth all` | Complete | 9: + advisor |
 | `run_ci_review.py` | CI/CD | Auto-selects based on diff risk |
 | `run_interactive.py` | Conversational | Single agent with follow-up |
+| `run_deep_analysis.py` | Full-stack codebase health | 5: verifier, adversary, grounding, structural-proof, advisor |
 
 ## Individual Runners
 
@@ -143,6 +186,26 @@ python tools/run_interactive.py --list
 python tools/run_interactive.py --resume <session_id>
 ```
 
+## Deep Analysis (Full-Stack)
+
+For comprehensive codebase health analysis (monthly or before major releases):
+
+```bash
+python tools/run_deep_analysis.py                    # All 5 agents
+python tools/run_deep_analysis.py --agents verifier,adversary  # Subset
+python tools/run_deep_analysis.py --verbose          # Show full output
+```
+
+**What it does:** Sends the full codebase (docs, tests, core code) to agents for DYNAMIC
+analysis - finding issues that static tests miss:
+- North Star drift (verifier)
+- Cross-component security (adversary)
+- Ungrounded claims (grounding)
+- L1/L2/L3 validity (structural-proof)
+- Strategic recommendations (advisor)
+
+**When to run:** Monthly, before major releases, or after large refactors. NOT for every push.
+
 ## CI Integration
 
 **GitHub Actions workflow:** `.github/workflows/agent-review.yml`
@@ -155,6 +218,12 @@ python tools/run_ci_review.py --pr-number 123 --post-comment
 # Runs on PR to rcx_pi/ or mu/
 ```
 
+**Note:** CI review is a **fast signal**, not a full gate:
+- Uses simplified verdict extraction
+- Does NOT run reasoning validator or skeptic challenge
+- Compliance validation is still strict (FILE:LINE must exist)
+- For thorough review, use `run_review.py --rigorous` locally
+
 ## Preflight
 
 Before running agents:
@@ -164,7 +233,10 @@ PYTHONHASHSEED=0 ./tools/audit_fast.sh
 
 ## Agent Memory
 
-Findings are automatically stored for regression tracking:
+Findings are automatically stored for regression tracking.
+
+**Note:** Only `run_review.py` (orchestrator) updates agent memory. Individual runners
+(`run_verifier.py`, etc.) do NOT update memory. Use the orchestrator for tracked reviews.
 
 ```bash
 # View recent findings

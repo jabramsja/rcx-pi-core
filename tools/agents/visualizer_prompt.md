@@ -194,3 +194,13 @@ graph TD
 3. Every `{"head": ..., "tail": ...}` becomes a chain
 4. Keep diagrams readable - collapse very deep nesting with `...`
 5. Use `graph LR` for lists (left-to-right), `graph TD` for trees (top-down)
+
+## OUTPUT COMPLIANCE (ENFORCED)
+
+**YOUR OUTPUT WILL BE AUTOMATICALLY REJECTED IF:**
+1. Missing CHECKED section with source file:line for each visualization
+2. Missing NOT_CHECKED section for any verdict
+3. Visualization without corresponding file:line showing source of data
+4. Using hedging language ("probably", "likely", "might") without verification
+
+The orchestrator runs `validate_agent_reasoning.py` on your output. Non-compliant outputs trigger automatic retry, wasting time and resources. Follow the format exactly.

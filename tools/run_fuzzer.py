@@ -11,47 +11,21 @@ Usage:
 """
 
 import sys
-import json
-import subprocess
 import anyio
 from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
+from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
 
 FUZZER_PROMPT = Path("tools/agents/fuzzer_prompt.md").read_text()
-
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations)
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
 
 
 async def run_fuzzer(files: list[str]) -> str:
     """Run the fuzzer agent on the specified files."""
 
-    file_list = ", ".join(files)
+    # Security: Sanitize file paths to prevent prompt injection via newlines
+    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
+    file_list = ", ".join(safe_files)
     prompt = f"""You are the RCX Fuzzer Agent. Your instructions are:
 
 {FUZZER_PROMPT}
@@ -94,24 +68,28 @@ async def main():
     print(result)
     print("=" * 60)
 
-    # Compliance validation
-    is_compliant, error = validate_compliance(result)
+    # Compliance validation (shared_agent_utils returns 3-tuple)
+    is_compliant, error, _ = validate_compliance(result)
     if not is_compliant:
         print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
         print("Agent output did not meet AgentGuardrails.v0 requirements.")
         sys.exit(3)
 
-    # Check verdict
-    if "BROKEN" in result:
+    # Check verdict using secure marker-based extraction (shared_agent_utils)
+    verdict = extract_verdict_secure(result, agent_name="fuzzer")
+    if verdict == "BROKEN":
         print("\nBROKEN - consistent failures found")
         sys.exit(1)
-    elif "FRAGILE" in result:
+    elif verdict == "FRAGILE":
         print("\nFRAGILE - flaky tests detected")
         sys.exit(2)
-    elif "ROBUST" in result:
+    elif verdict == "ROBUST":
         print("\nROBUST - all property tests pass")
+    elif verdict == "NOT_EXECUTED":
+        print("\nNOT_EXECUTED - fuzzer could not run tests")
+        sys.exit(2)
     else:
-        print("\nFUZZER REVIEW COMPLETE")
+        print(f"\nFUZZER REVIEW COMPLETE (verdict: {verdict})")
 
 
 if __name__ == "__main__":

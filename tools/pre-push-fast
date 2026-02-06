@@ -1,0 +1,24 @@
+#!/bin/bash
+# Pre-push hook: runs fast audit before pushing
+# Quick sanity check (~2-3 min) - CI runs full validation after push
+# For comprehensive local validation, run: ./tools/audit_all.sh
+#
+# Install: ln -sf ../../tools/pre-push-fast .git/hooks/pre-push
+
+echo "Running pre-push check (dev.sh → audit_fast.sh)..."
+echo ""
+
+# Get repo root
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Run fast audit (not --full, which is redundant with CI)
+if ! "$REPO_ROOT/dev.sh"; then
+    echo ""
+    echo "❌ Pre-push check failed. Fix issues before pushing."
+    echo "   To bypass (not recommended): git push --no-verify"
+    exit 1
+fi
+
+echo ""
+echo "✅ Pre-push check passed"
+echo "   Note: CI will run full validation. For local full audit: ./tools/audit_all.sh"

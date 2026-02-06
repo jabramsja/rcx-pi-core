@@ -32,7 +32,7 @@ async def test_with_tools():
     print("\nTesting agent with tools...")
 
     async for message in query(
-        prompt="Read the file .claude/agents/verifier.md and tell me its name field from the YAML frontmatter.",
+        prompt="Read the file tools/agents/verifier_prompt.md and tell me the agent name from the first heading.",
         options=ClaudeAgentOptions(
             allowed_tools=["Read"],
             max_turns=3,

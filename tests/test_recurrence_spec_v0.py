@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
-from conftest import skip_or_fail_in_ci
+from tests.conftest import skip_or_fail_in_ci
 
 
 FIXTURES_DIR = Path("tests/fixtures/traces_v2/recurrence_spec_v0")

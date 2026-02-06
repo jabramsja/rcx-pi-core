@@ -186,7 +186,7 @@ class TestCrossSubstrateParity:
         from rcx_pi.selfhost.step_mu import normalize_projection, list_to_linked
         from rcx_pi.selfhost.match_mu import normalize_for_match
         from rcx_pi.selfhost.subst_mu import denormalize_from_match
-        from conftest import run_until_done
+        from tests.conftest import run_until_done
 
         mismatches = []
 

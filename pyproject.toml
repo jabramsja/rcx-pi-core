@@ -26,6 +26,8 @@ test = ["pytest", "pytest-xdist", "pytest-cov", "jsonschema", "hypothesis", "pyt
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "rcx_pi"]
+pythonpath = ["."]  # Ensure repo root is in sys.path for 'tools' imports
+addopts = "--import-mode=importlib"  # Required for tools.* imports to work properly
 # Treat DeprecationWarning from rcx_pi as error to catch accidental legacy usage
 # Tests that intentionally use deprecated code must wrap with pytest.warns(DeprecationWarning)
 filterwarnings = [
@@ -42,3 +44,54 @@ filterwarnings = [
 
 [tool.setuptools.exclude-package-data]
 "*" = ["test_*.py", "**/tests/**"]
+
+# =============================================================================
+# Ruff - Fast Python linter and formatter
+# =============================================================================
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start with essential rules, expand over time
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "E501",  # line too long (handled by formatter, not linter)
+    "E731",  # lambda assignment (common in functional code)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can have unused imports for fixtures
+"tests/**" = ["F401"]
+# Prototypes are experimental
+"prototypes/**" = ["E", "F", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# =============================================================================
+# Mypy - Static type checking (gradual mode)
+# =============================================================================
+# Gradual typing: don't require annotations on existing code, catch issues in new code
+# To run: mypy rcx_pi/ tools/ --ignore-missing-imports
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+# Gradual typing - don't fail on untyped code
+ignore_missing_imports = true
+check_untyped_defs = false
+# Don't require type annotations everywhere yet
+disallow_untyped_defs = false
+
+# Strict mode for shared utilities (opt-in)
+[[tool.mypy.overrides]]
+module = "tools.shared_*"
+strict = true
+disallow_untyped_defs = true

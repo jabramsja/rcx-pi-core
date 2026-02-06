@@ -71,24 +71,30 @@ APPROVAL_VERDICTS = {
 # =============================================================================
 
 def extract_verdict(output: str) -> str | None:
-    """Extract the verdict from agent output."""
-    # Look for common verdict patterns
+    """Extract the verdict from agent output.
+
+    Security: Only looks for explicit VERDICT: markers to prevent spoofing
+    via incidental mentions like "This code is NOT ROBUST".
+    """
+    # Look for explicit verdict patterns only
     patterns = [
         r'\*\*(?:VERDICT|Verdict)\*\*[:\s]+(\w+)',
         r'^(?:VERDICT|Verdict)[:\s]+(\w+)',
         r'###\s*(?:VERDICT|Verdict)[:\s]*(\w+)',
+        # Multi-line: ### Verdict\n**APPROVE**
+        r'###\s*(?:VERDICT|Verdict)\s*\n+\s*\*\*(\w+)',
     ]
 
     for pattern in patterns:
         match = re.search(pattern, output, re.MULTILINE)
         if match:
-            return match.group(1).upper()
+            found = match.group(1).upper()
+            # Validate it's a known verdict
+            if found in VERDICT_REQUIREMENTS:
+                return found
 
-    # Fallback: look for known verdicts in text
-    for verdict in VERDICT_REQUIREMENTS.keys():
-        if verdict in output.upper():
-            return verdict
-
+    # NO FALLBACK - security requirement
+    # Removed: substring matching that could be spoofed
     return None
 
 

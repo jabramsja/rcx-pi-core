@@ -11,47 +11,21 @@ Usage:
 """
 
 import sys
-import json
-import subprocess
 import anyio
 from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
+from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
 
 EXPERT_PROMPT = Path("tools/agents/expert_prompt.md").read_text()
-
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations)
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
 
 
 async def run_expert(files: list[str]) -> str:
     """Run the expert agent on the specified files."""
 
-    file_list = ", ".join(files)
+    # Security: Sanitize file paths to prevent prompt injection via newlines
+    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
+    file_list = ", ".join(safe_files)
     prompt = f"""You are the RCX Expert Agent. Your instructions are:
 
 {EXPERT_PROMPT}
@@ -94,23 +68,24 @@ async def main():
     print(result)
     print("=" * 60)
 
-    # Compliance validation
-    is_compliant, error = validate_compliance(result)
+    # Compliance validation (shared_agent_utils returns 3-tuple)
+    is_compliant, error, _ = validate_compliance(result)
     if not is_compliant:
         print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
         print("Agent output did not meet AgentGuardrails.v0 requirements.")
         sys.exit(3)
 
-    # Check verdict
-    if "OVER_ENGINEERED" in result:
+    # Check verdict using secure marker-based extraction (shared_agent_utils)
+    verdict = extract_verdict_secure(result, agent_name="expert")
+    if verdict == "OVER_ENGINEERED":
         print("\nOVER_ENGINEERED - simplification needed")
         sys.exit(1)
-    elif "COULD_SIMPLIFY" in result:
+    elif verdict == "COULD_SIMPLIFY":
         print("\nCOULD_SIMPLIFY - minor improvements possible")
-    elif "MINIMAL" in result:
+    elif verdict == "MINIMAL":
         print("\nMINIMAL - code is appropriately simple")
     else:
-        print("\nEXPERT REVIEW COMPLETE")
+        print(f"\nEXPERT REVIEW COMPLETE (verdict: {verdict})")
 
 
 if __name__ == "__main__":

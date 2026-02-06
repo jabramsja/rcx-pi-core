@@ -11,47 +11,21 @@ Usage:
 """
 
 import sys
-import json
-import subprocess
 import anyio
 from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
+from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
 
 TRANSLATOR_PROMPT = Path("tools/agents/translator_prompt.md").read_text()
-
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations)
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
 
 
 async def run_translator(files: list[str], request: str | None = None) -> str:
     """Run the translator agent on the specified files."""
 
-    file_list = ", ".join(files)
+    # Security: Sanitize file paths to prevent prompt injection via newlines
+    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
+    file_list = ", ".join(safe_files)
     request_context = ""
     if request:
         request_context = f"\n\n**Original Request:** {request}"
@@ -116,24 +90,25 @@ async def main():
     print(result)
     print("=" * 60)
 
-    # Compliance validation
-    is_compliant, error = validate_compliance(result)
+    # Compliance validation (shared_agent_utils returns 3-tuple)
+    is_compliant, error, _ = validate_compliance(result)
     if not is_compliant:
         print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
         print("Agent output did not meet AgentGuardrails.v0 requirements.")
         sys.exit(3)
 
-    # Check verdict
-    if "DEVIATES" in result:
+    # Check verdict using secure marker-based extraction (shared_agent_utils)
+    verdict = extract_verdict_secure(result, agent_name="translator")
+    if verdict == "DEVIATES":
         print("\nDEVIATES - code doesn't match intent")
         sys.exit(1)
-    elif "NEEDS_DISCUSSION" in result:
+    elif verdict == "NEEDS_DISCUSSION":
         print("\nNEEDS_DISCUSSION - clarification required")
         sys.exit(2)
-    elif "MATCHES_INTENT" in result:
+    elif verdict == "MATCHES_INTENT":
         print("\nMATCHES_INTENT - code matches original request")
     else:
-        print("\nTRANSLATOR REVIEW COMPLETE")
+        print(f"\nTRANSLATOR REVIEW COMPLETE (verdict: {verdict})")
 
 
 if __name__ == "__main__":

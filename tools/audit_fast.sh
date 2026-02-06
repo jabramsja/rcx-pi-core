@@ -32,6 +32,18 @@ export PYTHONHASHSEED=0
 echo "== FAST AUDIT (local iteration) =="
 echo ""
 
+# Check if git hooks are installed
+if [ ! -L ".git/hooks/pre-commit" ]; then
+    echo "⚠️  Warning: pre-commit hook not installed"
+    echo "   Run: ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit"
+    echo ""
+fi
+if [ ! -L ".git/hooks/pre-push" ]; then
+    echo "⚠️  Warning: pre-push hook not installed"
+    echo "   Run: ln -sf ../../tools/pre-push-fast .git/hooks/pre-push"
+    echo ""
+fi
+
 # Check if pytest-xdist is available for parallel execution
 # Using --dist worksteal for better load balancing (idle workers steal from busy)
 PARALLEL_FLAG=""
@@ -110,7 +122,10 @@ pytest tests/docs/test_root_files.py -q
 echo "== 1l) Roadmap governance check =="
 pytest tests/docs/test_roadmap_governance.py -q
 
-echo "== 2) AST police (Python) =="
+echo "== 2a) Structural lint (projection validity) =="
+python3 tools/structural_lint.py mu/
+
+echo "== 2b) AST police (Python) =="
 python3 tools/ast_police.py
 
 echo "== 3) Debt dashboard =="
@@ -161,7 +176,14 @@ else
     exit 1
 fi
 
+# === Condensed Summary ===
+CURRENT_PHASE=$(grep -E '^PHASE:' STATUS.md 2>/dev/null | sed 's/PHASE: *//' || echo "?")
+DEBT_CURRENT=$(grep -E '^CURRENT:' STATUS.md 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "?")
+DEBT_THRESHOLD=$(grep -E '^THRESHOLD:' STATUS.md 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "?")
+
 echo ""
-echo "✅ Fast audit pass"
-echo ""
-echo "Note: This is a quick sanity check. Run ./tools/audit_all.sh before pushing."
+echo "════════════════════════════════════════════════════════════"
+echo "✅ FAST AUDIT PASS"
+echo "   Phase: $CURRENT_PHASE | Debt: $DEBT_CURRENT/$DEBT_THRESHOLD | Core tests: PASS"
+echo "   Run ./tools/audit_all.sh for full validation before PR"
+echo "════════════════════════════════════════════════════════════"

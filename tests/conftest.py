@@ -9,6 +9,18 @@ Provides:
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Ensure repo root is at position 0 in sys.path for 'tools' imports
+# pytest adds tests/ to sys.path which can shadow repo root's tools package
+REPO_ROOT = Path(__file__).parent.parent
+_repo_root_str = str(REPO_ROOT)
+if sys.path[0] != _repo_root_str:
+    if _repo_root_str in sys.path:
+        sys.path.remove(_repo_root_str)
+    sys.path.insert(0, _repo_root_str)
+
 import pytest
 
 from rcx_pi.selfhost.kernel import reset_step_budget

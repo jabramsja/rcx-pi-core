@@ -23,7 +23,7 @@ from rcx_pi.selfhost.step_mu import (
     list_to_linked,        # Use canonical implementation (Expert finding: avoid duplication)
     normalize_projection,  # Use canonical implementation (Expert finding: avoid duplication)
 )
-from conftest import run_until_done  # Use shared implementation (Expert finding: avoid duplication)
+from tests.conftest import run_until_done  # Use shared implementation (Expert finding: avoid duplication)
 
 
 # Load test vectors

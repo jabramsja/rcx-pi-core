@@ -14,41 +14,13 @@ Usage:
 """
 
 import sys
-import json
-import subprocess
 import anyio
 from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
+from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
 
 ADVISOR_PROMPT = Path("tools/agents/advisor_prompt.md").read_text()
-
-
-def validate_compliance(output: str) -> tuple[bool, str]:
-    """Run compliance validation on agent output.
-
-    Returns (is_compliant, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["python3", "tools/validate_agent_compliance.py", "--json", "--strict"],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}"
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations)
-
-        return True, ""
-    except Exception as e:
-        return False, f"Validation error: {e}"
 
 
 async def run_advisor(
@@ -66,7 +38,9 @@ async def run_advisor(
 
     file_context = ""
     if context_files:
-        file_context = f"\n\nRelevant files to consider: {', '.join(context_files)}"
+        # Security: Sanitize file paths to prevent prompt injection via newlines
+        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in context_files[:20]]
+        file_context = f"\n\nRelevant files to consider: {', '.join(safe_files)}"
 
     web_instructions = ""
     if web_search:
@@ -155,21 +129,22 @@ async def main():
     print(result)
     print("=" * 60)
 
-    # Compliance validation
-    is_compliant, error = validate_compliance(result)
+    # Compliance validation (shared_agent_utils returns 3-tuple)
+    is_compliant, error, _ = validate_compliance(result)
     if not is_compliant:
         print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
         print("Agent output did not meet AgentGuardrails.v0 requirements.")
         sys.exit(3)
 
-    # Check verdict
-    if "NEEDS_MORE_CONTEXT" in result:
+    # Check verdict using secure marker-based extraction (shared_agent_utils)
+    verdict = extract_verdict_secure(result, agent_name="advisor")
+    if verdict == "NEEDS_MORE_CONTEXT":
         print("\nNEEDS_MORE_CONTEXT - provide more information")
         sys.exit(2)
-    elif "OPTIONS_PROVIDED" in result or "RECOMMENDATION" in result:
-        print("\nADVICE PROVIDED")
+    elif verdict in {"OPTIONS_PROVIDED", "RECOMMENDATION"}:
+        print(f"\nADVICE PROVIDED ({verdict})")
     else:
-        print("\nADVISOR REVIEW COMPLETE")
+        print(f"\nADVISOR REVIEW COMPLETE (verdict: {verdict})")
 
 
 if __name__ == "__main__":
