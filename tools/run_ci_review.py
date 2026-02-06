@@ -33,7 +33,13 @@ from dataclasses import dataclass
 
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
-from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
+from tools.shared_agent_utils import (
+    agent_passed,
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
 
 # =============================================================================
@@ -160,18 +166,10 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
 # Agent Runner (simplified from run_review.py)
 # =============================================================================
 
-def load_agent_prompt(name: str) -> str:
-    """Load agent prompt from tools/agents/{name}_prompt.md"""
-    path = Path(f"tools/agents/{name}_prompt.md")
-    if path.exists():
-        return path.read_text()
-    raise FileNotFoundError(f"Agent prompt not found: {path}")
-
-
 async def run_agent(agent_name: str, files: list[str]) -> dict:
     """Run a single agent and return result dict."""
 
-    prompt_text = load_agent_prompt(agent_name.replace("-", "_"))
+    prompt_text = load_agent_prompt_with_contract(agent_name)
 
     # Security: Sanitize file paths to prevent prompt injection via newlines
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
@@ -189,6 +187,7 @@ Produce a brief report (max 500 words) following your format.
 """
 
     result_text = ""
+    fragments: list[str] = []
     try:
         async for message in query(
             prompt=prompt,
@@ -197,16 +196,21 @@ Produce a brief report (max 500 words) following your format.
                 max_turns=20,
             )
         ):
+            extracted = extract_text_from_message(message)
+            if extracted:
+                fragments.append(extracted)
             if hasattr(message, 'result') and message.result:
                 result_text = message.result
     except Exception as e:
         result_text = f"Error: {e}"
 
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
+
     # Extract verdict using secure VERDICT: marker parsing (shared_agent_utils)
     verdict = extract_verdict_secure(result_text, agent_name=agent_name)
 
-    # NEEDS_HARDENING is NOT a pass - requires security fixes
-    passed = verdict in {"APPROVE", "SECURE", "MINIMAL", "PROVEN", "GROUNDED", "ROBUST", "COULD_SIMPLIFY", "PARTIALLY_GROUNDED"}
+    passed = agent_passed(agent_name, verdict)
 
     # Compliance validation (shared_agent_utils returns 3-tuple)
     is_compliant, compliance_error, _ = validate_compliance(

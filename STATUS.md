@@ -658,7 +658,7 @@ New organized structure makes architecture visible:
 - Location: `mu/bridge/bootstrap_structural.v1.json` (5 projections)
 - Design doc: `docs/core/BootstrapStructuralBridge.v0.md`
 - Execution path verified: bridge projections DO fire for non-linear patterns
-- `run_structural_match` + `run_structural_subst` use bridge with normalization
+- Bridge capability proven; standalone runners removed (dead code cleanup)
 - Note: JS substrate does not load bridge (Python-only for now; JS uses bootstrap path)
 
 **Current Algorithm Execution:**

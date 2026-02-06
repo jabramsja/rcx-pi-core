@@ -12,12 +12,16 @@ Usage:
 
 import sys
 import anyio
-from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
-from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
-VERIFIER_PROMPT = Path("tools/agents/verifier_prompt.md").read_text()
+VERIFIER_PROMPT = load_agent_prompt_with_contract("verifier")
 
 
 async def run_verifier(files: list[str]) -> str:
@@ -38,6 +42,7 @@ Read each file and produce a verification report following the format in your in
 """
 
     result_text = ""
+    fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
@@ -46,8 +51,14 @@ Read each file and produce a verification report following the format in your in
             max_turns=20,
         )
     ):
+        extracted = extract_text_from_message(message)
+        if extracted:
+            fragments.append(extracted)
         if hasattr(message, 'result') and message.result:
             result_text = message.result
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     return result_text
 

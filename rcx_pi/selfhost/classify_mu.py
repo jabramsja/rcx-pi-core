@@ -102,6 +102,11 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         # See docs/core/DebtCategories.v0.md for documentation of this design decision.
         head = current.get("head")
         if isinstance(head, dict):
+            # Gate 3: Type-tagged structures are NOT kv-pairs
+            # A kv-pair has exactly {head, tail} keys, not {head, tail, _type}
+            if "_type" in head:
+                # Type-tagged element means this is a list, not a dict
+                return "list"
             # Could be a kv-pair: {"head": key, "tail": {"head": val, "tail": null}}
             if set(head.keys()) == {"head", "tail"}:
                 key = head.get("head")

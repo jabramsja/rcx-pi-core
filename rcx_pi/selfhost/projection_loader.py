@@ -10,6 +10,7 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
+import json
 from typing import Callable
 
 from .mu_type import Mu
@@ -47,18 +48,20 @@ def make_projection_loader(seed_filename: str) -> tuple[
     def load() -> list[Mu]:
         """Load projections from seed file with integrity verification.
 
-        Returns a shallow copy to prevent callers from mutating the cache.
-        (Adversary finding: cache mutation vulnerability - defensive copy)
+        Returns a deep copy to prevent callers from mutating the cache.
+        (Adversary finding: shallow copy allows cache poisoning via dict mutation)
         """
         if cache[0] is not None:
-            return list(cache[0])  # Defensive copy prevents cache mutation
+            # Deep copy via JSON round-trip (Mu is JSON-compatible)
+            return json.loads(json.dumps(cache[0]))
 
         # Use mu/ as canonical location via get_seed_path()
         seed_path = get_seed_path(seed_filename)
         seed = load_verified_seed(seed_path)
 
         cache[0] = seed["projections"]
-        return list(cache[0])  # Defensive copy prevents cache mutation
+        # Deep copy via JSON round-trip (Mu is JSON-compatible)
+        return json.loads(json.dumps(cache[0]))
 
     def clear() -> None:
         """Clear cached projections (for testing)."""

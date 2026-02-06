@@ -12,12 +12,16 @@ Usage:
 
 import sys
 import anyio
-from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
-from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
-TRANSLATOR_PROMPT = Path("tools/agents/translator_prompt.md").read_text()
+TRANSLATOR_PROMPT = load_agent_prompt_with_contract("translator")
 
 
 async def run_translator(files: list[str], request: str | None = None) -> str:
@@ -44,6 +48,7 @@ Produce a translator report following the format in your instructions.
 """
 
     result_text = ""
+    fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
@@ -52,8 +57,14 @@ Produce a translator report following the format in your instructions.
             max_turns=25,
         )
     ):
+        extracted = extract_text_from_message(message)
+        if extracted:
+            fragments.append(extracted)
         if hasattr(message, 'result') and message.result:
             result_text = message.result
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     return result_text
 
@@ -99,7 +110,7 @@ async def main():
 
     # Check verdict using secure marker-based extraction (shared_agent_utils)
     verdict = extract_verdict_secure(result, agent_name="translator")
-    if verdict == "DEVIATES":
+    if verdict in {"DEVIATES", "SCOPE_CREEP", "HOST_SMUGGLING"}:
         print("\nDEVIATES - code doesn't match intent")
         sys.exit(1)
     elif verdict == "NEEDS_DISCUSSION":

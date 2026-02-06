@@ -48,10 +48,12 @@ SEED_CHECKSUMS: dict[str, str] = {
     # mu/ folder reorganization: renamed from enginenews.v1/exhaust.v1 to recurrence.v1/exhaustion.v1
     # Legacy names (enginenews.v1, exhaust.v1) removed - mu/ is now canonical
     # Updated v1.2.0: HYBRID execution_layer (honest: production uses BOOTSTRAP, meta-circular proven)
-    "recurrence.v1.json": "3d4b07523eac31c9495c6601b5e4c11eabbd35235619173aabc0f28d33ce34a6",
+    # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
+    "recurrence.v1.json": "2b9974d8f53a7d5a87900658ea76727e52c01f1d5d6a8aba68b8747df9fe1dad",
     # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
     # Updated v1.2.0: HYBRID execution_layer (honest: production uses BOOTSTRAP, meta-circular proven)
-    "exhaustion.v1.json": "44dc13783f1b0481a1e8961ab7e0717d511dcc09ade5af4078e5750f83d5d749",
+    # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
+    "exhaustion.v1.json": "2e407fd5774bd353b483eed51c153c4ec81ed7943447e97d7c18865f143de237",
     # RCX Engine: main program orchestrating recurrence + exhaustion
     # Updated: Added status: "design_only" marker
     # Updated: Fixed meta.doc path (docs/core/RCXEngine.v0.md -> docs/core/EngineNewsStructural.v0.md)

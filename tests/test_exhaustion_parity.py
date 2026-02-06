@@ -114,16 +114,16 @@ class TestExhaustionStructure:
         assert len(exhaust_projections) == 11, f"Expected 11 projections, got {len(exhaust_projections)}"
 
     def test_no_python_sets_in_frozen(self, exhaust_projections, exhaustion_vectors):
-        """Frozen list must be Mu linked-list, not Python set."""
+        """Frozen must be JSON-compatible list, not Python set."""
         vector = next(v for v in exhaustion_vectors if v["id"] == "exhaust.single_op_exhausted")
         result = run_until_stable(exhaust_projections, vector["input"])
 
-        # Frozen should be a linked list structure
+        # Gate 3: Frozen is now denormalized to Python list for backwards compatibility
+        # The key invariant: frozen is NOT a Python set (sets aren't JSON-serializable)
         frozen = result.get("frozen")
         assert frozen is not None, "Expected frozen list"
-        assert isinstance(frozen, dict), "Frozen must be dict (linked list)"
-        assert "head" in frozen, "Frozen must have head"
-        assert "tail" in frozen, "Frozen must have tail"
+        assert isinstance(frozen, list), "Frozen must be list (not set)"
+        assert not isinstance(frozen, set), "Frozen must NOT be Python set"
 
     def test_projection_order_matters(self, exhaust_projections):
         """Verify first-match-wins ordering for non-linear patterns."""

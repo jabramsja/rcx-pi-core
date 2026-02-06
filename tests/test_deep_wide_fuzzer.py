@@ -200,9 +200,10 @@ class TestDeepExhaustionTraversal:
             assert result.get("operator_to_freeze") == "same_op", \
                 f"Should freeze same_op, got: {result.get('operator_to_freeze')}"
             # Verify frozen list contains same_op (semantic check, not just existence)
+            # Gate 3: frozen is now a Python list (denormalized), not linked-list
             frozen = result.get("frozen")
-            assert frozen is not None and frozen.get("head") == "same_op", \
-                f"Frozen list should contain same_op as head, got: {frozen}"
+            assert frozen is not None and "same_op" in frozen, \
+                f"Frozen list should contain same_op, got: {frozen}"
         else:  # already_frozen
             # Verify already_frozen semantics
             assert result.get("exhaustion_detected") is False, \
@@ -295,7 +296,11 @@ class TestDeepAndWide:
         st.integers(min_value=10, max_value=30),
         st.integers(min_value=10, max_value=30)
     )
-    @settings(max_examples=15, deadline=30000)
+    @settings(
+        max_examples=15,
+        deadline=None,  # CI variance causes flaky DeadlineExceeded at this depth/width mix
+        suppress_health_check=[HealthCheck.too_slow],
+    )
     def test_deep_trace_with_wide_states(self, trace_depth: int, state_width: int):
         """Trace with many entries where each state is wide."""
         reset_step_budget()

@@ -478,6 +478,41 @@ class TestJSReservedFieldValidationParity:
         valid, error = self._run_js_validation(legitimate)
         assert valid, f"JS should allow entrypoint subtree, but got error: {error}"
 
+    def test_parity_normalized_reserved_key_rejected(self):
+        """SECURITY: Reserved field encoded as normalized dict key must be rejected."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        normalized = normalize_for_match({"_mode": "recurrence"})
+
+        # Python rejects
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_no_kernel_reserved_fields(normalized, "test")
+
+        # JS must also reject
+        valid, error = self._run_js_validation(normalized)
+        assert not valid, f"JS should reject normalized reserved key, but got valid=True"
+        assert "_mode" in error or "reserved" in error.lower()
+
+    def test_parity_normalized_entrypoint_allowed(self):
+        """SECURITY: Entry point subtree allowed even when normalized."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        normalized = normalize_for_match({
+            "_detect_exhaustion": {
+                "_mode": "exhaustion",
+                "_phase": "scan"
+            }
+        })
+
+        # Python allows
+        validate_no_kernel_reserved_fields(normalized, "test")
+
+        # JS must also allow
+        valid, error = self._run_js_validation(normalized)
+        assert valid, f"JS should allow normalized entrypoint, but got error: {error}"
+
     def test_parity_nested_spoof_rejected(self):
         """SECURITY: Reserved fields nested in non-entrypoint key MUST be rejected.
 

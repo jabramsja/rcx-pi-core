@@ -13,12 +13,15 @@ Usage:
 
 import sys
 import anyio
-from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
-from tools.shared_agent_utils import validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
-VISUALIZER_PROMPT = Path("tools/agents/visualizer_prompt.md").read_text()
+VISUALIZER_PROMPT = load_agent_prompt_with_contract("visualizer")
 
 
 async def run_visualizer(files: list[str] | None = None, structure: str | None = None) -> str:
@@ -45,6 +48,7 @@ Produce a visualization report following the format in your instructions.
 """
 
     result_text = ""
+    fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
@@ -53,8 +57,14 @@ Produce a visualization report following the format in your instructions.
             max_turns=20,
         )
     ):
+        extracted = extract_text_from_message(message)
+        if extracted:
+            fragments.append(extracted)
         if hasattr(message, 'result') and message.result:
             result_text = message.result
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     return result_text
 

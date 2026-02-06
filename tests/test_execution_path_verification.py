@@ -42,6 +42,7 @@ def step_with_trace(projections: list[dict], state: dict, trace: list[str]) -> d
     not just that behavior is correct.
     """
     from rcx_pi.selfhost.eval_seed import match, substitute, _NoMatch
+    from rcx_pi.selfhost.match_mu import denormalize_from_match
 
     for proj in projections:
         pattern = proj.get("pattern", {})
@@ -56,7 +57,11 @@ def step_with_trace(projections: list[dict], state: dict, trace: list[str]) -> d
             # This projection matched!
             trace.append(proj_id)
             # Apply substitution
-            return substitute(body, result)
+            subst_result = substitute(body, result)
+            # Gate 3: Denormalize output when body uses normalized dict format
+            if isinstance(body, dict) and body.get("_type") == "dict":
+                subst_result = denormalize_from_match(subst_result)
+            return subst_result
 
     # No projection matched - stall
     return state

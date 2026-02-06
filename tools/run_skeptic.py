@@ -26,7 +26,7 @@ import argparse
 from pathlib import Path
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from tools.shared_agent_utils import sanitize_for_prompt, validate_compliance
+from tools.shared_agent_utils import extract_text_from_message, sanitize_for_prompt, validate_compliance
 
 
 # =============================================================================
@@ -136,6 +136,7 @@ Look for what they might have missed.
 """
 
     result_text = ""
+    fragments: list[str] = []
 
     try:
         async for message in query(
@@ -145,10 +146,16 @@ Look for what they might have missed.
                 max_turns=20,
             )
         ):
+            extracted = extract_text_from_message(message)
+            if extracted:
+                fragments.append(extracted)
             if hasattr(message, 'result') and message.result:
                 result_text = message.result
     except Exception as e:
         result_text = f"Skeptic error: {e}"
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     # Extract verdict using secure marker parsing (no substring matching)
     import re
@@ -156,7 +163,7 @@ Look for what they might have missed.
 
     # Look for explicit verdict markers only
     verdict_pattern = re.compile(
-        r'(?:^|\n)\s*(?:\*\*)?(?:Skeptic\s+)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?[:\s]+(\w+)',
+        r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:Skeptic\s+)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?\s*:\s*(?:\*\*)?\s*([A-Z_]+)',
         re.MULTILINE
     )
     for match in verdict_pattern.finditer(result_text):

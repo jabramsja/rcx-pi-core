@@ -102,6 +102,55 @@ const MAX_VALIDATION_DEPTH = 100;
 // =============================================================================
 
 /**
+ * If value is a normalized dict encoding, return list of [key, value] pairs.
+ * Otherwise return null.
+ *
+ * Normalized dict format (from normalize):
+ *   {"_type":"dict","head":{"head":<key>,"tail":{"head":<val>,"tail":null}},"tail": ...}
+ *
+ * Gate 3 Security: This allows validateNoKernelReservedFields to check
+ * keys inside normalized dict representations, preventing bypass attacks.
+ */
+function iterNormalizedDictPairs(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  // Empty dict sentinel: {"_type": "dict"}
+  if (keys.length === 1 && value._type === 'dict') return [];
+  if ('_type' in value && value._type !== 'dict') return null;
+  if (!('head' in value) || !('tail' in value)) return null;
+
+  const pairs = [];
+  let current = value;
+  let steps = 0;
+
+  while (true) {
+    if (current === null || typeof current !== 'object' || Array.isArray(current)) return null;
+    if ('_type' in current && current._type !== 'dict') return null;
+    if (!('head' in current) || !('tail' in current)) return null;
+
+    const kv = current.head;
+    if (kv === null || typeof kv !== 'object' || Array.isArray(kv)) return null;
+    const kvKeys = Object.keys(kv);
+    if (kvKeys.length !== 2 || !('head' in kv) || !('tail' in kv)) return null;
+    const key = kv.head;
+    if (typeof key !== 'string') return null;
+
+    const kvTail = kv.tail;
+    if (kvTail === null || typeof kvTail !== 'object' || Array.isArray(kvTail)) return null;
+    const kvTailKeys = Object.keys(kvTail);
+    if (kvTailKeys.length !== 2 || !('head' in kvTail) || !('tail' in kvTail)) return null;
+    if (kvTail.tail !== null) return null;
+
+    pairs.push([key, kvTail.head]);
+    if (current.tail === null) break;
+    current = current.tail;
+    steps++;
+    if (steps > MAX_VALIDATION_DEPTH) return null;
+  }
+  return pairs;
+}
+
+/**
  * Validate that a type tag is allowed.
  * Prevents type injection attacks.
  */
@@ -146,7 +195,27 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _i
     return;
   }
 
-  // Objects: check keys and recurse into values
+  // Gate 3 Security: Check normalized dict encoding (keys stored as values).
+  // Without this, reserved fields in normalized dicts bypass validation.
+  const dictPairs = iterNormalizedDictPairs(value);
+  if (dictPairs !== null) {
+    for (const [key, val] of dictPairs) {
+      const enteringAlgorithm = ALGORITHM_ENTRYPOINT_KEYS.has(key);
+      if (KERNEL_RESERVED_FIELDS.has(key) && !_inAlgorithmSubtree) {
+        throw new Error(
+          `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
+          `Reserved fields only allowed inside algorithm entrypoints (_detect_closure, _detect_exhaustion).`
+        );
+      }
+      validateNoKernelReservedFields(
+        val, `${context}.${key}`, _depth + 1,
+        _inAlgorithmSubtree || enteringAlgorithm
+      );
+    }
+    return;
+  }
+
+  // Regular objects: check keys and recurse into values
   for (const [key, val] of Object.entries(value)) {
     // Check if we're entering an algorithm entrypoint subtree
     const enteringAlgorithm = ALGORITHM_ENTRYPOINT_KEYS.has(key);
@@ -676,6 +745,14 @@ function match(pattern, input, _depth = 0) {
     throw new Error(`Max depth exceeded in match (${MAX_DEPTH})`);
   }
 
+  // Gate 3: Auto-normalize input when pattern uses normalized dict format.
+  // Normalization is idempotent, so already-normalized input is unchanged.
+  // This allows normalized algorithm seeds to work with raw dict input.
+  if (_depth === 0 && typeof pattern === 'object' && pattern !== null &&
+      !Array.isArray(pattern) && pattern._type === 'dict') {
+    input = normalize(input);
+  }
+
   // Variable site - matches anything
   if (isVar(pattern)) {
     return { [pattern.var]: input };
@@ -715,13 +792,26 @@ function match(pattern, input, _depth = 0) {
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       return NO_MATCH;
     }
-    const pKeys = Object.keys(pattern).sort();
-    const iKeys = Object.keys(input).sort();
-    if (pKeys.length !== iKeys.length) {
-      return NO_MATCH;
-    }
-    if (!pKeys.every((k, i) => k === iKeys[i])) {
-      return NO_MATCH;
+    const pKeys = new Set(Object.keys(pattern));
+    const iKeys = new Set(Object.keys(input));
+
+    // Gate 3: Allow pattern to omit _type key while input has it.
+    // This lets patterns use bare {head, tail} to match normalized lists
+    // which have {head, tail, _type: "list"}.
+    // IMPORTANT: Only allow for _type="list" - dicts require explicit _type in pattern.
+    if (pKeys.size !== iKeys.size) {
+      // Check if the only difference is _type in input but not pattern
+      const inputExtra = [...iKeys].filter(k => !pKeys.has(k));
+      const patternExtra = [...pKeys].filter(k => !iKeys.has(k));
+      const typeIsList = (input._type === 'list');
+      if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) {
+        return NO_MATCH;
+      }
+    } else {
+      // Same size - must have same keys
+      for (const k of pKeys) {
+        if (!iKeys.has(k)) return NO_MATCH;
+      }
     }
     const bindings = {};
     for (const k of pKeys) {
@@ -792,7 +882,16 @@ function applyProjection(projection, input) {
   if (bindings === NO_MATCH) {
     return NO_MATCH;
   }
-  return substitute(projection.body, bindings);
+  let result = substitute(projection.body, bindings);
+
+  // Gate 3: Auto-denormalize output when body uses normalized dict format.
+  // This maintains backwards compatibility with code expecting raw dicts.
+  if (typeof projection.body === 'object' && projection.body !== null &&
+      !Array.isArray(projection.body) && projection.body._type === 'dict') {
+    result = denormalize(result);
+  }
+
+  return result;
 }
 
 /**

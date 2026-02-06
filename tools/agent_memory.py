@@ -40,15 +40,43 @@ Usage:
 """
 
 import argparse
-import fcntl
 import json
 import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from contextlib import contextmanager
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 MEMORY_DIR = Path(".agent_memory")
+
+
+@contextmanager
+def _exclusive_lock(lock_file):
+    """Cross-platform exclusive file lock for lock sidecar files."""
+    if os.name == "nt":
+        # Windows msvcrt.locking() locks a byte range from current file position.
+        lock_file.seek(0)
+        lock_file.write("0")
+        lock_file.flush()
+        lock_file.seek(0)
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            yield
+        finally:
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def ensure_memory_dir():
@@ -86,13 +114,10 @@ def save_findings(findings: list[dict]):
     # Use a lock file to avoid truncation before lock acquired
     lock_path = path.with_suffix('.lock')
     with open(lock_path, 'w') as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
+        with _exclusive_lock(lock_file):
             # Now safe to write the actual file
             content = json.dumps(findings, indent=2, default=str)
             path.write_text(content)
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def load_patterns() -> list[dict]:
@@ -108,12 +133,9 @@ def save_patterns(patterns: list[dict]):
     path = get_patterns_file()
     lock_path = path.with_suffix('.lock')
     with open(lock_path, 'w') as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
+        with _exclusive_lock(lock_file):
             content = json.dumps(patterns, indent=2, default=str)
             path.write_text(content)
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def store_finding(

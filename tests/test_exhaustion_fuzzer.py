@@ -187,7 +187,7 @@ class TestExhaustionProperties:
 
         result_frozen = result["frozen"]
 
-        # Count entries in original frozen
+        # Count entries in original frozen (linked-list format)
         def count_linked(ll):
             count = 0
             while ll is not None:
@@ -195,8 +195,10 @@ class TestExhaustionProperties:
                 ll = ll.get("tail") if isinstance(ll, dict) else None
             return count
 
+        # Gate 3: Result is now denormalized to Python list
+        # Input is still linked-list format
         orig_count = count_linked(original_frozen)
-        result_count = count_linked(result_frozen)
+        result_count = len(result_frozen) if isinstance(result_frozen, list) else count_linked(result_frozen)
 
         assert result_count >= orig_count, \
             f"Frozen list shrunk from {orig_count} to {result_count}"
@@ -279,7 +281,30 @@ class TestExhaustionDeterminism:
 
 
 class TestExhaustionNonLinearPatterns:
-    """Test non-linear pattern behavior (binding conflict detection)."""
+    """Test non-linear pattern behavior (binding conflict detection).
+
+    Gate 3: Updated to navigate normalized dict format (linked-list of kv-pairs).
+    """
+
+    def _get_normalized_value(self, normalized_dict: dict, key: str):
+        """Extract value for key from normalized dict format.
+
+        Normalized format: {head: {head: key, tail: {head: value, tail: null}}, tail: next, _type: "dict"}
+        """
+        current = normalized_dict
+        while current is not None:
+            if not isinstance(current, dict):
+                return None
+            head = current.get("head")
+            if isinstance(head, dict):
+                kv_key = head.get("head")
+                if kv_key == key:
+                    # Found the key - value is in head.tail.head
+                    tail = head.get("tail")
+                    if isinstance(tail, dict):
+                        return tail.get("head")
+            current = current.get("tail")
+        return None
 
     def test_find_match_uses_non_linear(self, exhaust_projections):
         """exhaustion.find_match uses non-linear pattern for step equality."""
@@ -287,31 +312,47 @@ class TestExhaustionNonLinearPatterns:
         proj = next(p for p in exhaust_projections if p["id"] == "exhaustion.find_match")
         pattern = proj["pattern"]
 
-        # The pattern should have "step" appearing twice (in _trace.head.step and _tau_step)
-        trace_step = pattern["_trace"]["head"]["step"]
-        tau_step = pattern["_tau_step"]
+        # Gate 3: Navigate normalized format
+        # Pattern has _tau_step with {"var": "step"} and _trace whose head entry has step with {"var": "step"}
+        tau_step = self._get_normalized_value(pattern, "_tau_step")
+        trace_value = self._get_normalized_value(pattern, "_trace")
 
-        # Both should be the same variable
-        assert trace_step == tau_step, "find_match should use non-linear pattern"
+        # trace_value is {head: {trace_entry_dict}, tail: {var: rest}}
+        # trace_entry_dict is normalized, has "step" key
+        trace_head = trace_value.get("head") if isinstance(trace_value, dict) else None
+        trace_step = self._get_normalized_value(trace_head, "step") if trace_head else None
+
+        # Both should be the same variable reference
+        assert tau_step == trace_step == {"var": "step"}, \
+            f"find_match should use non-linear pattern: tau_step={tau_step}, trace_step={trace_step}"
 
     def test_scan_same_uses_non_linear(self, exhaust_projections):
         """exhaustion.scan_same uses non-linear pattern for operator equality."""
         proj = next(p for p in exhaust_projections if p["id"] == "exhaustion.scan_same")
         pattern = proj["pattern"]
 
-        # The pattern should have same var for projection and _tau_operator
-        trace_proj = pattern["_trace"]["head"]["projection"]
-        tau_op = pattern["_tau_operator"]
+        # Gate 3: Navigate normalized format
+        tau_op = self._get_normalized_value(pattern, "_tau_operator")
+        trace_value = self._get_normalized_value(pattern, "_trace")
 
-        assert trace_proj == tau_op, "scan_same should use non-linear pattern"
+        # trace_value head is the trace entry with "projection" key
+        trace_head = trace_value.get("head") if isinstance(trace_value, dict) else None
+        trace_proj = self._get_normalized_value(trace_head, "projection") if trace_head else None
+
+        assert tau_op == trace_proj == {"var": "proj"}, \
+            f"scan_same should use non-linear pattern: tau_op={tau_op}, trace_proj={trace_proj}"
 
     def test_frozen_found_uses_non_linear(self, exhaust_projections):
         """exhaustion.frozen_found uses non-linear pattern for frozen membership."""
         proj = next(p for p in exhaust_projections if p["id"] == "exhaustion.frozen_found")
         pattern = proj["pattern"]
 
-        # The pattern should have same var for _operator and _frozen_check.head
-        operator = pattern["_operator"]
-        frozen_head = pattern["_frozen_check"]["head"]
+        # Gate 3: Navigate normalized format
+        operator = self._get_normalized_value(pattern, "_operator")
+        frozen_check = self._get_normalized_value(pattern, "_frozen_check")
 
-        assert operator == frozen_head, "frozen_found should use non-linear pattern"
+        # frozen_check is {head: {var: op}, tail: {var: _}} - linked list head
+        frozen_head = frozen_check.get("head") if isinstance(frozen_check, dict) else None
+
+        assert operator == frozen_head == {"var": "op"}, \
+            f"frozen_found should use non-linear pattern: operator={operator}, frozen_head={frozen_head}"

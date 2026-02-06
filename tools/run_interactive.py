@@ -45,7 +45,11 @@ from dataclasses import dataclass, asdict
 
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
-from tools.shared_agent_utils import validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
 
 # =============================================================================
@@ -133,14 +137,6 @@ def generate_session_id() -> str:
 # Agent Definitions
 # =============================================================================
 
-def load_agent_prompt(name: str) -> str:
-    """Load agent prompt from tools/agents/{name}_prompt.md"""
-    path = Path(f"tools/agents/{name.replace('-', '_')}_prompt.md")
-    if path.exists():
-        return path.read_text()
-    raise FileNotFoundError(f"Agent prompt not found: {path}")
-
-
 AVAILABLE_AGENTS = [
     "verifier", "adversary", "expert", "structural-proof",
     "grounding", "fuzzer", "translator", "visualizer", "advisor"
@@ -153,7 +149,7 @@ def create_agent_definition(agent_name: str) -> AgentDefinition:
 
     return AgentDefinition(
         description=f"RCX {agent_name} agent for interactive review",
-        prompt=load_agent_prompt(agent_name),
+        prompt=load_agent_prompt_with_contract(agent_name),
         tools=["Read", "Grep", "Glob"],
         model=model
     )
@@ -185,7 +181,7 @@ class InteractiveSession:
         file_list = ", ".join(safe_files)
         return f"""You are the RCX {self.agent_name.replace('-', ' ').title()} Agent in INTERACTIVE mode.
 
-{load_agent_prompt(self.agent_name)}
+{load_agent_prompt_with_contract(self.agent_name)}
 
 ---
 
@@ -218,6 +214,7 @@ Start by giving a brief overview of what you see in these files.
             options.resume = self.sdk_session_id
 
         result_text = ""
+        fragments: list[str] = []
         new_session_id = None
 
         async for message in query(prompt=prompt, options=options):
@@ -225,8 +222,15 @@ Start by giving a brief overview of what you see in these files.
             if hasattr(message, 'session_id'):
                 new_session_id = message.session_id
 
+            extracted = extract_text_from_message(message)
+            if extracted:
+                fragments.append(extracted)
+
             if hasattr(message, 'result') and message.result:
                 result_text = message.result
+
+        if not result_text and fragments:
+            result_text = "\n".join(dict.fromkeys(fragments))
 
         # Update session
         if new_session_id:
