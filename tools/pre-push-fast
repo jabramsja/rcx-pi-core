@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push hook: runs fast audit before pushing
+# Pre-push hook: enforces tracker sync + runs fast audit before pushing
 # Quick sanity check (~2-3 min) - CI runs full validation after push
 # For comprehensive local validation, run: ./tools/audit_all.sh
 #
@@ -10,6 +10,23 @@ echo ""
 
 # Get repo root
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Enforce tracker sync for commits being pushed
+RANGE=""
+if git rev-parse --verify --quiet @{upstream} >/dev/null; then
+    RANGE="@{upstream}...HEAD"
+elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+    RANGE="origin/dev...HEAD"
+fi
+
+if [ -n "$RANGE" ]; then
+    if ! "$REPO_ROOT/tools/enforce_tracker_sync.sh" --range "$RANGE"; then
+        echo ""
+        echo "❌ Pre-push tracker sync check failed."
+        echo "   Add STATUS.md or TASKS.md updates for core structural changes."
+        exit 1
+    fi
+fi
 
 # Run fast audit (not --full, which is redundant with CI)
 if ! "$REPO_ROOT/dev.sh"; then

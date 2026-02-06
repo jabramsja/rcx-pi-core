@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,6 +48,17 @@ jobs:
         run: |
           set -euo pipefail
           tools/check_docs_consistency.sh
+
+      - name: Enforce tracker sync for core changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            RANGE="HEAD~1...HEAD"
+          else
+            RANGE="${{ github.event.before }}...${{ github.sha }}"
+          fi
+          tools/enforce_tracker_sync.sh --range "$RANGE"
 
       - name: Green gate (authoritative, python-only)
         shell: bash

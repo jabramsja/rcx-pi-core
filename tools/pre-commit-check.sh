@@ -196,6 +196,13 @@ if [ -n "$STAGED_JS" ] || [ -n "$STAGED_SEEDS" ]; then
     fi
 fi
 
+# 14. Enforce STATUS/TASKS tracker sync for core structural changes
+echo "-- Enforcing tracker sync..."
+if ! ./tools/enforce_tracker_sync.sh --staged; then
+    echo "❌ Tracker sync check failed"
+    ERRORS=$((ERRORS + 1))
+fi
+
 if [ $ERRORS -gt 0 ]; then
     echo ""
     echo "❌ Pre-commit check failed with $ERRORS error(s)"

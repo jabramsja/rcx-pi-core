@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -68,6 +70,20 @@ jobs:
         run: |
           set -euo pipefail
           tools/check_docs_consistency.sh
+
+      - name: Enforce tracker sync for core changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${{ github.event.before }}...${{ github.sha }}"
+          else
+            echo "Skipping tracker sync check for event: ${{ github.event_name }}"
+            exit 0
+          fi
+          tools/enforce_tracker_sync.sh --range "$RANGE"
 
       - name: Run green gate
         shell: bash
