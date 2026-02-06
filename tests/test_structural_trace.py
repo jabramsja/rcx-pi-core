@@ -122,6 +122,25 @@ class TestRunMuStructural:
         assert last_entry["projection"] is None
         assert last_entry.get("stall") is True
 
+    def test_structural_trace_step_is_single_pass(self, monkeypatch):
+        """
+        run_mu_structural should not pre-match and then re-run step_mu.
+
+        Regression guard for double-evaluation debt: trace generation must be
+        based on a single structural pass per loop iteration.
+        """
+        import rcx_pi.selfhost.step_mu as step_mu_module
+
+        def _should_not_be_called(*_args, **_kwargs):
+            raise AssertionError("run_mu_structural should not call step_mu")
+
+        monkeypatch.setattr(step_mu_module, "step_mu", _should_not_be_called)
+
+        projs = [{"id": "inc", "pattern": 0, "body": 1}]
+        result = run_mu_structural(projs, 0, max_steps=2)
+        assert result["trace"]["head"]["projection"] == "inc"
+        assert result["result"] == 1
+
     def test_max_steps_without_stall(self, kernel_projections):
         """Max steps reached without stall returns stall=False."""
         # Create a projection that always transforms (never stalls)

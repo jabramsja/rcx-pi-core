@@ -402,6 +402,26 @@ class TestWiringVerification:
                 f"Bridge projections found: {[p for p in ids if p.startswith('bridge.')]}"
             )
 
+    def test_runtime_bridge_ordering_guard_rejects_invalid_order(self):
+        """
+        Runtime guard should reject bridge ordering regressions.
+        """
+        import rcx_pi.selfhost.step_mu as step_mu_module
+        validate_ordering = getattr(step_mu_module, "_validate_combined_bridge_ordering")
+
+        invalid = [
+            {"id": "kernel.wrap"},
+            {"id": "match.var"},
+            {"id": "bridge.var.check_existing"},
+            {"id": "bridge.lookup.found_same"},
+            {"id": "bridge.lookup.found_different"},
+            {"id": "bridge.lookup.not_found_yet"},
+            {"id": "bridge.lookup.not_found"},
+        ]
+
+        with pytest.raises(ValueError, match="Bridge ordering invariant failed"):
+            validate_ordering(invalid)
+
 
 # =============================================================================
 # Algorithm Execution Path Verification
