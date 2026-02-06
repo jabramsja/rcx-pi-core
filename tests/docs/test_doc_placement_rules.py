@@ -6,6 +6,16 @@ These rules ensure task/state sections stay in canonical root trackers.
 
 from __future__ import annotations
 
+# PATH SETUP - Ensure repo root is at position 0 for 'tools' imports
+# pytest adds tests/ to sys.path which can shadow repo root's tools package
+import sys as _sys
+from pathlib import Path as _Path
+_repo_root = str(_Path(__file__).parent.parent.parent)
+if _sys.path[0] != _repo_root:
+    if _repo_root in _sys.path:
+        _sys.path.remove(_repo_root)
+    _sys.path.insert(0, _repo_root)
+
 import re
 from pathlib import Path
 
