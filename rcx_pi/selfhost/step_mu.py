@@ -139,6 +139,26 @@ ALGORITHM_ENTRYPOINT_KEYS = frozenset({  # AST_OK: security whitelist - frozen c
     "_detect_exhaustion",   # Exhaustion algorithm entry point
 })
 
+# Gate 3 policy (minimal reserved set):
+# Some algorithm-internal underscore keys are intentionally not in KERNEL_RESERVED_FIELDS
+# because they are confined to algorithm state payloads under entrypoint subtrees and
+# would over-constrain domain representations if globally reserved. This allowlist is
+# locked by tests/structural/test_reserved_field_policy.py to prevent silent drift.
+ALGORITHM_INTERNAL_UNRESERVED_FIELDS = frozenset({  # AST_OK: security policy allowlist
+    "_closure",
+    "_frozen_check",
+    "_head",
+    "_maxsteps",
+    "_op_ids",
+    "_operator",
+    "_other",
+    "_rest",
+    "_state",
+    "_tau_op",
+    "_tau_operator",
+    "_trace",
+})
+
 
 def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
     """

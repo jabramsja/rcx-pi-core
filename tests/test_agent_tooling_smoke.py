@@ -49,6 +49,7 @@ class TestAgentToolingSmoke:
         "run_review.py",
         "run_ci_review.py",
         "run_interactive.py",
+        "run_skeptic.py",
         "validate_agent_compliance.py",
         "validate_agent_reasoning.py",
         "agent_memory.py",
