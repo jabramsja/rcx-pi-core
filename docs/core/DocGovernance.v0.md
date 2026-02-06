@@ -118,7 +118,7 @@ WorkingRCX/
 **Governed Folders** (require DOC_STATUS headers with all 5 fields):
 - `docs/core/`, `docs/agents/`, `docs/audit/`, `docs/execution/`
 - `docs/cli/`, `docs/schemas/`, `docs/reviews/`
-- `.claude/agents/`
+- `tools/agents/` (agent prompt files)
 
 **Exempt Paths** (no governance required):
 - `docs/archive/` - Historical, read-only, frozen in time

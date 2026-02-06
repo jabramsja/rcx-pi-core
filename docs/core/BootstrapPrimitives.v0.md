@@ -362,7 +362,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 | projection_loader | `seed_integrity.py` | `eval_step.js:JSON.parse()` |
 
 **Security hardening (completed 2026-01-30, updated 2026-02-02):**
-- [x] `KERNEL_RESERVED_FIELDS` validation (24 fields: 12 base + 4 EngineNews + 4 Exhaustion + 4 Bridge)
+- [x] `KERNEL_RESERVED_FIELDS` validation (22 fields: 12 base + 3 EngineNews + 3 Exhaustion + 4 Bridge)
 - [x] `validate_type_tag()` - whitelist enforcement
 - [x] Dict kv-pair normalization parity fix
 - [ ] Lambda calculus guard (future - not critical for L3)

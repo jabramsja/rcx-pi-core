@@ -92,16 +92,16 @@ DOC_TYPES = {
     # docs/reviews - REFERENCE (code review records)
     "mu_equal_fix_summary.md": "REFERENCE",
 
-    # .claude/agents - REFERENCE (agent configurations)
-    "adversary.md": "REFERENCE",
-    "advisor.md": "REFERENCE",
-    "expert.md": "REFERENCE",
-    "fuzzer.md": "REFERENCE",
-    "grounding.md": "REFERENCE",
-    "structural-proof.md": "REFERENCE",
-    "translator.md": "REFERENCE",
-    "verifier.md": "REFERENCE",
-    "visualizer.md": "REFERENCE",
+    # tools/agents - REFERENCE (agent prompt configurations)
+    "adversary_prompt.md": "REFERENCE",
+    "advisor_prompt.md": "REFERENCE",
+    "expert_prompt.md": "REFERENCE",
+    "fuzzer_prompt.md": "REFERENCE",
+    "grounding_prompt.md": "REFERENCE",
+    "structural_proof_prompt.md": "REFERENCE",
+    "translator_prompt.md": "REFERENCE",
+    "verifier_prompt.md": "REFERENCE",
+    "visualizer_prompt.md": "REFERENCE",
 
     # README files
     "README.md": "REFERENCE",

@@ -561,10 +561,10 @@ def run_algorithm_meta_circular(projections: list[Mu], input_value: Mu) -> Mu:
     """
     assert_mu(input_value, "run_algorithm_meta_circular.input")
 
-    # Run through structural match/subst with bridge projections.
-    # Bridge projections provide non-linear pattern support STRUCTURALLY.
-    # Pattern matching uses match.v2 + bridge (not Python match).
-    # Substitution uses subst.v2 (not Python substitute).
+    # HYBRID EXECUTION: Uses Python match/substitute for practical execution.
+    # Bridge projections PROVE structural non-linear support is possible,
+    # but for algorithms we use Python match() which already handles non-linear
+    # patterns correctly. See step_algorithm_with_bridge docstring for details.
     return step_algorithm_with_bridge(projections, input_value)
 
 
@@ -855,7 +855,10 @@ def run_mu_structural(
 
     for i in range(max_steps):
         # Find which projection will match (for trace)
-        # Uses match_mu to stay structural (9-agent review 2026-01-31: avoid Python match())
+        # Use match_mu() which has LINEAR-ONLY semantics matching step_kernel_mu().
+        # Both match.v1 (match_mu) and match.v2 (kernel) are linear-only.
+        # DO NOT use eval_seed.match() here - it has conflict detection which
+        # the kernel's match.v2 does NOT have. See BootstrapStructuralBridge.v0.md.
         matched_id = None
         for proj in projections:
             bindings = match_mu(proj.get("pattern"), current)

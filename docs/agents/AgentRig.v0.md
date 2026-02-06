@@ -329,16 +329,15 @@ python3 tools/ast_police.py
 | File | Purpose |
 |------|---------|
 | `STATUS.md` | **Single source of truth** - agents read this first |
-| `.claude/agents/expert.md` | Builder agent config |
-| `.claude/agents/verifier.md` | Invariant checker config |
-| `.claude/agents/adversary.md` | Red team attacker config |
-| `.claude/agents/structural-proof.md` | Proof demander config |
-| `.claude/agents/grounding.md` | Test writer config |
-| `.claude/agents/translator.md` | Plain English explainer config |
-| `.claude/agents/fuzzer.md` | Chaos monkey / property-based testing |
-| `.claude/agents/visualizer.md` | Mermaid diagram generator |
-| `.claude/agents/advisor.md` | Strategic advisor (when stuck) |
-| `tools/agents/*.md` | Tracked copies of agent prompts |
+| `tools/agents/expert_prompt.md` | Builder agent config |
+| `tools/agents/verifier_prompt.md` | Invariant checker config |
+| `tools/agents/adversary_prompt.md` | Red team attacker config |
+| `tools/agents/structural_proof_prompt.md` | Proof demander config |
+| `tools/agents/grounding_prompt.md` | Test writer config |
+| `tools/agents/translator_prompt.md` | Plain English explainer config |
+| `tools/agents/fuzzer_prompt.md` | Chaos monkey / property-based testing |
+| `tools/agents/visualizer_prompt.md` | Mermaid diagram generator |
+| `tools/agents/advisor_prompt.md` | Strategic advisor (when stuck) |
 | `tools/contraband.sh` | Dumb regex linter (no AI) |
 | `tools/ast_police.py` | AST-based linter (catches what grep misses) |
 

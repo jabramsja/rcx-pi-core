@@ -184,7 +184,7 @@ Simply citing defensive-looking code without showing an attack attempt = NOT_ATT
 - [e.g., "Timing attacks - need runtime analysis"]
 
 ### Verdict
-[SECURE / VULNERABLE / NEEDS HARDENING]
+[SECURE / VULNERABLE / NEEDS_HARDENING]
 ```
 
 **IMPORTANT:** SECURE verdicts require both CHECKED (3+ attack vectors) and NOT_CHECKED sections.
