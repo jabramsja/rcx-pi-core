@@ -207,8 +207,21 @@ class TestAgentCompliance:
         assert "violations" in result or not result.get("compliant", True)
 
 
+# Check if claude_agent_sdk is available (not installed in CI)
+try:
+    import claude_agent_sdk
+    HAS_AGENT_SDK = True
+except ImportError:
+    HAS_AGENT_SDK = False
+
+
+@pytest.mark.skipif(not HAS_AGENT_SDK, reason="claude_agent_sdk not installed (CI environment)")
 class TestOrchestratorIntegration:
-    """Integration tests for the orchestrator."""
+    """Integration tests for the orchestrator.
+
+    These tests require claude_agent_sdk which is only available locally.
+    They are skipped in CI where the SDK is not installed.
+    """
 
     def test_exit_codes_documented(self):
         """Orchestrator should use documented exit codes."""
