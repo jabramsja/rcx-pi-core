@@ -29,6 +29,8 @@ See docs/core/MetaCircularKernel.v0.md for kernel design.
 
 from __future__ import annotations
 
+import json
+
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
@@ -138,6 +140,61 @@ ALGORITHM_ENTRYPOINT_KEYS = frozenset({  # AST_OK: security whitelist - frozen c
 })
 
 
+def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
+    """
+    Return list of (key, value) if value is a normalized dict encoding.
+
+    Normalized dict format (from normalize_for_match):
+      {"_type":"dict","head":{"head":<key>,"tail":{"head":<val>,"tail":null}},"tail": ...}
+
+    Returns None if structure doesn't match normalized dict encoding.
+
+    Gate 3 Security: This allows validate_no_kernel_reserved_fields to check
+    keys inside normalized dict representations, preventing bypass attacks.
+    """
+    if not isinstance(value, dict):
+        return None
+    # Empty dict sentinel: {"_type": "dict"}
+    if set(value.keys()) == {"_type"}:
+        return [] if value.get("_type") == "dict" else None
+    if "_type" in value and value.get("_type") != "dict":
+        return None
+    if "head" not in value or "tail" not in value:
+        return None
+
+    pairs: list[tuple[str, Mu]] = []
+    current: Mu = value
+    while True:
+        if not isinstance(current, dict):
+            return None
+        if "_type" in current and current.get("_type") != "dict":
+            return None
+        if "head" not in current or "tail" not in current:
+            return None
+        kv = current.get("head")
+        if not isinstance(kv, dict):
+            return None
+        if set(kv.keys()) != {"head", "tail"}:
+            return None
+        key = kv.get("head")
+        if not isinstance(key, str):
+            return None
+        kv_tail = kv.get("tail")
+        if not isinstance(kv_tail, dict):
+            return None
+        if set(kv_tail.keys()) != {"head", "tail"}:
+            return None
+        if kv_tail.get("tail") is not None:
+            return None
+        val = kv_tail.get("head")
+        pairs.append((key, val))
+        tail = current.get("tail")
+        if tail is None:
+            break
+        current = tail
+    return pairs
+
+
 def validate_no_kernel_reserved_fields(
     value: Mu,
     context: str = "input",
@@ -180,6 +237,24 @@ def validate_no_kernel_reserved_fields(
         )
 
     if isinstance(value, dict):
+        # Gate 3 Security: Check normalized dict encoding (keys stored as values).
+        # Without this, reserved fields in normalized dicts bypass validation.
+        pairs = _iter_normalized_dict_pairs(value)
+        if pairs is not None:
+            for key, val in pairs:
+                entering_algorithm = key in ALGORITHM_ENTRYPOINT_KEYS
+                if key in KERNEL_RESERVED_FIELDS and not _in_algorithm_subtree:
+                    raise ValueError(
+                        f"SECURITY: {context} cannot contain kernel-reserved field: {key}. "
+                        f"Reserved fields: {sorted(KERNEL_RESERVED_FIELDS)}"
+                    )
+                validate_no_kernel_reserved_fields(
+                    val, context, _depth + 1,
+                    _in_algorithm_subtree=(_in_algorithm_subtree or entering_algorithm)
+                )
+            return
+
+        # Regular dict: check keys directly
         for key, val in value.items():
             # Check if we're entering an algorithm entrypoint subtree
             entering_algorithm = key in ALGORITHM_ENTRYPOINT_KEYS
@@ -258,15 +333,16 @@ def load_combined_kernel_projections() -> list[Mu]:
     SECURITY: Kernel projections MUST come first to prevent domain
     projections from forging kernel state.
 
-    Returns a shallow copy to prevent callers from mutating the cache.
-    (Adversary finding: cache mutation vulnerability - defensive copy)
+    Returns a deep copy to prevent callers from mutating the cache.
+    (Adversary finding: shallow copy allows cache poisoning via dict mutation)
 
     Returns:
         Combined list of kernel, match, and subst projections.
     """
     global _combined_kernel_cache
     if _combined_kernel_cache is not None:
-        return list(_combined_kernel_cache)  # Defensive copy prevents cache mutation
+        # Deep copy via JSON round-trip (Mu is JSON-compatible)
+        return json.loads(json.dumps(_combined_kernel_cache))
 
     # Use mu/ as canonical location via get_seed_path()
     kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
@@ -279,7 +355,8 @@ def load_combined_kernel_projections() -> list[Mu]:
         match_seed["projections"] +
         subst_seed["projections"]
     )
-    return list(_combined_kernel_cache)  # Defensive copy prevents cache mutation
+    # Deep copy via JSON round-trip (Mu is JSON-compatible)
+    return json.loads(json.dumps(_combined_kernel_cache))
 
 
 def clear_combined_kernel_cache() -> None:
@@ -308,8 +385,8 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     SECURITY: Kernel projections MUST come first to prevent domain
     projections from forging kernel state.
 
-    Returns a shallow copy to prevent callers from mutating the cache.
-    (Adversary finding: cache mutation vulnerability - defensive copy)
+    Returns a deep copy to prevent callers from mutating the cache.
+    (Adversary finding: shallow copy allows cache poisoning via dict mutation)
 
     Required for META_CIRCULAR seeds:
     - recurrence.v1.json (uses non-linear patterns for state equality)
@@ -320,7 +397,8 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     """
     global _combined_kernel_bridge_cache
     if _combined_kernel_bridge_cache is not None:
-        return list(_combined_kernel_bridge_cache)  # Defensive copy prevents cache mutation
+        # Deep copy via JSON round-trip (Mu is JSON-compatible)
+        return json.loads(json.dumps(_combined_kernel_bridge_cache))
 
     # Use mu/ as canonical location via get_seed_path()
     kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
@@ -339,7 +417,8 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
         match_seed["projections"] +
         subst_seed["projections"]
     )
-    return list(_combined_kernel_bridge_cache)  # Defensive copy prevents cache mutation
+    # Deep copy via JSON round-trip (Mu is JSON-compatible)
+    return json.loads(json.dumps(_combined_kernel_bridge_cache))
 
 
 # =============================================================================
@@ -572,24 +651,19 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     """
     Run algorithm projections (recurrence, exhaustion) with bridge-enabled matching.
 
-    EXECUTION MODEL:
-    Algorithm projections work with their own internal structure (head/tail
-    linked lists for traces, regular dict keys for state machine mode/phase).
-    They require NON-LINEAR PATTERN SUPPORT (same variable can appear twice,
-    and binding conflicts must be detected).
+    EXECUTION MODEL (Gate 3):
+    Algorithm seeds now use NORMALIZED patterns (linked-list dict format).
+    Input is normalized before matching so patterns can match correctly.
+    Output is DENORMALIZED for backwards compatibility with Kernel and tests.
+    (Gate 4+ may transition to fully normalized internal state.)
+
+    Algorithm projections require NON-LINEAR PATTERN SUPPORT (same variable
+    can appear twice, and binding conflicts must be detected). Python's
+    match() handles this correctly.
 
     The bootstrap_structural bridge PROVES that non-linear pattern support
     CAN be implemented structurally (via bridge.var.check_existing and
     bridge.lookup.* projections). This satisfies the META_CIRCULAR declaration.
-
-    For PRACTICAL EXECUTION, we use Python's match() and substitute() which
-    ALREADY handle non-linear patterns correctly (tested and verified). This:
-    1. Preserves algorithm state format (no kernel normalization)
-    2. Handles non-linear patterns (Python match detects binding conflicts)
-    3. Allows algorithms to run to completion
-
-    The bridge projections are available and tested for cases where TRUE
-    structural execution is required (e.g., cross-substrate verification).
 
     Args:
         projections: Algorithm projections (recurrence.v1 or exhaustion.v1).
@@ -599,11 +673,16 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
         Transformed value if any projection matched, input unchanged otherwise.
     """
     from rcx_pi.selfhost.eval_seed import match, substitute, NO_MATCH
+    from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 
     assert_mu(input_value, "step_algorithm_with_bridge.input")
 
+    # Gate 3: Normalize input for matching against normalized seed patterns.
+    # normalize_for_match is idempotent, so already-normalized state is unchanged.
+    normalized_input = normalize_for_match(input_value)
+
     # Try each algorithm projection using Python match/substitute
-    # Python match() already handles non-linear patterns (binding conflict detection)
+    # Python match() handles non-linear patterns (binding conflict detection)
     for proj in projections:
         pattern = proj.get("pattern")
         body = proj.get("body")
@@ -611,112 +690,16 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
         if pattern is None or body is None:
             continue
 
-        # Python match handles non-linear patterns correctly
-        bindings = match(pattern, input_value)
+        # Match normalized input against normalized pattern
+        bindings = match(pattern, normalized_input)
 
         if bindings is not NO_MATCH:
-            # Python substitute preserves algorithm state format
-            return substitute(body, bindings)
+            # Substitute produces normalized output, denormalize for compatibility
+            normalized_result = substitute(body, bindings)
+            return denormalize_from_match(normalized_result)
 
     # No projection matched - stall
     return input_value
-
-
-def run_structural_match(kernel_projs: list[Mu], pattern: Mu, value: Mu) -> Mu | None:
-    """
-    Run pattern matching using match.v2 + bridge projections.
-
-    This is structural pattern matching - the bridge projections handle
-    non-linear patterns (binding conflict detection) as PROJECTIONS.
-
-    Returns match result with _status and _bindings, or None if matching fails.
-    """
-    from rcx_pi.selfhost.match_mu import normalize_for_match
-
-    # Normalize pattern and value for match.v2
-    norm_pattern = normalize_for_match(pattern)
-    norm_value = normalize_for_match(value)
-
-    # Create match entry state
-    state: Mu = {
-        "match": {
-            "pattern": norm_pattern,
-            "value": norm_value
-        },
-        "_match_ctx": {}
-    }
-
-    # Run match.v2 + bridge until terminal
-    max_steps = 5000
-    for _ in range(max_steps):
-        result = eval_step(kernel_projs, state)
-
-        # Check for terminal state
-        if isinstance(result, dict) and result.get("_mode") == "match_done":
-            return result
-
-        # Check for stall
-        if mu_equal(result, state):
-            return None
-
-        state = result
-
-    return None
-
-
-def run_structural_subst(
-    kernel_projs: list[Mu],
-    body: Mu,
-    bindings: Mu,
-    denormalize: bool = True
-) -> Mu:
-    """
-    Run substitution using subst.v2 projections.
-
-    This is structural substitution - variables are replaced via PROJECTIONS.
-
-    Args:
-        kernel_projs: Combined projections (kernel + match + bridge + subst).
-        body: Template body to substitute into.
-        bindings: Bindings in linked-list format.
-        denormalize: If True, convert linked-lists back to Python lists.
-                     Set to False for algorithm execution where intermediate
-                     states must preserve linked-list format.
-    """
-    from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
-
-    # Normalize body for subst.v2
-    norm_body = normalize_for_match(body)
-
-    # Create subst entry state (subst.wrap expects "body" not "template")
-    state: Mu = {
-        "subst": {
-            "body": norm_body,
-            "bindings": bindings
-        },
-        "_subst_ctx": {}
-    }
-
-    # Run subst.v2 until terminal
-    max_steps = 5000
-    for _ in range(max_steps):
-        result = eval_step(kernel_projs, state)
-
-        # Check for terminal state
-        if isinstance(result, dict) and result.get("_mode") == "subst_done":
-            norm_result = result.get("_result")
-            if norm_result is None:
-                return norm_result
-            # Only denormalize if requested (not for algorithm intermediate states)
-            return denormalize_from_match(norm_result) if denormalize else norm_result
-
-        # Check for stall
-        if mu_equal(result, state):
-            return body  # Return original on stall
-
-        state = result
-
-    return body  # Return original on max steps
 
 
 # =============================================================================

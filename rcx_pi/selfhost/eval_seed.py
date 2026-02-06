@@ -287,6 +287,13 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     assert_mu(pattern, "match.pattern")
     assert_mu(input_value, "match.input")
 
+    # Gate 3: Auto-normalize input when pattern uses normalized dict format.
+    # Normalization is idempotent, so already-normalized input is unchanged.
+    # This allows normalized algorithm seeds to work with raw dict input.
+    if isinstance(pattern, dict) and pattern.get("_type") == "dict":
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        input_value = normalize_for_match(input_value)
+
     # Variable site - matches anything
     if is_var(pattern):
         name = get_var_name(pattern)
@@ -345,8 +352,19 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     if isinstance(pattern, dict):
         if not isinstance(input_value, dict):
             return NO_MATCH
-        if set(pattern.keys()) != set(input_value.keys()):
-            return NO_MATCH
+        # Gate 3: Allow pattern to omit _type key while input has it.
+        # This lets patterns use bare {head, tail} to match normalized lists
+        # which have {head, tail, _type: "list"}.
+        # IMPORTANT: Only allow for _type="list" - dicts require explicit _type in pattern.
+        pattern_keys = set(pattern.keys())
+        input_keys = set(input_value.keys())
+        if pattern_keys != input_keys:
+            # Check if the only difference is _type in input but not pattern
+            extra_is_type = (input_keys - pattern_keys == {"_type"})
+            no_pattern_extra = (len(pattern_keys - input_keys) == 0)
+            type_is_list = (input_value.get("_type") == "list")
+            if not (extra_is_type and no_pattern_extra and type_is_list):
+                return NO_MATCH
         bindings = {}
         for key in pattern:
             sub_bindings = match(pattern[key], input_value[key])
@@ -444,7 +462,15 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     if bindings is NO_MATCH:
         return NO_MATCH
 
-    return substitute(body, bindings)
+    result = substitute(body, bindings)
+
+    # Gate 3: Auto-denormalize output when body uses normalized dict format.
+    # This maintains backwards compatibility with code expecting raw dicts.
+    if isinstance(body, dict) and body.get("_type") == "dict":
+        from rcx_pi.selfhost.match_mu import denormalize_from_match
+        result = denormalize_from_match(result)
+
+    return result
 
 
 # BOOTSTRAP_PRIMITIVE: eval_step

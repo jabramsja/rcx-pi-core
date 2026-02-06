@@ -30,7 +30,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from tools.shared_agent_utils import GOOD_VERDICTS, validate_compliance
+from tools.shared_agent_utils import GOOD_VERDICTS, extract_text_from_message, validate_compliance
 
 
 # =============================================================================
@@ -209,6 +209,7 @@ async def run_analysis_agent(agent_name: str, verbose: bool = False) -> dict:
     print(f"  Running {agent_name}...", end=" ", flush=True)
 
     result_text = ""
+    fragments: list[str] = []
     try:
         async for message in query(
             prompt=prompt,
@@ -217,6 +218,9 @@ async def run_analysis_agent(agent_name: str, verbose: bool = False) -> dict:
                 max_turns=30,  # Allow thorough exploration
             )
         ):
+            extracted = extract_text_from_message(message)
+            if extracted:
+                fragments.append(extracted)
             if hasattr(message, 'result') and message.result:
                 result_text = message.result
     except Exception as e:
@@ -227,6 +231,9 @@ async def run_analysis_agent(agent_name: str, verbose: bool = False) -> dict:
             "error": str(e),
             "output": ""
         }
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     # Extract verdict
     verdict = "UNKNOWN"

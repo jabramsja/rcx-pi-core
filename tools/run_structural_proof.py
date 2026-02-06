@@ -12,12 +12,16 @@ Usage:
 
 import sys
 import anyio
-from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
-from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
-STRUCTURAL_PROOF_PROMPT = Path("tools/agents/structural_proof_prompt.md").read_text()
+STRUCTURAL_PROOF_PROMPT = load_agent_prompt_with_contract("structural-proof")
 
 
 async def run_structural_proof(claim: str) -> str:
@@ -36,6 +40,7 @@ Produce a structural proof report following the format in your instructions.
 """
 
     result_text = ""
+    fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
@@ -44,8 +49,14 @@ Produce a structural proof report following the format in your instructions.
             max_turns=30,
         )
     ):
+        extracted = extract_text_from_message(message)
+        if extracted:
+            fragments.append(extracted)
         if hasattr(message, 'result') and message.result:
             result_text = message.result
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     return result_text
 

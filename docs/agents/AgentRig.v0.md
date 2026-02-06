@@ -329,6 +329,7 @@ python3 tools/ast_police.py
 | File | Purpose |
 |------|---------|
 | `STATUS.md` | **Single source of truth** - agents read this first |
+| `tools/agents/_contract_redteam.md` | Shared injected red-team output contract for all agent prompts |
 | `tools/agents/expert_prompt.md` | Builder agent config |
 | `tools/agents/verifier_prompt.md` | Invariant checker config |
 | `tools/agents/adversary_prompt.md` | Red team attacker config |

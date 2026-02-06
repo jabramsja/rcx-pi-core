@@ -39,8 +39,17 @@ Define a single canonical normalized representation for algorithm state used by 
 5. **Ordering is structural**:
    - Dict key order is the explicit linked-list order of kv-pairs.
    - Projection code must build dicts as linked lists in a defined order.
-6. **Variable sites** remain literal `{"var": "x"}` in patterns.
-7. **Reserved kernel fields** remain prohibited in domain inputs.
+6. **Canonical dict order (Gate 3 contract)**:
+   - Normalization MUST order dict keys lexicographically (`sorted()` in Python, `Array.sort()` in JS).
+   - All normalized algorithm projections MUST match this exact linked-list order.
+   - This is a Gate 3 contract; L4 may later add order-independent field access projections.
+7. **Variable sites** remain literal `{"var": "x"}` in patterns.
+8. **Reserved kernel fields** remain prohibited in domain inputs.
+   - Validation MUST inspect keys inside normalized dict encodings (kv-pair keys),
+     not just raw dict keys, to prevent bypass.
+9. **List `_type` matching (Gate 3 behavior)**:
+   - Patterns may omit `_type` when matching normalized **lists**.
+   - Patterns for normalized **dicts** MUST include `_type:"dict"` explicitly.
 
 ## Trace Representation
 1. Trace is a Mu linked list with `head` and `tail`.

@@ -12,12 +12,16 @@ Usage:
 
 import sys
 import anyio
-from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
-from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
-EXPERT_PROMPT = Path("tools/agents/expert_prompt.md").read_text()
+EXPERT_PROMPT = load_agent_prompt_with_contract("expert")
 
 
 async def run_expert(files: list[str]) -> str:
@@ -39,6 +43,7 @@ Focus on: unnecessary complexity, simpler approaches, emergent patterns, self-ho
 """
 
     result_text = ""
+    fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
@@ -47,8 +52,14 @@ Focus on: unnecessary complexity, simpler approaches, emergent patterns, self-ho
             max_turns=25,
         )
     ):
+        extracted = extract_text_from_message(message)
+        if extracted:
+            fragments.append(extracted)
         if hasattr(message, 'result') and message.result:
             result_text = message.result
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     return result_text
 

@@ -15,12 +15,16 @@ Usage:
 
 import sys
 import anyio
-from pathlib import Path
 from claude_agent_sdk import query, ClaudeAgentOptions
 
-from tools.shared_agent_utils import extract_verdict_secure, validate_compliance
+from tools.shared_agent_utils import (
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+    validate_compliance,
+)
 
-ADVISOR_PROMPT = Path("tools/agents/advisor_prompt.md").read_text()
+ADVISOR_PROMPT = load_agent_prompt_with_contract("advisor")
 
 
 async def run_advisor(
@@ -78,6 +82,7 @@ Produce an advisor report following the format in your instructions.
         tools.append("WebSearch")
 
     result_text = ""
+    fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
@@ -86,8 +91,14 @@ Produce an advisor report following the format in your instructions.
             max_turns=30 if web_search else 25,
         )
     ):
+        extracted = extract_text_from_message(message)
+        if extracted:
+            fragments.append(extracted)
         if hasattr(message, 'result') and message.result:
             result_text = message.result
+
+    if not result_text and fragments:
+        result_text = "\n".join(dict.fromkeys(fragments))
 
     return result_text
 
@@ -141,8 +152,11 @@ async def main():
     if verdict == "NEEDS_MORE_CONTEXT":
         print("\nNEEDS_MORE_CONTEXT - provide more information")
         sys.exit(2)
-    elif verdict in {"OPTIONS_PROVIDED", "RECOMMENDATION"}:
-        print(f"\nADVICE PROVIDED ({verdict})")
+    elif verdict in {"FLAWED_APPROACH", "HIDDEN_CONSTRAINTS"}:
+        print(f"\nADVISOR FLAGS ISSUES ({verdict})")
+        sys.exit(2)
+    elif verdict == "VIABLE_PATH":
+        print("\nVIABLE_PATH - assumptions survived advisor attacks")
     else:
         print(f"\nADVISOR REVIEW COMPLETE (verdict: {verdict})")
 

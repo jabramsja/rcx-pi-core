@@ -24,7 +24,17 @@ import json
 import argparse
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from typing import Literal
+
+try:
+    from tools.shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, extract_verdict_secure
+except ModuleNotFoundError:
+    # Allow direct execution: python tools/validate_agent_reasoning.py
+    import sys
+    from pathlib import Path
+    _tools_dir = Path(__file__).resolve().parent
+    if str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
+    from shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, extract_verdict_secure
 
 
 # =============================================================================
@@ -35,35 +45,57 @@ from typing import Literal
 # So APPROVE requires MORE evidence than rejection
 
 VERDICT_REQUIREMENTS = {
-    # Approval verdicts need rigorous justification
+    # High-confidence approvals require stronger evidence density.
     "APPROVE": {"min_checked": 3, "requires_not_checked": True, "min_evidence": 2},
     "SECURE": {"min_checked": 3, "requires_not_checked": True, "min_evidence": 2},
     "MINIMAL": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+    "COULD_SIMPLIFY": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
     "PROVEN": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 2},
+    "NO_STRUCTURAL_CLAIMS": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
+    "REQUIRES_CI_VERIFICATION": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
     "GROUNDED": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+    "PARTIALLY_GROUNDED": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
     "ROBUST": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
     "MATCHES_INTENT": {"min_checked": 2, "requires_not_checked": True, "min_evidence": 1},
+    "CLEAN": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
+    "VIABLE_PATH": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
 
-    # Rejection verdicts - still need evidence but less burden
+    # Negative/concern verdicts still require concrete evidence.
     "REQUEST_CHANGES": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "NEEDS_DISCUSSION": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
     "VULNERABLE": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "NEEDS_HARDENING": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
     "OVER_ENGINEERED": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
     "UNPROVEN": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "IMPOSSIBLE_AS_CLAIMED": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
     "UNGROUNDED": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
-    "BROKEN": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
-    "DEVIATES": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
-
-    # Soft/neutral verdicts - minimal requirements
-    "COULD_SIMPLIFY": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
-    "PARTIALLY_GROUNDED": {"min_checked": 1, "requires_not_checked": True, "min_evidence": 1},
-    "NEEDS_DISCUSSION": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
+    "THEATER": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
     "FRAGILE": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "BROKEN": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "NOT_EXECUTED": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
+    "DEVIATES": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "SCOPE_CREEP": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "HOST_SMUGGLING": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "STRUCTURAL_LIES": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "PYTHON_SMUGGLING": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "HIDDEN_CONSTRAINTS": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "FLAWED_APPROACH": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 1},
+    "NEEDS_MORE_CONTEXT": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
 }
 
 # Approval verdicts that trigger skeptic challenge
 APPROVAL_VERDICTS = {
-    "APPROVE", "SECURE", "MINIMAL", "PROVEN", "GROUNDED", "ROBUST", "MATCHES_INTENT"
+    verdict
+    for agent, verdicts in AGENT_PASS_VERDICTS.items()
+    if not agent.startswith("deep_")
+    for verdict in verdicts
 }
+
+ALL_CANONICAL_VERDICTS = sorted({
+    verdict for agent, verdicts in AGENT_VERDICTS.items()
+    if not agent.startswith("deep_")
+    for verdict in verdicts
+})
 
 
 # =============================================================================
@@ -76,26 +108,10 @@ def extract_verdict(output: str) -> str | None:
     Security: Only looks for explicit VERDICT: markers to prevent spoofing
     via incidental mentions like "This code is NOT ROBUST".
     """
-    # Look for explicit verdict patterns only
-    patterns = [
-        r'\*\*(?:VERDICT|Verdict)\*\*[:\s]+(\w+)',
-        r'^(?:VERDICT|Verdict)[:\s]+(\w+)',
-        r'###\s*(?:VERDICT|Verdict)[:\s]*(\w+)',
-        # Multi-line: ### Verdict\n**APPROVE**
-        r'###\s*(?:VERDICT|Verdict)\s*\n+\s*\*\*(\w+)',
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, output, re.MULTILINE)
-        if match:
-            found = match.group(1).upper()
-            # Validate it's a known verdict
-            if found in VERDICT_REQUIREMENTS:
-                return found
-
-    # NO FALLBACK - security requirement
-    # Removed: substring matching that could be spoofed
-    return None
+    verdict = extract_verdict_secure(output, valid_verdicts=ALL_CANONICAL_VERDICTS)
+    if verdict == "UNKNOWN":
+        return None
+    return verdict
 
 
 def extract_checked_items(output: str) -> list[str]:

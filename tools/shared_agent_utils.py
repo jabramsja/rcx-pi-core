@@ -15,7 +15,8 @@ All agent runners should import from this module instead of duplicating code.
 import re
 import subprocess
 import unicodedata
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 
 
 # =============================================================================
@@ -26,17 +27,18 @@ AGENT_VERDICTS = {
     "verifier": ["APPROVE", "REQUEST_CHANGES", "NEEDS_DISCUSSION"],
     "adversary": ["SECURE", "VULNERABLE", "NEEDS_HARDENING"],
     "expert": ["MINIMAL", "COULD_SIMPLIFY", "OVER_ENGINEERED"],
-    # structural-proof has expanded verdicts per prompt (Mode A/B support)
     "structural-proof": [
-        "PROVEN", "UNPROVEN", "PARTIAL", "NO_STRUCTURAL_CLAIMS",
-        "IMPOSSIBLE_AS_CLAIMED", "REQUIRES_CI_VERIFICATION"
+        "PROVEN",
+        "UNPROVEN",
+        "IMPOSSIBLE_AS_CLAIMED",
+        "NO_STRUCTURAL_CLAIMS",
+        "REQUIRES_CI_VERIFICATION",
     ],
-    "grounding": ["GROUNDED", "GAPS_FOUND", "NEEDS_TESTS", "PARTIALLY_GROUNDED", "UNGROUNDED", "THEATER"],
-    "fuzzer": ["PASS", "FAIL", "NEEDS_INVESTIGATION", "ROBUST", "FRAGILE", "BROKEN"],
-    "translator": ["CLEAR", "NEEDS_REVISION", "DEVIATES", "MATCHES_INTENT", "NEEDS_DISCUSSION"],
-    "visualizer": ["COMPLETE", "PARTIAL", "NEEDS_DIAGRAMS"],
-    # advisor uses OPTIONS_PROVIDED per prompt
-    "advisor": ["OPTIONS_PROVIDED", "RECOMMENDATION", "NEEDS_MORE_CONTEXT", "RECOMMENDED", "OPTIONAL", "NOT_RECOMMENDED"],
+    "grounding": ["GROUNDED", "PARTIALLY_GROUNDED", "UNGROUNDED", "THEATER"],
+    "fuzzer": ["ROBUST", "FRAGILE", "BROKEN", "NOT_EXECUTED"],
+    "translator": ["MATCHES_INTENT", "DEVIATES", "SCOPE_CREEP", "HOST_SMUGGLING"],
+    "visualizer": ["CLEAN", "STRUCTURAL_LIES", "PYTHON_SMUGGLING"],
+    "advisor": ["VIABLE_PATH", "HIDDEN_CONSTRAINTS", "FLAWED_APPROACH", "NEEDS_MORE_CONTEXT"],
     # Deep analysis verdicts
     "deep_verifier": ["ALIGNED", "DRIFT_DETECTED"],
     "deep_adversary": ["SECURE", "CONCERNS"],
@@ -45,14 +47,81 @@ AGENT_VERDICTS = {
     "deep_advisor": ["HEALTHY", "NEEDS_ATTENTION", "AT_RISK"],
 }
 
-# Good verdicts (pass) for quick checking
-GOOD_VERDICTS = {
-    "APPROVE", "SECURE", "MINIMAL", "COULD_SIMPLIFY", "PROVEN", "PARTIAL",
-    "GROUNDED", "PARTIALLY_GROUNDED", "PASS", "ROBUST", "CLEAR", "COMPLETE",
-    "RECOMMENDED", "OPTIONAL", "OPTIONS_PROVIDED", "RECOMMENDATION",
-    "ALIGNED", "VALID", "HEALTHY", "NO_STRUCTURAL_CLAIMS", "REQUIRES_CI_VERIFICATION",
-    "MATCHES_INTENT"  # translator: code matches documented intent
+AGENT_PASS_VERDICTS = {
+    "verifier": {"APPROVE"},
+    "adversary": {"SECURE"},
+    "expert": {"MINIMAL", "COULD_SIMPLIFY"},
+    "structural-proof": {"PROVEN", "NO_STRUCTURAL_CLAIMS", "REQUIRES_CI_VERIFICATION"},
+    "grounding": {"GROUNDED", "PARTIALLY_GROUNDED"},
+    "fuzzer": {"ROBUST"},
+    "translator": {"MATCHES_INTENT"},
+    "visualizer": {"CLEAN"},
+    # Advisor is explicitly non-gating; all advisor outcomes are advisory-pass.
+    "advisor": {"VIABLE_PATH", "HIDDEN_CONSTRAINTS", "FLAWED_APPROACH", "NEEDS_MORE_CONTEXT"},
+    # Deep analysis pass states
+    "deep_verifier": {"ALIGNED"},
+    "deep_adversary": {"SECURE"},
+    "deep_grounding": {"GROUNDED"},
+    "deep_structural": {"VALID"},
+    "deep_advisor": {"HEALTHY"},
 }
+
+# Runtime gate policy for orchestrated review.
+HARD_GATE_AGENTS = {"verifier", "adversary", "structural-proof"}
+
+
+def _flatten_sets(mapping: dict[str, set[str]]) -> set[str]:
+    values: set[str] = set()
+    for verdicts in mapping.values():
+        values.update(verdicts)
+    return values
+
+
+# Good verdicts (pass) for quick checking and deep-analysis summaries.
+GOOD_VERDICTS = _flatten_sets(AGENT_PASS_VERDICTS)
+
+
+def agent_passed(agent_name: str, verdict: str) -> bool:
+    """Return True when a verdict is considered pass for that agent."""
+    return verdict in AGENT_PASS_VERDICTS.get(agent_name, set())
+
+
+# =============================================================================
+# Prompt Loading
+# =============================================================================
+
+AGENT_PROMPTS_DIR = Path("tools/agents")
+REDTEAM_CONTRACT_PATH = AGENT_PROMPTS_DIR / "_contract_redteam.md"
+
+
+def _normalize_agent_name(agent_name: str) -> str:
+    """Normalize runner names to canonical hyphen form."""
+    return agent_name.strip().lower().replace("_", "-")
+
+
+def get_agent_prompt_path(agent_name: str) -> Path:
+    """Resolve prompt path for an agent."""
+    normalized = _normalize_agent_name(agent_name)
+    file_name = f"{normalized.replace('-', '_')}_prompt.md"
+    return AGENT_PROMPTS_DIR / file_name
+
+
+def load_agent_prompt_with_contract(agent_name: str) -> str:
+    """Load prompt with shared red-team contract prepended.
+
+    This keeps compliance boilerplate centralized so per-agent prompts can
+    focus on attack lens and domain specifics.
+    """
+    prompt_path = get_agent_prompt_path(agent_name)
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Agent prompt not found: {prompt_path}")
+
+    prompt_text = prompt_path.read_text()
+    if not REDTEAM_CONTRACT_PATH.exists():
+        return prompt_text
+
+    contract_text = REDTEAM_CONTRACT_PATH.read_text().strip()
+    return f"{contract_text}\n\n---\n\n{prompt_text}"
 
 
 # =============================================================================
@@ -160,13 +229,20 @@ def extract_verdict_secure(
     # Build pattern for this agent's verdicts
     if valid_verdicts:
         verdict_options = "|".join(re.escape(v) for v in valid_verdicts)
-        specific_pattern = rf'(?:^|\n)\s*(?:\*\*)?[Vv]erdict(?:\*\*)?[:\s]+({verdict_options})\b'
+        specific_pattern = rf'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?[Vv]erdict(?:\*\*)?\s*:\s*(?:\*\*)?\s*({verdict_options})\b'
         match = re.search(specific_pattern, output, re.MULTILINE | re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
+        # Multi-line verdict format:
+        # "### Verdict" then next line "**SECURE**" (or plain SECURE)
+        multiline_specific_pattern = rf'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?[Vv]erdict(?:\*\*)?\s*\n+\s*(?:\*\*)?({verdict_options})(?:\*\*)?\b'
+        match = re.search(multiline_specific_pattern, output, re.MULTILINE | re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
     # Generic verdict pattern (fallback)
-    generic_pattern = r'(?:^|\n)\s*(?:###?\s*)?(?:\*\*)?[Vv]erdict(?:\*\*)?[:\s]+(\w+)'
+    generic_pattern = r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:###?\s*)?(?:\*\*)?[Vv]erdict(?:\*\*)?\s*:\s*(?:\*\*)?\s*([A-Z_]+)'
     match = re.search(generic_pattern, output, re.MULTILINE)
     if match:
         found = match.group(1).upper()
@@ -175,6 +251,67 @@ def extract_verdict_secure(
             return found
 
     return "UNKNOWN"
+
+
+# =============================================================================
+# SDK Message Text Extraction
+# =============================================================================
+
+def _extract_text_from_content_block(block: Any) -> str:
+    """Extract text from a Claude SDK content block with tolerant shape handling."""
+    if block is None:
+        return ""
+    if isinstance(block, str):
+        return block.strip()
+    if isinstance(block, dict):
+        text = block.get("text")
+        if isinstance(text, str):
+            return text.strip()
+        return ""
+
+    text_attr = getattr(block, "text", None)
+    if isinstance(text_attr, str):
+        return text_attr.strip()
+
+    # Some SDK objects expose model_dump(); use it as fallback.
+    model_dump = getattr(block, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump()
+            if isinstance(dumped, dict):
+                text = dumped.get("text")
+                if isinstance(text, str):
+                    return text.strip()
+        except Exception:
+            pass
+
+    return ""
+
+
+def extract_text_from_message(message: Any) -> str:
+    """Extract best-effort text from a Claude SDK message object."""
+    if message is None:
+        return ""
+
+    result = getattr(message, "result", None)
+    if isinstance(result, str) and result.strip():
+        return result.strip()
+
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            text = _extract_text_from_content_block(block)
+            if text:
+                text_parts.append(text)
+        if text_parts:
+            return "\n".join(text_parts).strip()
+    elif content is not None:
+        text = _extract_text_from_content_block(content)
+        if text:
+            return text
+
+    return ""
 
 
 # =============================================================================

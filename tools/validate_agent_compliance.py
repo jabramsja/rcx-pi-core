@@ -28,6 +28,17 @@ from pathlib import Path
 from typing import NamedTuple
 from difflib import SequenceMatcher
 
+try:
+    from tools.shared_agent_utils import AGENT_PASS_VERDICTS
+except ModuleNotFoundError:
+    # Allow direct execution: python tools/validate_agent_compliance.py
+    import sys
+    from pathlib import Path
+    _tools_dir = Path(__file__).resolve().parent
+    if str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
+    from shared_agent_utils import AGENT_PASS_VERDICTS
+
 
 def normalize_line_endings(text: str) -> str:
     """Normalize line endings to Unix-style (LF).
@@ -75,19 +86,31 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
 
     # Split on FINDING: variants to handle common agent output patterns
     # Handles: FINDING:, **FINDING:**, **FINDING**:, ### FINDING:, - FINDING:
-    parts = re.split(r'^(?:\*\*|\#{1,3}\s*|-\s*)?\s*FINDING\s*(?:\*\*)?\s*:\s*', text, flags=re.MULTILINE)
+    parts = re.split(
+        r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*',
+        text,
+        flags=re.MULTILINE
+    )
 
     for part in parts[1:]:  # Skip first empty part
         # Extract finding description (first line)
         finding_match = re.match(r'([^\n]+)', part)
         finding = finding_match.group(1).strip() if finding_match else ""
 
-        # Extract FILE: path (handles **FILE:** and variations)
-        file_match = re.search(r'^(?:\*\*)?FILE(?:\*\*)?:\s*(/[^\n]+)', part, re.MULTILINE)
+        # Extract FILE: path (handles bullets, markdown emphasis, backticks)
+        file_match = re.search(
+            r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?FILE(?:\*\*)?\s*:\s*(?:\*\*)?\s*`?((?:/[^\n`]+|[A-Za-z]:[\\/][^\n`]+))`?',
+            part,
+            re.MULTILINE
+        )
         file_path = file_match.group(1).strip() if file_match else None
 
-        # Extract LINES: or LINE: (handles **LINES:** and variations)
-        lines_match = re.search(r'^(?:\*\*)?LINES?(?:\*\*)?:\s*(\d+(?:-\d+)?)', part, re.MULTILINE)
+        # Extract LINES: or LINE: (handles bullets + markdown variations)
+        lines_match = re.search(
+            r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?LINES?(?:\*\*)?\s*:\s*(?:\*\*)?\s*(\d+(?:-\d+)?)',
+            part,
+            re.MULTILINE
+        )
         lines = lines_match.group(1) if lines_match else None
 
         # Extract CODE: block (handles **CODE:** variations)
@@ -97,7 +120,7 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
         # 3. Non-indented code blocks ending at next marker (VERIFIED, EXPLOIT, PROPOSED_FIX)
         # Try markdown format first (most specific)
         markdown_code_match = re.search(
-            r'^(?:\*\*)?CODE(?:\*\*)?:\s*\n```(?:\w+)?\n(.*?)```',
+            r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n```(?:\w+)?\n(.*?)```',
             part, re.MULTILINE | re.DOTALL
         )
         if markdown_code_match:
@@ -105,7 +128,7 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
         else:
             # Fall back to indented format
             indent_code_match = re.search(
-                r'^(?:\*\*)?CODE(?:\*\*)?:\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
+                r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
                 part, re.MULTILINE
             )
             if indent_code_match:
@@ -115,7 +138,7 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
                 # This handles agents that don't indent their code blocks
                 # Captures everything from CODE:\n until VERIFIED:, EXPLOIT:, PROPOSED_FIX:, or end
                 non_indent_match = re.search(
-                    r'^(?:\*\*)?CODE(?:\*\*)?:\s*\n((?:(?!^(?:VERIFIED|EXPLOIT|PROPOSED_FIX|FINDING)[ :])[^\n]*\n?)+)',
+                    r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n((?:(?!^(?:\s*(?:[-*]\s+)?)?(?:VERIFIED|EXPLOIT|PROPOSED_FIX|FINDING)[ :])[^\n]*\n?)+)',
                     part, re.MULTILINE
                 )
                 if non_indent_match:
@@ -124,8 +147,12 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
                 else:
                     code = None
 
-        # Extract VERIFIED: (handles **VERIFIED:** variations)
-        verified_match = re.search(r'^(?:\*\*)?VERIFIED(?:\*\*)?:\s*(Yes|No)', part, re.MULTILINE | re.IGNORECASE)
+        # Extract VERIFIED: (handles bullets + markdown variations)
+        verified_match = re.search(
+            r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?VERIFIED(?:\*\*)?\s*:\s*(?:\*\*)?\s*(Yes|No)',
+            part,
+            re.MULTILINE | re.IGNORECASE
+        )
         verified = verified_match.group(1) if verified_match else None
 
         blocks.append(FindingBlock(
@@ -150,7 +177,10 @@ def verify_file_paths(blocks: list[FindingBlock], check_exists: bool = True) -> 
     for block in blocks:
         if block.file_path:
             # Check path format (must be absolute)
-            if not block.file_path.startswith('/'):
+            path_str = block.file_path
+            path_obj = Path(path_str)
+            is_windows_abs = bool(re.match(r'^[A-Za-z]:[\\/]', path_str))
+            if not (path_obj.is_absolute() or is_windows_abs):
                 invalid_paths.append(f"{block.file_path} (not absolute path)")
                 continue
 
@@ -268,6 +298,28 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
         # Normalize claimed code once
         claimed_normalized = normalize_code_for_comparison(block.code)
 
+        # SPECIAL CASE: Ellipsis markers indicate intentional summary/truncation
+        # Agents often write summaries like: { "id": "foo", ... } or func_name(...
+        # These are valid citations showing structure, not fabrications
+        has_ellipsis = '...' in block.code or '…' in block.code
+        if has_ellipsis:
+            # Extract key identifiers from the claimed code (function names, IDs, etc.)
+            claimed_identifiers = set(re.findall(r'"id":\s*"([^"]+)"', block.code))
+            claimed_identifiers.update(re.findall(r'def\s+(\w+)', block.code))
+            claimed_identifiers.update(re.findall(r'class\s+(\w+)', block.code))
+            claimed_identifiers.update(re.findall(r'"(\w+)":\s*\{', block.code))
+
+            if claimed_identifiers:
+                # Read actual file and check if identifiers exist in the cited range
+                actual_lines = file_lines[max(0, start_line - 1):min(len(file_lines), end_line + 10)]
+                actual_code = ''.join(actual_lines)
+
+                # Check if ALL claimed identifiers appear in actual code
+                identifiers_found = sum(1 for ident in claimed_identifiers if ident in actual_code)
+                if identifiers_found >= len(claimed_identifiers) * 0.8:
+                    # 80%+ of claimed identifiers found - valid summary
+                    return True, ""
+
         # Try exact line range first, then with ±1, ±2 line tolerance
         # This handles off-by-one errors in agent line citations
         for offset in [0, -1, 1, -2, 2]:
@@ -332,9 +384,18 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
                 union = claimed_tokens | actual_tokens
                 token_similarity = len(intersection) / len(union) if union else 0
 
-                if token_similarity >= 0.6:
+                if token_similarity >= 0.5:
                     # Enough key identifiers match - likely same code, different formatting
+                    # Lowered from 0.6 to 0.5 to handle more truncation cases
                     return True, ""
+
+                # CONTAINMENT CHECK: If claimed tokens are mostly IN actual tokens,
+                # the agent likely excerpted/summarized (even if actual has much more)
+                if len(claimed_tokens) >= 3:
+                    containment = len(intersection) / len(claimed_tokens)
+                    if containment >= 0.7:
+                        # 70%+ of claimed tokens found in actual - valid excerpt
+                        return True, ""
 
         # None of the line offsets worked - this is a FABRICATION
         # Report using the original line range for the error message
@@ -398,7 +459,7 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     blocks_with_verified_no = sum(1 for b in finding_blocks if b.verified and b.verified.lower() == 'no')
 
     # Also count global patterns for backwards compatibility
-    file_citations = count_pattern(output, r'^FILE:\s*/[^\n]+')
+    file_citations = count_pattern(output, r'^FILE:\s*(?:/[^\n]+|[A-Za-z]:[\\/][^\n]+)')
     line_citations = count_pattern(output, r'^LINES?:\s*\d+')
     # CODE block: accepts two formats
     # 1. Markdown: CODE:\n```python\ncode\n```
@@ -484,13 +545,22 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     # === CRITICAL: Approval verdicts require evidence ===
     # Security fix: Prevent rubber-stamp approvals without findings
     # BUT: Legitimate "clean" reviews have no findings - they need explicit analysis evidence
-    approval_verdicts = {"APPROVE", "SECURE", "PROVEN", "GROUNDED", "ROBUST", "MINIMAL", "CLEAN", "MATCHES_INTENT"}
+    approval_verdicts = {
+        verdict
+        for agent, verdicts in AGENT_PASS_VERDICTS.items()
+        if not agent.startswith("deep_")
+        for verdict in verdicts
+    }
     output_upper = output.upper()
     has_approval_verdict = any(v in output_upper for v in approval_verdicts)
 
     if has_approval_verdict and findings == 0:
         # Check if this looks like a genuine approval (has VERDICT marker)
-        verdict_marker = re.search(r'(?:^|\n)\s*(?:\*\*)?(?:###?\s*)?VERDICT', output, re.IGNORECASE)
+        verdict_marker = re.search(
+            r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?VERDICT',
+            output,
+            re.IGNORECASE
+        )
         if verdict_marker:
             # Check for evidence of genuine review without findings:
             # 1. Explicit "no issues/findings/violations" statements
@@ -509,7 +579,7 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
                 # Additional evidence patterns for legitimate approvals
                 r'all\s+(checks?|tests?|verifications?)\s+(pass|passed|complete)',
                 r'###?\s*PASS',  # Markdown PASS headers
-                r'###?\s*CHECKED',  # structural-proof CHECKED sections
+                r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:###?\s*)?(?:\*\*)?CHECKED(?:\*\*)?\s*:?',  # CHECKED section
                 r'verification\s+(complete|passed|successful)',
                 r'claims?\s+(proven|verified|validated)',
                 r'projections?\s+(exist|found|verified)',

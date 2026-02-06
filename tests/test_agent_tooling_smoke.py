@@ -45,6 +45,7 @@ class TestAgentToolingSmoke:
     """Smoke tests to verify agent tools are importable and runnable."""
 
     @pytest.mark.parametrize("script", [
+        "check_agent_runtime.py",
         "run_review.py",
         "run_ci_review.py",
         "run_interactive.py",
@@ -274,8 +275,11 @@ class TestVerdictExtraction:
 
     def test_verdict_marker_required(self):
         """Verdict should only be extracted from explicit VERDICT: markers."""
-        # Import directly from shared_agent_utils where extract_verdict_secure lives
-        from tools.shared_agent_utils import extract_verdict_secure
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
         # Text containing "APPROVE" but not as a verdict marker should return UNKNOWN
         text_without_marker = "This code is APPROVE worthy but needs work"
@@ -284,7 +288,11 @@ class TestVerdictExtraction:
 
     def test_verdict_marker_extracted(self):
         """Verdict should be extracted from explicit VERDICT: markers."""
-        from tools.shared_agent_utils import extract_verdict_secure
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
         text_with_marker = """
         ## Analysis
@@ -297,8 +305,11 @@ class TestVerdictExtraction:
 
     def test_verdict_spoofing_blocked(self):
         """Substring-based verdict spoofing should be blocked."""
-        # Import directly from shared_agent_utils where extract_verdict_secure lives
-        from tools.shared_agent_utils import extract_verdict_secure
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
         # This text has "APPROVE" in context but not as a marker
         spoofing_attempt = """
@@ -308,3 +319,33 @@ class TestVerdictExtraction:
         """
         result = extract_verdict_secure(spoofing_attempt, agent_name="verifier")
         assert result == "REQUEST_CHANGES", f"Should extract REQUEST_CHANGES, not be spoofed by 'NOT APPROVE', got {result}"
+
+    def test_verdict_bullet_markdown_extracted(self):
+        """Verdict should be extracted from bullet markdown format."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text_with_bullet = """
+        ### Summary
+        - **Verdict:** SECURE - all attacks blocked
+        """
+        result = extract_verdict_secure(text_with_bullet, agent_name="adversary")
+        assert result == "SECURE", f"Should extract SECURE from bullet markdown, got {result}"
+
+    def test_verdict_multiline_markdown_extracted(self):
+        """Verdict should be extracted when marker and value are on separate lines."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text_multiline = """
+        ### Verdict
+        **NO_STRUCTURAL_CLAIMS**
+        """
+        result = extract_verdict_secure(text_multiline, agent_name="structural-proof")
+        assert result == "NO_STRUCTURAL_CLAIMS", f"Should extract multiline verdict, got {result}"

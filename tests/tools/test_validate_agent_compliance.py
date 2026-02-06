@@ -720,6 +720,44 @@ VERIFIED: Yes
         blocks = extract_finding_blocks(text)
         assert len(blocks) == 0
 
+    def test_markdown_bullet_fields_extraction(self):
+        """Fields with markdown bullets/emphasis/backticks should be parsed."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = """
+**FINDING:** Markdown formatted issue
+- **FILE:** `/path/to/file.py`
+- **LINES:** 12-15
+- **CODE:**
+```python
+def fn():
+    return 1
+```
+- **VERIFIED:** Yes
+"""
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 1
+        assert blocks[0].file_path == "/path/to/file.py"
+        assert blocks[0].lines == "12-15"
+        assert "def fn()" in (blocks[0].code or "")
+        assert blocks[0].verified == "Yes"
+
+
+class TestApprovalWithoutFindingsEvidence:
+    """Approval verdicts without findings should pass with explicit CHECKED evidence."""
+
+    def test_approval_with_checked_section_is_compliant(self):
+        output = """
+### CHECKED
+- /path/a.py:10 reserved-field validation
+- /path/b.py:25 projection order guard
+
+### VERDICT
+SECURE
+"""
+        result = check_compliance(output)
+        assert result["compliant"] is True
+
 
 class TestHookIntegration:
     """Integration tests for the validation hook (2026-02-02 advisor recommendation)."""

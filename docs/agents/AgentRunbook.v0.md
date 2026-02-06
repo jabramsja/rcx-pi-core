@@ -125,6 +125,9 @@ python tools/run_advisor.py "problem"          # Strategic advice
 
 **Validation is automatic** - built into every runner via `validate_agent_compliance.py --strict`.
 
+**Prompt contract is centralized** - all runners inject `tools/agents/_contract_redteam.md`
+via `load_agent_prompt_with_contract()` before agent-specific lens prompts.
+
 ## Rigorous Mode
 
 For high-stakes changes, add `--rigorous` to challenge approvals:
@@ -151,13 +154,15 @@ python tools/run_review.py rcx_pi/selfhost/ --rigorous
 |-------|-----------|-----------------|
 | verifier | Hard | REQUEST_CHANGES or NEEDS_DISCUSSION |
 | adversary | Hard | VULNERABLE |
-| structural-proof | Hard | UNPROVEN or IMPOSSIBLE |
+| structural-proof | Hard | UNPROVEN or IMPOSSIBLE_AS_CLAIMED |
 | expert | Soft | OVER_ENGINEERED (review recommended) |
-| grounding | Hard | UNGROUNDED (claims need tests) |
-| fuzzer | Hard | BROKEN |
+| grounding | Soft | UNGROUNDED or THEATER (must fix before release) |
+| fuzzer | Soft | BROKEN (must fix before release) |
 | translator | Soft | DEVIATES (founder review) |
 | visualizer | Soft | Red flags detected |
 | advisor | None | Advisory only |
+
+Runtime source of truth: `tools/shared_agent_utils.py` (`HARD_GATE_AGENTS`).
 
 ## Exit Codes
 
@@ -228,6 +233,7 @@ python tools/run_ci_review.py --pr-number 123 --post-comment
 
 Before running agents:
 ```bash
+PYTHONHASHSEED=0 python3 tools/check_agent_runtime.py
 PYTHONHASHSEED=0 ./tools/audit_fast.sh
 ```
 

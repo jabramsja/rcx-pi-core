@@ -50,7 +50,6 @@ import json
 import subprocess
 import asyncio
 import argparse
-import re
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -63,28 +62,46 @@ if str(_tools_dir.parent) not in sys.path:
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
 # Import agent memory for persistent finding storage
-from tools.agent_memory import (
-    store_finding,
-    load_findings,
-    get_context_for_files,
-    get_pattern_context,
-)
+try:
+    from tools.agent_memory import (
+        store_finding,
+        load_findings,
+        get_context_for_files,
+        get_pattern_context,
+    )
+    AGENT_MEMORY_AVAILABLE = True
+    AGENT_MEMORY_IMPORT_ERROR = ""
+except Exception as _agent_memory_error:
+    AGENT_MEMORY_AVAILABLE = False
+    AGENT_MEMORY_IMPORT_ERROR = str(_agent_memory_error)
+
+    def store_finding(*args, **kwargs):
+        return None
+
+    def load_findings():
+        return []
+
+    def get_context_for_files(*args, **kwargs):
+        return ""
+
+    def get_pattern_context(*args, **kwargs):
+        return ""
 
 # Import shared FINDING extraction (single source of truth)
 from tools.validate_agent_compliance import extract_finding_blocks
+from tools.shared_agent_utils import (
+    AGENT_PASS_VERDICTS,
+    HARD_GATE_AGENTS,
+    agent_passed as shared_agent_passed,
+    extract_text_from_message,
+    extract_verdict_secure,
+    load_agent_prompt_with_contract,
+)
 
 
 # =============================================================================
 # Agent Definitions
 # =============================================================================
-
-def load_agent_prompt(name: str) -> str:
-    """Load agent prompt from tools/agents/{name}_prompt.md"""
-    path = Path(f"tools/agents/{name}_prompt.md")
-    if path.exists():
-        return path.read_text()
-    raise FileNotFoundError(f"Agent prompt not found: {path}")
-
 
 def create_agent_definitions() -> dict[str, AgentDefinition]:
     """Create all 9 agent definitions with their specialized prompts."""
@@ -93,25 +110,25 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
         # === HARD GATE AGENTS (must pass for PR approval) ===
         "verifier": AgentDefinition(
             description="Verifies code against North Star invariants. Use for compliance checks.",
-            prompt=load_agent_prompt("verifier"),
+            prompt=load_agent_prompt_with_contract("verifier"),
             tools=["Read", "Grep", "Glob"],
             model="opus"
         ),
         "adversary": AgentDefinition(
             description="Red team agent that tries to break code. Use for security review.",
-            prompt=load_agent_prompt("adversary"),
+            prompt=load_agent_prompt_with_contract("adversary"),
             tools=["Read", "Grep", "Glob"],
             model="opus"
         ),
         "expert": AgentDefinition(
             description="Expert code reviewer for complexity and simplification. Use for quality review.",
-            prompt=load_agent_prompt("expert"),
+            prompt=load_agent_prompt_with_contract("expert"),
             tools=["Read", "Grep", "Glob"],
             model="opus"
         ),
         "structural-proof": AgentDefinition(
             description="Demands concrete proof of structural claims. Use for projection verification.",
-            prompt=load_agent_prompt("structural_proof"),
+            prompt=load_agent_prompt_with_contract("structural-proof"),
             tools=["Read", "Grep", "Glob"],
             model="sonnet"
         ),
@@ -119,13 +136,13 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
         # === DEPTH AGENTS (thorough verification) ===
         "grounding": AgentDefinition(
             description="Converts claims into executable tests. Use for test coverage verification.",
-            prompt=load_agent_prompt("grounding"),
+            prompt=load_agent_prompt_with_contract("grounding"),
             tools=["Read", "Grep", "Glob"],
             model="sonnet"
         ),
         "fuzzer": AgentDefinition(
             description="Property-based testing with Hypothesis. Use for edge case discovery.",
-            prompt=load_agent_prompt("fuzzer"),
+            prompt=load_agent_prompt_with_contract("fuzzer"),
             tools=["Read", "Grep", "Glob"],
             model="sonnet"
         ),
@@ -133,13 +150,13 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
         # === FOUNDER AGENTS (human-readable output) ===
         "translator": AgentDefinition(
             description="Explains code in plain English. Use for founder review.",
-            prompt=load_agent_prompt("translator"),
+            prompt=load_agent_prompt_with_contract("translator"),
             tools=["Read", "Grep", "Glob"],
             model="sonnet"
         ),
         "visualizer": AgentDefinition(
             description="Creates Mermaid diagrams of structures. Use for visual verification.",
-            prompt=load_agent_prompt("visualizer"),
+            prompt=load_agent_prompt_with_contract("visualizer"),
             tools=["Read", "Grep", "Glob"],
             model="sonnet"
         ),
@@ -147,7 +164,7 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
         # === ADVISORY AGENT (non-gating) ===
         "advisor": AgentDefinition(
             description="Strategic advisor for design decisions. Use when stuck.",
-            prompt=load_agent_prompt("advisor"),
+            prompt=load_agent_prompt_with_contract("advisor"),
             tools=["Read", "Grep", "Glob"],
             model="opus"
         ),
@@ -172,9 +189,6 @@ PARALLEL_GROUPS = [
     ["translator", "visualizer"],                              # Group 3: Founder
     ["advisor"],                                               # Group 4: Advisory
 ]
-
-HARD_GATE_AGENTS = {"verifier", "adversary", "structural-proof"}  # expert is soft gate per AgentRunbook
-
 
 # =============================================================================
 # Compliance Validation
@@ -275,77 +289,41 @@ def verdict_to_severity(agent_name: str, verdict: str) -> str:
     if verdict in {"VULNERABLE", "BROKEN", "IMPOSSIBLE_AS_CLAIMED", "THEATER"}:
         return "critical"
     # High severity
-    if verdict in {"REQUEST_CHANGES", "OVER_ENGINEERED", "UNPROVEN", "UNGROUNDED", "FRAGILE", "NOT_EXECUTED"}:
+    if verdict in {
+        "REQUEST_CHANGES",
+        "OVER_ENGINEERED",
+        "UNPROVEN",
+        "UNGROUNDED",
+        "FRAGILE",
+        "NOT_EXECUTED",
+        "SCOPE_CREEP",
+        "HOST_SMUGGLING",
+        "STRUCTURAL_LIES",
+        "PYTHON_SMUGGLING",
+    }:
         return "high"
     # Medium
-    if verdict in {"COULD_SIMPLIFY", "PARTIALLY_GROUNDED", "DEVIATES", "RED_FLAGS", "CONCERNS", "NEEDS_HARDENING"}:
+    if verdict in {
+        "COULD_SIMPLIFY",
+        "PARTIALLY_GROUNDED",
+        "DEVIATES",
+        "CONCERNS",
+        "NEEDS_HARDENING",
+        "HIDDEN_CONSTRAINTS",
+        "FLAWED_APPROACH",
+        "NEEDS_DISCUSSION",
+    }:
         return "medium"
     # Low/info - passing verdicts
-    if verdict in {
-        "APPROVE", "SECURE", "MINIMAL", "PROVEN", "GROUNDED", "ROBUST", "CLEAN", "MATCHES_INTENT",
-        "NO_STRUCTURAL_CLAIMS", "REQUIRES_CI_VERIFICATION",  # structural-proof passes
-        "OPTIONS_PROVIDED", "RECOMMENDATION",  # advisor passes
-    }:
+    all_pass_verdicts = {v for values in AGENT_PASS_VERDICTS.values() for v in values}
+    if verdict in all_pass_verdicts:
         return "info"
     return "medium"
 
 
 def extract_verdict(agent_name: str, output: str) -> str:
-    """Extract verdict from agent output.
-
-    Security fix: Look for explicit VERDICT: markers first to prevent
-    spoofing via incidental mentions of verdict words in output text.
-    """
-    # Verdicts must match what agent prompts actually define
-    verdicts = {
-        "verifier": ["APPROVE", "REQUEST_CHANGES", "NEEDS_DISCUSSION"],
-        "adversary": ["SECURE", "VULNERABLE", "NEEDS_HARDENING"],
-        "expert": ["MINIMAL", "COULD_SIMPLIFY", "OVER_ENGINEERED"],
-        "structural-proof": [
-            "PROVEN", "UNPROVEN", "IMPOSSIBLE_AS_CLAIMED",
-            "NO_STRUCTURAL_CLAIMS",  # When no structural claims exist to verify
-            "REQUIRES_CI_VERIFICATION",  # Mode B: execution unavailable
-        ],
-        "grounding": ["GROUNDED", "PARTIALLY_GROUNDED", "UNGROUNDED", "THEATER"],
-        "fuzzer": ["ROBUST", "FRAGILE", "BROKEN", "NOT_EXECUTED"],
-        "translator": ["MATCHES_INTENT", "DEVIATES", "NEEDS_DISCUSSION"],
-        "visualizer": ["CLEAN", "RED_FLAGS"],
-        "advisor": ["OPTIONS_PROVIDED", "RECOMMENDATION", "NEEDS_MORE_CONTEXT"],
-    }
-
-    valid_verdicts = set(verdicts.get(agent_name, []))
-    if not valid_verdicts:
-        return "UNKNOWN"
-
-    # Priority 1: Look for explicit VERDICT: or **Verdict:** markers (same line)
-    # Pattern: "### Verdict: APPROVE" or "**Verdict:** SECURE"
-    verdict_pattern = re.compile(
-        r'(?:^|\n)\s*(?:\*\*)?(?:###?\s*)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?[:\s]+(\w+)',
-        re.MULTILINE
-    )
-    for match in verdict_pattern.finditer(output):
-        found = match.group(1).upper()
-        if found in valid_verdicts:
-            return found
-        # Security: Removed startswith recovery - it allowed partial verdict spoofing
-        # e.g., "Verdict: RO" with "ROBUST" nearby would incorrectly match ROBUST
-        # Only exact verdict matches are accepted now
-
-    # Priority 2: Multi-line verdict (verdict on next line after header)
-    # Pattern: "### Verdict\n\n**NO_STRUCTURAL_CLAIMS**" or "### Verdict\nAPPROVE"
-    multiline_pattern = re.compile(
-        r'(?:^|\n)\s*(?:\*\*)?(?:###?\s*)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?\s*\n+\s*(?:\*\*)?([A-Z_]+)',
-        re.MULTILINE
-    )
-    for match in multiline_pattern.finditer(output):
-        found = match.group(1).upper()
-        if found in valid_verdicts:
-            return found
-
-    # Priority 3: NO FALLBACK - only explicit VERDICT: markers count
-    # Removed substring fallback to prevent verdict spoofing via incidental mentions
-    # e.g., "This code is NOT ROBUST" should NOT match as ROBUST verdict
-    return "UNKNOWN"
+    """Extract verdict from agent output using shared secure parsing."""
+    return extract_verdict_secure(output, agent_name=agent_name)
 
 
 def agent_passed(agent_name: str, verdict: str) -> bool:
@@ -353,22 +331,7 @@ def agent_passed(agent_name: str, verdict: str) -> bool:
 
     Pass verdicts must align with what agent prompts define as acceptable outcomes.
     """
-    pass_verdicts = {
-        "verifier": {"APPROVE"},
-        "adversary": {"SECURE"},  # NEEDS_HARDENING is NOT a pass - requires fixes
-        "expert": {"MINIMAL", "COULD_SIMPLIFY"},
-        "structural-proof": {
-            "PROVEN",
-            "NO_STRUCTURAL_CLAIMS",  # Nothing to verify = pass
-            "REQUIRES_CI_VERIFICATION",  # Needs CI, not a failure
-        },
-        "grounding": {"GROUNDED", "PARTIALLY_GROUNDED"},
-        "fuzzer": {"ROBUST"},  # NOT_EXECUTED is NOT a pass
-        "translator": {"MATCHES_INTENT"},
-        "visualizer": {"CLEAN"},
-        "advisor": {"OPTIONS_PROVIDED", "RECOMMENDATION"},
-    }
-    return verdict in pass_verdicts.get(agent_name, set())
+    return shared_agent_passed(agent_name, verdict)
 
 
 # =============================================================================
@@ -393,9 +356,21 @@ class ReviewOrchestrator:
         self.regression_warnings: list[dict] = []
         self.soft_warnings: list[dict] = []  # Non-hard-gate failures
         self.total_findings_stored: int = 0
+        if self.use_memory and not AGENT_MEMORY_AVAILABLE:
+            self.use_memory = False
+            if self.verbose:
+                print(
+                    "⚠️  Agent memory disabled: "
+                    f"{AGENT_MEMORY_IMPORT_ERROR}"
+                )
 
-    async def run_single_agent(self, agent_name: str) -> AgentResult:
-        """Run a single agent and return its result."""
+    async def run_single_agent(self, agent_name: str, retry_feedback: str = "") -> AgentResult:
+        """Run a single agent and return its result.
+
+        Args:
+            agent_name: Name of the agent to run
+            retry_feedback: If provided, include this feedback about previous failure
+        """
         if self.verbose:
             print(f"  Starting {agent_name}...")
 
@@ -412,10 +387,26 @@ class ReviewOrchestrator:
             if file_context or pattern_context:
                 memory_context = file_context + pattern_context
 
+        # Build retry feedback section if this is a retry
+        retry_section = ""
+        if retry_feedback:
+            retry_section = f"""
+---
+IMPORTANT: Your previous output failed compliance validation. Here's what went wrong:
+{retry_feedback}
+
+Please address these issues in your response. Ensure you:
+1. Include proper FINDING blocks with FILE, LINES, CODE, and VERIFIED fields
+2. Include a clear Verdict line
+3. Do NOT fabricate code - only cite code you actually read with the Read tool
+---
+"""
+
         prompt = f"""You are the RCX {agent_name.replace('-', ' ').title()} Agent.
 
 {agent_def.prompt}
 {memory_context}
+{retry_section}
 ---
 
 Now review these files: {file_list}
@@ -424,6 +415,8 @@ Produce a report following the format in your instructions.
 """
 
         result_text = ""
+        last_error = None
+        message_text_fragments: list[str] = []
 
         try:
             async for message in query(
@@ -433,13 +426,47 @@ Produce a report following the format in your instructions.
                     max_turns=30,
                 )
             ):
+                # Check for API errors on AssistantMessage
+                if hasattr(message, 'error') and message.error:
+                    last_error = message.error
+
+                # Capture any text-like content as backup (SDK shape can vary)
+                extracted = extract_text_from_message(message)
+                if extracted:
+                    message_text_fragments.append(extracted)
+
+                # Primary: get result from ResultMessage
                 if hasattr(message, 'result') and message.result:
                     result_text = message.result
         except Exception as e:
             result_text = f"AGENT ERROR: {e}"
 
-        # Validate compliance
-        is_compliant, compliance_error, _ = validate_compliance(result_text)
+        # If no result but we have an error, report it
+        if not result_text and last_error:
+            result_text = f"AGENT API ERROR: {last_error}"
+
+        # If no result but we captured text fragments, use them as fallback
+        if not result_text and message_text_fragments:
+            # Deduplicate while preserving order
+            result_text = "\n".join(dict.fromkeys(message_text_fragments))
+
+        # Handle empty output as a special compliance failure
+        if not result_text or not result_text.strip():
+            is_compliant = False
+            # Provide diagnostic info in verbose mode
+            if self.verbose:
+                print(
+                    f"    DEBUG {agent_name}: result_text empty, "
+                    f"last_error={last_error}, message_fragments={len(message_text_fragments)}"
+                )
+            compliance_error = (
+                f"EMPTY OUTPUT: Agent returned no output. "
+                f"API error: {last_error or 'none'}. "
+                f"Extracted fragments: {len(message_text_fragments)}."
+            )
+        else:
+            # Validate compliance
+            is_compliant, compliance_error, _ = validate_compliance(result_text)
 
         # Extract verdict
         verdict = extract_verdict(agent_name, result_text)
@@ -585,7 +612,7 @@ Produce a report following the format in your instructions.
                 compliance_failures = [r for r in hard_gate_failures if not r.is_compliant]
                 verdict_failures = [r for r in hard_gate_failures if r.is_compliant]
 
-                # Retry compliance failures with explicit feedback
+                # Retry compliance failures with explicit feedback about what went wrong
                 if compliance_failures:
                     print(f"\n🔄 Retrying {len(compliance_failures)} agent(s) with compliance failures...")
                     for r in compliance_failures:
@@ -595,7 +622,9 @@ Produce a report following the format in your instructions.
                     retry_results = []
                     for r in compliance_failures:
                         print(f"   Retrying {r.name}...")
-                        retry = await self.run_single_agent(r.name)
+                        # Pass the compliance error as feedback so agent knows what to fix
+                        retry_feedback = r.compliance_error or "Unknown compliance failure"
+                        retry = await self.run_single_agent(r.name, retry_feedback=retry_feedback)
                         retry_results.append(retry)
 
                         if retry.is_compliant:
@@ -634,7 +663,18 @@ Produce a report following the format in your instructions.
             {
                 'agent': r.name,
                 'verdict': r.verdict,
-                'severity': 'medium' if r.verdict in ('COULD_SIMPLIFY', 'PARTIALLY_GROUNDED', 'DEVIATES') else 'low',
+                'severity': 'medium' if r.verdict in (
+                    'COULD_SIMPLIFY',
+                    'PARTIALLY_GROUNDED',
+                    'DEVIATES',
+                    'SCOPE_CREEP',
+                    'HOST_SMUGGLING',
+                    'STRUCTURAL_LIES',
+                    'PYTHON_SMUGGLING',
+                    'HIDDEN_CONSTRAINTS',
+                    'FLAWED_APPROACH',
+                    'NEEDS_HARDENING',
+                ) else 'low',
             }
             for r in all_results if not r.is_hard_gate and not r.passed
         ]
@@ -955,8 +995,9 @@ Examples:
                 for result, violation in hard_gate_failures:
                     print(f"  Retrying {result.name}...")
 
-                    # Re-run with stronger format reminder
-                    retry_result = await orchestrator.run_single_agent(result.name)
+                    # Re-run with feedback about what went wrong
+                    retry_feedback = f"Reasoning validation failed: {violation}"
+                    retry_result = await orchestrator.run_single_agent(result.name, retry_feedback=retry_feedback)
 
                     # Check if retry fixed the issue
                     retry_reasoning = validate_reasoning(retry_result.output)

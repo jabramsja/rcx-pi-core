@@ -141,6 +141,29 @@ class TestEntrypointSubtreeAllowed:
         # Should NOT raise
         validate_no_kernel_reserved_fields(real_input, "test")
 
+    def test_normalized_reserved_key_rejected(self):
+        """Reserved fields in normalized dict keys MUST be rejected."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+
+        normalized = normalize_for_match({"_mode": "recurrence"})
+
+        with pytest.raises(ValueError, match="SECURITY.*_mode"):
+            validate_no_kernel_reserved_fields(normalized, "test")
+
+    def test_normalized_entrypoint_allows_reserved(self):
+        """Reserved fields inside entrypoint subtree are allowed even when normalized."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+
+        normalized = normalize_for_match({
+            "_detect_closure": {
+                "_mode": "recurrence",
+                "_phase": "scan"
+            }
+        })
+
+        # Should NOT raise
+        validate_no_kernel_reserved_fields(normalized, "test")
+
 
 class TestMixedScenarios:
     """Test mixed scenarios combining legitimate and attack patterns."""
