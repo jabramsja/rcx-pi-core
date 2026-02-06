@@ -229,14 +229,12 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
         return False, "No LINES provided"
 
     # Security: Validate path to prevent traversal attacks
-    # Only allow paths within the current working directory or absolute paths to project files
+    # ONLY allow paths within the current working directory (repo root)
+    # This prevents reading arbitrary files like /proc/self/environ or ~/.ssh/id_rsa
     try:
         resolved_path = Path(block.file_path).resolve()
         cwd = Path.cwd().resolve()
-        # Allow paths within cwd, or absolute paths that exist and are regular files
-        if not (resolved_path.is_relative_to(cwd) or
-                (resolved_path.exists() and resolved_path.is_file() and
-                 not str(resolved_path).startswith(('/etc/', '/root/', '/var/')))):
+        if not resolved_path.is_relative_to(cwd):
             return False, f"Path not allowed: {block.file_path} (must be within project directory)"
     except (OSError, ValueError) as e:
         return False, f"Invalid path: {block.file_path} ({e})"
