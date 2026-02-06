@@ -2,6 +2,19 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-06
+
+### Tooling: Canonical Pre-Commit Gate Consolidated
+
+- Removed legacy script: `tools/pre-commit-check.sh`
+- Standardized on `tools/pre-commit-doc-check` as the single pre-commit gate
+- Added targeted staged-file checks to `tools/pre-commit-doc-check`:
+  - `py_compile` for staged Python files
+  - bare `except:` detection in staged `rcx_pi/*` files
+  - `ast_police.py` on staged `rcx_pi/*` files
+  - `seed_police.sh` when staged `mu/*.json` files are present
+- Updated docs and grounding tests to reference only the canonical hook path
+
 ## 2026-02-03
 
 ### rcx_engine.v1.json Test Coverage: 6 Projections Now Tested

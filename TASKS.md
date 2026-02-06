@@ -170,7 +170,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - QoL Infrastructure (PRs #131+):
   - Agent reports as PR comments (verifier, adversary, expert, structural-proof)
   - Debt dashboard (`tools/debt_dashboard.sh`)
-  - Pre-commit local checks (`tools/pre-commit-check.sh`)
+  - Canonical pre-commit local gate (`tools/pre-commit-doc-check`)
   - Projection test coverage (`rcx_pi/projection_coverage.py`)
   - Agent memory across sessions (`tools/agent_memory.py`)
   - Trace visualization (`tools/trace_viewer.py`)

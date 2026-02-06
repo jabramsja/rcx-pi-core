@@ -180,12 +180,12 @@ pytest -n auto --dist worksteal
 |--------|---------|------|
 | `tools/pre-commit-doc-check` | Doc consistency, debt ceiling | Auto on `git commit` (~5s) |
 | `tools/pre-push-fast` | Fast audit (audit_fast.sh) | Auto on `git push` (~2-3 min) |
-| `tools/pre-commit-check.sh` | Syntax, contraband, AST, docs | Run manually |
 
 **Consistency tools:**
 - `./tools/check_docs_consistency.sh` - Validate STATUS.md matches reality
 - `./tools/debt_dashboard.sh` - Show current debt counts and locations
 - Verifier agent (Section F) - Checks doc consistency as part of verification
+- `./tools/pre-commit-doc-check` - Canonical local commit gate (manual or via git hook)
 
 **Cost model:**
 - Local agents (Claude Code): FREE (Max subscription)
