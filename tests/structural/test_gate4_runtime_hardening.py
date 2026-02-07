@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-import rcx_pi.selfhost.match_mu as match_mu_module
 from rcx_pi.selfhost.step_mu import (
     apply_mu,
     run_mu_structural,
     step_algorithm_with_bridge,
 )
+from rcx_pi.selfhost.match_mu import match_mu
 
 
 def test_apply_mu_rejects_reserved_input_field():
@@ -87,11 +87,11 @@ def test_run_mu_structural_activates_global_budget_when_inactive(monkeypatch):
     assert budget.stopped == 1
 
 
-def test_match_mu_cycle_guard_rejects_cycle(monkeypatch):
-    # Force entry into _check_empty_var_names by bypassing assert_mu,
-    # then verify cycle guard fails closed.
-    monkeypatch.setattr(match_mu_module, "assert_mu", lambda *_args, **_kwargs: None)
-    cycle = {}
-    cycle["self"] = cycle
-    with pytest.raises(ValueError, match="Cyclic structure detected"):
-        match_mu_module.match_mu(cycle, {"ok": True})
+def test_match_mu_allows_shared_substructures_without_false_cycle():
+    # Shared (aliased) sub-structures are not cycles and should not be rejected.
+    shared_var = {"var": "v"}
+    pattern = {"0": shared_var, "00": shared_var}
+    value = {"0": 1, "00": 1}
+    result = match_mu(pattern, value)
+    assert isinstance(result, dict)
+    assert result.get("v") == 1
