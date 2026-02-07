@@ -343,19 +343,22 @@ class ReviewOrchestrator:
 
     def __init__(self, files: list[str], depth: str = "full", verbose: bool = False,
                  use_memory: bool = True, pr_number: int | None = None,
-                 show_warnings: bool = False):
+                 show_warnings: bool = False,
+                 continue_on_hard_gate: bool = True):
         self.files = files
         self.depth = depth
         self.verbose = verbose
         self.use_memory = use_memory
         self.pr_number = pr_number
         self.show_warnings = show_warnings
+        self.continue_on_hard_gate = continue_on_hard_gate
         self.agents_to_run = DEPTH_AGENTS.get(depth, DEPTH_AGENTS["full"])
         self.agent_definitions = create_agent_definitions()
         self.results: list[AgentResult] = []
         self.regression_warnings: list[dict] = []
         self.soft_warnings: list[dict] = []  # Non-hard-gate failures
         self.total_findings_stored: int = 0
+        self._hard_gate_failed: bool = False
         if self.use_memory and not AGENT_MEMORY_AVAILABLE:
             self.use_memory = False
             if self.verbose:
@@ -649,13 +652,15 @@ Produce a report following the format in your instructions.
                             error_preview = r.compliance_error[:200]
                             print(f"     └─ {error_preview}{'...' if len(r.compliance_error) > 200 else ''}")
                     print(f"\n   Run with --verbose for full details")
-                    self.results = all_results
-                    self.total_findings_stored = sum(r.findings_stored for r in all_results)
                     self._hard_gate_failed = True
-                    return all_results
+                    if not self.continue_on_hard_gate:
+                        self.results = all_results
+                        self.total_findings_stored = sum(r.findings_stored for r in all_results)
+                        return all_results
+                    print("\n⚠️  Continuing despite hard gate failure (diagnostic mode)")
 
         self.results = all_results
-        self._hard_gate_failed = False
+        self._hard_gate_failed = any(r.is_hard_gate and not r.passed for r in all_results)
         self.total_findings_stored = sum(r.findings_stored for r in all_results)
 
         # Collect soft warnings (non-hard-gate failures)
@@ -919,6 +924,17 @@ Examples:
         help="Show full warning details (default: summary only)"
     )
     parser.add_argument(
+        "--continue-on-hard-gate",
+        action="store_true",
+        default=True,
+        help="(Default) Continue running non-hard-gate agents for diagnostics even if a hard gate fails"
+    )
+    parser.add_argument(
+        "--fail-fast-hard-gate",
+        action="store_true",
+        help="Stop immediately after hard gate failures in phase 1 (legacy fail-fast behavior)"
+    )
+    parser.add_argument(
         "--pr-number",
         type=int,
         help="PR number to associate with findings (for tracking)"
@@ -956,6 +972,7 @@ Examples:
         use_memory=not args.no_memory,
         pr_number=args.pr_number,
         show_warnings=args.show_warnings,
+        continue_on_hard_gate=(not args.fail_fast_hard_gate),
     )
     await orchestrator.run_all()
 

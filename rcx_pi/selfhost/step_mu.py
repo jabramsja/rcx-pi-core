@@ -35,6 +35,7 @@ from .eval_seed import NO_MATCH, host_iteration, step as eval_step
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_equal
+from .kernel import get_step_budget
 from .seed_integrity import get_seed_path, load_verified_seed
 
 
@@ -773,17 +774,21 @@ def step_kernel_mu(
 
         # Terminal state check - simple structural marker detection
         if is_kernel_terminal(result):
-            return extract_kernel_result(result, input_value)
+            output = extract_kernel_result(result, input_value)
+            validator(output, "step_kernel_mu output")
+            return output
 
         # Stall check - no change means no progress
         # Skip for intermediate kernel states (they have deep nested structures
         # and are mid-execution by definition, not stalls)
         if not is_kernel_intermediate(result) and mu_equal(result, current):
+            validator(input_value, "step_kernel_mu output")
             return input_value
 
         current = result
 
     # Max steps exceeded - return original input (stall)
+    validator(input_value, "step_kernel_mu output")
     return input_value
 
 
@@ -856,6 +861,26 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 
     assert_mu(input_value, "step_algorithm_with_bridge.input")
+    validate_algorithm_runtime_fields(input_value, "step_algorithm_with_bridge input")
+    validate_kernel_projections_first(projections)
+
+    for i, proj in enumerate(projections):
+        if not isinstance(proj, dict):
+            continue
+        proj_id = proj.get("id", "")
+        if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+            raise ValueError(
+                f"SECURITY: step_algorithm_with_bridge expects algorithm/domain projections only, "
+                f"got kernel projection at index {i}: {proj_id}"
+            )
+        if "pattern" in proj:
+            validate_algorithm_runtime_fields(
+                proj["pattern"], f"step_algorithm_with_bridge projection[{i}].pattern"
+            )
+        if "body" in proj:
+            validate_algorithm_runtime_fields(
+                proj["body"], f"step_algorithm_with_bridge projection[{i}].body"
+            )
 
     # Gate 3: Normalize input for matching against normalized seed patterns.
     # normalize_for_match is idempotent, so already-normalized state is unchanged.
@@ -876,7 +901,9 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
         if bindings is not NO_MATCH:
             # Substitute produces normalized output, denormalize for compatibility
             normalized_result = substitute(body, bindings)
-            return denormalize_from_match(normalized_result)
+            result = denormalize_from_match(normalized_result)
+            validate_algorithm_runtime_fields(result, "step_algorithm_with_bridge output")
+            return result
 
     # No projection matched - stall
     return input_value
@@ -917,13 +944,19 @@ def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     pattern = projection["pattern"]
     body = projection["body"]
 
+    validate_no_kernel_reserved_fields(input_value, "apply_mu input")
+    validate_no_kernel_reserved_fields(pattern, "apply_mu pattern")
+    validate_no_kernel_reserved_fields(body, "apply_mu body")
+
     # Use Mu-based match (runs match projections via kernel loop)
     bindings = match_mu(pattern, input_value)
     if bindings is NO_MATCH:
         return NO_MATCH
 
     # Use Mu-based substitute (runs subst projections via kernel loop)
-    return subst_mu(body, bindings)
+    result = subst_mu(body, bindings)
+    validate_no_kernel_reserved_fields(result, "apply_mu output")
+    return result
 
 
 def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
@@ -1013,65 +1046,91 @@ def run_mu_structural(
     This enables Rule 2.2 (closure-on-second-demand) - EngineNews projections
     can pattern-match against the trace to detect when a state recurs.
     """
+    assert_mu(initial, "run_mu_structural.initial")
+    validate_no_kernel_reserved_fields(initial, "run_mu_structural initial")
+    validate_kernel_projections_first(projections)
+    for i, proj in enumerate(projections):
+        if not isinstance(proj, dict):
+            continue
+        if "pattern" in proj:
+            validate_no_kernel_reserved_fields(
+                proj["pattern"], f"run_mu_structural projection[{i}].pattern"
+            )
+        if "body" in proj:
+            validate_no_kernel_reserved_fields(
+                proj["body"], f"run_mu_structural projection[{i}].body"
+            )
+
+    budget = get_step_budget()
+    started_budget = False
+    if not budget.is_active():
+        budget.start()
+        started_budget = True
+
     trace_entries = []
     current = initial
 
-    for i in range(max_steps):
-        # Single-pass structural step: identify first match and apply it once.
-        # This avoids the previous double-evaluation path (pre-match + step_mu).
-        matched_id = None
-        result = current
-        for proj in projections:
-            if not isinstance(proj, dict):
-                continue
-            pattern = proj.get("pattern")
-            body = proj.get("body")
-            if pattern is None or body is None:
-                continue
-            bindings = match_mu(pattern, current)
-            if bindings is not NO_MATCH:
-                matched_id = proj.get("id")
-                try:
-                    result = subst_mu(body, bindings)
-                except KeyError:
-                    # Parity with step_mu: unresolved substitution stalls and
-                    # returns original input rather than bubbling an exception.
-                    result = current
-                break
+    try:
+        for i in range(max_steps):
+            # Single-pass structural step: identify first match and apply it once.
+            # This avoids the previous double-evaluation path (pre-match + step_mu).
+            matched_id = None
+            result = current
+            for proj in projections:
+                if not isinstance(proj, dict):
+                    continue
+                pattern = proj.get("pattern")
+                body = proj.get("body")
+                if pattern is None or body is None:
+                    continue
+                bindings = match_mu(pattern, current)
+                if bindings is not NO_MATCH:
+                    matched_id = proj.get("id")
+                    try:
+                        result = subst_mu(body, bindings)
+                    except KeyError:
+                        # Parity with step_mu: unresolved substitution stalls and
+                        # returns original input rather than bubbling an exception.
+                        result = current
+                    break
 
-        trace_entries.append({
-            "step": i,
-            "state": current,
-            "projection": matched_id
-        })
-
-        # Check for stall (no change)
-        if mu_equal(result, current):
+            validate_no_kernel_reserved_fields(result, "run_mu_structural output")
             trace_entries.append({
-                "step": i + 1,
-                "state": result,
-                "projection": None,
-                "stall": True
+                "step": i,
+                "state": current,
+                "projection": matched_id
             })
-            return {
-                "result": result,
-                "trace": list_to_linked(trace_entries),
-                "stall": True,
-                "steps": i + 1
-            }
 
-        current = result
+            # Check for stall (no change)
+            if mu_equal(result, current):
+                trace_entries.append({
+                    "step": i + 1,
+                    "state": result,
+                    "projection": None,
+                    "stall": True
+                })
+                return {
+                    "result": result,
+                    "trace": list_to_linked(trace_entries),
+                    "stall": True,
+                    "steps": i + 1
+                }
 
-    # Hit max steps without stall
-    trace_entries.append({
-        "step": max_steps,
-        "state": current,
-        "projection": None,
-        "max_steps": True
-    })
-    return {
-        "result": current,
-        "trace": list_to_linked(trace_entries),
-        "stall": False,
-        "steps": max_steps
-    }
+            current = result
+
+        # Hit max steps without stall
+        trace_entries.append({
+            "step": max_steps,
+            "state": current,
+            "projection": None,
+            "max_steps": True
+        })
+        return {
+            "result": current,
+            "trace": list_to_linked(trace_entries),
+            "stall": False,
+            "steps": max_steps
+        }
+    finally:
+        if started_budget:
+            budget.stop()
