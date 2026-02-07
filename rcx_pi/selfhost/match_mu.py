@@ -10,7 +10,7 @@ See docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu
+from .mu_type import Mu, assert_mu, MAX_MU_DEPTH, MAX_MU_WIDTH
 from .eval_seed import NO_MATCH, _NoMatch
 from .classify_mu import classify_linked_list
 from .projection_loader import make_projection_loader
@@ -71,22 +71,47 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
     """
     # Iterative traversal with explicit stack
     # BOUNDARY SCAFFOLDING: Pre-validation check, not semantic computation.
-    stack: list[Mu] = [value]
+    stack: list[tuple[Mu, bool]] = [(value, False)]
+    active_containers: set[int] = set()
+    max_nodes = MAX_MU_DEPTH * MAX_MU_WIDTH
+    nodes_scanned = 0
 
     while stack:  # @host_iteration: boundary pre-validation (9-agent review 2026-01-31)
-        current = stack.pop()
+        current, exiting = stack.pop()
+        if exiting:
+            if isinstance(current, (dict, list)):
+                active_containers.discard(id(current))
+            continue
+
+        nodes_scanned += 1
+        if nodes_scanned > max_nodes:
+            raise ValueError(
+                f"Variable-name validation exceeded maximum node scan ({max_nodes}) in {context}"
+            )
 
         if isinstance(current, dict):  # isinstance at boundary is scaffolding
+            container_id = id(current)
+            if container_id in active_containers:
+                raise ValueError(f"Cyclic structure detected while validating {context}")
+            active_containers.add(container_id)
+            stack.append((current, True))
             # Check if this is a variable site with empty name
             keys = set(current.keys())  # AST_OK: key comparison
             if keys == {"var"} and isinstance(current.get("var"), str):
                 if current["var"] == "":
                     raise ValueError(f"Variable name cannot be empty in {context}: {{'var': ''}}")
             # Add dict values to stack for processing
-            stack.extend(current.values())
+            for v in current.values():
+                stack.append((v, False))
         elif isinstance(current, list):  # isinstance at boundary is scaffolding
+            container_id = id(current)
+            if container_id in active_containers:
+                raise ValueError(f"Cyclic structure detected while validating {context}")
+            active_containers.add(container_id)
+            stack.append((current, True))
             # Add list items to stack for processing
-            stack.extend(current)
+            for item in current:
+                stack.append((item, False))
 
 
 # =============================================================================

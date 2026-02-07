@@ -108,6 +108,11 @@ FORBIDDEN_PATTERNS = [
         "JavaScript substrate moved to mu/host/js/",
         "Use mu/host/js/eval_step.js",
     ),
+    ForbiddenPattern(
+        r'JS substrate does not load bridge',
+        "Outdated bridge claim: JS now loads bootstrap_structural.v1.json",
+        "Update to reflect current behavior in mu/host/js/eval_step.js",
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 

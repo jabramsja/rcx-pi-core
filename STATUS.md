@@ -607,8 +607,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-04 (Gate 2 complete; tooling delta items)
-**Next milestone:** Gate 3 - Rewrite Algorithm Seeds for Normalized State
+**Last updated:** 2026-02-07 (Gate 4 prep infrastructure complete; docs consistency hardening)
+**Next milestone:** Gate 4 - Structural Algorithm Execution (switch default runtime path)
 
 **Known Architectural Constraints:** See "Known Architectural Constraints" section in [`roadmap/MetaCircular_Boot0_GatePlan.md`](roadmap/MetaCircular_Boot0_GatePlan.md) for authoritative documentation of:
 - Why kernel reserved fields block algorithm entry
@@ -659,7 +659,8 @@ New organized structure makes architecture visible:
 - Design doc: `docs/core/BootstrapStructuralBridge.v0.md`
 - Execution path verified: bridge projections DO fire for non-linear patterns
 - Bridge capability proven; standalone runners removed (dead code cleanup)
-- Note: JS substrate does not load bridge (Python-only for now; JS uses bootstrap path)
+- Note: JS substrate loads bridge projections (`mu/host/js/eval_step.js`) for structural parity paths.
+  Production algorithm execution remains hybrid/bootstrap until Gate 4 cutover.
 
 **Current Algorithm Execution:**
 - `run_algorithm_meta_circular()` uses Python match/substitute

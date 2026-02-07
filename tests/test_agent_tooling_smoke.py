@@ -270,6 +270,28 @@ class TestOrchestratorIntegration:
         )
         assert "--show-warnings" in result.stdout
 
+    def test_continue_on_hard_gate_flag_exists(self):
+        """Orchestrator should expose --continue-on-hard-gate for explicit diagnostics mode."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--continue-on-hard-gate" in result.stdout
+
+    def test_fail_fast_hard_gate_flag_exists(self):
+        """Orchestrator should support --fail-fast-hard-gate legacy behavior."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--fail-fast-hard-gate" in result.stdout
+
 
 class TestVerdictExtraction:
     """Tests for secure verdict extraction."""

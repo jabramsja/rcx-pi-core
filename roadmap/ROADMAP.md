@@ -15,16 +15,14 @@ Read first:
 6. `roadmap/MuHemispheresDesign.md`
 
 **Now (9-agent reviewed 2026-02-04)**
-1. Confirm the normalization strategy decision in `roadmap/NormalizationDecisionMemo.md`. If accepted, treat it as the official direction.
-2. **Gate 1 first:** Complete the normalization spec in `roadmap/AlgorithmNormalizationSpec.v0.md`. Resolve all open questions (required for Gate 1 exit). Once approved, migrate to `docs/core/`.
-3. **Gate 0 second:** Run baseline freeze immediately before Gate 2 begins (not standalone). Lock parity and checksums.
-4. Explicitly block hemisphere implementation until Gate 5 completes. Design only is allowed.
+1. Gate 1, Gate 0, Gate 2, and Gate 3 are complete. Keep this reflected in canonical trackers (`STATUS.md`, `TASKS.md`).
+2. Start Gate 4 execution using the prepared kernel infrastructure (`kernel_mode`, strict `algorithm_runtime` validation).
+3. Keep hemisphere implementation blocked until Gate 5 completes. Design-only work is still allowed.
 
 **Next**
-1. Execute Gates 1 → 0 → 2 → 3 → 4 → 5 per `roadmap/MetaCircular_Boot0_GatePlan.md`. This is the canonical path to true meta-circular algorithm execution.
-2. Gate 3 must include 4 fuzzer edge cases (per 9-agent review): frozen list stress, multi-state cycles, quadruple var, mixed patterns.
-3. Gate 2 adapter window must close explicitly before Gate 4 (hard requirement).
-4. After Gate 5, hemisphere implementation may proceed.
+1. Execute Gate 4 (structural algorithm execution) and then Gate 5 (meta-circular parity) per `roadmap/MetaCircular_Boot0_GatePlan.md`.
+2. Gate 2 adapter window remains closed before Gate 4 production cutover (hard requirement).
+3. After Gate 5, hemisphere implementation may proceed.
 
 **Vector (Design Only)**
 1. Mu-only hemisphere routing design in `roadmap/MuHemispheresDesign.md`. This is blocked on completion of the normalization refactor. No implementation until Gate 5 exit criteria are met.
