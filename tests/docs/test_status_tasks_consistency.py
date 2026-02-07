@@ -8,6 +8,7 @@ high-risk execution-layer claims that can otherwise drift silently.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,86 +16,98 @@ STATUS_PATH = REPO_ROOT / "STATUS.md"
 TASKS_PATH = REPO_ROOT / "TASKS.md"
 
 LAYER_TOKENS = ("BOOTSTRAP", "META_CIRCULAR")
-SEED_ALIASES = {
-    "recurrence": ("recurrence.v1.json", "recurrence.v1"),
-    "exhaustion": ("exhaustion.v1.json", "exhaustion.v1"),
-}
 
 
-def _find_layer_claims(text: str, aliases: tuple[str, ...]) -> list[tuple[int, str, str]]:
-    claims: list[tuple[int, str, str]] = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
-        if not any(alias in line for alias in aliases):
-            continue
-        for token in LAYER_TOKENS:
-            if token in line:
-                claims.append((line_no, token, line.strip()))
-    return claims
-
-
-def _format_claims(doc_name: str, claims: list[tuple[int, str, str]]) -> str:
-    if not claims:
-        return f"{doc_name}: (no matching layer claims found)"
-    lines = [f"{doc_name} claims:"]
-    for line_no, token, line in claims:
-        lines.append(f"  - L{line_no}: {token} | {line}")
-    return "\n".join(lines)
+def _extract_canonical_layer(text: str, label: str) -> str:
+    pattern = re.compile(rf"^{re.escape(label)}:\s*(BOOTSTRAP|META_CIRCULAR)\s*$", re.MULTILINE)
+    matches = pattern.findall(text)
+    assert len(matches) == 1, (
+        f"Expected exactly one canonical layer line for '{label}', found {len(matches)}.\n"
+        f"Required format: '{label}: BOOTSTRAP|META_CIRCULAR'"
+    )
+    return matches[0]
 
 
 def test_execution_layer_claims_match_between_status_and_tasks() -> None:
     """
-    STATUS.md and TASKS.md must not disagree on recurrence/exhaustion layer.
-
-    If one file says BOOTSTRAP and the other says META_CIRCULAR for the same
-    seeds, tracker sync should fail to prevent semantic drift.
+    STATUS.md and TASKS.md must not disagree on canonical execution-layer lines.
     """
     status_text = STATUS_PATH.read_text(encoding="utf-8")
     tasks_text = TASKS_PATH.read_text(encoding="utf-8")
 
-    for seed_name, aliases in SEED_ALIASES.items():
-        status_claims = _find_layer_claims(status_text, aliases)
-        tasks_claims = _find_layer_claims(tasks_text, aliases)
-
-        status_layers = {token for _, token, _ in status_claims}
-        tasks_layers = {token for _, token, _ in tasks_claims}
-
-        assert len(status_layers) == 1, (
-            f"STATUS.md must have exactly one execution-layer claim for {seed_name}.\n"
-            f"{_format_claims('STATUS.md', status_claims)}"
-        )
-        assert len(tasks_layers) == 1, (
-            f"TASKS.md must have exactly one execution-layer claim for {seed_name}.\n"
-            f"{_format_claims('TASKS.md', tasks_claims)}"
-        )
-        assert status_layers == tasks_layers, (
-            f"STATUS.md and TASKS.md disagree on execution layer for {seed_name}.\n"
-            f"{_format_claims('STATUS.md', status_claims)}\n"
-            f"{_format_claims('TASKS.md', tasks_claims)}"
+    for label in ("Current Recurrence Layer", "Current Exhaustion Layer"):
+        status_layer = _extract_canonical_layer(status_text, label)
+        tasks_layer = _extract_canonical_layer(tasks_text, label)
+        assert status_layer in LAYER_TOKENS
+        assert tasks_layer in LAYER_TOKENS
+        assert status_layer == tasks_layer, (
+            f"STATUS.md and TASKS.md disagree for '{label}'. "
+            f"status={status_layer}, tasks={tasks_layer}"
         )
 
 
-def test_both_trackers_state_algorithm_path_is_currently_hybrid() -> None:
+def test_both_trackers_state_algorithm_path_matches_canonical_layer() -> None:
     """
-    Both trackers must explicitly reflect current runtime path.
+    Runtime path text must match canonical layer declaration.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    status_layer = _extract_canonical_layer(status_text, "Current Recurrence Layer")
+    tasks_layer = _extract_canonical_layer(tasks_text, "Current Recurrence Layer")
+    assert status_layer == tasks_layer
 
-    Runtime truth: recurrence/exhaustion still execute through Python
-    match/substitute path in production (hybrid), not structural-only.
+    if status_layer == "META_CIRCULAR":
+        status_has_marker = (
+            "run_algorithm_meta_circular() defaults to `step_kernel_mu(" in status_text
+            or "`run_algorithm_meta_circular()` defaults to `step_kernel_mu(" in status_text
+            or "run_algorithm_meta_circular() now defaults to structural kernel bridge path" in status_text
+        )
+        tasks_has_marker = (
+            "defaults to structural kernel bridge path" in tasks_text
+            or "run_algorithm_meta_circular() defaults to `step_kernel_mu(" in tasks_text
+            or "`run_algorithm_meta_circular()` defaults to `step_kernel_mu(" in tasks_text
+        )
+        assert status_has_marker, "STATUS.md missing Gate 4 structural runtime marker."
+        assert tasks_has_marker, "TASKS.md missing Gate 4 structural runtime marker."
+    else:
+        assert "uses Python match/substitute" in status_text
+        assert "uses Python match/substitute" in tasks_text
+
+
+def test_status_l3_summary_is_not_self_contradictory() -> None:
+    """
+    STATUS.md must not claim both "L3 achieved/complete" and "L3 future".
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    has_l3_achieved = (
+        "L3 COMPLETE" in status_text
+        or "L3: Substrate Portability (ACHIEVED" in status_text
+    )
+    has_l3_future_row = any(
+        "| **L3:" in line and "FUTURE" in line
+        for line in status_text.splitlines()
+    )
+    assert not (has_l3_achieved and has_l3_future_row), (
+        "STATUS.md has contradictory L3 claims (achieved/complete vs future)."
+    )
+
+
+def test_gate_snapshot_matches_between_status_and_tasks() -> None:
+    """
+    STATUS.md and TASKS.md must mirror Gate 3/4/5 snapshot lines exactly.
+
+    This prevents drift where one tracker says Gate 4 started but the other
+    still reads as pre-Gate-4.
     """
     status_text = STATUS_PATH.read_text(encoding="utf-8")
     tasks_text = TASKS_PATH.read_text(encoding="utf-8")
 
-    status_has_hybrid_marker = (
-        "uses Python match/substitute" in status_text
-        or "Current Algorithm Execution" in status_text
-    )
-    tasks_has_hybrid_marker = (
-        "uses Python match/substitute" in tasks_text
-        or "Current architecture" in tasks_text
+    required_snapshot_lines = (
+        "Gate 3: COMPLETE",
+        "Gate 4: COMPLETE",
+        "Gate 5: IN_PROGRESS",
     )
 
-    assert status_has_hybrid_marker, (
-        "STATUS.md must explicitly describe current hybrid runtime path."
-    )
-    assert tasks_has_hybrid_marker, (
-        "TASKS.md must explicitly describe current hybrid runtime path."
-    )
+    for line in required_snapshot_lines:
+        assert line in status_text, f"STATUS.md missing gate snapshot line: {line}"
+        assert line in tasks_text, f"TASKS.md missing gate snapshot line: {line}"

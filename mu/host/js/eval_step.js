@@ -94,6 +94,43 @@ const ALGORITHM_ENTRYPOINT_KEYS = new Set([
   '_detect_exhaustion',   // Exhaustion algorithm entry point
 ]);
 
+// Gate 3 policy (minimal reserved set):
+// Some algorithm-internal underscore keys are intentionally not in
+// KERNEL_RESERVED_FIELDS because they are confined to algorithm state payloads.
+const ALGORITHM_INTERNAL_UNRESERVED_FIELDS = new Set([
+  '_closure',
+  '_frozen_check',
+  '_head',
+  '_maxsteps',
+  '_op_ids',
+  '_operator',
+  '_other',
+  '_rest',
+  '_state',
+  '_tau_op',
+  '_tau_operator',
+  '_trace',
+]);
+
+// Gate 4 prep parity with Python step_mu.py:
+// allowlisted underscore fields for trusted algorithm runtime mode.
+const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
+  ...ALGORITHM_ENTRYPOINT_KEYS,
+  ...ALGORITHM_INTERNAL_UNRESERVED_FIELDS,
+  '_check_list',
+  '_current',
+  '_frozen',
+  '_mode',
+  '_operator_ids',
+  '_phase',
+  '_result',
+  '_seen',
+  '_stall',
+  '_step',
+  '_tau_step',
+  '_type',
+]);
+
 // Maximum depth for validation traversal (fail closed)
 const MAX_VALIDATION_DEPTH = 100;
 
@@ -152,6 +189,25 @@ function iterNormalizedDictPairs(value) {
     if (steps > MAX_VALIDATION_DEPTH) return null;
   }
   return pairs;
+}
+
+/**
+ * Check whether value appears to be a normalized dict encoding candidate.
+ *
+ * Conservative heuristic: explicit {_type:"dict"} or head/tail with kv-like head.
+ * If candidate parsing fails, validators should fail closed.
+ */
+function looksLikeNormalizedDictCandidate(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value._type === 'dict') return true;
+  if (!('head' in value) || !('tail' in value)) return false;
+  const kv = value.head;
+  if (kv === null || typeof kv !== 'object' || Array.isArray(kv)) return false;
+  const kvKeys = Object.keys(kv);
+  if (kvKeys.length !== 2 || !('head' in kv) || !('tail' in kv)) return false;
+  if (typeof kv.head !== 'string') return false;
+  const kvTail = kv.tail;
+  return kvTail !== null && typeof kvTail === 'object' && !Array.isArray(kvTail);
 }
 
 /**
@@ -218,6 +274,12 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _i
     }
     return;
   }
+  if (looksLikeNormalizedDictCandidate(value)) {
+    throw new Error(
+      `SECURITY: Malformed normalized dict encoding at ${context}. ` +
+      `Failing closed to prevent reserved-field bypass.`
+    );
+  }
 
   // Regular objects: check keys and recurse into values
   for (const [key, val] of Object.entries(value)) {
@@ -236,6 +298,65 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _i
       val, `${context}.${key}`, _depth + 1,
       _inAlgorithmSubtree || enteringAlgorithm
     );
+  }
+}
+
+/**
+ * Validate trusted algorithm runtime state at kernel entry.
+ *
+ * Mirrors Python validate_algorithm_runtime_fields():
+ * - unknown underscore fields are rejected (fail closed)
+ * - underscore keys inside normalized dict encodings are validated
+ */
+function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
+  if (_depth > MAX_VALIDATION_DEPTH) {
+    throw new Error(
+      `SECURITY: ${context} exceeded maximum validation depth (${MAX_VALIDATION_DEPTH}). ` +
+      `Possible deeply nested attack structure.`
+    );
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      validateAlgorithmRuntimeFields(value[i], `${context}[${i}]`, _depth + 1);
+    }
+    return;
+  }
+
+  const dictPairs = iterNormalizedDictPairs(value);
+  if (dictPairs !== null) {
+    for (const [key, val] of dictPairs) {
+      if (key.startsWith('_') && !ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
+        throw new Error(
+          `SECURITY: ${context} contains unsupported algorithm underscore field: ${key}. ` +
+          `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
+        );
+      }
+      validateAlgorithmRuntimeFields(val, `${context}.${key}`, _depth + 1);
+    }
+    return;
+  }
+
+  if (looksLikeNormalizedDictCandidate(value)) {
+    throw new Error(
+      `SECURITY: ${context} contains malformed normalized dict encoding. Failing closed.`
+    );
+  }
+
+  for (const [key, val] of Object.entries(value)) {
+    if (typeof key === 'string' && key.startsWith('_')) {
+      if (!ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
+        throw new Error(
+          `SECURITY: ${context} contains unsupported algorithm underscore field: ${key}. ` +
+          `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
+        );
+      }
+    }
+    validateAlgorithmRuntimeFields(val, `${context}.${key}`, _depth + 1);
   }
 }
 
@@ -987,17 +1108,30 @@ function listToLinked(arr) {
  * @throws {Error} If domain input contains kernel-reserved fields
  */
 function stepKernel(projections, domainInput, domainProjections, options = {}) {
-  const { maxSteps = 10000, shouldNormalize = true } = options;
+  const {
+    maxSteps = 10000,
+    shouldNormalize = true,
+    validationMode = 'domain',
+  } = options;
 
-  // SECURITY: Validate domain input does not contain kernel-reserved fields
-  // This prevents domain data from forging kernel state
-  validateNoKernelReservedFields(domainInput, 'domainInput');
+  let validator;
+  if (validationMode === 'domain') {
+    validator = validateNoKernelReservedFields;
+  } else if (validationMode === 'algorithm_runtime') {
+    validator = validateAlgorithmRuntimeFields;
+  } else {
+    throw new Error(
+      `SECURITY: invalid validationMode '${validationMode}'. ` +
+      `Expected 'domain' or 'algorithm_runtime'.`
+    );
+  }
 
-  // SECURITY: Validate each domain projection's pattern and body
+  // SECURITY: Validate input and projection payloads at selected boundary mode.
+  validator(domainInput, 'domainInput');
   for (let i = 0; i < domainProjections.length; i++) {
     const proj = domainProjections[i];
-    validateNoKernelReservedFields(proj.pattern, `domainProjections[${i}].pattern`);
-    validateNoKernelReservedFields(proj.body, `domainProjections[${i}].body`);
+    validator(proj.pattern, `domainProjections[${i}].pattern`);
+    validator(proj.body, `domainProjections[${i}].body`);
   }
 
   // Normalize if requested
@@ -1005,11 +1139,15 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   const normalizedProjs = shouldNormalize
     ? domainProjections.map(normalizeProjection)
     : domainProjections;
+  const kernelDomainProjs = normalizedProjs.map(proj => ({
+    pattern: proj.pattern,
+    body: proj.body
+  }));
 
   // Wrap in kernel format
   const kernelInput = {
     _step: normalizedInput,
-    _projs: listToLinked(normalizedProjs)
+    _projs: listToLinked(kernelDomainProjs)
   };
 
   // Run kernel cycle
@@ -1049,11 +1187,19 @@ function runStructural(projections, input, maxSteps = 10000) {
   let current = input;
 
   for (let i = 0; i < maxSteps; i++) {
-    // Find which projection will match (for trace)
     let matchedId = null;
+    let result = current;
+
+    // Single-pass apply: first-match-wins with one match/substitute execution.
     for (const proj of projections) {
-      if (match(proj.pattern, current) !== NO_MATCH) {
+      const bindings = match(proj.pattern, current);
+      if (bindings !== NO_MATCH) {
         matchedId = proj.id || null;
+        result = substitute(proj.body, bindings);
+        if (typeof proj.body === 'object' && proj.body !== null &&
+            !Array.isArray(proj.body) && proj.body._type === 'dict') {
+          result = denormalize(result);
+        }
         break;
       }
     }
@@ -1063,8 +1209,6 @@ function runStructural(projections, input, maxSteps = 10000) {
       state: current,
       projection: matchedId
     });
-
-    const result = step(projections, current);
 
     // Check for stall (no change)
     if (muEqual(result, current)) {
@@ -1107,16 +1251,30 @@ function runStructural(projections, input, maxSteps = 10000) {
  * Combines security validation with structural trace accumulation.
  */
 function stepKernelStructural(projections, domainInput, domainProjections, options = {}) {
-  const { maxSteps = 10000, shouldNormalize = true } = options;
+  const {
+    maxSteps = 10000,
+    shouldNormalize = true,
+    validationMode = 'domain',
+  } = options;
 
-  // SECURITY: Validate domain input does not contain kernel-reserved fields
-  validateNoKernelReservedFields(domainInput, 'domainInput');
+  let validator;
+  if (validationMode === 'domain') {
+    validator = validateNoKernelReservedFields;
+  } else if (validationMode === 'algorithm_runtime') {
+    validator = validateAlgorithmRuntimeFields;
+  } else {
+    throw new Error(
+      `SECURITY: invalid validationMode '${validationMode}'. ` +
+      `Expected 'domain' or 'algorithm_runtime'.`
+    );
+  }
 
-  // SECURITY: Validate each domain projection's pattern and body
+  // SECURITY: Validate input and projection payloads at selected boundary mode.
+  validator(domainInput, 'domainInput');
   for (let i = 0; i < domainProjections.length; i++) {
     const proj = domainProjections[i];
-    validateNoKernelReservedFields(proj.pattern, `domainProjections[${i}].pattern`);
-    validateNoKernelReservedFields(proj.body, `domainProjections[${i}].body`);
+    validator(proj.pattern, `domainProjections[${i}].pattern`);
+    validator(proj.body, `domainProjections[${i}].body`);
   }
 
   // Normalize if requested
@@ -1124,11 +1282,15 @@ function stepKernelStructural(projections, domainInput, domainProjections, optio
   const normalizedProjs = shouldNormalize
     ? domainProjections.map(normalizeProjection)
     : domainProjections;
+  const kernelDomainProjs = normalizedProjs.map(proj => ({
+    pattern: proj.pattern,
+    body: proj.body
+  }));
 
   // Wrap in kernel format
   const kernelInput = {
     _step: normalizedInput,
-    _projs: listToLinked(normalizedProjs)
+    _projs: listToLinked(kernelDomainProjs)
   };
 
   // Run kernel cycle with structural trace
@@ -2006,7 +2168,13 @@ if (process.argv.includes('--json-api')) {
         let steps = 0;
         const limit = maxSteps || 200;
         while (steps < limit) {
-          const next = step(allProjectionsWithRecurrenceAndBridge, current);
+          const wrapped = stepKernel(
+            allProjectionsWithBridge,
+            current,
+            recurrenceProjections,
+            { validationMode: 'algorithm_runtime' }
+          );
+          const next = denormalize(wrapped.result);
           if (muEqual(current, next)) break;
           current = next;
           steps++;
@@ -2023,7 +2191,13 @@ if (process.argv.includes('--json-api')) {
         let steps = 0;
         const limit = maxSteps || 200;
         while (steps < limit) {
-          const next = step(allProjectionsWithExhaustionAndBridge, current);
+          const wrapped = stepKernel(
+            allProjectionsWithBridge,
+            current,
+            exhaustionProjections,
+            { validationMode: 'algorithm_runtime' }
+          );
+          const next = denormalize(wrapped.result);
           if (muEqual(current, next)) break;
           current = next;
           steps++;

@@ -19,7 +19,7 @@ NAME: Mechanical Kernel (Security Hardened)
 |-------|-------------|--------|
 | **L1: Algorithmic** | match/subst algorithms EXPRESSED as Mu projections | DONE (Python executes projections) |
 | **L2: Operational** | kernel state machine EXPRESSED as Mu projections | FULL (decision: accept for-loop as bootstrap primitive) |
-| **L3: Full Bootstrap** | RCX runs RCX on minimal substrate | FUTURE (Forth-style bootstrap - see below) |
+| **L3: Substrate Portability** | Same projections on Python and JavaScript substrates | COMPLETE |
 | **L4: True Self-Hosting** | Bootstrap primitives eliminated or substrate-independent | SINK (research question) |
 
 **Terminology Honesty:**
@@ -607,8 +607,16 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-07 (Gate 4 prep infrastructure complete; docs consistency hardening)
-**Next milestone:** Gate 4 - Structural Algorithm Execution (switch default runtime path)
+**Last updated:** 2026-02-07 (Gate 4 cutover complete; structural runtime is default)
+**Next milestone:** Gate 5 - Meta-Circular Parity
+
+**Gate Snapshot (Canonical):**
+- Gate 3: COMPLETE (2026-02-07)
+- Gate 4: COMPLETE (2026-02-07 structural cutover)
+- Gate 5: IN_PROGRESS (parity verification and cleanup)
+
+Current Recurrence Layer: META_CIRCULAR
+Current Exhaustion Layer: META_CIRCULAR
 
 **Known Architectural Constraints:** See "Known Architectural Constraints" section in [`roadmap/MetaCircular_Boot0_GatePlan.md`](roadmap/MetaCircular_Boot0_GatePlan.md) for authoritative documentation of:
 - Why kernel reserved fields block algorithm entry
@@ -632,7 +640,8 @@ New organized structure makes architecture visible:
 - Added North Star #14 (execution layer declaration) and #15 (true self-hosting path)
 - Added Cross-Seed Compatibility Check to AgentGuardrails.v0.md
 - Created VECTOR item for Bootstrap-Structural Bridge (non-linear pattern support)
-- Updated seed meta sections with `"execution_layer": "BOOTSTRAP"`
+- Updated seed meta sections with `"execution_layer": "BOOTSTRAP"` (at the time)
+- **Resolved by Gate 4 cutover (2026-02-07):** recurrence/exhaustion now run structurally by default via kernel bridge path
 
 **Completed (Steps 1-6):**
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
@@ -648,8 +657,8 @@ New organized structure makes architecture visible:
 - [x] kernel.v1.json: 7 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] match.v2.json: 8 projections (Python ✓, JS ✓) - META_CIRCULAR (linear only)
 - [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
-- [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
-- [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - BOOTSTRAP (needs non-linear)
+- [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
+- [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] Total: 47 core projections across 5 L3-complete seeds
 - [x] Additional: 43 projections in utilities/programs/bridge (90 total across all mu/)
 - [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
@@ -660,12 +669,12 @@ New organized structure makes architecture visible:
 - Execution path verified: bridge projections DO fire for non-linear patterns
 - Bridge capability proven; standalone runners removed (dead code cleanup)
 - Note: JS substrate loads bridge projections (`mu/host/js/eval_step.js`) for structural parity paths.
-  Production algorithm execution remains hybrid/bootstrap until Gate 4 cutover.
+  Production algorithm execution is now structural via kernel bridge path.
 
 **Current Algorithm Execution:**
-- `run_algorithm_meta_circular()` uses Python match/substitute
-- Python match/substitute already handle non-linear patterns correctly
-- This is practical and correct, but not "true meta-circular"
+- `run_algorithm_meta_circular()` defaults to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
+- Bootstrap fallback exists only as explicit debug mode (`execution_mode="bootstrap"`)
+- Algorithm runtime is now true meta-circular for recurrence/exhaustion production path
 
 **Path to True Meta-Circular Algorithm Execution:**
 1. Algorithm projections (recurrence.v1, exhaustion.v1) expect their own format:

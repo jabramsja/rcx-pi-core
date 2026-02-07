@@ -11,6 +11,7 @@ import pytest
 
 from rcx_pi.selfhost.step_mu import (
     apply_mu,
+    run_algorithm_meta_circular,
     run_mu_structural,
     step_algorithm_with_bridge,
 )
@@ -95,3 +96,43 @@ def test_match_mu_allows_shared_substructures_without_false_cycle():
     result = match_mu(pattern, value)
     assert isinstance(result, dict)
     assert result.get("v") == 1
+
+
+def test_run_algorithm_meta_circular_defaults_to_structural_kernel(monkeypatch):
+    seen = {}
+
+    def fake_step_kernel_mu(projections, input_value, **kwargs):
+        seen["kwargs"] = kwargs
+        return {"mode": "structural", "input": input_value}
+
+    def fail_bootstrap(*_args, **_kwargs):
+        raise AssertionError("bootstrap fallback should not run in default mode")
+
+    monkeypatch.setattr("rcx_pi.selfhost.step_mu.step_kernel_mu", fake_step_kernel_mu)
+    monkeypatch.setattr("rcx_pi.selfhost.step_mu.step_algorithm_with_bridge", fail_bootstrap)
+
+    result = run_algorithm_meta_circular([], {"_detect_closure": {"trace": None, "result": "x"}})
+    assert result["mode"] == "structural"
+    assert seen["kwargs"]["kernel_mode"] == "bridge"
+    assert seen["kwargs"]["validation_mode"] == "algorithm_runtime"
+
+
+def test_run_algorithm_meta_circular_bootstrap_fallback_is_explicit(monkeypatch):
+    monkeypatch.setattr(
+        "rcx_pi.selfhost.step_mu.step_algorithm_with_bridge",
+        lambda *_args, **_kwargs: {"mode": "bootstrap"}
+    )
+    monkeypatch.setattr(
+        "rcx_pi.selfhost.step_mu.step_kernel_mu",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("kernel path should not run"))
+    )
+
+    result = run_algorithm_meta_circular(
+        [], {"_detect_closure": {"trace": None, "result": "x"}}, execution_mode="bootstrap"
+    )
+    assert result["mode"] == "bootstrap"
+
+
+def test_run_algorithm_meta_circular_rejects_unknown_mode():
+    with pytest.raises(ValueError, match="invalid execution_mode"):
+        run_algorithm_meta_circular([], {"ok": True}, execution_mode="unknown")

@@ -15,13 +15,13 @@ Read first:
 6. `roadmap/MuHemispheresDesign.md`
 
 **Now (9-agent reviewed 2026-02-04)**
-1. Gate 1, Gate 0, Gate 2, and Gate 3 are complete. Keep this reflected in canonical trackers (`STATUS.md`, `TASKS.md`).
-2. Start Gate 4 execution using the prepared kernel infrastructure (`kernel_mode`, strict `algorithm_runtime` validation).
+1. Gate 1, Gate 0, Gate 2, Gate 3, and Gate 4 are complete. Keep this reflected in canonical trackers (`STATUS.md`, `TASKS.md`).
+2. Run Gate 5 parity verification and cleanup against the Gate 4 structural-default runtime.
 3. Keep hemisphere implementation blocked until Gate 5 completes. Design-only work is still allowed.
 
 **Next**
-1. Execute Gate 4 (structural algorithm execution) and then Gate 5 (meta-circular parity) per `roadmap/MetaCircular_Boot0_GatePlan.md`.
-2. Gate 2 adapter window remains closed before Gate 4 production cutover (hard requirement).
+1. Execute Gate 5 (meta-circular parity) per `roadmap/MetaCircular_Boot0_GatePlan.md`.
+2. Keep Gate 4 guarantees intact: structural default remains active and bootstrap path stays explicit fallback-only.
 3. After Gate 5, hemisphere implementation may proceed.
 
 **Vector (Design Only)**
