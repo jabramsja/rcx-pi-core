@@ -196,15 +196,29 @@ function iterNormalizedDictPairs(value) {
  */
 function looksLikeNormalizedDictCandidate(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  if (value._type === 'dict') return true;
-  if (!('head' in value) || !('tail' in value)) return false;
+  const keys = Object.keys(value);
+  if (value._type === 'dict') {
+    const keySet = new Set(keys);
+    if (
+      !(keySet.size === 1 && keySet.has('_type')) &&
+      !(keySet.size === 3 && keySet.has('_type') && keySet.has('head') && keySet.has('tail'))
+    ) {
+      return false;
+    }
+    return true;
+  }
+  const keySet = new Set(keys);
+  if (!(keySet.size === 2 && keySet.has('head') && keySet.has('tail'))) return false;
   const kv = value.head;
   if (kv === null || typeof kv !== 'object' || Array.isArray(kv)) return false;
   const kvKeys = Object.keys(kv);
   if (kvKeys.length !== 2 || !('head' in kv) || !('tail' in kv)) return false;
   if (typeof kv.head !== 'string') return false;
   const kvTail = kv.tail;
-  return kvTail !== null && typeof kvTail === 'object' && !Array.isArray(kvTail);
+  if (kvTail === null || typeof kvTail !== 'object' || Array.isArray(kvTail)) return false;
+  const kvTailKeys = Object.keys(kvTail);
+  if (kvTailKeys.length !== 2 || !('head' in kvTail) || !('tail' in kvTail)) return false;
+  return value.tail === null || (typeof value.tail === 'object' && !Array.isArray(value.tail));
 }
 
 /**

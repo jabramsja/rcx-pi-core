@@ -12,6 +12,7 @@ import pytest
 from rcx_pi.selfhost.step_mu import (
     apply_mu,
     run_algorithm_meta_circular,
+    run_mu,
     run_mu_structural,
     step_kernel_mu,
     step_algorithm_with_bridge,
@@ -60,6 +61,11 @@ def test_step_algorithm_with_bridge_rejects_unknown_underscore_input():
 def test_run_mu_structural_rejects_reserved_initial_input():
     with pytest.raises(ValueError, match="kernel-reserved field"):
         run_mu_structural([], {"_mode": "forged"}, max_steps=1)
+
+
+def test_run_mu_rejects_reserved_initial_input():
+    with pytest.raises(ValueError, match="kernel-reserved field"):
+        run_mu([], {"_mode": "forged"}, max_steps=1)
 
 
 def test_run_mu_structural_activates_global_budget_when_inactive(monkeypatch):
