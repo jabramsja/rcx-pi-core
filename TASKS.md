@@ -643,7 +643,7 @@ All blockers resolved 2026-01-28:
 - Bridge projections VERIFIED to fire for non-linear pattern matching
 - Algorithm execution (recurrence, exhaustion) defaults to structural kernel bridge path
   - `run_algorithm_meta_circular()` default is structural (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
-  - Python bootstrap path remains explicit fallback only (`execution_mode="bootstrap"`)
+  - Python bootstrap path remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
 - Two execution layers:
   1. Structural layer: kernel + bridge + match.v2 + subst.v2 (production path)
   2. Legacy BOOTSTRAP fallback: Python match/substitute (debug-only fallback path)
@@ -654,7 +654,7 @@ All blockers resolved 2026-01-28:
   - Algorithm-runtime mode is allowlisted and fail-closed for unknown underscore fields
 - Gate 4 cutover (2026-02-07):
   - `run_algorithm_meta_circular()` now defaults to structural kernel bridge path
-  - Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap"`)
+  - Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
   - recurrence/exhaustion execution layer promoted to META_CIRCULAR
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**

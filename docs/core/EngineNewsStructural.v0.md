@@ -138,7 +138,7 @@ Step 5 is COMPLETE:
 - [x] Closure detection uses pattern matching on trace
 - [x] No Python `if/for/while` in closure detection semantics (only bootstrap kernel driver loop)
 - [x] Seen-set is Mu linked-list, NOT Python set
-- **Note:** `run_algorithm_meta_circular()` now defaults to structural kernel bridge execution. Bootstrap mode is explicit fallback only (`execution_mode="bootstrap"`).
+- **Note:** `run_algorithm_meta_circular()` now defaults to structural kernel bridge execution. Bootstrap mode is explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`).
 
 ### 3. Cross-Substrate Parity ✅
 - [x] Same projections produce same results on Python

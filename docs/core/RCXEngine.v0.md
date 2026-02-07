@@ -91,7 +91,7 @@ The engine tests whether ZFC axioms emerge from structural pressure:
 - Requires non-linear pattern matching (not yet in structural kernel)
 - Runtime path now defaults to structural kernel bridge execution via `run_algorithm_meta_circular()`
   (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
-- Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap"`)
+- Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
 - Integration tests verify projection selection, not full engine execution
 
 **Test coverage:** See `tests/test_rcx_engine_integration.py` for current integration tests.

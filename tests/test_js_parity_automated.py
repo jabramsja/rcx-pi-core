@@ -414,15 +414,15 @@ class TestJSReservedFieldValidationParity:
     """Verify JS reserved field validation matches Python (Gate 3 security fix).
 
     Security invariant: Both Python and JS must reject reserved fields outside
-    algorithm entrypoint subtrees (_detect_closure, _detect_exhaustion).
+    trusted algorithm-runtime validation mode.
 
     These tests catch the class of vulnerability where spoofed _mode/_phase values
     could bypass validation entirely.
     """
 
-    def _run_js_validation(self, value):
+    def _run_js_validation(self, value, action="validate_reserved_fields"):
         """Run JS validation and return (success, error_msg)."""
-        request = json.dumps({"action": "validate_reserved_fields", "value": value})
+        request = json.dumps({"action": action, "value": value})
         result = subprocess.run(
             ["node", "mu/host/js/eval_step.js", "--json-api", request],
             capture_output=True,
@@ -457,11 +457,8 @@ class TestJSReservedFieldValidationParity:
         assert not valid, f"JS should reject spoofed _mode, but got valid=True"
         assert "_mode" in error or "reserved" in error.lower()
 
-    def test_parity_entrypoint_subtree_allowed(self):
-        """SECURITY: Reserved fields inside entrypoint subtrees MUST be allowed.
-
-        Legitimate input: {"_detect_closure": {"_mode": "recurrence", ...}}
-        """
+    def test_parity_entrypoint_subtree_rejected_in_domain_mode(self):
+        """SECURITY: Domain validation rejects reserved fields even under entrypoints."""
         from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
 
         legitimate = {
@@ -471,12 +468,14 @@ class TestJSReservedFieldValidationParity:
             }
         }
 
-        # Python allows
-        validate_no_kernel_reserved_fields(legitimate, "test")
+        # Python rejects
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_no_kernel_reserved_fields(legitimate, "test")
 
-        # JS must also allow
+        # JS must also reject
         valid, error = self._run_js_validation(legitimate)
-        assert valid, f"JS should allow entrypoint subtree, but got error: {error}"
+        assert not valid, "JS should reject reserved entrypoint fields in domain mode"
+        assert "_mode" in error or "reserved" in error.lower()
 
     def test_parity_normalized_reserved_key_rejected(self):
         """SECURITY: Reserved field encoded as normalized dict key must be rejected."""
@@ -494,8 +493,8 @@ class TestJSReservedFieldValidationParity:
         assert not valid, f"JS should reject normalized reserved key, but got valid=True"
         assert "_mode" in error or "reserved" in error.lower()
 
-    def test_parity_normalized_entrypoint_allowed(self):
-        """SECURITY: Entry point subtree allowed even when normalized."""
+    def test_parity_normalized_entrypoint_rejected_in_domain_mode(self):
+        """SECURITY: Domain validation rejects reserved normalized entrypoint payloads."""
         from rcx_pi.selfhost.match_mu import normalize_for_match
         from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
 
@@ -506,12 +505,14 @@ class TestJSReservedFieldValidationParity:
             }
         })
 
-        # Python allows
-        validate_no_kernel_reserved_fields(normalized, "test")
+        # Python rejects
+        with pytest.raises(ValueError, match="SECURITY"):
+            validate_no_kernel_reserved_fields(normalized, "test")
 
-        # JS must also allow
+        # JS must also reject
         valid, error = self._run_js_validation(normalized)
-        assert valid, f"JS should allow normalized entrypoint, but got error: {error}"
+        assert not valid, "JS should reject normalized reserved entrypoint fields in domain mode"
+        assert "_mode" in error or "reserved" in error.lower()
 
     def test_parity_nested_spoof_rejected(self):
         """SECURITY: Reserved fields nested in non-entrypoint key MUST be rejected.
@@ -544,6 +545,22 @@ class TestJSReservedFieldValidationParity:
         # JS must also allow
         valid, error = self._run_js_validation(clean)
         assert valid, f"JS should allow clean data, but got error: {error}"
+
+    def test_parity_algorithm_runtime_allows_entrypoint_reserved_fields(self):
+        """SECURITY: Algorithm-runtime mode allows trusted reserved fields."""
+        from rcx_pi.selfhost.step_mu import validate_algorithm_runtime_fields
+
+        payload = {
+            "_detect_closure": {
+                "_mode": "recurrence",
+                "_phase": "scan",
+                "_result": "X",
+            }
+        }
+
+        validate_algorithm_runtime_fields(payload, "test")
+        valid, error = self._run_js_validation(payload, action="validate_algorithm_runtime_fields")
+        assert valid, f"JS algorithm-runtime validator should allow payload, got error: {error}"
 
     def test_parity_malformed_normalized_dict_fails_closed(self):
         """

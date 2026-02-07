@@ -523,7 +523,7 @@ The bridge projections are IMPLEMENTED and VERIFIED to fire. Gate 4 cutover make
 - This is now the production path for recurrence/exhaustion
 
 **Fallback Layer: Bootstrap Debug Path**
-- `execution_mode="bootstrap"` calls `step_algorithm_with_bridge()` for controlled debugging
+- `execution_mode="bootstrap", allow_bootstrap_fallback=True` calls `step_algorithm_with_bridge()` for controlled debugging
 - This path is no longer the default runtime
 
 ### Why This Architecture Exists

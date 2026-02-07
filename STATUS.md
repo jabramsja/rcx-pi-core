@@ -673,7 +673,7 @@ New organized structure makes architecture visible:
 
 **Current Algorithm Execution:**
 - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
-- Bootstrap fallback exists only as explicit debug mode (`execution_mode="bootstrap"`)
+- Bootstrap fallback exists only as explicit debug mode (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
 - Algorithm runtime is now true meta-circular for recurrence/exhaustion production path
 
 **Path to True Meta-Circular Algorithm Execution:**
