@@ -28,9 +28,9 @@ If a task is not listed here, it is NOT to be implemented.
     - **BOOTSTRAP**: Runs via eval_seed.step() only (Python/JS substrate provides non-linear pattern support)
     - **META-CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2)
     - If a seed claims META-CIRCULAR, tests MUST verify it through step_kernel_mu
-    - Seeds requiring non-linear patterns (same var twice for equality) are BOOTSTRAP until bootstrap_structural bridge exists
-    - Current BOOTSTRAP seeds: recurrence.v1, exhaustion.v1 (require non-linear patterns)
-    - Current META-CIRCULAR seeds: kernel.v1, match.v2, subst.v2, classify.v1, eval.v1 (linear only)
+    - Non-linear pattern seeds become META-CIRCULAR only when bridge-backed structural runtime is default
+    - Current BOOTSTRAP seeds: none in L3 core closure path
+    - Current META-CIRCULAR seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, exhaustion.v1, classify.v1, eval.v1
 15. **True self-hosting is the path.** The goal is structural computation without host semantics:
     - **L1 (Algorithmic)**: match/subst algorithms as Mu projections ✓ DONE
     - **L2 (Operational)**: kernel loop as Mu projections ✓ DONE (with bootstrap primitive acceptance)
@@ -631,7 +631,7 @@ All blockers resolved 2026-01-28:
 - [x] `load_combined_kernel_with_bridge_projections()` wires match.v2 + bootstrap_structural (2026-02-02)
 - [x] All 31 bridge test vectors pass (tests/test_bootstrap_structural_bridge.py) (2026-02-02)
 - [x] Binding conflict detection is structural (projections, not Python) (2026-02-02)
-- [x] recurrence.v1 and exhaustion.v1 execution layer explicitly declared BOOTSTRAP (runtime-honest) (2026-02-02)
+- [x] recurrence.v1 and exhaustion.v1 execution layer explicitly declared BOOTSTRAP (runtime-honest at 2026-02-02; superseded by Gate 4 META_CIRCULAR cutover on 2026-02-07)
 - [x] Execution path verification: bridge projections ACTUALLY fire (2026-02-03)
   - tests/test_execution_path_verification.py (9 tests)
   - Tests use tracing to prove which projections execute
@@ -641,17 +641,29 @@ All blockers resolved 2026-01-28:
 
 **Current architecture (2026-02-03):**
 - Bridge projections VERIFIED to fire for non-linear pattern matching
-- Algorithm execution (recurrence, exhaustion) uses Python match/substitute
-  - Reason: Structural normalization converts dict→linked-list, breaking algorithm state format
-  - This is documented scaffolding, not hidden debt
+- Algorithm execution (recurrence, exhaustion) defaults to structural kernel bridge path
+  - `run_algorithm_meta_circular()` default is structural (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
+  - Python bootstrap path remains explicit fallback only (`execution_mode="bootstrap"`)
 - Two execution layers:
-  1. Structural layer: match.v2 + bridge (for pattern matching with non-linear support)
-  2. Practical layer: Python match/substitute (for algorithm execution)
+  1. Structural layer: kernel + bridge + match.v2 + subst.v2 (production path)
+  2. Legacy BOOTSTRAP fallback: Python match/substitute (debug-only fallback path)
 - Path to true meta-circular algorithm execution documented in BootstrapStructuralBridge.v0.md
 - Gate 4 prep infrastructure (2026-02-07):
   - `step_kernel_mu()` now supports `kernel_mode` (`core`/`bridge`)
   - `step_kernel_mu()` now supports strict `validation_mode` (`domain`/`algorithm_runtime`)
   - Algorithm-runtime mode is allowlisted and fail-closed for unknown underscore fields
+- Gate 4 cutover (2026-02-07):
+  - `run_algorithm_meta_circular()` now defaults to structural kernel bridge path
+  - Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap"`)
+  - recurrence/exhaustion execution layer promoted to META_CIRCULAR
+
+**Gate Snapshot (Canonical mirror of STATUS.md):**
+- Gate 3: COMPLETE (2026-02-07)
+- Gate 4: COMPLETE (2026-02-07 structural cutover)
+- Gate 5: IN_PROGRESS (parity verification and cleanup)
+
+Current Recurrence Layer: META_CIRCULAR
+Current Exhaustion Layer: META_CIRCULAR
 
 ---
 

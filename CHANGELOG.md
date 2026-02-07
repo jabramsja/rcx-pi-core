@@ -2,6 +2,18 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-07
+
+### Gate 4: Structural Runtime Cutover + Doc/Parity Sync
+
+- `run_algorithm_meta_circular()` now defaults to structural execution (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
+- Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap"`)
+- Promoted recurrence/exhaustion seed metadata to `execution_layer: META_CIRCULAR`
+- Updated seed integrity checksums for `recurrence.v1.json` and `exhaustion.v1.json`
+- Fixed JS bridge JSON API runtime loop to unwrap kernel result correctly and preserve Python/JS parity
+- Synced canonical tracker docs and roadmap timeline to Gate 4 COMPLETE / Gate 5 IN_PROGRESS
+- Hardened docs consistency test to use canonical layer lines and tolerate markdown-format marker variants
+
 ## 2026-02-06
 
 ### Tooling: Canonical Pre-Commit Gate Consolidated

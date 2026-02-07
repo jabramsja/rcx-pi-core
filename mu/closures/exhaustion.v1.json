@@ -5,15 +5,15 @@
         "description": "Structural operator exhaustion detection for Rule 3.1",
         "doc": "docs/core/OperatorExhaustion.v0.md",
         "spec_ref": "RCXEngineNew.pdf Rule 3.1",
-        "execution_layer": "HYBRID",
+        "execution_layer": "META_CIRCULAR",
         "meta_circular_capable": true,
         "requires_patterns": [
             "non-linear"
         ],
         "requires_bridge": "bootstrap_structural.v1",
-        "production_execution": "BOOTSTRAP",
-        "production_reason": "Structural normalization converts dict to linked-list, breaking algorithm state format",
-        "meta_circular_proven": "Gate 6 (2026-02-02): bootstrap_structural.v1 bridge verified to fire",
+        "production_execution": "META_CIRCULAR",
+        "production_reason": "Gate 4 cutover: runtime defaults to step_kernel_mu with bridge + algorithm_runtime validation",
+        "meta_circular_proven": "Gate 4 (2026-02-07): structural kernel + bridge is default runtime path",
         "invariants": [
             "All projections are pure Mu (JSON-compatible)",
             "Exhaustion detection uses pattern matching, NOT Python conditionals",

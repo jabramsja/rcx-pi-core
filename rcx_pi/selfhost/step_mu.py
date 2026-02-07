@@ -244,6 +244,33 @@ def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
     return pairs
 
 
+def _looks_like_normalized_dict_candidate(value: Mu) -> bool:
+    """
+    Check whether a value appears to be a normalized dict encoding candidate.
+
+    This is intentionally conservative so regular domain objects are not
+    misclassified. If this returns True and pair iteration fails, validators
+    should fail closed to prevent encoded-key bypasses.
+    """
+    if not isinstance(value, dict):
+        return False
+    if value.get("_type") == "dict":
+        return True
+    if "head" not in value or "tail" not in value:
+        return False
+    kv = value.get("head")
+    if not isinstance(kv, dict):
+        return False
+    # Candidate only when head itself looks like a kv-pair node.
+    if set(kv.keys()) != {"head", "tail"}:
+        return False
+    key = kv.get("head")
+    if not isinstance(key, str):
+        return False
+    kv_tail = kv.get("tail")
+    return isinstance(kv_tail, dict)
+
+
 def validate_no_kernel_reserved_fields(
     value: Mu,
     context: str = "input",
@@ -302,6 +329,11 @@ def validate_no_kernel_reserved_fields(
                     _in_algorithm_subtree=(_in_algorithm_subtree or entering_algorithm)
                 )
             return
+        if _looks_like_normalized_dict_candidate(value):
+            raise ValueError(
+                f"SECURITY: {context} contains malformed normalized dict encoding. "
+                "Failing closed to prevent reserved-field bypass."
+            )
 
         # Regular dict: check keys directly
         for key, val in value.items():
@@ -358,6 +390,11 @@ def validate_algorithm_runtime_fields(
                     )
                 validate_algorithm_runtime_fields(val, context, _depth + 1)
             return
+        if _looks_like_normalized_dict_candidate(value):
+            raise ValueError(
+                f"SECURITY: {context} contains malformed normalized dict encoding. "
+                "Failing closed."
+            )
 
         for key, val in value.items():
             if isinstance(key, str) and key.startswith("_"):
@@ -719,7 +756,7 @@ def step_kernel_mu(
     # SECURITY: Reject kernel projections - step_kernel_mu expects DOMAIN projections only
     # Kernel projections are loaded separately via load_combined_kernel_projections().
     # Check by ID (kernel.*) not by _mode pattern because algorithm projections use _mode.
-    for i, proj in enumerate(projections):
+    for i, proj in enumerate(projections):  # AST_OK: infra - boundary validation loop
         proj_id = proj.get("id", "") if isinstance(proj, dict) else ""
         if isinstance(proj_id, str) and proj_id.startswith("kernel."):
             raise ValueError(
@@ -767,69 +804,92 @@ def step_kernel_mu(
     # Prevents infinite execution - analogous to watchdog timer.
     # See docs/core/BootstrapPrimitives.v0.md
     max_steps = 10000
+    budget = get_step_budget()
+    started_budget = False
+    if not budget.is_active():
+        budget.start()
+        started_budget = True
 
     # Phase 8b: Simplified mechanical loop - no semantic decisions inside
-    for _ in range(max_steps):
-        result = eval_step(kernel_projs, current)
+    try:
+        for _ in range(max_steps):
+            # Account for kernel-driver work in the shared global budget.
+            budget.consume(1)
+            result = eval_step(kernel_projs, current)
 
-        # Terminal state check - simple structural marker detection
-        if is_kernel_terminal(result):
-            output = extract_kernel_result(result, input_value)
-            validator(output, "step_kernel_mu output")
-            return output
+            # Terminal state check - simple structural marker detection
+            if is_kernel_terminal(result):
+                output = extract_kernel_result(result, input_value)
+                validator(output, "step_kernel_mu output")
+                return output
 
-        # Stall check - no change means no progress
-        # Skip for intermediate kernel states (they have deep nested structures
-        # and are mid-execution by definition, not stalls)
-        if not is_kernel_intermediate(result) and mu_equal(result, current):
-            validator(input_value, "step_kernel_mu output")
-            return input_value
+            # Stall check - no change means no progress
+            # Skip for intermediate kernel states (they have deep nested structures
+            # and are mid-execution by definition, not stalls)
+            if not is_kernel_intermediate(result) and mu_equal(result, current):
+                validator(input_value, "step_kernel_mu output")
+                return input_value
 
-        current = result
+            current = result
 
-    # Max steps exceeded - return original input (stall)
-    validator(input_value, "step_kernel_mu output")
-    return input_value
+        # Max steps exceeded - return original input (stall)
+        validator(input_value, "step_kernel_mu output")
+        return input_value
+    finally:
+        if started_budget:
+            budget.stop()
 
 
-def run_algorithm_meta_circular(projections: list[Mu], input_value: Mu) -> Mu:
+def run_algorithm_meta_circular(
+    projections: list[Mu],
+    input_value: Mu,
+    *,
+    execution_mode: str = "structural",
+) -> Mu:
     """
-    Run an internal algorithm (recurrence, exhaustion) via HYBRID execution.
+    Run an internal algorithm (recurrence, exhaustion).
 
-    CURRENT EXECUTION (Gate 2):
-    This function delegates to step_algorithm_with_bridge(), which uses
-    Python's match() and substitute() for practical execution. This is
-    HYBRID execution, not true meta-circular.
+    Gate 4 cutover:
+    - Default mode (`execution_mode="structural"`) runs through step_kernel_mu
+      with bridge support and algorithm-runtime validation.
+    - Bootstrap execution is retained only as an explicit debug fallback
+      (`execution_mode="bootstrap"`).
 
-    WHY HYBRID:
-    Algorithm states contain reserved kernel fields (_detect_closure, _mode,
-    _phase, etc.) that step_kernel_mu() rejects. Until Gate 3 rewrites the
-    seeds to use non-reserved field names, algorithms cannot enter the kernel.
-    See "Known Architectural Constraints" in MetaCircular_Boot0_GatePlan.md.
-
-    STRUCTURAL PROOF:
-    The bootstrap_structural bridge PROVES that non-linear pattern support
-    CAN be implemented structurally (bridge.var.check_existing, bridge.lookup.*).
-    This satisfies the META_CIRCULAR declaration for parity testing purposes.
-
-    FUTURE (Gate 4):
-    Once seeds are rewritten (Gate 3), this function will use the actual
-    structural kernel with bridge projections.
+    Security and parity properties:
+    - Structural mode uses `kernel_mode="bridge"` to keep non-linear matching
+      behavior aligned with recurrence/exhaustion requirements.
+    - Structural mode uses `validation_mode="algorithm_runtime"` so trusted
+      underscore-heavy algorithm state is allowlisted, while unknown underscore
+      fields still fail closed.
+    - Bootstrap fallback remains available for controlled debugging only.
 
     Args:
         projections: Algorithm projections (recurrence.v1 or exhaustion.v1).
         input_value: Algorithm entry point or intermediate state.
+        execution_mode: `structural` (default) or `bootstrap` (debug fallback).
 
     Returns:
         Algorithm result after single projection application.
+
+    Raises:
+        ValueError: If execution_mode is not recognized.
     """
     assert_mu(input_value, "run_algorithm_meta_circular.input")
 
-    # HYBRID EXECUTION: Uses Python match/substitute for practical execution.
-    # Bridge projections PROVE structural non-linear support is possible,
-    # but for algorithms we use Python match() which already handles non-linear
-    # patterns correctly. See step_algorithm_with_bridge docstring for details.
-    return step_algorithm_with_bridge(projections, input_value)
+    if execution_mode == "structural":
+        return step_kernel_mu(
+            projections,
+            input_value,
+            kernel_mode="bridge",
+            validation_mode="algorithm_runtime",
+        )
+    if execution_mode == "bootstrap":
+        return step_algorithm_with_bridge(projections, input_value)
+
+    raise ValueError(
+        "SECURITY: invalid execution_mode. Expected 'structural' or 'bootstrap', "
+        f"got: {execution_mode}"
+    )
 
 
 def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
@@ -857,7 +917,7 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
     """
-    from rcx_pi.selfhost.eval_seed import match, substitute, NO_MATCH
+    from rcx_pi.selfhost.eval_seed import step
     from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 
     assert_mu(input_value, "step_algorithm_with_bridge.input")
@@ -886,27 +946,15 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     # normalize_for_match is idempotent, so already-normalized state is unchanged.
     normalized_input = normalize_for_match(input_value)
 
-    # Try each algorithm projection using Python match/substitute
-    # Python match() handles non-linear patterns (binding conflict detection)
-    for proj in projections:
-        pattern = proj.get("pattern")
-        body = proj.get("body")
+    # Single bootstrap step: preserves first-match-wins semantics without
+    # embedding a projection-application loop in this helper.
+    normalized_result = step(projections, normalized_input)
+    if mu_equal(normalized_result, normalized_input):
+        return input_value
 
-        if pattern is None or body is None:
-            continue
-
-        # Match normalized input against normalized pattern
-        bindings = match(pattern, normalized_input)
-
-        if bindings is not NO_MATCH:
-            # Substitute produces normalized output, denormalize for compatibility
-            normalized_result = substitute(body, bindings)
-            result = denormalize_from_match(normalized_result)
-            validate_algorithm_runtime_fields(result, "step_algorithm_with_bridge output")
-            return result
-
-    # No projection matched - stall
-    return input_value
+    result = denormalize_from_match(normalized_result)
+    validate_algorithm_runtime_fields(result, "step_algorithm_with_bridge output")
+    return result
 
 
 # =============================================================================
@@ -1071,12 +1119,12 @@ def run_mu_structural(
     current = initial
 
     try:
-        for i in range(max_steps):
+        for i in range(max_steps):  # AST_OK: infra - trace driver loop (function-level @host_iteration)
             # Single-pass structural step: identify first match and apply it once.
             # This avoids the previous double-evaluation path (pre-match + step_mu).
             matched_id = None
             result = current
-            for proj in projections:
+            for proj in projections:  # AST_OK: infra - single-pass projection identification for trace
                 if not isinstance(proj, dict):
                     continue
                 pattern = proj.get("pattern")

@@ -1,21 +1,13 @@
 """
-Gate 6 Integration Tests: HYBRID Recurrence and Exhaustion.
+Gate 6 Integration Tests: META_CIRCULAR recurrence and exhaustion.
 
-These tests verify that recurrence.v1 and exhaustion.v1 are declared as
-HYBRID and can run with bridge support for non-linear pattern matching.
+These tests verify that recurrence.v1 and exhaustion.v1 are declared
+META_CIRCULAR and run via structural kernel + bridge.
 
 Key verification:
-1. Seeds declare execution_layer: HYBRID (meta-circular capable but uses hybrid path)
+1. Seeds declare execution_layer: META_CIRCULAR
 2. Seeds require bootstrap_structural.v1 bridge for non-linear pattern support
 3. Kernel with bridge (kernel.v1 + match.v2 + bootstrap_structural + subst.v2) loads correctly
-
-EXECUTION MODEL:
-Algorithm seeds are declared HYBRID because:
-- They CAN run through meta-circular kernel (bridge provides non-linear support)
-- They CURRENTLY run via Python match/substitute (practical execution)
-- Reserved kernel fields (_detect_closure, _mode, etc.) block kernel entry
-
-See: roadmap/MetaCircular_Boot0_GatePlan.md "Known Architectural Constraints"
 """
 
 from __future__ import annotations
@@ -108,23 +100,23 @@ def run_until_stable_meta_circular(projections: list, value: dict, max_steps: in
 
 
 class TestMetaCircularDeclaration:
-    """Verify seeds declare HYBRID execution layer with meta-circular capability."""
+    """Verify seeds declare META_CIRCULAR execution layer."""
 
-    def test_recurrence_declares_hybrid(self, recurrence_seed):
-        """recurrence.v1 must declare execution_layer: HYBRID (capable but needs bridge)."""
+    def test_recurrence_declares_meta_circular(self, recurrence_seed):
+        """recurrence.v1 must declare execution_layer: META_CIRCULAR."""
         meta = recurrence_seed["meta"]
-        assert meta.get("execution_layer") == "HYBRID", (
-            f"Expected HYBRID, got {meta.get('execution_layer')}"
+        assert meta.get("execution_layer") == "META_CIRCULAR", (
+            f"Expected META_CIRCULAR, got {meta.get('execution_layer')}"
         )
         assert meta.get("meta_circular_capable") is True, (
             "recurrence.v1 must declare meta_circular_capable: true"
         )
 
-    def test_exhaustion_declares_hybrid(self, exhaustion_seed):
-        """exhaustion.v1 must declare execution_layer: HYBRID (capable but needs bridge)."""
+    def test_exhaustion_declares_meta_circular(self, exhaustion_seed):
+        """exhaustion.v1 must declare execution_layer: META_CIRCULAR."""
         meta = exhaustion_seed["meta"]
-        assert meta.get("execution_layer") == "HYBRID", (
-            f"Expected HYBRID, got {meta.get('execution_layer')}"
+        assert meta.get("execution_layer") == "META_CIRCULAR", (
+            f"Expected META_CIRCULAR, got {meta.get('execution_layer')}"
         )
         assert meta.get("meta_circular_capable") is True, (
             "exhaustion.v1 must declare meta_circular_capable: true"
@@ -153,9 +145,9 @@ class TestMetaCircularDeclaration:
 class TestRecurrenceMetaCircular:
     """Test recurrence detection through meta-circular kernel.
 
-    Algorithm seeds run through run_algorithm_meta_circular() which uses
-    eval_seed.step() for execution. This provides non-linear pattern support
-    via binding conflict detection.
+    Algorithm seeds run through run_algorithm_meta_circular() which now uses
+    step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")
+    by default.
     """
 
     def test_no_closure_meta_circular(self, recurrence_projections):
@@ -263,9 +255,9 @@ class TestRecurrenceMetaCircular:
 class TestExhaustionMetaCircular:
     """Test exhaustion detection through meta-circular kernel.
 
-    Algorithm seeds run through run_algorithm_meta_circular() which uses
-    eval_seed.step() for execution. This provides non-linear pattern support
-    via binding conflict detection.
+    Algorithm seeds run through run_algorithm_meta_circular() which now uses
+    step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")
+    by default.
     """
 
     def test_no_tau_continues_meta_circular(self, exhaustion_projections):

@@ -132,13 +132,13 @@ Step 5 is COMPLETE:
 - [x] Each projection has `id`, `pattern`, `body` fields
 - [x] SHA256 checksum verified on load (seed_integrity.py)
 
-### 2. Execution is Structural (HYBRID) ✅
+### 2. Execution is Structural (META_CIRCULAR Path) ✅
 - [x] Recurrence LOGIC is expressed as projections (recurrence.v1.json, 9 projections)
-- [x] Recurrence runs via `eval_seed.step()` (bootstrap primitive)
+- [x] Recurrence runs via `step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - [x] Closure detection uses pattern matching on trace
-- [x] No Python `if/for/while` in closure detection path (only in bootstrap)
+- [x] No Python `if/for/while` in closure detection semantics (only bootstrap kernel driver loop)
 - [x] Seen-set is Mu linked-list, NOT Python set
-- **Note:** Uses `run_algorithm_meta_circular()` which delegates to Python match/substitute for projection application. This is the HYBRID execution model - projections define semantics, bootstrap provides execution.
+- **Note:** `run_algorithm_meta_circular()` now defaults to structural kernel bridge execution. Bootstrap mode is explicit fallback only (`execution_mode="bootstrap"`).
 
 ### 3. Cross-Substrate Parity ✅
 - [x] Same projections produce same results on Python
