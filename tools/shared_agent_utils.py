@@ -69,6 +69,11 @@ AGENT_PASS_VERDICTS = {
 # Runtime gate policy for orchestrated review.
 HARD_GATE_AGENTS = {"verifier", "adversary", "structural-proof"}
 
+# Adversary verdicts that can block merge when proof is machine-checkable.
+ADVERSARY_BLOCKING_VERDICTS = {"VULNERABLE", "NEEDS_HARDENING"}
+# Required proof markers for adversary hard-block escalation.
+ADVERSARY_REQUIRED_PROOF_MARKERS = ("FILE", "LINES", "CODE", "CALL_PATH", "REPRO_STEPS")
+
 
 def _flatten_sets(mapping: dict[str, set[str]]) -> set[str]:
     values: set[str] = set()
@@ -84,6 +89,47 @@ GOOD_VERDICTS = _flatten_sets(AGENT_PASS_VERDICTS)
 def agent_passed(agent_name: str, verdict: str) -> bool:
     """Return True when a verdict is considered pass for that agent."""
     return verdict in AGENT_PASS_VERDICTS.get(agent_name, set())
+
+
+def adversary_has_machine_verifiable_evidence(output: str) -> bool:
+    """Return True when at least one FINDING block contains all required proof markers.
+
+    This enforces evidence-gated hard blocks for adversary verdicts to reduce
+    false-positive merge blockers while preserving security pressure.
+    """
+    if not output:
+        return False
+
+    finding_blocks = re.split(
+        r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*',
+        output,
+        flags=re.MULTILINE,
+    )
+    if len(finding_blocks) <= 1:
+        return False
+
+    for block in finding_blocks[1:]:
+        has_all_markers = True
+        for marker in ADVERSARY_REQUIRED_PROOF_MARKERS:
+            marker_regex = (
+                rf'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?{re.escape(marker)}(?:\*\*)?\s*:'
+            )
+            if not re.search(marker_regex, block, re.MULTILINE | re.IGNORECASE):
+                has_all_markers = False
+                break
+        if has_all_markers:
+            return True
+
+    return False
+
+
+def adversary_blocks_merge(verdict: str, output: str, is_compliant: bool) -> bool:
+    """Adversary can block only with compliant output + machine-checkable proof."""
+    if verdict not in ADVERSARY_BLOCKING_VERDICTS:
+        return False
+    if not is_compliant:
+        return False
+    return adversary_has_machine_verifiable_evidence(output)
 
 
 # =============================================================================

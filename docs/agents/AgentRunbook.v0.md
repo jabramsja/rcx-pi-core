@@ -27,7 +27,7 @@ Which tool to use and when:
 
 | Tool | What it is | When to use | Time |
 |------|------------|-------------|------|
-| `run_review.py` | Multi-agent code review orchestrator | After changing core code (`rcx_pi/selfhost/`, `mu/`) | ~2-6 min |
+| `run_review.py` | Multi-agent code review orchestrator | After changing core code (`rcx_pi/selfhost/`, `mu/`) | ~8-30 min (scope/model dependent) |
 | `run_deep_analysis.py` | Full codebase health scan | Monthly, pre-release, or after large refactors | ~5-10 min |
 | `run_ci_review.py` | Lightweight CI review | Auto-triggered in GitHub Actions on PR | ~2-4 min |
 | `run_interactive.py` | Conversational agent session | When you want to dig deeper with follow-up questions | Interactive |
@@ -67,15 +67,16 @@ python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 
 **Depth levels control how many agents run:**
 - `--depth quick` - 4 core agents (fast feedback)
-- `--depth full` - 6 agents (+ grounding, fuzzer)
-- `--founder` - 8 agents (+ translator, visualizer for founder review)
-- `--depth all` - All 9 agents
+- `--depth full` - 5-6 agents (`fuzzer` always, `grounding` risk-triggered)
+- `--founder` - 7-8 agents (+ translator, visualizer for founder review)
+- `--depth all` - 8-9 agents (+ advisor)
 
 **Key parameters:**
 - `--rigorous` - Validates reasoning quality, challenges approvals with skeptic agent
 - `--pr` - Auto-detects changed files from git diff
 - `--no-memory` - Disable finding storage
 - `--show-warnings` - Show full warning details
+- `--force-grounding` - Include grounding even for low-risk scopes
 
 **Architecture:** See `docs/agents/AgentRig.v0.md` for trust model.
 
@@ -84,9 +85,9 @@ python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 | Command | Purpose | Agents |
 |---------|---------|--------|
 | `run_review.py --depth quick` | Fast review | 4: verifier, adversary, expert, structural-proof |
-| `run_review.py --depth full` | Full review | 6: + grounding, fuzzer |
-| `run_review.py --founder` | Founder review | 8: + translator, visualizer |
-| `run_review.py --depth all` | Complete | 9: + advisor |
+| `run_review.py --depth full` | Full review | 5-6: + fuzzer always, grounding risk-triggered |
+| `run_review.py --founder` | Founder review | 7-8: + translator, visualizer |
+| `run_review.py --depth all` | Complete | 8-9: + advisor |
 | `run_ci_review.py` | CI/CD | Auto-selects based on diff risk |
 | `run_interactive.py` | Conversational | Single agent with follow-up |
 | `run_deep_analysis.py` | Full-stack codebase health | 5: verifier, adversary, grounding, structural-proof, advisor |
@@ -153,7 +154,7 @@ python tools/run_review.py rcx_pi/selfhost/ --rigorous
 | Agent | Gate Type | Blocks Merge If |
 |-------|-----------|-----------------|
 | verifier | Hard | REQUEST_CHANGES or NEEDS_DISCUSSION |
-| adversary | Hard | VULNERABLE |
+| adversary | Hard | VULNERABLE/NEEDS_HARDENING **with compliant machine-checkable proof** (`FILE`, `LINES`, `CODE`, `CALL_PATH`, `REPRO_STEPS`) |
 | structural-proof | Hard | UNPROVEN or IMPOSSIBLE_AS_CLAIMED |
 | expert | Soft | OVER_ENGINEERED (review recommended) |
 | grounding | Soft | UNGROUNDED or THEATER (must fix before release) |

@@ -292,6 +292,45 @@ class TestOrchestratorIntegration:
         )
         assert "--fail-fast-hard-gate" in result.stdout
 
+    def test_force_grounding_flag_exists(self):
+        """Orchestrator should expose --force-grounding override."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--force-grounding" in result.stdout
+
+    def test_full_depth_keeps_fuzzer_and_risk_triggers_grounding(self):
+        """Full depth should always include fuzzer; grounding should be risk-triggered."""
+        run_review = import_from_path("run_review", TOOLS_DIR / "run_review.py")
+
+        low_risk = run_review.ReviewOrchestrator(
+            files=["docs/agents/AgentRunbook.v0.md"],
+            depth="full",
+            use_memory=False,
+        )
+        assert "fuzzer" in low_risk.agents_to_run
+        assert "grounding" not in low_risk.agents_to_run
+
+        high_risk = run_review.ReviewOrchestrator(
+            files=["rcx_pi/selfhost/step_mu.py"],
+            depth="full",
+            use_memory=False,
+        )
+        assert "fuzzer" in high_risk.agents_to_run
+        assert "grounding" in high_risk.agents_to_run
+
+        forced = run_review.ReviewOrchestrator(
+            files=["docs/agents/AgentRunbook.v0.md"],
+            depth="full",
+            use_memory=False,
+            force_grounding=True,
+        )
+        assert "grounding" in forced.agents_to_run
+
 
 class TestVerdictExtraction:
     """Tests for secure verdict extraction."""
@@ -372,3 +411,70 @@ class TestVerdictExtraction:
         """
         result = extract_verdict_secure(text_multiline, agent_name="structural-proof")
         assert result == "NO_STRUCTURAL_CLAIMS", f"Should extract multiline verdict, got {result}"
+
+
+class TestAdversaryEvidenceGate:
+    """Evidence-gated hard-block rules for adversary findings."""
+
+    def test_adversary_evidence_gate_accepts_full_proof_block(self):
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        has_proof = shared_agent_utils.adversary_has_machine_verifiable_evidence
+
+        output = """
+FINDING: Kernel reserved field injection
+FILE: /tmp/example.py
+LINES: 10-20
+CODE:
+    if user_input.get("_mode"):
+        return True
+CALL_PATH: run_mu -> run_mu_structural -> step_kernel_mu
+REPRO_STEPS:
+    1. Provide crafted input with _mode
+    2. Observe acceptance path
+VERIFIED: Yes
+"""
+        assert has_proof(output) is True
+
+    def test_adversary_evidence_gate_rejects_missing_call_path(self):
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        has_proof = shared_agent_utils.adversary_has_machine_verifiable_evidence
+
+        output = """
+FINDING: Missing call path marker
+FILE: /tmp/example.py
+LINES: 5-7
+CODE:
+    pass
+REPRO_STEPS:
+    1. Run test
+VERIFIED: Yes
+"""
+        assert has_proof(output) is False
+
+    def test_adversary_blocks_merge_requires_compliance_and_proof(self):
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        blocks_merge = shared_agent_utils.adversary_blocks_merge
+
+        proof_output = """
+FINDING: Valid proof block
+FILE: /tmp/example.py
+LINES: 1-2
+CODE:
+    x = 1
+CALL_PATH: a -> b -> c
+REPRO_STEPS:
+    1. run it
+VERIFIED: Yes
+"""
+        assert blocks_merge("VULNERABLE", proof_output, is_compliant=True) is True
+        assert blocks_merge("VULNERABLE", proof_output, is_compliant=False) is False
+        assert blocks_merge("SECURE", proof_output, is_compliant=True) is False
