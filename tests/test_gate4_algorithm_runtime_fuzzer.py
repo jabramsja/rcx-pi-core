@@ -21,11 +21,13 @@ from rcx_pi.selfhost.step_mu import (
     ALGORITHM_ENTRYPOINT_KEYS,
     ALGORITHM_INTERNAL_UNRESERVED_FIELDS,
     KERNEL_RESERVED_FIELDS,
+    run_algorithm_meta_circular,
     validate_algorithm_runtime_fields,
     validate_no_kernel_reserved_fields,
     step_kernel_mu,
 )
 from rcx_pi.selfhost.mu_type import is_mu
+from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 
 
 # =============================================================================
@@ -118,6 +120,32 @@ def normalized_dict_with_allowed_underscore(draw):
         "head": {"head": good_key, "tail": {"head": value, "tail": None}},
         "tail": None,
     }, good_key
+
+
+# Preloaded algorithm seeds for runtime-path fuzzing.
+RECURRENCE_PROJECTIONS = load_verified_seed(get_seed_path("recurrence.v1.json"))["projections"]
+EXHAUSTION_PROJECTIONS = load_verified_seed(get_seed_path("exhaustion.v1.json"))["projections"]
+
+
+@st.composite
+def algorithm_runtime_entrypoint_state(draw):
+    """Generate trusted algorithm-runtime payloads for recurrence/exhaustion."""
+    entrypoint = draw(st.sampled_from(sorted(ALGORITHM_ENTRYPOINT_KEYS)))
+    underscore_keys = draw(
+        st.lists(allowed_underscore, min_size=1, max_size=4, unique=True)
+    )
+    payload = {k: draw(simple_mu) for k in underscore_keys}
+
+    # Add minimal algorithm-facing fields that commonly appear in real vectors.
+    if entrypoint == "_detect_closure":
+        payload.setdefault("trace", draw(simple_mu))
+        payload.setdefault("result", draw(simple_mu))
+    else:
+        payload.setdefault("trace", draw(simple_mu))
+        payload.setdefault("frozen", draw(simple_mu))
+        payload.setdefault("tau_step", draw(st.integers(min_value=0, max_value=20)))
+
+    return {entrypoint: payload}
 
 
 # =============================================================================
@@ -385,6 +413,34 @@ class TestStepKernelMuModeFuzzer:
         state = {key: value}
         with pytest.raises(ValueError, match="kernel-reserved field"):
             step_kernel_mu([], state, validation_mode="domain")
+
+
+# =============================================================================
+# Gate 4 Runtime Path Fuzzing
+# =============================================================================
+
+class TestRunAlgorithmMetaCircularFuzzer:
+    """Fuzz run_algorithm_meta_circular trusted algorithm-runtime path."""
+
+    @given(state=algorithm_runtime_entrypoint_state())
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.too_slow], max_examples=40)
+    def test_accepts_allowed_runtime_payloads(self, state):
+        # Choose projections that match the generated entrypoint.
+        if "_detect_closure" in state:
+            projections = RECURRENCE_PROJECTIONS
+        else:
+            projections = EXHAUSTION_PROJECTIONS
+
+        result = run_algorithm_meta_circular(projections, state)
+        assert is_mu(result)
+
+    @given(bad_key=unknown_underscore_key(), value=simple_mu)
+    @settings(deadline=5000, max_examples=30)
+    def test_rejects_unknown_runtime_underscore_fields(self, bad_key, value):
+        assume(bad_key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)
+        payload = {"_detect_closure": {bad_key: value}}
+        with pytest.raises(ValueError, match="unsupported algorithm underscore field"):
+            run_algorithm_meta_circular(RECURRENCE_PROJECTIONS, payload)
 
 
 # =============================================================================

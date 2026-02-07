@@ -141,7 +141,8 @@ ALGORITHM_ENTRYPOINT_KEYS = frozenset({  # AST_OK: security whitelist - frozen c
 # Some algorithm-internal underscore keys are intentionally not in KERNEL_RESERVED_FIELDS
 # because they are confined to algorithm state payloads under entrypoint subtrees and
 # would over-constrain domain representations if globally reserved. This allowlist is
-# locked by tests/structural/test_reserved_field_policy.py to prevent silent drift.
+# locked by tests/test_gate4_algorithm_runtime_fuzzer.py and
+# tests/structural/test_gate3_security_fix.py to prevent silent drift.
 ALGORITHM_INTERNAL_UNRESERVED_FIELDS = frozenset({  # AST_OK: security policy allowlist
     "_closure",
     "_frozen_check",
@@ -256,9 +257,12 @@ def _looks_like_normalized_dict_candidate(value: Mu) -> bool:
     """
     if not isinstance(value, dict):
         return False
+    keys = set(value.keys())
     if value.get("_type") == "dict":
-        return True
-    if "head" not in value or "tail" not in value:
+        has_only_type = len(keys) == 1 and "_type" in keys
+        has_typed_node = len(keys) == 3 and "_type" in keys and "head" in keys and "tail" in keys
+        return has_only_type or has_typed_node
+    if not (len(keys) == 2 and "head" in keys and "tail" in keys):
         return False
     kv = value.get("head")
     if not isinstance(kv, dict):
@@ -270,7 +274,12 @@ def _looks_like_normalized_dict_candidate(value: Mu) -> bool:
     if not isinstance(key, str):
         return False
     kv_tail = kv.get("tail")
-    return isinstance(kv_tail, dict)
+    if not isinstance(kv_tail, dict):
+        return False
+    if set(kv_tail.keys()) != {"head", "tail"}:
+        return False
+    tail = value.get("tail")
+    return tail is None or isinstance(tail, dict)
 
 
 def validate_no_kernel_reserved_fields(
@@ -1044,6 +1053,17 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
         - trace: List of {"step": n, "value": v} entries
         - is_stall: True if stopped due to stall (no change)
     """
+    assert_mu(initial, "run_mu.initial")
+    validate_no_kernel_reserved_fields(initial, "run_mu initial")
+    validate_kernel_projections_first(projections)
+    for i, proj in enumerate(projections):
+        if not isinstance(proj, dict):
+            continue
+        if "pattern" in proj:
+            validate_no_kernel_reserved_fields(proj["pattern"], f"run_mu projection[{i}].pattern")
+        if "body" in proj:
+            validate_no_kernel_reserved_fields(proj["body"], f"run_mu projection[{i}].body")
+
     trace = []
     current = initial
 
