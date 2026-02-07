@@ -85,10 +85,7 @@ const KERNEL_RESERVED_FIELDS = new Set([
   '_lookup_name', '_lookup_value', '_lookup_bindings', '_original_bindings'
 ]);
 
-// Algorithm entrypoint keys - reserved fields are ONLY allowed inside these subtrees
-// Gate 3 (2026-02-04) Security fix: Prevents spoofed _mode/_phase at top level.
-// Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
-// Allowed: {"_detect_closure": {"_mode": "recurrence", ...}}
+// Algorithm entrypoint keys used by trusted algorithm-runtime validation.
 const ALGORITHM_ENTRYPOINT_KEYS = new Set([
   '_detect_closure',      // Recurrence algorithm entry point
   '_detect_exhaustion',   // Exhaustion algorithm entry point
@@ -228,12 +225,10 @@ function validateTypeTag(tag, context = '') {
  * Deep recursive check with depth guard (fail closed).
  * Matches Python step_mu.py:validate_no_kernel_reserved_fields()
  *
- * Gate 3 (2026-02-04) Security fix: Reserved fields are now allowed ONLY inside
- * algorithm entrypoint subtrees (_detect_closure, _detect_exhaustion).
- * Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
- * Allowed: {"_detect_closure": {"_mode": "recurrence", ...}}
+ * Gate 4 hardening: domain validation is strict. Reserved fields are rejected
+ * everywhere. Trusted algorithm state uses validateAlgorithmRuntimeFields().
  */
-function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _inAlgorithmSubtree = false) {
+function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
   // Depth guard - fail CLOSED (reject on deep structures)
   if (_depth > MAX_VALIDATION_DEPTH) {
     throw new Error(
@@ -250,7 +245,7 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _i
   // Arrays: validate each element
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      validateNoKernelReservedFields(value[i], `${context}[${i}]`, _depth + 1, _inAlgorithmSubtree);
+      validateNoKernelReservedFields(value[i], `${context}[${i}]`, _depth + 1);
     }
     return;
   }
@@ -260,17 +255,13 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _i
   const dictPairs = iterNormalizedDictPairs(value);
   if (dictPairs !== null) {
     for (const [key, val] of dictPairs) {
-      const enteringAlgorithm = ALGORITHM_ENTRYPOINT_KEYS.has(key);
-      if (KERNEL_RESERVED_FIELDS.has(key) && !_inAlgorithmSubtree) {
+      if (KERNEL_RESERVED_FIELDS.has(key)) {
         throw new Error(
           `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
-          `Reserved fields only allowed inside algorithm entrypoints (_detect_closure, _detect_exhaustion).`
+          `Reserved fields are not allowed in domain input.`
         );
       }
-      validateNoKernelReservedFields(
-        val, `${context}.${key}`, _depth + 1,
-        _inAlgorithmSubtree || enteringAlgorithm
-      );
+      validateNoKernelReservedFields(val, `${context}.${key}`, _depth + 1);
     }
     return;
   }
@@ -283,21 +274,13 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0, _i
 
   // Regular objects: check keys and recurse into values
   for (const [key, val] of Object.entries(value)) {
-    // Check if we're entering an algorithm entrypoint subtree
-    const enteringAlgorithm = ALGORITHM_ENTRYPOINT_KEYS.has(key);
-
-    // Reserved fields are only allowed inside algorithm entrypoint subtrees
-    if (KERNEL_RESERVED_FIELDS.has(key) && !_inAlgorithmSubtree) {
+    if (KERNEL_RESERVED_FIELDS.has(key)) {
       throw new Error(
         `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
-        `Reserved fields only allowed inside algorithm entrypoints (_detect_closure, _detect_exhaustion).`
+        `Reserved fields are not allowed in domain input.`
       );
     }
-    // Recurse into nested values, tracking if we're in an entrypoint subtree
-    validateNoKernelReservedFields(
-      val, `${context}.${key}`, _depth + 1,
-      _inAlgorithmSubtree || enteringAlgorithm
-    );
+    validateNoKernelReservedFields(val, `${context}.${key}`, _depth + 1);
   }
 }
 
@@ -2207,11 +2190,19 @@ if (process.argv.includes('--json-api')) {
         response = { success: false, error: e.message };
       }
     } else if (request.action === 'validate_reserved_fields') {
-      // Gate 3 security fix: Validate reserved field handling for cross-substrate parity
-      // Tests that both Python and JS accept/reject the same shapes
+      // Validate strict domain-mode reserved field policy for cross-substrate parity.
       const { value } = request;
       try {
         validateNoKernelReservedFields(value, 'test');
+        response = { success: true, valid: true, error: '' };
+      } catch (e) {
+        response = { success: true, valid: false, error: e.message };
+      }
+    } else if (request.action === 'validate_algorithm_runtime_fields') {
+      // Validate trusted algorithm-runtime underscore allowlist policy.
+      const { value } = request;
+      try {
+        validateAlgorithmRuntimeFields(value, 'test');
         response = { success: true, valid: true, error: '' };
       } catch (e) {
         response = { success: true, valid: false, error: e.message };

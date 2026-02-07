@@ -270,7 +270,7 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 - [x] Exhaustion detection runs via `step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - [x] Frozen set is Mu linked-list, NOT Python set
 - [x] Exhaustion LOGIC is in projections (exhaustion.v1.json)
-- **Note:** `run_algorithm_meta_circular()` now defaults to structural kernel bridge execution. Bootstrap mode is explicit fallback only (`execution_mode="bootstrap"`).
+- **Note:** `run_algorithm_meta_circular()` now defaults to structural kernel bridge execution. Bootstrap mode is explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`).
 
 ### 3. Cross-Substrate Parity
 - [x] Same projections produce same results on Python and JS

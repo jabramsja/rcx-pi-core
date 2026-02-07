@@ -161,9 +161,21 @@ def test_run_algorithm_meta_circular_bootstrap_fallback_is_explicit(monkeypatch)
     )
 
     result = run_algorithm_meta_circular(
-        [], {"_detect_closure": {"trace": None, "result": "x"}}, execution_mode="bootstrap"
+        [],
+        {"_detect_closure": {"trace": None, "result": "x"}},
+        execution_mode="bootstrap",
+        allow_bootstrap_fallback=True,
     )
     assert result["mode"] == "bootstrap"
+
+
+def test_run_algorithm_meta_circular_bootstrap_requires_explicit_opt_in():
+    with pytest.raises(ValueError, match="bootstrap fallback is disabled by default"):
+        run_algorithm_meta_circular(
+            [],
+            {"_detect_closure": {"trace": None, "result": "x"}},
+            execution_mode="bootstrap",
+        )
 
 
 def test_run_algorithm_meta_circular_rejects_unknown_mode():

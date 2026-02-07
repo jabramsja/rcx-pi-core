@@ -6,11 +6,10 @@ identified during external review. The original implementation allowed any input
 with _mode="recurrence" to bypass reserved field validation entirely.
 
 Attack vector blocked: {"_mode": "recurrence", "_result": "pwned"}
-Allowed: {"_detect_closure": {"_mode": "recurrence", ...}}
 
-The fix scopes the exception to algorithm entrypoint subtrees ONLY:
-- Reserved fields allowed ONLY inside _detect_closure / _detect_exhaustion
-- Top-level _mode/_phase spoofing is rejected
+Gate 4 hardening policy:
+- Domain validation is strict: reserved kernel fields are rejected everywhere.
+- Trusted algorithm state is validated separately by algorithm-runtime allowlist.
 """
 
 import pytest
@@ -77,12 +76,11 @@ class TestSpoofedModeAttack:
                 validate_no_kernel_reserved_fields(attack, "test")
 
 
-class TestEntrypointSubtreeAllowed:
-    """Test that algorithm states inside entrypoints are allowed."""
+class TestStrictDomainValidation:
+    """Domain-mode validator must reject reserved fields everywhere."""
 
-    def test_detect_closure_allows_reserved_fields(self):
-        """Reserved fields inside _detect_closure are allowed."""
-        legitimate = {
+    def test_detect_closure_with_reserved_fields_rejected(self):
+        payload = {
             "_detect_closure": {
                 "_mode": "recurrence",
                 "_phase": "scan",
@@ -91,13 +89,11 @@ class TestEntrypointSubtreeAllowed:
                 "_result": "final"
             }
         }
+        with pytest.raises(ValueError, match="kernel-reserved field"):
+            validate_no_kernel_reserved_fields(payload, "test")
 
-        # Should NOT raise
-        validate_no_kernel_reserved_fields(legitimate, "test")
-
-    def test_detect_exhaustion_allows_reserved_fields(self):
-        """Reserved fields inside _detect_exhaustion are allowed."""
-        legitimate = {
+    def test_detect_exhaustion_with_reserved_fields_rejected(self):
+        payload = {
             "_detect_exhaustion": {
                 "_mode": "exhaustion",
                 "_phase": "find_tau",
@@ -106,24 +102,18 @@ class TestEntrypointSubtreeAllowed:
                 "_operator_ids": None
             }
         }
+        with pytest.raises(ValueError, match="kernel-reserved field"):
+            validate_no_kernel_reserved_fields(payload, "test")
 
-        # Should NOT raise
-        validate_no_kernel_reserved_fields(legitimate, "test")
-
-    def test_nested_algorithm_state_allowed(self):
-        """Deeply nested reserved fields inside entrypoint are allowed."""
-        legitimate = {
+    def test_nested_algorithm_state_rejected(self):
+        payload = {
             "_detect_closure": {
                 "_mode": "recurrence",
-                "_seen": {
-                    "head": {"_mode": "recurrence"},  # Nested _mode OK inside entrypoint
-                    "tail": None
-                }
+                "_seen": {"head": {"_mode": "recurrence"}, "tail": None}
             }
         }
-
-        # Should NOT raise
-        validate_no_kernel_reserved_fields(legitimate, "test")
+        with pytest.raises(ValueError, match="kernel-reserved field"):
+            validate_no_kernel_reserved_fields(payload, "test")
 
     def test_real_recurrence_input_allowed(self):
         """Real recurrence algorithm input passes validation."""
@@ -140,7 +130,7 @@ class TestEntrypointSubtreeAllowed:
             }
         }
 
-        # Should NOT raise
+        # No reserved fields in this payload, so domain validation should pass.
         validate_no_kernel_reserved_fields(real_input, "test")
 
     def test_normalized_reserved_key_rejected(self):
@@ -152,8 +142,8 @@ class TestEntrypointSubtreeAllowed:
         with pytest.raises(ValueError, match="SECURITY.*_mode"):
             validate_no_kernel_reserved_fields(normalized, "test")
 
-    def test_normalized_entrypoint_allows_reserved(self):
-        """Reserved fields inside entrypoint subtree are allowed even when normalized."""
+    def test_normalized_entrypoint_with_reserved_rejected(self):
+        """Reserved fields inside normalized entrypoint subtree are rejected in domain mode."""
         from rcx_pi.selfhost.match_mu import normalize_for_match
 
         normalized = normalize_for_match({
@@ -163,8 +153,8 @@ class TestEntrypointSubtreeAllowed:
             }
         })
 
-        # Should NOT raise
-        validate_no_kernel_reserved_fields(normalized, "test")
+        with pytest.raises(ValueError, match="kernel-reserved field"):
+            validate_no_kernel_reserved_fields(normalized, "test")
 
     def test_malformed_normalized_dict_rejected_fail_closed(self):
         """
@@ -226,7 +216,7 @@ class TestMixedScenarios:
     def test_clean_data_with_entrypoint_passes(self):
         """Clean data alongside entrypoint passes."""
         clean = {
-            "_detect_closure": {"_mode": "recurrence", "_result": "X"},
+            "_detect_closure": {"trace": None, "result": "X"},
             "metadata": {"timestamp": 12345, "version": "1.0"}
         }
 
@@ -263,6 +253,30 @@ class TestAlgorithmEntrypointKeys:
 class TestAlgorithmRuntimeValidation:
     """Gate 4 algorithm-runtime validation hardening."""
 
+    def test_algorithm_runtime_allows_reserved_inside_detect_closure(self):
+        payload = {
+            "_detect_closure": {
+                "_mode": "recurrence",
+                "_phase": "scan",
+                "_result": "X",
+            }
+        }
+        validate_algorithm_runtime_fields(payload, "test")
+
+    def test_algorithm_runtime_allows_reserved_inside_detect_exhaustion(self):
+        payload = {
+            "_detect_exhaustion": {
+                "_mode": "exhaustion",
+                "_phase": "scan",
+                "_tau_step": 0,
+            }
+        }
+        validate_algorithm_runtime_fields(payload, "test")
+
+    def test_algorithm_runtime_rejects_unknown_underscore(self):
+        with pytest.raises(ValueError, match="unsupported algorithm underscore field"):
+            validate_algorithm_runtime_fields({"_detect_closure": {"_evil": 1}}, "test")
+
     def test_algorithm_runtime_rejects_malformed_normalized_dict(self):
         malformed = {
             "_type": "dict",
@@ -283,9 +297,9 @@ class TestAlgorithmRuntimeValidation:
 class TestCrossSubstrateParity:
     """Verify Python and JS validation accept/reject the same shapes."""
 
-    def _run_js_validation(self, value):
+    def _run_js_validation(self, value, action="validate_reserved_fields"):
         """Run JS validation and return (success, error_msg)."""
-        request = json.dumps({"action": "validate_reserved_fields", "value": value})
+        request = json.dumps({"action": action, "value": value})
         result = subprocess.run(
             ["node", "mu/host/js/eval_step.js", "--json-api", request],
             capture_output=True,
@@ -314,21 +328,23 @@ class TestCrossSubstrateParity:
         assert not valid, f"JS should reject spoofed _mode, but got valid=True"
         assert "_mode" in error or "reserved" in error.lower()
 
-    def test_parity_entrypoint_allowed(self):
-        """Both Python and JS allow entrypoint subtrees."""
-        legitimate = {
+    def test_parity_strict_domain_rejects_entrypoint_reserved_fields(self):
+        """Both Python and JS reject reserved fields in strict domain mode."""
+        payload = {
             "_detect_closure": {
                 "_mode": "recurrence",
                 "_result": "X"
             }
         }
 
-        # Python allows
-        validate_no_kernel_reserved_fields(legitimate, "test")  # Should not raise
+        # Python rejects
+        with pytest.raises(ValueError):
+            validate_no_kernel_reserved_fields(payload, "test")
 
-        # JS should also allow
-        valid, error = self._run_js_validation(legitimate)
-        assert valid, f"JS should allow entrypoint subtree, but got error: {error}"
+        # JS should also reject
+        valid, error = self._run_js_validation(payload)
+        assert not valid, f"JS should reject reserved fields in domain mode, got valid=True"
+        assert "reserved" in error.lower() or "_mode" in error
 
     def test_parity_nested_spoof_rejected(self):
         """Both Python and JS reject nested spoof outside entrypoint."""
@@ -352,3 +368,17 @@ class TestCrossSubstrateParity:
         # JS should also allow
         valid, error = self._run_js_validation(clean)
         assert valid, f"JS should allow clean data, but got error: {error}"
+
+    def test_parity_algorithm_runtime_allows_entrypoint_reserved_fields(self):
+        """Both Python and JS algorithm-runtime validators allow trusted entrypoint state."""
+        payload = {
+            "_detect_closure": {
+                "_mode": "recurrence",
+                "_phase": "scan",
+                "_result": "X",
+            }
+        }
+
+        validate_algorithm_runtime_fields(payload, "test")
+        valid, error = self._run_js_validation(payload, action="validate_algorithm_runtime_fields")
+        assert valid, f"JS algorithm-runtime validation should allow payload: {error}"
