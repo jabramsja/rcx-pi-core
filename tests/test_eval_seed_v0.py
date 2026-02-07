@@ -14,13 +14,8 @@ from rcx_pi.eval_seed import (
     substitute,
     apply_projection,
     step,
-    create_step_handler,
-    create_stall_handler,
-    # register_eval_seed removed - legacy Kernel class deleted
     assert_not_lambda_calculus,
 )
-# NOTE: create_kernel import removed - TestKernelIntegration tests removed
-# Legacy Kernel class is deprecated; use kernel.v1.json via step_kernel_mu()
 
 
 # =============================================================================
@@ -389,35 +384,6 @@ class TestStep:
             {"pattern": {"var": "y"}, "body": "second"},
         ]
         assert step(projections, 1) == "first"
-
-
-# =============================================================================
-# Handler tests
-# =============================================================================
-
-
-class TestHandlers:
-    """Tests for kernel handlers."""
-
-    def test_step_handler(self):
-        """step_handler extracts mu and applies projections."""
-        projections = [{"pattern": 1, "body": 2}]
-        handler = create_step_handler(projections)
-        result = handler({"mu": 1, "hash": "abc"})
-        assert result == 2
-
-    def test_step_handler_stall(self):
-        """step_handler returns mu if no match."""
-        projections = [{"pattern": 1, "body": 2}]
-        handler = create_step_handler(projections)
-        result = handler({"mu": 99, "hash": "abc"})
-        assert result == 99
-
-    def test_stall_handler(self):
-        """stall_handler returns stalled value."""
-        handler = create_stall_handler()
-        result = handler({"mu": 42, "trace": []})
-        assert result == 42
 
 
 # =============================================================================

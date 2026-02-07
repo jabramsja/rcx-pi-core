@@ -511,7 +511,7 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
 
     for proj in projections:
         # Get projection ID for coverage tracking
-        proj_id = proj.get("id", f"proj_{id(proj)}") if isinstance(proj, dict) else f"proj_{id(proj)}"
+        proj_id = proj.get("id", "<anonymous>") if isinstance(proj, dict) else "<invalid>"
 
         result = apply_projection(proj, input_value)
         if result is not NO_MATCH:
@@ -526,90 +526,7 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
     return input_value
 
 
-# =============================================================================
-# Kernel Handlers
-# =============================================================================
-
-
-def create_step_handler(projections: list[Mu]):
-    """
-    Create a step handler for the kernel with given projections.
-
-    Args:
-        projections: List of projections to use.
-
-    Returns:
-        Handler function for "step" event.
-    """
-    def step_handler(context: Mu) -> Mu:
-        """Handle step event: apply projections to current value."""
-        assert_mu(context, "step_handler.context")
-        if not isinstance(context, dict) or "mu" not in context:
-            raise KeyError("step_handler context must have 'mu' key")
-        return step(projections, context["mu"])
-
-    return step_handler
-
-
-def create_stall_handler():
-    """
-    Create a stall handler for the kernel.
-
-    For now, just returns the stalled value. Later versions may
-    signal closure, retry with different projections, etc.
-
-    Returns:
-        Handler function for "stall" event.
-    """
-    def stall_handler(context: Mu) -> Mu:
-        """Handle stall event: return stalled value."""
-        assert_mu(context, "stall_handler.context")
-        if not isinstance(context, dict) or "mu" not in context:
-            raise KeyError("stall_handler context must have 'mu' key")
-        return context["mu"]
-
-    return stall_handler
-
-
-def create_init_handler():
-    """
-    Create an init handler for the kernel.
-
-    Returns:
-        Handler function for "init" event.
-    """
-    def init_handler(context: Mu) -> Mu:
-        """Handle init event: return initial value."""
-        assert_mu(context, "init_handler.context")
-        if not isinstance(context, dict) or "mu" not in context:
-            raise KeyError("init_handler context must have 'mu' key")
-        return context["mu"]
-
-    return init_handler
-
-
-# =============================================================================
-# Seed Configuration
-# =============================================================================
-
-
-def create_eval_seed(projections: list[Mu]) -> dict:
-    """
-    Create a complete EVAL_SEED configuration.
-
-    Args:
-        projections: List of projections for this seed.
-
-    Returns:
-        Dict with handlers for kernel registration.
-    """
-    return {
-        "step": create_step_handler(projections),
-        "stall": create_stall_handler(),
-        "init": create_init_handler(),
-    }
-
-
-# NOTE: register_eval_seed() was removed in Phase 8b cleanup (2026-01-30)
-# It called kernel.register_handler() on the deleted legacy Kernel class.
-# The handler creator functions above are kept for test compatibility.
+# NOTE: Kernel handler framework (create_step_handler, create_stall_handler,
+# create_init_handler, create_eval_seed, register_eval_seed) removed in
+# Gate 4 cleanup (2026-02-07). The legacy Kernel class they targeted was
+# deleted in Phase 8b (2026-01-30).

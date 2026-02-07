@@ -87,10 +87,11 @@ try:
         derandomize=False,
     )
 
-    # Default profile: same as ci_full for local development (full coverage)
+    # Default profile: same as ci_fast for local development (fast feedback)
+    # Use HYPOTHESIS_PROFILE=ci_full for comprehensive local fuzzing
     settings.register_profile(
         "default",
-        max_examples=500,
+        max_examples=50,
         deadline=5000,
         suppress_health_check=[HealthCheck.too_slow],
         print_blob=True,

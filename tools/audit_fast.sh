@@ -4,6 +4,10 @@ set -euo pipefail
 # Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
 export PYTHONHASHSEED=0
 
+# Use fast Hypothesis profile for local iteration (50 examples vs 500 default)
+# CI sets its own profile via environment variable
+export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci_fast}"
+
 # ============================================================================
 # FAST AUDIT - For local development iteration (~3 minutes)
 # ============================================================================
