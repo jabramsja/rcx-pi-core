@@ -291,6 +291,7 @@ When a doc is purely historical (not replaced, just obsolete):
 | No hardcoded projection counts | `test_doc_freshness.py` | CI |
 | Debt count matches | `check_docs_consistency.sh` | CI |
 | STATUS.md recently updated | `check_docs_consistency.sh` | CI |
+| STATUS/TASKS execution-layer claims agree | `test_status_tasks_consistency.py` | CI |
 
 ---
 
@@ -305,6 +306,7 @@ When a doc is purely historical (not replaced, just obsolete):
 | Old docs without lifecycle status | Mandatory DOC_STATUS header |
 | Superseded docs still referenced | FORBIDDEN_PATTERNS for archived content |
 | Duplicate truth across docs | Law 1 enforcement (STATUS.md + TASKS.md only) |
+| STATUS/TASKS claim contradictions | Cross-tracker consistency test (`test_status_tasks_consistency.py`) |
 
 ---
 

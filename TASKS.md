@@ -590,7 +590,7 @@ All blockers resolved 2026-01-28:
 1. [x] Gate 1: Create `mu/bridge/` directory structure (2026-02-02)
 2. [x] Gate 2-4: Implement bridge projections (5 projections in bootstrap_structural.v1.json) (2026-02-02)
 3. [x] Gate 5: Wire step_mu to use match.v2 + bootstrap_structural bridge (2026-02-02)
-4. [x] Gate 6: Update recurrence.v1 and exhaustion.v1 to META_CIRCULAR (2026-02-02)
+4. [x] Gate 6: Integrate bridge path for recurrence/exhaustion and keep runtime layer explicit (2026-02-02)
 5. [x] Gate 7: Cross-substrate parity verification (JS port) (2026-02-03)
 
 **Projections (5 in bridge, combined with match.v2 at runtime):**
@@ -630,7 +630,7 @@ All blockers resolved 2026-01-28:
 - [x] `load_combined_kernel_with_bridge_projections()` wires match.v2 + bootstrap_structural (2026-02-02)
 - [x] All 31 bridge test vectors pass (tests/test_bootstrap_structural_bridge.py) (2026-02-02)
 - [x] Binding conflict detection is structural (projections, not Python) (2026-02-02)
-- [x] recurrence.v1 and exhaustion.v1 declared META_CIRCULAR (Gate 6) (2026-02-02)
+- [x] recurrence.v1 and exhaustion.v1 execution layer explicitly declared BOOTSTRAP (runtime-honest) (2026-02-02)
 - [x] Execution path verification: bridge projections ACTUALLY fire (2026-02-03)
   - tests/test_execution_path_verification.py (9 tests)
   - Tests use tracing to prove which projections execute
