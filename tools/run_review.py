@@ -192,16 +192,18 @@ PARALLEL_GROUPS = [
 ]
 
 # Runtime budget controls (major latency lever)
+# 25 turns handles full-codebase reviews; agents hit turn limits at lower values
+# on large scopes. Use --max-turns to override if needed.
 AGENT_MAX_TURNS = {
-    "verifier": 14,
-    "adversary": 14,
-    "expert": 12,
-    "structural-proof": 12,
-    "grounding": 10,
-    "fuzzer": 12,
-    "translator": 10,
-    "visualizer": 10,
-    "advisor": 12,
+    "verifier": 25,
+    "adversary": 25,
+    "expert": 20,
+    "structural-proof": 20,
+    "grounding": 18,
+    "fuzzer": 20,
+    "translator": 15,
+    "visualizer": 15,
+    "advisor": 18,
 }
 
 GROUNDING_HIGH_RISK_PATTERNS = (
@@ -1022,6 +1024,11 @@ Examples:
         help="Stop immediately after hard gate failures in phase 1 (legacy fail-fast behavior)"
     )
     parser.add_argument(
+        "--max-turns",
+        type=int,
+        help="Override per-agent max_turns (use for large scopes that need more exploration)"
+    )
+    parser.add_argument(
         "--pr-number",
         type=int,
         help="PR number to associate with findings (for tracking)"
@@ -1050,6 +1057,12 @@ Examples:
     if args.pr and depth == "full":
         depth = auto_select_depth(files)
         print(f"Auto-selected depth: {depth}")
+
+    # Apply max-turns override if specified
+    if args.max_turns:
+        for key in AGENT_MAX_TURNS:
+            AGENT_MAX_TURNS[key] = args.max_turns
+        print(f"Max turns override: {args.max_turns} for all agents")
 
     # Run orchestrator
     orchestrator = ReviewOrchestrator(

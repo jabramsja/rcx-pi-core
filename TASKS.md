@@ -29,8 +29,8 @@ If a task is not listed here, it is NOT to be implemented.
     - **META-CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2)
     - If a seed claims META-CIRCULAR, tests MUST verify it through step_kernel_mu
     - Non-linear pattern seeds become META-CIRCULAR only when bridge-backed structural runtime is default
-    - Current BOOTSTRAP seeds: none in L3 core closure path
-    - Current META-CIRCULAR seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, exhaustion.v1, classify.v1, eval.v1
+    - Current BOOTSTRAP seeds: eval.v1 (uses [] arrays, requires bootstrap match/substitute)
+    - Current META-CIRCULAR seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, exhaustion.v1, classify.v1
 15. **True self-hosting is the path.** The goal is structural computation without host semantics:
     - **L1 (Algorithmic)**: match/subst algorithms as Mu projections ✓ DONE
     - **L2 (Operational)**: kernel loop as Mu projections ✓ DONE (with bootstrap primitive acceptance)
