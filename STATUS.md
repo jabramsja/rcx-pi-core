@@ -244,7 +244,7 @@ THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
 INFRA_CEILING: 37
-INFRA_CURRENT: 36
+INFRA_CURRENT: 33
 ```
 
 **Debt breakdown:**
@@ -283,9 +283,9 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:148 - constant definition (AST_OK: infra)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 37 (current 36)
+- AST_OK:infra ceiling: 37 (current 33)
 - AST_OK:infra is NOT debt, but capped to prevent drift
-- Gate 6 added 3 new infra markers for kernel v3 and algorithm runner
+- Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
 Note: projection_runner has a comment mentioning @host_iteration but uses composition pattern, not decoration.
 
