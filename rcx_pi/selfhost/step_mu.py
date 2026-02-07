@@ -756,7 +756,7 @@ def step_kernel_mu(
     # SECURITY: Reject kernel projections - step_kernel_mu expects DOMAIN projections only
     # Kernel projections are loaded separately via load_combined_kernel_projections().
     # Check by ID (kernel.*) not by _mode pattern because algorithm projections use _mode.
-    for i, proj in enumerate(projections):  # AST_OK: infra - boundary validation loop
+    for i, proj in enumerate(projections):
         proj_id = proj.get("id", "") if isinstance(proj, dict) else ""
         if isinstance(proj_id, str) and proj_id.startswith("kernel."):
             raise ValueError(
@@ -1119,12 +1119,12 @@ def run_mu_structural(
     current = initial
 
     try:
-        for i in range(max_steps):  # AST_OK: infra - trace driver loop (function-level @host_iteration)
+        for i in range(max_steps):
             # Single-pass structural step: identify first match and apply it once.
             # This avoids the previous double-evaluation path (pre-match + step_mu).
             matched_id = None
             result = current
-            for proj in projections:  # AST_OK: infra - single-pass projection identification for trace
+            for proj in projections:
                 if not isinstance(proj, dict):
                     continue
                 pattern = proj.get("pattern")
