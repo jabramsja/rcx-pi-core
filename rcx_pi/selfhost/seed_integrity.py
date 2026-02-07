@@ -47,13 +47,15 @@ SEED_CHECKSUMS: dict[str, str] = {
     "subst.v2.json": "e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621",
     # mu/ folder reorganization: renamed from enginenews.v1/exhaust.v1 to recurrence.v1/exhaustion.v1
     # Legacy names (enginenews.v1, exhaust.v1) removed - mu/ is now canonical
-    # Updated v1.2.0: HYBRID execution_layer (honest: production uses BOOTSTRAP, meta-circular proven)
+    # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
-    "recurrence.v1.json": "2b9974d8f53a7d5a87900658ea76727e52c01f1d5d6a8aba68b8747df9fe1dad",
+    # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
+    "recurrence.v1.json": "7de48c0b8ded041ae7b681e2364ca7e7b188358fc82923cd3f53b141a5143baf",
     # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
-    # Updated v1.2.0: HYBRID execution_layer (honest: production uses BOOTSTRAP, meta-circular proven)
+    # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
-    "exhaustion.v1.json": "2e407fd5774bd353b483eed51c153c4ec81ed7943447e97d7c18865f143de237",
+    # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
+    "exhaustion.v1.json": "3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c",
     # RCX Engine: main program orchestrating recurrence + exhaustion
     # Updated: Added status: "design_only" marker
     # Updated: Fixed meta.doc path (docs/core/RCXEngine.v0.md -> docs/core/EngineNewsStructural.v0.md)

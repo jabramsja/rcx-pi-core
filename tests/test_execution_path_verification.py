@@ -435,9 +435,9 @@ class TestAlgorithmExecutionPath:
     9-agent finding (Fuzzer): Algorithm execution may fall back to bootstrap
     without detection. These tests verify which projections actually fire.
 
-    NOTE: Algorithms run via eval_seed.step() (BOOTSTRAP path) which provides
-    non-linear pattern support natively. The bridge projections are for when
-    algorithms run through the structural kernel (META_CIRCULAR path).
+    NOTE (Gate 4): Default algorithm runtime path is structural:
+    run_algorithm_meta_circular() -> step_kernel_mu(kernel_mode="bridge").
+    Bootstrap execution is explicit fallback only.
     """
 
     @pytest.fixture
@@ -635,3 +635,28 @@ class TestAlgorithmExecutionPath:
         # Should return freeze action
         assert result.get("action") == "freeze"
         assert result.get("exhaustion_detected") is True
+
+    def test_default_runtime_does_not_use_bootstrap_fallback(self, monkeypatch):
+        """
+        EVIDENCE: run_algorithm_meta_circular() default path must use structural kernel.
+
+        If this regresses to bootstrap fallback silently, Gate 4 cutover is broken.
+        """
+        from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
+
+        def fail_bootstrap(*_args, **_kwargs):
+            raise AssertionError("bootstrap fallback executed on default path")
+
+        monkeypatch.setattr("rcx_pi.selfhost.step_mu.step_algorithm_with_bridge", fail_bootstrap)
+
+        # Use a patched kernel entry so test is path-focused (not seed semantics-focused).
+        monkeypatch.setattr(
+            "rcx_pi.selfhost.step_mu.step_kernel_mu",
+            lambda *_args, **_kwargs: {"mode": "kernel_path"}
+        )
+
+        out = run_algorithm_meta_circular(
+            [],
+            {"_detect_closure": {"trace": None, "result": "x"}},
+        )
+        assert out == {"mode": "kernel_path"}

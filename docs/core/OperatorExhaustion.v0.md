@@ -266,11 +266,11 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 - [x] Each projection has `id`, `pattern`, `body` fields (enforced by `seed_integrity.py`)
 - [x] SHA256 checksum verified on load (enforced by `seed_integrity.py`)
 
-### 2. Execution is Structural (HYBRID)
-- [x] Exhaustion detection runs via `eval_seed.step()` (bootstrap primitive)
+### 2. Execution is Structural (META_CIRCULAR Path)
+- [x] Exhaustion detection runs via `step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - [x] Frozen set is Mu linked-list, NOT Python set
 - [x] Exhaustion LOGIC is in projections (exhaustion.v1.json)
-- **Note:** Uses `run_algorithm_meta_circular()` which delegates to Python match/substitute. This is the HYBRID execution model - projections define semantics, bootstrap provides execution. True meta-circular requires non-linear pattern support in structural kernel.
+- **Note:** `run_algorithm_meta_circular()` now defaults to structural kernel bridge execution. Bootstrap mode is explicit fallback only (`execution_mode="bootstrap"`).
 
 ### 3. Cross-Substrate Parity
 - [x] Same projections produce same results on Python and JS

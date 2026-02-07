@@ -459,7 +459,7 @@ Both paths produce identical results. The execution path verification tests (`te
 4. **Create non-linear tests** (binding conflict detection)
 5. **Port to JS** and verify parity
 6. **Update recurrence.v1 and exhaustion.v1** to use bridge
-7. **Update execution_layer** declarations to META_CIRCULAR (currently HYBRID; requires non-linear kernel support)
+7. **Update execution_layer** declarations to META_CIRCULAR (completed in Gate 4 cutover)
 8. **Add integration tests** verifying meta-circular execution
 
 ---
@@ -511,22 +511,20 @@ Both paths produce identical results. The execution path verification tests (`te
 
 ---
 
-## Current Execution Architecture (2026-02-03)
+## Current Execution Architecture (2026-02-07)
 
-### Two Execution Layers
+### Runtime Layers
 
-The bridge projections are IMPLEMENTED and VERIFIED to fire. However, algorithm execution (recurrence, exhaustion) currently uses a hybrid approach:
+The bridge projections are IMPLEMENTED and VERIFIED to fire. Gate 4 cutover makes structural execution the default for recurrence/exhaustion:
 
-**Layer 1: Structural Pattern Matching (match.v2 + bridge)**
-- Bridge projections handle non-linear pattern variable binding
-- Normalization converts dict/list to linked-list format for structural matching
-- This layer WORKS - `bridge.var.check_existing`, `bridge.lookup.found_same/found_different` all fire correctly
+**Primary Layer: Structural Kernel Execution (kernel + bridge + match.v2 + subst.v2)**
+- `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
+- Bridge projections provide non-linear pattern support inside structural execution
+- This is now the production path for recurrence/exhaustion
 
-**Layer 2: Algorithm Execution (Python match/substitute)**
-- Algorithm projections expect specific dict formats (e.g., `{_state: ..., _check_list: ...}`)
-- Structural normalization breaks these formats (converts to linked-list kv-pairs)
-- Current solution: `step_algorithm_with_bridge()` uses Python match/substitute
-- This avoids normalization issues while still benefiting from bridge design
+**Fallback Layer: Bootstrap Debug Path**
+- `execution_mode="bootstrap"` calls `step_algorithm_with_bridge()` for controlled debugging
+- This path is no longer the default runtime
 
 ### Why This Architecture Exists
 

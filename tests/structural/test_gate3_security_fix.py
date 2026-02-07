@@ -20,6 +20,7 @@ from pathlib import Path
 
 from rcx_pi.selfhost.step_mu import (
     validate_no_kernel_reserved_fields,
+    validate_algorithm_runtime_fields,
     KERNEL_RESERVED_FIELDS,
     ALGORITHM_ENTRYPOINT_KEYS,
     _iter_normalized_dict_pairs,
@@ -165,6 +166,28 @@ class TestEntrypointSubtreeAllowed:
         # Should NOT raise
         validate_no_kernel_reserved_fields(normalized, "test")
 
+    def test_malformed_normalized_dict_rejected_fail_closed(self):
+        """
+        Malformed normalized dict encoding must fail closed.
+
+        If kv-tail shape is invalid, validator must not fall back to regular
+        dict recursion because encoded key values would bypass reserved-field checks.
+        """
+        malformed = {
+            "_type": "dict",
+            "head": {
+                "head": "_mode",
+                "tail": {
+                    "head": "forged",
+                    "tail": {"oops": 1},  # invalid kv-tail; should be null
+                },
+            },
+            "tail": None,
+        }
+
+        with pytest.raises(ValueError, match="malformed normalized dict encoding"):
+            validate_no_kernel_reserved_fields(malformed, "test")
+
 
 class TestMixedScenarios:
     """Test mixed scenarios combining legitimate and attack patterns."""
@@ -235,6 +258,26 @@ class TestAlgorithmEntrypointKeys:
         """Entrypoint keys themselves are NOT reserved (they're entry points)."""
         for key in ALGORITHM_ENTRYPOINT_KEYS:
             assert key not in KERNEL_RESERVED_FIELDS
+
+
+class TestAlgorithmRuntimeValidation:
+    """Gate 4 algorithm-runtime validation hardening."""
+
+    def test_algorithm_runtime_rejects_malformed_normalized_dict(self):
+        malformed = {
+            "_type": "dict",
+            "head": {
+                "head": "_evil",
+                "tail": {
+                    "head": 1,
+                    "tail": {"oops": 1},  # invalid kv-tail; should be null
+                },
+            },
+            "tail": None,
+        }
+
+        with pytest.raises(ValueError, match="malformed normalized dict encoding"):
+            validate_algorithm_runtime_fields(malformed, "test")
 
 
 class TestCrossSubstrateParity:

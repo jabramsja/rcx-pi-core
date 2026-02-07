@@ -545,6 +545,33 @@ class TestJSReservedFieldValidationParity:
         valid, error = self._run_js_validation(clean)
         assert valid, f"JS should allow clean data, but got error: {error}"
 
+    def test_parity_malformed_normalized_dict_fails_closed(self):
+        """
+        SECURITY: Malformed normalized dict encodings must fail closed.
+
+        This blocks encoded-key bypasses where reserved keys are carried in kv heads.
+        """
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        malformed = {
+            "_type": "dict",
+            "head": {
+                "head": "_mode",
+                "tail": {
+                    "head": "forged",
+                    "tail": {"oops": 1},
+                },
+            },
+            "tail": None,
+        }
+
+        with pytest.raises(ValueError, match="malformed normalized dict encoding"):
+            validate_no_kernel_reserved_fields(malformed, "test")
+
+        valid, error = self._run_js_validation(malformed)
+        assert not valid, "JS should reject malformed normalized dict encoding"
+        assert "Malformed normalized dict encoding" in error
+
 
 class TestJSSecurityParity:
     """Verify JS implements the same security checks as Python."""
@@ -824,7 +851,7 @@ class TestJSBridgeParity:
             }
         }
 
-        # Run Python (using bootstrap path which handles non-linear patterns)
+        # Run Python (Gate 4 default structural path via run_algorithm_meta_circular)
         py_result = input_data
         for _ in range(100):
             next_result = run_algorithm_meta_circular(recurrence_projs, py_result)
@@ -872,7 +899,7 @@ class TestJSBridgeParity:
             }
         }
 
-        # Run Python
+        # Run Python (Gate 4 default structural path)
         py_result = input_data
         for _ in range(100):
             next_result = run_algorithm_meta_circular(recurrence_projs, py_result)
@@ -926,7 +953,7 @@ class TestJSBridgeParity:
             }
         }
 
-        # Run Python
+        # Run Python (Gate 4 default structural path)
         py_result = input_data
         for _ in range(100):
             next_result = run_algorithm_meta_circular(exhaustion_projs, py_result)
@@ -973,7 +1000,7 @@ class TestJSBridgeParity:
             }
         }
 
-        # Run Python
+        # Run Python (Gate 4 default structural path)
         py_result = input_data
         for _ in range(100):
             next_result = run_algorithm_meta_circular(exhaustion_projs, py_result)
