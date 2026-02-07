@@ -647,6 +647,10 @@ All blockers resolved 2026-01-28:
   1. Structural layer: match.v2 + bridge (for pattern matching with non-linear support)
   2. Practical layer: Python match/substitute (for algorithm execution)
 - Path to true meta-circular algorithm execution documented in BootstrapStructuralBridge.v0.md
+- Gate 4 prep infrastructure (2026-02-07):
+  - `step_kernel_mu()` now supports `kernel_mode` (`core`/`bridge`)
+  - `step_kernel_mu()` now supports strict `validation_mode` (`domain`/`algorithm_runtime`)
+  - Algorithm-runtime mode is allowlisted and fail-closed for unknown underscore fields
 
 ---
 
