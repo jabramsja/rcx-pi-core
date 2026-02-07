@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-04
+LAST_VERIFIED: 2026-02-06
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_governance.py
@@ -135,7 +135,12 @@ WorkingRCX/
 1. `docs/core/` = Active specs only (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)
 2. `docs/archive/` = EXEMPT from governance (historical, read-only)
 3. Moving a doc to `archive/` removes it from governance but requires updating all references
-4. New folders require updating `GOVERNED_FOLDERS` in test_doc_governance.py
+4. New folders require updating `tools/docs_registry.json`
+
+**Registry rule (fail-closed):**
+- `tools/docs_registry.json` is the central registry for markdown governance classification.
+- New markdown files/folders must be registered there or tests fail.
+- Run `python3 tools/docs_sync_report.py --check` to validate registry coverage and placement rules.
 
 ---
 
@@ -286,6 +291,7 @@ When a doc is purely historical (not replaced, just obsolete):
 | No hardcoded projection counts | `test_doc_freshness.py` | CI |
 | Debt count matches | `check_docs_consistency.sh` | CI |
 | STATUS.md recently updated | `check_docs_consistency.sh` | CI |
+| STATUS/TASKS execution-layer claims agree | `test_status_tasks_consistency.py` | CI |
 
 ---
 
@@ -300,6 +306,7 @@ When a doc is purely historical (not replaced, just obsolete):
 | Old docs without lifecycle status | Mandatory DOC_STATUS header |
 | Superseded docs still referenced | FORBIDDEN_PATTERNS for archived content |
 | Duplicate truth across docs | Law 1 enforcement (STATUS.md + TASKS.md only) |
+| STATUS/TASKS claim contradictions | Cross-tracker consistency test (`test_status_tasks_consistency.py`) |
 
 ---
 

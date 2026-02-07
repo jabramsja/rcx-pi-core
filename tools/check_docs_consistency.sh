@@ -92,6 +92,28 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
+# 5b. Cross-tracker semantic consistency
+echo ""
+echo "5b. Checking STATUS/TASKS cross-tracker consistency..."
+if PYTHONHASHSEED=0 python3 -m pytest tests/docs/test_status_tasks_consistency.py -q --tb=no 2>/dev/null; then
+    echo "   OK: STATUS.md and TASKS.md execution-layer claims are consistent"
+else
+    echo "   WARNING: STATUS/TASKS consistency test found drift"
+    echo "   → Run: PYTHONHASHSEED=0 pytest tests/docs/test_status_tasks_consistency.py -v"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# 6. Registry and placement sync checks
+echo ""
+echo "6. Checking docs registry coverage and placement..."
+if python3 tools/docs_sync_report.py --check >/dev/null 2>&1; then
+    echo "   OK: Registry coverage and placement checks pass"
+else
+    echo "   WARNING: docs sync report found issues"
+    echo "   → Run: python3 tools/docs_sync_report.py"
+    ERRORS=$((ERRORS + 1))
+fi
+
 # Summary
 echo ""
 echo "=== Summary ==="

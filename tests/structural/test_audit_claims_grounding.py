@@ -239,17 +239,17 @@ class TestUnderscoreKeyAudit:
                 f"Kernel/engine seeds use underscore-prefixed fields by design."
             )
 
-    def test_precommit_excludes_kernel_seeds(self):
-        """pre-commit-check.sh must exclude kernel/engine seeds from underscore check."""
-        script = REPO_ROOT / "tools" / "pre-commit-check.sh"
+    def test_precommit_uses_seed_police_for_mu_json(self):
+        """Active pre-commit hook must run seed police for staged mu/*.json files."""
+        script = REPO_ROOT / "tools" / "pre-commit-doc-check"
         content = script.read_text()
 
-        # Check for the KERNEL_SEEDS pattern or individual exclusions
-        for seed in self.KERNEL_ENGINE_SEEDS:
-            assert seed in content, (
-                f"pre-commit-check.sh must exclude {seed} from underscore key check. "
-                f"Kernel/engine seeds use underscore-prefixed fields by design."
-            )
+        assert "STAGED_SEEDS=$(echo \"$STAGED_FILES\" | grep -E '^mu/.*\\.json$' || true)" in content, (
+            "pre-commit-doc-check must detect staged mu/*.json files"
+        )
+        assert "./tools/seed_police.sh" in content, (
+            "pre-commit-doc-check must run seed_police.sh when mu seeds are staged"
+        )
 
     def test_kernel_seed_uses_underscore_mode(self):
         """kernel.v1.json must use _mode for state machine transitions."""

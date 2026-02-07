@@ -191,7 +191,7 @@ Cross-substrate parity tests verify L3 (substrate portability):
 
 **Before committing, run:**
 ```bash
-./tools/pre-commit-check.sh       # Full checks: syntax, contraband, AST, docs
+./tools/pre-commit-doc-check      # Canonical commit gate (docs, debt, tracker, staged checks)
 ./tools/check_docs_consistency.sh # Verify STATUS.md matches reality
 ./tools/debt_dashboard.sh         # Check debt doesn't exceed ceiling
 ```
@@ -202,7 +202,7 @@ Cross-substrate parity tests verify L3 (substrate portability):
 ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 ```
 
-The pre-commit hook checks doc consistency, debt ceiling, and warns if core code changed without STATUS.md update. See `CLAUDE.md` for full workflow details.
+The pre-commit hook checks doc consistency, debt ceiling, targeted staged-file checks, and tracker sync. See `CLAUDE.md` for full workflow details.
 
 ## Testing Tiers
 
