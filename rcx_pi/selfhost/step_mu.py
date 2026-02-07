@@ -159,6 +159,28 @@ ALGORITHM_INTERNAL_UNRESERVED_FIELDS = frozenset({  # AST_OK: security policy al
     "_trace",
 })
 
+# Gate 4 prep (2026-02-07): strict allowlist for algorithm-runtime kernel entry.
+# This mode is only for trusted internal algorithm execution (recurrence/exhaustion)
+# and is narrower than "allow all reserved fields". Unknown underscore fields fail closed.
+ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = (
+    ALGORITHM_ENTRYPOINT_KEYS
+    | ALGORITHM_INTERNAL_UNRESERVED_FIELDS
+    | frozenset((
+        "_check_list",
+        "_current",
+        "_frozen",
+        "_mode",
+        "_operator_ids",
+        "_phase",
+        "_result",
+        "_seen",
+        "_stall",
+        "_step",
+        "_tau_step",
+        "_type",
+    ))
+)
+
 
 def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
     """
@@ -299,6 +321,54 @@ def validate_no_kernel_reserved_fields(
     elif isinstance(value, list):
         for item in value:
             validate_no_kernel_reserved_fields(item, context, _depth + 1, _in_algorithm_subtree)
+
+
+def validate_algorithm_runtime_fields(
+    value: Mu,
+    context: str = "input",
+    _depth: int = 0,
+) -> None:
+    """
+    Validate trusted algorithm runtime state at kernel entry.
+
+    Gate 4 prep: algorithm execution requires underscore-heavy state keys at the
+    top level (for example `_mode`, `_phase`) that domain validation rejects.
+    This validator is stricter than a blanket bypass:
+    - Unknown underscore fields are rejected (fail closed).
+    - Underscore keys inside normalized dict encodings are also checked.
+
+    This mode is for internal algorithm execution only.
+    """
+    MAX_VALIDATION_DEPTH = 100
+    if _depth > MAX_VALIDATION_DEPTH:
+        raise ValueError(
+            f"SECURITY: {context} exceeded maximum validation depth ({MAX_VALIDATION_DEPTH}). "
+            f"Possible deeply nested attack structure."
+        )
+
+    if isinstance(value, dict):
+        pairs = _iter_normalized_dict_pairs(value)
+        if pairs is not None:
+            for key, val in pairs:
+                if key.startswith("_") and key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS:
+                    raise ValueError(
+                        f"SECURITY: {context} contains unsupported algorithm underscore field: {key}. "
+                        f"Allowed: {sorted(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)}"
+                    )
+                validate_algorithm_runtime_fields(val, context, _depth + 1)
+            return
+
+        for key, val in value.items():
+            if isinstance(key, str) and key.startswith("_"):
+                if key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS:
+                    raise ValueError(
+                        f"SECURITY: {context} contains unsupported algorithm underscore field: {key}. "
+                        f"Allowed: {sorted(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)}"
+                    )
+            validate_algorithm_runtime_fields(val, context, _depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            validate_algorithm_runtime_fields(item, context, _depth + 1)
 
 
 # =============================================================================
@@ -582,7 +652,13 @@ def extract_kernel_result(terminal_state: Mu, original_input: Mu) -> Mu:
 
 
 @host_iteration("Kernel execution loop - mechanical driver (Phase 8b simplified)")
-def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
+def step_kernel_mu(
+    projections: list[Mu],
+    input_value: Mu,
+    *,
+    kernel_mode: str = "core",
+    validation_mode: str = "domain",
+) -> Mu:
     """
     Try each projection in order using structural kernel projections.
 
@@ -608,6 +684,11 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     Args:
         projections: List of domain projections to try.
         input_value: The value to transform.
+        kernel_mode: `core` uses kernel+match.v2+subst.v2. `bridge` uses
+            kernel+bridge+match.v2+subst.v2.
+        validation_mode: `domain` uses reserved-field protection for untrusted
+            domain inputs. `algorithm_runtime` allows trusted algorithm state
+            with strict underscore allowlisting.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
@@ -618,8 +699,18 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     """
     assert_mu(input_value, "step_kernel_mu.input")
 
-    # SECURITY: Validate input doesn't contain kernel-reserved fields
-    validate_no_kernel_reserved_fields(input_value, "step_kernel_mu input")
+    if validation_mode == "domain":
+        validator = validate_no_kernel_reserved_fields
+    elif validation_mode == "algorithm_runtime":
+        validator = validate_algorithm_runtime_fields
+    else:
+        raise ValueError(
+            "SECURITY: invalid validation_mode. Expected 'domain' or 'algorithm_runtime', "
+            f"got: {validation_mode}"
+        )
+
+    # SECURITY: Validate input at the selected boundary mode
+    validator(input_value, "step_kernel_mu input")
 
     # SECURITY: Validate projection order
     validate_kernel_projections_first(projections)
@@ -640,12 +731,20 @@ def step_kernel_mu(projections: list[Mu], input_value: Mu) -> Mu:
     for i, proj in enumerate(projections):
         if isinstance(proj, dict):
             if "pattern" in proj:
-                validate_no_kernel_reserved_fields(proj["pattern"], f"projection[{i}].pattern")
+                validator(proj["pattern"], f"projection[{i}].pattern")
             if "body" in proj:
-                validate_no_kernel_reserved_fields(proj["body"], f"projection[{i}].body")
+                validator(proj["body"], f"projection[{i}].body")
 
     # Load combined kernel projections
-    kernel_projs = load_combined_kernel_projections()
+    if kernel_mode == "core":
+        kernel_projs = load_combined_kernel_projections()
+    elif kernel_mode == "bridge":
+        kernel_projs = load_combined_kernel_with_bridge_projections()
+    else:
+        raise ValueError(
+            "SECURITY: invalid kernel_mode. Expected 'core' or 'bridge', "
+            f"got: {kernel_mode}"
+        )
 
     # Normalize domain projections to head/tail format
     normalized_projs = [normalize_projection(p) for p in projections]  # AST_OK: infra - kernel bridge scaffolding
