@@ -88,6 +88,7 @@ If a task is not listed here, it is NOT to be implemented.
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
 - Deterministic trace core (v1) complete
+- Tracker sync note (2026-02-07): `match_mu` var-name scan cycle guard was corrected to allow shared substructures (DAG reuse) while still rejecting true active-path cycles; no phase/task promotion.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
 - Golden fixtures in place
