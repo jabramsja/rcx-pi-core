@@ -54,9 +54,9 @@ show_help() {
 ║  DEPTH LEVELS (for run_review.py)                                            ║
 ║  ────────────────────────────────                                            ║
 ║  quick   = verifier, adversary, expert, structural-proof (4 agents)          ║
-║  full    = + grounding, fuzzer (6 agents)                                    ║
-║  founder = + translator, visualizer (8 agents)                               ║
-║  all     = + advisor (9 agents)                                              ║
+║  full    = + fuzzer always; grounding risk-triggered (5-6 agents)            ║
+║  founder = + translator, visualizer (7-8 agents)                             ║
+║  all     = + advisor (8-9 agents)                                            ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 EOF

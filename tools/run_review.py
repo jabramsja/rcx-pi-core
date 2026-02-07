@@ -33,9 +33,9 @@ Usage:
 
 Depth levels:
     quick:  verifier, adversary, expert, structural-proof (4 agents)
-    full:   + grounding, fuzzer (6 agents)
-    founder: + translator, visualizer (8 agents)
-    all:    + advisor (9 agents)
+    full:   + fuzzer always; grounding is risk-triggered (5-6 agents)
+    founder: + translator, visualizer (7-8 agents)
+    all:    + advisor (8-9 agents)
 
 Agent Memory:
     Findings are stored in .agent_memory/findings.json for:
@@ -92,6 +92,7 @@ from tools.validate_agent_compliance import extract_finding_blocks
 from tools.shared_agent_utils import (
     AGENT_PASS_VERDICTS,
     HARD_GATE_AGENTS,
+    adversary_blocks_merge,
     agent_passed as shared_agent_passed,
     extract_text_from_message,
     extract_verdict_secure,
@@ -190,6 +191,39 @@ PARALLEL_GROUPS = [
     ["advisor"],                                               # Group 4: Advisory
 ]
 
+# Runtime budget controls (major latency lever)
+AGENT_MAX_TURNS = {
+    "verifier": 14,
+    "adversary": 14,
+    "expert": 12,
+    "structural-proof": 12,
+    "grounding": 10,
+    "fuzzer": 12,
+    "translator": 10,
+    "visualizer": 10,
+    "advisor": 12,
+}
+
+GROUNDING_HIGH_RISK_PATTERNS = (
+    "rcx_pi/selfhost/",
+    "mu/",
+    "tests/structural/",
+    "tests/fuzz/",
+    "tests/test_js_parity_automated.py",
+    "tools/run_review.py",
+    "tools/validate_agent_compliance.py",
+    "tools/validate_agent_reasoning.py",
+)
+
+
+def should_include_grounding(files: list[str]) -> bool:
+    """Run grounding only on high-risk changes unless explicitly forced."""
+    normalized = [f.replace("\\", "/") for f in files]
+    for file_path in normalized:
+        if any(pattern in file_path for pattern in GROUNDING_HIGH_RISK_PATTERNS):
+            return True
+    return len(files) >= 20
+
 # =============================================================================
 # Compliance Validation
 # =============================================================================
@@ -230,6 +264,26 @@ def validate_compliance(output: str) -> tuple[bool, str, dict]:
         return False, f"Validation error: {e}", {}
 
 
+def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAgentOptions:
+    """Build SDK query options with explicit model wiring when supported.
+
+    Some SDK builds may not accept a `model` kwarg on ClaudeAgentOptions.
+    We gracefully fall back to the baseline options in that case.
+    """
+    base_kwargs = {
+        "allowed_tools": ["Read", "Grep", "Glob"],
+        "max_turns": max_turns,
+    }
+    model = getattr(agent_def, "model", None)
+    if model:
+        try:
+            return ClaudeAgentOptions(model=model, **base_kwargs)
+        except TypeError:
+            # Backward compatibility with SDK variants lacking `model=`.
+            pass
+    return ClaudeAgentOptions(**base_kwargs)
+
+
 # =============================================================================
 # Result Extraction
 # =============================================================================
@@ -243,6 +297,7 @@ class AgentResult:
     is_compliant: bool
     compliance_error: str
     is_hard_gate: bool
+    blocks_merge: bool
     passed: bool
     findings_stored: int = 0  # Count of findings stored in memory
 
@@ -344,7 +399,8 @@ class ReviewOrchestrator:
     def __init__(self, files: list[str], depth: str = "full", verbose: bool = False,
                  use_memory: bool = True, pr_number: int | None = None,
                  show_warnings: bool = False,
-                 continue_on_hard_gate: bool = True):
+                 continue_on_hard_gate: bool = True,
+                 force_grounding: bool = False):
         self.files = files
         self.depth = depth
         self.verbose = verbose
@@ -352,7 +408,8 @@ class ReviewOrchestrator:
         self.pr_number = pr_number
         self.show_warnings = show_warnings
         self.continue_on_hard_gate = continue_on_hard_gate
-        self.agents_to_run = DEPTH_AGENTS.get(depth, DEPTH_AGENTS["full"])
+        self.force_grounding = force_grounding
+        self.agents_to_run = self._resolve_agents_to_run(depth)
         self.agent_definitions = create_agent_definitions()
         self.results: list[AgentResult] = []
         self.regression_warnings: list[dict] = []
@@ -366,6 +423,19 @@ class ReviewOrchestrator:
                     "⚠️  Agent memory disabled: "
                     f"{AGENT_MEMORY_IMPORT_ERROR}"
                 )
+
+    def _resolve_agents_to_run(self, depth: str) -> list[str]:
+        """Resolve depth agent set with runtime policy adjustments.
+
+        Policy:
+        - `fuzzer` remains always-on for `full` and above to prevent fuzz drift.
+        - `grounding` is risk-triggered unless explicitly forced.
+        """
+        agents = list(DEPTH_AGENTS.get(depth, DEPTH_AGENTS["full"]))
+        if "grounding" in agents and not self.force_grounding:
+            if not should_include_grounding(self.files):
+                agents.remove("grounding")
+        return agents
 
     async def run_single_agent(self, agent_name: str, retry_feedback: str = "") -> AgentResult:
         """Run a single agent and return its result.
@@ -420,14 +490,12 @@ Produce a report following the format in your instructions.
         result_text = ""
         last_error = None
         message_text_fragments: list[str] = []
+        max_turns = AGENT_MAX_TURNS.get(agent_name, 12)
 
         try:
             async for message in query(
                 prompt=prompt,
-                options=ClaudeAgentOptions(
-                    allowed_tools=["Read", "Grep", "Glob"],
-                    max_turns=30,
-                )
+                options=build_query_options(agent_def, max_turns)
             ):
                 # Check for API errors on AssistantMessage
                 if hasattr(message, 'error') and message.error:
@@ -474,6 +542,17 @@ Produce a report following the format in your instructions.
         # Extract verdict
         verdict = extract_verdict(agent_name, result_text)
         passed = agent_passed(agent_name, verdict) and is_compliant
+        is_hard_gate = agent_name in HARD_GATE_AGENTS
+        blocks_merge = is_hard_gate and not passed
+
+        # Evidence-gated adversary blocking: failing adversary verdicts only block
+        # when output is compliant and contains machine-checkable proof markers.
+        if agent_name == "adversary" and blocks_merge:
+            blocks_merge = adversary_blocks_merge(
+                verdict=verdict,
+                output=result_text,
+                is_compliant=is_compliant,
+            )
 
         # Store findings in memory (if enabled and findings exist)
         findings_stored = 0
@@ -505,7 +584,8 @@ Produce a report following the format in your instructions.
             verdict=verdict,
             is_compliant=is_compliant,
             compliance_error=compliance_error,
-            is_hard_gate=agent_name in HARD_GATE_AGENTS,
+            is_hard_gate=is_hard_gate,
+            blocks_merge=blocks_merge,
             passed=passed,
             findings_stored=findings_stored,
         )
@@ -572,6 +652,8 @@ Produce a report following the format in your instructions.
         print(f"{'='*60}")
         print(f"Files: {', '.join(self.files)}")
         print(f"Depth: {self.depth} ({len(self.agents_to_run)} agents)")
+        if "grounding" not in self.agents_to_run and "grounding" in DEPTH_AGENTS.get(self.depth, []):
+            print("Grounding: skipped (low-risk scope, use --force-grounding to include)")
         if self.use_memory:
             print(f"Memory: enabled")
         print(f"{'='*60}\n")
@@ -609,7 +691,7 @@ Produce a report following the format in your instructions.
             all_results.extend(group_results)
 
             # Check hard gate failures - retry compliance failures once, then stop if still failing
-            hard_gate_failures = [r for r in group_results if r.is_hard_gate and not r.passed]
+            hard_gate_failures = [r for r in group_results if r.blocks_merge]
             if hard_gate_failures and i == 0:  # Only stop after first group
                 # Separate compliance failures from verdict failures
                 compliance_failures = [r for r in hard_gate_failures if not r.is_compliant]
@@ -641,7 +723,7 @@ Produce a report following the format in your instructions.
                             print(f"     └─ {error_preview}")
 
                 # Re-check hard gate failures after retry
-                hard_gate_failures = [r for r in all_results if r.is_hard_gate and not r.passed]
+                hard_gate_failures = [r for r in all_results if r.blocks_merge]
 
                 if hard_gate_failures:
                     print(f"\n⚠️  Hard gate failure(s) after retry:")
@@ -660,7 +742,7 @@ Produce a report following the format in your instructions.
                     print("\n⚠️  Continuing despite hard gate failure (diagnostic mode)")
 
         self.results = all_results
-        self._hard_gate_failed = any(r.is_hard_gate and not r.passed for r in all_results)
+        self._hard_gate_failed = any(r.blocks_merge for r in all_results)
         self.total_findings_stored = sum(r.findings_stored for r in all_results)
 
         # Collect soft warnings (non-hard-gate failures)
@@ -681,7 +763,7 @@ Produce a report following the format in your instructions.
                     'NEEDS_HARDENING',
                 ) else 'low',
             }
-            for r in all_results if not r.is_hard_gate and not r.passed
+            for r in all_results if not r.blocks_merge and not r.passed
         ]
 
         # End-of-run warning summary (progressive disclosure)
@@ -757,7 +839,7 @@ Produce a report following the format in your instructions.
             gate = " (GATE)" if result.is_hard_gate else ""
             lines.append(f"| {result.name}{gate} | {result.verdict} | {status} |")
 
-            if result.is_hard_gate and not result.passed:
+            if result.blocks_merge:
                 hard_gate_passed = False
 
         lines.append("")
@@ -801,12 +883,12 @@ Produce a report following the format in your instructions.
             return 3
 
         # Check hard gate failures
-        hard_gate_failures = [r for r in self.results if r.is_hard_gate and not r.passed]
+        hard_gate_failures = [r for r in self.results if r.blocks_merge]
         if hard_gate_failures:
             return 1
 
         # Check soft failures
-        soft_failures = [r for r in self.results if not r.is_hard_gate and not r.passed]
+        soft_failures = [r for r in self.results if not r.blocks_merge and not r.passed]
         if soft_failures:
             return 2
 
@@ -865,9 +947,9 @@ async def main():
         epilog="""
 Depth levels:
   quick    4 agents: verifier, adversary, expert, structural-proof
-  full     6 agents: + grounding, fuzzer
-  founder  8 agents: + translator, visualizer
-  all      9 agents: + advisor
+  full     5-6 agents: + fuzzer always; grounding risk-triggered
+  founder  7-8 agents: + translator, visualizer
+  all      8-9 agents: + advisor
 
 Examples:
   python tools/run_review.py rcx_pi/selfhost/
@@ -924,6 +1006,11 @@ Examples:
         help="Show full warning details (default: summary only)"
     )
     parser.add_argument(
+        "--force-grounding",
+        action="store_true",
+        help="Force grounding agent even for low-risk scopes"
+    )
+    parser.add_argument(
         "--continue-on-hard-gate",
         action="store_true",
         default=True,
@@ -973,6 +1060,7 @@ Examples:
         pr_number=args.pr_number,
         show_warnings=args.show_warnings,
         continue_on_hard_gate=(not args.fail_fast_hard_gate),
+        force_grounding=args.force_grounding,
     )
     await orchestrator.run_all()
 
@@ -1004,7 +1092,7 @@ Examples:
 
         # Layer 3: Correction - retry hard gate agents with reasoning failures
         if reasoning_failures:
-            hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.is_hard_gate]
+            hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
 
             if hard_gate_failures:
                 print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
