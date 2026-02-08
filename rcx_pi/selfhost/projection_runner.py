@@ -95,8 +95,9 @@ def make_projection_runner(mode_name: str) -> tuple[
 
             # Check for stall (no change) - use mu_equal to avoid Python type coercion
             if mu_equal(next_state, state):
-                # Report steps consumed to global budget
-                budget.consume(i)
+                # Report steps consumed to global budget.
+                # A step was executed before stall detection, so consume i + 1.
+                budget.consume(i + 1)
                 return state, i, True
 
             state = next_state

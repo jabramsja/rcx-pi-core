@@ -695,7 +695,8 @@ def step_kernel_mu(
     *,
     kernel_mode: str = "core",
     validation_mode: str = "domain",
-) -> Mu:
+    return_meta: bool = False,
+) -> Mu | dict[str, Mu]:
     """
     Try each projection in order using structural kernel projections.
 
@@ -726,9 +727,12 @@ def step_kernel_mu(
         validation_mode: `domain` uses reserved-field protection for untrusted
             domain inputs. `algorithm_runtime` allows trusted algorithm state
             with strict underscore allowlisting.
+        return_meta: When True, returns metadata payload
+            `{\"output\": <Mu>, \"stall\": <bool>}`.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
+        If `return_meta=True`, returns a metadata dict with `output` and `stall`.
 
     Raises:
         ValueError: If kernel projections appear after domain projections (security).
@@ -820,6 +824,11 @@ def step_kernel_mu(
             if is_kernel_terminal(result):
                 output = extract_kernel_result(result, input_value)
                 validator(output, "step_kernel_mu output")
+                if return_meta:
+                    return {
+                        "output": output,
+                        "stall": bool(result.get("_stall") is True),
+                    }
                 return output
 
             # Stall check - no change means no progress
@@ -827,12 +836,16 @@ def step_kernel_mu(
             # and are mid-execution by definition, not stalls)
             if not is_kernel_intermediate(result) and mu_equal(result, current):
                 validator(input_value, "step_kernel_mu output")
+                if return_meta:
+                    return {"output": input_value, "stall": True}
                 return input_value
 
             current = result
 
         # Max steps exceeded - return original input (stall)
         validator(input_value, "step_kernel_mu output")
+        if return_meta:
+            return {"output": input_value, "stall": True}
         return input_value
     finally:
         if started_budget:
@@ -1084,6 +1097,57 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     return current, trace, False
 
 
+def _resolve_trace_projection_id(
+    projections: list[Mu],
+    current: Mu,
+    next_value: Mu,
+) -> Mu:
+    """
+    Resolve which projection produced `next_value` from `current` using bridge semantics.
+
+    Gate 5 parity requirement:
+    - `run_mu_structural` must share execution semantics with `step_kernel_mu`.
+    - Projection ID extraction therefore probes each projection through
+      `step_kernel_mu(..., kernel_mode="bridge")` instead of calling `match_mu`
+      or `subst_mu` directly.
+
+    Returns:
+        Projection id if a matching projection is found, otherwise None.
+    """
+    budget = get_step_budget()
+    restore_budget = budget.is_active()
+    snapshot_total = 0
+    snapshot_limit = 0
+    if restore_budget:
+        snapshot_total = budget.get_total()
+        snapshot_limit = snapshot_total + budget.get_remaining()
+        # Suspend the caller's active budget while probing projection IDs.
+        budget.stop()
+
+    try:
+        for proj in projections:
+            if not isinstance(proj, dict):
+                continue
+            if "pattern" not in proj or "body" not in proj:
+                continue
+            candidate = step_kernel_mu(
+                [proj],
+                current,
+                kernel_mode="bridge",
+                validation_mode="domain",
+                return_meta=True,
+            )
+            if candidate["stall"] is True:
+                continue
+            if mu_equal(candidate["output"], next_value):
+                return proj.get("id")
+        return None
+    finally:
+        if restore_budget:
+            budget.start(limit=snapshot_limit)
+            budget.consume(snapshot_total)
+
+
 @host_iteration("Phase 8d trace model - structural trace for EngineNews")
 def run_mu_structural(
     projections: list[Mu],
@@ -1137,27 +1201,14 @@ def run_mu_structural(
 
     try:
         for i in range(max_steps):
-            # Single-pass structural step: identify first match and apply it once.
-            # This avoids the previous double-evaluation path (pre-match + step_mu).
-            matched_id = None
-            result = current
-            for proj in projections:
-                if not isinstance(proj, dict):
-                    continue
-                pattern = proj.get("pattern")
-                body = proj.get("body")
-                if pattern is None or body is None:
-                    continue
-                bindings = match_mu(pattern, current)
-                if bindings is not NO_MATCH:
-                    matched_id = proj.get("id")
-                    try:
-                        result = subst_mu(body, bindings)
-                    except KeyError:
-                        # Parity with step_mu: unresolved substitution stalls and
-                        # returns original input rather than bubbling an exception.
-                        result = current
-                    break
+            # Gate 5 parity: run the same bridge-backed kernel path as production.
+            result = step_kernel_mu(
+                projections,
+                current,
+                kernel_mode="bridge",
+                validation_mode="domain",
+            )
+            matched_id = _resolve_trace_projection_id(projections, current, result)
 
             validate_no_kernel_reserved_fields(result, "run_mu_structural output")
             trace_entries.append({

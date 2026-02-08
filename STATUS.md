@@ -615,6 +615,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - Gate 4: COMPLETE (2026-02-07 structural cutover)
 - Gate 5: IN_PROGRESS (parity verification and cleanup)
   - Dedicated Gate 5 suite: `tests/structural/test_gate5_meta_circular_parity.py`
+  - Runtime parity fix complete (2026-02-08): `run_mu_structural()` now executes through `step_kernel_mu(..., kernel_mode="bridge")`
 
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR
@@ -622,7 +623,7 @@ Current Exhaustion Layer: META_CIRCULAR
 **Known Architectural Constraints:** See "Known Architectural Constraints" section in [`roadmap/MetaCircular_Boot0_GatePlan.md`](roadmap/MetaCircular_Boot0_GatePlan.md) for authoritative documentation of:
 - Why kernel reserved fields block algorithm entry
 - Why kernel-internal bypass exists for hybrid execution
-- Why trace matching uses different matcher than execution
+- Historical trace matcher split and its Gate 5 parity resolution
 - Resolution path through Gates 3-5
 
 **mu/ Folder Reorganization (2026-02-02):**

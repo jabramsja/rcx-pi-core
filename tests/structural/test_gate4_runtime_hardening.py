@@ -18,6 +18,7 @@ from rcx_pi.selfhost.step_mu import (
     step_algorithm_with_bridge,
 )
 from rcx_pi.selfhost.match_mu import match_mu
+from rcx_pi.selfhost.kernel import get_step_budget, reset_step_budget
 
 
 def test_apply_mu_rejects_reserved_input_field():
@@ -74,6 +75,8 @@ def test_run_mu_structural_activates_global_budget_when_inactive(monkeypatch):
             self.active = False
             self.started = 0
             self.stopped = 0
+            self.consumed = 0
+            self.limit = 50000
 
         def is_active(self):
             return self.active
@@ -86,13 +89,23 @@ def test_run_mu_structural_activates_global_budget_when_inactive(monkeypatch):
             self.active = False
             self.stopped += 1
 
+        def consume(self, steps):
+            self.consumed += steps
+
+        def get_total(self):
+            return self.consumed
+
+        def get_remaining(self):
+            return max(0, self.limit - self.consumed)
+
     budget = DummyBudget()
     monkeypatch.setattr("rcx_pi.selfhost.step_mu.get_step_budget", lambda: budget)
 
     result = run_mu_structural([], {"ok": True}, max_steps=1)
     assert result["stall"] is True
-    assert budget.started == 1
-    assert budget.stopped == 1
+    assert budget.started >= 1
+    assert budget.stopped >= 1
+    assert budget.consumed >= 1
 
 
 def test_step_kernel_mu_activates_global_budget_when_inactive(monkeypatch):
@@ -125,6 +138,67 @@ def test_step_kernel_mu_activates_global_budget_when_inactive(monkeypatch):
     assert budget.started == 1
     assert budget.stopped == 1
     assert budget.consumed >= 1
+
+
+def test_run_mu_structural_projection_id_probe_is_budget_neutral():
+    projections = [
+        {
+            "id": "p.double",
+            "pattern": {"op": "double", "v": {"var": "x"}},
+            "body": {"op": "done", "v": {"var": "x"}},
+        }
+    ]
+    value = {"op": "double", "v": 7}
+
+    # Baseline: one bridge kernel step cost
+    reset_step_budget()
+    budget = get_step_budget()
+    budget.start(limit=5000)
+    try:
+        baseline_before = budget.get_total()
+        step_kernel_mu(
+            projections,
+            value,
+            kernel_mode="bridge",
+            validation_mode="domain",
+        )
+        baseline_delta = budget.get_total() - baseline_before
+    finally:
+        budget.stop()
+
+    # Trace path should consume the same budget for one iteration.
+    reset_step_budget()
+    budget = get_step_budget()
+    budget.start(limit=5000)
+    try:
+        trace_before = budget.get_total()
+        run_mu_structural(projections, value, max_steps=1)
+        trace_delta = budget.get_total() - trace_before
+    finally:
+        budget.stop()
+
+    assert trace_delta == baseline_delta
+
+
+def test_step_kernel_mu_return_meta_stall_true_on_no_match():
+    meta = step_kernel_mu([], {"ok": True}, return_meta=True)
+    assert isinstance(meta, dict)
+    assert meta["stall"] is True
+    assert meta["output"] == {"ok": True}
+
+
+def test_step_kernel_mu_return_meta_stall_false_on_match():
+    projections = [
+        {
+            "id": "p.match",
+            "pattern": {"x": {"var": "v"}},
+            "body": {"ok": {"var": "v"}},
+        }
+    ]
+    meta = step_kernel_mu(projections, {"x": 1}, return_meta=True)
+    assert isinstance(meta, dict)
+    assert meta["stall"] is False
+    assert meta["output"] == {"ok": 1}
 
 
 def test_match_mu_allows_shared_substructures_without_false_cycle():

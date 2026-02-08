@@ -589,6 +589,31 @@ class TestJSReservedFieldValidationParity:
         assert not valid, "JS should reject malformed normalized dict encoding"
         assert "Malformed normalized dict encoding" in error
 
+    def test_parity_normalized_dict_width_boundary(self):
+        """
+        SECURITY/PARITY: normalized dict width boundary must match in Python and JS.
+
+        Python validator fails closed once normalized dict chain exceeds the
+        validation-depth cap. JS must fail at the same boundary.
+        """
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        width_100 = normalize_for_match({f"k{i}": i for i in range(100)})
+        validate_no_kernel_reserved_fields(width_100, "test")
+        valid_100, error_100 = self._run_js_validation(width_100)
+        assert valid_100, f"JS should allow normalized dict width 100, got error: {error_100}"
+
+        width_101 = normalize_for_match({f"k{i}": i for i in range(101)})
+        with pytest.raises(ValueError, match="malformed normalized dict encoding"):
+            validate_no_kernel_reserved_fields(width_101, "test")
+        valid_101, error_101 = self._run_js_validation(width_101)
+        assert not valid_101, "JS should reject normalized dict width 101 to match Python"
+        assert (
+            "Malformed normalized dict encoding" in error_101
+            or "malformed normalized dict encoding" in error_101
+        )
+
 
 class TestJSSecurityParity:
     """Verify JS implements the same security checks as Python."""

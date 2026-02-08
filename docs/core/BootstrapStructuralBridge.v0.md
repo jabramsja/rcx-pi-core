@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-08
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -33,7 +33,7 @@ match.v2.json explicitly states "Linear patterns only (no conflict detection)." 
 
 These seeds work via `eval_seed.step()` which implements binding conflict detection in Python. The bootstrap-structural bridge adds binding conflict detection as structural projections.
 
-**Status (2026-02-03):** Bridge projections are IMPLEMENTED and VERIFIED to fire. Algorithm execution uses Python match/substitute for practical reasons (normalization format mismatch). See "Current Execution Architecture" section below.
+**Status (2026-02-08):** Bridge projections are IMPLEMENTED and VERIFIED to fire. Recurrence and exhaustion now execute through the structural kernel bridge path by default. Bootstrap execution remains explicit debug fallback only.
 
 ---
 
@@ -61,7 +61,7 @@ exhaustion.v1.json projection "scan_same":
 
 ### Implementation Status
 
-The bridge is IMPLEMENTED (`mu/bridge/bootstrap_structural.v1.json` with 5 projections). Execution path verification tests prove bridge projections fire. Algorithm execution uses Python match/substitute for practical reasons (see "Current Execution Architecture" section).
+The bridge is IMPLEMENTED (`mu/bridge/bootstrap_structural.v1.json` with 5 projections). Execution path verification tests prove bridge projections fire. Production algorithm execution is structural via kernel bridge mode (see "Current Execution Architecture" section).
 
 ---
 
@@ -476,16 +476,19 @@ Both paths produce identical results. The execution path verification tests (`te
 
 ## Changelog
 
+- **v0.6 (2026-02-08):** Gate 4 runtime wording corrected
+  - Updated status language to reflect structural-default execution
+  - Clarified bootstrap path is explicit debug fallback only
 - **v0.5 (2026-02-03):** Algorithm execution layer clarification
   - **CRITICAL DISCOVERY:** Structural kernel normalizes to linked-list format, which breaks algorithm state
   - Algorithm projections (recurrence, exhaustion) require dict format with specific keys (e.g., `_state`, `_check_list`)
   - Normalization converts dict → linked-list kv-pairs, breaking pattern matching in algorithm projections
-  - **Current solution:** `step_algorithm_with_bridge()` uses Python match/substitute for algorithm execution
-  - This is INTENTIONAL: Bridge provides structural non-linear patterns for MATCHING, not algorithm execution
+  - **Historical solution (superseded by Gate 4):** `step_algorithm_with_bridge()` provided Python bootstrap execution for algorithms
+  - This was an intermediate transition stage before structural-default cutover
   - **Two execution layers now documented:**
-    1. Structural layer: match.v2 + bridge (with normalization) - for pattern matching
-    2. Algorithm layer: Python match/substitute - for recurrence/exhaustion execution
-  - Path to true meta-circular algorithm execution requires structural format standardization
+    1. Structural layer: kernel + bridge + match.v2 + subst.v2 (production path after Gate 4)
+    2. Bootstrap layer: explicit debug fallback (`execution_mode="bootstrap"`)
+  - Path to true meta-circular algorithm execution required structural format standardization
   - Fixed subst entry format bug: changed `template` to `body` key in step_mu.py
 - **v0.4 (2026-02-03):** Execution path verification added
   - Created `tests/test_execution_path_verification.py` with 9 tests
