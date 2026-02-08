@@ -97,6 +97,7 @@ from tools.shared_agent_utils import (
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    validate_compliance as shared_validate_compliance,
 )
 
 
@@ -233,37 +234,19 @@ def should_include_grounding(files: list[str]) -> bool:
 def validate_compliance(output: str) -> tuple[bool, str, dict]:
     """Run compliance validation on agent output.
 
-    Returns (is_compliant, error_message, metrics).
+    Delegates to shared_agent_utils.validate_compliance with strict policy:
+    all verification flags enabled.
+
+    Note: imprecise citations (near-match/paraphrase) do NOT block compliance.
+    Only true fabrications (missing file, no resemblance) set compliant=False.
     """
-    try:
-        result = subprocess.run(
-            [
-                "python3", "tools/validate_agent_compliance.py",
-                "--json", "--strict",
-                "--verify-files",  # Verify FILE paths exist
-                "--verify-code",   # Verify CODE appears at FILE:LINE
-            ],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}", {}
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations), metrics
-
-        return True, "", metrics
-    except subprocess.TimeoutExpired:
-        return False, "Validator timeout (>30s)", {}
-    except json.JSONDecodeError as e:
-        return False, f"Validator returned invalid JSON: {e}", {}
-    except Exception as e:
-        return False, f"Validation error: {e}", {}
+    return shared_validate_compliance(
+        output,
+        strict=True,
+        verify_files=True,
+        verify_code=True,
+        json_output=True,
+    )
 
 
 def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAgentOptions:
@@ -402,7 +385,8 @@ class ReviewOrchestrator:
                  use_memory: bool = True, pr_number: int | None = None,
                  show_warnings: bool = False,
                  continue_on_hard_gate: bool = True,
-                 force_grounding: bool = False):
+                 force_grounding: bool = False,
+                 agent_max_turns: dict | None = None):
         self.files = files
         self.depth = depth
         self.verbose = verbose
@@ -411,6 +395,7 @@ class ReviewOrchestrator:
         self.show_warnings = show_warnings
         self.continue_on_hard_gate = continue_on_hard_gate
         self.force_grounding = force_grounding
+        self.agent_max_turns = agent_max_turns or dict(AGENT_MAX_TURNS)
         self.agents_to_run = self._resolve_agents_to_run(depth)
         self.agent_definitions = create_agent_definitions()
         self.results: list[AgentResult] = []
@@ -492,7 +477,7 @@ Produce a report following the format in your instructions.
         result_text = ""
         last_error = None
         message_text_fragments: list[str] = []
-        max_turns = AGENT_MAX_TURNS.get(agent_name, 12)
+        max_turns = self.agent_max_turns.get(agent_name, 12)
 
         try:
             async for message in query(
@@ -539,7 +524,12 @@ Produce a report following the format in your instructions.
             )
         else:
             # Validate compliance
-            is_compliant, compliance_error, _ = validate_compliance(result_text)
+            is_compliant, compliance_error, compliance_metrics = validate_compliance(result_text)
+
+            # Log imprecise citations as warnings (non-blocking)
+            imprecise_count = compliance_metrics.get("imprecise_citations", 0)
+            if imprecise_count > 0 and self.verbose:
+                print(f"    ⚠️  {agent_name}: {imprecise_count} imprecise citation(s) (non-blocking)")
 
         # Extract verdict
         verdict = extract_verdict(agent_name, result_text)
@@ -1060,10 +1050,11 @@ Examples:
         depth = auto_select_depth(files)
         print(f"Auto-selected depth: {depth}")
 
-    # Apply max-turns override if specified
+    # Apply max-turns override if specified (use local copy, don't mutate module-level)
+    agent_max_turns = dict(AGENT_MAX_TURNS)
     if args.max_turns:
-        for key in AGENT_MAX_TURNS:
-            AGENT_MAX_TURNS[key] = args.max_turns
+        for key in agent_max_turns:
+            agent_max_turns[key] = args.max_turns
         print(f"Max turns override: {args.max_turns} for all agents")
 
     # Run orchestrator
@@ -1076,6 +1067,7 @@ Examples:
         show_warnings=args.show_warnings,
         continue_on_hard_gate=(not args.fail_fast_hard_gate),
         force_grounding=args.force_grounding,
+        agent_max_turns=agent_max_turns,
     )
     await orchestrator.run_all()
 
