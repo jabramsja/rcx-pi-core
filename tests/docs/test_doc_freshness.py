@@ -149,6 +149,11 @@ FORBIDDEN_PATTERNS = [
         "Phase 4 terminology outdated",
         "Update to L4 (True Self-Hosting) in SINK status",
     ),
+    ForbiddenPattern(
+        r'Algorithm execution uses Python match/substitute for practical reasons',
+        "Outdated Gate 4 runtime claim: production algorithm execution is structural-default",
+        "Update wording to structural-default runtime and explicit bootstrap fallback only",
+    ),
 
     # =========================================================================
     # Law 3 Violations - Inline status claims that should be in STATUS.md/TASKS.md

@@ -110,26 +110,27 @@ Exit criteria:
 
 ---
 
-## Known Architectural Constraints (Gate 2–5 Context)
+## Known Architectural Constraints (Gate 2–5 Context, Historical Pre-Gate 4)
 
-These are **intentional constraints** in the current architecture. They are **not bugs**. They exist until Gates 3–5 are completed.
+These were **intentional constraints** before Gate 4 cutover. They were **not bugs** at the time and were resolved by Gate 4 structural-default execution.
 
 ### 1. Kernel reserved fields block algorithm entry
 
 Algorithm states use fields like `_detect_closure`, `_detect_exhaustion`, `_mode`, `_phase`.
 `step_kernel_mu()` rejects any input containing reserved kernel fields.
-**Result:** algorithm states **cannot enter the kernel**, so algorithms run via bootstrap `match/substitute`.
+**Historical result (pre-Gate 4):** algorithm states **could not enter the kernel**, so algorithms ran via bootstrap `match/substitute`.
 
 ### 2. Kernel-internal bypass exists to keep hybrid execution safe
 
 `eval_seed._is_kernel_internal_state()` treats `_mode`/`_phase` states as kernel-internal and skips deep Mu validation.
-This keeps hybrid execution viable but **allows non-Mu values to slip through**.
-This bypass must be removed once algorithms run structurally.
+This kept hybrid execution viable but **allowed non-Mu values to slip through**.
+Gate 4 closed this path for production execution.
 
 ### 3. Trace "matched_id" uses a different matcher than execution
 
-`run_mu_structural()` uses `match.v1` (via `match_mu`) to find `matched_id`, but execution uses kernel + `match.v2`.
-If v1 and v2 diverge, traces can misreport which projection fired.
+`run_mu_structural()` used `match.v1` (via `match_mu`) to find `matched_id`, while execution used kernel + `match.v2`.
+If v1 and v2 diverged, traces could misreport which projection fired.
+Resolved in Gate 5 parity cleanup (2026-02-08): `run_mu_structural()` now executes via `step_kernel_mu(..., kernel_mode="bridge")` and resolves trace projection IDs from the same bridge semantics.
 
 ### Resolution Path
 

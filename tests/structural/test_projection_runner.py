@@ -14,7 +14,7 @@ import pytest
 
 from rcx_pi.selfhost.projection_runner import make_projection_runner
 from rcx_pi.selfhost.projection_loader import make_projection_loader
-from rcx_pi.selfhost.kernel import reset_step_budget
+from rcx_pi.selfhost.kernel import get_step_budget, reset_step_budget
 
 
 class TestMakeProjectionRunner:
@@ -132,6 +132,17 @@ class TestRunProjections:
         state, steps, is_stall = run(projections, initial, max_steps=10)
         assert is_stall is True
         assert steps == 0  # Stalled immediately
+
+    def test_stall_consumes_one_budget_step(self):
+        """Immediate stall still consumes one executed step in global budget."""
+        _, _, run = make_projection_runner("test")
+        budget = get_step_budget()
+        budget.start(limit=10)
+        try:
+            run([], {"mode": "test", "data": 42}, max_steps=10)
+            assert budget.get_total() == 1
+        finally:
+            budget.stop()
 
     def test_run_terminates_on_max_steps(self):
         """Run terminates when max_steps is exceeded."""

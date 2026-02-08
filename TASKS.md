@@ -669,6 +669,7 @@ All blockers resolved 2026-01-28:
 - Gate 4: COMPLETE (2026-02-07 structural cutover)
 - Gate 5: IN_PROGRESS (parity verification and cleanup)
   - Dedicated Gate 5 suite: `tests/structural/test_gate5_meta_circular_parity.py`
+  - Runtime parity fix complete (2026-02-08): `run_mu_structural()` now executes via `step_kernel_mu(..., kernel_mode="bridge")`
 
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR

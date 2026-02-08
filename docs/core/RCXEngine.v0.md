@@ -88,7 +88,7 @@ The engine tests whether ZFC axioms emerge from structural pressure:
 **Execution layer:** APPLICATION (highest level, orchestrates closures)
 
 **Known limitations:**
-- Requires non-linear pattern matching (not yet in structural kernel)
+- Requires non-linear pattern matching (provided by structural bridge execution path; not yet native in core-only mode)
 - Runtime path now defaults to structural kernel bridge execution via `run_algorithm_meta_circular()`
   (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
 - Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)

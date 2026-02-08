@@ -17,7 +17,11 @@ import pytest
 
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
-from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
+from rcx_pi.selfhost.step_mu import (
+    run_algorithm_meta_circular,
+    run_mu_structural,
+    step_kernel_mu,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -94,3 +98,49 @@ def test_gate5_exhaustion_python_js_parity_vectors():
         py = _run_python_until_stall(exh_projs, vec["input"], max_steps=200)
         js = _run_js_action("run_exhaustion_with_bridge", vec["input"], max_steps=200)
         assert mu_equal(py, js), f"exhaustion parity mismatch for vector {vec['id']}: py={py} js={js}"
+
+
+def test_gate5_run_mu_structural_matches_bridge_nonlinear_semantics():
+    projections = [
+        {
+            "id": "nonlinear.eq",
+            "pattern": {"a": {"var": "x"}, "b": {"var": "x"}},
+            "body": "ok",
+        }
+    ]
+    input_value = {"a": 1, "b": 2}
+
+    trace_result = run_mu_structural(projections, input_value, max_steps=3)
+    bridge_result = step_kernel_mu(
+        projections,
+        input_value,
+        kernel_mode="bridge",
+        validation_mode="domain",
+    )
+
+    assert trace_result["stall"] is True
+    assert mu_equal(trace_result["result"], input_value)
+    assert mu_equal(trace_result["result"], bridge_result)
+
+
+def test_gate5_run_mu_structural_records_projection_id_via_bridge_path():
+    projections = [
+        {
+            "id": "nonlinear.eq",
+            "pattern": {"a": {"var": "x"}, "b": {"var": "x"}},
+            "body": "ok",
+        }
+    ]
+    input_value = {"a": 1, "b": 1}
+
+    trace_result = run_mu_structural(projections, input_value, max_steps=3)
+    first_entry = trace_result["trace"]["head"]
+
+    assert first_entry["projection"] == "nonlinear.eq"
+
+
+def test_gate5_run_mu_structural_identity_match_keeps_projection_id():
+    projections = [{"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+    trace_result = run_mu_structural(projections, {"x": 1}, max_steps=3)
+    first_entry = trace_result["trace"]["head"]
+    assert first_entry["projection"] == "identity"

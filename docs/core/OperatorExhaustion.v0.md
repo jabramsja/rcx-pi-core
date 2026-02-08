@@ -447,8 +447,8 @@ explicitly.
 - Caller already has the projection list; extracting IDs is trivial
 - Enables globalstall detection: `length(frozen) >= length(operator_ids)`
 
-**Implementation:** `run_mu_structural()` extracts projection IDs before calling
-exhaustion detection.
+**Implementation:** `run_mu_structural()` records projection IDs from bridge-kernel
+execution semantics, then exhaustion detection consumes that trace.
 
 ---
 

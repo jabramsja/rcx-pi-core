@@ -183,7 +183,9 @@ function iterNormalizedDictPairs(value) {
     if (current.tail === null) break;
     current = current.tail;
     steps++;
-    if (steps > MAX_VALIDATION_DEPTH) return null;
+    // Parity with Python _iter_normalized_dict_pairs: fail at width 101 when
+    // MAX_VALIDATION_DEPTH is 100 (protects validator against oversized encodings).
+    if (steps >= MAX_VALIDATION_DEPTH) return null;
   }
   return pairs;
 }
