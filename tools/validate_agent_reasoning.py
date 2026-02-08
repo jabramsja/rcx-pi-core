@@ -115,37 +115,51 @@ def extract_verdict(output: str) -> str | None:
 
 
 def extract_checked_items(output: str) -> list[str]:
-    """Extract items from CHECKED section."""
+    """Extract items from CHECKED section.
+
+    Handles multiple agent output formats:
+    - Markdown headers: ### CHECKED, ## CHECKED
+    - Plain headers: CHECKED:, What I Checked:
+    - Bullet items: - item, * item
+    - Numbered items: 1. item, 2. item
+    """
     items = []
 
-    # Look for CHECKED: section
+    # Look for CHECKED section with optional markdown header prefix (###, ##, #)
     checked_match = re.search(
-        r'(?:^|\n)(?:CHECKED|What I Checked|Verified)[:\s]*\n((?:[-*]\s*.+\n?)+)',
+        r'(?:^|\n)(?:#{1,3}\s+)?(?:CHECKED|What I Checked|Verified)[:\s]*\n((?:(?:[-*]|\d+\.)\s+.+\n?)+)',
         output,
         re.MULTILINE | re.IGNORECASE
     )
 
     if checked_match:
         section = checked_match.group(1)
-        items = re.findall(r'[-*]\s*(.+?)(?:\n|$)', section)
+        items = re.findall(r'(?:[-*]|\d+\.)\s+(.+?)(?:\n|$)', section)
 
     return [item.strip() for item in items if item.strip()]
 
 
 def extract_not_checked_items(output: str) -> list[str]:
-    """Extract items from NOT_CHECKED section."""
+    """Extract items from NOT_CHECKED section.
+
+    Handles multiple agent output formats:
+    - Markdown headers: ### NOT_CHECKED, ## NOT_CHECKED
+    - Plain headers: NOT_CHECKED:, Not Checked:, Limitations:
+    - Bullet items: - item, * item
+    - Numbered items: 1. item, 2. item
+    """
     items = []
 
-    # Look for NOT_CHECKED: section
+    # Look for NOT_CHECKED section with optional markdown header prefix
     not_checked_match = re.search(
-        r'(?:^|\n)(?:NOT_CHECKED|Not Checked|What I Did NOT Check|Limitations|Blind Spots)[:\s]*\n((?:[-*]\s*.+\n?)+)',
+        r'(?:^|\n)(?:#{1,3}\s+)?(?:NOT_CHECKED|Not Checked|What I Did NOT Check|Limitations|Blind Spots)[:\s]*\n((?:(?:[-*]|\d+\.)\s+.+\n?)+)',
         output,
         re.MULTILINE | re.IGNORECASE
     )
 
     if not_checked_match:
         section = not_checked_match.group(1)
-        items = re.findall(r'[-*]\s*(.+?)(?:\n|$)', section)
+        items = re.findall(r'(?:[-*]|\d+\.)\s+(.+?)(?:\n|$)', section)
 
     return [item.strip() for item in items if item.strip()]
 
