@@ -20,7 +20,7 @@ from rcx_pi.selfhost.step_mu import (
     _iter_normalized_dict_pairs,
     _looks_like_normalized_dict_candidate,
 )
-from rcx_pi.selfhost.mu_type import is_mu
+from rcx_pi.selfhost.mu_type import is_mu, mu_equal
 
 
 # =============================================================================
@@ -59,12 +59,7 @@ def make_typed_normalized_dict(pairs: list[tuple[str, object]]) -> dict:
 # Strategies
 # =============================================================================
 
-simple_mu = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(min_value=-1000, max_value=1000),
-    st.text(max_size=20),
-)
+from tests.strategies import simple_mu
 
 safe_key = st.text(min_size=1, max_size=10).filter(
     lambda k: k not in KERNEL_RESERVED_FIELDS and not k.startswith("_")
@@ -131,7 +126,7 @@ class TestNormalizedDictPairIteration:
         assert pairs is not None
         assert len(pairs) == 1
         assert pairs[0][0] == key
-        assert pairs[0][1] == value
+        assert mu_equal(pairs[0][1], value)
 
     @given(
         k1=safe_key,

@@ -28,13 +28,7 @@ from rcx_pi.selfhost.mu_type import is_mu
 # Strategies
 # =============================================================================
 
-simple_mu = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(min_value=-1000, max_value=1000),
-    st.floats(allow_nan=False, allow_infinity=False),
-    st.text(max_size=20),
-)
+from tests.strategies import simple_mu_with_floats as simple_mu
 
 
 @st.composite

@@ -30,20 +30,7 @@ from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 # Strategies
 # =============================================================================
 
-simple_mu = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(min_value=-1000, max_value=1000),
-    st.text(max_size=20),
-)
-
-# Values suitable for non-linear pattern testing (need equality comparison)
-hashable_mu = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(min_value=-100, max_value=100),
-    st.text(max_size=10),
-)
+from tests.strategies import simple_mu, hashable_mu
 
 
 # =============================================================================
@@ -62,7 +49,7 @@ class TestNonLinearPatternMatching:
         inp = [value, value]
         result = match(pattern, inp)
         assert result is not NO_MATCH
-        assert result["x"] == value
+        assert mu_equal(result["x"], value)
 
     @given(
         v1=hashable_mu,
@@ -88,8 +75,8 @@ class TestNonLinearPatternMatching:
         inp = [v1, v2]
         result = match(pattern, inp)
         assert result is not NO_MATCH
-        assert result["x"] == v1
-        assert result["y"] == v2
+        assert mu_equal(result["x"], v1)
+        assert mu_equal(result["y"], v2)
 
     @given(value=hashable_mu)
     @settings(deadline=5000)
@@ -99,7 +86,7 @@ class TestNonLinearPatternMatching:
         inp = [value, value, value]
         result = match(pattern, inp)
         assert result is not NO_MATCH
-        assert result["x"] == value
+        assert mu_equal(result["x"], value)
 
     @given(
         v1=hashable_mu,
