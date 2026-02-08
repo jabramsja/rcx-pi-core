@@ -13,7 +13,7 @@ A projection-based computational substrate where **structure is the primitive**.
 
 - **2,100+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
-- **34 CRITICAL_TEST_FILES** protected from silent skipping
+- **43 CRITICAL_TEST_FILES** protected from silent skipping
 
 **Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
 All logic is in `mu/closures/recurrence.v1.json` (9 projections). Bootstrap provides only mechanical execution.

@@ -222,7 +222,7 @@ Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
 - `tests/structural/` (17 files) - structural claims grounding
 - `tests/tools/` (4 files) - security tool grounding tests (including validator)
 - 20 core test files including adversarial and self-hosting tests
-- 34 CRITICAL_TEST_FILES protected from silent skipping
+- 43 CRITICAL_TEST_FILES protected from silent skipping
 
 **Fuzzer Settings (standardized 2026-01-28):**
 - `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
@@ -243,8 +243,8 @@ See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
-INFRA_CEILING: 37
-INFRA_CURRENT: 33
+INFRA_CEILING: 38
+INFRA_CURRENT: 38
 ```
 
 **Debt breakdown:**
@@ -283,7 +283,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:148 - constant definition (AST_OK: infra)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 37 (current 33)
+- AST_OK:infra ceiling: 38 (current 38)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -471,7 +471,7 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Added `import builtins` detection to contraband.sh (closes eval/exec bypass)
 - Added `base64/codecs` detection to contraband.sh (encoding bypass defense-in-depth)
 - Added AST_OK category validation (8 approved categories prevent bypass abuse)
-- Added CRITICAL_TEST_FILES protection (32 files cannot be silently skipped):
+- Added CRITICAL_TEST_FILES protection (43 files cannot be silently skipped):
   - Debt/security enforcement, core parity tests, tool grounding tests
   - Adversarial tests, self-hosting tests, grounding verification
 - Updated audit_fast.sh to include security-critical tests in Tier 1
