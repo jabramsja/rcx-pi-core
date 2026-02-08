@@ -505,11 +505,14 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_dict", result_dict))
 
-                        # Collect kv-pairs with cycle detection
+                        # Collect kv-pairs with cycle detection + iteration guard
+                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
                         kv_pairs: list = []
                         current = val
                         visited: set[int] = set()
                         while current is not None:
+                            if len(visited) > MAX_DENORM_ITER:
+                                raise ValueError(f"denormalize_from_match: dict kv-pair iteration exceeded {MAX_DENORM_ITER}")
                             node_id = id(current)
                             if node_id in visited:
                                 raise ValueError("Circular reference in linked list during denormalization")
@@ -534,11 +537,14 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_list", result_list))
 
-                        # Collect elements with cycle detection
+                        # Collect elements with cycle detection + iteration guard
+                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
                         elements: list = []
                         current = val
                         visited: set[int] = set()
                         while current is not None:
+                            if len(visited) > MAX_DENORM_ITER:
+                                raise ValueError(f"denormalize_from_match: list element iteration exceeded {MAX_DENORM_ITER}")
                             node_id = id(current)
                             if node_id in visited:
                                 raise ValueError("Circular reference in linked list during denormalization")
@@ -563,11 +569,14 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_dict", result_dict))
 
-                        # Collect kv-pairs with cycle detection
+                        # Collect kv-pairs with cycle detection + iteration guard
+                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
                         kv_pairs: list = []
                         current = val
                         visited: set[int] = set()
                         while current is not None:
+                            if len(visited) > MAX_DENORM_ITER:
+                                raise ValueError(f"denormalize_from_match: legacy dict kv-pair iteration exceeded {MAX_DENORM_ITER}")
                             node_id = id(current)
                             if node_id in visited:
                                 raise ValueError("Circular reference in linked list during denormalization")
@@ -590,11 +599,14 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_list", result_list))
 
-                        # Collect elements with cycle detection
+                        # Collect elements with cycle detection + iteration guard
+                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
                         elements: list = []
                         current = val
                         visited: set[int] = set()
                         while current is not None:
+                            if len(visited) > MAX_DENORM_ITER:
+                                raise ValueError(f"denormalize_from_match: legacy list element iteration exceeded {MAX_DENORM_ITER}")
                             node_id = id(current)
                             if node_id in visited:
                                 raise ValueError("Circular reference in linked list during denormalization")
@@ -654,9 +666,17 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
     not semantic debt. The projections work on linked lists; this converts
     the result for Python callers. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
     """
+    MAX_BINDINGS = 10000  # AST_OK: infra - iteration guard (adversary finding #1031)
     result: dict[str, Mu] = {}
     current = linked
+    steps = 0
     while current is not None:  # @host_iteration: boundary conversion (API scaffolding)
+        steps += 1
+        if steps > MAX_BINDINGS:
+            raise ValueError(
+                f"bindings_to_dict exceeded max iterations ({MAX_BINDINGS}). "
+                "Possible malformed or circular bindings structure."
+            )
         if not isinstance(current, dict):  # isinstance at boundary is scaffolding
             raise ValueError(f"Invalid bindings structure: {current}")
         name = current.get("name")

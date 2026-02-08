@@ -1054,6 +1054,8 @@ Examples:
     depth = args.depth
     if args.founder:
         depth = "founder"
+    if args.rigorous:
+        depth = "all"
     if args.pr and depth == "full":
         depth = auto_select_depth(files)
         print(f"Auto-selected depth: {depth}")
@@ -1077,117 +1079,120 @@ Examples:
     )
     await orchestrator.run_all()
 
-    # Skip reasoning validation if hard gate already failed (no point retrying)
-    if not getattr(orchestrator, '_hard_gate_failed', False):
-        # Always validate reasoning quality (Layer 2: Detection)
-        print("\n📋 Validating reasoning quality...")
+    # Reasoning validation and skeptic challenge
+    # Always run even on compliance failures (with warning) so skeptic can still catch issues
+    hard_gate_failed = getattr(orchestrator, '_hard_gate_failed', False)
+    if hard_gate_failed:
+        print("\n⚠️  Hard gate failures detected — running reasoning validation and skeptic anyway")
 
-        from tools.validate_agent_reasoning import validate_reasoning
+    # Always validate reasoning quality (Layer 2: Detection)
+    print("\n📋 Validating reasoning quality...")
 
-        reasoning_failures = []
-        approvals_to_challenge = []
+    from tools.validate_agent_reasoning import validate_reasoning
 
-        for result in orchestrator.results:
-            # Validate reasoning quality
-            reasoning = validate_reasoning(result.output)
+    reasoning_failures = []
+    approvals_to_challenge = []
 
-            if not reasoning.is_valid:
-                reasoning_failures.append((result, reasoning.violations[0]))
-                print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
-                # Don't downgrade yet - Layer 3 will retry
+    for result in orchestrator.results:
+        # Validate reasoning quality
+        reasoning = validate_reasoning(result.output)
 
-            elif reasoning.requires_challenge and args.rigorous:
-                approvals_to_challenge.append(result)
-                print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
+        if not reasoning.is_valid:
+            reasoning_failures.append((result, reasoning.violations[0]))
+            print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
+            # Don't downgrade yet - Layer 3 will retry
 
-            else:
-                print(f"  ✓ {result.name}: Reasoning valid")
+        elif reasoning.requires_challenge and args.rigorous:
+            approvals_to_challenge.append(result)
+            print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
 
-        # Layer 3: Correction - retry hard gate agents with reasoning failures
-        if reasoning_failures:
-            hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
+        else:
+            print(f"  ✓ {result.name}: Reasoning valid")
 
-            if hard_gate_failures:
-                print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
+    # Layer 3: Correction - retry hard gate agents with reasoning failures
+    if reasoning_failures:
+        hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
 
-                for result, violation in hard_gate_failures:
-                    print(f"  Retrying {result.name}...")
+        if hard_gate_failures:
+            print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
 
-                    # Re-run with feedback about what went wrong
-                    retry_feedback = f"Reasoning validation failed: {violation}"
-                    retry_result = await orchestrator.run_single_agent(result.name, retry_feedback=retry_feedback)
+            for result, violation in hard_gate_failures:
+                print(f"  Retrying {result.name}...")
 
-                    # Check if retry fixed the issue
-                    retry_reasoning = validate_reasoning(retry_result.output)
+                # Re-run with feedback about what went wrong
+                retry_feedback = f"Reasoning validation failed: {violation}"
+                retry_result = await orchestrator.run_single_agent(result.name, retry_feedback=retry_feedback)
 
-                    if retry_reasoning.is_valid:
-                        print(f"  ✓ {result.name}: Retry successful")
-                        # Replace the result
-                        idx = orchestrator.results.index(result)
-                        orchestrator.results[idx] = retry_result
-                    else:
-                        print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
-                        result.passed = False  # Downgrade to failed
+                # Check if retry fixed the issue
+                retry_reasoning = validate_reasoning(retry_result.output)
 
-        # Rigorous mode: challenge approvals with skeptic
-        if args.rigorous and approvals_to_challenge:
-            print(f"\n🔍 RIGOROUS: Challenging {len(approvals_to_challenge)} approval(s) with skeptic...")
-
-            from tools.run_skeptic import run_skeptic
-
-            for result in approvals_to_challenge:
-                skeptic_result = await run_skeptic(
-                    agent_output=result.output,
-                    files=files,
-                    original_agent=result.name,
-                )
-
-                if skeptic_result["verdict"] == "OVERRIDE":
-                    print(f"  ❌ Skeptic OVERRIDES {result.name}'s approval")
-                    result.passed = False
-                    result.verdict = f"{result.verdict} (SKEPTIC OVERRIDE)"
-                elif skeptic_result["verdict"] == "CONCERNS":
-                    print(f"  ⚠️ Skeptic has CONCERNS about {result.name}'s approval")
-                    if skeptic_result["high_severity_count"] > 0:
-                        result.passed = False
-                        result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
+                if retry_reasoning.is_valid:
+                    print(f"  ✓ {result.name}: Retry successful")
+                    # Replace the result
+                    idx = orchestrator.results.index(result)
+                    orchestrator.results[idx] = retry_result
                 else:
-                    print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
+                    print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
+                    result.passed = False  # Downgrade to failed
 
-        # CONVERGENCE CHECK: If ALL agents pass after skeptic challenges, verify convergence
-        all_passed_after_skeptic = all(r.passed for r in orchestrator.results)
-        if all_passed_after_skeptic and args.rigorous:
-            print(f"\n🎯 CONVERGENCE CHECK: All {len(orchestrator.results)} agents passed. Verifying...")
+    # Rigorous mode: challenge approvals with skeptic
+    # Run even if some agents had compliance failures — skeptic adds value regardless
+    if args.rigorous and approvals_to_challenge:
+        print(f"\n🔍 RIGOROUS: Challenging {len(approvals_to_challenge)} approval(s) with skeptic...")
 
-            # Run a meta-skeptic check on the full convergence
-            from tools.run_skeptic import run_skeptic
+        from tools.run_skeptic import run_skeptic
 
-            convergence_summaries = [
-                f"{r.name}: {r.verdict}" for r in orchestrator.results
-            ]
-            meta_prompt = (
-                f"All agents approved these files: {', '.join(files[:5])}\n"
-                f"Results: {'; '.join(convergence_summaries)}\n"
-                f"This is suspicious - verify there's no blind spot or groupthink."
-            )
-
-            convergence_check = await run_skeptic(
-                agent_output=meta_prompt,
+        for result in approvals_to_challenge:
+            skeptic_result = await run_skeptic(
+                agent_output=result.output,
                 files=files,
-                original_agent="convergence",
+                original_agent=result.name,
             )
 
-            if convergence_check["verdict"] == "OVERRIDE":
-                print(f"  ❌ Convergence check FAILED - skeptic found blind spots")
-                # Mark as needing review but don't block
-                for r in orchestrator.results:
-                    r.verdict = f"{r.verdict} (CONVERGENCE_SUSPECT)"
-            elif convergence_check["verdict"] == "CONCERNS":
-                print(f"  ⚠️ Convergence check raised {convergence_check.get('concern_count', 0)} concern(s)")
+            if skeptic_result["verdict"] == "OVERRIDE":
+                print(f"  ❌ Skeptic OVERRIDES {result.name}'s approval")
+                result.passed = False
+                result.verdict = f"{result.verdict} (SKEPTIC OVERRIDE)"
+            elif skeptic_result["verdict"] == "CONCERNS":
+                print(f"  ⚠️ Skeptic has CONCERNS about {result.name}'s approval")
+                if skeptic_result["high_severity_count"] > 0:
+                    result.passed = False
+                    result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
             else:
-                print(f"  ✅ Convergence VERIFIED - no blind spots detected")
-    else:
-        print("\n⏭️  Skipping reasoning validation (hard gate already failed)")
+                print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
+
+    # CONVERGENCE CHECK: If ALL agents pass after skeptic challenges, verify convergence
+    all_passed_after_skeptic = all(r.passed for r in orchestrator.results)
+    if all_passed_after_skeptic and args.rigorous:
+        print(f"\n🎯 CONVERGENCE CHECK: All {len(orchestrator.results)} agents passed. Verifying...")
+
+        # Run a meta-skeptic check on the full convergence
+        from tools.run_skeptic import run_skeptic
+
+        convergence_summaries = [
+            f"{r.name}: {r.verdict}" for r in orchestrator.results
+        ]
+        meta_prompt = (
+            f"All agents approved these files: {', '.join(files[:5])}\n"
+            f"Results: {'; '.join(convergence_summaries)}\n"
+            f"This is suspicious - verify there's no blind spot or groupthink."
+        )
+
+        convergence_check = await run_skeptic(
+            agent_output=meta_prompt,
+            files=files,
+            original_agent="convergence",
+        )
+
+        if convergence_check["verdict"] == "OVERRIDE":
+            print(f"  ❌ Convergence check FAILED - skeptic found blind spots")
+            # Mark as needing review but don't block
+            for r in orchestrator.results:
+                r.verdict = f"{r.verdict} (CONVERGENCE_SUSPECT)"
+        elif convergence_check["verdict"] == "CONCERNS":
+            print(f"  ⚠️ Convergence check raised {convergence_check.get('concern_count', 0)} concern(s)")
+        else:
+            print(f"  ✅ Convergence VERIFIED - no blind spots detected")
 
     # Generate report
     report = orchestrator.synthesize_report()
