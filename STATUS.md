@@ -72,7 +72,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
-| **Python Substrate** | ~2000 LOC, 2,100+ tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~2000 LOC, 2,846 tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~1300 LOC core + ~900 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
 
@@ -388,7 +388,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,100+ tests passing.
+**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,846 tests passing.
 
 **L3 Substrate Portability Progress (2026-01-30):**
 - Step 1 DONE: JS POC security hardened (v4) - KERNEL_RESERVED_FIELDS validation, dict kv-pair fix
@@ -568,7 +568,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
    - `{}` now normalizes to `{"_type": "dict"}` (was `None`)
    - Denormalization correctly reverses typed sentinels
    - Normalization is now idempotent
-6. All 2,100+ tests pass
+6. All 2,846 tests pass
 
 **Tests created:**
 - `tests/test_phase8b_mechanical_kernel.py` (31 tests)
@@ -607,7 +607,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-07 (Gate 4 cutover complete; structural runtime is default)
+**Last updated:** 2026-02-08 (9-agent rigorous tooling hardened; 5 fuzzer test files from findings #1017-#1021)
 **Next milestone:** Gate 5 - Meta-Circular Parity
 
 **Gate Snapshot (Canonical):**
@@ -691,3 +691,17 @@ New organized structure makes architecture visible:
 - `tools/validate_agent_compliance.py` now verifies CODE matches FILE:LINE
 - `--strict` mode (used by hook) catches fabricated citations
 - All 9 agent prompts updated with fabrication warning
+
+**9-Agent Rigorous Tooling Hardening (2026-02-08):**
+- `--rigorous` now overrides depth to "all" (runs all 9 agents, was only running 6)
+- Reasoning validation + skeptic always run, even on compliance failures (was skipped)
+- `validate_agent_reasoning.py` regex fixed: now parses `### CHECKED` markdown headers and numbered items
+- 5 fuzzer test files from agent findings #1017-#1021 (88 tests):
+  - `test_cross_seed_boundary_fuzzer.py` (#1017) - kernel state machine boundary fuzzing
+  - `test_algorithm_oscillation_fuzzer.py` (#1018) - algorithm runtime stability
+  - `test_nonlinear_bridge_fuzzer.py` (#1019) - non-linear pattern binding conflicts
+  - `test_normalized_injection_fuzzer.py` (#1020) - normalized dict security bypass
+  - `test_trace_malformation_fuzzer.py` (#1021) - trace format robustness
+- Shared Hypothesis strategies extracted to `tests/strategies.py`
+- Iteration guards added to `match_mu.py` (bindings_to_dict, denormalize_from_match)
+- INFRA_CEILING: 37 → 38 (5 new AST_OK:infra markers for iteration guards)
