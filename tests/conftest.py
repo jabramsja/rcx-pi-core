@@ -183,6 +183,12 @@ CRITICAL_TEST_FILES = frozenset({
     "test_validate_agent_compliance.py",
     # Spec ground truth tests - CRITICAL for catching "both wrong in same way" bugs
     "test_spec_ground_truth.py",
+    # Agent fuzzer findings #1017-#1021 (9-agent review, 2026-02-07)
+    "test_cross_seed_boundary_fuzzer.py",
+    "test_algorithm_oscillation_fuzzer.py",
+    "test_nonlinear_bridge_fuzzer.py",
+    "test_normalized_injection_fuzzer.py",
+    "test_trace_malformation_fuzzer.py",
 })
 
 
