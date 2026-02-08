@@ -73,7 +73,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) | ✅ | ✅ |
 | **Python Substrate** | ~2000 LOC, 2,100+ tests, production-ready | ✅ PRIMARY | - |
-| **JS Substrate** | ~600 LOC core + inline tests, auditable, portability proof | - | ✅ COMPLETE |
+| **JS Substrate** | ~1300 LOC core + ~900 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, mu_equal, max_steps, stack_guard, projection_loader | Same in both | Same in both |
 
 **What L3 proves:**
@@ -144,7 +144,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `mu/host/js/eval_step.js` (~600 LOC core + inline tests)
+**JS POC location:** `mu/host/js/eval_step.js` (~1300 LOC core + ~900 LOC inline tests)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -161,9 +161,9 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **L4 Status:** Open research question in SINK. Not promised, not ruled out.
 
-**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~600 LOC core in JS), we know exactly what would need to change.
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~1300 LOC core in JS), we know exactly what would need to change.
 
-**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~600 LOC core is our current answer - auditable, portable, mechanical.
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~1300 LOC core is our current answer - auditable, portable, mechanical.
 
 ### Cross-Substrate Testing Strategy
 
@@ -300,7 +300,7 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
 - eval_step reclassified as BOOTSTRAP_PRIMITIVE (not debt)
 - **Security hardening (9-agent reviewed):**
   - Deep validation: recursive check prevents nested smuggling
-  - KERNEL_RESERVED_FIELDS: 24 fields (12 base + 4 EngineNews + 4 Exhaustion + 4 Bridge)
+  - KERNEL_RESERVED_FIELDS: 22 fields (12 base + 3 Recurrence + 3 Exhaustion + 4 Bridge) + 2 ALGORITHM_ENTRYPOINT_KEYS = 24 total
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
 - Net debt: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 

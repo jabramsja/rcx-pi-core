@@ -349,7 +349,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## L3 Substrate Portability: JavaScript POC
 
-**Location:** `mu/host/js/eval_step.js` (~600 LOC core + inline tests)
+**Location:** `mu/host/js/eval_step.js` (~1300 LOC core + ~900 LOC inline tests)
 
 **What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 
@@ -374,7 +374,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 **Role clarification:**
 - **Python:** Primary development substrate (comprehensive test coverage, agent-reviewed - see STATUS.md)
-- **JavaScript:** Portability proof (auditable ~600 LOC core, all parity tests pass)
+- **JavaScript:** Portability proof (auditable ~1300 LOC core, all parity tests pass)
 
 ---
 
