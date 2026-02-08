@@ -263,6 +263,13 @@ Items here are implemented and verified under current invariants. Changes requir
   - Created `tests/test_rcx_engine_parity.py` - 15 tests
   - All 6 engine projections now tested (grounding agent finding addressed)
   - Note: rcx_engine has `status: design_only` - projections tested but not in production
+- 9-Agent Rigorous Tooling Hardening (2026-02-08, PR #219):
+  - 5 fuzzer test files from agent findings #1017-#1021 (88 property-based tests)
+  - `--rigorous` fixed: runs all 9 agents (was 6), skeptic always runs
+  - Reasoning validator fixed: parses `### CHECKED` markdown format from agents
+  - `==` → `mu_equal()` in fuzzer tests, shared strategies extracted to `tests/strategies.py`
+  - Iteration guards in match_mu.py (bindings_to_dict, denormalize_from_match)
+  - INFRA_CEILING: 37 → 38, test count: 2,846
 
 ---
 
