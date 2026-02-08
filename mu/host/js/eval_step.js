@@ -769,7 +769,7 @@ function denormalize(value, _depth = 0) {
       }
 
       if (type === 'dict') {
-        const result = Object.create(null);  // Prevent __proto__ pollution
+        const result = Object.create(null);  // Prevent prototype pollution
         let node = value;
         let nodeDepth = 0;
         while (node && 'head' in node) {
@@ -799,7 +799,7 @@ function denormalize(value, _depth = 0) {
 
     if (isDictEncoding) {
       // Dict encoding - extract kv-pairs
-      const result = Object.create(null);  // Prevent __proto__ pollution
+      const result = Object.create(null);  // Prevent prototype pollution
       let node = value;
       let nodeDepth = 0;
       while (node && typeof node === 'object' && 'head' in node) {
@@ -830,7 +830,7 @@ function denormalize(value, _depth = 0) {
   }
 
   // Regular object - denormalize values
-  const result = Object.create(null);  // Prevent __proto__ pollution
+  const result = Object.create(null);  // Prevent prototype pollution
   for (const [k, v] of Object.entries(value)) {
     result[k] = denormalize(v, _depth + 1);
   }
@@ -991,7 +991,7 @@ function substitute(body, bindings, _depth = 0) {
     return body.map(elem => substitute(elem, bindings, _depth + 1));
   }
 
-  const result = Object.create(null);  // Prevent __proto__ pollution
+  const result = Object.create(null);  // Prevent prototype pollution
   for (const [k, v] of Object.entries(body)) {
     result[k] = substitute(v, bindings, _depth + 1);
   }
