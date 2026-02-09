@@ -81,22 +81,30 @@ These are the only two files that track current state. Do not duplicate status i
 
 **The rule:** If you touched `rcx_pi/selfhost/` or `mu/`, run agents before saying "done."
 
-| Change Type | Command |
-|-------------|---------|
-| Core code (`rcx_pi/selfhost/`, `mu/`) | `python tools/run_review.py <files> --depth full` |
-| Security-sensitive / major refactor | `python tools/run_review.py <files> --rigorous` |
-| PR prep for founder | `python tools/run_review.py <files> --founder` |
-| Monthly / pre-release health check | `python tools/run_deep_analysis.py` |
-| Docs/tooling only | Skip agents, just run tests |
+| Tier | Command | When | Time |
+|------|---------|------|------|
+| **Quick** | `python tools/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
+| **Full** | `python tools/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
+| **Rigorous** | `python tools/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
+| **Release** | `python tools/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+| **Health** | `python tools/run_deep_analysis.py` | Monthly / pre-release | ~5-10 min |
+
+**Practical rules:**
+1. Default habit: `quick` for iteration, then `full` once before merge
+2. Reserve `--rigorous` for high-risk PRs (`rcx_pi/selfhost/`, `mu/`, gating tooling)
+3. Docs/tooling only: skip agents, just run tests
 
 ### Key Commands
 
 ```bash
-# Orchestrated review (parallel, 6 agents)
-python tools/run_review.py rcx_pi/selfhost/ --depth full
+# Quick feedback (4 agents)
+python tools/run_review.py --pr --depth quick
 
-# Rigorous mode (challenges approvals with skeptic)
-python tools/run_review.py rcx_pi/selfhost/ --rigorous
+# Full review (5-6 agents, pre-merge gate)
+python tools/run_review.py --pr --depth full
+
+# Rigorous mode (all 9 agents + skeptic challenge)
+python tools/run_review.py --pr --rigorous
 
 # Interactive session
 python tools/run_interactive.py verifier rcx_pi/selfhost/

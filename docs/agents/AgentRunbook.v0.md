@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-05
+LAST_VERIFIED: 2026-02-08
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -37,6 +37,21 @@ Which tool to use and when:
 - Security-sensitive change? → `run_review.py --rigorous`
 - Monthly health check? → `run_deep_analysis.py`
 - Want to explore a finding? → `run_interactive.py <agent> <files>`
+
+## Recommended Workflow Tiers
+
+| Tier | Command | When | Time |
+|------|---------|------|------|
+| **Quick** | `python tools/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
+| **Full** | `python tools/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
+| **Rigorous** | `python tools/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
+| **Release** | `python tools/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+
+**Practical rules:**
+1. Default habit: `quick` for iteration, then `full` once before merge
+2. Reserve `--rigorous` for high-risk PRs (`rcx_pi/selfhost/`, `mu/`, compliance/gating tooling)
+3. If runtime is too long, reduce scope (files) before increasing depth
+4. `--show-warnings` on `full` when you want detail on soft-gate findings
 
 ## Quick Start
 
