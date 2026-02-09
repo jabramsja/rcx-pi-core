@@ -953,15 +953,34 @@ def enforce_global_high_fail_closed(results: list[AgentResult], global_high: int
 # Git Integration
 # =============================================================================
 
+def _get_base_branch() -> str:
+    """Detect the default branch (dev, main, master, etc.).
+
+    Raises FileNotFoundError if git is not installed (callers handle this).
+    """
+    for candidate in ["dev", "main", "master"]:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", candidate],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return candidate
+        except subprocess.TimeoutExpired:
+            continue
+    return "dev"  # fallback
+
+
 def get_changed_files() -> list[str]:
-    """Get files changed in current branch vs main.
+    """Get files changed in current branch vs base branch.
 
     Raises:
         RuntimeError: If git command fails (don't fail silently)
     """
     try:
+        base = _get_base_branch()
         result = subprocess.run(
-            ["git", "diff", "--name-only", "main...HEAD"],
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
             capture_output=True,
             text=True,
             timeout=10
@@ -1027,7 +1046,7 @@ Examples:
     parser.add_argument(
         "--pr",
         action="store_true",
-        help="Review files changed in current PR (git diff vs main)"
+        help="Review files changed in current PR (git diff vs base branch)"
     )
     parser.add_argument(
         "--founder",

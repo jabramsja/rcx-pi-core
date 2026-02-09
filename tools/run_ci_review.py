@@ -105,6 +105,24 @@ class DiffAnalysis:
     summary: str
 
 
+def _get_base_branch() -> str:
+    """Detect the default branch (dev, main, master, etc.).
+
+    Raises FileNotFoundError if git is not installed (callers handle this).
+    """
+    for candidate in ["dev", "main", "master"]:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", candidate],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return candidate
+        except subprocess.TimeoutExpired:
+            continue
+    return "dev"  # fallback
+
+
 def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
     """Analyze the diff to determine review scope."""
 
@@ -112,7 +130,8 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
     if pr_number:
         cmd = ["gh", "pr", "diff", str(pr_number), "--name-only"]
     else:
-        cmd = ["git", "diff", "--name-only", "main...HEAD"]
+        base = _get_base_branch()
+        cmd = ["git", "diff", "--name-only", f"{base}...HEAD"]
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     # Security: Check for command failure - don't fail silently
@@ -127,7 +146,7 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
     if pr_number:
         stat_cmd = ["gh", "pr", "diff", str(pr_number), "--stat"]
     else:
-        stat_cmd = ["git", "diff", "--stat", "main...HEAD"]
+        stat_cmd = ["git", "diff", "--stat", f"{base}...HEAD"]
 
     stat_result = subprocess.run(stat_cmd, capture_output=True, text=True, timeout=30)
     # Note: stat failure is non-critical - we can proceed with 0 line counts

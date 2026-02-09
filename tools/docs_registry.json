@@ -45,6 +45,7 @@
     "^rcx_pi/specs/",
     "^tests/archive/",
     "^tests/golden/",
-    "^docs/TESTING_PERFORMANCE_ISSUE\\.md$"
+    "^docs/TESTING_PERFORMANCE_ISSUE\\.md$",
+    "^reports/"
   ]
 }
