@@ -260,6 +260,7 @@ python tools/run_ci_review.py --pr-number 123 --post-comment
 - Uses simplified verdict extraction
 - Does NOT run reasoning validator or skeptic challenge
 - Compliance validation is still strict (FILE:LINE must exist)
+- Hard-gate failures (`verifier`, `adversary`, `structural-proof`) block CI; soft-gate findings are warnings
 - For thorough review, use `run_review.py --rigorous` locally
 
 ## Preflight

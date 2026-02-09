@@ -40,6 +40,7 @@ from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
+    HARD_GATE_AGENTS,
     agent_passed,
     build_sdk_options,
     extract_text_from_message,
@@ -199,48 +200,78 @@ Be CONCISE. This is a CI review - focus on critical issues only.
 Produce a brief report (max 500 words) following your format.
 """
 
-    result_text = ""
-    fragments: list[str] = []
-    try:
-        async for message in query(
-            prompt=prompt,
-            options=build_sdk_options(
-                ClaudeAgentOptions,
-                allowed_tools=["Read", "Grep", "Glob"],
-                max_turns=20,
-                model=agent_model,
-                require_model_kwarg=True,
-            ),
-        ):
-            extracted = extract_text_from_message(message)
-            if extracted:
-                fragments.append(extracted)
-            if hasattr(message, 'result') and message.result:
-                result_text = message.result
-    except Exception as e:
-        result_text = f"Error: {e}"
+    async def _run_once(run_prompt: str) -> str:
+        result_text_local = ""
+        fragments_local: list[str] = []
+        try:
+            async for message in query(
+                prompt=run_prompt,
+                options=build_sdk_options(
+                    ClaudeAgentOptions,
+                    allowed_tools=["Read", "Grep", "Glob"],
+                    max_turns=20,
+                    model=agent_model,
+                    require_model_kwarg=True,
+                ),
+            ):
+                extracted = extract_text_from_message(message)
+                if extracted:
+                    fragments_local.append(extracted)
+                if hasattr(message, 'result') and message.result:
+                    result_text_local = message.result
+        except Exception as e:
+            result_text_local = f"Error: {e}"
 
-    if not result_text and fragments:
-        result_text = "\n".join(dict.fromkeys(fragments))
+        if not result_text_local and fragments_local:
+            result_text_local = "\n".join(dict.fromkeys(fragments_local))
+        return result_text_local
 
-    # Extract verdict using secure VERDICT: marker parsing (shared_agent_utils)
-    verdict = extract_verdict_secure(result_text, agent_name=agent_name)
+    def _evaluate(output: str) -> tuple[str, bool, bool, str]:
+        verdict_local = extract_verdict_secure(output, agent_name=agent_name)
+        passed_local = agent_passed(agent_name, verdict_local)
+        is_compliant_local, compliance_error_local, _ = validate_compliance(
+            output, verify_files=True, verify_code=True
+        )
+        if not is_compliant_local:
+            passed_local = False
+        return verdict_local, passed_local, is_compliant_local, compliance_error_local
 
-    passed = agent_passed(agent_name, verdict)
+    result_text = await _run_once(prompt)
+    verdict, passed, is_compliant, compliance_error = _evaluate(result_text)
+    retried = False
 
-    # Compliance validation (shared_agent_utils returns 3-tuple)
-    is_compliant, compliance_error, _ = validate_compliance(
-        result_text, verify_files=True, verify_code=True
-    )
-    if not is_compliant:
-        passed = False  # Compliance failure = not passed
+    # One retry for malformed outputs (UNKNOWN verdict or non-compliant format).
+    if verdict == "UNKNOWN" or not is_compliant:
+        retried = True
+        retry_prompt = (
+            f"{prompt}\n\n"
+            "IMPORTANT RETRY REQUIREMENTS:\n"
+            "- You MUST include an explicit `VERDICT: <TOKEN>` line.\n"
+            "- Every finding MUST include FINDING/FILE/LINES/CODE/VERIFIED fields.\n"
+            "- Use only evidence from files you actually read.\n"
+        )
+        retry_text = await _run_once(retry_prompt)
+        retry_verdict, retry_passed, retry_compliant, retry_error = _evaluate(retry_text)
+        # Keep retry outcome if it produced any output.
+        if retry_text.strip():
+            result_text = retry_text
+            verdict = retry_verdict
+            passed = retry_passed
+            is_compliant = retry_compliant
+            compliance_error = retry_error
+
+    is_hard_gate = agent_name in HARD_GATE_AGENTS
+    blocks_merge = is_hard_gate and (not passed)
 
     return {
         "name": agent_name,
         "verdict": verdict,
         "passed": passed,
+        "is_hard_gate": is_hard_gate,
+        "blocks_merge": blocks_merge,
         "is_compliant": is_compliant,
         "compliance_error": compliance_error,
+        "retried": retried,
         "output": result_text[:2000],  # Truncate for comment size
     }
 
@@ -270,23 +301,36 @@ def generate_ci_report(analysis: DiffAnalysis, results: list[dict]) -> str:
         "",
         "### Summary",
         "",
-        "| Agent | Verdict | Status |",
-        "|-------|---------|--------|",
+        "| Agent | Gate | Verdict | Status |",
+        "|-------|------|---------|--------|",
     ]
 
-    all_passed = True
+    hard_failures = [r for r in results if r.get("is_hard_gate") and not r.get("passed")]
+    soft_failures = [r for r in results if (not r.get("is_hard_gate")) and not r.get("passed")]
     for result in results:
-        status = "✅" if result["passed"] else "❌"
-        lines.append(f"| {result['name']} | {result['verdict']} | {status} |")
-        if not result["passed"]:
-            all_passed = False
+        gate = "Hard" if result.get("is_hard_gate") else "Soft"
+        if result["passed"]:
+            status = "✅ Pass"
+        elif result.get("is_hard_gate"):
+            status = "❌ Block"
+        else:
+            status = "⚠️ Warn"
+        lines.append(f"| {result['name']} | {gate} | {result['verdict']} | {status} |")
 
     lines.append("")
 
-    if all_passed:
+    if not hard_failures and not soft_failures:
         lines.append("### ✅ All checks passed")
+    elif hard_failures:
+        lines.append(f"### ❌ Hard-gate issues found ({len(hard_failures)} blocker(s))")
     else:
-        lines.append("### ❌ Issues found")
+        lines.append(f"### ⚠️ Soft-gate warnings ({len(soft_failures)} warning(s))")
+
+    if soft_failures and not hard_failures:
+        lines.append("")
+        lines.append("_Soft-gate warnings do not block CI merge._")
+
+    if hard_failures or soft_failures:
         lines.append("")
         lines.append("<details>")
         lines.append("<summary>Click to expand findings</summary>")
@@ -302,6 +346,8 @@ def generate_ci_report(analysis: DiffAnalysis, results: list[dict]) -> str:
                 lines.append("")
 
         lines.append("</details>")
+    else:
+        lines.append("")
 
     lines.append("")
     lines.append("---")
@@ -434,13 +480,15 @@ async def main():
             print("   ❌ Failed to post comment")
 
     # Exit code
-    failed = [r for r in results if not r["passed"]]
-    if failed:
-        print(f"\n❌ {len(failed)} agent(s) reported issues")
+    hard_failures = [r for r in results if r.get("is_hard_gate") and not r["passed"]]
+    soft_failures = [r for r in results if (not r.get("is_hard_gate")) and not r["passed"]]
+    if hard_failures:
+        print(f"\n❌ {len(hard_failures)} hard-gate agent(s) reported blocking issues")
         sys.exit(1)
-    else:
-        print("\n✅ All agents passed")
-        sys.exit(0)
+    if soft_failures:
+        print(f"\n⚠️ {len(soft_failures)} soft-gate warning(s) reported (non-blocking)")
+    print("\n✅ CI review completed")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
