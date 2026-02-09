@@ -79,7 +79,9 @@ async def run_agent_prompt(
 
     agent_model = resolve_agent_model(agent_name, model_override)
     tools = allowed_tools or ["Read", "Grep", "Glob"]
-    action_line_safe = sanitize_for_prompt(action_line, max_len=2000)
+    # Sanitize injection chars but don't truncate — action_line is internally
+    # constructed from already-sanitized file lists and may be long.
+    action_line_safe = sanitize_for_prompt(action_line, max_len=len(action_line))
 
     agent_title = agent_name.replace("-", " ").title()
     prompt = (
