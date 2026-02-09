@@ -23,7 +23,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'tools'))
 # architecture-mismatched environments (e.g. arm64 Python + x86_64 wheel).
 # We mock the SDK so only the pure-Python parsing functions are loaded.
 _sdk_mock = mock.MagicMock()
-with mock.patch.dict(sys.modules, {"claude_agent_sdk": _sdk_mock}):
+# agent_runner_common imports tools.shared_agent_utils which may not resolve
+# when running tests with only tools/ on sys.path.  Mock it alongside the SDK.
+_arc_mock = mock.MagicMock()
+_arc_mock.sanitize_files = lambda files, **kw: files  # passthrough for tests
+with mock.patch.dict(sys.modules, {
+    "claude_agent_sdk": _sdk_mock,
+    "agent_runner_common": _arc_mock,
+    "tools.agent_runner_common": _arc_mock,
+}):
     # Force re-import if already cached with real SDK
     if "run_skeptic" in sys.modules:
         del sys.modules["run_skeptic"]

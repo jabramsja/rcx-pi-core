@@ -33,6 +33,7 @@ if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
+from agent_runner_common import sanitize_files
 from shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
     build_sdk_options,
@@ -312,9 +313,7 @@ async def run_skeptic(
     For multi-agent reviews, use run_consolidated_skeptic() instead.
     """
 
-    # Security: Sanitize file list to prevent prompt injection via file paths
-    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:100] for f in files]
-    file_list = ", ".join(safe_files)
+    file_list = ", ".join(sanitize_files(files, max_len=100))
 
     # Security: Sanitize agent output to prevent prompt injection
     safe_output = sanitize_for_prompt(agent_output)
@@ -377,8 +376,7 @@ async def run_consolidated_skeptic(
             "output": raw text,
         }
     """
-    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:100] for f in files]
-    file_list = ", ".join(safe_files)
+    file_list = ", ".join(sanitize_files(files, max_len=100))
 
     # Build labeled sections for each agent's output
     agent_sections = []

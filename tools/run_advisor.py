@@ -29,6 +29,7 @@ from tools.agent_runner_common import (
     finalize_standard_result,
     print_standard_runner_footer,
     run_agent_prompt,
+    sanitize_files,
 )
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
@@ -74,9 +75,7 @@ async def run_advisor(
 
     file_context = ""
     if context_files:
-        # Security: Sanitize file paths to prevent prompt injection via newlines
-        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in context_files[:20]]
-        file_context = f"\n\nRelevant files to consider: {', '.join(safe_files)}"
+        file_context = f"\n\nRelevant files to consider: {', '.join(sanitize_files(context_files))}"
 
     web_instructions = ""
     if web_search:

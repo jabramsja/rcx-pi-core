@@ -27,6 +27,7 @@ from tools.agent_runner_common import (
     finalize_standard_result,
     print_standard_runner_footer,
     run_agent_prompt,
+    sanitize_files,
 )
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
@@ -65,9 +66,7 @@ async def run_visualizer(
     if structure:
         target = f"this Mu structure:\n```json\n{structure}\n```"
     elif files:
-        # Security: Sanitize file paths to prevent prompt injection.
-        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
-        target = f"these files: {', '.join(safe_files)}"
+        target = f"these files: {', '.join(sanitize_files(files))}"
     else:
         target = "the relevant data structures"
 

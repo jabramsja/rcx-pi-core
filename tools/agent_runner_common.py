@@ -47,9 +47,16 @@ class StandardFileRunnerConfig:
     default_exit_code: int = 0  # Exit code when verdict is UNKNOWN/unrecognized
 
 
-def _sanitize_files(files: list[str]) -> list[str]:
-    # Security: sanitize file paths before prompt injection.
-    return [f.replace("\n", "_").replace("\r", "_").replace("`", "_")[:200] for f in files[:20]]
+def sanitize_files(files: list[str], *, max_len: int = 200, max_count: int = 20) -> list[str]:
+    """Security: sanitize file paths before prompt injection.
+
+    Exported for reuse across all runners (run_ci_review, run_interactive,
+    run_skeptic, run_review, etc.) to eliminate inline copies.
+    """
+    return [
+        f.replace("\n", "_").replace("\r", "_").replace("\u2028", "_").replace("\u2029", "_").replace("`", "_")[:max_len]
+        for f in files[:max_count]
+    ]
 
 
 async def run_agent_prompt(
@@ -115,7 +122,7 @@ async def run_standard_file_agent(
     task_instructions_override: str | None = None,
 ) -> str:
     """Run a standard file-based agent using shared execution logic."""
-    safe_files = _sanitize_files(files)
+    safe_files = sanitize_files(files)
     file_list = ", ".join(safe_files)
     task_instructions = task_instructions_override or config.task_instructions
     return await run_agent_prompt(
