@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -168,7 +168,7 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 - **Purpose:** Strategic advice when stuck - options, trade-offs, creative solutions
 - **Focus:** Exploring solution space, unblocking progress, out-of-the-box thinking
 - **When to use:** Design decisions, multiple valid approaches, need fresh perspective
-- **Verdict:** OPTIONS_PROVIDED / RECOMMENDATION / NEEDS_MORE_CONTEXT
+- **Verdict:** VIABLE_PATH / HIDDEN_CONSTRAINTS / FLAWED_APPROACH / NEEDS_MORE_CONTEXT
 - **Note:** Advisor PROPOSES, other agents VALIDATE
 
 ## Agent Guardrails (Anti-Hallucination)
@@ -205,6 +205,8 @@ All 9 review agents follow `AgentGuardrails.v0.md` which requires:
 - **Model distribution (2026-02-01):**
   - **Opus:** verifier, adversary, expert, advisor (core reasoning agents)
   - **Sonnet:** structural-proof, grounding, fuzzer, translator, visualizer (implementation agents)
+- **Source of truth:** `tools/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
+- **Override path:** `--model` flag on orchestrators/runners; fail-closed if SDK cannot apply explicit model wiring
 
 ### Trust Model
 - We don't trust the Expert's code

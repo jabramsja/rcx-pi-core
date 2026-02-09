@@ -11,25 +11,41 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
+from pathlib import Path
+
+# Ensure tools directory is importable when run directly
+_tools_dir = Path(__file__).resolve().parent
+if str(_tools_dir.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent))
+
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
 TRANSLATOR_PROMPT = load_agent_prompt_with_contract("translator")
 
 
-async def run_translator(files: list[str], request: str | None = None) -> str:
+async def run_translator(
+    files: list[str],
+    request: str | None = None,
+    model_override: str | None = None,
+) -> str:
     """Run the translator agent on the specified files."""
 
     # Security: Sanitize file paths to prevent prompt injection via newlines
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
     file_list = ", ".join(safe_files)
+    agent_model = resolve_agent_model("translator", model_override)
     request_context = ""
     if request:
         request_context = f"\n\n**Original Request:** {request}"
@@ -52,10 +68,13 @@ Produce a translator report following the format in your instructions.
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=25,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -70,33 +89,30 @@ Produce a translator report following the format in your instructions.
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_translator.py <file1> [file2] ... [--request \"original request\"]")
-        print("Example: python tools/run_translator.py rcx_pi/selfhost/eval_seed.py")
-        sys.exit(1)
-
-    # Parse args - extract --request if present
-    files = []
-    request = None
-    i = 1
-    while i < len(sys.argv):
-        if sys.argv[i] == "--request" and i + 1 < len(sys.argv):
-            request = sys.argv[i + 1]
-            i += 2
-        else:
-            files.append(sys.argv[i])
-            i += 1
-
-    if not files:
-        print("Error: No files specified")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Run RCX translator agent on specified files."
+    )
+    parser.add_argument("files", nargs="+", help="Files to review")
+    parser.add_argument("--request", help="Original request text for intent matching")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for translator (default uses policy)",
+    )
+    args = parser.parse_args()
+    files = args.files
+    request = args.request
 
     print(f"Running translator on: {', '.join(files)}")
     if request:
         print(f"Original request: {request}")
     print("=" * 60)
 
-    result = await run_translator(files, request)
+    result = await run_translator(
+        files,
+        request,
+        model_override=args.model,
+    )
 
     print(result)
     print("=" * 60)

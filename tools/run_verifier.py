@@ -11,25 +11,37 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
+from pathlib import Path
+
+# Ensure tools directory is importable when run directly
+_tools_dir = Path(__file__).resolve().parent
+if str(_tools_dir.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent))
+
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
 VERIFIER_PROMPT = load_agent_prompt_with_contract("verifier")
 
 
-async def run_verifier(files: list[str]) -> str:
+async def run_verifier(files: list[str], model_override: str | None = None) -> str:
     """Run the verifier agent on the specified files."""
 
     # Security: Sanitize file paths to prevent prompt injection via newlines
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
     file_list = ", ".join(safe_files)
+    agent_model = resolve_agent_model("verifier", model_override)
     prompt = f"""You are the RCX Verifier Agent. Your instructions are:
 
 {VERIFIER_PROMPT}
@@ -46,10 +58,13 @@ Read each file and produce a verification report following the format in your in
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=20,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -64,16 +79,22 @@ Read each file and produce a verification report following the format in your in
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_verifier.py <file1> [file2] ...")
-        print("Example: python tools/run_verifier.py rcx_pi/eval_seed.py")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Run RCX verifier agent on specified files."
+    )
+    parser.add_argument("files", nargs="+", help="Files to review")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for verifier (default uses policy)",
+    )
+    args = parser.parse_args()
 
-    files = sys.argv[1:]
+    files = args.files
     print(f"Running verifier on: {', '.join(files)}")
     print("=" * 60)
 
-    result = await run_verifier(files)
+    result = await run_verifier(files, model_override=args.model)
 
     print(result)
     print("=" * 60)

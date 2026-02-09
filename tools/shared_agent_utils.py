@@ -14,6 +14,7 @@ All agent runners should import from this module instead of duplicating code.
 
 import re
 import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional
@@ -46,6 +47,31 @@ AGENT_VERDICTS = {
     "deep_structural": ["VALID", "INVALID"],
     "deep_advisor": ["HEALTHY", "NEEDS_ATTENTION", "AT_RISK"],
 }
+
+# Canonical model policy (single source of truth).
+# Agent runners and orchestrators should resolve model names only from here.
+AGENT_DEFAULT_MODELS = {
+    "verifier": "opus",
+    "adversary": "opus",
+    "expert": "opus",
+    "advisor": "opus",
+    "skeptic": "opus",
+    "structural-proof": "sonnet",
+    "grounding": "sonnet",
+    "fuzzer": "sonnet",
+    "translator": "sonnet",
+    "visualizer": "sonnet",
+    # Deep analysis aliases
+    "deep_verifier": "opus",
+    "deep_adversary": "opus",
+    "deep_grounding": "sonnet",
+    "deep_structural": "sonnet",
+    "deep_advisor": "opus",
+}
+
+# Allowed short model aliases used in this repository.
+# Keep this constrained to avoid silent typos in CLI overrides.
+SUPPORTED_AGENT_MODELS = {"opus", "sonnet", "haiku"}
 
 AGENT_PASS_VERDICTS = {
     "verifier": {"APPROVE"},
@@ -108,6 +134,74 @@ _ZERO_WIDTH_RE = re.compile(r'[\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
 def agent_passed(agent_name: str, verdict: str) -> bool:
     """Return True when a verdict is considered pass for that agent."""
     return verdict in AGENT_PASS_VERDICTS.get(agent_name, set())
+
+
+def normalize_model_name(model: Optional[str]) -> Optional[str]:
+    """Normalize model names to internal short aliases."""
+    if model is None:
+        return None
+    normalized = model.strip().lower()
+    return normalized or None
+
+
+def resolve_agent_model(agent_name: str, override_model: Optional[str] = None) -> str:
+    """Resolve model for an agent with optional override."""
+    normalized_override = normalize_model_name(override_model)
+    if normalized_override is not None:
+        if normalized_override not in SUPPORTED_AGENT_MODELS:
+            raise ValueError(
+                f"Unsupported model override '{override_model}'. "
+                f"Expected one of: {sorted(SUPPORTED_AGENT_MODELS)}"
+            )
+        return normalized_override
+
+    raw_name = agent_name.strip().lower()
+    # Accept both underscore and hyphen variants to prevent silent fallback
+    # for deep-analysis aliases such as deep_verifier / deep-structural.
+    candidates = [
+        raw_name,
+        raw_name.replace("_", "-"),
+        raw_name.replace("-", "_"),
+    ]
+    for candidate in candidates:
+        if candidate in AGENT_DEFAULT_MODELS:
+            return AGENT_DEFAULT_MODELS[candidate]
+    return "sonnet"
+
+
+def build_sdk_options(
+    options_cls: Any,
+    *,
+    allowed_tools: list[str],
+    max_turns: int,
+    model: Optional[str],
+    require_model_kwarg: bool = True,
+    **extra_kwargs: Any,
+) -> Any:
+    """Construct ClaudeAgentOptions with explicit model wiring.
+
+    Fail-closed behavior:
+    - If a model is configured but SDK options class does not accept `model=`,
+      raise RuntimeError (unless require_model_kwarg=False).
+    """
+    kwargs: dict[str, Any] = {
+        "allowed_tools": allowed_tools,
+        "max_turns": max_turns,
+    }
+    kwargs.update(extra_kwargs)
+
+    normalized_model = normalize_model_name(model)
+    if normalized_model is not None:
+        try:
+            return options_cls(model=normalized_model, **kwargs)
+        except TypeError as exc:
+            if require_model_kwarg:
+                raise RuntimeError(
+                    "ClaudeAgentOptions does not support `model=` but model "
+                    f"policy requires it (requested '{normalized_model}')."
+                ) from exc
+
+    return options_cls(**kwargs)
 
 
 def adversary_has_machine_verifiable_evidence(output: str) -> bool:
@@ -216,7 +310,7 @@ def validate_compliance(
         Tuple of (is_compliant, error_message, metrics_dict)
     """
     try:
-        cmd = ["python3", "tools/validate_agent_compliance.py"]
+        cmd = [sys.executable, "tools/validate_agent_compliance.py"]
         if strict:
             cmd.append("--strict")
         if verify_files:

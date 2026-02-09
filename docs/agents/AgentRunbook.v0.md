@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-08
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -46,6 +46,8 @@ Which tool to use and when:
 | **Full** | `python tools/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
 | **Rigorous** | `python tools/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
 | **Release** | `python tools/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+
+Times assume healthy SDK/runtime infrastructure (auth, Claude SDK, Bun compatibility). Infra failures can fail fast before review starts.
 
 **Practical rules:**
 1. Default habit: `quick` for iteration, then `full` once before merge
@@ -92,6 +94,15 @@ python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 - `--no-memory` - Disable finding storage
 - `--show-warnings` - Show full warning details
 - `--force-grounding` - Include grounding even for low-risk scopes
+- `--fail-fast-hard-gate` - Stop after phase-1 hard gate failures
+- `--skip-preflight` - Bypass mandatory runtime preflight (debugging only)
+- `--preflight-timeout` - Preflight timeout in seconds
+- `--model` - Override model for all orchestrated agents (`opus`, `sonnet`, `haiku`)
+
+**Model governance:**
+- Canonical defaults live in `tools/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
+- `run_review.py`, `run_ci_review.py`, `run_interactive.py`, `run_deep_analysis.py`, and direct runners all resolve model from that shared policy
+- Preflight fails closed if SDK cannot honor explicit `model=...` wiring
 
 **Architecture:** See `docs/agents/AgentRig.v0.md` for trust model.
 
@@ -112,15 +123,15 @@ python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 All 9 agents have dedicated SDK runners with built-in compliance validation:
 
 ```bash
-python tools/run_verifier.py <files>           # North Star compliance
-python tools/run_adversary.py <files>          # Security/attack vectors
-python tools/run_expert.py <files>             # Complexity review
-python tools/run_structural_proof.py "claim"   # Verify structural claims
-python tools/run_grounding.py <files>          # Test coverage
-python tools/run_fuzzer.py <files>             # Property-based testing
-python tools/run_translator.py <files>         # Plain English
-python tools/run_visualizer.py <files>         # Mermaid diagrams
-python tools/run_advisor.py "problem"          # Strategic advice
+python tools/run_verifier.py <files> [--model opus|sonnet|haiku]           # North Star compliance
+python tools/run_adversary.py <files> [--model opus|sonnet|haiku]          # Security/attack vectors
+python tools/run_expert.py <files> [--model opus|sonnet|haiku]             # Complexity review
+python tools/run_structural_proof.py "claim" [--model opus|sonnet|haiku]   # Verify structural claims
+python tools/run_grounding.py <files> [--model opus|sonnet|haiku]          # Test coverage
+python tools/run_fuzzer.py <files> [--model opus|sonnet|haiku]             # Property-based testing
+python tools/run_translator.py <files> [--model opus|sonnet|haiku]         # Plain English
+python tools/run_visualizer.py <files> [--model opus|sonnet|haiku]         # Mermaid diagrams
+python tools/run_advisor.py "problem" [--model opus|sonnet|haiku]          # Strategic advice
 ```
 
 ## Trigger Map (Which Agents to Run)
@@ -188,6 +199,7 @@ Runtime source of truth: `tools/shared_agent_utils.py` (`HARD_GATE_AGENTS`).
 | 1 | Fail (hard gate) |
 | 2 | Warnings (soft gate) |
 | 3 | Compliance failure |
+| 4 | Infrastructure preflight failure |
 
 ## Interactive Mode
 
@@ -232,17 +244,23 @@ analysis - finding issues that static tests miss:
 **GitHub Actions workflow:** `.github/workflows/agent-review.yml`
 
 ```bash
-# Manual trigger
+# Manual trigger (always available)
 python tools/run_ci_review.py --pr-number 123 --post-comment
 
-# Auto-trigger (uncomment in workflow)
-# Runs on PR to rcx_pi/ or mu/
+# Auto-triggered in GitHub Actions on PRs touching:
+# rcx_pi/**, mu/**, agent tooling/prompts, docs/agents/**
 ```
+
+**Execution guardrails in workflow:**
+- Skips automatically on fork PRs (secrets unavailable)
+- Skips automatically when `ANTHROPIC_API_KEY` is missing
+- Uses concurrency cancellation to avoid duplicate runs on rapid pushes
 
 **Note:** CI review is a **fast signal**, not a full gate:
 - Uses simplified verdict extraction
 - Does NOT run reasoning validator or skeptic challenge
 - Compliance validation is still strict (FILE:LINE must exist)
+- Hard-gate failures (`verifier`, `adversary`, `structural-proof`) block CI; soft-gate findings are warnings
 - For thorough review, use `run_review.py --rigorous` locally
 
 ## Preflight
@@ -252,6 +270,8 @@ Before running agents:
 PYTHONHASHSEED=0 python3 tools/check_agent_runtime.py
 PYTHONHASHSEED=0 ./tools/audit_fast.sh
 ```
+
+`run_review.py` also enforces preflight automatically unless `--skip-preflight` is set.
 
 ## Agent Memory
 
