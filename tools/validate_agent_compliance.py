@@ -21,6 +21,7 @@ Updated: 2026-02-03 (CRITICAL: Now verifies CODE actually appears at FILE:LINE -
 Updated: 2026-02-08 (Split citation failures: FABRICATION hard-blocks, IMPRECISE_CITATION warns only)
 """
 
+import json
 import os
 import re
 import sys
@@ -30,15 +31,13 @@ from typing import NamedTuple
 from difflib import SequenceMatcher
 
 try:
-    from tools.shared_agent_utils import AGENT_PASS_VERDICTS
+    from tools.shared_agent_utils import APPROVAL_VERDICTS, FINDING_BLOCK_PATTERN
 except ModuleNotFoundError:
     # Allow direct execution: python tools/validate_agent_compliance.py
-    import sys
-    from pathlib import Path
     _tools_dir = Path(__file__).resolve().parent
     if str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
-    from shared_agent_utils import AGENT_PASS_VERDICTS
+    from shared_agent_utils import APPROVAL_VERDICTS, FINDING_BLOCK_PATTERN
 
 
 def normalize_line_endings(text: str) -> str:
@@ -85,13 +84,8 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
     """
     blocks = []
 
-    # Split on FINDING: variants to handle common agent output patterns
-    # Handles: FINDING:, **FINDING:**, **FINDING**:, ### FINDING:, - FINDING:
-    parts = re.split(
-        r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*',
-        text,
-        flags=re.MULTILINE
-    )
+    # Split on FINDING: variants (uses shared constant from shared_agent_utils)
+    parts = re.split(FINDING_BLOCK_PATTERN, text, flags=re.MULTILINE)
 
     for part in parts[1:]:  # Skip first empty part
         # Extract finding description (first line)
@@ -230,7 +224,6 @@ def extract_code_tokens(code: str) -> set[str]:
     code is semantically the same (e.g., reformatted).
     """
     # Split on whitespace and punctuation, keep only significant tokens
-    import re
     tokens = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', code)
     # Filter out very short tokens and common keywords
     common = {'if', 'else', 'for', 'in', 'def', 'return', 'and', 'or', 'not', 'is', 'the', 'a', 'an'}
@@ -257,12 +250,18 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]
     if not block.code:
         return False, "No CODE block provided", "fabrication"
 
+    # Cap CODE block size to prevent O(n^2) SequenceMatcher on huge inputs.
+    # 8KB is generous for any legitimate code citation.
+    MAX_CODE_BLOCK_SIZE = 8192
+    code_to_verify = block.code[:MAX_CODE_BLOCK_SIZE] if len(block.code) > MAX_CODE_BLOCK_SIZE else block.code
+
     if not block.lines:
         return False, "No LINES provided", "fabrication"
 
     # Security: Validate path to prevent traversal attacks
     # ONLY allow paths within the current working directory (repo root)
     # This prevents reading arbitrary files like /proc/self/environ or ~/.ssh/id_rsa
+    # Uses resolved_path for ALL subsequent operations to prevent TOCTOU symlink races
     try:
         resolved_path = Path(block.file_path).resolve()
         cwd = Path.cwd().resolve()
@@ -271,13 +270,13 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]
     except (OSError, ValueError) as e:
         return False, f"Invalid path: {block.file_path} ({e})", "fabrication"
 
-    # Check file exists
-    if not os.path.exists(block.file_path):
+    # Check file exists (use resolved_path to prevent TOCTOU race)
+    if not resolved_path.exists():
         return False, f"File not found: {block.file_path}", "fabrication"
 
     try:
-        # Read the actual file
-        with open(block.file_path, 'r') as f:
+        # Read the actual file (use resolved_path to prevent TOCTOU symlink race)
+        with open(resolved_path, 'r') as f:
             file_lines = f.readlines()
 
         # Parse line range (e.g., "123" or "123-127")
@@ -297,19 +296,19 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]
         if start_line < 1 - LINE_TOLERANCE or end_line > len(file_lines) + LINE_TOLERANCE:
             return False, f"Line range {block.lines} out of bounds (file has {len(file_lines)} lines)", "fabrication"
 
-        # Normalize claimed code once
-        claimed_normalized = normalize_code_for_comparison(block.code)
+        # Normalize claimed code once (use size-capped version)
+        claimed_normalized = normalize_code_for_comparison(code_to_verify)
 
         # SPECIAL CASE: Ellipsis markers indicate intentional summary/truncation
         # Agents often write summaries like: { "id": "foo", ... } or func_name(...
         # These are valid citations showing structure, not fabrications
-        has_ellipsis = '...' in block.code or '…' in block.code
+        has_ellipsis = '...' in code_to_verify or '…' in code_to_verify
         if has_ellipsis:
             # Extract key identifiers from the claimed code (function names, IDs, etc.)
-            claimed_identifiers = set(re.findall(r'"id":\s*"([^"]+)"', block.code))
-            claimed_identifiers.update(re.findall(r'def\s+(\w+)', block.code))
-            claimed_identifiers.update(re.findall(r'class\s+(\w+)', block.code))
-            claimed_identifiers.update(re.findall(r'"(\w+)":\s*\{', block.code))
+            claimed_identifiers = set(re.findall(r'"id":\s*"([^"]+)"', code_to_verify))
+            claimed_identifiers.update(re.findall(r'def\s+(\w+)', code_to_verify))
+            claimed_identifiers.update(re.findall(r'class\s+(\w+)', code_to_verify))
+            claimed_identifiers.update(re.findall(r'"(\w+)":\s*\{', code_to_verify))
 
             if claimed_identifiers:
                 # Read actual file and check if identifiers exist in the cited range
@@ -573,14 +572,9 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     # === CRITICAL: Approval verdicts require evidence ===
     # Security fix: Prevent rubber-stamp approvals without findings
     # BUT: Legitimate "clean" reviews have no findings - they need explicit analysis evidence
-    approval_verdicts = {
-        verdict
-        for agent, verdicts in AGENT_PASS_VERDICTS.items()
-        if not agent.startswith("deep_")
-        for verdict in verdicts
-    }
+    # APPROVAL_VERDICTS imported from shared_agent_utils (single source of truth)
     output_upper = output.upper()
-    has_approval_verdict = any(v in output_upper for v in approval_verdicts)
+    has_approval_verdict = any(v in output_upper for v in APPROVAL_VERDICTS)
 
     if has_approval_verdict and findings == 0:
         # Check if this looks like a genuine approval (has VERDICT marker)
@@ -785,7 +779,6 @@ def main():
 
     # Output results
     if args.json:
-        import json
         print(json.dumps(metrics, indent=2))
     elif args.quiet:
         if not metrics['compliant']:

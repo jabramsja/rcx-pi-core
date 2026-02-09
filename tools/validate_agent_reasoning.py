@@ -26,15 +26,13 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 
 try:
-    from tools.shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, extract_verdict_secure
+    from tools.shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, APPROVAL_VERDICTS, extract_verdict_secure
 except ModuleNotFoundError:
     # Allow direct execution: python tools/validate_agent_reasoning.py
-    import sys
-    from pathlib import Path
     _tools_dir = Path(__file__).resolve().parent
     if str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
-    from shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, extract_verdict_secure
+    from shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, APPROVAL_VERDICTS, extract_verdict_secure
 
 
 # =============================================================================
@@ -83,13 +81,7 @@ VERDICT_REQUIREMENTS = {
     "NEEDS_MORE_CONTEXT": {"min_checked": 1, "requires_not_checked": False, "min_evidence": 0},
 }
 
-# Approval verdicts that trigger skeptic challenge
-APPROVAL_VERDICTS = {
-    verdict
-    for agent, verdicts in AGENT_PASS_VERDICTS.items()
-    if not agent.startswith("deep_")
-    for verdict in verdicts
-}
+# APPROVAL_VERDICTS imported from shared_agent_utils (single source of truth)
 
 ALL_CANONICAL_VERDICTS = sorted({
     verdict for agent, verdicts in AGENT_VERDICTS.items()
@@ -126,8 +118,10 @@ def extract_checked_items(output: str) -> list[str]:
     items = []
 
     # Look for CHECKED section with optional markdown header prefix (###, ##, #)
+    # Uses [^\n]+ instead of .+ to prevent ReDoS via catastrophic backtracking
+    # Allows optional blank lines between header and first bullet item
     checked_match = re.search(
-        r'(?:^|\n)(?:#{1,3}\s+)?(?:CHECKED|What I Checked|Verified)[:\s]*\n((?:(?:[-*]|\d+\.)\s+.+\n?)+)',
+        r'(?:^|\n)(?:#{1,3}\s+)?(?:CHECKED|What I Checked|Verified)[:\s]*\n\n?((?:(?:[-*]|\d+\.)\s+[^\n]+\n)+)',
         output,
         re.MULTILINE | re.IGNORECASE
     )
@@ -151,8 +145,10 @@ def extract_not_checked_items(output: str) -> list[str]:
     items = []
 
     # Look for NOT_CHECKED section with optional markdown header prefix
+    # Uses [^\n]+ instead of .+ to prevent ReDoS via catastrophic backtracking
+    # Allows optional blank lines between header and first bullet item
     not_checked_match = re.search(
-        r'(?:^|\n)(?:#{1,3}\s+)?(?:NOT_CHECKED|Not Checked|What I Did NOT Check|Limitations|Blind Spots)[:\s]*\n((?:(?:[-*]|\d+\.)\s+.+\n?)+)',
+        r'(?:^|\n)(?:#{1,3}\s+)?(?:NOT_CHECKED|Not Checked|What I Did NOT Check|Limitations|Blind Spots)[:\s]*\n\n?((?:(?:[-*]|\d+\.)\s+[^\n]+\n)+)',
         output,
         re.MULTILINE | re.IGNORECASE
     )
@@ -282,54 +278,6 @@ def validate_reasoning(output: str) -> ReasoningValidation:
 
 
 # =============================================================================
-# Skeptic Challenge
-# =============================================================================
-
-SKEPTIC_PROMPT = """You are a SKEPTIC reviewing another agent's APPROVAL decision.
-
-Your job is NOT to reject everything. Your job is to:
-1. Identify what the approving agent might have MISSED
-2. Surface RISKS that weren't explicitly addressed
-3. Challenge ASSUMPTIONS that weren't verified
-
-The approving agent said:
----
-{agent_output}
----
-
-They checked: {checked_items}
-They did NOT check: {not_checked_items}
-
-Questions to consider:
-- Are the CHECKED items actually sufficient for this verdict?
-- Are the NOT_CHECKED items actually safe to skip?
-- What edge cases might break this?
-- Is there anything suspicious in the code that wasn't mentioned?
-
-Output format:
-CHALLENGE_RESULT: CONFIRMED | CONCERNS | REJECTED
-
-If CONFIRMED: The approval is well-reasoned, proceed.
-If CONCERNS: List specific concerns that should be addressed.
-If REJECTED: The approval is flawed, explain why.
-
-Be SPECIFIC. Cite FILE:LINE if you find issues.
-"""
-
-
-def generate_skeptic_prompt(agent_output: str, validation: ReasoningValidation) -> str:
-    """Generate a prompt for the skeptic agent."""
-    checked = ", ".join(validation.checked_items) if validation.checked_items else "(none listed)"
-    not_checked = ", ".join(validation.not_checked_items) if validation.not_checked_items else "(none listed)"
-
-    return SKEPTIC_PROMPT.format(
-        agent_output=agent_output[:3000],  # Truncate for context
-        checked_items=checked,
-        not_checked_items=not_checked,
-    )
-
-
-# =============================================================================
 # Output
 # =============================================================================
 
@@ -401,12 +349,6 @@ def main():
         action='store_true',
         help="Output as JSON"
     )
-    parser.add_argument(
-        '--generate-skeptic-prompt',
-        action='store_true',
-        help="If approval, output a skeptic challenge prompt"
-    )
-
     args = parser.parse_args()
 
     # Read input
@@ -422,8 +364,6 @@ def main():
     if args.json:
         result = asdict(validation)
         print(json.dumps(result, indent=2))
-    elif args.generate_skeptic_prompt and validation.requires_challenge:
-        print(generate_skeptic_prompt(output, validation))
     else:
         print(format_report(validation))
 

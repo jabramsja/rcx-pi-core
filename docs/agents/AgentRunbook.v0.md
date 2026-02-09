@@ -139,8 +139,8 @@ python tools/run_review.py rcx_pi/selfhost/ --rigorous
 
 **What it does:**
 1. **Reasoning validation** (`validate_agent_reasoning.py`) - CHECKED/NOT_CHECKED sections required for approvals
-2. **Skeptic challenge** (`run_skeptic.py`) - Spawns separate agent to challenge any APPROVE verdicts
-3. Skeptic can OVERRIDE approvals if it finds issues the original agent missed
+2. **Consolidated skeptic** (`run_skeptic.py`) - Single skeptic session reviews ALL approved agents at once, with per-agent verdicts and global blind spot detection
+3. Skeptic can OVERRIDE individual approvals or flag GLOBAL_BLIND_SPOT concerns that affect all agents. Non-compliant or UNKNOWN skeptic output triggers fail-closed blocking.
 
 **Use for:** Security-sensitive code, major refactors, pre-release audits.
 

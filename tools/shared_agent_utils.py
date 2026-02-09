@@ -85,6 +85,25 @@ def _flatten_sets(mapping: dict[str, set[str]]) -> set[str]:
 # Good verdicts (pass) for quick checking and deep-analysis summaries.
 GOOD_VERDICTS = _flatten_sets(AGENT_PASS_VERDICTS)
 
+# Approval verdicts (non-deep) that trigger skeptic challenge and rubber-stamp checks.
+# Single source of truth — imported by validate_agent_compliance and validate_agent_reasoning.
+APPROVAL_VERDICTS = {
+    verdict
+    for agent, verdicts in AGENT_PASS_VERDICTS.items()
+    if not agent.startswith("deep_")
+    for verdict in verdicts
+}
+
+# Canonical regex for splitting on FINDING: blocks.
+# Handles: FINDING:, **FINDING:**, **FINDING**:, ### FINDING:, - FINDING:
+# Single source of truth — used by validate_agent_compliance and shared_agent_utils.
+FINDING_BLOCK_PATTERN = r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*'
+
+# Zero-width and line-breaking Unicode characters that could hide injection payloads.
+# Includes U+2028 (Line Separator) and U+2029 (Paragraph Separator) which act as
+# newlines in JavaScript and some contexts, bypassing \n/\r replacement.
+_ZERO_WIDTH_RE = re.compile(r'[\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
+
 
 def agent_passed(agent_name: str, verdict: str) -> bool:
     """Return True when a verdict is considered pass for that agent."""
@@ -101,7 +120,7 @@ def adversary_has_machine_verifiable_evidence(output: str) -> bool:
         return False
 
     finding_blocks = re.split(
-        r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*',
+        FINDING_BLOCK_PATTERN,
         output,
         flags=re.MULTILINE,
     )
@@ -230,7 +249,8 @@ def validate_compliance(
                 pass
 
         # Non-JSON mode or JSON parse failed
-        if result.returncode == 0:
+        # Exit code 0 = compliant, 2 = compliant with imprecise citation warnings
+        if result.returncode in (0, 2):
             return True, "", {}
         else:
             return False, result.stderr or "Validation failed", {}
@@ -369,9 +389,10 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
 
     Prevents prompt injection by:
     - Unicode normalization (NFKC) to prevent lookalike bypasses
-    - Truncation to max_len
+    - Zero-width character stripping
     - Escaping triple backticks to prevent code block breakout
-    - Removing instruction-like patterns
+    - Removing instruction-like patterns (case-insensitive)
+    - Truncation to max_len (AFTER sanitization to prevent smuggling past truncation)
 
     Args:
         text: Text to sanitize
@@ -386,8 +407,8 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     # Unicode normalization first - converts lookalikes (Greek omicron -> Latin o)
     text = unicodedata.normalize('NFKC', text)
 
-    # Truncate
-    text = text[:max_len]
+    # Strip zero-width characters that could hide injection payloads
+    text = _ZERO_WIDTH_RE.sub('', text)
 
     # Escape triple backticks to prevent code block breakout
     text = text.replace('```', '` ` `')
@@ -395,17 +416,22 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     # Escape newlines to prevent context breakout
     text = text.replace('\n', ' ').replace('\r', ' ')
 
-    # Remove instruction-like patterns
+    # Remove instruction-like patterns (case-insensitive, word-boundary aware)
+    # Uses \b word boundaries to prevent partial-word false positives
+    # and \s* between words to catch space-insertion bypass attempts
     patterns_to_redact = [
-        'ignore previous',
-        'disregard',
-        'new instructions',
-        'system prompt',
-        'forget everything'
+        r'ignore\s+previous',
+        r'disregard',
+        r'new\s+instructions',
+        r'system\s+prompt',
+        r'forget\s+everything',
+        r'you\s+are\s+now',
+        r'override\s+instructions',
     ]
     for pattern in patterns_to_redact:
-        text = text.replace(pattern.lower(), '[REDACTED]')
-        text = text.replace(pattern.upper(), '[REDACTED]')
-        text = text.replace(pattern.title(), '[REDACTED]')
+        text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)
+
+    # Truncate AFTER sanitization to prevent smuggling payloads past the truncation boundary
+    text = text[:max_len]
 
     return text

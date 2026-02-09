@@ -820,6 +820,7 @@ class TestJSTraceFormatParity:
         assert "Stall detected correctly: true" in result.stdout
 
 
+@pytest.mark.timeout(120)
 class TestJSBridgeParity:
     """Verify JS bridge execution matches Python (Gate 7: L3 Bridge Parity).
 
