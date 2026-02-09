@@ -14,6 +14,13 @@ Usage:
 import sys
 import argparse
 import anyio
+from pathlib import Path
+
+# Ensure tools directory is importable when run directly
+_tools_dir = Path(__file__).resolve().parent
+if str(_tools_dir.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent))
+
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (

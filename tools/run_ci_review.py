@@ -31,6 +31,11 @@ from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
 
+# Ensure tools directory is importable when run directly
+_tools_dir = Path(__file__).resolve().parent
+if str(_tools_dir.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent))
+
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
 from tools.shared_agent_utils import (
