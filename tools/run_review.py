@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from typing import Any
 
 # Ensure tools directory is importable when run directly
-_tools_dir = Path(__file__).parent
+_tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
@@ -1252,8 +1252,10 @@ Examples:
             for result in approvals_to_challenge:
                 result.verdict = f"{result.verdict} (GLOBAL_BLIND_SPOT)"
 
-        global_high = skeptic_result.get("global_high_severity_count", 0)
-        if global_high > 0:
+        # Fail-closed: if global concerns exist AND there are HIGH severity
+        # findings, block all challenged approvals.
+        global_high = skeptic_result.get("high_severity_count", 0)
+        if global_concerns and global_high > 0:
             print(f"  ❌ Skeptic GLOBAL HIGH concerns ({global_high}) — fail-closed blocking all approvals")
             enforce_global_high_fail_closed(approvals_to_challenge, global_high)
 
