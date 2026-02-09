@@ -106,14 +106,20 @@ class DiffAnalysis:
 
 
 def _get_base_branch() -> str:
-    """Detect the default branch (dev, main, master, etc.)."""
+    """Detect the default branch (dev, main, master, etc.).
+
+    Raises FileNotFoundError if git is not installed (callers handle this).
+    """
     for candidate in ["dev", "main", "master"]:
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", candidate],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            return candidate
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", candidate],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return candidate
+        except subprocess.TimeoutExpired:
+            continue
     return "dev"  # fallback
 
 
