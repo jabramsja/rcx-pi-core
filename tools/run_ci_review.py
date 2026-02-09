@@ -330,20 +330,27 @@ def generate_ci_report(analysis: DiffAnalysis, results: list[dict]) -> str:
         lines.append("")
         lines.append("_Soft-gate warnings do not block CI merge._")
 
-    if hard_failures or soft_failures:
+    # Always show agent findings (even when CI passes) so reviewers can
+    # see the reasoning behind verdicts like COULD_SIMPLIFY.
+    agents_with_output = [r for r in results if r.get("output", "").strip()]
+    if agents_with_output:
         lines.append("")
         lines.append("<details>")
-        lines.append("<summary>Click to expand findings</summary>")
+        lines.append("<summary>Click to expand agent findings</summary>")
         lines.append("")
 
-        for result in results:
-            if not result["passed"]:
-                lines.append(f"#### {result['name']}")
-                lines.append("")
-                lines.append("```")
-                lines.append(result["output"][:1000])
-                lines.append("```")
-                lines.append("")
+        for result in agents_with_output:
+            label = result["name"]
+            if not result["passed"] and result.get("is_hard_gate"):
+                label += " ❌"
+            elif not result["passed"]:
+                label += " ⚠️"
+            lines.append(f"#### {label}")
+            lines.append("")
+            lines.append("```")
+            lines.append(result["output"][:1000])
+            lines.append("```")
+            lines.append("")
 
         lines.append("</details>")
     else:
