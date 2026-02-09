@@ -44,6 +44,7 @@ class StandardFileRunnerConfig:
     max_turns: int
     verdict_messages: Mapping[str, tuple[str, int]]
     default_message_prefix: str
+    default_exit_code: int = 0  # Exit code when verdict is UNKNOWN/unrecognized
 
 
 def _sanitize_files(files: list[str]) -> list[str]:
@@ -142,7 +143,7 @@ def finalize_standard_result(config: StandardFileRunnerConfig, result_text: str)
     verdict = extract_verdict_secure(result_text, agent_name=config.agent_name)
     message, exit_code = config.verdict_messages.get(
         verdict,
-        (f"{config.default_message_prefix} (verdict: {verdict})", 0),
+        (f"{config.default_message_prefix} (verdict: {verdict})", config.default_exit_code),
     )
     print(f"\n{message}")
     return exit_code

@@ -51,7 +51,8 @@ CONFIG = StandardFileRunnerConfig(
         "PYTHON_SMUGGLING": ("⚠️  RED FLAGS DETECTED - Python smuggling found", 1),
         "CLEAN": ("VISUALIZATION COMPLETE", 0),
     },
-    default_message_prefix="VISUALIZATION COMPLETE",
+    default_message_prefix="⚠️  VISUALIZATION INCOMPLETE",
+    default_exit_code=1,  # UNKNOWN verdict = red flag for visualizer
 )
 
 
