@@ -18,8 +18,10 @@ Updated: 2026-02-01 (9-agent self-review fixes: line endings, tabs, hallucinatio
 Updated: 2026-02-02 (Critical fixes: structured blocks, file verification, empty lines)
 Updated: 2026-02-02 (Fix: CODE regex in extract_finding_blocks now matches global pattern)
 Updated: 2026-02-03 (CRITICAL: Now verifies CODE actually appears at FILE:LINE - not just format)
+Updated: 2026-02-08 (Split citation failures: FABRICATION hard-blocks, IMPRECISE_CITATION warns only)
 """
 
+import json
 import os
 import re
 import sys
@@ -29,15 +31,13 @@ from typing import NamedTuple
 from difflib import SequenceMatcher
 
 try:
-    from tools.shared_agent_utils import AGENT_PASS_VERDICTS
+    from tools.shared_agent_utils import APPROVAL_VERDICTS, FINDING_BLOCK_PATTERN
 except ModuleNotFoundError:
     # Allow direct execution: python tools/validate_agent_compliance.py
-    import sys
-    from pathlib import Path
     _tools_dir = Path(__file__).resolve().parent
     if str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
-    from shared_agent_utils import AGENT_PASS_VERDICTS
+    from shared_agent_utils import APPROVAL_VERDICTS, FINDING_BLOCK_PATTERN
 
 
 def normalize_line_endings(text: str) -> str:
@@ -84,13 +84,8 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
     """
     blocks = []
 
-    # Split on FINDING: variants to handle common agent output patterns
-    # Handles: FINDING:, **FINDING:**, **FINDING**:, ### FINDING:, - FINDING:
-    parts = re.split(
-        r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*',
-        text,
-        flags=re.MULTILINE
-    )
+    # Split on FINDING: variants (uses shared constant from shared_agent_utils)
+    parts = re.split(FINDING_BLOCK_PATTERN, text, flags=re.MULTILINE)
 
     for part in parts[1:]:  # Skip first empty part
         # Extract finding description (first line)
@@ -229,14 +224,13 @@ def extract_code_tokens(code: str) -> set[str]:
     code is semantically the same (e.g., reformatted).
     """
     # Split on whitespace and punctuation, keep only significant tokens
-    import re
     tokens = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', code)
     # Filter out very short tokens and common keywords
     common = {'if', 'else', 'for', 'in', 'def', 'return', 'and', 'or', 'not', 'is', 'the', 'a', 'an'}
     return {t.lower() for t in tokens if len(t) > 2 and t.lower() not in common}
 
 
-def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
+def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]:
     """
     CRITICAL: Verify that CODE actually appears at FILE:LINE.
 
@@ -245,37 +239,44 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
     file and checks if the claimed code is really there.
 
     Returns:
-        (is_valid, error_message)
-        - (True, "") if code matches
-        - (False, "reason") if mismatch or error
+        (is_valid, error_message, severity)
+        - (True, "", None) if code matches
+        - (False, "reason", "fabrication") if no resemblance to actual code
+        - (False, "reason", "imprecise_citation") if near-match/paraphrase/line drift
     """
     if not block.file_path:
-        return False, "No FILE path provided"
+        return False, "No FILE path provided", "fabrication"
 
     if not block.code:
-        return False, "No CODE block provided"
+        return False, "No CODE block provided", "fabrication"
+
+    # Cap CODE block size to prevent O(n^2) SequenceMatcher on huge inputs.
+    # 8KB is generous for any legitimate code citation.
+    MAX_CODE_BLOCK_SIZE = 8192
+    code_to_verify = block.code[:MAX_CODE_BLOCK_SIZE] if len(block.code) > MAX_CODE_BLOCK_SIZE else block.code
 
     if not block.lines:
-        return False, "No LINES provided"
+        return False, "No LINES provided", "fabrication"
 
     # Security: Validate path to prevent traversal attacks
     # ONLY allow paths within the current working directory (repo root)
     # This prevents reading arbitrary files like /proc/self/environ or ~/.ssh/id_rsa
+    # Uses resolved_path for ALL subsequent operations to prevent TOCTOU symlink races
     try:
         resolved_path = Path(block.file_path).resolve()
         cwd = Path.cwd().resolve()
         if not resolved_path.is_relative_to(cwd):
-            return False, f"Path not allowed: {block.file_path} (must be within project directory)"
+            return False, f"Path not allowed: {block.file_path} (must be within project directory)", "fabrication"
     except (OSError, ValueError) as e:
-        return False, f"Invalid path: {block.file_path} ({e})"
+        return False, f"Invalid path: {block.file_path} ({e})", "fabrication"
 
-    # Check file exists
-    if not os.path.exists(block.file_path):
-        return False, f"File not found: {block.file_path}"
+    # Check file exists (use resolved_path to prevent TOCTOU race)
+    if not resolved_path.exists():
+        return False, f"File not found: {block.file_path}", "fabrication"
 
     try:
-        # Read the actual file
-        with open(block.file_path, 'r') as f:
+        # Read the actual file (use resolved_path to prevent TOCTOU symlink race)
+        with open(resolved_path, 'r') as f:
             file_lines = f.readlines()
 
         # Parse line range (e.g., "123" or "123-127")
@@ -293,21 +294,21 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
         # This allows the loop below to try adjusted ranges
         LINE_TOLERANCE = 2
         if start_line < 1 - LINE_TOLERANCE or end_line > len(file_lines) + LINE_TOLERANCE:
-            return False, f"Line range {block.lines} out of bounds (file has {len(file_lines)} lines)"
+            return False, f"Line range {block.lines} out of bounds (file has {len(file_lines)} lines)", "fabrication"
 
-        # Normalize claimed code once
-        claimed_normalized = normalize_code_for_comparison(block.code)
+        # Normalize claimed code once (use size-capped version)
+        claimed_normalized = normalize_code_for_comparison(code_to_verify)
 
         # SPECIAL CASE: Ellipsis markers indicate intentional summary/truncation
         # Agents often write summaries like: { "id": "foo", ... } or func_name(...
         # These are valid citations showing structure, not fabrications
-        has_ellipsis = '...' in block.code or '…' in block.code
+        has_ellipsis = '...' in code_to_verify or '…' in code_to_verify
         if has_ellipsis:
             # Extract key identifiers from the claimed code (function names, IDs, etc.)
-            claimed_identifiers = set(re.findall(r'"id":\s*"([^"]+)"', block.code))
-            claimed_identifiers.update(re.findall(r'def\s+(\w+)', block.code))
-            claimed_identifiers.update(re.findall(r'class\s+(\w+)', block.code))
-            claimed_identifiers.update(re.findall(r'"(\w+)":\s*\{', block.code))
+            claimed_identifiers = set(re.findall(r'"id":\s*"([^"]+)"', code_to_verify))
+            claimed_identifiers.update(re.findall(r'def\s+(\w+)', code_to_verify))
+            claimed_identifiers.update(re.findall(r'class\s+(\w+)', code_to_verify))
+            claimed_identifiers.update(re.findall(r'"(\w+)":\s*\{', code_to_verify))
 
             if claimed_identifiers:
                 # Read actual file and check if identifiers exist in the cited range
@@ -318,10 +319,14 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
                 identifiers_found = sum(1 for ident in claimed_identifiers if ident in actual_code)
                 if identifiers_found >= len(claimed_identifiers) * 0.8:
                     # 80%+ of claimed identifiers found - valid summary
-                    return True, ""
+                    return True, "", None
 
         # Try exact line range first, then with ±1, ±2 line tolerance
         # This handles off-by-one errors in agent line citations
+        # Track best scores across all offsets for severity classification
+        best_char_similarity = 0.0
+        best_token_overlap = 0.0
+
         for offset in [0, -1, 1, -2, 2]:
             adj_start = start_line + offset
             adj_end = end_line + offset
@@ -339,18 +344,19 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
 
             # Check for exact match after normalization
             if claimed_normalized == actual_normalized:
-                return True, ""
+                return True, "", None
 
             # Check for substring match (agent may have excerpted)
             if claimed_normalized in actual_normalized or actual_normalized in claimed_normalized:
-                return True, ""
+                return True, "", None
 
             # Check similarity ratio
             similarity = SequenceMatcher(None, claimed_normalized, actual_normalized).ratio()
+            best_char_similarity = max(best_char_similarity, similarity)
 
             if similarity >= 0.7:
                 # Close enough - minor formatting differences (lowered from 0.8 to 0.7)
-                return True, ""
+                return True, "", None
 
             # TIERED VERIFICATION: Check for legitimate truncation
             # If claimed is significantly shorter, the agent may have truncated a longer block.
@@ -358,19 +364,19 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
             if len(claimed_normalized) < len(actual_normalized) * 0.7 and len(claimed_normalized) >= 15:
                 # Agent likely truncated - find best alignment using sliding window
                 window_size = len(claimed_normalized)
-                best_similarity = 0
-                best_position = 0
+                best_window_sim = 0
 
                 for i in range(len(actual_normalized) - window_size + 1):
                     window = actual_normalized[i:i + window_size]
                     window_sim = SequenceMatcher(None, claimed_normalized, window).ratio()
-                    if window_sim > best_similarity:
-                        best_similarity = window_sim
-                        best_position = i
+                    if window_sim > best_window_sim:
+                        best_window_sim = window_sim
 
-                if best_similarity >= 0.75:
+                best_char_similarity = max(best_char_similarity, best_window_sim)
+
+                if best_window_sim >= 0.75:
                     # Truncated but valid excerpt (lowered from 0.85 to 0.75)
-                    return True, ""
+                    return True, "", None
 
             # TOKEN-BASED FALLBACK: Check if key identifiers match
             # This catches cases where reformatting causes low character similarity
@@ -383,53 +389,69 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str]:
                 intersection = claimed_tokens & actual_tokens
                 union = claimed_tokens | actual_tokens
                 token_similarity = len(intersection) / len(union) if union else 0
+                best_token_overlap = max(best_token_overlap, token_similarity)
 
                 if token_similarity >= 0.5:
                     # Enough key identifiers match - likely same code, different formatting
                     # Lowered from 0.6 to 0.5 to handle more truncation cases
-                    return True, ""
+                    return True, "", None
 
                 # CONTAINMENT CHECK: If claimed tokens are mostly IN actual tokens,
                 # the agent likely excerpted/summarized (even if actual has much more)
                 if len(claimed_tokens) >= 3:
                     containment = len(intersection) / len(claimed_tokens)
+                    best_token_overlap = max(best_token_overlap, containment)
                     if containment >= 0.7:
                         # 70%+ of claimed tokens found in actual - valid excerpt
-                        return True, ""
+                        return True, "", None
 
-        # None of the line offsets worked - this is a FABRICATION
-        # Report using the original line range for the error message
+        # None of the line offsets worked — classify severity
+        # FABRICATION: no resemblance (very low similarity AND low token overlap)
+        # IMPRECISE_CITATION: some resemblance but below pass thresholds
         actual_lines = file_lines[start_line - 1:end_line]
         actual_code = ''.join(actual_lines)
         actual_normalized = normalize_code_for_comparison(actual_code)
         similarity = SequenceMatcher(None, claimed_normalized, actual_normalized).ratio()
+        best_char_similarity = max(best_char_similarity, similarity)
+
+        if best_char_similarity < 0.3 and best_token_overlap < 0.3:
+            severity = "fabrication"
+        else:
+            severity = "imprecise_citation"
 
         return False, (
             f"CODE MISMATCH at {block.file_path}:{block.lines}\n"
             f"  Claimed ({len(claimed_normalized)} chars): {claimed_normalized[:100]}...\n"
             f"  Actual ({len(actual_normalized)} chars): {actual_normalized[:100]}...\n"
-            f"  Similarity: {similarity:.1%}"
-        )
+            f"  Similarity: {similarity:.1%} (best across offsets: {best_char_similarity:.1%})"
+        ), severity
 
     except Exception as e:
-        return False, f"Error reading file: {e}"
+        return False, f"Error reading file: {e}", "fabrication"
 
 
-def verify_all_code_citations(blocks: list[FindingBlock]) -> list[str]:
+def verify_all_code_citations(blocks: list[FindingBlock]) -> tuple[list[str], list[str]]:
     """
     Verify all CODE citations in finding blocks.
 
-    Returns list of fabrication errors (empty if all valid).
+    Returns:
+        (fabrications, imprecise_citations) — two lists of error messages.
+        fabrications: hard failures (missing file, invalid path, no resemblance)
+        imprecise_citations: near-match/paraphrase/line drift (warnings only)
     """
     fabrications = []
+    imprecise_citations = []
 
     for block in blocks:
         if block.file_path and block.code and block.lines:
-            is_valid, error = verify_code_at_location(block)
+            is_valid, error, severity = verify_code_at_location(block)
             if not is_valid:
-                fabrications.append(error)
+                if severity == "imprecise_citation":
+                    imprecise_citations.append(error)
+                else:
+                    fabrications.append(error)
 
-    return fabrications
+    return fabrications, imprecise_citations
 
 
 def check_compliance(output: str, verify_files: bool = False, verify_code: bool = False, strict: bool = False) -> dict:
@@ -520,12 +542,17 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
 
     # === CRITICAL: Verify CODE actually appears at FILE:LINE ===
     # This is the key anti-fabrication check
+    # Two severity levels:
+    #   FABRICATION (hard fail): missing file, invalid path, no resemblance
+    #   IMPRECISE_CITATION (warning): near-match/paraphrase/line drift
+    imprecise_citations = []
     if verify_code and finding_blocks:
-        fabrications = verify_all_code_citations(finding_blocks)
+        fabrications, imprecise_citations = verify_all_code_citations(finding_blocks)
         if fabrications:
-            violations.append(f"FABRICATION DETECTED: {len(fabrications)} code citations don't match actual files")
+            violations.append(f"FABRICATION DETECTED: {len(fabrications)} code citations fabricated")
             for fab in fabrications[:3]:
                 violations.append(f"  - {fab}")
+        # Imprecise citations are warnings, not violations — they don't block compliance
 
     # Legacy count-based checks (kept for backwards compatibility)
     if verified_no > 0:
@@ -545,14 +572,9 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     # === CRITICAL: Approval verdicts require evidence ===
     # Security fix: Prevent rubber-stamp approvals without findings
     # BUT: Legitimate "clean" reviews have no findings - they need explicit analysis evidence
-    approval_verdicts = {
-        verdict
-        for agent, verdicts in AGENT_PASS_VERDICTS.items()
-        if not agent.startswith("deep_")
-        for verdict in verdicts
-    }
+    # APPROVAL_VERDICTS imported from shared_agent_utils (single source of truth)
     output_upper = output.upper()
-    has_approval_verdict = any(v in output_upper for v in approval_verdicts)
+    has_approval_verdict = any(v in output_upper for v in APPROVAL_VERDICTS)
 
     if has_approval_verdict and findings == 0:
         # Check if this looks like a genuine approval (has VERDICT marker)
@@ -617,9 +639,12 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
         "blocks_with_code": blocks_with_code,
         "blocks_with_verified_yes": blocks_with_verified_yes,
         "incomplete_blocks": len(incomplete_blocks),
-        # Fabrication detection
+        # Fabrication detection (hard fail — blocks compliance)
         "fabrications": len(fabrications),
         "fabrication_details": fabrications,
+        # Imprecise citations (warning only — does NOT block compliance)
+        "imprecise_citations": len(imprecise_citations),
+        "imprecise_citation_details": imprecise_citations,
     }
 
 
@@ -648,17 +673,28 @@ def format_report(metrics: dict) -> str:
         f"  Incomplete blocks:   {metrics.get('incomplete_blocks', 'N/A')}",
         "",
         "FABRICATION DETECTION:",
-        f"  Code mismatches:     {metrics.get('fabrications', 'NOT CHECKED')}",
+        f"  Fabrications:        {metrics.get('fabrications', 'NOT CHECKED')}",
+        f"  Imprecise citations: {metrics.get('imprecise_citations', 'NOT CHECKED')}",
         "",
     ]
 
     if metrics.get('fabrications', 0) > 0:
         lines.extend([
-            "*** FABRICATIONS FOUND ***",
-            "The following CODE citations do not match the actual file contents:",
+            "*** FABRICATIONS FOUND (BLOCKING) ***",
+            "The following CODE citations have no resemblance to actual file contents:",
             "",
         ])
         for detail in metrics.get('fabrication_details', []):
+            lines.append(f"  {detail}")
+        lines.append("")
+
+    if metrics.get('imprecise_citations', 0) > 0:
+        lines.extend([
+            "CITATION MISMATCHES (non-blocking warning):",
+            "The following CODE citations are near-matches but below verification threshold:",
+            "",
+        ])
+        for detail in metrics.get('imprecise_citation_details', []):
             lines.append(f"  {detail}")
         lines.append("")
 
@@ -743,14 +779,25 @@ def main():
 
     # Output results
     if args.json:
-        import json
         print(json.dumps(metrics, indent=2))
     elif args.quiet:
-        print("COMPLIANT" if metrics['compliant'] else "NON-COMPLIANT")
-        sys.exit(0 if metrics['compliant'] else 1)
+        if not metrics['compliant']:
+            print("NON-COMPLIANT")
+            sys.exit(1)
+        elif metrics.get('imprecise_citations', 0) > 0:
+            print("COMPLIANT (imprecise citations)")
+            sys.exit(2)
+        else:
+            print("COMPLIANT")
+            sys.exit(0)
     else:
         print(format_report(metrics))
-        sys.exit(0 if metrics['compliant'] else 1)
+        if not metrics['compliant']:
+            sys.exit(1)
+        elif metrics.get('imprecise_citations', 0) > 0:
+            sys.exit(2)
+        else:
+            sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -18,20 +18,22 @@ Usage:
     cat agent_output.txt | python tools/run_skeptic.py --files file1.py
 """
 
+import re
 import sys
 import json
-import subprocess
 import asyncio
 import argparse
 from pathlib import Path
 
 # Ensure tools directory is importable when run directly
 _tools_dir = Path(__file__).parent
+if str(_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_tools_dir))
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from tools.shared_agent_utils import extract_text_from_message, sanitize_for_prompt, validate_compliance
+from shared_agent_utils import extract_text_from_message, sanitize_for_prompt, validate_compliance
 
 
 # =============================================================================
@@ -104,8 +106,191 @@ VERIFIED: Yes
 
 # validate_compliance imported from shared_agent_utils
 
+
+CONSOLIDATED_SKEPTIC_PROMPT = """You are the RCX SKEPTIC - a devil's advocate for code review approvals.
+
+## Your Role
+
+Multiple review agents have ALL approved the same set of files.
+Your job is to challenge ALL of them in a single pass:
+1. What might EACH agent have MISSED?
+2. Did they make overlapping ASSUMPTIONS (groupthink)?
+3. What EDGE CASES weren't considered by ANY agent?
+4. Is there a GLOBAL blind spot across all reviews?
+
+## MANDATORY: Verification Protocol
+
+You MUST read the actual files and verify claims. Do not trust any agent's summary.
+
+For every concern you raise:
+```
+AGENT: <agent_name or ALL>
+CONCERN: [description]
+FILE: /path/to/file.py
+LINES: 123-127
+CODE:
+    [actual code from Read tool]
+SEVERITY: HIGH | MEDIUM | LOW
+VERIFIED: Yes
+```
+
+## Output Format
+
+```
+## Consolidated Skeptic Review
+
+### Per-Agent Assessment
+
+AGENT_VERDICT: <agent_name>: CONFIRMED | CONCERNS | OVERRIDE
+[Repeat for each agent]
+
+### Global Blind Spots
+AGENT: ALL
+[Any concerns that ALL agents missed — groupthink / convergence gaps]
+
+### Concerns Raised
+[Specific concerns with AGENT tag, FILE:LINE evidence]
+
+### Final Assessment
+OVERALL_VERDICT: CONFIRMED | CONCERNS | OVERRIDE
+[Your recommendation]
+```
+
+## Verdicts
+
+Per-agent:
+- **CONFIRMED**: That agent's approval is solid.
+- **CONCERNS**: That agent missed something. List it.
+- **OVERRIDE**: That agent's approval is flawed.
+
+Overall:
+- **CONFIRMED**: All approvals stand. No blind spots.
+- **CONCERNS**: Issues found but not blocking.
+- **OVERRIDE**: Significant blind spot. Should NOT merge without addressing.
+
+## Rules
+
+1. Always read the actual files - don't trust summaries
+2. Be SPECIFIC - vague concerns are useless
+3. Tag EVERY concern with AGENT: <name> or AGENT: ALL
+4. Cite FILE:LINE for every claim
+5. HIGH severity = blocks merge, MEDIUM = should fix, LOW = nice to have
+6. If you find nothing concerning, say CONFIRMED and move on
+"""
+
+
 # =============================================================================
-# Skeptic Runner
+# Verdict Parsing Helpers
+# =============================================================================
+
+def _extract_verdict(text: str) -> str:
+    """Extract a single verdict from skeptic output using secure marker parsing."""
+    verdict_pattern = re.compile(
+        r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:Skeptic\s+)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?\s*:\s*(?:\*\*)?\s*([A-Z_]+)',
+        re.MULTILINE
+    )
+    for match in verdict_pattern.finditer(text):
+        found = match.group(1).upper()
+        if found in {"CONFIRMED", "OVERRIDE", "CONCERNS"}:
+            return found
+
+    # Also check CHALLENGE_RESULT: marker (from validate_agent_reasoning)
+    challenge_pattern = re.compile(
+        r'CHALLENGE_RESULT[:\s]+(\w+)',
+        re.IGNORECASE
+    )
+    challenge_match = challenge_pattern.search(text)
+    if challenge_match:
+        found = challenge_match.group(1).upper()
+        if found in {"CONFIRMED", "CONCERNS", "REJECTED"}:
+            return "OVERRIDE" if found == "REJECTED" else found
+
+    return "UNKNOWN"
+
+
+def _extract_per_agent_verdicts(text: str, agent_names: list[str]) -> dict[str, str]:
+    """Extract per-agent verdicts from consolidated skeptic output.
+
+    Parses lines like: AGENT_VERDICT: verifier: CONFIRMED
+    """
+    verdicts = {}
+    pattern = re.compile(
+        r'AGENT_VERDICT\s*:\s*(\S+)\s*:\s*(CONFIRMED|CONCERNS|OVERRIDE)',
+        re.IGNORECASE
+    )
+    for match in pattern.finditer(text):
+        agent = match.group(1).lower().rstrip(':')
+        verdict = match.group(2).upper()
+        verdicts[agent] = verdict
+
+    # Fill in missing agents: agents not explicitly evaluated by skeptic
+    # default to UNKNOWN (fail-closed). Only explicit AGENT_VERDICT: CONFIRMED
+    # counts as confirmation — silence is not approval.
+    for name in agent_names:
+        if name not in verdicts:
+            verdicts[name] = "UNKNOWN"
+
+    return verdicts
+
+
+def _extract_global_concerns(text: str) -> list[str]:
+    """Extract concerns tagged with AGENT: ALL."""
+    concerns = []
+    # Match AGENT: ALL blocks followed by CONCERN:
+    pattern = re.compile(
+        r'AGENT\s*:\s*ALL\s*\n\s*CONCERN\s*:\s*(.+?)(?=\nAGENT\s*:|$)',
+        re.DOTALL | re.IGNORECASE
+    )
+    for match in pattern.finditer(text):
+        concerns.append(match.group(1).strip()[:500])
+
+    return concerns
+
+
+def _validate_concern_tags(text: str, agent_names: list[str]) -> list[str]:
+    """Flag CONCERN: blocks that lack a preceding AGENT: tag.
+
+    Returns list of warning strings for untagged concerns.
+    Untagged concerns degrade to warnings — they do NOT silently pass.
+
+    Each CONCERN: must have an AGENT: tag in the same block (separated by
+    blank lines). An AGENT: tag from a previous block does NOT carry over.
+    """
+    warnings = []
+    valid_agents = {name.lower() for name in agent_names} | {"all"}
+
+    # Split into blocks separated by blank lines
+    # Each block should be self-contained: AGENT + CONCERN + evidence
+    concern_pattern = re.compile(r'CONCERN\s*:\s*(.+)', re.IGNORECASE)
+    agent_pattern = re.compile(r'AGENT\s*:\s*(\S+)', re.IGNORECASE)
+
+    # Find all CONCERN: positions and look for AGENT: in the same block
+    for match in concern_pattern.finditer(text):
+        concern_pos = match.start()
+        concern_text = match.group(1).strip()[:120]
+
+        # Find the block boundary: look backward for a blank line or start of text
+        block_start = text.rfind('\n\n', 0, concern_pos)
+        block_start = block_start + 2 if block_start != -1 else 0
+
+        # Search for AGENT: tag only within this block
+        block_text = text[block_start:concern_pos]
+        agent_matches = list(agent_pattern.finditer(block_text))
+
+        if not agent_matches:
+            warnings.append(f"UNTAGGED CONCERN (no AGENT: marker): {concern_text}")
+        else:
+            tagged_agent = agent_matches[-1].group(1).lower().rstrip(':')
+            if tagged_agent not in valid_agents:
+                warnings.append(
+                    f"UNKNOWN AGENT '{tagged_agent}' on concern: {concern_text}"
+                )
+
+    return warnings
+
+
+# =============================================================================
+# Skeptic Runners
 # =============================================================================
 
 async def run_skeptic(
@@ -113,7 +298,11 @@ async def run_skeptic(
     files: list[str],
     original_agent: str = "unknown"
 ) -> dict:
-    """Run the skeptic agent to challenge an approval."""
+    """Run the skeptic agent to challenge a single agent's approval.
+
+    Kept for backward compatibility (CLI usage, single-agent challenges).
+    For multi-agent reviews, use run_consolidated_skeptic() instead.
+    """
 
     # Security: Sanitize file list to prevent prompt injection via file paths
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:100] for f in files]
@@ -140,6 +329,114 @@ Now, read the actual files yourself and challenge this approval.
 Look for what they might have missed.
 """
 
+    result_text = await _run_skeptic_query(prompt)
+
+    verdict = _extract_verdict(result_text)
+    high_severity = result_text.count("SEVERITY: HIGH")
+    medium_severity = result_text.count("SEVERITY: MEDIUM")
+    is_compliant, compliance_error, _ = validate_compliance(result_text, json_output=True)
+
+    return {
+        "verdict": verdict,
+        "high_severity_count": high_severity,
+        "medium_severity_count": medium_severity,
+        "is_compliant": is_compliant,
+        "compliance_error": compliance_error,
+        "output": result_text,
+    }
+
+
+async def run_consolidated_skeptic(
+    agent_outputs: dict[str, str],
+    files: list[str],
+) -> dict:
+    """Run a single skeptic session to challenge ALL approved agents at once.
+
+    Args:
+        agent_outputs: {agent_name: output_text} for each approved agent
+        files: List of files that were reviewed
+
+    Returns:
+        {
+            "verdict": overall verdict,
+            "verdict_per_agent": {agent_name: verdict},
+            "global_concerns": [concern strings],
+            "high_severity_count": int,
+            "medium_severity_count": int,
+            "is_compliant": bool,
+            "compliance_error": str,
+            "output": raw text,
+        }
+    """
+    safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:100] for f in files]
+    file_list = ", ".join(safe_files)
+
+    # Build labeled sections for each agent's output
+    agent_sections = []
+    for agent_name, output in agent_outputs.items():
+        safe_name = agent_name.replace('`', '').replace('\n', ' ')[:50]
+        safe_output = sanitize_for_prompt(output)
+        agent_sections.append(
+            f"### {safe_name}\n```\n{safe_output}\n```"
+        )
+
+    agents_block = "\n\n".join(agent_sections)
+    agent_names = list(agent_outputs.keys())
+
+    prompt = f"""{CONSOLIDATED_SKEPTIC_PROMPT}
+
+---
+
+## Context
+
+The following agents reviewed these files: {file_list}
+
+{agents_block}
+
+Now, read the actual files yourself and challenge these approvals.
+For each agent, issue AGENT_VERDICT: <name>: CONFIRMED|CONCERNS|OVERRIDE.
+Tag every concern with AGENT: <name> or AGENT: ALL for global blind spots.
+End with OVERALL_VERDICT: CONFIRMED|CONCERNS|OVERRIDE.
+"""
+
+    result_text = await _run_skeptic_query(prompt)
+
+    # Parse structured output
+    overall_verdict = "UNKNOWN"
+    overall_match = re.search(
+        r'OVERALL_VERDICT\s*:\s*(CONFIRMED|CONCERNS|OVERRIDE)',
+        result_text, re.IGNORECASE
+    )
+    if overall_match:
+        overall_verdict = overall_match.group(1).upper()
+    else:
+        overall_verdict = _extract_verdict(result_text)
+
+    per_agent = _extract_per_agent_verdicts(result_text, agent_names)
+    global_concerns = _extract_global_concerns(result_text)
+
+    # Validate that all concerns have proper AGENT: tags
+    untagged_warnings = _validate_concern_tags(result_text, agent_names)
+
+    high_severity = result_text.count("SEVERITY: HIGH")
+    medium_severity = result_text.count("SEVERITY: MEDIUM")
+    is_compliant, compliance_error, _ = validate_compliance(result_text, json_output=True)
+
+    return {
+        "verdict": overall_verdict,
+        "verdict_per_agent": per_agent,
+        "global_concerns": global_concerns,
+        "untagged_warnings": untagged_warnings,
+        "high_severity_count": high_severity,
+        "medium_severity_count": medium_severity,
+        "is_compliant": is_compliant,
+        "compliance_error": compliance_error,
+        "output": result_text,
+    }
+
+
+async def _run_skeptic_query(prompt: str) -> str:
+    """Shared query execution for both single and consolidated skeptic."""
     result_text = ""
     fragments: list[str] = []
 
@@ -162,47 +459,7 @@ Look for what they might have missed.
     if not result_text and fragments:
         result_text = "\n".join(dict.fromkeys(fragments))
 
-    # Extract verdict using secure marker parsing (no substring matching)
-    import re
-    verdict = "UNKNOWN"
-
-    # Look for explicit verdict markers only
-    verdict_pattern = re.compile(
-        r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:Skeptic\s+)?[Vv][Ee][Rr][Dd][Ii][Cc][Tt](?:\*\*)?\s*:\s*(?:\*\*)?\s*([A-Z_]+)',
-        re.MULTILINE
-    )
-    for match in verdict_pattern.finditer(result_text):
-        found = match.group(1).upper()
-        if found in {"CONFIRMED", "OVERRIDE", "CONCERNS"}:
-            verdict = found
-            break
-
-    # Also check CHALLENGE_RESULT: marker (from validate_agent_reasoning)
-    challenge_pattern = re.compile(
-        r'CHALLENGE_RESULT[:\s]+(\w+)',
-        re.IGNORECASE
-    )
-    challenge_match = challenge_pattern.search(result_text)
-    if challenge_match and verdict == "UNKNOWN":
-        found = challenge_match.group(1).upper()
-        if found in {"CONFIRMED", "CONCERNS", "REJECTED"}:
-            verdict = "OVERRIDE" if found == "REJECTED" else found
-
-    # Count high severity concerns
-    high_severity = result_text.count("SEVERITY: HIGH")
-    medium_severity = result_text.count("SEVERITY: MEDIUM")
-
-    # Compliance check (shared_agent_utils returns 3-tuple)
-    is_compliant, compliance_error, _ = validate_compliance(result_text, json_output=True)
-
-    return {
-        "verdict": verdict,
-        "high_severity_count": high_severity,
-        "medium_severity_count": medium_severity,
-        "is_compliant": is_compliant,
-        "compliance_error": compliance_error,
-        "output": result_text,
-    }
+    return result_text
 
 
 # =============================================================================

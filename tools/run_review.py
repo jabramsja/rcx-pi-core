@@ -91,12 +91,15 @@ except Exception as _agent_memory_error:
 from tools.validate_agent_compliance import extract_finding_blocks
 from tools.shared_agent_utils import (
     AGENT_PASS_VERDICTS,
+    GOOD_VERDICTS,
     HARD_GATE_AGENTS,
     adversary_blocks_merge,
     agent_passed as shared_agent_passed,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    sanitize_for_prompt,
+    validate_compliance as shared_validate_compliance,
 )
 
 
@@ -233,37 +236,19 @@ def should_include_grounding(files: list[str]) -> bool:
 def validate_compliance(output: str) -> tuple[bool, str, dict]:
     """Run compliance validation on agent output.
 
-    Returns (is_compliant, error_message, metrics).
+    Delegates to shared_agent_utils.validate_compliance with strict policy:
+    all verification flags enabled.
+
+    Note: imprecise citations (near-match/paraphrase) do NOT block compliance.
+    Only true fabrications (missing file, no resemblance) set compliant=False.
     """
-    try:
-        result = subprocess.run(
-            [
-                "python3", "tools/validate_agent_compliance.py",
-                "--json", "--strict",
-                "--verify-files",  # Verify FILE paths exist
-                "--verify-code",   # Verify CODE appears at FILE:LINE
-            ],
-            input=output,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0 and not result.stdout:
-            return False, f"Validator crashed: {result.stderr}", {}
-
-        metrics = json.loads(result.stdout)
-        if not metrics.get("compliant", False):
-            violations = metrics.get("violations", ["Unknown violation"])
-            return False, "; ".join(violations), metrics
-
-        return True, "", metrics
-    except subprocess.TimeoutExpired:
-        return False, "Validator timeout (>30s)", {}
-    except json.JSONDecodeError as e:
-        return False, f"Validator returned invalid JSON: {e}", {}
-    except Exception as e:
-        return False, f"Validation error: {e}", {}
+    return shared_validate_compliance(
+        output,
+        strict=True,
+        verify_files=True,
+        verify_code=True,
+        json_output=True,
+    )
 
 
 def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAgentOptions:
@@ -328,7 +313,7 @@ def extract_findings_from_output(agent_name: str, output: str, verdict: str) -> 
                 pass
 
         # Determine severity based on verdict
-        severity = verdict_to_severity(agent_name, verdict)
+        severity = verdict_to_severity(verdict)
 
         findings.append({
             "message": block.finding,
@@ -340,7 +325,7 @@ def extract_findings_from_output(agent_name: str, output: str, verdict: str) -> 
     return findings
 
 
-def verdict_to_severity(agent_name: str, verdict: str) -> str:
+def verdict_to_severity(verdict: str) -> str:
     """Map agent verdict to finding severity."""
     # Critical verdicts
     if verdict in {"VULNERABLE", "BROKEN", "IMPOSSIBLE_AS_CLAIMED", "THEATER"}:
@@ -371,9 +356,8 @@ def verdict_to_severity(agent_name: str, verdict: str) -> str:
         "NEEDS_DISCUSSION",
     }:
         return "medium"
-    # Low/info - passing verdicts
-    all_pass_verdicts = {v for values in AGENT_PASS_VERDICTS.values() for v in values}
-    if verdict in all_pass_verdicts:
+    # Low/info - passing verdicts (uses pre-computed GOOD_VERDICTS from shared_agent_utils)
+    if verdict in GOOD_VERDICTS:
         return "info"
     return "medium"
 
@@ -402,7 +386,8 @@ class ReviewOrchestrator:
                  use_memory: bool = True, pr_number: int | None = None,
                  show_warnings: bool = False,
                  continue_on_hard_gate: bool = True,
-                 force_grounding: bool = False):
+                 force_grounding: bool = False,
+                 agent_max_turns: dict | None = None):
         self.files = files
         self.depth = depth
         self.verbose = verbose
@@ -411,6 +396,7 @@ class ReviewOrchestrator:
         self.show_warnings = show_warnings
         self.continue_on_hard_gate = continue_on_hard_gate
         self.force_grounding = force_grounding
+        self.agent_max_turns = agent_max_turns or dict(AGENT_MAX_TURNS)
         self.agents_to_run = self._resolve_agents_to_run(depth)
         self.agent_definitions = create_agent_definitions()
         self.results: list[AgentResult] = []
@@ -450,7 +436,8 @@ class ReviewOrchestrator:
             print(f"  Starting {agent_name}...")
 
         # Security: Sanitize file paths to prevent prompt injection via newlines
-        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in self.files]
+        # Include U+2028/U+2029 (Line/Paragraph Separators) which act as newlines in JS
+        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('\u2028', '_').replace('\u2029', '_').replace('`', '_')[:200] for f in self.files]
         file_list = ", ".join(safe_files)
         agent_def = self.agent_definitions[agent_name]
 
@@ -465,10 +452,11 @@ class ReviewOrchestrator:
         # Build retry feedback section if this is a retry
         retry_section = ""
         if retry_feedback:
+            safe_feedback = sanitize_for_prompt(retry_feedback, max_len=500)
             retry_section = f"""
 ---
 IMPORTANT: Your previous output failed compliance validation. Here's what went wrong:
-{retry_feedback}
+{safe_feedback}
 
 Please address these issues in your response. Ensure you:
 1. Include proper FINDING blocks with FILE, LINES, CODE, and VERIFIED fields
@@ -492,7 +480,7 @@ Produce a report following the format in your instructions.
         result_text = ""
         last_error = None
         message_text_fragments: list[str] = []
-        max_turns = AGENT_MAX_TURNS.get(agent_name, 12)
+        max_turns = self.agent_max_turns.get(agent_name, 12)
 
         try:
             async for message in query(
@@ -512,7 +500,12 @@ Produce a report following the format in your instructions.
                 if hasattr(message, 'result') and message.result:
                     result_text = message.result
         except Exception as e:
-            result_text = f"AGENT ERROR: {e}"
+            # Preserve any text fragments collected before the error
+            if message_text_fragments and not result_text:
+                result_text = "\n".join(dict.fromkeys(message_text_fragments))
+                result_text += f"\n\nAGENT ERROR (partial output above): {e}"
+            else:
+                result_text = f"AGENT ERROR: {e}"
 
         # If no result but we have an error, report it
         if not result_text and last_error:
@@ -539,7 +532,12 @@ Produce a report following the format in your instructions.
             )
         else:
             # Validate compliance
-            is_compliant, compliance_error, _ = validate_compliance(result_text)
+            is_compliant, compliance_error, compliance_metrics = validate_compliance(result_text)
+
+            # Log imprecise citations as warnings (non-blocking)
+            imprecise_count = compliance_metrics.get("imprecise_citations", 0)
+            if imprecise_count > 0 and self.verbose:
+                print(f"    ⚠️  {agent_name}: {imprecise_count} imprecise citation(s) (non-blocking)")
 
         # Extract verdict
         verdict = extract_verdict(agent_name, result_text)
@@ -748,22 +746,12 @@ Produce a report following the format in your instructions.
         self.total_findings_stored = sum(r.findings_stored for r in all_results)
 
         # Collect soft warnings (non-hard-gate failures)
+        # Uses verdict_to_severity() as single source of truth for severity mapping
         self.soft_warnings = [
             {
                 'agent': r.name,
                 'verdict': r.verdict,
-                'severity': 'medium' if r.verdict in (
-                    'COULD_SIMPLIFY',
-                    'PARTIALLY_GROUNDED',
-                    'DEVIATES',
-                    'SCOPE_CREEP',
-                    'HOST_SMUGGLING',
-                    'STRUCTURAL_LIES',
-                    'PYTHON_SMUGGLING',
-                    'HIDDEN_CONSTRAINTS',
-                    'FLAWED_APPROACH',
-                    'NEEDS_HARDENING',
-                ) else 'low',
+                'severity': verdict_to_severity(r.verdict),
             }
             for r in all_results if not r.blocks_merge and not r.passed
         ]
@@ -1060,10 +1048,11 @@ Examples:
         depth = auto_select_depth(files)
         print(f"Auto-selected depth: {depth}")
 
-    # Apply max-turns override if specified
+    # Apply max-turns override if specified (use local copy, don't mutate module-level)
+    agent_max_turns = dict(AGENT_MAX_TURNS)
     if args.max_turns:
-        for key in AGENT_MAX_TURNS:
-            AGENT_MAX_TURNS[key] = args.max_turns
+        for key in agent_max_turns:
+            agent_max_turns[key] = args.max_turns
         print(f"Max turns override: {args.max_turns} for all agents")
 
     # Run orchestrator
@@ -1076,6 +1065,7 @@ Examples:
         show_warnings=args.show_warnings,
         continue_on_hard_gate=(not args.fail_fast_hard_gate),
         force_grounding=args.force_grounding,
+        agent_max_turns=agent_max_turns,
     )
     await orchestrator.run_all()
 
@@ -1135,64 +1125,85 @@ Examples:
                     print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
                     result.passed = False  # Downgrade to failed
 
-    # Rigorous mode: challenge approvals with skeptic
-    # Run even if some agents had compliance failures — skeptic adds value regardless
+    # Rigorous mode: consolidated skeptic challenge
+    # One skeptic session reviews ALL approved agents + checks for convergence blind spots
     if args.rigorous and approvals_to_challenge:
-        print(f"\n🔍 RIGOROUS: Challenging {len(approvals_to_challenge)} approval(s) with skeptic...")
+        print(f"\n🔍 RIGOROUS: Consolidated skeptic challenging {len(approvals_to_challenge)} approval(s)...")
 
-        from tools.run_skeptic import run_skeptic
+        from tools.run_skeptic import run_consolidated_skeptic
 
+        agent_outputs = {result.name: result.output for result in approvals_to_challenge}
+        skeptic_result = await run_consolidated_skeptic(
+            agent_outputs=agent_outputs,
+            files=files,
+        )
+
+        # Gate on skeptic compliance: non-compliant skeptic output cannot be trusted
+        if not skeptic_result.get("is_compliant", False):
+            print(f"  ⚠️  Skeptic output failed compliance: {skeptic_result.get('compliance_error', 'unknown')}")
+            print(f"      Treating as UNKNOWN (fail-closed)")
+            skeptic_result["verdict"] = "UNKNOWN"
+
+        # Map per-agent verdicts back to targeted results only
+        per_agent = skeptic_result.get("verdict_per_agent", {})
         for result in approvals_to_challenge:
-            skeptic_result = await run_skeptic(
-                agent_output=result.output,
-                files=files,
-                original_agent=result.name,
-            )
-
-            if skeptic_result["verdict"] == "OVERRIDE":
+            agent_verdict = per_agent.get(result.name, "UNKNOWN")
+            if agent_verdict == "OVERRIDE":
                 print(f"  ❌ Skeptic OVERRIDES {result.name}'s approval")
                 result.passed = False
                 result.verdict = f"{result.verdict} (SKEPTIC OVERRIDE)"
-            elif skeptic_result["verdict"] == "CONCERNS":
+            elif agent_verdict == "CONCERNS":
                 print(f"  ⚠️ Skeptic has CONCERNS about {result.name}'s approval")
-                if skeptic_result["high_severity_count"] > 0:
-                    result.passed = False
-                    result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
+                # CONCERNS alone don't block — only HIGH severity does
+            elif agent_verdict == "UNKNOWN":
+                print(f"  ❓ Skeptic did not evaluate {result.name} — fail-closed")
+                result.passed = False
+                result.verdict = f"{result.verdict} (SKEPTIC_NOT_EVALUATED)"
             else:
                 print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
 
-    # CONVERGENCE CHECK: If ALL agents pass after skeptic challenges, verify convergence
-    all_passed_after_skeptic = all(r.passed for r in orchestrator.results)
-    if all_passed_after_skeptic and args.rigorous:
-        print(f"\n🎯 CONVERGENCE CHECK: All {len(orchestrator.results)} agents passed. Verifying...")
+        # AGENT: ALL — apply global blind spots explicitly to every approved agent
+        global_concerns = skeptic_result.get("global_concerns", [])
+        if global_concerns:
+            print(f"\n  🎯 GLOBAL BLIND SPOTS (AGENT: ALL): {len(global_concerns)} found")
+            for concern in global_concerns:
+                print(f"    - {concern[:120]}")
+            # Mark all approved agents with the global flag (visible in report)
+            for result in approvals_to_challenge:
+                result.verdict = f"{result.verdict} (GLOBAL_BLIND_SPOT)"
 
-        # Run a meta-skeptic check on the full convergence
-        from tools.run_skeptic import run_skeptic
+        # Report untagged concerns as warnings (not silent pass)
+        untagged = skeptic_result.get("untagged_warnings", [])
+        if untagged:
+            print(f"\n  ⚠️  UNTAGGED CONCERNS: {len(untagged)} concern(s) missing AGENT: marker")
+            for warning in untagged:
+                print(f"    - {warning}")
 
-        convergence_summaries = [
-            f"{r.name}: {r.verdict}" for r in orchestrator.results
-        ]
-        meta_prompt = (
-            f"All agents approved these files: {', '.join(files[:5])}\n"
-            f"Results: {'; '.join(convergence_summaries)}\n"
-            f"This is suspicious - verify there's no blind spot or groupthink."
-        )
-
-        convergence_check = await run_skeptic(
-            agent_output=meta_prompt,
-            files=files,
-            original_agent="convergence",
-        )
-
-        if convergence_check["verdict"] == "OVERRIDE":
-            print(f"  ❌ Convergence check FAILED - skeptic found blind spots")
-            # Mark as needing review but don't block
-            for r in orchestrator.results:
-                r.verdict = f"{r.verdict} (CONVERGENCE_SUSPECT)"
-        elif convergence_check["verdict"] == "CONCERNS":
-            print(f"  ⚠️ Convergence check raised {convergence_check.get('concern_count', 0)} concern(s)")
-        else:
-            print(f"  ✅ Convergence VERIFIED - no blind spots detected")
+        # Overall verdict gating — preserves hard-gate behavior
+        if skeptic_result["verdict"] == "OVERRIDE":
+            print(f"  ❌ Skeptic OVERALL OVERRIDE — significant blind spots")
+            for result in approvals_to_challenge:
+                agent_v = per_agent.get(result.name, "CONFIRMED")
+                if agent_v != "CONFIRMED":
+                    result.passed = False
+                    result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
+        elif skeptic_result["verdict"] == "CONCERNS":
+            print(f"  ⚠️ Skeptic has CONCERNS — {skeptic_result['high_severity_count']} HIGH, {skeptic_result['medium_severity_count']} MEDIUM")
+            # CONCERNS with HIGH severity findings should block
+            if skeptic_result["high_severity_count"] > 0:
+                for result in approvals_to_challenge:
+                    agent_v = per_agent.get(result.name, "CONFIRMED")
+                    if agent_v in ("CONCERNS", "OVERRIDE"):
+                        result.passed = False
+                        result.verdict = f"{result.verdict} (SKEPTIC_CONCERNS: {skeptic_result['high_severity_count']} HIGH)"
+        elif skeptic_result["verdict"] == "UNKNOWN":
+            print(f"  ❓ Skeptic returned UNKNOWN verdict — fail-closed, blocking approvals")
+            # Fail-closed: inconclusive skeptic MUST block, not silently pass
+            for result in approvals_to_challenge:
+                result.passed = False
+                result.verdict = f"{result.verdict} (SKEPTIC_INCONCLUSIVE)"
+        elif skeptic_result["verdict"] == "CONFIRMED":
+            print(f"  ✅ Skeptic CONFIRMS all approvals — no blind spots")
 
     # Generate report
     report = orchestrator.synthesize_report()

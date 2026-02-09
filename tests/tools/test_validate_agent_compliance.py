@@ -879,3 +879,126 @@ VERIFIED: Yes
         assert blocks[0].code is not None
         assert "class A" in blocks[0].code
         assert "class B" in blocks[0].code
+
+
+class TestFabricationClassification:
+    """True fabrication must hard-block compliance (2026-02-08 severity split)."""
+
+    def test_completely_fabricated_code_blocks(self):
+        """Code with zero resemblance to actual file content must block."""
+        import os
+        this_file = os.path.abspath(__file__)
+        # Lines 1-5 of this file are the module docstring.
+        # Cite completely unrelated code — no token overlap.
+        output = f"""
+STATUS.md reviewed.
+
+FINDING: Fabricated code
+FILE: {this_file}
+LINES: 1-5
+CODE:
+    async function handleRequest(req, res) {{
+        const payload = await req.json();
+        return res.status(200).send(payload);
+    }}
+VERIFIED: Yes
+"""
+        result = check_compliance(output, verify_files=True, verify_code=True, strict=True)
+        assert result["compliant"] is False
+        assert result["fabrications"] >= 1
+        assert result["imprecise_citations"] == 0
+        assert any("FABRICATION" in v for v in result["violations"])
+
+    def test_nonexistent_file_is_fabrication(self):
+        """Citation of a file that doesn't exist must be classified as fabrication."""
+        output = """
+STATUS.md reviewed.
+
+FINDING: Phantom file
+FILE: /this/file/does/not/exist/anywhere/phantom.py
+LINES: 1-5
+CODE:
+    def phantom():
+        pass
+VERIFIED: Yes
+"""
+        result = check_compliance(output, verify_files=True, verify_code=True, strict=True)
+        assert result["compliant"] is False
+        assert result["fabrications"] >= 1
+
+
+class TestImpreciseCitationClassification:
+    """Near-match/paraphrase must warn but NOT block compliance (2026-02-08 severity split)."""
+
+    def test_imprecise_citation_unit_classification(self):
+        """verify_code_at_location must classify near-match as imprecise_citation.
+
+        Uses code sharing structural patterns (frozenset, assignment, numbers)
+        but with different identifiers, producing char similarity ~0.35 (above 0.3
+        fabrication threshold) but below 0.7 pass threshold.
+        """
+        import tempfile
+        from validate_agent_compliance import verify_code_at_location, FindingBlock
+
+        # Actual file content: constants with frozenset + numbers
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', dir='.', delete=False) as f:
+            f.write('KERNEL_RESERVED = frozenset({"_mode", "_result"})\n')
+            f.write('MAX_DEPTH = 50\n')
+            f.write('TIMEOUT = 3000\n')
+            tmp_path = f.name
+
+        try:
+            # Claimed code: same structure (frozenset, assignments, numbers)
+            # but different identifiers → char similarity ~0.35, token Jaccard ~0.09
+            block = FindingBlock(
+                finding="Near-match code",
+                file_path=os.path.abspath(tmp_path),
+                lines="1-3",
+                code='BRIDGE_PROJECTIONS = frozenset({"_step", "_trace"})\nMIN_ITERATIONS = 200\nDEADLINE = 8000',
+                verified="Yes",
+            )
+            is_valid, error, severity = verify_code_at_location(block)
+
+            assert is_valid is False, "Structurally similar but different code should not pass"
+            assert severity == "imprecise_citation", (
+                f"Expected imprecise_citation, got {severity}. Error: {error}"
+            )
+        finally:
+            os.unlink(tmp_path)
+
+    def test_imprecise_citation_does_not_block_compliance(self):
+        """check_compliance must remain compliant when only imprecise citations found."""
+        import tempfile
+
+        # Create temp file with known content
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', dir='.', delete=False) as f:
+            f.write('KERNEL_RESERVED = frozenset({"_mode", "_result"})\n')
+            f.write('MAX_DEPTH = 50\n')
+            f.write('TIMEOUT = 3000\n')
+            tmp_path = os.path.abspath(f.name)
+
+        try:
+            output = f"""
+STATUS.md reviewed.
+
+FINDING: Near-match code
+FILE: {tmp_path}
+LINES: 1-3
+CODE:
+    BRIDGE_PROJECTIONS = frozenset({{"_step", "_trace"}})
+    MIN_ITERATIONS = 200
+    DEADLINE = 8000
+VERIFIED: Yes
+"""
+            result = check_compliance(output, verify_files=True, verify_code=True, strict=True)
+            # Must NOT be blocked — imprecise citation is a warning
+            assert result["compliant"] is True, (
+                f"Imprecise citation should not block. Violations: {result['violations']}"
+            )
+            assert result["imprecise_citations"] >= 1
+            assert result["fabrications"] == 0
+            assert not any("FABRICATION" in v for v in result["violations"])
+            # Details should still be reported
+            assert len(result.get("imprecise_citation_details", [])) >= 1
+        finally:
+            os.unlink(tmp_path)

@@ -53,7 +53,20 @@ if os.name == "nt":
 else:
     import fcntl
 
+# Import shared sanitization (single source of truth)
+try:
+    from tools.shared_agent_utils import sanitize_for_prompt as _shared_sanitize
+except ModuleNotFoundError:
+    _tools_dir = Path(__file__).resolve().parent
+    if str(_tools_dir) not in sys.path:
+        sys.path.insert(0, str(_tools_dir))
+    from shared_agent_utils import sanitize_for_prompt as _shared_sanitize
+
 MEMORY_DIR = Path(".agent_memory")
+
+# Maximum number of findings stored before FIFO eviction.
+# Prevents unbounded disk/memory growth in long-running projects.
+MAX_FINDINGS = 10000
 
 
 @contextmanager
@@ -100,42 +113,93 @@ def get_patterns_file() -> Path:
 
 
 def load_findings() -> list[dict]:
-    """Load all findings from disk."""
+    """Load all findings from disk with shared lock to prevent torn reads."""
     path = get_findings_file()
-    if path.exists():
-        return json.loads(path.read_text())
-    return []
-
-
-def save_findings(findings: list[dict]):
-    """Save findings to disk with file locking to prevent race conditions."""
-    path = get_findings_file()
-    # Open with 'r+' or create, then lock BEFORE truncating to prevent race
-    # Use a lock file to avoid truncation before lock acquired
+    if not path.exists():
+        return []
     lock_path = path.with_suffix('.lock')
     with open(lock_path, 'w') as lock_file:
         with _exclusive_lock(lock_file):
-            # Now safe to write the actual file
+            return json.loads(path.read_text()) if path.exists() else []
+
+
+def save_findings(findings: list[dict]):
+    """Save findings to disk with file locking.
+
+    Note: For add/modify operations, prefer _atomic_modify_findings() to
+    prevent TOCTOU races between load_findings() and save_findings().
+    """
+    path = get_findings_file()
+    lock_path = path.with_suffix('.lock')
+    with open(lock_path, 'w') as lock_file:
+        with _exclusive_lock(lock_file):
             content = json.dumps(findings, indent=2, default=str)
             path.write_text(content)
 
 
+def _atomic_modify_findings(modifier):
+    """Atomically load, modify, and save findings inside a single lock.
+
+    Prevents TOCTOU races where concurrent callers read stale data.
+
+    Args:
+        modifier: callable(findings: list[dict]) -> list[dict]
+                  Receives the current findings list, returns the updated list.
+    """
+    path = get_findings_file()
+    lock_path = path.with_suffix('.lock')
+    with open(lock_path, 'w') as lock_file:
+        with _exclusive_lock(lock_file):
+            findings = json.loads(path.read_text()) if path.exists() else []
+            findings = modifier(findings)
+            content = json.dumps(findings, indent=2, default=str)
+            path.write_text(content)
+    return findings
+
+
 def load_patterns() -> list[dict]:
-    """Load patterns from disk."""
+    """Load patterns from disk with shared lock to prevent torn reads."""
     path = get_patterns_file()
-    if path.exists():
-        return json.loads(path.read_text())
-    return []
+    if not path.exists():
+        return []
+    lock_path = path.with_suffix('.lock')
+    with open(lock_path, 'w') as lock_file:
+        with _exclusive_lock(lock_file):
+            return json.loads(path.read_text()) if path.exists() else []
 
 
 def save_patterns(patterns: list[dict]):
-    """Save patterns to disk with file locking to prevent race conditions."""
+    """Save patterns to disk with file locking.
+
+    Note: For add/modify operations, prefer _atomic_modify_patterns() to
+    prevent TOCTOU races between load_patterns() and save_patterns().
+    """
     path = get_patterns_file()
     lock_path = path.with_suffix('.lock')
     with open(lock_path, 'w') as lock_file:
         with _exclusive_lock(lock_file):
             content = json.dumps(patterns, indent=2, default=str)
             path.write_text(content)
+
+
+def _atomic_modify_patterns(modifier):
+    """Atomically load, modify, and save patterns inside a single lock.
+
+    Prevents TOCTOU races where concurrent callers read stale data.
+
+    Args:
+        modifier: callable(patterns: list[dict]) -> list[dict]
+                  Receives the current patterns list, returns the updated list.
+    """
+    path = get_patterns_file()
+    lock_path = path.with_suffix('.lock')
+    with open(lock_path, 'w') as lock_file:
+        with _exclusive_lock(lock_file):
+            patterns = json.loads(path.read_text()) if path.exists() else []
+            patterns = modifier(patterns)
+            content = json.dumps(patterns, indent=2, default=str)
+            path.write_text(content)
+    return patterns
 
 
 def store_finding(
@@ -149,33 +213,44 @@ def store_finding(
 ):
     """Store a new finding.
 
+    Uses atomic load-modify-save to prevent TOCTOU race conditions.
+
     Fields:
         - resolution: None (pending), "confirmed", "false_positive"
         - resolved_at: timestamp when resolution was set
         - resolved_by: who resolved it (human or agent name)
     """
-    findings = load_findings()
+    # Mutable container to capture the finding dict from inside the modifier
+    result = {}
 
-    finding = {
-        "id": len(findings) + 1,
-        "timestamp": datetime.now().isoformat(),
-        "agent": agent,
-        "message": message,
-        "file": file,
-        "line": line,
-        "severity": severity,
-        "fixed": fixed,
-        "pr": pr,
-        "resolution": None,  # None, "confirmed", "false_positive"
-        "resolved_at": None,
-        "resolved_by": None,
-    }
+    def _add(findings):
+        # Use max existing ID + 1 to prevent collision after FIFO eviction
+        max_id = max((f.get("id", 0) for f in findings), default=0)
+        finding = {
+            "id": max_id + 1,
+            "timestamp": datetime.now().isoformat(),
+            "agent": agent,
+            "message": message,
+            "file": file,
+            "line": line,
+            "severity": severity,
+            "fixed": fixed,
+            "pr": pr,
+            "resolution": None,
+            "resolved_at": None,
+            "resolved_by": None,
+        }
+        findings.append(finding)
+        # FIFO eviction: drop oldest findings when cap exceeded
+        if len(findings) > MAX_FINDINGS:
+            findings = findings[-MAX_FINDINGS:]
+        result.update(finding)
+        return findings
 
-    findings.append(finding)
-    save_findings(findings)
+    _atomic_modify_findings(_add)
 
-    print(f"✓ Stored finding #{finding['id']}: {message[:50]}...")
-    return finding
+    print(f"✓ Stored finding #{result['id']}: {message[:50]}...")
+    return result
 
 
 def list_findings(
@@ -246,22 +321,28 @@ def list_findings(
 
 
 def mark_fixed(finding_id: int):
-    """Mark a finding as fixed."""
-    findings = load_findings()
+    """Mark a finding as fixed (atomic load-modify-save)."""
+    found = [False]
 
-    for f in findings:
-        if f.get("id") == finding_id:
-            f["fixed"] = True
-            f["fixed_at"] = datetime.now().isoformat()
-            save_findings(findings)
-            print(f"✓ Marked finding #{finding_id} as fixed")
-            return
+    def _modify(findings):
+        for f in findings:
+            if f.get("id") == finding_id:
+                f["fixed"] = True
+                f["fixed_at"] = datetime.now().isoformat()
+                found[0] = True
+                break
+        return findings
 
-    print(f"❌ Finding #{finding_id} not found")
+    _atomic_modify_findings(_modify)
+
+    if found[0]:
+        print(f"✓ Marked finding #{finding_id} as fixed")
+    else:
+        print(f"❌ Finding #{finding_id} not found")
 
 
 def resolve_finding(finding_id: int, resolution: str, resolved_by: str = "human"):
-    """Set the resolution status of a finding.
+    """Set the resolution status of a finding (atomic load-modify-save).
 
     Args:
         finding_id: ID of the finding
@@ -272,18 +353,24 @@ def resolve_finding(finding_id: int, resolution: str, resolved_by: str = "human"
         print(f"❌ Invalid resolution: {resolution}. Use 'confirmed' or 'false_positive'")
         return
 
-    findings = load_findings()
+    found = [False]
 
-    for f in findings:
-        if f.get("id") == finding_id:
-            f["resolution"] = resolution
-            f["resolved_at"] = datetime.now().isoformat()
-            f["resolved_by"] = resolved_by
-            save_findings(findings)
+    def _modify(findings):
+        for f in findings:
+            if f.get("id") == finding_id:
+                f["resolution"] = resolution
+                f["resolved_at"] = datetime.now().isoformat()
+                f["resolved_by"] = resolved_by
+                found[0] = True
+                break
+        return findings
 
-            icon = "✓✓" if resolution == "confirmed" else "✗"
-            print(f"{icon} Marked finding #{finding_id} as {resolution}")
-            return
+    _atomic_modify_findings(_modify)
+
+    if found[0]:
+        icon = "✓✓" if resolution == "confirmed" else "✗"
+        print(f"{icon} Marked finding #{finding_id} as {resolution}")
+        return
 
     print(f"❌ Finding #{finding_id} not found")
 
@@ -486,30 +573,10 @@ def show_file_risk(file_path: str, days: int = 30):
 def _sanitize_for_prompt(text: str, max_len: int = 60) -> str:
     """Sanitize text before injecting into agent prompts.
 
-    Prevents prompt injection attacks via malicious finding messages.
-    Security: Includes Unicode normalization to prevent lookalike bypasses.
+    Delegates to shared_agent_utils.sanitize_for_prompt (single source of truth)
+    with a shorter default max_len for memory context snippets.
     """
-    import unicodedata
-    if not text:
-        return ""
-    # Unicode normalization first - converts lookalikes (Greek omicron → Latin o)
-    text = unicodedata.normalize('NFKC', text)
-    # Truncate
-    text = text[:max_len]
-    # Escape markdown/prompt injection patterns
-    text = (text
-            .replace('\\', '\\\\')
-            .replace('`', '\\`')
-            .replace('---', '\\-\\-\\-')
-            .replace('```', '\\`\\`\\`')
-            .replace('\n', ' ')
-            .replace('\r', ' '))
-    # Remove any instruction-like patterns (matched with run_skeptic.py patterns)
-    for pattern in ['ignore previous', 'disregard', 'new instructions', 'system prompt', 'forget everything']:
-        text = text.replace(pattern.lower(), '[REDACTED]')
-        text = text.replace(pattern.upper(), '[REDACTED]')
-        text = text.replace(pattern.title(), '[REDACTED]')
-    return text
+    return _shared_sanitize(text, max_len=max_len)
 
 
 def get_context_for_files(files: list[str], days: int = 30) -> str:
@@ -579,32 +646,37 @@ def add_pattern(
     usually_false: bool = False,
     agent: Optional[str] = None,
 ):
-    """Add a pattern to the library.
+    """Add a pattern to the library (atomic load-modify-save).
 
     Patterns are text snippets that indicate known issues.
     - always_real: This pattern is always a real issue (reduces false negatives)
     - usually_false: This pattern is usually a false positive (reduces noise)
     """
-    patterns = load_patterns()
+    result = {}
 
-    new_pattern = {
-        "id": len(patterns) + 1,
-        "pattern": pattern,
-        "description": description,
-        "always_real": always_real,
-        "usually_false": usually_false,
-        "agent": agent,
-        "created_at": datetime.now().isoformat(),
-        "match_count": 0,
-        "confirmed_matches": 0,
-    }
+    def _add(patterns):
+        # Use max existing ID + 1 to prevent collision after deletion
+        max_id = max((p.get("id", 0) for p in patterns), default=0)
+        new_pattern = {
+            "id": max_id + 1,
+            "pattern": pattern,
+            "description": description,
+            "always_real": always_real,
+            "usually_false": usually_false,
+            "agent": agent,
+            "created_at": datetime.now().isoformat(),
+            "match_count": 0,
+            "confirmed_matches": 0,
+        }
+        patterns.append(new_pattern)
+        result.update(new_pattern)
+        return patterns
 
-    patterns.append(new_pattern)
-    save_patterns(patterns)
+    _atomic_modify_patterns(_add)
 
     tag = "[ALWAYS REAL]" if always_real else "[USUALLY FALSE]" if usually_false else ""
-    print(f"✓ Added pattern #{new_pattern['id']}: '{pattern}' {tag}")
-    return new_pattern
+    print(f"✓ Added pattern #{result['id']}: '{pattern}' {tag}")
+    return result
 
 
 def list_patterns():
@@ -730,19 +802,21 @@ def check_regressions(files: Optional[list[str]] = None):
 
 
 def clear_old(days: int = 30):
-    """Clear findings older than specified days."""
-    findings = load_findings()
+    """Clear findings older than specified days (atomic load-modify-save)."""
     cutoff = datetime.now() - timedelta(days=days)
+    removed = [0]
 
-    original_count = len(findings)
-    findings = [
-        f for f in findings
-        if datetime.fromisoformat(f.get("timestamp", datetime.now().isoformat())) > cutoff
-    ]
+    def _prune(findings):
+        original_count = len(findings)
+        pruned = [
+            f for f in findings
+            if datetime.fromisoformat(f.get("timestamp", datetime.now().isoformat())) > cutoff
+        ]
+        removed[0] = original_count - len(pruned)
+        return pruned
 
-    removed = original_count - len(findings)
-    save_findings(findings)
-    print(f"✓ Removed {removed} findings older than {days} days")
+    _atomic_modify_findings(_prune)
+    print(f"✓ Removed {removed[0]} findings older than {days} days")
 
 
 def show_hotspots(limit: int = 10, include_fixed: bool = False):

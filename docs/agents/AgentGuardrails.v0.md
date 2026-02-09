@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-08
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -348,6 +348,7 @@ VERIFIED: Yes/No
 
 | Date | Change |
 |------|--------|
+| 2026-02-08 | Hardened: CODE block size cap (8KB), CHECKED/NOT_CHECKED blank-line tolerance, consolidated skeptic fail-closed |
 | 2026-02-04 | Added Cross-Substrate Parity section (JS/Python parity is mandatory) |
 | 2026-02-03 | Added Execution Path Verification (discovered tests verify behavior not path) |
 | 2026-02-02 | Added Cross-Seed Compatibility Check (architectural gap found in 9-agent review) |

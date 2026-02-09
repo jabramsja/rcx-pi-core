@@ -30,22 +30,22 @@
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
  *   @host_iteration: 6
- *     - step()              line ~607  - for loop over projections
- *     - run()               line ~624  - for loop until stall
- *     - runStructural()     line ~732  - for loop until stall
- *     - normalize()         line ~278  - for loop for array conversion
- *     - denormalize()       line ~390  - while loop for linked list
- *     - listToLinked()      line ~660  - for loop for conversion
+ *     - step()              - for loop over projections
+ *     - run()               - for loop until stall
+ *     - runStructural()     - for loop until stall (Gate 5: routes through stepKernel)
+ *     - normalize()         - for loop for array conversion
+ *     - denormalize()       - while loop for linked list
+ *     - listToLinked()      - for loop for conversion
  *
  *   @host_recursion: 4
- *     - match()             line ~480  - recursive pattern matching
- *     - substitute()        line ~561  - recursive substitution
- *     - normalize()         line ~249  - recursive normalization
- *     - denormalize()       line ~355  - recursive denormalization
+ *     - match()             - recursive pattern matching
+ *     - substitute()        - recursive substitution
+ *     - normalize()         - recursive normalization
+ *     - denormalize()       - recursive denormalization
  *
  *   @host_builtin: 2
- *     - muEqual()           line ~170  - structural equality (primitive)
- *     - isValidMu()         line ~146  - type validation
+ *     - muEqual()           - structural equality (primitive)
+ *     - isValidMu()         - type validation
  *
  * TOTAL DEBT: 12 (matches Python's 12 semantic debt markers)
  *
@@ -769,7 +769,7 @@ function denormalize(value, _depth = 0) {
       }
 
       if (type === 'dict') {
-        const result = {};
+        const result = Object.create(null);  // Prevent prototype pollution
         let node = value;
         let nodeDepth = 0;
         while (node && 'head' in node) {
@@ -799,7 +799,7 @@ function denormalize(value, _depth = 0) {
 
     if (isDictEncoding) {
       // Dict encoding - extract kv-pairs
-      const result = {};
+      const result = Object.create(null);  // Prevent prototype pollution
       let node = value;
       let nodeDepth = 0;
       while (node && typeof node === 'object' && 'head' in node) {
@@ -830,7 +830,7 @@ function denormalize(value, _depth = 0) {
   }
 
   // Regular object - denormalize values
-  const result = {};
+  const result = Object.create(null);  // Prevent prototype pollution
   for (const [k, v] of Object.entries(value)) {
     result[k] = denormalize(v, _depth + 1);
   }
@@ -991,7 +991,7 @@ function substitute(body, bindings, _depth = 0) {
     return body.map(elem => substitute(elem, bindings, _depth + 1));
   }
 
-  const result = {};
+  const result = Object.create(null);  // Prevent prototype pollution
   for (const [k, v] of Object.entries(body)) {
     result[k] = substitute(v, bindings, _depth + 1);
   }
@@ -1111,6 +1111,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     maxSteps = 10000,
     shouldNormalize = true,
     validationMode = 'domain',
+    returnMeta = false,
   } = options;
 
   let validator;
@@ -1150,11 +1151,52 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   };
 
   // Run kernel cycle
-  return run(projections, kernelInput, maxSteps);
+  const runResult = run(projections, kernelInput, maxSteps);
+
+  if (returnMeta) {
+    // Gate 5 parity: extract domain result from kernel cycle.
+    // JS kernel runs to fixpoint via run() — the result is the domain value
+    // (still normalized for dicts), not a kernel terminal state.
+    // Compare with normalized input to detect stall vs successful transform.
+    const kernelResult = runResult.result;
+    if (muEqual(kernelResult, normalizedInput)) {
+      // No change — stall
+      return { output: domainInput, stall: true };
+    }
+    // Transform succeeded — denormalize the result
+    return { output: denormalize(kernelResult), stall: false };
+  }
+
+  return runResult;
+}
+
+/**
+ * Gate 5 parity: Resolve which projection produced nextValue from current.
+ * Probes each projection through stepKernel with bridge semantics.
+ * Mirrors Python _resolve_trace_projection_id() (step_mu.py:1100-1148).
+ */
+function resolveTraceProjectionId(projections, current, nextValue) {
+  for (const proj of projections) {
+    if (typeof proj !== 'object' || proj === null) continue;
+    if (!('pattern' in proj) || !('body' in proj)) continue;
+    const candidate = stepKernel(allProjectionsWithBridge, current, [proj], {
+      validationMode: 'domain',
+      returnMeta: true,
+    });
+    if (candidate.stall) continue;
+    if (muEqual(candidate.output, nextValue)) {
+      return proj.id || null;
+    }
+  }
+  return null;
 }
 
 /**
  * Phase 8d: Run with structural trace accumulation.
+ *
+ * Gate 5 parity: Routes each step through stepKernel with bridge projections
+ * instead of calling match/substitute directly. This matches Python's
+ * run_mu_structural() which uses step_kernel_mu(kernel_mode="bridge").
  *
  * Returns a Mu-compatible result structure that Recurrence can analyze:
  * {
@@ -1181,28 +1223,34 @@ function runStructural(projections, input, maxSteps = 10000) {
   if (!isValidMu(input)) {
     throw new Error('Invalid Mu input to runStructural()');
   }
+  validateNoKernelReservedFields(input, 'runStructural input');
+
+  // Validate each domain projection's pattern and body for reserved fields
+  for (let idx = 0; idx < projections.length; idx++) {
+    const proj = projections[idx];
+    if (typeof proj === 'object' && proj !== null) {
+      if ('pattern' in proj) {
+        validateNoKernelReservedFields(proj.pattern, `runStructural projection[${idx}].pattern`);
+      }
+      if ('body' in proj) {
+        validateNoKernelReservedFields(proj.body, `runStructural projection[${idx}].body`);
+      }
+    }
+  }
 
   const traceEntries = [];
   let current = input;
 
   for (let i = 0; i < maxSteps; i++) {
-    let matchedId = null;
-    let result = current;
+    // Gate 5 parity: route through kernel with bridge projections
+    const meta = stepKernel(allProjectionsWithBridge, current, projections, {
+      validationMode: 'domain',
+      returnMeta: true,
+    });
+    const result = meta.output;
+    const matchedId = resolveTraceProjectionId(projections, current, result);
 
-    // Single-pass apply: first-match-wins with one match/substitute execution.
-    for (const proj of projections) {
-      const bindings = match(proj.pattern, current);
-      if (bindings !== NO_MATCH) {
-        matchedId = proj.id || null;
-        result = substitute(proj.body, bindings);
-        if (typeof proj.body === 'object' && proj.body !== null &&
-            !Array.isArray(proj.body) && proj.body._type === 'dict') {
-          result = denormalize(result);
-        }
-        break;
-      }
-    }
-
+    validateNoKernelReservedFields(result, 'runStructural output');
     traceEntries.push({
       step: i,
       state: current,
@@ -1211,8 +1259,7 @@ function runStructural(projections, input, maxSteps = 10000) {
 
     // Check for stall (no change)
     if (muEqual(result, current)) {
-      // Add NEW entry for stall - MUST match Python exactly (step_mu.py:571-576)
-      // Python adds entry at step i+1 with stall: true, NOT modifying last entry
+      // Add NEW entry for stall - MUST match Python exactly (step_mu.py:1221-1227)
       traceEntries.push({
         step: i + 1,
         state: result,
@@ -1230,7 +1277,7 @@ function runStructural(projections, input, maxSteps = 10000) {
     current = result;
   }
 
-  // Hit max steps without stall - add NEW entry (MUST match Python step_mu.py:587-592)
+  // Hit max steps without stall - add NEW entry (MUST match Python step_mu.py:1238-1243)
   traceEntries.push({
     step: maxSteps,
     state: current,
@@ -1247,53 +1294,12 @@ function runStructural(projections, input, maxSteps = 10000) {
 
 /**
  * Phase 8d: stepKernel with structural trace.
- * Combines security validation with structural trace accumulation.
+ * Gate 5 parity: delegates to runStructural() which routes each step
+ * through stepKernel with bridge projections internally.
  */
-function stepKernelStructural(projections, domainInput, domainProjections, options = {}) {
-  const {
-    maxSteps = 10000,
-    shouldNormalize = true,
-    validationMode = 'domain',
-  } = options;
-
-  let validator;
-  if (validationMode === 'domain') {
-    validator = validateNoKernelReservedFields;
-  } else if (validationMode === 'algorithm_runtime') {
-    validator = validateAlgorithmRuntimeFields;
-  } else {
-    throw new Error(
-      `SECURITY: invalid validationMode '${validationMode}'. ` +
-      `Expected 'domain' or 'algorithm_runtime'.`
-    );
-  }
-
-  // SECURITY: Validate input and projection payloads at selected boundary mode.
-  validator(domainInput, 'domainInput');
-  for (let i = 0; i < domainProjections.length; i++) {
-    const proj = domainProjections[i];
-    validator(proj.pattern, `domainProjections[${i}].pattern`);
-    validator(proj.body, `domainProjections[${i}].body`);
-  }
-
-  // Normalize if requested
-  const normalizedInput = shouldNormalize ? normalize(domainInput) : domainInput;
-  const normalizedProjs = shouldNormalize
-    ? domainProjections.map(normalizeProjection)
-    : domainProjections;
-  const kernelDomainProjs = normalizedProjs.map(proj => ({
-    pattern: proj.pattern,
-    body: proj.body
-  }));
-
-  // Wrap in kernel format
-  const kernelInput = {
-    _step: normalizedInput,
-    _projs: listToLinked(kernelDomainProjs)
-  };
-
-  // Run kernel cycle with structural trace
-  return runStructural(projections, kernelInput, maxSteps);
+function stepKernelStructural(domainProjections, domainInput, options = {}) {
+  const { maxSteps = 10000 } = options;
+  return runStructural(domainProjections, domainInput, maxSteps);
 }
 
 // =============================================================================
@@ -1811,12 +1817,11 @@ try {
   structuralTraceAllPassed = false;
 }
 
-// Test 5: stepKernelStructural works
+// Test 5: stepKernelStructural works (Gate 5: delegates to runStructural)
 try {
   const structResult = stepKernelStructural(
-    allProjections,
-    { op: 'double', value: 99 },
     [testProjection],
+    { op: 'double', value: 99 },
     { maxSteps: 100 }
   );
 
@@ -2006,6 +2011,7 @@ const allPassed = passed && passedStall && pass3a && pass3b && pass3c &&
                   parityAllPassed && securityAllPassed && structuralTraceAllPassed &&
                   recurrenceAllPassed && e2ePassed;
 console.log(`All tests passed: ${allPassed}`);
+if (!allPassed) process.exit(1);
 console.log(`\nSecurity hardening (v7 - L3 Recurrence Parity, mu/ reorg):`);
 console.log(`  - MAX_DEPTH=${MAX_DEPTH} guard (matches Python MAX_MU_DEPTH)`);
 console.log(`  - NaN/Infinity rejection (matches Python)`);

@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-05
+LAST_VERIFIED: 2026-02-08
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -37,6 +37,21 @@ Which tool to use and when:
 - Security-sensitive change? → `run_review.py --rigorous`
 - Monthly health check? → `run_deep_analysis.py`
 - Want to explore a finding? → `run_interactive.py <agent> <files>`
+
+## Recommended Workflow Tiers
+
+| Tier | Command | When | Time |
+|------|---------|------|------|
+| **Quick** | `python tools/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
+| **Full** | `python tools/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
+| **Rigorous** | `python tools/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
+| **Release** | `python tools/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+
+**Practical rules:**
+1. Default habit: `quick` for iteration, then `full` once before merge
+2. Reserve `--rigorous` for high-risk PRs (`rcx_pi/selfhost/`, `mu/`, compliance/gating tooling)
+3. If runtime is too long, reduce scope (files) before increasing depth
+4. `--show-warnings` on `full` when you want detail on soft-gate findings
 
 ## Quick Start
 
@@ -139,8 +154,8 @@ python tools/run_review.py rcx_pi/selfhost/ --rigorous
 
 **What it does:**
 1. **Reasoning validation** (`validate_agent_reasoning.py`) - CHECKED/NOT_CHECKED sections required for approvals
-2. **Skeptic challenge** (`run_skeptic.py`) - Spawns separate agent to challenge any APPROVE verdicts
-3. Skeptic can OVERRIDE approvals if it finds issues the original agent missed
+2. **Consolidated skeptic** (`run_skeptic.py`) - Single skeptic session reviews ALL approved agents at once, with per-agent verdicts and global blind spot detection
+3. Skeptic can OVERRIDE individual approvals or flag GLOBAL_BLIND_SPOT concerns that affect all agents. Non-compliant or UNKNOWN skeptic output triggers fail-closed blocking.
 
 **Use for:** Security-sensitive code, major refactors, pre-release audits.
 

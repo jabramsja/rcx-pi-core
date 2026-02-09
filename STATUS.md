@@ -616,6 +616,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - Gate 5: IN_PROGRESS (parity verification and cleanup)
   - Dedicated Gate 5 suite: `tests/structural/test_gate5_meta_circular_parity.py`
   - Runtime parity fix complete (2026-02-08): `run_mu_structural()` now executes through `step_kernel_mu(..., kernel_mode="bridge")`
+  - JS parity fix (2026-02-08): `runStructural()` now routes through `stepKernel(allProjectionsWithBridge)` instead of direct `match()`/`substitute()`
 
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR
