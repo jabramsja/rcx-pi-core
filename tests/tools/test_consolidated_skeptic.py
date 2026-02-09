@@ -7,27 +7,47 @@ Verifies:
 4. Single skeptic invocation in rigorous mode (no sequential fan-out)
 """
 import ast
-import importlib
 import sys
 import os
+import types
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-# Add tools to path (same pattern as test_validate_agent_compliance.py)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'tools'))
+# Fix `tools` package in sys.modules.
+# pytest's collection of tests/tools/ pre-loads `tools` in sys.modules pointing
+# at tests/tools/__init__.py, shadowing the repo-root tools/ package. We need to
+# fix this before importing run_skeptic, which uses `from tools.* import ...`.
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+_real_tools_init = os.path.join(_repo_root, 'tools', '__init__.py')
+if 'tools' in sys.modules:
+    _existing = sys.modules['tools']
+    _existing_file = getattr(_existing, '__file__', '') or ''
+    if 'tests' in _existing_file:
+        # Wrong tools package loaded — replace with real one
+        _real_tools = types.ModuleType('tools')
+        _real_tools.__file__ = _real_tools_init
+        _real_tools.__path__ = [os.path.join(_repo_root, 'tools')]
+        _real_tools.__package__ = 'tools'
+        sys.modules['tools'] = _real_tools
 
 # Import parsing helpers without triggering SDK import.
 # run_skeptic imports claude_agent_sdk at module level, which may fail on
 # architecture-mismatched environments (e.g. arm64 Python + x86_64 wheel).
 # We mock the SDK so only the pure-Python parsing functions are loaded.
 _sdk_mock = mock.MagicMock()
-with mock.patch.dict(sys.modules, {"claude_agent_sdk": _sdk_mock}):
+with mock.patch.dict(sys.modules, {
+    "claude_agent_sdk": _sdk_mock,
+}):
     # Force re-import if already cached with real SDK
-    if "run_skeptic" in sys.modules:
-        del sys.modules["run_skeptic"]
-    from run_skeptic import (
+    for mod_name in list(sys.modules):
+        if "run_skeptic" in mod_name or "agent_runner_common" in mod_name:
+            del sys.modules[mod_name]
+    from tools.run_skeptic import (
         _extract_per_agent_verdicts,
         _extract_global_concerns,
         _extract_verdict,

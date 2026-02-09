@@ -33,19 +33,23 @@ on:
         default: true
         type: boolean
 
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'rcx_pi/**'
-      - 'mu/**'
-      - 'tools/run_review.py'
-      - 'tools/run_ci_review.py'
-      - 'tools/run_skeptic.py'
-      - 'tools/shared_agent_utils.py'
-      - 'tools/validate_agent_compliance.py'
-      - 'tools/validate_agent_reasoning.py'
-      - 'tools/agents/**'
-      - 'docs/agents/**'
+  # Auto-trigger disabled — agent review uses Anthropic API (pay-per-token),
+  # not the Max subscription. Use manual workflow_dispatch when API cost is
+  # justified, or run locally with: python tools/run_review.py --pr
+  #
+  # pull_request:
+  #   types: [opened, synchronize, reopened, ready_for_review]
+  #   paths:
+  #     - 'rcx_pi/**'
+  #     - 'mu/**'
+  #     - 'tools/run_review.py'
+  #     - 'tools/run_ci_review.py'
+  #     - 'tools/run_skeptic.py'
+  #     - 'tools/shared_agent_utils.py'
+  #     - 'tools/validate_agent_compliance.py'
+  #     - 'tools/validate_agent_reasoning.py'
+  #     - 'tools/agents/**'
+  #     - 'docs/agents/**'
 
 jobs:
   agent-review:
@@ -105,14 +109,19 @@ jobs:
           python tools/run_ci_review.py \
             --pr-number $PR_NUMBER \
             ${{ github.event.inputs.post_comment == 'true' && '--post-comment' || '' }} \
-            --output review-report.md
+            --output review-report.md \
+            --full-output review-report-full.md \
+            --json-output review-results.json
 
       - name: Upload review report
         if: steps.preconditions.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: agent-review-report
-          path: review-report.md
+          path: |
+            review-report.md
+            review-report-full.md
+            review-results.json
           retention-days: 30
 
       - name: Comment on PR (if not using --post-comment)

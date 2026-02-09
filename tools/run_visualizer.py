@@ -21,18 +21,40 @@ _tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
-from claude_agent_sdk import query, ClaudeAgentOptions
-
+from tools.agent_runner_common import (
+    StandardFileRunnerConfig,
+    exit_with_code,
+    finalize_standard_result,
+    print_standard_runner_footer,
+    run_agent_prompt,
+    sanitize_files,
+)
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
-    build_sdk_options,
-    extract_text_from_message,
     load_agent_prompt_with_contract,
-    resolve_agent_model,
-    validate_compliance,
 )
 
 VISUALIZER_PROMPT = load_agent_prompt_with_contract("visualizer")
+CONFIG = StandardFileRunnerConfig(
+    agent_name="visualizer",
+    parser_description="Run RCX visualizer agent on files or a specific structure.",
+    files_help="Files to visualize",
+    run_message_prefix="Running visualizer on",
+    action_line_prefix="visualize this target",
+    task_instructions=(
+        "Read the files/structure and produce Mermaid diagrams showing the actual structure. "
+        "Flag any Python lists (red blobs) vs proper linked lists (chains). "
+        "Produce a visualization report following the format in your instructions."
+    ),
+    max_turns=20,
+    verdict_messages={
+        "STRUCTURAL_LIES": ("⚠️  RED FLAGS DETECTED - structural lies found", 1),
+        "PYTHON_SMUGGLING": ("⚠️  RED FLAGS DETECTED - Python smuggling found", 1),
+        "CLEAN": ("VISUALIZATION COMPLETE", 0),
+    },
+    default_message_prefix="⚠️  VISUALIZATION INCOMPLETE",
+    default_exit_code=1,  # UNKNOWN verdict = red flag for visualizer
+)
 
 
 async def run_visualizer(
@@ -41,51 +63,22 @@ async def run_visualizer(
     model_override: str | None = None,
 ) -> str:
     """Run the visualizer agent on files or a specific structure."""
-    agent_model = resolve_agent_model("visualizer", model_override)
-
     if structure:
         target = f"this Mu structure:\n```json\n{structure}\n```"
     elif files:
-        target = f"these files: {', '.join(files)}"
+        target = f"these files: {', '.join(sanitize_files(files))}"
     else:
         target = "the relevant data structures"
 
-    prompt = f"""You are the RCX Visualizer Agent. Your instructions are:
-
-{VISUALIZER_PROMPT}
-
----
-
-Now visualize {target}
-
-Read the files/structure and produce Mermaid diagrams showing the actual structure.
-Flag any Python lists (red blobs) vs proper linked lists (chains).
-Produce a visualization report following the format in your instructions.
-"""
-
-    result_text = ""
-    fragments: list[str] = []
-
-    async for message in query(
-        prompt=prompt,
-        options=build_sdk_options(
-            ClaudeAgentOptions,
-            allowed_tools=["Read", "Grep", "Glob"],
-            max_turns=20,
-            model=agent_model,
-            require_model_kwarg=True,
-        ),
-    ):
-        extracted = extract_text_from_message(message)
-        if extracted:
-            fragments.append(extracted)
-        if hasattr(message, 'result') and message.result:
-            result_text = message.result
-
-    if not result_text and fragments:
-        result_text = "\n".join(dict.fromkeys(fragments))
-
-    return result_text
+    return await run_agent_prompt(
+        agent_name=CONFIG.agent_name,
+        prompt_text=VISUALIZER_PROMPT,
+        action_line=f"Now visualize {target}",
+        task_instructions=CONFIG.task_instructions,
+        model_override=model_override,
+        allowed_tools=["Read", "Grep", "Glob"],
+        max_turns=CONFIG.max_turns,
+    )
 
 
 async def main():
@@ -121,21 +114,8 @@ async def main():
     )
 
     print(result)
-    print("=" * 60)
-
-    # Compliance validation (shared_agent_utils returns 3-tuple)
-    is_compliant, error, _ = validate_compliance(result)
-    if not is_compliant:
-        print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
-        print("Agent output did not meet AgentGuardrails.v0 requirements.")
-        sys.exit(3)
-
-    # Check for red flags (Python lists detected)
-    if "⚠️" in result or "PYTHON LIST" in result or "NOT STRUCTURAL" in result:
-        print("\n⚠️  RED FLAGS DETECTED - Python structures found")
-        sys.exit(1)
-    else:
-        print("\nVISUALIZATION COMPLETE")
+    print_standard_runner_footer()
+    exit_with_code(finalize_standard_result(CONFIG, result))
 
 
 if __name__ == "__main__":

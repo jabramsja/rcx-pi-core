@@ -23,19 +23,40 @@ _tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
-from claude_agent_sdk import query, ClaudeAgentOptions
-
+from tools.agent_runner_common import (
+    StandardFileRunnerConfig,
+    exit_with_code,
+    finalize_standard_result,
+    print_standard_runner_footer,
+    run_agent_prompt,
+    sanitize_files,
+)
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
-    build_sdk_options,
-    extract_text_from_message,
-    extract_verdict_secure,
     load_agent_prompt_with_contract,
-    resolve_agent_model,
-    validate_compliance,
 )
 
 ADVISOR_PROMPT = load_agent_prompt_with_contract("advisor")
+CONFIG = StandardFileRunnerConfig(
+    agent_name="advisor",
+    parser_description="Run RCX advisor agent on a strategic problem.",
+    files_help="N/A",
+    run_message_prefix="Advising on",
+    action_line_prefix="evaluate this problem",
+    task_instructions=(
+        "Read relevant files (STATUS.md, TASKS.md, and any context files). "
+        "Provide multiple options with trade-off analysis. "
+        "Produce an advisor report following the format in your instructions."
+    ),
+    max_turns=25,
+    verdict_messages={
+        "NEEDS_MORE_CONTEXT": ("NEEDS_MORE_CONTEXT - provide more information", 2),
+        "FLAWED_APPROACH": ("ADVISOR FLAGS ISSUES (FLAWED_APPROACH)", 2),
+        "HIDDEN_CONSTRAINTS": ("ADVISOR FLAGS ISSUES (HIDDEN_CONSTRAINTS)", 2),
+        "VIABLE_PATH": ("VIABLE_PATH - assumptions survived advisor attacks", 0),
+    },
+    default_message_prefix="ADVISOR REVIEW COMPLETE",
+)
 
 
 async def run_advisor(
@@ -54,9 +75,7 @@ async def run_advisor(
 
     file_context = ""
     if context_files:
-        # Security: Sanitize file paths to prevent prompt injection via newlines
-        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in context_files[:20]]
-        file_context = f"\n\nRelevant files to consider: {', '.join(safe_files)}"
+        file_context = f"\n\nRelevant files to consider: {', '.join(sanitize_files(context_files))}"
 
     web_instructions = ""
     if web_search:
@@ -74,49 +93,25 @@ Search for relevant papers, blog posts, GitHub repos, or documentation.
 Synthesize findings into RCX-relevant options.
 """
 
-    prompt = f"""You are the RCX Advisor Agent. Your instructions are:
-
-{ADVISOR_PROMPT}
-{web_instructions}
----
-
-The team is stuck on this problem: "{problem}"{file_context}
-
-Read relevant files (STATUS.md, TASKS.md, and any context files).
-{"Also search the web for how other systems solve similar problems." if web_search else ""}
-Provide multiple options with trade-off analysis.
-Produce an advisor report following the format in your instructions.
-"""
-
-    # Include WebSearch if enabled
+    action_line = f'The team is stuck on this problem: "{problem}"{file_context}'
+    task_instructions = (
+        f"{CONFIG.task_instructions}\n"
+        f"{'Also search the web for how other systems solve similar problems.' if web_search else ''}"
+    )
+    prompt_text = ADVISOR_PROMPT + web_instructions
     tools = ["Read", "Grep", "Glob"]
     if web_search:
         tools.append("WebSearch")
-    agent_model = resolve_agent_model("advisor", model_override)
 
-    result_text = ""
-    fragments: list[str] = []
-
-    async for message in query(
-        prompt=prompt,
-        options=build_sdk_options(
-            ClaudeAgentOptions,
-            allowed_tools=tools,
-            max_turns=30 if web_search else 25,
-            model=agent_model,
-            require_model_kwarg=True,
-        ),
-    ):
-        extracted = extract_text_from_message(message)
-        if extracted:
-            fragments.append(extracted)
-        if hasattr(message, 'result') and message.result:
-            result_text = message.result
-
-    if not result_text and fragments:
-        result_text = "\n".join(dict.fromkeys(fragments))
-
-    return result_text
+    return await run_agent_prompt(
+        agent_name=CONFIG.agent_name,
+        prompt_text=prompt_text,
+        action_line=action_line,
+        task_instructions=task_instructions,
+        model_override=model_override,
+        allowed_tools=tools,
+        max_turns=30 if web_search else CONFIG.max_turns,
+    )
 
 
 async def main():
@@ -151,27 +146,8 @@ async def main():
     )
 
     print(result)
-    print("=" * 60)
-
-    # Compliance validation (shared_agent_utils returns 3-tuple)
-    is_compliant, error, _ = validate_compliance(result)
-    if not is_compliant:
-        print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
-        print("Agent output did not meet AgentGuardrails.v0 requirements.")
-        sys.exit(3)
-
-    # Check verdict using secure marker-based extraction (shared_agent_utils)
-    verdict = extract_verdict_secure(result, agent_name="advisor")
-    if verdict == "NEEDS_MORE_CONTEXT":
-        print("\nNEEDS_MORE_CONTEXT - provide more information")
-        sys.exit(2)
-    elif verdict in {"FLAWED_APPROACH", "HIDDEN_CONSTRAINTS"}:
-        print(f"\nADVISOR FLAGS ISSUES ({verdict})")
-        sys.exit(2)
-    elif verdict == "VIABLE_PATH":
-        print("\nVIABLE_PATH - assumptions survived advisor attacks")
-    else:
-        print(f"\nADVISOR REVIEW COMPLETE (verdict: {verdict})")
+    print_standard_runner_footer()
+    exit_with_code(finalize_standard_result(CONFIG, result))
 
 
 if __name__ == "__main__":

@@ -50,6 +50,7 @@ if str(_tools_dir.parent) not in sys.path:
 
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
+from tools.agent_runner_common import sanitize_files
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
     build_sdk_options,
@@ -191,9 +192,7 @@ class InteractiveSession:
 
     def _build_initial_prompt(self) -> str:
         """Build the initial prompt for the agent."""
-        # Security: Sanitize file paths to prevent prompt injection via newlines
-        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in self.files[:20]]
-        file_list = ", ".join(safe_files)
+        file_list = ", ".join(sanitize_files(self.files))
         return f"""You are the RCX {self.agent_name.replace('-', ' ').title()} Agent in INTERACTIVE mode.
 
 {load_agent_prompt_with_contract(self.agent_name)}

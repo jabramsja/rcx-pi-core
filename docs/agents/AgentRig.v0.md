@@ -326,6 +326,13 @@ python3 tools/ast_police.py
 - [ ] visualizer: (on request)
 ```
 
+### CI Output Retrieval
+
+When Agent Review runs in GitHub Actions, the run artifact `agent-review-report` contains:
+- `review-report.md` (concise PR-safe summary)
+- `review-report-full.md` (expanded outputs, size-capped)
+- `review-results.json` (structured outputs with truncation metadata)
+
 ## Files
 
 | File | Purpose |

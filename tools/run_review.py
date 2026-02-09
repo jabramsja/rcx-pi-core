@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from typing import Any
 
 # Ensure tools directory is importable when run directly
-_tools_dir = Path(__file__).parent
+_tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
@@ -97,6 +97,7 @@ except Exception as _agent_memory_error:
 
 # Import shared FINDING extraction (single source of truth)
 from tools.validate_agent_compliance import extract_finding_blocks
+from tools.agent_runner_common import sanitize_files
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
     AGENT_PASS_VERDICTS,
@@ -491,10 +492,7 @@ class ReviewOrchestrator:
         if self.verbose:
             print(f"  Starting {agent_name}...")
 
-        # Security: Sanitize file paths to prevent prompt injection via newlines
-        # Include U+2028/U+2029 (Line/Paragraph Separators) which act as newlines in JS
-        safe_files = [f.replace('\n', '_').replace('\r', '_').replace('\u2028', '_').replace('\u2029', '_').replace('`', '_')[:200] for f in self.files]
-        file_list = ", ".join(safe_files)
+        file_list = ", ".join(sanitize_files(self.files))
         agent_def = self.agent_definitions[agent_name]
 
         # Build memory context (past findings + patterns)
@@ -1254,8 +1252,10 @@ Examples:
             for result in approvals_to_challenge:
                 result.verdict = f"{result.verdict} (GLOBAL_BLIND_SPOT)"
 
-        global_high = skeptic_result.get("global_high_severity_count", 0)
-        if global_high > 0:
+        # Fail-closed: if global concerns exist AND there are HIGH severity
+        # findings, block all challenged approvals.
+        global_high = skeptic_result.get("high_severity_count", 0)
+        if global_concerns and global_high > 0:
             print(f"  ❌ Skeptic GLOBAL HIGH concerns ({global_high}) — fail-closed blocking all approvals")
             enforce_global_high_fail_closed(approvals_to_challenge, global_high)
 
