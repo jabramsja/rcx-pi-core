@@ -17,7 +17,7 @@ from .eval_seed import step
 from .kernel import get_step_budget
 
 
-def make_projection_runner(mode_name: str) -> tuple[
+def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> tuple[
     Callable[[Mu], bool],
     Callable[[Mu], bool],
     Callable[[list[Mu], Mu, int], tuple[Mu, int, bool]]
@@ -26,7 +26,7 @@ def make_projection_runner(mode_name: str) -> tuple[
     Create a projection runner for a specific mode.
 
     Returns a (is_done_fn, is_state_fn, run_fn) tuple:
-    - is_done_fn: Check if state is completed (mode == "{mode_name}_done")
+    - is_done_fn: Check if state is completed (terminal_field == "{mode_name}_done")
     - is_state_fn: Check if state is in progress (mode == "{mode_name}")
     - run_fn: Run projections until done or stall
 
@@ -41,6 +41,9 @@ def make_projection_runner(mode_name: str) -> tuple[
 
     Args:
         mode_name: The mode name (e.g., "match", "subst", "classify")
+        terminal_field: The field name to check for terminal state detection.
+            Default "mode" (v1 projections). Use "_mode" for v2 projections
+            where terminal states use underscore-prefixed fields.
 
     Returns:
         Tuple of (is_done, is_state, run_projections) functions
@@ -48,6 +51,9 @@ def make_projection_runner(mode_name: str) -> tuple[
     Example:
         is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
         result, steps, is_stall = run_match_projections(projections, initial_state)
+
+        # For v2 projections with _mode terminal field:
+        is_done_v2, _, run_v2 = make_projection_runner("match", terminal_field="_mode")
     """
     done_mode = f"{mode_name}_done"
 
@@ -55,7 +61,7 @@ def make_projection_runner(mode_name: str) -> tuple[
         """Check if state is a completed result."""
         return (
             isinstance(state, dict)
-            and state.get("mode") == done_mode
+            and state.get(terminal_field) == done_mode
         )
 
     def is_state(state: Mu) -> bool:

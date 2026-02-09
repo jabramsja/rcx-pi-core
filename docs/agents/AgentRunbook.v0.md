@@ -29,7 +29,7 @@ Which tool to use and when:
 |------|------------|-------------|------|
 | `run_review.py` | Multi-agent code review orchestrator | After changing core code (`rcx_pi/selfhost/`, `mu/`) | ~8-30 min (scope/model dependent) |
 | `run_deep_analysis.py` | Full codebase health scan | Monthly, pre-release, or after large refactors | ~5-10 min |
-| `run_ci_review.py` | Lightweight CI review | Auto-triggered in GitHub Actions on PR | ~2-4 min |
+| `run_ci_review.py` | Lightweight CI review | Manual dispatch in GitHub Actions (API cost) | ~2-4 min |
 | `run_interactive.py` | Conversational agent session | When you want to dig deeper with follow-up questions | Interactive |
 
 **Decision guide:**
@@ -244,11 +244,13 @@ analysis - finding issues that static tests miss:
 **GitHub Actions workflow:** `.github/workflows/agent-review.yml`
 
 ```bash
-# Manual trigger (always available)
+# Manual trigger via workflow_dispatch (always available)
 python tools/run_ci_review.py --pr-number 123 --post-comment
 
-# Auto-triggered in GitHub Actions on PRs touching:
-# rcx_pi/**, mu/**, agent tooling/prompts, docs/agents/**
+# NOTE: PR auto-trigger is DISABLED — agent review uses Anthropic API
+# (pay-per-token), not the Max subscription. Use manual dispatch when
+# API cost is justified, or run locally with:
+#   python tools/run_review.py <files> --depth quick
 ```
 
 **Where outputs are stored (always):**

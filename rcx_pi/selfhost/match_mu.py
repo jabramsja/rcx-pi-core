@@ -51,6 +51,109 @@ load_match_projections, clear_projection_cache = make_projection_loader("match.v
 
 
 # =============================================================================
+# Bridge-Aware Projection Loading (match.v2 + bridge)
+# =============================================================================
+
+_match_bridge_cache: list[Mu] | None = None
+
+
+def _validate_match_bridge_ordering(projections: list[Mu]) -> None:
+    """Enforce bridge.var.check_existing comes before match.var.
+
+    This ordering is critical: the bridge intercepts variable binding before
+    match.var can silently overwrite bindings. If the ordering is wrong,
+    non-linear pattern conflict detection won't work.
+
+    Raises:
+        ValueError: If ordering invariant is violated.
+    """
+    bridge_check_idx = None
+    match_var_idx = None
+
+    for i, proj in enumerate(projections):
+        pid = proj.get("id", "")
+        if pid == "bridge.var.check_existing":
+            bridge_check_idx = i
+        elif pid == "match.var":
+            match_var_idx = i
+
+    if bridge_check_idx is None:
+        raise ValueError(
+            "INVARIANT VIOLATION: bridge.var.check_existing not found in "
+            "match+bridge projection set"
+        )
+    if match_var_idx is None:
+        raise ValueError(
+            "INVARIANT VIOLATION: match.var not found in match+bridge projection set"
+        )
+    if bridge_check_idx >= match_var_idx:
+        raise ValueError(
+            f"INVARIANT VIOLATION: bridge.var.check_existing (index {bridge_check_idx}) "
+            f"must come before match.var (index {match_var_idx}). "
+            "Non-linear conflict detection requires bridge to intercept vars first."
+        )
+
+
+def load_match_with_bridge_projections() -> list[Mu]:
+    """Load match.v2 + bridge projections, properly ordered and cached.
+
+    Combines match.v2.json and bootstrap_structural.v1.json with bridge
+    projections inserted before match.var. This gives match_mu non-linear
+    pattern conflict detection without routing through the full kernel.
+
+    Combined ordering:
+        match.done, match.sibling, match.equal,
+        bridge.var.check_existing, bridge.lookup.found_same,
+        bridge.lookup.found_different, bridge.lookup.not_found_yet,
+        bridge.lookup.not_found,
+        match.var (dead — bridge handles all var cases),
+        match.typed.descend, match.dict.descend, match.fail, match.wrap
+
+    Returns:
+        Combined list of match.v2 + bridge projections.
+    """
+    global _match_bridge_cache
+    if _match_bridge_cache is not None:
+        _validate_match_bridge_ordering(_match_bridge_cache)
+        return _match_bridge_cache
+
+    from .seed_integrity import load_verified_seed, get_seed_path
+
+    match_seed = load_verified_seed(get_seed_path("match.v2.json"))
+    bridge_seed = load_verified_seed(get_seed_path("bootstrap_structural.v1.json"))
+
+    match_projs = match_seed["projections"]
+    bridge_projs = bridge_seed["projections"]
+
+    # Find match.var position to insert bridge projections before it
+    match_var_idx = None
+    for i, proj in enumerate(match_projs):
+        if proj.get("id") == "match.var":
+            match_var_idx = i
+            break
+
+    if match_var_idx is None:
+        raise ValueError("match.var not found in match.v2.json projections")
+
+    # Insert bridge projections before match.var
+    combined = (
+        match_projs[:match_var_idx] +
+        bridge_projs +
+        match_projs[match_var_idx:]
+    )
+
+    _validate_match_bridge_ordering(combined)
+    _match_bridge_cache = combined
+    return _match_bridge_cache
+
+
+def clear_match_bridge_cache() -> None:
+    """Clear the bridge-aware match projection cache (for testing)."""
+    global _match_bridge_cache
+    _match_bridge_cache = None
+
+
+# =============================================================================
 # Variable Name Validation
 # =============================================================================
 
@@ -710,12 +813,20 @@ def dict_to_bindings(d: dict[str, Mu]) -> Mu:
 # Match Runner (consolidated via factory)
 # =============================================================================
 
+# v1 runner (legacy, used by load_match_projections / match.v1.json)
 is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
+
+# v2 runner (bridge-aware, uses _mode terminal field for match.v2 + bridge)
+is_match_done_v2, _, run_match_bridge = make_projection_runner("match", terminal_field="_mode")
 
 
 def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
     """
-    Match pattern against value using Mu projections.
+    Match pattern against value using Mu projections (v2 + bridge).
+
+    Uses match.v2 + bridge projections for correct non-linear pattern
+    handling. Bridge projections intercept variable binding and detect
+    conflicts (same var bound to different values → NO_MATCH).
 
     This is the parity function for eval_seed.match().
 
@@ -736,29 +847,30 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
     norm_pattern = normalize_for_match(pattern)
     norm_value = normalize_for_match(value)
 
-    # Load projections
-    projections = load_match_projections()
+    # Load match.v2 + bridge projections (bridge intercepts vars for conflict detection)
+    projections = load_match_with_bridge_projections()
 
     # Wrap input in match request format
-    initial = {"match": {"pattern": norm_pattern, "value": norm_value}}
+    # v2 requires _match_ctx field (bridge uses it for binding lookup state)
+    initial = {"match": {"pattern": norm_pattern, "value": norm_value}, "_match_ctx": None}
 
-    # Run projections
-    final_state, steps, is_stall = run_match_projections(projections, initial)
+    # Run projections using v2 runner (_mode terminal detection)
+    final_state, steps, is_stall = run_match_bridge(projections, initial)
 
     # Extract result
     if is_stall:
         # Stall means no projection matched = pattern didn't match
         return NO_MATCH
 
-    if is_match_done(final_state):
-        status = final_state.get("status")
+    if is_match_done_v2(final_state):
+        status = final_state.get("_status")  # v2: underscore-prefixed
         if status == "success":
-            bindings = final_state.get("bindings")
+            bindings = final_state.get("_bindings")  # v2: underscore-prefixed
             raw_dict = bindings_to_dict(bindings)
             # Denormalize the bound values back to regular Python structures
             return {k: denormalize_from_match(v) for k, v in raw_dict.items()}  # AST_OK: infra - boundary conversion
         else:
-            # Explicit failure status
+            # Explicit failure status (including "no_match" from bridge conflict detection)
             return NO_MATCH
 
     # Unexpected state

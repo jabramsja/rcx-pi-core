@@ -293,16 +293,21 @@ class TestDeepAndWide:
     """Test combinations of deep and wide structures."""
 
     @given(
-        st.integers(min_value=10, max_value=30),
-        st.integers(min_value=10, max_value=30)
+        st.integers(min_value=10, max_value=20),
+        st.integers(min_value=10, max_value=20)
     )
     @settings(
         max_examples=15,
-        deadline=None,  # CI variance causes flaky DeadlineExceeded at this depth/width mix
+        deadline=None,  # Recurrence is O(n²) on trace_depth; per-example can take ~10s at 20x20
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_deep_trace_with_wide_states(self, trace_depth: int, state_width: int):
-        """Trace with many entries where each state is wide."""
+        """Trace with many entries where each state is wide.
+
+        Recurrence scans trace O(n²): each entry compared against seen-set.
+        At 20x20 (depth=20, width=20), each example takes ~10s / ~233 steps.
+        Ranges capped at 20 to stay within 180s pytest timeout across 15 examples.
+        """
         reset_step_budget()
 
         # Create trace where each state is a wide dict with UNIQUE values

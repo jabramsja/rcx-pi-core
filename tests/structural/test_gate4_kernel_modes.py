@@ -19,11 +19,11 @@ from rcx_pi.selfhost.step_mu import (
 def test_step_kernel_mu_bridge_mode_selects_bridge_loader(monkeypatch):
     calls = {"core": 0, "bridge": 0}
 
-    def fake_core():
+    def fake_core(**kwargs):
         calls["core"] += 1
         return []
 
-    def fake_bridge():
+    def fake_bridge(**kwargs):
         calls["bridge"] += 1
         return []
 
@@ -42,11 +42,11 @@ def test_step_kernel_mu_bridge_mode_selects_bridge_loader(monkeypatch):
 def test_step_kernel_mu_core_mode_selects_core_loader(monkeypatch):
     calls = {"core": 0, "bridge": 0}
 
-    def fake_core():
+    def fake_core(**kwargs):
         calls["core"] += 1
         return []
 
-    def fake_bridge():
+    def fake_bridge(**kwargs):
         calls["bridge"] += 1
         return []
 
@@ -73,7 +73,7 @@ def test_step_kernel_mu_invalid_validation_mode_fails():
 
 
 def test_algorithm_runtime_allows_top_level_algorithm_fields(monkeypatch):
-    monkeypatch.setattr("rcx_pi.selfhost.step_mu.load_combined_kernel_projections", lambda: [])
+    monkeypatch.setattr("rcx_pi.selfhost.step_mu.load_combined_kernel_projections", lambda **kw: [])
     value = {"_mode": "recurrence", "_phase": "scan", "_state": "A", "_step": 2}
 
     result = step_kernel_mu([], value, validation_mode="algorithm_runtime")
@@ -81,7 +81,7 @@ def test_algorithm_runtime_allows_top_level_algorithm_fields(monkeypatch):
 
 
 def test_domain_mode_rejects_top_level_reserved_algorithm_fields(monkeypatch):
-    monkeypatch.setattr("rcx_pi.selfhost.step_mu.load_combined_kernel_projections", lambda: [])
+    monkeypatch.setattr("rcx_pi.selfhost.step_mu.load_combined_kernel_projections", lambda **kw: [])
     value = {"_mode": "recurrence", "_phase": "scan"}
 
     with pytest.raises(ValueError, match="kernel-reserved field"):

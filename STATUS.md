@@ -9,8 +9,8 @@
 ## Current Phase
 
 ```
-PHASE: 8b
-NAME: Mechanical Kernel (Security Hardened)
+PHASE: 8c
+NAME: Gate 5 Meta-Circular Parity (Stabilization)
 ```
 
 ## Projection-Based Architecture Levels
@@ -388,7 +388,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,846 tests passing.
+**Historical milestone:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,846 tests passing.
 
 **L3 Substrate Portability Progress (2026-01-30):**
 - Step 1 DONE: JS POC security hardened (v4) - KERNEL_RESERVED_FIELDS validation, dict kv-pair fix
@@ -600,14 +600,14 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - **After:** Unbound variables cause stall (return original input)
 - This is more consistent with pure Mu semantics where errors become stalls
 
-**PAUSED (requires Phase 8 implementation):**
-- Phase 7d-2: Migrate projection_runner to step_mu
-- Phase 7d-3: Eliminate projection_runner iteration
-- Reason: 7d-1 moved the loop, didn't eliminate it. Phase 8 addresses this properly.
+**Historical closure (resolved by Phase 8 decision):**
+- Phase 7d-2: Migrate projection_runner to step_mu (closed)
+- Phase 7d-3: Eliminate projection_runner iteration (closed)
+- Reason: 7d-1 moved the loop; Phase 8 accepted irreducible iteration as bootstrap primitive.
 
 ---
 
-**Last updated:** 2026-02-08 (9-agent rigorous tooling hardened; 5 fuzzer test files from findings #1017-#1021)
+**Last updated:** 2026-02-09 (canonical doc sync: Gate 5 remains active milestone; historical Phase 7/8 wording clarified)
 **Next milestone:** Gate 5 - Meta-Circular Parity
 
 **Gate Snapshot (Canonical):**

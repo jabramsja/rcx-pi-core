@@ -459,23 +459,26 @@ def normalize_projection(proj: dict) -> dict:
     }
 
 
-def load_combined_kernel_projections() -> list[Mu]:
+def load_combined_kernel_projections(*, _copy: bool = True) -> list[Mu]:
     """
     Load and cache combined kernel + match.v2 + subst.v2 projections.
 
     SECURITY: Kernel projections MUST come first to prevent domain
     projections from forging kernel state.
 
-    Returns a deep copy to prevent callers from mutating the cache.
+    By default returns a deep copy to prevent callers from mutating the cache.
     (Adversary finding: shallow copy allows cache poisoning via dict mutation)
+    Internal callers (step_kernel_mu) pass _copy=False since eval_step never
+    mutates projections, avoiding the JSON round-trip hot-path cost.
 
     Returns:
         Combined list of kernel, match, and subst projections.
     """
     global _combined_kernel_cache
     if _combined_kernel_cache is not None:
-        # Deep copy via JSON round-trip (Mu is JSON-compatible)
-        return json.loads(json.dumps(_combined_kernel_cache))
+        if _copy:
+            return json.loads(json.dumps(_combined_kernel_cache))
+        return _combined_kernel_cache
 
     # Use mu/ as canonical location via get_seed_path()
     kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
@@ -488,8 +491,9 @@ def load_combined_kernel_projections() -> list[Mu]:
         match_seed["projections"] +
         subst_seed["projections"]
     )
-    # Deep copy via JSON round-trip (Mu is JSON-compatible)
-    return json.loads(json.dumps(_combined_kernel_cache))
+    if _copy:
+        return json.loads(json.dumps(_combined_kernel_cache))
+    return _combined_kernel_cache
 
 
 def clear_combined_kernel_cache() -> None:
@@ -561,7 +565,7 @@ def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
         )
 
 
-def load_combined_kernel_with_bridge_projections() -> list[Mu]:
+def load_combined_kernel_with_bridge_projections(*, _copy: bool = True) -> list[Mu]:
     """
     Load and cache combined kernel + match.v2 + bootstrap_structural + subst.v2 projections.
 
@@ -571,8 +575,10 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     SECURITY: Kernel projections MUST come first to prevent domain
     projections from forging kernel state.
 
-    Returns a deep copy to prevent callers from mutating the cache.
+    By default returns a deep copy to prevent callers from mutating the cache.
     (Adversary finding: shallow copy allows cache poisoning via dict mutation)
+    Internal callers (step_kernel_mu) pass _copy=False since eval_step never
+    mutates projections, avoiding the JSON round-trip hot-path cost.
 
     Required for META_CIRCULAR seeds:
     - recurrence.v1.json (uses non-linear patterns for state equality)
@@ -584,8 +590,9 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     global _combined_kernel_bridge_cache
     if _combined_kernel_bridge_cache is not None:
         _validate_combined_bridge_ordering(_combined_kernel_bridge_cache)
-        # Deep copy via JSON round-trip (Mu is JSON-compatible)
-        return json.loads(json.dumps(_combined_kernel_bridge_cache))
+        if _copy:
+            return json.loads(json.dumps(_combined_kernel_bridge_cache))
+        return _combined_kernel_bridge_cache
 
     # Use mu/ as canonical location via get_seed_path()
     kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
@@ -593,7 +600,7 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     bridge_seed = load_verified_seed(get_seed_path("bootstrap_structural.v1.json"))
     subst_seed = load_verified_seed(get_seed_path("subst.v2.json"))
 
-    # SECURITY: Kernel projections MUST be first
+    # SECURITY: Kernel projections MUST come first
     # Order: kernel → bridge (intercepts vars) → match.v2 → subst
     # CRITICAL: bridge MUST come before match.v2 so bridge.var.check_existing
     # intercepts {"var": "x"} patterns before match.var handles them.
@@ -605,8 +612,9 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
         subst_seed["projections"]
     )
     _validate_combined_bridge_ordering(_combined_kernel_bridge_cache)
-    # Deep copy via JSON round-trip (Mu is JSON-compatible)
-    return json.loads(json.dumps(_combined_kernel_bridge_cache))
+    if _copy:
+        return json.loads(json.dumps(_combined_kernel_bridge_cache))
+    return _combined_kernel_bridge_cache
 
 
 # =============================================================================
@@ -696,6 +704,7 @@ def step_kernel_mu(
     kernel_mode: str = "core",
     validation_mode: str = "domain",
     return_meta: bool = False,
+    max_steps: int = 10000,
 ) -> Mu | dict[str, Mu]:
     """
     Try each projection in order using structural kernel projections.
@@ -729,6 +738,8 @@ def step_kernel_mu(
             with strict underscore allowlisting.
         return_meta: When True, returns metadata payload
             `{\"output\": <Mu>, \"stall\": <bool>}`.
+        max_steps: Maximum kernel iteration steps. Default 10000.
+            For single-projection calls (e.g. apply_mu), 500 is sufficient.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
@@ -776,11 +787,11 @@ def step_kernel_mu(
             if "body" in proj:
                 validator(proj["body"], f"projection[{i}].body")
 
-    # Load combined kernel projections
+    # Load combined kernel projections (skip deep copy — eval_step never mutates)
     if kernel_mode == "core":
-        kernel_projs = load_combined_kernel_projections()
+        kernel_projs = load_combined_kernel_projections(_copy=False)
     elif kernel_mode == "bridge":
-        kernel_projs = load_combined_kernel_with_bridge_projections()
+        kernel_projs = load_combined_kernel_with_bridge_projections(_copy=False)
     else:
         raise ValueError(
             "SECURITY: invalid kernel_mode. Expected 'core' or 'bridge', "
@@ -806,7 +817,6 @@ def step_kernel_mu(
     # Cannot be structural (would require arithmetic on fuel).
     # Prevents infinite execution - analogous to watchdog timer.
     # See docs/core/BootstrapPrimitives.v0.md
-    max_steps = 10000
     budget = get_step_budget()
     started_budget = False
     if not budget.is_active():
@@ -978,15 +988,25 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
 
 # =============================================================================
 # Projection Application (Phase 5)
+#
+# SEMANTIC SPLIT (intentional, fail-closed):
+#   apply_mu / match_mu: Uses match.v2 + bridge projections (non-linear
+#       conflict detection). Required for non-linear patterns.
+#   step_mu / run_mu: Uses core kernel (match.v2 without bridge).
+#       Linear-only by contract. Rejects non-linear patterns with ValueError.
+#   run_algorithm_meta_circular: Uses bridge kernel. Handles algorithm seeds
+#       (recurrence, exhaustion) which contain non-linear patterns.
+#
+# See tests/structural/test_match_bridge_invariants.py::TestSplitSemanticsContract
 # =============================================================================
 
 def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     """
     Apply a projection to a value using Mu-based match and substitute.
 
-    This is apply_projection() implemented with match_mu + subst_mu.
-    Achieves parity with eval_seed.apply_projection() for all inputs
-    (except known normalization edge cases documented in Phase 4d).
+    Uses match_mu (match.v2 + bridge) for correct non-linear pattern
+    handling. Achieves parity with eval_seed.apply_projection() for all
+    inputs (except known normalization edge cases documented in Phase 4d).
 
     Args:
         projection: Dict with "pattern" and "body" keys.
@@ -1026,37 +1046,91 @@ def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     return result
 
 
+def _has_nonlinear_vars(pattern: Mu) -> bool:
+    """Check if pattern has non-linear variables (same var name appears twice).
+
+    Used as fail-closed guard: step_mu/run_mu use core kernel which does NOT
+    detect binding conflicts. Non-linear patterns must use apply_mu (bridge path)
+    or run_algorithm_meta_circular.
+    """
+    var_counts: dict[str, int] = {}
+
+    stack: list[Mu] = [pattern]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            if set(current.keys()) == {"var"} and isinstance(current["var"], str):
+                name = current["var"]
+                var_counts[name] = var_counts.get(name, 0) + 1
+            else:
+                stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+
+    return any(count > 1 for count in var_counts.values())
+
+
+def _reject_nonlinear_projections(projections: list[Mu], caller: str) -> None:
+    """Fail-closed: reject projections with non-linear patterns on core kernel path.
+
+    Core kernel (match.v2 without bridge) silently overwrites bindings when the
+    same variable appears twice in a pattern. This produces wrong results for
+    conflicting bindings instead of NO_MATCH.
+
+    Non-linear patterns MUST use:
+    - apply_mu() for single-projection application (uses match.v2 + bridge)
+    - run_algorithm_meta_circular() for algorithm execution (uses bridge kernel)
+
+    Raises:
+        ValueError: If any projection has non-linear patterns.
+    """
+    for i, proj in enumerate(projections):
+        if not isinstance(proj, dict):
+            continue
+        pattern = proj.get("pattern")
+        if pattern is not None and _has_nonlinear_vars(pattern):
+            proj_id = proj.get("id", f"projection[{i}]")
+            raise ValueError(
+                f"{caller}: projection '{proj_id}' has non-linear pattern "
+                f"(same variable appears twice). Core kernel does not detect "
+                f"binding conflicts. Use apply_mu() or "
+                f"run_algorithm_meta_circular(kernel_mode='bridge') instead."
+            )
+
+
 def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     """
-    Try each projection in order using structural kernel.
+    Try each projection in order using structural kernel (core, linear-only).
 
-    Phase 7d-1: This function now uses the meta-circular kernel
-    (kernel.v1 + match.v2 + subst.v2 projections) instead of a Python
-    for-loop. The kernel provides iteration without host arithmetic
-    or control flow.
+    Uses core kernel (match.v2 without bridge). Non-linear patterns
+    (same variable twice) are rejected — use apply_mu for those.
 
     Args:
-        projections: List of projections to try.
+        projections: List of projections to try (must be linear-only).
         input_value: The value to transform.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
 
     Raises:
+        ValueError: If projections contain non-linear patterns.
         ValueError: If kernel projections appear after domain projections (security).
     """
+    _reject_nonlinear_projections(projections, "step_mu")
     return step_kernel_mu(projections, input_value)
 
 
 @host_iteration("Kernel run loop - Phase 7d replaces with meta-circular kernel")
 def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[Mu, list[dict], bool]:
     """
-    Run projections repeatedly until stall or max steps.
+    Run projections repeatedly until stall or max steps (core, linear-only).
 
-    This is the kernel loop using step_mu instead of step.
+    Uses core kernel (match.v2 without bridge). Non-linear patterns
+    (same variable twice) are rejected — use run_algorithm_meta_circular
+    with kernel_mode='bridge' for those.
 
     Args:
-        projections: List of projections to apply.
+        projections: List of projections to apply (must be linear-only).
         initial: Starting value.
         max_steps: Maximum iterations before forced stop.
 
@@ -1065,9 +1139,13 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
         - final_value: The result after all steps
         - trace: List of {"step": n, "value": v} entries
         - is_stall: True if stopped due to stall (no change)
+
+    Raises:
+        ValueError: If projections contain non-linear patterns.
     """
     assert_mu(initial, "run_mu.initial")
     validate_no_kernel_reserved_fields(initial, "run_mu initial")
+    _reject_nonlinear_projections(projections, "run_mu")
     validate_kernel_projections_first(projections)
     for i, proj in enumerate(projections):
         if not isinstance(proj, dict):

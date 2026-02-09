@@ -22,6 +22,7 @@ See docs/core/SelfHosting.v0.md for design.
 import pytest
 
 from rcx_pi.eval_seed import apply_projection, match, substitute, NO_MATCH
+from rcx_pi.mu_type import mu_equal
 
 # Import apply_mu from production code (9-agent Expert finding 2026-02-01)
 # Production version has assert_mu() validation that conftest version lacked
@@ -440,3 +441,69 @@ class TestApplyMuErrors:
 
         with pytest.raises(TypeError):
             apply_mu("not a dict", 42)
+
+
+# =============================================================================
+# Non-linear pattern parity contract tests
+# =============================================================================
+
+class TestNonLinearPatternParity:
+    """Contract: apply_mu must match apply_projection on non-linear patterns.
+
+    Non-linear pattern = same variable appears multiple times in pattern.
+    When the variable binds to different values, the match must fail (NO_MATCH).
+    When the variable binds to the same value, the match must succeed.
+
+    This is the semantic rule: identity match -> result (not NO_MATCH).
+    """
+
+    def test_nonlinear_conflict_returns_no_match(self):
+        """Same var, different values -> NO_MATCH on both paths."""
+        proj = {"pattern": {"a": {"var": "x"}, "b": {"var": "x"}}, "body": "ok"}
+        input_value = {"a": 1, "b": 2}
+
+        ref = apply_projection(proj, input_value)
+        mu = apply_mu(proj, input_value)
+
+        assert ref is NO_MATCH, f"apply_projection should return NO_MATCH, got {ref}"
+        assert mu is NO_MATCH, f"apply_mu should return NO_MATCH, got {mu}"
+
+    def test_nonlinear_agreement_returns_result(self):
+        """Same var, same values -> match succeeds on both paths."""
+        proj = {"pattern": {"a": {"var": "x"}, "b": {"var": "x"}}, "body": "ok"}
+        input_value = {"a": 1, "b": 1}
+
+        ref = apply_projection(proj, input_value)
+        mu = apply_mu(proj, input_value)
+
+        assert ref == "ok", f"apply_projection should return 'ok', got {ref}"
+        assert mu == "ok", f"apply_mu should return 'ok', got {mu}"
+
+    def test_nonlinear_nested_conflict(self):
+        """Nested non-linear conflict -> NO_MATCH."""
+        proj = {
+            "pattern": {"x": {"var": "v"}, "y": {"nested": {"var": "v"}}},
+            "body": "matched",
+        }
+        input_value = {"x": 1, "y": {"nested": 2}}
+
+        ref = apply_projection(proj, input_value)
+        mu = apply_mu(proj, input_value)
+
+        assert ref is NO_MATCH
+        assert mu is NO_MATCH
+
+    def test_identity_match_returns_value_not_no_match(self):
+        """Identity projection (matched but unchanged) must return value, not NO_MATCH.
+
+        Semantic rule: identity match is still a match. Only true non-matching
+        patterns return NO_MATCH.
+        """
+        proj = {"pattern": {"var": "x"}, "body": {"var": "x"}}
+
+        for value in [42, "hello", None, True, {"a": 1}, [1, 2, 3]]:
+            ref = apply_projection(proj, value)
+            mu = apply_mu(proj, value)
+            assert mu_equal(ref, value), f"apply_projection identity failed for {value}"
+            assert mu_equal(mu, value), f"apply_mu identity should return value, got NO_MATCH for {value}"
+            assert mu is not NO_MATCH, f"apply_mu returned NO_MATCH for identity match on {value}"
