@@ -132,4 +132,5 @@ jobs:
 
       - name: Skip reason
         if: steps.preconditions.outputs.enabled != 'true'
-        run: echo "Skipping agent review: ${{ steps.preconditions.outputs.reason }}"
+        run: |
+          echo "Skipping agent review: ${{ steps.preconditions.outputs.reason }}"

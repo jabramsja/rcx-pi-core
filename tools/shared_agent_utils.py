@@ -155,8 +155,18 @@ def resolve_agent_model(agent_name: str, override_model: Optional[str] = None) -
             )
         return normalized_override
 
-    normalized_name = agent_name.strip().lower().replace("_", "-")
-    return AGENT_DEFAULT_MODELS.get(normalized_name, "sonnet")
+    raw_name = agent_name.strip().lower()
+    # Accept both underscore and hyphen variants to prevent silent fallback
+    # for deep-analysis aliases such as deep_verifier / deep-structural.
+    candidates = [
+        raw_name,
+        raw_name.replace("_", "-"),
+        raw_name.replace("-", "_"),
+    ]
+    for candidate in candidates:
+        if candidate in AGENT_DEFAULT_MODELS:
+            return AGENT_DEFAULT_MODELS[candidate]
+    return "sonnet"
 
 
 def build_sdk_options(

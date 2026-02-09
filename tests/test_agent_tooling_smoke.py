@@ -230,6 +230,8 @@ class TestModelPolicy:
         resolve_agent_model = shared_agent_utils.resolve_agent_model
         assert resolve_agent_model("verifier") == "opus"
         assert resolve_agent_model("verifier", "sonnet") == "sonnet"
+        assert resolve_agent_model("deep_verifier") == "opus"
+        assert resolve_agent_model("deep-verifier") == "opus"
         with pytest.raises(ValueError):
             resolve_agent_model("verifier", "unknown-model")
 
