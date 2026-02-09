@@ -20,60 +20,52 @@ _tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
-from claude_agent_sdk import query, ClaudeAgentOptions
-
+from tools.agent_runner_common import (
+    StandardFileRunnerConfig,
+    exit_with_code,
+    finalize_standard_result,
+    print_standard_runner_footer,
+    run_agent_prompt,
+)
 from tools.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
-    build_sdk_options,
-    extract_text_from_message,
-    extract_verdict_secure,
     load_agent_prompt_with_contract,
-    resolve_agent_model,
-    validate_compliance,
 )
 
 STRUCTURAL_PROOF_PROMPT = load_agent_prompt_with_contract("structural-proof")
+CONFIG = StandardFileRunnerConfig(
+    agent_name="structural-proof",
+    parser_description="Run RCX structural-proof agent on a claim.",
+    files_help="N/A",
+    run_message_prefix="Verifying claim",
+    action_line_prefix="verify this claim",
+    task_instructions=(
+        "Search the codebase for relevant projections and trace through them manually. "
+        "Produce a structural proof report following the format in your instructions."
+    ),
+    max_turns=30,
+    verdict_messages={
+        "PROVEN": ("CLAIM PROVEN", 0),
+        "UNPROVEN": ("CLAIM UNPROVEN - need concrete projections", 1),
+        "IMPOSSIBLE_AS_CLAIMED": ("CLAIM IMPOSSIBLE - cannot be done structurally", 2),
+        "NO_STRUCTURAL_CLAIMS": ("NO STRUCTURAL CLAIMS - nothing to verify", 0),
+        "REQUIRES_CI_VERIFICATION": ("REQUIRES CI VERIFICATION - execution unavailable", 0),
+    },
+    default_message_prefix="STRUCTURAL PROOF REVIEW COMPLETE",
+)
 
 
 async def run_structural_proof(claim: str, model_override: str | None = None) -> str:
     """Run the structural-proof agent on a claim."""
-    agent_model = resolve_agent_model("structural-proof", model_override)
-
-    prompt = f"""You are the RCX Structural Proof Agent. Your instructions are:
-
-{STRUCTURAL_PROOF_PROMPT}
-
----
-
-Verify this claim: "{claim}"
-
-Search the codebase for relevant projections and trace through them manually.
-Produce a structural proof report following the format in your instructions.
-"""
-
-    result_text = ""
-    fragments: list[str] = []
-
-    async for message in query(
-        prompt=prompt,
-        options=build_sdk_options(
-            ClaudeAgentOptions,
-            allowed_tools=["Read", "Grep", "Glob"],
-            max_turns=30,
-            model=agent_model,
-            require_model_kwarg=True,
-        ),
-    ):
-        extracted = extract_text_from_message(message)
-        if extracted:
-            fragments.append(extracted)
-        if hasattr(message, 'result') and message.result:
-            result_text = message.result
-
-    if not result_text and fragments:
-        result_text = "\n".join(dict.fromkeys(fragments))
-
-    return result_text
+    return await run_agent_prompt(
+        agent_name=CONFIG.agent_name,
+        prompt_text=STRUCTURAL_PROOF_PROMPT,
+        action_line=f'Verify this claim: "{claim}"',
+        task_instructions=CONFIG.task_instructions,
+        model_override=model_override,
+        allowed_tools=["Read", "Grep", "Glob"],
+        max_turns=CONFIG.max_turns,
+    )
 
 
 async def main():
@@ -95,31 +87,8 @@ async def main():
     result = await run_structural_proof(claim, model_override=args.model)
 
     print(result)
-    print("=" * 60)
-
-    # Compliance validation (shared_agent_utils returns 3-tuple)
-    is_compliant, error, _ = validate_compliance(result)
-    if not is_compliant:
-        print(f"\n⚠️  COMPLIANCE FAILURE: {error}")
-        print("Agent output did not meet AgentGuardrails.v0 requirements.")
-        sys.exit(3)
-
-    # Check verdict using secure marker-based extraction (shared_agent_utils)
-    verdict = extract_verdict_secure(result, agent_name="structural-proof")
-    if verdict == "PROVEN":
-        print("\nCLAIM PROVEN")
-    elif verdict == "UNPROVEN":
-        print("\nCLAIM UNPROVEN - need concrete projections")
-        sys.exit(1)
-    elif verdict == "IMPOSSIBLE_AS_CLAIMED":
-        print("\nCLAIM IMPOSSIBLE - cannot be done structurally")
-        sys.exit(2)
-    elif verdict == "NO_STRUCTURAL_CLAIMS":
-        print("\nNO STRUCTURAL CLAIMS - nothing to verify")
-    elif verdict == "REQUIRES_CI_VERIFICATION":
-        print("\nREQUIRES CI VERIFICATION - execution unavailable")
-    else:
-        print(f"\nSTRUCTURAL PROOF REVIEW COMPLETE (verdict: {verdict})")
+    print_standard_runner_footer()
+    exit_with_code(finalize_standard_result(CONFIG, result))
 
 
 if __name__ == "__main__":

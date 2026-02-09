@@ -251,6 +251,24 @@ python tools/run_ci_review.py --pr-number 123 --post-comment
 # rcx_pi/**, mu/**, agent tooling/prompts, docs/agents/**
 ```
 
+**Where outputs are stored (always):**
+- PR comment: concise summary with per-agent snippets (`review-report.md` content)
+- Actions artifact `agent-review-report` includes:
+- `review-report.md` (concise, comment-friendly)
+- `review-report-full.md` (expanded agent outputs, capped per agent)
+- `review-results.json` (structured results + truncation metadata)
+
+**How to find artifacts (new session safe):**
+1. Open GitHub Actions run for the PR
+2. Scroll to `Artifacts`
+3. Download `agent-review-report`
+4. Open `review-report-full.md` or `review-results.json` for full details
+
+**Size control (prevents runaway files):**
+- PR/comment snippets are capped via `--comment-snippet-chars` (default `1000`)
+- Artifact outputs are capped via `--artifact-max-chars` (default `50000` per agent)
+- If capped, a truncation marker is included in `.md` and `output_truncated=true` in `.json`
+
 **Execution guardrails in workflow:**
 - Skips automatically on fork PRs (secrets unavailable)
 - Skips automatically when `ANTHROPIC_API_KEY` is missing
