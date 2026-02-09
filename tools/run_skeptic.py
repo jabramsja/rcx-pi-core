@@ -33,7 +33,14 @@ if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from shared_agent_utils import extract_text_from_message, sanitize_for_prompt, validate_compliance
+from shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
+    extract_text_from_message,
+    resolve_agent_model,
+    sanitize_for_prompt,
+    validate_compliance,
+)
 
 
 # =============================================================================
@@ -296,7 +303,8 @@ def _validate_concern_tags(text: str, agent_names: list[str]) -> list[str]:
 async def run_skeptic(
     agent_output: str,
     files: list[str],
-    original_agent: str = "unknown"
+    original_agent: str = "unknown",
+    model_override: str | None = None,
 ) -> dict:
     """Run the skeptic agent to challenge a single agent's approval.
 
@@ -329,7 +337,7 @@ Now, read the actual files yourself and challenge this approval.
 Look for what they might have missed.
 """
 
-    result_text = await _run_skeptic_query(prompt)
+    result_text = await _run_skeptic_query(prompt, model_override=model_override)
 
     verdict = _extract_verdict(result_text)
     high_severity = result_text.count("SEVERITY: HIGH")
@@ -349,6 +357,7 @@ Look for what they might have missed.
 async def run_consolidated_skeptic(
     agent_outputs: dict[str, str],
     files: list[str],
+    model_override: str | None = None,
 ) -> dict:
     """Run a single skeptic session to challenge ALL approved agents at once.
 
@@ -399,7 +408,7 @@ Tag every concern with AGENT: <name> or AGENT: ALL for global blind spots.
 End with OVERALL_VERDICT: CONFIRMED|CONCERNS|OVERRIDE.
 """
 
-    result_text = await _run_skeptic_query(prompt)
+    result_text = await _run_skeptic_query(prompt, model_override=model_override)
 
     # Parse structured output
     overall_verdict = "UNKNOWN"
@@ -435,18 +444,22 @@ End with OVERALL_VERDICT: CONFIRMED|CONCERNS|OVERRIDE.
     }
 
 
-async def _run_skeptic_query(prompt: str) -> str:
+async def _run_skeptic_query(prompt: str, model_override: str | None = None) -> str:
     """Shared query execution for both single and consolidated skeptic."""
     result_text = ""
     fragments: list[str] = []
+    skeptic_model = resolve_agent_model("skeptic", model_override)
 
     try:
         async for message in query(
             prompt=prompt,
-            options=ClaudeAgentOptions(
+            options=build_sdk_options(
+                ClaudeAgentOptions,
                 allowed_tools=["Read", "Grep", "Glob"],
                 max_turns=20,
-            )
+                model=skeptic_model,
+                require_model_kwarg=True,
+            ),
         ):
             extracted = extract_text_from_message(message)
             if extracted:
@@ -491,6 +504,11 @@ async def main():
         action="store_true",
         help="Output as JSON"
     )
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for skeptic (default uses policy)",
+    )
 
     args = parser.parse_args()
 
@@ -507,6 +525,7 @@ async def main():
         agent_output=agent_output,
         files=args.files,
         original_agent=args.original_agent,
+        model_override=args.model,
     )
 
     if args.json:

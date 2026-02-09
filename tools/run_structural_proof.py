@@ -11,21 +11,26 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
 STRUCTURAL_PROOF_PROMPT = load_agent_prompt_with_contract("structural-proof")
 
 
-async def run_structural_proof(claim: str) -> str:
+async def run_structural_proof(claim: str, model_override: str | None = None) -> str:
     """Run the structural-proof agent on a claim."""
+    agent_model = resolve_agent_model("structural-proof", model_override)
 
     prompt = f"""You are the RCX Structural Proof Agent. Your instructions are:
 
@@ -44,10 +49,13 @@ Produce a structural proof report following the format in your instructions.
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=30,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -62,16 +70,22 @@ Produce a structural proof report following the format in your instructions.
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_structural_proof.py \"<claim to verify>\"")
-        print("Example: python tools/run_structural_proof.py \"linked list append works with finite projections\"")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Run RCX structural-proof agent on a claim."
+    )
+    parser.add_argument("claim", nargs="+", help="Claim text to verify")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for structural-proof (default uses policy)",
+    )
+    args = parser.parse_args()
 
-    claim = " ".join(sys.argv[1:])
+    claim = " ".join(args.claim)
     print(f"Verifying claim: {claim}")
     print("=" * 60)
 
-    result = await run_structural_proof(claim)
+    result = await run_structural_proof(claim, model_override=args.model)
 
     print(result)
     print("=" * 60)

@@ -14,13 +14,17 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
@@ -31,6 +35,7 @@ async def run_advisor(
     problem: str,
     context_files: list[str] | None = None,
     web_search: bool = False,
+    model_override: str | None = None,
 ) -> str:
     """Run the advisor agent on a problem.
 
@@ -80,16 +85,20 @@ Produce an advisor report following the format in your instructions.
     tools = ["Read", "Grep", "Glob"]
     if web_search:
         tools.append("WebSearch")
+    agent_model = resolve_agent_model("advisor", model_override)
 
     result_text = ""
     fragments: list[str] = []
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=tools,
             max_turns=30 if web_search else 25,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -104,25 +113,21 @@ Produce an advisor report following the format in your instructions.
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_advisor.py \"<problem description>\" [--files file1 ...] [--web]")
-        print("Example: python tools/run_advisor.py \"How should we represent bindings?\"")
-        print("Example: python tools/run_advisor.py \"How do other interpreters handle this?\" --web")
-        sys.exit(1)
-
-    # Parse args
-    args = sys.argv[1:]
-    problem = args[0]
-    context_files = []
-    web_search = "--web" in args
-
-    if "--files" in args:
-        files_idx = args.index("--files")
-        # Get files until we hit another flag or end
-        for i in range(files_idx + 1, len(args)):
-            if args[i].startswith("--"):
-                break
-            context_files.append(args[i])
+    parser = argparse.ArgumentParser(
+        description="Run RCX advisor agent on a strategic problem."
+    )
+    parser.add_argument("problem", help="Problem statement for advisor")
+    parser.add_argument("--files", nargs="*", default=[], help="Context files")
+    parser.add_argument("--web", action="store_true", help="Enable web search tool")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for advisor (default uses policy)",
+    )
+    args = parser.parse_args()
+    problem = args.problem
+    context_files = args.files
+    web_search = args.web
 
     print(f"Advising on: {problem}")
     if context_files:
@@ -135,6 +140,7 @@ async def main():
         problem,
         context_files if context_files else None,
         web_search=web_search,
+        model_override=args.model,
     )
 
     print(result)

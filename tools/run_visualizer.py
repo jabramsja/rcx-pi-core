@@ -12,20 +12,29 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
 VISUALIZER_PROMPT = load_agent_prompt_with_contract("visualizer")
 
 
-async def run_visualizer(files: list[str] | None = None, structure: str | None = None) -> str:
+async def run_visualizer(
+    files: list[str] | None = None,
+    structure: str | None = None,
+    model_override: str | None = None,
+) -> str:
     """Run the visualizer agent on files or a specific structure."""
+    agent_model = resolve_agent_model("visualizer", model_override)
 
     if structure:
         target = f"this Mu structure:\n```json\n{structure}\n```"
@@ -52,10 +61,13 @@ Produce a visualization report following the format in your instructions.
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=20,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -70,23 +82,24 @@ Produce a visualization report following the format in your instructions.
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_visualizer.py <file1> [file2] ...")
-        print("       python tools/run_visualizer.py --structure '<json>'")
-        print("Example: python tools/run_visualizer.py mu/substrate/kernel.v1.json")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Run RCX visualizer agent on files or a specific structure."
+    )
+    parser.add_argument("files", nargs="*", help="Files to visualize")
+    parser.add_argument("--structure", help="Inline JSON structure to visualize")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for visualizer (default uses policy)",
+    )
+    args = parser.parse_args()
 
-    # Parse args
-    files = []
-    structure = None
-    i = 1
-    while i < len(sys.argv):
-        if sys.argv[i] == "--structure" and i + 1 < len(sys.argv):
-            structure = sys.argv[i + 1]
-            i += 2
-        else:
-            files.append(sys.argv[i])
-            i += 1
+    files = args.files
+    structure = args.structure
+
+    if not files and not structure:
+        parser.print_help()
+        sys.exit(1)
 
     if structure:
         print(f"Visualizing structure: {structure[:50]}...")
@@ -94,7 +107,11 @@ async def main():
         print(f"Running visualizer on: {', '.join(files)}")
     print("=" * 60)
 
-    result = await run_visualizer(files if files else None, structure)
+    result = await run_visualizer(
+        files if files else None,
+        structure,
+        model_override=args.model,
+    )
 
     print(result)
     print("=" * 60)

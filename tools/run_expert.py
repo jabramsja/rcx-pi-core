@@ -11,25 +11,30 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
 EXPERT_PROMPT = load_agent_prompt_with_contract("expert")
 
 
-async def run_expert(files: list[str]) -> str:
+async def run_expert(files: list[str], model_override: str | None = None) -> str:
     """Run the expert agent on the specified files."""
 
     # Security: Sanitize file paths to prevent prompt injection via newlines
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
     file_list = ", ".join(safe_files)
+    agent_model = resolve_agent_model("expert", model_override)
     prompt = f"""You are the RCX Expert Agent. Your instructions are:
 
 {EXPERT_PROMPT}
@@ -47,10 +52,13 @@ Focus on: unnecessary complexity, simpler approaches, emergent patterns, self-ho
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=25,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -65,16 +73,22 @@ Focus on: unnecessary complexity, simpler approaches, emergent patterns, self-ho
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_expert.py <file1> [file2] ...")
-        print("Example: python tools/run_expert.py rcx_pi/eval_seed.py")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Run RCX expert agent on specified files."
+    )
+    parser.add_argument("files", nargs="+", help="Files to review")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for expert (default uses policy)",
+    )
+    args = parser.parse_args()
 
-    files = sys.argv[1:]
+    files = args.files
     print(f"Running expert review on: {', '.join(files)}")
     print("=" * 60)
 
-    result = await run_expert(files)
+    result = await run_expert(files, model_override=args.model)
 
     print(result)
     print("=" * 60)

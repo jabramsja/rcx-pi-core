@@ -11,25 +11,30 @@ Usage:
 """
 
 import sys
+import argparse
 import anyio
 from claude_agent_sdk import query, ClaudeAgentOptions
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
 GROUNDING_PROMPT = load_agent_prompt_with_contract("grounding")
 
 
-async def run_grounding(files: list[str]) -> str:
+async def run_grounding(files: list[str], model_override: str | None = None) -> str:
     """Run the grounding agent on the specified files."""
 
     # Security: Sanitize file paths to prevent prompt injection via newlines
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
     file_list = ", ".join(safe_files)
+    agent_model = resolve_agent_model("grounding", model_override)
     prompt = f"""You are the RCX Grounding Agent. Your instructions are:
 
 {GROUNDING_PROMPT}
@@ -47,10 +52,13 @@ Produce a grounding report following the format in your instructions.
 
     async for message in query(
         prompt=prompt,
-        options=ClaudeAgentOptions(
+        options=build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=30,
-        )
+            model=agent_model,
+            require_model_kwarg=True,
+        ),
     ):
         extracted = extract_text_from_message(message)
         if extracted:
@@ -65,16 +73,22 @@ Produce a grounding report following the format in your instructions.
 
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python tools/run_grounding.py <file1> [file2] ...")
-        print("Example: python tools/run_grounding.py rcx_pi/selfhost/eval_seed.py")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Run RCX grounding agent on specified files."
+    )
+    parser.add_argument("files", nargs="+", help="Files to review")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for grounding (default uses policy)",
+    )
+    args = parser.parse_args()
 
-    files = sys.argv[1:]
+    files = args.files
     print(f"Running grounding on: {', '.join(files)}")
     print("=" * 60)
 
-    result = await run_grounding(files)
+    result = await run_grounding(files, model_override=args.model)
 
     print(result)
     print("=" * 60)

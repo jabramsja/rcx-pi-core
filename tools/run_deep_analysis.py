@@ -30,7 +30,14 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from tools.shared_agent_utils import GOOD_VERDICTS, extract_text_from_message, validate_compliance
+from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    GOOD_VERDICTS,
+    build_sdk_options,
+    extract_text_from_message,
+    resolve_agent_model,
+    validate_compliance,
+)
 
 
 # =============================================================================
@@ -194,7 +201,11 @@ DEFAULT_AGENTS = ["verifier", "adversary", "grounding", "structural-proof", "adv
 # Agent Runner
 # =============================================================================
 
-async def run_analysis_agent(agent_name: str, verbose: bool = False) -> dict:
+async def run_analysis_agent(
+    agent_name: str,
+    verbose: bool = False,
+    model_override: str | None = None,
+) -> dict:
     """Run a single analysis agent."""
 
     prompt = ANALYSIS_PROMPTS.get(agent_name)
@@ -207,16 +218,21 @@ async def run_analysis_agent(agent_name: str, verbose: bool = False) -> dict:
         }
 
     print(f"  Running {agent_name}...", end=" ", flush=True)
+    model_key = "deep_structural" if agent_name == "structural-proof" else f"deep_{agent_name}"
+    agent_model = resolve_agent_model(model_key, model_override)
 
     result_text = ""
     fragments: list[str] = []
     try:
         async for message in query(
             prompt=prompt,
-            options=ClaudeAgentOptions(
+            options=build_sdk_options(
+                ClaudeAgentOptions,
                 allowed_tools=["Read", "Glob", "Grep"],  # No Bash for security
                 max_turns=30,  # Allow thorough exploration
-            )
+                model=agent_model,
+                require_model_kwarg=True,
+            ),
         ):
             extracted = extract_text_from_message(message)
             if extracted:
@@ -271,7 +287,11 @@ async def run_analysis_agent(agent_name: str, verbose: bool = False) -> dict:
     }
 
 
-async def run_deep_analysis(agents: list[str], verbose: bool = False) -> dict:
+async def run_deep_analysis(
+    agents: list[str],
+    verbose: bool = False,
+    model_override: str | None = None,
+) -> dict:
     """Run deep analysis with specified agents."""
 
     print(f"\n{'='*70}")
@@ -283,7 +303,7 @@ async def run_deep_analysis(agents: list[str], verbose: bool = False) -> dict:
     print("Running agents in parallel (this may take 5-10 minutes):\n")
 
     # Run all agents in parallel for faster execution
-    tasks = [run_analysis_agent(agent, verbose) for agent in agents]
+    tasks = [run_analysis_agent(agent, verbose, model_override=model_override) for agent in agents]
     results = await asyncio.gather(*tasks)
 
     return {
@@ -363,6 +383,11 @@ async def main():
         action="store_true",
         help="List available agents and exit"
     )
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for deep-analysis agents (default uses per-agent policy)",
+    )
 
     args = parser.parse_args()
 
@@ -382,7 +407,11 @@ async def main():
         print(f"Available: {list(ANALYSIS_PROMPTS.keys())}")
         sys.exit(1)
 
-    analysis = await run_deep_analysis(agents, args.verbose)
+    analysis = await run_deep_analysis(
+        agents,
+        args.verbose,
+        model_override=args.model,
+    )
     print_synthesis(analysis, args.verbose)
 
 

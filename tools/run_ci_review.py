@@ -34,10 +34,13 @@ from dataclasses import dataclass
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
     agent_passed,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
@@ -166,10 +169,15 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
 # Agent Runner (simplified from run_review.py)
 # =============================================================================
 
-async def run_agent(agent_name: str, files: list[str]) -> dict:
+async def run_agent(
+    agent_name: str,
+    files: list[str],
+    model_override: str | None = None,
+) -> dict:
     """Run a single agent and return result dict."""
 
     prompt_text = load_agent_prompt_with_contract(agent_name)
+    agent_model = resolve_agent_model(agent_name, model_override)
 
     # Security: Sanitize file paths to prevent prompt injection via newlines
     safe_files = [f.replace('\n', '_').replace('\r', '_').replace('`', '_')[:200] for f in files[:20]]
@@ -191,10 +199,13 @@ Produce a brief report (max 500 words) following your format.
     try:
         async for message in query(
             prompt=prompt,
-            options=ClaudeAgentOptions(
+            options=build_sdk_options(
+                ClaudeAgentOptions,
                 allowed_tools=["Read", "Grep", "Glob"],
                 max_turns=20,
-            )
+                model=agent_model,
+                require_model_kwarg=True,
+            ),
         ):
             extracted = extract_text_from_message(message)
             if extracted:
@@ -229,9 +240,13 @@ Produce a brief report (max 500 words) following your format.
     }
 
 
-async def run_agents_parallel(agents: list[str], files: list[str]) -> list[dict]:
+async def run_agents_parallel(
+    agents: list[str],
+    files: list[str],
+    model_override: str | None = None,
+) -> list[dict]:
     """Run multiple agents in parallel."""
-    tasks = [run_agent(agent, files) for agent in agents]
+    tasks = [run_agent(agent, files, model_override=model_override) for agent in agents]
     return await asyncio.gather(*tasks)
 
 
@@ -342,6 +357,11 @@ async def main():
     parser.add_argument("--local", action="store_true", help="Local mode (no GitHub posting)")
     parser.add_argument("--post-comment", action="store_true", help="Post comment to PR")
     parser.add_argument("--output", "-o", type=Path, help="Save report to file")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for all CI review agents (default uses per-agent policy)",
+    )
 
     args = parser.parse_args()
 
@@ -372,7 +392,11 @@ async def main():
 
     # Run agents
     print(f"\n🤖 Running {len(analysis.agents_to_run)} agents in parallel...")
-    results = await run_agents_parallel(analysis.agents_to_run, analysis.files_changed)
+    results = await run_agents_parallel(
+        analysis.agents_to_run,
+        analysis.files_changed,
+        model_override=args.model,
+    )
 
     # Generate report
     report = generate_ci_report(analysis, results)

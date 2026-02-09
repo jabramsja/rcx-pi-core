@@ -46,8 +46,11 @@ from dataclasses import dataclass, asdict
 from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
 
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
+    build_sdk_options,
     extract_text_from_message,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     validate_compliance,
 )
 
@@ -143,9 +146,9 @@ AVAILABLE_AGENTS = [
 ]
 
 
-def create_agent_definition(agent_name: str) -> AgentDefinition:
+def create_agent_definition(agent_name: str, model_override: str | None = None) -> AgentDefinition:
     """Create an agent definition for interactive use."""
-    model = "opus" if agent_name in ["verifier", "adversary", "expert", "advisor"] else "sonnet"
+    model = resolve_agent_model(agent_name, model_override)
 
     return AgentDefinition(
         description=f"RCX {agent_name} agent for interactive review",
@@ -162,9 +165,16 @@ def create_agent_definition(agent_name: str) -> AgentDefinition:
 class InteractiveSession:
     """Manages an interactive conversation with an agent."""
 
-    def __init__(self, agent_name: str, files: list[str], session: Session | None = None):
+    def __init__(
+        self,
+        agent_name: str,
+        files: list[str],
+        session: Session | None = None,
+        model_override: str | None = None,
+    ):
         self.agent_name = agent_name
         self.files = files
+        self.model_override = model_override
         self.session = session or Session(
             id=generate_session_id(),
             agent=agent_name,
@@ -204,9 +214,12 @@ Start by giving a brief overview of what you see in these files.
             prompt = user_message
 
         # Prepare options
-        options = ClaudeAgentOptions(
+        options = build_sdk_options(
+            ClaudeAgentOptions,
             allowed_tools=["Read", "Grep", "Glob"],
             max_turns=15,
+            model=resolve_agent_model(self.agent_name, self.model_override),
+            require_model_kwarg=True,
         )
 
         # Add resume if we have a session ID
@@ -376,6 +389,11 @@ Available agents:
     parser.add_argument("files", nargs="*", help="Files to review")
     parser.add_argument("--resume", metavar="SESSION_ID", help="Resume a previous session")
     parser.add_argument("--list", action="store_true", help="List saved sessions")
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for interactive agent sessions",
+    )
 
     args = parser.parse_args()
 
@@ -403,7 +421,8 @@ Available agents:
         session = InteractiveSession(
             agent_name=session_data.agent,
             files=session_data.files,
-            session=session_data
+            session=session_data,
+            model_override=args.model,
         )
         print(f"\n📂 Resuming session {args.resume}")
         await run_repl(session)
@@ -420,7 +439,11 @@ Available agents:
         print(f"Available: {', '.join(AVAILABLE_AGENTS)}")
         sys.exit(1)
 
-    session = InteractiveSession(agent_name=args.agent, files=args.files)
+    session = InteractiveSession(
+        agent_name=args.agent,
+        files=args.files,
+        model_override=args.model,
+    )
     await run_repl(session)
 
     # Auto-save on exit

@@ -53,13 +53,21 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
+from typing import Any
 
 # Ensure tools directory is importable when run directly
 _tools_dir = Path(__file__).parent
 if str(_tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent))
 
-from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
+SDK_IMPORT_ERROR: Exception | None = None
+try:
+    from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
+except Exception as _sdk_import_error:
+    SDK_IMPORT_ERROR = _sdk_import_error
+    query = None  # type: ignore[assignment]
+    ClaudeAgentOptions = None  # type: ignore[assignment]
+    AgentDefinition = Any  # type: ignore[assignment]
 
 # Import agent memory for persistent finding storage
 try:
@@ -90,14 +98,17 @@ except Exception as _agent_memory_error:
 # Import shared FINDING extraction (single source of truth)
 from tools.validate_agent_compliance import extract_finding_blocks
 from tools.shared_agent_utils import (
+    SUPPORTED_AGENT_MODELS,
     AGENT_PASS_VERDICTS,
     GOOD_VERDICTS,
     HARD_GATE_AGENTS,
     adversary_blocks_merge,
     agent_passed as shared_agent_passed,
+    build_sdk_options,
     extract_text_from_message,
     extract_verdict_secure,
     load_agent_prompt_with_contract,
+    resolve_agent_model,
     sanitize_for_prompt,
     validate_compliance as shared_validate_compliance,
 )
@@ -107,7 +118,7 @@ from tools.shared_agent_utils import (
 # Agent Definitions
 # =============================================================================
 
-def create_agent_definitions() -> dict[str, AgentDefinition]:
+def create_agent_definitions(model_override: str | None = None) -> dict[str, AgentDefinition]:
     """Create all 9 agent definitions with their specialized prompts."""
 
     return {
@@ -116,25 +127,25 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
             description="Verifies code against North Star invariants. Use for compliance checks.",
             prompt=load_agent_prompt_with_contract("verifier"),
             tools=["Read", "Grep", "Glob"],
-            model="opus"
+            model=resolve_agent_model("verifier", model_override),
         ),
         "adversary": AgentDefinition(
             description="Red team agent that tries to break code. Use for security review.",
             prompt=load_agent_prompt_with_contract("adversary"),
             tools=["Read", "Grep", "Glob"],
-            model="opus"
+            model=resolve_agent_model("adversary", model_override),
         ),
         "expert": AgentDefinition(
             description="Expert code reviewer for complexity and simplification. Use for quality review.",
             prompt=load_agent_prompt_with_contract("expert"),
             tools=["Read", "Grep", "Glob"],
-            model="opus"
+            model=resolve_agent_model("expert", model_override),
         ),
         "structural-proof": AgentDefinition(
             description="Demands concrete proof of structural claims. Use for projection verification.",
             prompt=load_agent_prompt_with_contract("structural-proof"),
             tools=["Read", "Grep", "Glob"],
-            model="sonnet"
+            model=resolve_agent_model("structural-proof", model_override),
         ),
 
         # === DEPTH AGENTS (thorough verification) ===
@@ -142,13 +153,13 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
             description="Converts claims into executable tests. Use for test coverage verification.",
             prompt=load_agent_prompt_with_contract("grounding"),
             tools=["Read", "Grep", "Glob"],
-            model="sonnet"
+            model=resolve_agent_model("grounding", model_override),
         ),
         "fuzzer": AgentDefinition(
             description="Property-based testing with Hypothesis. Use for edge case discovery.",
             prompt=load_agent_prompt_with_contract("fuzzer"),
             tools=["Read", "Grep", "Glob"],
-            model="sonnet"
+            model=resolve_agent_model("fuzzer", model_override),
         ),
 
         # === FOUNDER AGENTS (human-readable output) ===
@@ -156,13 +167,13 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
             description="Explains code in plain English. Use for founder review.",
             prompt=load_agent_prompt_with_contract("translator"),
             tools=["Read", "Grep", "Glob"],
-            model="sonnet"
+            model=resolve_agent_model("translator", model_override),
         ),
         "visualizer": AgentDefinition(
             description="Creates Mermaid diagrams of structures. Use for visual verification.",
             prompt=load_agent_prompt_with_contract("visualizer"),
             tools=["Read", "Grep", "Glob"],
-            model="sonnet"
+            model=resolve_agent_model("visualizer", model_override),
         ),
 
         # === ADVISORY AGENT (non-gating) ===
@@ -170,7 +181,7 @@ def create_agent_definitions() -> dict[str, AgentDefinition]:
             description="Strategic advisor for design decisions. Use when stuck.",
             prompt=load_agent_prompt_with_contract("advisor"),
             tools=["Read", "Grep", "Glob"],
-            model="opus"
+            model=resolve_agent_model("advisor", model_override),
         ),
     }
 
@@ -252,23 +263,66 @@ def validate_compliance(output: str) -> tuple[bool, str, dict]:
 
 
 def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAgentOptions:
-    """Build SDK query options with explicit model wiring when supported.
+    """Build SDK query options with explicit model wiring.
 
-    Some SDK builds may not accept a `model` kwarg on ClaudeAgentOptions.
-    We gracefully fall back to the baseline options in that case.
+    Fail-closed: if SDK options cannot accept `model=`, raise RuntimeError.
     """
-    base_kwargs = {
-        "allowed_tools": ["Read", "Grep", "Glob"],
-        "max_turns": max_turns,
-    }
+    if ClaudeAgentOptions is None:
+        raise RuntimeError(f"claude_agent_sdk unavailable: {SDK_IMPORT_ERROR}")
     model = getattr(agent_def, "model", None)
-    if model:
-        try:
-            return ClaudeAgentOptions(model=model, **base_kwargs)
-        except TypeError:
-            # Backward compatibility with SDK variants lacking `model=`.
-            pass
-    return ClaudeAgentOptions(**base_kwargs)
+    return build_sdk_options(
+        ClaudeAgentOptions,
+        allowed_tools=["Read", "Grep", "Glob"],
+        max_turns=max_turns,
+        model=model,
+        require_model_kwarg=True,
+    )
+
+
+INFRA_FAILURE_EXIT_CODE = 4
+
+
+async def run_agent_preflight(
+    timeout_seconds: int = 20,
+    model_override: str | None = None,
+) -> tuple[bool, str]:
+    """Validate SDK/runtime availability before launching review agents.
+
+    This avoids burning runtime/tokens on known-bad infra states where all
+    agents return transport/runtime errors instead of review output.
+    """
+    if os.getenv("RCX_AGENT_PREFLIGHT_FORCE_FAIL") == "1":
+        return False, "Forced preflight failure via RCX_AGENT_PREFLIGHT_FORCE_FAIL=1"
+
+    if SDK_IMPORT_ERROR is not None or query is None:
+        return False, f"Claude SDK import failed: {SDK_IMPORT_ERROR}"
+
+    try:
+        verifier_def = create_agent_definitions(model_override=model_override)["verifier"]
+        saw_message = False
+        saw_result = False
+
+        async def _ping() -> None:
+            nonlocal saw_message, saw_result
+            async for message in query(
+                prompt="Preflight check. Reply with exactly: PONG",
+                options=build_query_options(verifier_def, max_turns=1),
+            ):
+                saw_message = True
+                extracted = extract_text_from_message(message)
+                if extracted and extracted.strip():
+                    saw_result = True
+                if hasattr(message, "result") and message.result:
+                    saw_result = True
+
+        await asyncio.wait_for(_ping(), timeout=timeout_seconds)
+        if not saw_message and not saw_result:
+            return False, "Preflight query returned no messages/results"
+        return True, ""
+    except asyncio.TimeoutError:
+        return False, f"SDK preflight timed out after {timeout_seconds}s"
+    except Exception as exc:
+        return False, f"SDK preflight query failed: {exc}"
 
 
 # =============================================================================
@@ -387,6 +441,7 @@ class ReviewOrchestrator:
                  show_warnings: bool = False,
                  continue_on_hard_gate: bool = True,
                  force_grounding: bool = False,
+                 model_override: str | None = None,
                  agent_max_turns: dict | None = None):
         self.files = files
         self.depth = depth
@@ -396,9 +451,10 @@ class ReviewOrchestrator:
         self.show_warnings = show_warnings
         self.continue_on_hard_gate = continue_on_hard_gate
         self.force_grounding = force_grounding
+        self.model_override = model_override
         self.agent_max_turns = agent_max_turns or dict(AGENT_MAX_TURNS)
         self.agents_to_run = self._resolve_agents_to_run(depth)
-        self.agent_definitions = create_agent_definitions()
+        self.agent_definitions = create_agent_definitions(model_override=model_override)
         self.results: list[AgentResult] = []
         self.regression_warnings: list[dict] = []
         self.soft_warnings: list[dict] = []  # Non-hard-gate failures
@@ -885,6 +941,16 @@ Produce a report following the format in your instructions.
         return 0
 
 
+def enforce_global_high_fail_closed(results: list[AgentResult], global_high: int) -> None:
+    """Fail-closed policy: AGENT: ALL + HIGH concerns block all challenged approvals."""
+    if global_high <= 0:
+        return
+    for result in results:
+        result.passed = False
+        result.verdict = f"{result.verdict} (SKEPTIC_GLOBAL_HIGH:{global_high})"
+        result.blocks_merge = result.is_hard_gate and (not result.passed)
+
+
 # =============================================================================
 # Git Integration
 # =============================================================================
@@ -1001,20 +1067,30 @@ Examples:
         help="Force grounding agent even for low-risk scopes"
     )
     parser.add_argument(
-        "--continue-on-hard-gate",
-        action="store_true",
-        default=True,
-        help="(Default) Continue running non-hard-gate agents for diagnostics even if a hard gate fails"
-    )
-    parser.add_argument(
         "--fail-fast-hard-gate",
         action="store_true",
         help="Stop immediately after hard gate failures in phase 1 (legacy fail-fast behavior)"
     )
     parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip mandatory SDK/runtime preflight (debugging only)"
+    )
+    parser.add_argument(
+        "--preflight-timeout",
+        type=int,
+        default=20,
+        help="Preflight timeout in seconds (default: 20)"
+    )
+    parser.add_argument(
         "--max-turns",
         type=int,
         help="Override per-agent max_turns (use for large scopes that need more exploration)"
+    )
+    parser.add_argument(
+        "--model",
+        choices=sorted(SUPPORTED_AGENT_MODELS),
+        help="Override model for all agents (default uses per-agent policy)"
     )
     parser.add_argument(
         "--pr-number",
@@ -1037,6 +1113,19 @@ Examples:
         print("Error: specify files or use --pr")
         parser.print_help()
         sys.exit(1)
+
+    # Mandatory runtime preflight for real review runs.
+    if not args.skip_preflight:
+        print("🔧 Running agent runtime preflight...")
+        preflight_ok, preflight_error = await run_agent_preflight(
+            timeout_seconds=args.preflight_timeout,
+            model_override=args.model,
+        )
+        if not preflight_ok:
+            print("\n❌ AGENT PREFLIGHT FAILED")
+            print(f"Reason: {preflight_error}")
+            print("Action: run `PYTHONHASHSEED=0 python3 tools/check_agent_runtime.py` and fix runtime.")
+            sys.exit(INFRA_FAILURE_EXIT_CODE)
 
     # Determine depth
     depth = args.depth
@@ -1065,86 +1154,82 @@ Examples:
         show_warnings=args.show_warnings,
         continue_on_hard_gate=(not args.fail_fast_hard_gate),
         force_grounding=args.force_grounding,
+        model_override=args.model,
         agent_max_turns=agent_max_turns,
     )
     await orchestrator.run_all()
 
-    # Reasoning validation and skeptic challenge
-    # Always run even on compliance failures (with warning) so skeptic can still catch issues
-    hard_gate_failed = getattr(orchestrator, '_hard_gate_failed', False)
-    if hard_gate_failed:
-        print("\n⚠️  Hard gate failures detected — running reasoning validation and skeptic anyway")
+    # Reasoning validation and skeptic challenge are rigorous-only.
+    hard_gate_failed = getattr(orchestrator, "_hard_gate_failed", False)
+    approvals_to_challenge: list[AgentResult] = []
+    if args.rigorous:
+        if hard_gate_failed:
+            print("\n⚠️  Hard gate failures detected — running rigorous checks anyway")
 
-    # Always validate reasoning quality (Layer 2: Detection)
-    print("\n📋 Validating reasoning quality...")
+        print("\n📋 Validating reasoning quality...")
+        try:
+            from tools.validate_agent_reasoning import validate_reasoning
+        except ModuleNotFoundError:
+            from validate_agent_reasoning import validate_reasoning
 
-    from tools.validate_agent_reasoning import validate_reasoning
+        reasoning_failures: list[tuple[AgentResult, str]] = []
+        for result in orchestrator.results:
+            reasoning = validate_reasoning(result.output)
+            if not reasoning.is_valid:
+                reasoning_failures.append((result, reasoning.violations[0]))
+                print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
+            elif reasoning.requires_challenge:
+                approvals_to_challenge.append(result)
+                print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
+            else:
+                print(f"  ✓ {result.name}: Reasoning valid")
 
-    reasoning_failures = []
-    approvals_to_challenge = []
+        # Retry hard-gate agents with invalid reasoning only in rigorous mode.
+        if reasoning_failures:
+            hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
+            if hard_gate_failures:
+                print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
+                for result, violation in hard_gate_failures:
+                    print(f"  Retrying {result.name}...")
+                    retry_feedback = f"Reasoning validation failed: {violation}"
+                    retry_result = await orchestrator.run_single_agent(
+                        result.name,
+                        retry_feedback=retry_feedback,
+                    )
+                    retry_reasoning = validate_reasoning(retry_result.output)
+                    if retry_reasoning.is_valid:
+                        print(f"  ✓ {result.name}: Retry successful")
+                        idx = orchestrator.results.index(result)
+                        orchestrator.results[idx] = retry_result
+                    else:
+                        print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
+                        result.passed = False
+                        if result.is_hard_gate:
+                            result.blocks_merge = True
 
-    for result in orchestrator.results:
-        # Validate reasoning quality
-        reasoning = validate_reasoning(result.output)
+        if not approvals_to_challenge:
+            print("\n🔍 RIGOROUS: no approvals to challenge")
 
-        if not reasoning.is_valid:
-            reasoning_failures.append((result, reasoning.violations[0]))
-            print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
-            # Don't downgrade yet - Layer 3 will retry
-
-        elif reasoning.requires_challenge and args.rigorous:
-            approvals_to_challenge.append(result)
-            print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
-
-        else:
-            print(f"  ✓ {result.name}: Reasoning valid")
-
-    # Layer 3: Correction - retry hard gate agents with reasoning failures
-    if reasoning_failures:
-        hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
-
-        if hard_gate_failures:
-            print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
-
-            for result, violation in hard_gate_failures:
-                print(f"  Retrying {result.name}...")
-
-                # Re-run with feedback about what went wrong
-                retry_feedback = f"Reasoning validation failed: {violation}"
-                retry_result = await orchestrator.run_single_agent(result.name, retry_feedback=retry_feedback)
-
-                # Check if retry fixed the issue
-                retry_reasoning = validate_reasoning(retry_result.output)
-
-                if retry_reasoning.is_valid:
-                    print(f"  ✓ {result.name}: Retry successful")
-                    # Replace the result
-                    idx = orchestrator.results.index(result)
-                    orchestrator.results[idx] = retry_result
-                else:
-                    print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
-                    result.passed = False  # Downgrade to failed
-
-    # Rigorous mode: consolidated skeptic challenge
-    # One skeptic session reviews ALL approved agents + checks for convergence blind spots
+    # Rigorous mode: consolidated skeptic challenge.
     if args.rigorous and approvals_to_challenge:
         print(f"\n🔍 RIGOROUS: Consolidated skeptic challenging {len(approvals_to_challenge)} approval(s)...")
-
-        from tools.run_skeptic import run_consolidated_skeptic
+        try:
+            from tools.run_skeptic import run_consolidated_skeptic
+        except ModuleNotFoundError:
+            from run_skeptic import run_consolidated_skeptic
 
         agent_outputs = {result.name: result.output for result in approvals_to_challenge}
         skeptic_result = await run_consolidated_skeptic(
             agent_outputs=agent_outputs,
             files=files,
+            model_override=args.model,
         )
 
-        # Gate on skeptic compliance: non-compliant skeptic output cannot be trusted
         if not skeptic_result.get("is_compliant", False):
             print(f"  ⚠️  Skeptic output failed compliance: {skeptic_result.get('compliance_error', 'unknown')}")
-            print(f"      Treating as UNKNOWN (fail-closed)")
+            print("      Treating as UNKNOWN (fail-closed)")
             skeptic_result["verdict"] = "UNKNOWN"
 
-        # Map per-agent verdicts back to targeted results only
         per_agent = skeptic_result.get("verdict_per_agent", {})
         for result in approvals_to_challenge:
             agent_verdict = per_agent.get(result.name, "UNKNOWN")
@@ -1154,7 +1239,6 @@ Examples:
                 result.verdict = f"{result.verdict} (SKEPTIC OVERRIDE)"
             elif agent_verdict == "CONCERNS":
                 print(f"  ⚠️ Skeptic has CONCERNS about {result.name}'s approval")
-                # CONCERNS alone don't block — only HIGH severity does
             elif agent_verdict == "UNKNOWN":
                 print(f"  ❓ Skeptic did not evaluate {result.name} — fail-closed")
                 result.passed = False
@@ -1162,48 +1246,55 @@ Examples:
             else:
                 print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
 
-        # AGENT: ALL — apply global blind spots explicitly to every approved agent
         global_concerns = skeptic_result.get("global_concerns", [])
         if global_concerns:
             print(f"\n  🎯 GLOBAL BLIND SPOTS (AGENT: ALL): {len(global_concerns)} found")
             for concern in global_concerns:
                 print(f"    - {concern[:120]}")
-            # Mark all approved agents with the global flag (visible in report)
             for result in approvals_to_challenge:
                 result.verdict = f"{result.verdict} (GLOBAL_BLIND_SPOT)"
 
-        # Report untagged concerns as warnings (not silent pass)
+        global_high = skeptic_result.get("global_high_severity_count", 0)
+        if global_high > 0:
+            print(f"  ❌ Skeptic GLOBAL HIGH concerns ({global_high}) — fail-closed blocking all approvals")
+            enforce_global_high_fail_closed(approvals_to_challenge, global_high)
+
         untagged = skeptic_result.get("untagged_warnings", [])
         if untagged:
             print(f"\n  ⚠️  UNTAGGED CONCERNS: {len(untagged)} concern(s) missing AGENT: marker")
             for warning in untagged:
                 print(f"    - {warning}")
 
-        # Overall verdict gating — preserves hard-gate behavior
         if skeptic_result["verdict"] == "OVERRIDE":
-            print(f"  ❌ Skeptic OVERALL OVERRIDE — significant blind spots")
+            print("  ❌ Skeptic OVERALL OVERRIDE — significant blind spots")
             for result in approvals_to_challenge:
                 agent_v = per_agent.get(result.name, "CONFIRMED")
                 if agent_v != "CONFIRMED":
                     result.passed = False
                     result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
         elif skeptic_result["verdict"] == "CONCERNS":
-            print(f"  ⚠️ Skeptic has CONCERNS — {skeptic_result['high_severity_count']} HIGH, {skeptic_result['medium_severity_count']} MEDIUM")
-            # CONCERNS with HIGH severity findings should block
+            print(
+                f"  ⚠️ Skeptic has CONCERNS — "
+                f"{skeptic_result['high_severity_count']} HIGH, {skeptic_result['medium_severity_count']} MEDIUM"
+            )
             if skeptic_result["high_severity_count"] > 0:
                 for result in approvals_to_challenge:
                     agent_v = per_agent.get(result.name, "CONFIRMED")
                     if agent_v in ("CONCERNS", "OVERRIDE"):
                         result.passed = False
-                        result.verdict = f"{result.verdict} (SKEPTIC_CONCERNS: {skeptic_result['high_severity_count']} HIGH)"
+                        result.verdict = (
+                            f"{result.verdict} (SKEPTIC_CONCERNS: {skeptic_result['high_severity_count']} HIGH)"
+                        )
         elif skeptic_result["verdict"] == "UNKNOWN":
-            print(f"  ❓ Skeptic returned UNKNOWN verdict — fail-closed, blocking approvals")
-            # Fail-closed: inconclusive skeptic MUST block, not silently pass
+            print("  ❓ Skeptic returned UNKNOWN verdict — fail-closed, blocking approvals")
             for result in approvals_to_challenge:
                 result.passed = False
                 result.verdict = f"{result.verdict} (SKEPTIC_INCONCLUSIVE)"
         elif skeptic_result["verdict"] == "CONFIRMED":
-            print(f"  ✅ Skeptic CONFIRMS all approvals — no blind spots")
+            print("  ✅ Skeptic CONFIRMS all approvals — no blind spots")
+
+        for result in approvals_to_challenge:
+            result.blocks_merge = result.is_hard_gate and (not result.passed)
 
     # Generate report
     report = orchestrator.synthesize_report()

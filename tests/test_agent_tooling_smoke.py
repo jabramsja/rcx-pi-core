@@ -209,6 +209,31 @@ class TestAgentCompliance:
         assert "violations" in result or not result.get("compliant", True)
 
 
+class TestModelPolicy:
+    """Model-governance policy should stay centralized and enforced."""
+
+    def test_shared_model_policy_defaults_exist(self):
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        defaults = shared_agent_utils.AGENT_DEFAULT_MODELS
+        assert defaults["verifier"] == "opus"
+        assert defaults["adversary"] == "opus"
+        assert defaults["structural-proof"] == "sonnet"
+
+    def test_resolve_agent_model_allows_override_and_rejects_typos(self):
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        resolve_agent_model = shared_agent_utils.resolve_agent_model
+        assert resolve_agent_model("verifier") == "opus"
+        assert resolve_agent_model("verifier", "sonnet") == "sonnet"
+        with pytest.raises(ValueError):
+            resolve_agent_model("verifier", "unknown-model")
+
+
 # Check if claude_agent_sdk is available (not installed in CI)
 try:
     import claude_agent_sdk
@@ -227,7 +252,7 @@ class TestOrchestratorIntegration:
 
     def test_exit_codes_documented(self):
         """Orchestrator should use documented exit codes."""
-        # Exit codes: 0=pass, 1=hard gate fail, 2=soft fail, 3=compliance fail
+        # Exit codes: 0=pass, 1=hard gate fail, 2=soft fail, 3=compliance fail, 4=infra preflight fail
         result = subprocess.run(
             [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
             capture_output=True,
@@ -270,8 +295,8 @@ class TestOrchestratorIntegration:
         )
         assert "--show-warnings" in result.stdout
 
-    def test_continue_on_hard_gate_flag_exists(self):
-        """Orchestrator should expose --continue-on-hard-gate for explicit diagnostics mode."""
+    def test_continue_on_hard_gate_flag_removed(self):
+        """Orchestrator should not expose redundant --continue-on-hard-gate flag."""
         result = subprocess.run(
             [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
             capture_output=True,
@@ -279,7 +304,7 @@ class TestOrchestratorIntegration:
             timeout=60,
             cwd=PROJECT_ROOT,
         )
-        assert "--continue-on-hard-gate" in result.stdout
+        assert "--continue-on-hard-gate" not in result.stdout
 
     def test_fail_fast_hard_gate_flag_exists(self):
         """Orchestrator should support --fail-fast-hard-gate legacy behavior."""
@@ -292,6 +317,28 @@ class TestOrchestratorIntegration:
         )
         assert "--fail-fast-hard-gate" in result.stdout
 
+    def test_skip_preflight_flag_exists(self):
+        """Orchestrator should expose --skip-preflight for debugging only."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--skip-preflight" in result.stdout
+
+    def test_preflight_timeout_flag_exists(self):
+        """Orchestrator should expose --preflight-timeout control."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--preflight-timeout" in result.stdout
+
     def test_force_grounding_flag_exists(self):
         """Orchestrator should expose --force-grounding override."""
         result = subprocess.run(
@@ -302,6 +349,34 @@ class TestOrchestratorIntegration:
             cwd=PROJECT_ROOT,
         )
         assert "--force-grounding" in result.stdout
+
+    def test_model_flag_exists(self):
+        """Orchestrator should expose --model override."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--model" in result.stdout
+
+    @pytest.mark.parametrize("script", [
+        "run_ci_review.py",
+        "run_interactive.py",
+        "run_deep_analysis.py",
+        "run_skeptic.py",
+    ])
+    def test_model_flag_exists_in_other_orchestrators(self, script: str):
+        """Other orchestrators should expose --model for model governance."""
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / script), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+        )
+        assert "--model" in result.stdout, f"--model missing in {script}"
 
     def test_full_depth_keeps_fuzzer_and_risk_triggers_grounding(self):
         """Full depth should always include fuzzer; grounding should be risk-triggered."""
@@ -330,6 +405,62 @@ class TestOrchestratorIntegration:
             force_grounding=True,
         )
         assert "grounding" in forced.agents_to_run
+
+    def test_preflight_force_fail_exits_before_pipeline(self):
+        """Forced preflight failure should stop before phases/reasoning/skeptic."""
+        env = dict(os.environ)
+        env["RCX_AGENT_PREFLIGHT_FORCE_FAIL"] = "1"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS_DIR / "run_review.py"),
+                "tools/run_review.py",
+                "--depth",
+                "quick",
+                "--rigorous",
+                "--no-memory",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=PROJECT_ROOT,
+            env=env,
+        )
+        combined = f"{result.stdout}\n{result.stderr}"
+        assert result.returncode == 4
+        assert "AGENT PREFLIGHT FAILED" in combined
+        assert "Phase 1:" not in combined
+        assert "Validating reasoning quality" not in combined
+
+    def test_global_high_fail_closed_helper_blocks_hard_gate(self):
+        """Global HIGH concerns should fail-closed and mark hard gates as blocking."""
+        run_review = import_from_path("run_review", TOOLS_DIR / "run_review.py")
+        hard_gate = run_review.AgentResult(
+            name="verifier",
+            output="",
+            verdict="APPROVE",
+            is_compliant=True,
+            compliance_error="",
+            is_hard_gate=True,
+            blocks_merge=False,
+            passed=True,
+        )
+        soft_gate = run_review.AgentResult(
+            name="expert",
+            output="",
+            verdict="MINIMAL",
+            is_compliant=True,
+            compliance_error="",
+            is_hard_gate=False,
+            blocks_merge=False,
+            passed=True,
+        )
+        run_review.enforce_global_high_fail_closed([hard_gate, soft_gate], global_high=2)
+        assert hard_gate.passed is False
+        assert hard_gate.blocks_merge is True
+        assert "SKEPTIC_GLOBAL_HIGH:2" in hard_gate.verdict
+        assert soft_gate.passed is False
+        assert soft_gate.blocks_merge is False
 
 
 class TestVerdictExtraction:
