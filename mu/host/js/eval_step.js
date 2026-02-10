@@ -1339,15 +1339,18 @@ const path = require('path');
 //   mu/substrate/ - kernel, match, subst (the VM)
 //   mu/closures/  - recurrence, exhaustion (closure detection)
 //   mu/bridge/    - bootstrap_structural (non-linear pattern support)
+//   mu/programs/  - rcx_engine, hemispheres (application programs)
 const substrateDir = path.join(__dirname, '..', '..', 'substrate');
 const closuresDir = path.join(__dirname, '..', '..', 'closures');
 const bridgeDir = path.join(__dirname, '..', '..', 'bridge');
+const programsDir = path.join(__dirname, '..', '..', 'programs');
 const kernel = JSON.parse(fs.readFileSync(path.join(substrateDir, 'kernel.v1.json'), 'utf8'));
 const matchSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'match.v2.json'), 'utf8'));
 const substSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'subst.v2.json'), 'utf8'));
 const recurrenceSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'recurrence.v1.json'), 'utf8'));
 const exhaustionSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'exhaustion.v1.json'), 'utf8'));
 const bridgeSeed = JSON.parse(fs.readFileSync(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'utf8'));
+const hemisphereSeed = JSON.parse(fs.readFileSync(path.join(programsDir, 'hemispheres.v1.json'), 'utf8'));
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -1364,6 +1367,9 @@ const recurrenceProjections = recurrenceSeed.projections;
 
 // Exhaustion projections (separate - used for operator exhaustion after recurrence)
 const exhaustionProjections = exhaustionSeed.projections;
+
+// Hemisphere projections (APPLICATION level - structural routing, linear-only, no bridge needed)
+const hemisphereProjections = hemisphereSeed.projections;
 
 // Combined projections WITH BRIDGE for meta-circular algorithm execution
 // Order: kernel -> bridge -> match -> subst (bridge extends match for non-linear patterns)
@@ -1418,6 +1424,7 @@ console.log(`  - substrate/subst.v2.json: ${substSeed.projections.length} projec
 console.log(`  - bridge/bootstrap_structural.v1.json: ${bridgeSeed.projections.length} projections`);
 console.log(`  - closures/recurrence.v1.json: ${recurrenceSeed.projections.length} projections`);
 console.log(`  - closures/exhaustion.v1.json: ${exhaustionSeed.projections.length} projections`);
+console.log(`  - programs/hemispheres.v1.json: ${hemisphereSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
 console.log(`  - Total (with Bridge): ${allProjectionsWithBridge.length} projections`);
 console.log(`  - Total (with Recurrence): ${allProjectionsWithRecurrence.length} projections`);
@@ -2159,6 +2166,7 @@ if (process.argv.includes('--json-api')) {
         bridge_projection_count: bridgeSeed.projections.length,
         recurrence_projection_count: recurrenceSeed.projections.length,
         exhaustion_projection_count: exhaustionSeed.projections.length,
+        hemisphere_projection_count: hemisphereSeed.projections.length,
         total_with_bridge: allProjectionsWithBridge.length,
         total_with_recurrence_bridge: allProjectionsWithRecurrenceAndBridge.length,
         total_with_exhaustion_bridge: allProjectionsWithExhaustionAndBridge.length
@@ -2273,6 +2281,29 @@ if (process.argv.includes('--json-api')) {
           stall: traceResult.stall,
           steps: traceResult.steps,
         };
+      } catch (e) {
+        response = { success: false, error: e.message };
+      }
+    } else if (request.action === 'run_hemisphere') {
+      // Run hemisphere routing (APPLICATION level, core kernel, linear-only)
+      // Uses returnMeta for proper kernel terminal detection (matches Python run_mu path)
+      const { input, maxSteps } = request;
+      try {
+        let current = input;
+        let steps = 0;
+        const limit = maxSteps || 100;
+        while (steps < limit) {
+          const wrapped = stepKernel(
+            allProjections,
+            current,
+            hemisphereProjections,
+            { returnMeta: true }
+          );
+          if (wrapped.stall) break;
+          current = wrapped.output;
+          steps++;
+        }
+        response = { success: true, result: current };
       } catch (e) {
         response = { success: false, error: e.message };
       }

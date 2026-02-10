@@ -1,0 +1,193 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "HEMISPHERES",
+    "description": "Native structural routing: routes engine_result to hemispheres (r_null, r_inf, r_a, lobes, sink)",
+    "doc": "roadmap/MuHemispheresDesign.md",
+    "spec_ref": "North Star #7: Buckets are native routing states, not metaphors",
+    "status": "testable",
+    "execution_layer": "APPLICATION",
+    "requires_patterns": ["linear"],
+    "dependencies": [
+      "rcx_engine.v1.json (produces engine_result input)"
+    ],
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Routing decisions expressed as structural projections, not host logic",
+      "Input: route_hemisphere with engine_result and current hemispheres",
+      "Output: updated hemispheres dict with entry prepended to target hemisphere",
+      "Linear-only patterns (no bridge required)",
+      "No kernel-reserved underscore fields in intermediate state"
+    ]
+  },
+  "projections": [
+    {
+      "id": "hemisphere.init",
+      "description": "Entry point: decompose engine_result, extract value and closure_detected for classification",
+      "pattern": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": {"var": "v"},
+            "closure_detected": {"var": "c"},
+            "tau_step": {"var": "t"},
+            "exhaustion_detected": {"var": "e"},
+            "operator_frozen": {"var": "o"},
+            "frozen_set": {"var": "f"},
+            "action": {"var": "a"},
+            "stall": {"var": "s"}
+          },
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "hemi_mode": "classify",
+        "hemi_value": {"var": "v"},
+        "hemi_closure": {"var": "c"},
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.classify.null",
+      "description": "Value is null -> route to r_null (void/zero-structure)",
+      "pattern": {
+        "hemi_mode": "classify",
+        "hemi_value": null,
+        "hemi_closure": {"var": "c"},
+        "hemi_h": {"var": "h"}
+      },
+      "body": {
+        "hemi_mode": "add",
+        "hemi_target": "r_null",
+        "hemi_entry": {
+          "state": null,
+          "closure_flag": {"var": "c"},
+          "origin": "engine"
+        },
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.classify.closure",
+      "description": "Closure detected -> route to r_a (closed, stable structure)",
+      "pattern": {
+        "hemi_mode": "classify",
+        "hemi_value": {"var": "v"},
+        "hemi_closure": true,
+        "hemi_h": {"var": "h"}
+      },
+      "body": {
+        "hemi_mode": "add",
+        "hemi_target": "r_a",
+        "hemi_entry": {
+          "state": {"var": "v"},
+          "closure_flag": true,
+          "origin": "engine"
+        },
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.classify.default",
+      "description": "Default route -> lobes (emerging structure pending closure)",
+      "pattern": {
+        "hemi_mode": "classify",
+        "hemi_value": {"var": "v"},
+        "hemi_closure": {"var": "c"},
+        "hemi_h": {"var": "h"}
+      },
+      "body": {
+        "hemi_mode": "add",
+        "hemi_target": "lobes",
+        "hemi_entry": {
+          "state": {"var": "v"},
+          "closure_flag": {"var": "c"},
+          "origin": "engine"
+        },
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.add.r_null",
+      "description": "Prepend entry to r_null hemisphere list",
+      "pattern": {
+        "hemi_mode": "add",
+        "hemi_target": "r_null",
+        "hemi_entry": {"var": "entry"},
+        "hemi_h": {
+          "r_null": {"var": "existing"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "hemisphere_result": {
+          "r_null": {"head": {"var": "entry"}, "tail": {"var": "existing"}},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.add.r_a",
+      "description": "Prepend entry to r_a hemisphere list",
+      "pattern": {
+        "hemi_mode": "add",
+        "hemi_target": "r_a",
+        "hemi_entry": {"var": "entry"},
+        "hemi_h": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "existing"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "hemisphere_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"head": {"var": "entry"}, "tail": {"var": "existing"}},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.add.lobes",
+      "description": "Prepend entry to lobes hemisphere list",
+      "pattern": {
+        "hemi_mode": "add",
+        "hemi_target": "lobes",
+        "hemi_entry": {"var": "entry"},
+        "hemi_h": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "existing"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "hemisphere_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"head": {"var": "entry"}, "tail": {"var": "existing"}},
+          "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.unwrap",
+      "description": "Extract final hemispheres dict from result wrapper",
+      "pattern": {
+        "hemisphere_result": {"var": "result"}
+      },
+      "body": {"var": "result"}
+    }
+  ]
+}
