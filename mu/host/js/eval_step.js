@@ -524,9 +524,12 @@ function classifyLegacyLinkedList(value) {
       return 'list';
     }
 
-    // Cycle detection
-    // Note: Can't use object identity in same way as Python, but we can check structure
-    // For simplicity, just use depth guard as protection
+    // Cycle detection: reject cyclic structures (parity with iterNormalizedDictPairs)
+    if (visited.has(current)) {
+      return 'list';
+    }
+    visited.add(current);
+
     const keys = Object.keys(current).sort();
 
     // Must be exactly {head, tail}
@@ -1332,6 +1335,7 @@ function stepKernelStructural(domainProjections, domainInput, options = {}) {
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // BOOTSTRAP_PRIMITIVE: projection_loader
 // Load all seed files (JSON parsing is the irreducible I/O primitive)
@@ -1340,17 +1344,128 @@ const path = require('path');
 //   mu/closures/  - recurrence, exhaustion (closure detection)
 //   mu/bridge/    - bootstrap_structural (non-linear pattern support)
 //   mu/programs/  - rcx_engine, hemispheres (application programs)
+
+// Seed integrity verification — parity with Python's seed_integrity.py
+// SHA256 checksums must match Python's SEED_CHECKSUMS exactly
+const SEED_CHECKSUMS = {
+  'kernel.v1.json': '813cae10f2a7f19bd494e56e5c8cf2feaf92f32ae6988d626bca21ee01811daa',
+  'match.v2.json': '55a6b58a6c8fe31d4c3a8c704603d453fc04c1a757a45fcf7f6570afa1fe27b1',
+  'subst.v2.json': 'e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621',
+  'recurrence.v1.json': '7de48c0b8ded041ae7b681e2364ca7e7b188358fc82923cd3f53b141a5143baf',
+  'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
+  'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
+  'hemispheres.v1.json': '107b49d413102ef4cdb80662f48324e3757ebe40dcbc7c74935ca7aa1106ecfd',
+};
+
+// Expected projection IDs in security-critical order (first-match-wins)
+// Must match Python's EXPECTED_PROJECTION_IDS exactly
+const EXPECTED_PROJECTION_IDS = {
+  'kernel.v1.json': [
+    'kernel.wrap', 'kernel.stall', 'kernel.try', 'kernel.match_success',
+    'kernel.match_fail', 'kernel.subst_success', 'kernel.unwrap',
+  ],
+  'match.v2.json': [
+    'match.done', 'match.sibling', 'match.equal', 'match.var',
+    'match.typed.descend', 'match.dict.descend', 'match.fail', 'match.wrap',
+  ],
+  'subst.v2.json': [
+    'subst.done', 'subst.ascend', 'subst.sibling', 'subst.var',
+    'subst.lookup.found', 'subst.lookup.next', 'subst.typed.descend',
+    'subst.typed.sibling', 'subst.typed.ascend', 'subst.descend',
+    'subst.primitive', 'subst.wrap',
+  ],
+  'recurrence.v1.json': [
+    'recurrence.init', 'recurrence.end_of_trace', 'recurrence.check_state_stall',
+    'recurrence.check_state_maxsteps', 'recurrence.check_state',
+    'recurrence.found_in_seen', 'recurrence.not_in_head', 'recurrence.not_found',
+    'recurrence.unwrap',
+  ],
+  'exhaustion.v1.json': [
+    'exhaustion.init_null', 'exhaustion.init', 'exhaustion.find_match',
+    'exhaustion.find_continue', 'exhaustion.find_not_found', 'exhaustion.scan_same',
+    'exhaustion.scan_different', 'exhaustion.scan_end', 'exhaustion.frozen_found',
+    'exhaustion.frozen_check_tail', 'exhaustion.do_freeze',
+  ],
+  'bootstrap_structural.v1.json': [
+    'bridge.var.check_existing', 'bridge.lookup.found_same',
+    'bridge.lookup.found_different', 'bridge.lookup.not_found_yet',
+    'bridge.lookup.not_found',
+  ],
+  'hemispheres.v1.json': [
+    'hemisphere.init', 'hemisphere.classify.null', 'hemisphere.classify.closure',
+    'hemisphere.classify.default', 'hemisphere.add.r_null', 'hemisphere.add.r_a',
+    'hemisphere.add.lobes', 'hemisphere.unwrap',
+  ],
+};
+
+function verifySeedChecksum(seedName, rawContent) {
+  const expected = SEED_CHECKSUMS[seedName];
+  if (!expected) return; // Unknown seed — skip (matches Python behavior)
+  const actual = crypto.createHash('sha256').update(rawContent).digest('hex');
+  if (actual !== expected) {
+    throw new Error(
+      `Seed ${seedName} checksum mismatch: expected ${expected}, got ${actual}`
+    );
+  }
+}
+
+function validateSeedStructure(seedName, seed) {
+  if (!seed.meta || typeof seed.meta !== 'object') {
+    throw new Error(`Seed ${seedName}: missing or invalid 'meta' field`);
+  }
+  if (!Array.isArray(seed.projections)) {
+    throw new Error(`Seed ${seedName}: missing or invalid 'projections' field`);
+  }
+  for (let i = 0; i < seed.projections.length; i++) {
+    const proj = seed.projections[i];
+    if (!proj.id || !proj.pattern || !proj.body) {
+      throw new Error(
+        `Seed ${seedName}: projection ${i} missing required field (id/pattern/body)`
+      );
+    }
+  }
+}
+
+function validateProjectionIds(seedName, seed) {
+  const expected = EXPECTED_PROJECTION_IDS[seedName];
+  if (!expected) return; // Unknown seed — skip
+  const actualIds = seed.projections.map(p => p.id);
+  // Enforce exact ordered equality — projection order is security-critical
+  if (actualIds.length !== expected.length) {
+    throw new Error(
+      `Seed ${seedName}: expected ${expected.length} projections, got ${actualIds.length}`
+    );
+  }
+  for (let i = 0; i < expected.length; i++) {
+    if (actualIds[i] !== expected[i]) {
+      throw new Error(
+        `Seed ${seedName}: projection order mismatch at index ${i}: ` +
+        `expected '${expected[i]}', got '${actualIds[i]}'`
+      );
+    }
+  }
+}
+
+function loadVerifiedSeed(seedPath, seedName) {
+  const raw = fs.readFileSync(seedPath, 'utf8');
+  verifySeedChecksum(seedName, raw);
+  const seed = JSON.parse(raw);
+  validateSeedStructure(seedName, seed);
+  validateProjectionIds(seedName, seed);
+  return seed;
+}
+
 const substrateDir = path.join(__dirname, '..', '..', 'substrate');
 const closuresDir = path.join(__dirname, '..', '..', 'closures');
 const bridgeDir = path.join(__dirname, '..', '..', 'bridge');
 const programsDir = path.join(__dirname, '..', '..', 'programs');
-const kernel = JSON.parse(fs.readFileSync(path.join(substrateDir, 'kernel.v1.json'), 'utf8'));
-const matchSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'match.v2.json'), 'utf8'));
-const substSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'subst.v2.json'), 'utf8'));
-const recurrenceSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'recurrence.v1.json'), 'utf8'));
-const exhaustionSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'exhaustion.v1.json'), 'utf8'));
-const bridgeSeed = JSON.parse(fs.readFileSync(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'utf8'));
-const hemisphereSeed = JSON.parse(fs.readFileSync(path.join(programsDir, 'hemispheres.v1.json'), 'utf8'));
+const kernel = loadVerifiedSeed(path.join(substrateDir, 'kernel.v1.json'), 'kernel.v1.json');
+const matchSeed = loadVerifiedSeed(path.join(substrateDir, 'match.v2.json'), 'match.v2.json');
+const substSeed = loadVerifiedSeed(path.join(substrateDir, 'subst.v2.json'), 'subst.v2.json');
+const recurrenceSeed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v1.json'), 'recurrence.v1.json');
+const exhaustionSeed = loadVerifiedSeed(path.join(closuresDir, 'exhaustion.v1.json'), 'exhaustion.v1.json');
+const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'bootstrap_structural.v1.json');
+const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -1417,6 +1532,7 @@ const allProjectionsWithExhaustionAndBridge = [
 ];
 
 console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
+console.log('Seed integrity: 7 seeds verified (checksum + structure + projection order)');
 console.log(`Loaded projections from mu/ folder:`);
 console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
@@ -2065,6 +2181,28 @@ console.log(`  8. Security parity with Python (5 bootstrap primitives) ✓`);
 console.log(`  9. Recurrence closure detection parity ✓`);
 console.log(`  10. Same projections, same semantics, two substrates ✓`);
 
+/**
+ * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
+ * Shared helper for run_recurrence_with_bridge and run_exhaustion_with_bridge JSON API actions.
+ * @host_iteration (bridge-backed algorithm execution loop)
+ */
+function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
+  let current = input;
+  let steps = 0;
+  const limit = maxSteps || 200;
+  while (steps < limit) {
+    const wrapped = stepKernel(
+      allProjs, current, domainProjs,
+      { validationMode: 'algorithm_runtime' }
+    );
+    const next = denormalize(wrapped.result);
+    if (muEqual(current, next)) break;
+    current = next;
+    steps++;
+  }
+  return current;
+}
+
 // =============================================================================
 // JSON API Mode (for cross-substrate verification)
 // =============================================================================
@@ -2160,6 +2298,8 @@ if (process.argv.includes('--json-api')) {
         MAX_DEPTH,
         max_width: MAX_MU_WIDTH,  // Added for Tooling Delta parity check
         KERNEL_RESERVED_FIELDS: [...KERNEL_RESERVED_FIELDS],
+        seed_integrity_verified: true,
+        seed_count: Object.keys(SEED_CHECKSUMS).length,
         kernel_projection_count: kernel.projections.length,
         match_projection_count: matchSeed.projections.length,
         subst_projection_count: substSeed.projections.length,
@@ -2201,22 +2341,8 @@ if (process.argv.includes('--json-api')) {
       // Run Recurrence with bridge (meta-circular path)
       const { input, maxSteps } = request;
       try {
-        let current = input;
-        let steps = 0;
-        const limit = maxSteps || 200;
-        while (steps < limit) {
-          const wrapped = stepKernel(
-            allProjectionsWithBridge,
-            current,
-            recurrenceProjections,
-            { validationMode: 'algorithm_runtime' }
-          );
-          const next = denormalize(wrapped.result);
-          if (muEqual(current, next)) break;
-          current = next;
-          steps++;
-        }
-        response = { success: true, result: current };
+        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, recurrenceProjections, maxSteps);
+        response = { success: true, result };
       } catch (e) {
         response = { success: false, error: e.message };
       }
@@ -2224,22 +2350,8 @@ if (process.argv.includes('--json-api')) {
       // Run Exhaustion with bridge (meta-circular path)
       const { input, maxSteps } = request;
       try {
-        let current = input;
-        let steps = 0;
-        const limit = maxSteps || 200;
-        while (steps < limit) {
-          const wrapped = stepKernel(
-            allProjectionsWithBridge,
-            current,
-            exhaustionProjections,
-            { validationMode: 'algorithm_runtime' }
-          );
-          const next = denormalize(wrapped.result);
-          if (muEqual(current, next)) break;
-          current = next;
-          steps++;
-        }
-        response = { success: true, result: current };
+        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, exhaustionProjections, maxSteps);
+        response = { success: true, result };
       } catch (e) {
         response = { success: false, error: e.message };
       }

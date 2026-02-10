@@ -308,36 +308,22 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
     projections = seed.get("projections", [])
     actual_ids = [p.get("id") for p in projections]  # AST_OK: infra
 
-    # Check all expected IDs are present
-    missing = set(expected) - set(actual_ids)
-    if missing:
+    # Enforce exact ordered equality — projection order is security-critical
+    # (first-match-wins means reordering changes routing semantics)
+    if actual_ids != expected:
+        missing = set(expected) - set(actual_ids)
+        extra = set(actual_ids) - set(expected)
+        if missing or extra:
+            raise ValueError(
+                f"Seed {seed_name} projection ID mismatch: "
+                f"missing={missing or 'none'}, extra={extra or 'none'}"
+            )
+        # Same IDs but wrong order
         raise ValueError(
-            f"Seed {seed_name} missing expected projection IDs: {missing}"
+            f"Seed {seed_name} projection order mismatch "
+            f"(order is security-critical): "
+            f"expected {expected}, got {actual_ids}"
         )
-
-    # Check wrap projection is last (catch-all) for match/subst/classify seeds
-    # Kernel seeds have different structure: wrap is entry point, unwrap is exit
-    if seed_name != "kernel.v1.json":
-        wrap_id = [eid for eid in expected if eid.endswith(".wrap")]  # AST_OK: infra
-        if wrap_id:
-            wrap_id = wrap_id[0]
-            if actual_ids[-1] != wrap_id:
-                raise ValueError(
-                    f"Seed {seed_name}: '{wrap_id}' must be last projection "
-                    f"(catch-all), but last is '{actual_ids[-1]}'"
-                )
-    else:
-        # Kernel seeds: wrap is first (entry), unwrap is last (exit)
-        if actual_ids[0] != "kernel.wrap":
-            raise ValueError(
-                f"Seed {seed_name}: 'kernel.wrap' must be first projection "
-                f"(entry point), but first is '{actual_ids[0]}'"
-            )
-        if actual_ids[-1] != "kernel.unwrap":
-            raise ValueError(
-                f"Seed {seed_name}: 'kernel.unwrap' must be last projection "
-                f"(exit point), but last is '{actual_ids[-1]}'"
-            )
 
 
 # =============================================================================
@@ -389,18 +375,6 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
         validate_projection_ids(seed_name, seed)
 
     return seed
-
-
-def get_seeds_dir() -> Path:
-    """Get the seeds directory path (DEPRECATED - use get_seed_path instead)."""
-    import warnings
-    warnings.warn(
-        "get_seeds_dir() is deprecated. Use get_seed_path(seed_name) instead. "
-        "mu/ is now the canonical location for seeds.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    return Path(__file__).parent.parent.parent / "seeds"
 
 
 def get_mu_dir() -> Path:

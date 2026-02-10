@@ -201,7 +201,7 @@ class TestProjectionIdValidation:
                 # Missing other expected IDs
             ]
         }
-        with pytest.raises(ValueError, match="missing expected projection IDs"):
+        with pytest.raises(ValueError, match="projection ID mismatch"):
             validate_projection_ids("match.v1.json", seed)
 
     def test_wrap_not_last_fails(self):
@@ -217,7 +217,7 @@ class TestProjectionIdValidation:
                 {"id": "match.dict.descend", "pattern": {}, "body": {}},
             ]
         }
-        with pytest.raises(ValueError, match="must be last"):
+        with pytest.raises(ValueError, match="projection order mismatch"):
             validate_projection_ids("match.v1.json", seed)
 
     def test_unknown_seed_skips_validation(self):

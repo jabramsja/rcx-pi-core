@@ -327,8 +327,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 38 (added iteration guards in match_mu.py: adversary #1031/#1032)
-    assert infra_count == 38, (
-        f"Expected 38 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 37 (removed deprecated get_seeds_dir + simplified validate_projection_ids)
+    assert infra_count == 37, (
+        f"Expected 37 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
