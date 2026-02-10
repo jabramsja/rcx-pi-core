@@ -10,7 +10,7 @@
 
 ```
 PHASE: 8c
-NAME: Gate 5 Meta-Circular Parity (Stabilization)
+NAME: Gate 5 Meta-Circular Parity (COMPLETE)
 ```
 
 ## Projection-Based Architecture Levels
@@ -607,16 +607,17 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-09 (B-structural match_mu: match.v2 + bridge for non-linear pattern support; fail-closed step_mu/run_mu guard)
-**Next milestone:** Gate 5 - Meta-Circular Parity
+**Last updated:** 2026-02-09 (Gate 5 COMPLETE: meta-circular parity verified, all 56 exit criteria tests pass)
+**Next milestone:** Hemisphere implementation (unblocked by Gate 5 closure)
 
 **Gate Snapshot (Canonical):**
 - Gate 3: COMPLETE (2026-02-07)
 - Gate 4: COMPLETE (2026-02-07 structural cutover)
-- Gate 5: IN_PROGRESS (parity verification and cleanup)
-  - Dedicated Gate 5 suite: `tests/structural/test_gate5_meta_circular_parity.py`
-  - Runtime parity fix complete (2026-02-08): `run_mu_structural()` now executes through `step_kernel_mu(..., kernel_mode="bridge")`
-  - JS parity fix (2026-02-08): `runStructural()` now routes through `stepKernel(allProjectionsWithBridge)` instead of direct `match()`/`substitute()`
+- Gate 5: COMPLETE (2026-02-09 meta-circular parity verified)
+  - 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
+  - Structural execution is default; bootstrap is explicit fallback only
+  - Cross-substrate parity intact (Python + JS, all 47 core projections)
+  - B-structural match_mu (match.v2 + bridge) provides non-linear pattern support
 
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR
