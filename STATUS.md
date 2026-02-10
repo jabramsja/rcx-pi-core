@@ -284,7 +284,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:148 - constant definition (AST_OK: infra)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 38 (current 38)
+- AST_OK:infra ceiling: 38 (current 37)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 

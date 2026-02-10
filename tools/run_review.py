@@ -216,7 +216,7 @@ AGENT_MAX_TURNS = {
     "structural-proof": 20,
     "grounding": 18,
     "fuzzer": 20,
-    "translator": 15,
+    "translator": 20,
     "visualizer": 15,
     "advisor": 18,
 }

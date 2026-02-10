@@ -816,7 +816,7 @@ def dict_to_bindings(d: dict[str, Mu]) -> Mu:
 # =============================================================================
 
 # v1 runner (legacy, used by load_match_projections / match.v1.json)
-is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
+is_match_done, _, run_match_projections = make_projection_runner("match")
 
 # v2 runner (bridge-aware, uses _mode terminal field for match.v2 + bridge)
 is_match_done_v2, _, run_match_bridge = make_projection_runner("match", terminal_field="_mode")

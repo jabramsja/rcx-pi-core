@@ -49,7 +49,7 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
         Tuple of (is_done, is_state, run_projections) functions
 
     Example:
-        is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
+        is_match_done, _, run_match_projections = make_projection_runner("match")
         result, steps, is_stall = run_match_projections(projections, initial_state)
 
         # For v2 projections with _mode terminal field:
