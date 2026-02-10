@@ -2,9 +2,9 @@
 
 > **Current State**: See [`STATUS.md`](../STATUS.md)
 > **Authorization**: See [`TASKS.md`](../TASKS.md)
-> **Scope**: This document defines DESIGN only. Implementation blocked until Gate 5 exit criteria met.
+> **Scope**: This document defines DESIGN only. Gate 5 blocker resolved (2026-02-09). Promotion to NEXT requires locked semantics.
 
-Status: design-only. Implementation is blocked until the normalization refactor is complete.
+Status: design-only. Gate 5 exit criteria met — implementation unblocked pending promotion.
 
 ## Purpose
 Define native structural routing states for RCX: `r_null`, `r_inf`, `r_a`, `lobes`, and `sink`. Routing must be expressed as Mu projections, not host logic.

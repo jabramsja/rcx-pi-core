@@ -2,6 +2,47 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-09
+
+### Gate 5 CLOSED: Meta-Circular Parity Verified
+
+- **Gates 1-5 ALL COMPLETE** — hemisphere implementation unblocked
+- 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
+- Structural execution is default; bootstrap is explicit fallback only
+- Cross-substrate parity intact (Python + JS, all 47 core projections)
+- Updated consistency tests to handle all-gates-complete state
+
+### B-Structural Non-Linear Match
+
+- `match_mu()` now uses match.v2 + bridge projections directly via `projection_runner`
+- Non-linear pattern conflict detection: `apply_mu({a:{var:x}, b:{var:x}}, {a:1, b:2})` → NO_MATCH
+- `projection_runner.make_projection_runner()` extended with `terminal_field` parameter
+- `load_match_with_bridge_projections()` loads and caches 13 combined projections (8 match.v2 + 5 bridge)
+- Fail-closed guard: `step_mu()`/`run_mu()` reject non-linear patterns with ValueError
+- 18 structural invariant tests + non-linear Hypothesis strategies
+
+### 9-Agent Rigorous Tooling Hardening (PR #219)
+
+- `--rigorous` now overrides depth to "all" (runs all 9 agents, was only running 6)
+- Reasoning validation + skeptic always run, even on compliance failures
+- `validate_agent_reasoning.py` regex fixed for `### CHECKED` markdown format
+- 5 fuzzer test files from agent findings #1017-#1021 (88 property-based tests)
+- Shared Hypothesis strategies extracted to `tests/strategies.py`
+- Iteration guards in `match_mu.py` (bindings_to_dict, denormalize_from_match)
+
+### Gate 5 Compliance/Severity Split (PR #221)
+
+- JS Gate 5 parity: `runStructural()` routes through `stepKernel(allProjectionsWithBridge)`
+- Prototype pollution hardened in JS substrate
+- Compliance severity split for agent validation tooling
+
+## 2026-02-08
+
+### Gate 5 Runtime Parity Fix (PR #221)
+
+- `run_mu_structural()` now executes through `step_kernel_mu(..., kernel_mode="bridge")`
+- JS parity fix: `runStructural()` routes through `stepKernel(allProjectionsWithBridge)`
+
 ## 2026-02-07
 
 ### Gate 4: Structural Runtime Cutover + Doc/Parity Sync
