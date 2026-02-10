@@ -105,12 +105,18 @@ def test_gate_snapshot_matches_between_status_and_tasks() -> None:
     required_snapshot_lines = (
         "Gate 3: COMPLETE",
         "Gate 4: COMPLETE",
-        "Gate 5: IN_PROGRESS",
     )
 
     for line in required_snapshot_lines:
         assert line in status_text, f"STATUS.md missing gate snapshot line: {line}"
         assert line in tasks_text, f"TASKS.md missing gate snapshot line: {line}"
+
+    # Gate 5 must be either IN_PROGRESS or COMPLETE, and must match
+    gate5_status = "COMPLETE" if "Gate 5: COMPLETE" in status_text else "IN_PROGRESS"
+    gate5_tasks = "COMPLETE" if "Gate 5: COMPLETE" in tasks_text else "IN_PROGRESS"
+    assert gate5_status == gate5_tasks, (
+        f"Gate 5 state mismatch: STATUS={gate5_status}, TASKS={gate5_tasks}"
+    )
 
 
 def test_status_current_phase_name_matches_active_gate_snapshot() -> None:
@@ -129,18 +135,23 @@ def test_status_current_phase_name_matches_active_gate_snapshot() -> None:
     active_gate_match = re.search(
         r"^\-\s*Gate\s+(\d+):\s*IN_PROGRESS\b", status_text, re.MULTILINE
     )
-    assert active_gate_match, (
-        "STATUS.md must include one active gate line in Gate Snapshot "
-        "(e.g., '- Gate 5: IN_PROGRESS')."
-    )
-    active_gate = active_gate_match.group(1)
 
-    assert f"Gate {active_gate}" in phase_name, (
-        "STATUS.md Current Phase NAME does not match active gate snapshot.\n"
-        f"  active gate: Gate {active_gate}\n"
-        f"  phase name:  {phase_name}\n"
-        "Update NAME to include the active gate."
-    )
+    if active_gate_match:
+        # There's an active gate — phase name must reference it
+        active_gate = active_gate_match.group(1)
+        assert f"Gate {active_gate}" in phase_name, (
+            "STATUS.md Current Phase NAME does not match active gate snapshot.\n"
+            f"  active gate: Gate {active_gate}\n"
+            f"  phase name:  {phase_name}\n"
+            "Update NAME to include the active gate."
+        )
+    else:
+        # All L2/L3 gates complete — phase name should reflect completion
+        assert "COMPLETE" in phase_name or "complete" in phase_name.lower(), (
+            "All gates are COMPLETE but STATUS.md phase NAME doesn't reflect this.\n"
+            f"  phase name: {phase_name}\n"
+            "Update NAME to indicate completion."
+        )
 
 
 def test_tasks_next_section_has_active_work_only() -> None:
@@ -178,7 +189,10 @@ def test_tasks_next_section_has_active_work_only() -> None:
         f"Matched patterns: {stale_hits}"
     )
 
-    assert re.search(r"^\-\s*\[\s\]\s+", next_section, re.MULTILINE), (
-        "TASKS.md NEXT should contain at least one active unchecked task "
-        "('- [ ] ...')."
+    # NEXT can be empty when all gates are complete and no follow-up work remains
+    has_active_tasks = re.search(r"^\-\s*\[\s\]\s+", next_section, re.MULTILINE)
+    has_empty_marker = "No active items" in next_section
+    assert has_active_tasks or has_empty_marker, (
+        "TASKS.md NEXT should contain either active unchecked tasks "
+        "('- [ ] ...') or an explicit empty marker ('No active items')."
     )

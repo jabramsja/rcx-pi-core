@@ -280,6 +280,13 @@ Items here are implemented and verified under current invariants. Changes requir
   - 18 structural invariant tests in `tests/structural/test_match_bridge_invariants.py`
   - Non-linear Hypothesis strategies + 2 fuzzer tests in `test_apply_mu_fuzzer.py`
   - All deadlines at original 5000ms (no inflation needed)
+- Gate 5 Meta-Circular Parity CLOSED (2026-02-09):
+  - 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
+  - Structural execution is default for recurrence/exhaustion on both substrates
+  - Bootstrap execution is explicit fallback-only (requires `execution_mode="bootstrap", allow_bootstrap_fallback=True`)
+  - Cross-substrate parity intact: all 47 core projections run identically on Python and JS
+  - B-structural match_mu provides non-linear pattern support via match.v2 + bridge
+  - Gates 1-5 ALL COMPLETE — hemisphere implementation unblocked
 
 ---
 
@@ -302,28 +309,15 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-1. Close Gate 5 parity and stabilization:
-- [ ] Keep structural execution as default for recurrence/exhaustion in Python and JS.
-- [ ] Keep bootstrap execution as explicit fallback-only path.
-- [ ] Keep `tests/structural/test_gate5_meta_circular_parity.py` green.
-- [ ] Keep `tests/test_execution_path_verification.py` green (trace path == runtime path).
-- [ ] Keep `tests/test_js_parity_automated.py` green (cross-substrate parity).
-
-2. Canonical tracker discipline:
-- [ ] When Gate 5 is closed, update Gate Snapshot in `STATUS.md` and `TASKS.md` in the same change.
-- [ ] Keep roadmap documents sequence-only; state changes belong in canonical trackers only.
-
-3. Historical note:
-- Phase 7 and Phase 8 implementation history is complete and retained in `Ra` and `STATUS.md`.
-- This NEXT section now tracks only active follow-up work.
+*(No active items — Gate 5 closed, hemisphere implementation unblocked)*
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)
 - Gate 4: COMPLETE (2026-02-07 structural cutover)
-- Gate 5: IN_PROGRESS (parity verification and cleanup)
-  - Dedicated Gate 5 suite: `tests/structural/test_gate5_meta_circular_parity.py`
-  - Runtime parity fix complete (2026-02-08): `run_mu_structural()` now executes via `step_kernel_mu(..., kernel_mode="bridge")`
-  - JS parity fix (2026-02-08): `runStructural()` routes through `stepKernel(allProjectionsWithBridge)`, prototype pollution hardened (PR #222)
+- Gate 5: COMPLETE (2026-02-09 meta-circular parity verified)
+  - 56 exit criteria tests: 9 gate5 parity + 17 execution path + 30 JS parity
+  - Structural execution default; bootstrap explicit fallback only
+  - Cross-substrate parity intact (Python + JS, all 47 core projections)
   - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")` on production path.
 
 Current Recurrence Layer: META_CIRCULAR
