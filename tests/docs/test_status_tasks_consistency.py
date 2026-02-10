@@ -111,7 +111,14 @@ def test_gate_snapshot_matches_between_status_and_tasks() -> None:
         assert line in status_text, f"STATUS.md missing gate snapshot line: {line}"
         assert line in tasks_text, f"TASKS.md missing gate snapshot line: {line}"
 
-    # Gate 5 must be either IN_PROGRESS or COMPLETE, and must match
+    # Gate 5 must exist in both files and be either IN_PROGRESS or COMPLETE
+    for label, text in (("STATUS.md", status_text), ("TASKS.md", tasks_text)):
+        assert "Gate 5: COMPLETE" in text or "Gate 5: IN_PROGRESS" in text, (
+            f"{label} missing Gate 5 snapshot line "
+            "(expected 'Gate 5: COMPLETE' or 'Gate 5: IN_PROGRESS')."
+        )
+
+    # Gate 5 state must match between the two trackers
     gate5_status = "COMPLETE" if "Gate 5: COMPLETE" in status_text else "IN_PROGRESS"
     gate5_tasks = "COMPLETE" if "Gate 5: COMPLETE" in tasks_text else "IN_PROGRESS"
     assert gate5_status == gate5_tasks, (
