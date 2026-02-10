@@ -28,7 +28,7 @@
 
 | Gates | Level | Scope | Status |
 |-------|-------|-------|--------|
-| 1, 0, 2-5 | L2/L3 | Structural algorithm execution | ACTIVE |
+| 1, 0, 2-5 | L2/L3 | Structural algorithm execution | COMPLETE (2026-02-09) |
 | 6-8 | L4 | Boot chain / substrate independence | PARKED |
 
 **Rationale:** Spec (Gate 1) first; baseline freeze (Gate 0) immediately before code changes.

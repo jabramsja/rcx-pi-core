@@ -14,18 +14,17 @@ Read first:
 5. `roadmap/MetaCircular_Boot0_GatePlan.md`
 6. `roadmap/MuHemispheresDesign.md`
 
-**Now (9-agent reviewed 2026-02-04)**
-1. Gate 1, Gate 0, Gate 2, Gate 3, and Gate 4 are complete. Keep this reflected in canonical trackers (`STATUS.md`, `TASKS.md`).
-2. Run Gate 5 parity verification and cleanup against the Gate 4 structural-default runtime.
-3. Keep hemisphere implementation blocked until Gate 5 completes. Design-only work is still allowed.
+**Now (updated 2026-02-09)**
+1. Gates 1-5 ALL COMPLETE. Canonical trackers (`STATUS.md`, `TASKS.md`) reflect this.
+2. Hemisphere implementation is unblocked. Promote from VECTOR to NEXT when ready.
+3. Keep Gate 4/5 guarantees intact: structural default active, bootstrap explicit fallback only.
 
 **Next**
-1. Execute Gate 5 (meta-circular parity) per `roadmap/MetaCircular_Boot0_GatePlan.md`.
-2. Keep Gate 4 guarantees intact: structural default remains active and bootstrap path stays explicit fallback-only.
-3. After Gate 5, hemisphere implementation may proceed.
+1. Promote hemisphere design (`roadmap/MuHemispheresDesign.md`) to NEXT when semantics are locked.
+2. Keep all L2/L3 invariants intact (structural execution default, cross-substrate parity).
 
 **Vector (Design Only)**
-1. Mu-only hemisphere routing design in `roadmap/MuHemispheresDesign.md`. This is blocked on completion of the normalization refactor. No implementation until Gate 5 exit criteria are met.
+1. Mu-only hemisphere routing design in `roadmap/MuHemispheresDesign.md`. Gate 5 blocker resolved — ready for promotion when design is locked.
 2. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
 
 **Sink (Parked)**
