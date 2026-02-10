@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "eval.v1.json": "22232b172f883271845d013d8e39b1b75555bd94899deb8276548c5f0d10f53e",
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
     "hemispheres.v1.json": "107b49d413102ef4cdb80662f48324e3757ebe40dcbc7c74935ca7aa1106ecfd",
+    # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
+    "paxos_demo.v1.json": "cc2c36db7613190ab118df3f2ac18180801d8e49a958fcd621c83b5c081be624",
 }
 
 # Expected projection IDs for each seed.
@@ -191,6 +194,14 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "ascend.to_root",       # ASCEND when context empty -> root_check
         "wrap",                 # Entry point - wrap raw value into state
     ],
+    # Paxos demo: consensus demonstration
+    "paxos_demo.v1.json": [
+        "paxos.init",
+        "paxos.vote_a",
+        "paxos.reject_b",
+        "paxos.reject_a",
+        "healer.detect_deadlock",
+    ],
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
     "hemispheres.v1.json": [
         "hemisphere.init",              # Entry: decompose engine_result
@@ -201,6 +212,13 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "hemisphere.add.r_a",           # Prepend entry to r_a
         "hemisphere.add.lobes",         # Prepend entry to lobes
         "hemisphere.unwrap",            # Extract final result
+    ],
+    "paxos_demo.v1.json": [
+        "paxos.init",
+        "paxos.vote_a",
+        "paxos.reject_b",
+        "paxos.reject_a",
+        "healer.detect_deadlock",
     ],
 }
 
@@ -225,6 +243,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     # Programs
     "rcx_engine.v1.json": "programs",
     "hemispheres.v1.json": "programs",
+    "paxos_demo.v1.json": "programs",
 }
 
 
@@ -324,7 +343,11 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
         ValueError: If expected projections are missing or wrap isn't last.
     """
     if seed_name not in EXPECTED_PROJECTION_IDS:
-        # Unknown seed - skip projection ID check
+        warnings.warn(
+            f"Seed {seed_name} has no entry in EXPECTED_PROJECTION_IDS — "
+            f"projection ordering is NOT validated. Register it for fail-closed security.",
+            stacklevel=2,
+        )
         return
 
     expected = EXPECTED_PROJECTION_IDS[seed_name]

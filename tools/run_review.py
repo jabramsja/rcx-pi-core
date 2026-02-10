@@ -501,7 +501,9 @@ class ReviewOrchestrator:
             file_context = get_context_for_files(self.files)
             pattern_context = get_pattern_context()
             if file_context or pattern_context:
-                memory_context = file_context + pattern_context
+                memory_context = sanitize_for_prompt(
+                    file_context + pattern_context, max_len=4000
+                )
 
         # Build retry feedback section if this is a retry
         retry_section = ""
