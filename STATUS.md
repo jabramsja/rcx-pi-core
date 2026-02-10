@@ -80,7 +80,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - The SAME projections (all 4 seed files) run on Python AND JavaScript
 - All semantics are in the projections (data), not the host (code)
 - The host provides only mechanical execution (the 5 bootstrap primitives)
-- EngineNews closure detection works identically on both substrates
+- Recurrence closure detection works identically on both substrates
 
 **L3 Parity Requirement (MANDATORY - North Star #13):**
 - Any change to Python projection behavior MUST be mirrored in JavaScript
@@ -264,13 +264,13 @@ INFRA_CURRENT: 38
 The `match()` and `substitute()` in eval_seed.py are NOT "reference implementations" - they ARE the bootstrap primitives that `eval_step()` uses to apply ANY projection. The production path is:
 1. `step_kernel_mu()` → `eval_step()` (on kernel.v1 + match.v2 + subst.v2)
 2. `eval_step()` → `apply_projection()` → `match()` + `substitute()` (eval_seed.py)
-3. `run_mu_structural()` → structural trace for EngineNews (Phase 8d)
+3. `run_mu_structural()` → structural trace for Recurrence (Phase 8d)
 4. `run_algorithm_meta_circular()` → trusted algorithm execution (recurrence, exhaustion)
 
 These cannot be eliminated because:
 - eval_step needs to apply projections (pattern match + substitute)
 - match_mu/subst_mu use eval_step to apply THEIR projections
-- run_mu_structural provides trace accumulation for EngineNews
+- run_mu_structural provides trace accumulation for Recurrence
 - run_algorithm_meta_circular runs trusted internal algorithms through eval_step
 - Circular dependency: eliminating them would require eval_step to not exist
 
@@ -396,9 +396,9 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Step 2 DONE: Cross-substrate parity tests - 20 vectors pass on both Python and JS
 - Step 3 DONE: Phase 8d trace model in Python - run_mu_structural() + 14 tests
 - Step 4 DONE: Port trace to JS POC - runStructural() + 5 tests
-- Step 5 DONE: EngineNews structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
+- Step 5 DONE: Recurrence structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
 
-**Step 5 EngineNews Implementation (2026-01-30):**
+**Step 5 Recurrence Implementation (2026-01-30):**
 - Created `mu/closures/recurrence.v1.json` with 9 projections for structural closure detection
 - Implements Rule 2.2 (Closure-on-Second-Demand) via pattern matching on traces
 - Closure detection uses non-linear patterns (same var twice) for state equality
@@ -446,8 +446,8 @@ Addressed findings from comprehensive 7-agent adversarial peer review:
 - Tests run_mu_structural() for: termination, structure validity, trace format, stall detection, determinism, oscillation detection
 - Added to CRITICAL_TEST_FILES (cannot be silently skipped)
 
-**CRITICAL: EngineNews Must Be Structural (2026-01-30):**
-Step 5 (EngineNews Demo) requires that EngineNews rules are expressed as Mu projections,
+**CRITICAL: Recurrence Must Be Structural (2026-01-30):**
+Step 5 (Recurrence Demo) requires that Recurrence rules are expressed as Mu projections,
 NOT Python code. Closure detection must be pattern matching on traces, not Python loops.
 This is essential for structural honesty - emergence must be attributable to RCX dynamics,
 not "Python did it". See TASKS.md Step 5 for concrete success criteria.
@@ -547,7 +547,7 @@ All 5 bootstrap primitives marked with `# BOOTSTRAP_PRIMITIVE`:
 
 **Document updated with:**
 - Scope and Self-Hosting Levels section
-- EngineNews Compatibility section
+- Recurrence Compatibility section
 - Hidden/Implicit Primitives section
 - Known Limitations section
 
@@ -661,7 +661,7 @@ New organized structure makes architecture visible:
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
 4. ✅ Ported trace to JS (runStructural in mu/host/js/eval_step.js)
-5. ✅ EngineNews structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
+5. ✅ Recurrence structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
 6. ✅ Operator Exhaustion (mu/closures/exhaustion.v1.json, 11 projections)
 
 **L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.
@@ -675,7 +675,7 @@ New organized structure makes architecture visible:
 - [x] hemispheres.v1.json: 8 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
 - [x] Total: 47 core projections across 5 L3-complete seeds + 8 hemisphere projections
 - [x] Additional: 51 projections in utilities/programs/bridge (98 total across all mu/)
-- [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
+- [x] 5 Recurrence + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**
 - Location: `mu/bridge/bootstrap_structural.v1.json` (5 projections)

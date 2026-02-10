@@ -114,7 +114,6 @@ def load_match_with_bridge_projections() -> list[Mu]:
     """
     global _match_bridge_cache
     if _match_bridge_cache is not None:
-        _validate_match_bridge_ordering(_match_bridge_cache)
         return _match_bridge_cache
 
     from .seed_integrity import load_verified_seed, get_seed_path
