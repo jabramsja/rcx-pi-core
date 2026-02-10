@@ -111,3 +111,74 @@ def test_gate_snapshot_matches_between_status_and_tasks() -> None:
     for line in required_snapshot_lines:
         assert line in status_text, f"STATUS.md missing gate snapshot line: {line}"
         assert line in tasks_text, f"TASKS.md missing gate snapshot line: {line}"
+
+
+def test_status_current_phase_name_matches_active_gate_snapshot() -> None:
+    """
+    STATUS.md "Current Phase" must align with the active IN_PROGRESS gate snapshot.
+
+    Prevents drift where the phase header remains on an old milestone while
+    canonical gate snapshot has advanced.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+
+    phase_name_match = re.search(r"^NAME:\s*(.+)$", status_text, re.MULTILINE)
+    assert phase_name_match, "STATUS.md must include 'NAME:' in Current Phase block."
+    phase_name = phase_name_match.group(1).strip()
+
+    active_gate_match = re.search(
+        r"^\-\s*Gate\s+(\d+):\s*IN_PROGRESS\b", status_text, re.MULTILINE
+    )
+    assert active_gate_match, (
+        "STATUS.md must include one active gate line in Gate Snapshot "
+        "(e.g., '- Gate 5: IN_PROGRESS')."
+    )
+    active_gate = active_gate_match.group(1)
+
+    assert f"Gate {active_gate}" in phase_name, (
+        "STATUS.md Current Phase NAME does not match active gate snapshot.\n"
+        f"  active gate: Gate {active_gate}\n"
+        f"  phase name:  {phase_name}\n"
+        "Update NAME to include the active gate."
+    )
+
+
+def test_tasks_next_section_has_active_work_only() -> None:
+    """
+    TASKS.md NEXT section should track active work, not completed history dumps.
+
+    Historical implementation detail belongs in Ra/STATUS, not in NEXT.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    next_match = re.search(
+        r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
+        tasks_text,
+        re.DOTALL,
+    )
+    assert next_match, "Could not isolate TASKS.md NEXT section."
+    next_section = next_match.group(1)
+
+    stale_patterns = (
+        r"\[x\]",                         # completed checklist items
+        r"\(DONE\s+\d{4}-\d{2}-\d{2}\)",  # dated done markers
+        r"\b✅\b",                         # checkmark history style
+        r"Promoted from VECTOR",          # historical progression detail
+        r"All blockers resolved",         # postmortem wording
+        r"### Step \d+:",                 # completed migration-plan dump style
+    )
+
+    stale_hits = []
+    for pat in stale_patterns:
+        if re.search(pat, next_section):
+            stale_hits.append(pat)
+
+    assert not stale_hits, (
+        "TASKS.md NEXT contains stale completed-history markers. "
+        "Keep NEXT focused on active follow-up work.\n"
+        f"Matched patterns: {stale_hits}"
+    )
+
+    assert re.search(r"^\-\s*\[\s\]\s+", next_section, re.MULTILINE), (
+        "TASKS.md NEXT should contain at least one active unchecked task "
+        "('- [ ] ...')."
+    )

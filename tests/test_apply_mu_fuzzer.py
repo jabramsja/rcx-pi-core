@@ -20,9 +20,12 @@ Test Infrastructure Note:
 Known Limitations Tested:
     - Empty collections ([], {}) normalize to None in Mu representation
     - Head/tail dict structures can collide with user data having those keys
-    - Non-linear patterns (same var twice) don't check binding conflicts in Mu
-    These are documented design decisions or known gaps. Tests skip these cases
+    These are documented design decisions. Tests skip these cases
     for parity checks but verify the core properties still hold.
+
+    Non-linear patterns (same var twice) are now handled correctly via
+    B-structural approach: match_mu uses match.v2 + bridge projections
+    which detect binding conflicts structurally.
 """
 
 import pytest
@@ -159,12 +162,9 @@ def extract_var_names(pattern) -> set:
 def has_nonlinear_vars(pattern) -> bool:
     """Check if pattern has non-linear variables (same var name appears twice).
 
-    Known limitation: Mu projections (match.var) don't check for binding conflicts.
-    When the same variable appears twice in a pattern with different values,
-    Python's match() correctly returns NO_MATCH, but Mu's match_mu() incorrectly
-    binds both (last wins). This is a design gap in the projections.
-
-    See: mu/substrate/match.v2.json - match.var just adds bindings without conflict check.
+    Used by fuzzer strategies to generate targeted non-linear test cases.
+    Non-linear conflict detection is handled by bridge projections
+    (bridge.var.check_existing intercepts vars before match.var).
     """
     var_counts = {}
 
@@ -195,6 +195,114 @@ def mu_projections(draw):
     body = draw(mu_values(max_depth=3, allow_var_sites=True))
 
     return {"pattern": pattern, "body": body}
+
+
+@composite
+def mu_nonlinear_projections(draw):
+    """Generate projections with deliberately repeated variables (non-linear patterns).
+
+    Non-linear patterns have the same variable name in multiple pattern positions.
+    These are critical for testing binding conflict detection:
+    - Same var, different values at positions -> NO_MATCH
+    - Same var, same value at positions -> match succeeds
+    """
+    var_name = draw(st.sampled_from(["x", "y", "z", "v", "w"]))
+
+    # Number of keys in the pattern dict (2-5, all mapping to the same var)
+    num_keys = draw(st.integers(min_value=2, max_value=5))
+    keys = [f"k{i}" for i in range(num_keys)]
+
+    # Build pattern: at least 2 positions use the same var
+    # Some positions may use different vars or literals for variety
+    pattern = {}
+    nonlinear_positions = draw(
+        st.lists(
+            st.sampled_from(keys),
+            min_size=2,
+            max_size=num_keys,
+            unique=True,
+        )
+    )
+    for key in keys:
+        if key in nonlinear_positions:
+            pattern[key] = {"var": var_name}
+        else:
+            # Use a unique var name for non-repeated positions or a literal
+            pattern[key] = draw(st.one_of(
+                st.just({"var": "other_" + key}),
+                mu_primitives,
+            ))
+
+    body = draw(st.one_of(
+        st.just("matched"),
+        st.just({"result": {"var": var_name}}),
+    ))
+
+    return {"pattern": pattern, "body": body, "_nonlinear_var": var_name,
+            "_nonlinear_keys": nonlinear_positions}
+
+
+@composite
+def mu_nonlinear_conflict_inputs(draw):
+    """Generate (projection, value) pairs where non-linear vars bind to DIFFERENT values.
+
+    These MUST return NO_MATCH in a correct implementation.
+    """
+    proj_info = draw(mu_nonlinear_projections())
+    pattern = proj_info["pattern"]
+    body = proj_info["body"]
+    nl_var = proj_info["_nonlinear_var"]
+    nl_keys = proj_info["_nonlinear_keys"]
+
+    # Generate distinct values for the non-linear positions
+    base_val = draw(mu_primitives)
+    conflict_val = draw(mu_primitives)
+    assume(not mu_equal(base_val, conflict_val))
+
+    value = {}
+    first = True
+    for key in sorted(pattern.keys()):
+        if key in nl_keys:
+            if first:
+                value[key] = base_val
+                first = False
+            else:
+                value[key] = conflict_val
+        else:
+            # For non-nonlinear positions, provide a matching value
+            if isinstance(pattern[key], dict) and set(pattern[key].keys()) == {"var"}:
+                value[key] = draw(mu_primitives)
+            else:
+                value[key] = pattern[key]
+
+    return {"pattern": pattern, "body": body}, value
+
+
+@composite
+def mu_nonlinear_agreement_inputs(draw):
+    """Generate (projection, value) pairs where non-linear vars bind to SAME value.
+
+    These MUST succeed (return body result) in a correct implementation.
+    """
+    proj_info = draw(mu_nonlinear_projections())
+    pattern = proj_info["pattern"]
+    body = proj_info["body"]
+    nl_keys = proj_info["_nonlinear_keys"]
+
+    # Same value at all non-linear positions
+    shared_val = draw(mu_primitives)
+
+    value = {}
+    for key in sorted(pattern.keys()):
+        if key in nl_keys:
+            value[key] = shared_val
+        else:
+            if isinstance(pattern[key], dict) and set(pattern[key].keys()) == {"var"}:
+                value[key] = draw(mu_primitives)
+            else:
+                value[key] = pattern[key]
+
+    return {"pattern": pattern, "body": body}, value
 
 
 def contains_var_site(value, _seen=None):
@@ -333,11 +441,9 @@ def test_apply_mu_parity_fuzzer(projection, value):
     Python == treats them as equal, but JSON serialization distinguishes them.
     Mu uses JSON-based structural comparison, so 0.0 != -0.0 in Mu.
 
-    Known limitation: non-linear patterns with binding conflicts.
-    Mu projections (match.var in mu/substrate/match.v2.json) don't check for binding
-    conflicts. When the same variable appears twice in a pattern with different
-    values, Python's match() correctly returns NO_MATCH, but Mu's match_mu()
-    incorrectly binds both values. This is a design gap in the projections.
+    Non-linear patterns (same var twice) are handled correctly via
+    B-structural approach: match_mu uses match.v2 + bridge projections
+    which detect binding conflicts structurally.
     """
     assume(is_mu(projection))
     assume(is_mu(value))
@@ -361,12 +467,8 @@ def test_apply_mu_parity_fuzzer(projection, value):
     if is_empty_collection(body) or contains_empty_collection(body):
         return  # Skip - known divergence
 
-    # Known limitation: non-linear patterns with potential conflicts
-    # Mu projections (match.var) don't check for binding conflicts.
-    # Python's match() correctly fails when same var binds to different values,
-    # but Mu's match_mu() binds both (design gap in mu/substrate/match.v2.json).
-    if has_nonlinear_vars(pattern):
-        return  # Skip - known divergence for non-linear patterns
+    # Non-linear patterns handled correctly via B-structural approach:
+    # match_mu uses match.v2 + bridge projections which detect binding conflicts.
 
     # Known limitation: None ↔ [] confusion due to normalization
     # Skip cases where pattern=None matches value=[] or vice versa
@@ -475,6 +577,68 @@ def test_same_var_multiple_times_consistency(var_name, value):
     # All three should be structurally identical
     assert mu_equal(result["first"], result["second"]), "first != second"
     assert mu_equal(result["second"], result["third"]), "second != third"
+
+
+# =============================================================================
+# Property 5b: Non-Linear Pattern Conflict Detection (Binding Parity)
+# =============================================================================
+
+@given(mu_nonlinear_conflict_inputs())
+@settings(
+    deadline=5000,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+def test_nonlinear_pattern_conflict_detection(conflict_pair):
+    """Non-linear pattern with conflicting bindings MUST return NO_MATCH.
+
+    When a pattern has {a: {var:x}, b: {var:x}} and value has a!=b,
+    apply_mu must detect the conflict and return NO_MATCH, matching
+    apply_projection behavior.
+
+    This is the key semantic gap: match.v1 silently overwrites the first
+    binding. Bridge projections (via match.v2) correctly detect conflicts.
+    """
+    projection, value = conflict_pair
+
+    # Skip empty collections and head/tail (known normalization edge cases)
+    assume(not contains_empty_collection(value))
+    assume(not contains_head_tail(value))
+
+    ref = apply_projection(projection, value)
+    mu_result = apply_mu(projection, value)
+
+    assert ref is NO_MATCH, f"Reference should NO_MATCH on conflict, got {ref}"
+    assert mu_result is NO_MATCH, f"apply_mu should NO_MATCH on conflict, got {mu_result}"
+
+
+@given(mu_nonlinear_agreement_inputs())
+@settings(
+    deadline=5000,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+def test_nonlinear_agreement_determinism(agreement_pair):
+    """Non-linear pattern with agreeing bindings MUST succeed.
+
+    When a pattern has {a: {var:x}, b: {var:x}} and value has a==b,
+    apply_mu must return the substituted body, matching apply_projection.
+    """
+    projection, value = agreement_pair
+
+    # Skip empty collections and head/tail (known normalization edge cases)
+    assume(not contains_empty_collection(value))
+    assume(not contains_head_tail(value))
+
+    ref = apply_projection(projection, value)
+    mu_result = apply_mu(projection, value)
+
+    if ref is NO_MATCH:
+        # Literal positions didn't match — skip (not a non-linear issue)
+        return
+
+    assert mu_result is not NO_MATCH, \
+        f"apply_mu should succeed when non-linear vars agree, got NO_MATCH (ref={ref})"
+    assert mu_equal(ref, mu_result), \
+        f"Parity violation: apply_projection={ref}, apply_mu={mu_result}"
 
 
 # =============================================================================

@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-08
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -201,7 +201,11 @@ VERIFIED: Yes/No
 
 - **Linear patterns**: Same variable can only appear once per pattern
 - **Non-linear patterns**: Same variable appears twice (enforces equality via binding conflict)
-- match.v2.json is LINEAR ONLY - seeds requiring non-linear patterns are BOOTSTRAP-DEPENDENT
+- match.v2.json alone is LINEAR ONLY
+- match.v2 + bridge projections (bootstrap_structural.v1.json) provides non-linear support:
+  - **match_mu direct**: `match_mu()` loads match.v2 + bridge (13 combined projections) via `projection_runner`
+  - **kernel bridge mode**: `step_kernel_mu(kernel_mode="bridge")` for algorithm execution
+- `step_mu()`/`run_mu()` are fail-closed: reject non-linear patterns with ValueError
 
 ### 2. Execution Layer Declaration
 ```
@@ -214,8 +218,9 @@ VERIFIED: Yes/No
 ```
 
 - **BOOTSTRAP**: Runs via eval_seed.step() - Python/JS substrate provides non-linear support
-- **META_CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2)
+- **META_CIRCULAR**: Runs via step_kernel_mu (kernel.v1 + match.v2 + subst.v2), with bridge for non-linear
 - If claiming META_CIRCULAR, show test that runs through step_kernel_mu
+- Non-linear seeds (recurrence, exhaustion) are META_CIRCULAR via kernel bridge mode
 
 ### 3. Integration Shape Compatibility
 For seeds that chain together (e.g., enginenews → exhaust):

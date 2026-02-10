@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-08
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -17,7 +17,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 # Bootstrap-Structural Bridge: Non-Linear Pattern Support
 
-**Status:** IMPLEMENTED
+**Status:** IMPLEMENTED (two execution paths: match_mu direct + kernel bridge mode)
 **Created:** 2026-02-02
 **Implemented:** 2026-02-02
 **Origin:** Architectural gap found in 9-agent review of Step 6
@@ -33,7 +33,11 @@ match.v2.json explicitly states "Linear patterns only (no conflict detection)." 
 
 These seeds work via `eval_seed.step()` which implements binding conflict detection in Python. The bootstrap-structural bridge adds binding conflict detection as structural projections.
 
-**Status (2026-02-08):** Bridge projections are IMPLEMENTED and VERIFIED to fire. Recurrence and exhaustion now execute through the structural kernel bridge path by default. Bootstrap execution remains explicit debug fallback only.
+**Status (2026-02-09):** Bridge projections are IMPLEMENTED and VERIFIED to fire. Two execution paths now use bridge:
+1. **match_mu direct** (B-structural, 2026-02-09): `match_mu()` loads match.v2 + bridge projections via `projection_runner` for `apply_mu()` non-linear conflict detection.
+2. **kernel bridge mode**: `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge")` for recurrence/exhaustion.
+
+Bootstrap execution remains explicit debug fallback only. `step_mu()`/`run_mu()` are fail-closed: they reject non-linear patterns with ValueError.
 
 ---
 
@@ -476,6 +480,11 @@ Both paths produce identical results. The execution path verification tests (`te
 
 ## Changelog
 
+- **v0.7 (2026-02-09):** B-structural match_mu direct usage
+  - match_mu now uses match.v2 + bridge projections directly via projection_runner
+  - Two execution paths documented: match_mu direct (Path 1) and kernel bridge mode (Path 2)
+  - Fail-closed guard: step_mu/run_mu reject non-linear patterns with ValueError
+  - 18 structural invariant tests added (test_match_bridge_invariants.py)
 - **v0.6 (2026-02-08):** Gate 4 runtime wording corrected
   - Updated status language to reflect structural-default execution
   - Clarified bootstrap path is explicit debug fallback only
@@ -514,16 +523,28 @@ Both paths produce identical results. The execution path verification tests (`te
 
 ---
 
-## Current Execution Architecture (2026-02-07)
+## Current Execution Architecture (2026-02-09)
 
 ### Runtime Layers
 
-The bridge projections are IMPLEMENTED and VERIFIED to fire. Gate 4 cutover makes structural execution the default for recurrence/exhaustion:
+The bridge projections are IMPLEMENTED and VERIFIED to fire. Two primary paths use bridge projections:
 
-**Primary Layer: Structural Kernel Execution (kernel + bridge + match.v2 + subst.v2)**
+**Path 1: match_mu Direct (B-structural, 2026-02-09)**
+- `match_mu()` loads match.v2 + bridge projections (13 combined) via `projection_runner`
+- `apply_mu()` calls `match_mu → subst_mu` — fast path with correct non-linear semantics
+- No kernel overhead; bridge projections intercept variable binding for conflict detection
+- `load_match_with_bridge_projections()` caches the combined set
+- `make_projection_runner("match", terminal_field="_mode")` detects v2 terminal states
+
+**Path 2: Kernel Bridge Mode (algorithm execution)**
 - `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - Bridge projections provide non-linear pattern support inside structural execution
-- This is now the production path for recurrence/exhaustion
+- This is the production path for recurrence/exhaustion
+
+**Fail-Closed Guard (2026-02-09):**
+- `step_mu()` and `run_mu()` reject non-linear patterns with `ValueError`
+- Callers needing non-linear support must use `apply_mu()` (Path 1) or `run_algorithm_meta_circular()` (Path 2)
+- See `tests/structural/test_match_bridge_invariants.py::TestSplitSemanticsContract`
 
 **Fallback Layer: Bootstrap Debug Path**
 - `execution_mode="bootstrap", allow_bootstrap_fallback=True` calls `step_algorithm_with_bridge()` for controlled debugging

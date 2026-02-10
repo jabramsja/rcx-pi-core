@@ -82,9 +82,7 @@ def test_gate5_bootstrap_fallback_runs_when_opted_in():
 def test_gate5_recurrence_python_js_parity_vectors():
     rec_projs = _load_projections("recurrence.v1.json")
     vectors = json.loads((FIXTURES / "recurrence_vectors.json").read_text(encoding="utf-8"))["vectors"]
-    # Keep this suite focused and fast: one positive and one negative canonical vector.
-    selected = [vectors[0], vectors[1]]
-    for vec in selected:
+    for vec in vectors:
         py = _run_python_until_stall(rec_projs, vec["input"], max_steps=200)
         js = _run_js_action("run_recurrence_with_bridge", vec["input"], max_steps=200)
         assert mu_equal(py, js), f"recurrence parity mismatch for vector {vec['id']}: py={py} js={js}"
@@ -93,8 +91,7 @@ def test_gate5_recurrence_python_js_parity_vectors():
 def test_gate5_exhaustion_python_js_parity_vectors():
     exh_projs = _load_projections("exhaustion.v1.json")
     vectors = json.loads((FIXTURES / "exhaustion_vectors.json").read_text(encoding="utf-8"))["vectors"]
-    selected = [vectors[0], vectors[1]]
-    for vec in selected:
+    for vec in vectors:
         py = _run_python_until_stall(exh_projs, vec["input"], max_steps=200)
         js = _run_js_action("run_exhaustion_with_bridge", vec["input"], max_steps=200)
         assert mu_equal(py, js), f"exhaustion parity mismatch for vector {vec['id']}: py={py} js={js}"
@@ -144,3 +141,84 @@ def test_gate5_run_mu_structural_identity_match_keeps_projection_id():
     trace_result = run_mu_structural(projections, {"x": 1}, max_steps=3)
     first_entry = trace_result["trace"]["head"]
     assert first_entry["projection"] == "identity"
+
+
+# =============================================================================
+# Cross-substrate structural trace parity tests
+# =============================================================================
+
+def _run_js_structural_trace(projections, input_value, max_steps=10):
+    """Run JS structural trace via JSON API and return trace array."""
+    req = json.dumps({
+        "action": "run_structural_trace",
+        "projections": projections,
+        "input": input_value,
+        "maxSteps": max_steps,
+    })
+    proc = subprocess.run(
+        ["node", "mu/host/js/eval_step.js", "--json-api", req],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    last = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("JSON_API_RESPONSE:"):
+            last = json.loads(line[len("JSON_API_RESPONSE:"):])
+    assert last is not None, f"no JSON_API_RESPONSE in stdout: {proc.stdout[:500]}"
+    assert last.get("success"), f"js action failed: {last.get('error')}"
+    return last
+
+
+def test_gate5_cross_substrate_identity_trace_projection_id():
+    """Identity projection must keep projection ID in trace on BOTH substrates.
+
+    Regression test for JS stepKernel stall detection bug: value equality
+    misclassified identity projections as stalls, losing projection ID.
+    Fix: JS uses kernel terminal state (_stall field) like Python.
+    """
+    projections = [{"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+    input_value = {"x": 1}
+
+    # Python
+    py_trace = run_mu_structural(projections, input_value, max_steps=5)
+    py_first = py_trace["trace"]["head"]
+    assert py_first["projection"] == "identity", (
+        f"Python lost identity projection ID: {py_first}"
+    )
+
+    # JS
+    js_result = _run_js_structural_trace(projections, input_value, max_steps=5)
+    js_first = js_result["trace"][0]
+    assert js_first["projection"] == "identity", (
+        f"JS lost identity projection ID: {js_first}"
+    )
+
+    # Cross-substrate: both must agree
+    assert py_first["projection"] == js_first["projection"], (
+        f"Trace projection ID mismatch: Python={py_first['projection']}, JS={js_first['projection']}"
+    )
+
+
+def test_gate5_cross_substrate_transform_trace_projection_id():
+    """Non-identity transform must track projection ID on both substrates."""
+    projections = [
+        {"id": "double", "pattern": {"op": "double", "value": {"var": "v"}},
+         "body": {"op": "doubled", "value": {"var": "v"}}},
+    ]
+    input_value = {"op": "double", "value": 42}
+
+    # Python
+    py_trace = run_mu_structural(projections, input_value, max_steps=5)
+    py_first = py_trace["trace"]["head"]
+    assert py_first["projection"] == "double"
+
+    # JS
+    js_result = _run_js_structural_trace(projections, input_value, max_steps=5)
+    js_first = js_result["trace"][0]
+    assert js_first["projection"] == "double"
+
+    # Both results should match
+    assert mu_equal(py_trace["result"], js_result["result"])

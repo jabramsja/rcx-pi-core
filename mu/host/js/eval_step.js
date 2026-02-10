@@ -1150,23 +1150,47 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     _projs: listToLinked(kernelDomainProjs)
   };
 
-  // Run kernel cycle
-  const runResult = run(projections, kernelInput, maxSteps);
-
   if (returnMeta) {
-    // Gate 5 parity: extract domain result from kernel cycle.
-    // JS kernel runs to fixpoint via run() — the result is the domain value
-    // (still normalized for dicts), not a kernel terminal state.
-    // Compare with normalized input to detect stall vs successful transform.
-    const kernelResult = runResult.result;
-    if (muEqual(kernelResult, normalizedInput)) {
-      // No change — stall
-      return { output: domainInput, stall: true };
+    // Gate 5 parity fix: use step-by-step loop that detects kernel terminal
+    // state {_mode:"done", _stall:...} BEFORE kernel.unwrap fires.
+    // This matches Python's step_kernel_mu which reads _stall from the
+    // kernel's own terminal marker — not value equality.
+    //
+    // Previous code used run() which loses _stall information after
+    // kernel.unwrap extracts the result, forcing value equality fallback
+    // that misclassifies identity projections as stalls.
+    let current = kernelInput;
+    for (let i = 0; i < maxSteps; i++) {
+      const result = step(projections, current);
+
+      // Check for kernel terminal state BEFORE unwrap
+      if (typeof result === 'object' && result !== null &&
+          result._mode === 'done' && '_result' in result && '_stall' in result) {
+        const stall = result._stall === true;
+        if (stall) {
+          validator(domainInput, 'stepKernel output');
+          return { output: domainInput, stall: true };
+        }
+        const output = denormalize(result._result);
+        validator(output, 'stepKernel output');
+        return { output, stall: false };
+      }
+
+      // Stall check: no change means no progress (skip for intermediate states)
+      if (muEqual(result, current)) {
+        validator(domainInput, 'stepKernel output');
+        return { output: domainInput, stall: true };
+      }
+
+      current = result;
     }
-    // Transform succeeded — denormalize the result
-    return { output: denormalize(kernelResult), stall: false };
+    // Max steps exceeded — stall
+    validator(domainInput, 'stepKernel output');
+    return { output: domainInput, stall: true };
   }
 
+  // Non-meta mode: use run() as before
+  const runResult = run(projections, kernelInput, maxSteps);
   return runResult;
 }
 
@@ -2228,6 +2252,29 @@ if (process.argv.includes('--json-api')) {
         response = { success: true, valid: true, error: '' };
       } catch (e) {
         response = { success: true, valid: false, error: e.message };
+      }
+    } else if (request.action === 'run_structural_trace') {
+      // Run structural trace and return trace with projection IDs.
+      // For cross-substrate parity testing of trace projection-id assignment.
+      const { projections: userProjs, input, maxSteps } = request;
+      try {
+        const traceResult = runStructural(userProjs || [], input, maxSteps || 100);
+        // Convert trace linked list to array for JSON serialization
+        const traceArray = [];
+        let node = traceResult.trace;
+        while (node && typeof node === 'object' && 'head' in node) {
+          traceArray.push(node.head);
+          node = node.tail;
+        }
+        response = {
+          success: true,
+          result: traceResult.result,
+          trace: traceArray,
+          stall: traceResult.stall,
+          steps: traceResult.steps,
+        };
+      } catch (e) {
+        response = { success: false, error: e.message };
       }
     } else {
       response = { success: false, error: `Unknown action: ${request.action}` };

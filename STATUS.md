@@ -9,8 +9,8 @@
 ## Current Phase
 
 ```
-PHASE: 8b
-NAME: Mechanical Kernel (Security Hardened)
+PHASE: 8c
+NAME: Gate 5 Meta-Circular Parity (Stabilization)
 ```
 
 ## Projection-Based Architecture Levels
@@ -45,7 +45,7 @@ NAME: Mechanical Kernel (Security Hardened)
 - [x] Security hardening complete (24 reserved fields: 22 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py` `step_kernel_mu`, see `@host_iteration` decorator)
 
-**Seed version note:** `match_mu()` and `subst_mu()` standalone functions use v1 seeds for direct invocation. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
+**Seed version note:** `match_mu()` now uses match.v2 + bridge projections directly for non-linear pattern conflict detection (B-structural approach, 2026-02-09). `subst_mu()` standalone function uses v1 seeds. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
 
 **L2 FULL (target - requires decision):**
 The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Options:
@@ -388,7 +388,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Recommended Next Action
 
-**Status:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,846 tests passing.
+**Historical milestone:** Phase 8b COMPLETE (2026-01-28). 9-agent review SHIP verdict. 2,846 tests passing.
 
 **L3 Substrate Portability Progress (2026-01-30):**
 - Step 1 DONE: JS POC security hardened (v4) - KERNEL_RESERVED_FIELDS validation, dict kv-pair fix
@@ -600,14 +600,14 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - **After:** Unbound variables cause stall (return original input)
 - This is more consistent with pure Mu semantics where errors become stalls
 
-**PAUSED (requires Phase 8 implementation):**
-- Phase 7d-2: Migrate projection_runner to step_mu
-- Phase 7d-3: Eliminate projection_runner iteration
-- Reason: 7d-1 moved the loop, didn't eliminate it. Phase 8 addresses this properly.
+**Historical closure (resolved by Phase 8 decision):**
+- Phase 7d-2: Migrate projection_runner to step_mu (closed)
+- Phase 7d-3: Eliminate projection_runner iteration (closed)
+- Reason: 7d-1 moved the loop; Phase 8 accepted irreducible iteration as bootstrap primitive.
 
 ---
 
-**Last updated:** 2026-02-08 (9-agent rigorous tooling hardened; 5 fuzzer test files from findings #1017-#1021)
+**Last updated:** 2026-02-09 (B-structural match_mu: match.v2 + bridge for non-linear pattern support; fail-closed step_mu/run_mu guard)
 **Next milestone:** Gate 5 - Meta-Circular Parity
 
 **Gate Snapshot (Canonical):**
@@ -666,13 +666,14 @@ New organized structure makes architecture visible:
 - [x] Additional: 43 projections in utilities/programs/bridge (90 total across all mu/)
 - [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
 
-**Bootstrap-Structural Bridge: IMPLEMENTED (Capability Proven)**
+**Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**
 - Location: `mu/bridge/bootstrap_structural.v1.json` (5 projections)
 - Design doc: `docs/core/BootstrapStructuralBridge.v0.md`
 - Execution path verified: bridge projections DO fire for non-linear patterns
-- Bridge capability proven; standalone runners removed (dead code cleanup)
-- Note: JS substrate loads bridge projections (`mu/host/js/eval_step.js`) for structural parity paths.
-  Production algorithm execution is now structural via kernel bridge path.
+- **Path 1: match_mu direct** (2026-02-09) — `match_mu()` loads match.v2 + bridge projections via `projection_runner`. Provides non-linear pattern conflict detection for `apply_mu()` without kernel overhead.
+- **Path 2: kernel bridge mode** — `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge")` for recurrence/exhaustion.
+- **Fail-closed guard:** `step_mu()`/`run_mu()` reject non-linear patterns with ValueError, directing callers to bridge-aware paths.
+- JS substrate loads bridge projections (`mu/host/js/eval_step.js`) for structural parity paths.
 
 **Current Algorithm Execution:**
 - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`

@@ -270,6 +270,16 @@ Items here are implemented and verified under current invariants. Changes requir
   - `==` → `mu_equal()` in fuzzer tests, shared strategies extracted to `tests/strategies.py`
   - Iteration guards in match_mu.py (bindings_to_dict, denormalize_from_match)
   - INFRA_CEILING: 37 → 38, test count: 2,846
+- B-Structural Non-Linear Match (2026-02-09):
+  - `match_mu()` now uses match.v2 + bridge projections directly via `projection_runner`
+  - Non-linear pattern conflict detection: `apply_mu({a:{var:x}, b:{var:x}}, {a:1, b:2})` → NO_MATCH
+  - `projection_runner.make_projection_runner()` extended with `terminal_field` parameter for v2 support
+  - `load_match_with_bridge_projections()` loads and caches 13 combined projections (8 match.v2 + 5 bridge)
+  - Fail-closed guard: `step_mu()`/`run_mu()` reject non-linear patterns with ValueError
+  - Semantic split documented: `apply_mu`/`match_mu` (bridge-aware) vs `step_mu`/`run_mu` (core-only, fail-closed)
+  - 18 structural invariant tests in `tests/structural/test_match_bridge_invariants.py`
+  - Non-linear Hypothesis strategies + 2 fuzzer tests in `test_apply_mu_fuzzer.py`
+  - All deadlines at original 5000ms (no inflation needed)
 
 ---
 
@@ -292,377 +302,20 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-### Phase 7: Meta-Circular Kernel (L2 Operational Self-Hosting)
-
-**Promoted from VECTOR:** 2026-01-27
-**Rationale:** All 7 agents APPROVE. Design complete (MetaCircularKernel.v0.md v0.2). All blockers resolved.
-
-**Goal:** Replace Python for-loop in `step_mu()` with structural kernel projections.
-
-**Sub-phases:**
-
-- [x] **Phase 7a: Kernel Projections Seed** (DONE 2026-01-28)
-  - Created `mu/substrate/kernel.v1.json` with 7 projections (in mu/substrate/)
-  - 30 manual trace tests pass (success, failure, empty projections)
-  - Projection order regression tests pass
-
-- [x] **Phase 7b: Match/Subst Context Passthrough** (DONE 2026-01-28)
-  - Created match.v2.json with `_match_ctx` passthrough + match.fail catch-all
-  - Created subst.v2.json with `_subst_ctx` passthrough
-  - Parity tests pass (v2 seeds == v1 behavior)
-
-- [x] **Phase 7c: Integration Testing** (DONE 2026-01-28)
-  - 20 integration tests: kernel → match → subst → kernel
-  - Context preservation verified through full cycles
-  - Security: domain data can't forge `_mode` (underscore prefix)
-
-**Phase 7d Blockers (from agent review 2026-01-28):**
-
-All blockers resolved 2026-01-28:
-
-1. [x] **SECURITY: Call validate_kernel_projections_first() in production** (adversary)
-   - Fixed: Added call in step_mu() at line 154
-   - Domain projections can no longer run before kernel
-
-2. [x] **TESTING: Add v2 parity tests** (grounding)
-   - Fixed: Created test_match_v2_parity.py (19 tests)
-   - Fixed: Created test_subst_v2_parity.py (18 tests)
-   - 37 new parity tests verify v2 preserves v1 behavior
-
-3. [x] **DEBT: Track projection_runner iteration debt** (advisor)
-   - Fixed: Added "# @host_iteration" marker in projection_runner.py
-   - Fixed: Updated debt_dashboard.sh to count comment markers
-   - Debt now accurately shows 15 (was 14)
-
-4. [x] **DEBT: Update target to phased approach** (structural-proof, advisor)
-   - Fixed: Updated TASKS.md with 7d-1, 7d-2, 7d-3 sub-phases
-   - Fixed: Updated STATUS.md with phased debt reduction plan (15→14→13→12)
-   - Note: Original target was 9, revised to 12 per structural-proof (run_mu stays as L3 boundary)
-
-- [x] **Phase 7d-1: Wire step_mu to kernel** - DONE 2026-01-28 (L2 PARTIAL)
-  - [x] Modify `step_mu()` to call structural kernel (step_kernel_mu)
-  - [x] Call validate_kernel_projections_first() for security
-  - [x] Added helpers: list_to_linked, normalize_projection, load_combined_kernel_projections
-  - [x] Parity tests: 106 core tests pass (existing + fuzzer)
-  - [x] 7-agent review revealed: execution loop still Python (honest assessment)
-  - [x] Added @host_iteration to step_kernel_mu (honest debt tracking)
-  - Note: Behavioral change - unbound variables now stall instead of raising KeyError
-  - **Outcome:** Projection SELECTION is structural (linked-list cursor). Projection EXECUTION is Python.
-  - **Debt:** 15 → 15 (moved location, not eliminated)
-
-- [x] **Phase 7d-2: Migrate projection_runner** - CLOSED (not applicable per Phase 8 decision)
-  - Phase 8 decided: "Option 1 (accept as bootstrap primitive)"
-  - The for-loop is accepted as irreducible - no migration needed
-  - L2 FULL achieved via explicit acceptance
-
-- [x] **Phase 7d-3: Eliminate projection_runner iteration** - CLOSED (not applicable per Phase 8 decision)
-  - Same as 7d-2: loop is accepted as bootstrap primitive
-  - If L4 pursues CPS/trampolining, new tasks will be created
-
-**Success criteria:**
-- [x] `mu/substrate/kernel.v1.json` exists with 7 projections
-- [x] Manual trace tests pass for success/failure/empty cases
-- [x] Match/subst context passthrough tests pass
-- [x] Phase 7d blockers resolved (security, testing, debt tracking) - 2026-01-28
-- [x] v2 parity tests pass (37 tests: 19 match + 18 subst) - 2026-01-28
-- [x] Doc inconsistencies fixed (all .md files reference STATUS.md for debt) - 2026-01-28
-- [x] Kernel projections pass parity tests with Python `step_mu` - 2026-01-28 (106 tests)
-- [x] step_mu delegates to step_kernel_mu (structural selection) - 2026-01-28
-- [x] All 1293+ existing tests still pass - 2026-01-28
-- [x] L2 PARTIAL achieved: selection structural, execution Python - 2026-01-28
-- [x] L2 FULL achieved: PARTIAL + explicit acceptance of for-loop as bootstrap primitive - 2026-01-28
-- [x] Debt floor: 12 (irreducible bootstrap substrate) - no further reduction without L4 architecture
-
-**Recommended fuzzer additions (from agent review):**
-- [x] Add fuzzer tests for kernel projection ordering (500+ examples) - 2026-02-01
-- [x] Add fuzzer tests for mode transition completeness (500+ examples) - 2026-02-01
-- [x] Add fuzzer tests for context passthrough stress (500+ examples) - 2026-02-01
-- [x] Add property-based tests for _step/_projs field fuzzing (500+ examples) - 2026-02-01
-- [x] Add depth boundary fuzzing (95-105 range) - 2026-02-01
-
-**Debt status**: See `STATUS.md` for current counts and threshold.
-
----
-
-### Phase 8: Bootstrap Primitives + Mechanical Kernel (DONE 2026-01-28)
-
-**Goal:** Document irreducible primitives, simplify kernel loop to mechanical operation.
-
-- [x] **Phase 8a: Bootstrap Primitives** (DONE 2026-01-28)
-  - Created `docs/core/BootstrapPrimitives.v0.md`
-  - Marked 5 primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
-  - 36 tests in `test_bootstrap_primitives.py`, 18 fuzzer tests
-
-- [x] **Phase 8b: Mechanical Kernel** (DONE 2026-01-28)
-  - Added `is_kernel_terminal()` and `extract_kernel_result()` helpers
-  - Simplified loop to ~15 lines (was ~35)
-  - Fixed empty container type preservation
-  - 31 tests + 12 grounding tests
-
-- [x] **Phase 8b Security Hardening** (DONE 2026-01-28, 9-agent reviewed)
-  - Added KERNEL_RESERVED_FIELDS (12 fields) with deep validation
-  - Changed depth guard to fail CLOSED (raises ValueError at depth > 100)
-  - Added `_step` and `_projs` to reserved fields (kernel entry format protection)
-  - 35 tests in `test_step_mu_kernel_integration.py`
-  - 844 total tests passing
-
-**Next:** L3 Substrate Portability + EngineNews Demo (5-step plan from 7-agent review)
-
-### L3 + EngineNews Implementation Plan
-
-**Goal:** Prove projections are substrate-portable AND demo EngineNews on RCX
-
-**Sequence (7-agent reviewed, 2026-01-30):**
-
-| Step | Task | Status | Effort |
-|------|------|--------|--------|
-| 1 | Fix JS security gaps | **DONE** | ~80 LOC (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair fix) |
-| 2 | Create cross-substrate parity tests | **DONE** | ~120 LOC + 20 vectors (`tests/test_parity_python.py`) |
-| 3 | Phase 8d in Python (trace model) | **DONE** | ~80 LOC + 14 tests (`tests/test_structural_trace.py`) |
-| 4 | Port trace to JS POC | **DONE** | ~80 LOC + 5 tests |
-| 5 | EngineNews in Python | **DONE** | `mu/closures/recurrence.v1.json` (9 projections) |
-| 6 | EngineNews in JS (L3 parity) | **DONE** | JS POC v5 with EngineNews tests |
-| 7 | ACTUAL cross-substrate verification | **DONE** | JSON API + actual output comparison (9-agent Round 3 fix, 2026-01-31) |
-
----
-
-### Step 1: Fix JS Security Gaps ✅ DONE
-
-**Location:** `mu/host/js/eval_step.js`
-
-**Completed (2026-01-30):**
-- [x] Add `KERNEL_RESERVED_FIELDS` validation (12 fields)
-- [x] Add `validate_type_tag()` for type injection prevention
-- [x] Add deep validation at kernel entry point
-- [x] Fix dict kv-pair normalization parity (critical bug)
-
----
-
-### Step 2: Cross-Substrate Parity Tests ✅ DONE
-
-**Goal:** Prove JS matches Python BEFORE adding features
-
-**Completed (2026-01-30):**
-- [x] Created `tests/fixtures/parity_vectors.json` with 20 parity + 3 security vectors
-- [x] Created `tests/test_parity_python.py` (20 parity + 3 security tests)
-- [x] JS POC passes all 20 parity vectors
-- [x] Added semantic checks: direct equality + structural normalization
-
----
-
-### Step 3: Phase 8d - EngineNews Trace Model (Python) ✅ DONE
-
-**Goal:** Structural trace accumulation for EngineNews Rule 2.2 (closure-on-second-demand)
-
-**Completed (2026-01-30):**
-- [x] `run_mu_structural()` in `step_mu.py` - returns Mu-compatible trace format
-- [x] Trace is Mu linked-list: `{head: entry, tail: {head: entry, tail: ...}}`
-- [x] Each entry: `{step, state, projection}` (projection=None for stall)
-- [x] `list_to_linked()` helper for Python list → Mu linked-list
-- [x] 14 tests in `tests/test_structural_trace.py`:
-  - Trace format tests (linked-list structure, required fields)
-  - Stall detection tests (projection=None for unmatched)
-  - Closure detection capability tests (oscillation captured)
-
-**EngineNews Alignment:**
-- Stall detection: `mu_equal(before, after)` → exists (primitive)
-- Fix operation: domain projections → exists (structural)
-- Promote: kernel selection → exists (kernel.v1)
-- **Closure**: trace accumulation → **DONE** (run_mu_structural)
-
----
-
-### Step 4: Port Trace to JS POC ✅ DONE
-
-**Completed (2026-01-30):**
-- [x] `runStructural()` in `mu/host/js/eval_step.js`
-- [x] Returns `{result, trace, stall, steps}` matching Python
-- [x] Trace as Mu linked-list format
-- [x] 5 structural trace tests pass in JS
-
----
-
-### Step 5: EngineNews Demo (CRITICAL: Must Be Structural) ✅ DONE
-
-**GATES (from 7-agent review 2026-01-30):**
-- [x] Design doc: `docs/core/EngineNewsStructural.v0.md` (explicit criteria)
-- [x] Property-based fuzzer: `tests/test_structural_trace_fuzzer.py` (23 tests)
-- [x] CRITICAL_TEST_FILES updated: structural trace fuzzer protected
-- [x] Implementation: `mu/closures/recurrence.v1.json` (9 projections)
-- [x] Parity tests: `tests/test_recurrence_parity.py` (24 tests)
-- [x] Fuzzer tests: `tests/test_recurrence_fuzzer.py` (property-based)
-
-**REQUIREMENT:** EngineNews rules MUST be expressed as Mu projections, NOT Python code.
-
-**Why this matters (from 7-agent review):**
-- If EngineNews runs via Python loops/logic, emergence might be a Python artifact
-- For structural honesty, closure detection must be pattern matching on traces
-- The bootstrap (eval_step, mu_equal) is acceptable - the LOGIC must be projections
-
-**Implementation (COMPLETE):**
-
-1. Created `mu/closures/recurrence.v1.json` with 9 projections:
-   - `enginenews.init` - Entry point: _detect_closure -> internal state
-   - `enginenews.end_of_trace` - End of trace (null) -> no closure
-   - `enginenews.check_state_stall` - Extract state from stall entry
-   - `enginenews.check_state_maxsteps` - Extract state from max_steps entry
-   - `enginenews.check_state` - Extract state from normal entry
-   - `enginenews.found_in_seen` - State in seen-set -> closure detected!
-   - `enginenews.not_in_head` - State not in head -> check tail
-   - `enginenews.not_found` - State not found -> add and advance
-   - `enginenews.unwrap` - Extract final closure evidence
-
-2. Key design decision: **Non-linear patterns for state equality**
-   - `enginenews.found_in_seen` uses `{"var": "state"}` twice in pattern
-   - eval_seed.match() binding conflict detection enforces equality
-   - This is bootstrap (like Forth's NEXT), not semantic debt
-
-3. Success criteria (ALL MET):
-   - [x] `recurrence.v1.json` exists with 9 projections
-   - [x] EngineNews projections run via eval_seed.step(), NOT Python loops
-   - [x] Closure detection is structural: projection matches trace pattern
-   - [x] Seen-set is Mu linked-list, NOT Python set
-   - [x] No Python `if/for/while` in closure detection path (only in bootstrap)
-   - [x] 7-agent review: All agents APPROVE
-
-**The demonstration (COMPLETE):**
-- Same projections (kernel.v1 + match.v2 + subst.v2 + enginenews.v1)
-- Same input (EngineNews workload)
-- Same trace output
-- Same closure detection
-- **Python:** Full EngineNews support ✅
-- **JavaScript:** Full EngineNews support ✅ (v5, 2026-01-30)
-
-**This proves:** All meaning is in projections. Host provides only mechanical execution. Emergence is structural, not a Python artifact. L3 Substrate Portability is COMPLETE.
-
----
-
-### Step 6: Operator Exhaustion (Rule 3.1) ✅ COMPLETE
-
-**Completed:** 2026-02-02
-**Design Doc:** `docs/core/OperatorExhaustion.v0.md`
-
-**Goal:** Detect when operators are exhausted (Rule 3.1) - τ transitions to frozen state.
-
-**Implementation:**
-- Created `mu/closures/exhaustion.v1.json` with 11 projections (separate seed, not added to enginenews)
-- Three-phase state machine: find_tau → scan → check_frozen → terminal
-- Non-linear patterns for equality (same var twice enforces binding conflict detection)
-- First-match-wins ordering (scan_same before scan_different, frozen_found before frozen_check_tail)
-- Frozen list as Mu linked-list, NOT Python set
-
-**Projections in exhaustion.v1.json:**
-- `exhaust.init_null` - No tau_step → continue (no exhaustion possible)
-- `exhaust.init` - Start find phase with tau_step
-- `exhaust.find_match` - Found tau_step in trace
-- `exhaust.find_continue` - Keep searching for tau_step
-- `exhaust.find_not_found` - tau_step not in trace → continue
-- `exhaust.scan_same` - Same operator, keep scanning (non-linear pattern)
-- `exhaust.scan_different` - Different operator → not exhausted
-- `exhaust.scan_end` - End of trace, check frozen list
-- `exhaust.frozen_found` - Operator already frozen (non-linear pattern)
-- `exhaust.frozen_check_tail` - Continue searching frozen list
-- `exhaust.do_freeze` - Freeze the operator
-
-**Success criteria (ALL MET):**
-- [x] Design doc reviewed by all 9 agents (2026-02-02)
-- [x] `mu/closures/exhaustion.v1.json` created with 11 projections (2026-02-02)
-- [x] Exhaustion detection is structural (projections, not Python)
-- [x] Parity tests for Python (17 tests in `test_exhaustion_parity.py`)
-- [x] JavaScript loads exhaustion.v1.json (47 total projections)
-- [x] Property-based fuzzer tests (10 tests in `test_exhaustion_fuzzer.py`)
-- [x] Cross-substrate parity vectors verified (6 cross-substrate tests pass)
-- [x] KERNEL_RESERVED_FIELDS updated to 20 fields (Python and JS match)
-- [x] Automated parity test verifies Python/JS reserved fields match
-
----
-
-### Step 7: Bootstrap-Structural Bridge (Non-Linear Pattern Support)
-
-**Promoted from VECTOR:** 2026-02-02
-**Rationale:** All 9 agents approved with security hardening applied. Design complete. Semantics locked (22 test vectors).
-
-**Design Doc:** `docs/core/BootstrapStructuralBridge.v0.md`
-**Location:** `mu/bridge/bootstrap_structural.v1.json`
-
-**Goal:** Enable recurrence.v1 and exhaustion.v1 to run through meta-circular kernel (step_kernel_mu) instead of bootstrap (eval_seed).
-
-**Why this matters:**
-- Currently, recurrence.v1 and exhaustion.v1 use non-linear patterns (same var twice for equality)
-- Non-linear patterns work via eval_seed.match() binding conflict detection (BOOTSTRAP)
-- match.v2.json is "linear only" - no binding conflict projections
-- Result: These seeds work but CANNOT run through step_kernel_mu
-- This bridge adds binding conflict detection as projections
-
-**Implementation plan (7 gates from Advisor):**
-1. [x] Gate 1: Create `mu/bridge/` directory structure (2026-02-02)
-2. [x] Gate 2-4: Implement bridge projections (5 projections in bootstrap_structural.v1.json) (2026-02-02)
-3. [x] Gate 5: Wire step_mu to use match.v2 + bootstrap_structural bridge (2026-02-02)
-4. [x] Gate 6: Integrate bridge path for recurrence/exhaustion and keep runtime layer explicit (2026-02-02)
-5. [x] Gate 7: Cross-substrate parity verification (JS port) (2026-02-03)
-
-**Projections (5 in bridge, combined with match.v2 at runtime):**
-- `bridge.var.check_existing` - Entry: start lookup for variable binding
-- `bridge.lookup.found_same` - Found binding with same value (non-linear OK)
-- `bridge.lookup.found_different` - Found binding with different value → NO_MATCH
-- `bridge.lookup.not_found_yet` - Name not at head, continue searching
-- `bridge.lookup.not_found` - Name not in bindings, add new binding
-
-**Security hardening (applied 2026-02-02):**
-- KERNEL_RESERVED_FIELDS updated: 20 → 24 fields
-- Added: `_lookup_name`, `_lookup_value`, `_lookup_bindings`, `_original_bindings`
-- Python and JS in parity (both have 24 fields)
-
-**Test vectors (22 total):**
-- Linear Parity Tests (5): linear_ok, linear_nested, linear_list, linear_catchall, linear_empty_dict
-- Non-Linear Detection Tests (8): nonlinear_same, nonlinear_diff, nested_nonlinear, triple_same, triple_one_diff, nonlinear_list, nonlinear_list_diff, nonlinear_complex
-- Edge Cases (4): empty_bindings_first, null_value_binding, empty_list_match, type_mismatch
-- Security Vectors (3): reserved_var_ok, lookup_injection, ordering_critical
-- Cross-Substrate Parity (3): parity_unicode, parity_float, parity_deep
-
-**9-agent review (2026-02-02):**
-| Agent | Verdict |
-|-------|---------|
-| Verifier | APPROVE |
-| Adversary | SECURE |
-| Expert | MINIMAL |
-| Structural-proof | STRUCTURALLY_SOUND |
-| Grounding | ADEQUATELY_GROUNDED |
-| Fuzzer | NEEDS_MORE (non-blocking) |
-| Translator | MATCHES_INTENT |
-| Visualizer | ARCHITECTURALLY_ALIGNED |
-| Advisor | READY_FOR_PROMOTION |
-
-**Success criteria:**
-- [x] `mu/bridge/bootstrap_structural.v1.json` created with 5 projections (2026-02-02)
-- [x] `load_combined_kernel_with_bridge_projections()` wires match.v2 + bootstrap_structural (2026-02-02)
-- [x] All 31 bridge test vectors pass (tests/test_bootstrap_structural_bridge.py) (2026-02-02)
-- [x] Binding conflict detection is structural (projections, not Python) (2026-02-02)
-- [x] recurrence.v1 and exhaustion.v1 execution layer explicitly declared BOOTSTRAP (runtime-honest at 2026-02-02; superseded by Gate 4 META_CIRCULAR cutover on 2026-02-07)
-- [x] Execution path verification: bridge projections ACTUALLY fire (2026-02-03)
-  - tests/test_execution_path_verification.py (9 tests)
-  - Tests use tracing to prove which projections execute
-  - Tests FAIL if bridge projections don't fire (even if behavior correct)
-- [x] Cross-substrate parity verified (Python and JS) (Gate 7) (2026-02-03)
-- [x] All tests pass (1622 fast audit, 2446 full audit) (2026-02-03)
-
-**Current architecture (2026-02-03):**
-- Bridge projections VERIFIED to fire for non-linear pattern matching
-- Algorithm execution (recurrence, exhaustion) defaults to structural kernel bridge path
-  - `run_algorithm_meta_circular()` default is structural (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
-  - Python bootstrap path remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
-- Two execution layers:
-  1. Structural layer: kernel + bridge + match.v2 + subst.v2 (production path)
-  2. Legacy BOOTSTRAP fallback: Python match/substitute (debug-only fallback path)
-- Path to true meta-circular algorithm execution documented in BootstrapStructuralBridge.v0.md
-- Gate 4 prep infrastructure (2026-02-07):
-  - `step_kernel_mu()` now supports `kernel_mode` (`core`/`bridge`)
-  - `step_kernel_mu()` now supports strict `validation_mode` (`domain`/`algorithm_runtime`)
-  - Algorithm-runtime mode is allowlisted and fail-closed for unknown underscore fields
-- Gate 4 cutover (2026-02-07):
-  - `run_algorithm_meta_circular()` now defaults to structural kernel bridge path
-  - Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
-  - recurrence/exhaustion execution layer promoted to META_CIRCULAR
+1. Close Gate 5 parity and stabilization:
+- [ ] Keep structural execution as default for recurrence/exhaustion in Python and JS.
+- [ ] Keep bootstrap execution as explicit fallback-only path.
+- [ ] Keep `tests/structural/test_gate5_meta_circular_parity.py` green.
+- [ ] Keep `tests/test_execution_path_verification.py` green (trace path == runtime path).
+- [ ] Keep `tests/test_js_parity_automated.py` green (cross-substrate parity).
+
+2. Canonical tracker discipline:
+- [ ] When Gate 5 is closed, update Gate Snapshot in `STATUS.md` and `TASKS.md` in the same change.
+- [ ] Keep roadmap documents sequence-only; state changes belong in canonical trackers only.
+
+3. Historical note:
+- Phase 7 and Phase 8 implementation history is complete and retained in `Ra` and `STATUS.md`.
+- This NEXT section now tracks only active follow-up work.
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)
@@ -671,32 +324,13 @@ All blockers resolved 2026-01-28:
   - Dedicated Gate 5 suite: `tests/structural/test_gate5_meta_circular_parity.py`
   - Runtime parity fix complete (2026-02-08): `run_mu_structural()` now executes via `step_kernel_mu(..., kernel_mode="bridge")`
   - JS parity fix (2026-02-08): `runStructural()` routes through `stepKernel(allProjectionsWithBridge)`, prototype pollution hardened (PR #222)
+  - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")` on production path.
 
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR
 
----
-
-**Cross-substrate verification (9-agent Round 3 fix, 2026-01-31):**
-- Previous tests just parsed strings from JS stdout (theater)
-- Now runs SAME 20 parity vectors through BOTH substrates via JSON API
-- Compares actual outputs, handles int/float normalization
-- See `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
-
-**7-Agent Review Results (2026-01-30):**
-| Agent | Verdict | Key Finding |
-|-------|---------|-------------|
-| Verifier | APPROVE | All 12 North Star invariants maintained |
-| Adversary | SECURE | Non-linear pattern concern RESOLVED (binding conflict detection works) |
-| Expert | MINIMAL | Code appropriately sized |
-| Structural-proof | PROVEN | All 4 structural claims verified |
-| Grounding | GROUNDED | All claims have executable tests |
-| Fuzzer | DESIGN COMPLETE | Comprehensive fuzzer tests provided |
-| Advisor | RESOLVED | Architecture is sound |
-
----
-
 ## VECTOR (design-only; semantics locked, no implementation allowed)
+
 
 **Active designs:**
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
@@ -707,11 +341,8 @@ Current Exhaustion Layer: META_CIRCULAR
   - Step 6 complete: 11 projections in `mu/closures/exhaustion.v1.json`
   - 27 tests (17 parity + 10 fuzzer), cross-substrate parity verified
 
-**Promoted to NEXT:**
-- Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - **Promoted 2026-01-27**
-  - All 7 agents APPROVE (verifier, adversary, expert, structural-proof, grounding, fuzzer, advisor)
-  - Design complete: 7 kernel projections, linked-list cursor, context passthrough
-  - See NEXT section for Phase 7 implementation plan
+**Historical promotion (completed):**
+- Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - promoted 2026-01-27, implemented and archived in `Ra`
 
 **Completed designs (now in Ra):**
 - RCX Kernel v0 (`docs/core/RCXKernel.v0.md`)
