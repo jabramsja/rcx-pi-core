@@ -35,7 +35,7 @@ Eliminate accidental complexity and enforce minimal structural implementation.
 2. When claiming minimality, show areas inspected and why they survived attack.
 
 ### Verdict
-[MINIMAL / COULD_SIMPLIFY / OVER_ENGINEERED]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `MINIMAL`: reviewed surfaces appear lean for current scope.
 - `COULD_SIMPLIFY`: non-blocking simplifications are available.

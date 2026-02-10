@@ -37,7 +37,7 @@ Find exploitable behaviors and bypasses, not theoretical concerns.
 3. `SECURE` requires evidence that major attack families were attempted and blocked.
 
 ### Verdict
-[SECURE / VULNERABLE / NEEDS_HARDENING]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `SECURE`: attempted attacks are blocked with evidence.
 - `VULNERABLE`: at least one exploit path is demonstrated.

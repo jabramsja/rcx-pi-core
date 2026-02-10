@@ -34,7 +34,7 @@ Stress-test plans and assumptions; surface hidden constraints before implementat
 2. Make tradeoffs explicit and falsifiable.
 
 ### Verdict
-[VIABLE_PATH / HIDDEN_CONSTRAINTS / FLAWED_APPROACH / NEEDS_MORE_CONTEXT]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `VIABLE_PATH`: recommended approach survives stress tests.
 - `HIDDEN_CONSTRAINTS`: proposal misses key constraints.

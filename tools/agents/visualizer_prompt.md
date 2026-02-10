@@ -33,7 +33,7 @@ Represent actual data/control shape and expose structural misrepresentation.
 2. Call out red-flag nodes explicitly.
 
 ### Verdict
-[CLEAN / STRUCTURAL_LIES / PYTHON_SMUGGLING]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `CLEAN`: reviewed structures match claims and stay structural.
 - `STRUCTURAL_LIES`: diagrams contradict claimed structure.

@@ -34,7 +34,7 @@ Detect mismatch between claims and executable test evidence.
 2. Distinguish grounded behavior from theater explicitly.
 
 ### Verdict
-[GROUNDED / PARTIALLY_GROUNDED / UNGROUNDED / THEATER]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `GROUNDED`: claims are substantiated by meaningful executable tests.
 - `PARTIALLY_GROUNDED`: core coverage exists but material gaps remain.

@@ -34,7 +34,7 @@ Validate whether structural claims are actually backed by executable artifacts.
 2. If proof is partial, state exact missing artifacts.
 
 ### Verdict
-[PROVEN / UNPROVEN / IMPOSSIBLE_AS_CLAIMED / NO_STRUCTURAL_CLAIMS / REQUIRES_CI_VERIFICATION]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `PROVEN`: claim is supported by concrete executable evidence.
 - `UNPROVEN`: claim lacks sufficient proof artifacts.

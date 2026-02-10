@@ -311,7 +311,7 @@ def test_infra_count_within_ceiling():
     of boundary scaffolding. Infra markers are not debt (they don't block
     self-hosting), but excessive infra suggests architectural issues.
 
-    Current expected: 33
+    Current expected: 37
     """
     result = _run(["bash", str(DEBT_DASHBOARD), "--json"])
 
@@ -327,7 +327,7 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 37 (removed deprecated get_seeds_dir + simplified validate_projection_ids)
+    # Current expected count is 37 (iteration guards from PR #219, 2026-02-08)
     assert infra_count == 37, (
         f"Expected 37 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."

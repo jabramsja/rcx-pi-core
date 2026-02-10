@@ -33,7 +33,7 @@ Expose mismatch between stated intent and actual behavior.
 2. Pair every mismatch with direct evidence.
 
 ### Verdict
-[MATCHES_INTENT / DEVIATES / SCOPE_CREEP / HOST_SMUGGLING]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `MATCHES_INTENT`: implementation aligns with stated intent for reviewed scope.
 - `DEVIATES`: behavior diverges from stated intent.

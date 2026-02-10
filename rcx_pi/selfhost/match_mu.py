@@ -114,7 +114,8 @@ def load_match_with_bridge_projections() -> list[Mu]:
     """
     global _match_bridge_cache
     if _match_bridge_cache is not None:
-        return _match_bridge_cache
+        import json as _json
+        return _json.loads(_json.dumps(_match_bridge_cache))
 
     from .seed_integrity import load_verified_seed, get_seed_path
 
@@ -143,7 +144,9 @@ def load_match_with_bridge_projections() -> list[Mu]:
 
     _validate_match_bridge_ordering(combined)
     _match_bridge_cache = combined
-    return _match_bridge_cache
+    # Return defensive copy — callers must not mutate the cached projections
+    import json as _json
+    return _json.loads(_json.dumps(_match_bridge_cache))
 
 
 def clear_match_bridge_cache() -> None:

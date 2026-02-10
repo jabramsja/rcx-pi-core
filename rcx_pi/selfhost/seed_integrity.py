@@ -205,6 +205,29 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
 }
 
 
+# Map seed names to mu/ subfolders — the ONLY source of truth for seed locations.
+# Module-level so it's created once (not per call).
+MU_SEED_LOCATIONS: dict[str, str] = {
+    # Substrate seeds (the VM)
+    "kernel.v1.json": "substrate",
+    "match.v1.json": "substrate",
+    "match.v2.json": "substrate",
+    "subst.v1.json": "substrate",
+    "subst.v2.json": "substrate",
+    # Bridge seeds
+    "bootstrap_structural.v1.json": "bridge",
+    # Closure detection seeds
+    "recurrence.v1.json": "closures",
+    "exhaustion.v1.json": "closures",
+    # Utilities
+    "classify.v1.json": "utilities",
+    "eval.v1.json": "utilities",
+    # Programs
+    "rcx_engine.v1.json": "programs",
+    "hemispheres.v1.json": "programs",
+}
+
+
 # =============================================================================
 # Checksum Verification
 # =============================================================================
@@ -405,27 +428,6 @@ def get_seed_path(seed_name: str) -> Path:
         ValueError: If seed_name is not in the known location map.
     """
     mu_dir = get_mu_dir()
-
-    # Map seed names to mu/ subfolders - this is the ONLY source of truth
-    MU_SEED_LOCATIONS = {
-        # Substrate seeds (the VM)
-        "kernel.v1.json": "substrate",
-        "match.v1.json": "substrate",
-        "match.v2.json": "substrate",
-        "subst.v1.json": "substrate",
-        "subst.v2.json": "substrate",
-        # Bridge seeds
-        "bootstrap_structural.v1.json": "bridge",
-        # Closure detection seeds
-        "recurrence.v1.json": "closures",
-        "exhaustion.v1.json": "closures",
-        # Utilities
-        "classify.v1.json": "utilities",
-        "eval.v1.json": "utilities",
-        # Programs
-        "rcx_engine.v1.json": "programs",
-        "hemispheres.v1.json": "programs",
-    }
 
     if seed_name not in MU_SEED_LOCATIONS:
         raise ValueError(

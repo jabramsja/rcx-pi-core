@@ -389,19 +389,27 @@ def extract_verdict_secure(
     # Build pattern for this agent's verdicts
     if valid_verdicts:
         verdict_options = "|".join(re.escape(v) for v in valid_verdicts)
+
+        # Tier 1: Colon format — "Verdict: TOKEN" or "**Verdict:** TOKEN"
         specific_pattern = rf'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?[Vv]erdict(?:\*\*)?\s*:\s*(?:\*\*)?\s*({verdict_options})\b'
         match = re.search(specific_pattern, output, re.MULTILINE | re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
-        # Multi-line verdict format:
-        # "### Verdict" then next line "**SECURE**" (or plain SECURE)
+        # Tier 2: Multi-line — "### Verdict" then next line "**TOKEN**" or "TOKEN"
         multiline_specific_pattern = rf'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?[Vv]erdict(?:\*\*)?\s*\n+\s*(?:\*\*)?({verdict_options})(?:\*\*)?\b'
         match = re.search(multiline_specific_pattern, output, re.MULTILINE | re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
-    # Generic verdict pattern (fallback)
+        # Tier 3: Bracket format — "### Verdict\n[TOKEN / TOKEN2 / ...]"
+        # Agents produce this when prompts show options as [A / B / C]
+        bracket_pattern = rf'(?:^|\n)\s*(?:\*\*)?(?:###?\s*)?[Vv]erdict(?:\*\*)?\s*\n+\s*\[\s*({verdict_options})\b'
+        match = re.search(bracket_pattern, output, re.MULTILINE | re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
+    # Generic verdict pattern (fallback) — requires colon
     generic_pattern = r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:###?\s*)?(?:\*\*)?[Vv]erdict(?:\*\*)?\s*:\s*(?:\*\*)?\s*([A-Z_]+)'
     match = re.search(generic_pattern, output, re.MULTILINE)
     if match:
@@ -409,6 +417,18 @@ def extract_verdict_secure(
         # Only return if it looks like a verdict (not random word)
         if found in GOOD_VERDICTS or (valid_verdicts and found in [v.upper() for v in valid_verdicts]):
             return found
+
+    # Last resort: scan lines in reverse for a standalone valid verdict token.
+    # Bottom of output is most likely the verdict section.
+    # Security: only matches exact tokens from the agent's allowlist.
+    if valid_verdicts:
+        upper_verdicts = [v.upper() for v in valid_verdicts]
+        for line in reversed(output.split('\n')):
+            stripped = line.strip().strip('*').strip('#').strip().strip('*').strip()
+            upper = stripped.upper()
+            for v in upper_verdicts:
+                if upper == v or upper == f"VERDICT: {v}":
+                    return v
 
     return "UNKNOWN"
 

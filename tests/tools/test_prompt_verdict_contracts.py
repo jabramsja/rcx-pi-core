@@ -29,10 +29,24 @@ def _prompt_agent_name(prompt_file: Path) -> str:
 
 
 def _extract_prompt_verdicts(text: str) -> set[str]:
-    match = re.search(r"###\s*Verdict\s*\n\s*\[([^\]]+)\]", text, re.MULTILINE)
-    if not match:
-        return set()
-    return {token.strip().strip("`") for token in match.group(1).split("/") if token.strip()}
+    # Extract verdict tokens from bullet list format:
+    #   - `TOKEN`: description text
+    # Each prompt has "### Verdict" followed by instruction line then bullet list.
+    tokens: set[str] = set()
+    in_verdict_section = False
+    for line in text.split("\n"):
+        if re.match(r"###\s*Verdict", line):
+            in_verdict_section = True
+            continue
+        if in_verdict_section:
+            # Stop at next section header
+            if line.strip().startswith("#") and "Verdict" not in line:
+                break
+            # Match bullet lines: "- `TOKEN`: ..."
+            m = re.match(r"\s*-\s*`([A-Z_]+)`", line)
+            if m:
+                tokens.add(m.group(1))
+    return tokens
 
 
 def test_prompt_verdict_tokens_exist_in_registry():

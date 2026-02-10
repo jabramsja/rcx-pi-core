@@ -545,6 +545,77 @@ class TestVerdictExtraction:
         result = extract_verdict_secure(text_multiline, agent_name="structural-proof")
         assert result == "NO_STRUCTURAL_CLAIMS", f"Should extract multiline verdict, got {result}"
 
+    def test_verdict_bracket_format_extracted(self):
+        """Verdict in bracket format [TOKEN / ...] should be extracted."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+### Verdict
+[APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION]
+
+- `APPROVE`: all attacks blocked.
+"""
+        result = extract_verdict_secure(text, agent_name="verifier")
+        assert result == "APPROVE", f"Should extract APPROVE from bracket format, got {result}"
+
+    def test_verdict_bracket_format_non_first_token(self):
+        """Bracket format with non-first token selected should still match first."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        # Agent wrote the bracket list but verdict is actually in a VERDICT: line above
+        text = """
+### Verdict
+VERDICT: REQUEST_CHANGES
+
+Options were: [APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION]
+"""
+        result = extract_verdict_secure(text, agent_name="verifier")
+        assert result == "REQUEST_CHANGES", f"Should extract REQUEST_CHANGES, got {result}"
+
+    def test_verdict_bare_token_last_resort(self):
+        """Bare verdict token on a standalone line should be caught by last resort."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+## Analysis
+Everything checks out.
+
+### Verdict
+
+SECURE
+"""
+        result = extract_verdict_secure(text, agent_name="adversary")
+        assert result == "SECURE", f"Should extract SECURE from bare token, got {result}"
+
+    def test_verdict_deep_analysis_aligned(self):
+        """Deep analysis Verdict: **ALIGNED** format should be extracted."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+## North Star Drift Analysis
+All claims verified.
+
+### Verdict: **ALIGNED**
+"""
+        result = extract_verdict_secure(text, agent_name="deep_verifier")
+        assert result == "ALIGNED", f"Should extract ALIGNED from deep analysis format, got {result}"
+
 
 class TestAdversaryEvidenceGate:
     """Evidence-gated hard-block rules for adversary findings."""
