@@ -245,7 +245,7 @@ THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
 INFRA_CEILING: 38
-INFRA_CURRENT: 38
+INFRA_CURRENT: 37
 ```
 
 **Debt breakdown:**

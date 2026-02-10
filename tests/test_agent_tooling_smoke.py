@@ -616,6 +616,68 @@ All claims verified.
         result = extract_verdict_secure(text, agent_name="deep_verifier")
         assert result == "ALIGNED", f"Should extract ALIGNED from deep analysis format, got {result}"
 
+    def test_verdict_embedded_in_prose_after_header(self):
+        """Token embedded in prose near Verdict header should be extracted."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+### Verdict
+
+All L1/L2/L3 claims in STATUS.md are structurally **VALID** against the actual implementation.
+"""
+        result = extract_verdict_secure(text, agent_name="deep_structural")
+        assert result == "VALID", f"Should extract VALID from prose near header, got {result}"
+
+    def test_verdict_emoji_between_colon_and_token(self):
+        """Emoji between colon and token should not break extraction."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+## Final Verdict: ✅ **VALID**
+
+All L1/L2/L3 claims verified.
+"""
+        result = extract_verdict_secure(text, agent_name="deep_structural")
+        assert result == "VALID", f"Should extract VALID despite emoji, got {result}"
+
+    def test_verdict_prefixed_header(self):
+        """'L3 Verdict:' and 'Final Verdict:' should be parsed."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+**L3 Verdict:** ✅ **VALID** - Substrate portability is proven.
+"""
+        result = extract_verdict_secure(text, agent_name="deep_structural")
+        assert result == "VALID", f"Should extract VALID from 'L3 Verdict:', got {result}"
+
+    def test_verdict_token_with_trailing_text_last_resort(self):
+        """Token with trailing commentary should be caught by last resort."""
+        shared_agent_utils = import_from_path(
+            "shared_agent_utils",
+            TOOLS_DIR / "shared_agent_utils.py"
+        )
+        extract_verdict_secure = shared_agent_utils.extract_verdict_secure
+
+        text = """
+## Analysis complete.
+
+SECURE — all attack vectors blocked with evidence.
+"""
+        result = extract_verdict_secure(text, agent_name="adversary")
+        assert result == "SECURE", f"Should extract SECURE with trailing text, got {result}"
+
 
 class TestAdversaryEvidenceGate:
     """Evidence-gated hard-block rules for adversary findings."""
