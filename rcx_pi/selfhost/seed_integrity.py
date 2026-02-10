@@ -65,6 +65,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
     # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> docs/core/EVAL_SEED.v0.md)
     "eval.v1.json": "22232b172f883271845d013d8e39b1b75555bd94899deb8276548c5f0d10f53e",
+    # Hemispheres v1: native structural routing (APPLICATION execution layer)
+    "hemispheres.v1.json": "107b49d413102ef4cdb80662f48324e3757ebe40dcbc7c74935ca7aa1106ecfd",
 }
 
 # Expected projection IDs for each seed.
@@ -188,6 +190,17 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "ascend.to_context",    # ASCEND -> pop context frame
         "ascend.to_root",       # ASCEND when context empty -> root_check
         "wrap",                 # Entry point - wrap raw value into state
+    ],
+    # Hemispheres v1: native structural routing (APPLICATION execution layer)
+    "hemispheres.v1.json": [
+        "hemisphere.init",              # Entry: decompose engine_result
+        "hemisphere.classify.null",     # Value is null -> r_null
+        "hemisphere.classify.closure",  # Closure detected -> r_a
+        "hemisphere.classify.default",  # Default -> lobes
+        "hemisphere.add.r_null",        # Prepend entry to r_null
+        "hemisphere.add.r_a",           # Prepend entry to r_a
+        "hemisphere.add.lobes",         # Prepend entry to lobes
+        "hemisphere.unwrap",            # Extract final result
     ],
 }
 
@@ -437,6 +450,7 @@ def get_seed_path(seed_name: str) -> Path:
         "eval.v1.json": "utilities",
         # Programs
         "rcx_engine.v1.json": "programs",
+        "hemispheres.v1.json": "programs",
     }
 
     if seed_name not in MU_SEED_LOCATIONS:

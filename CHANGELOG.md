@@ -4,6 +4,22 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-02-09
 
+### Mu Hemispheres v0: Native Structural Routing
+
+- **Created `mu/programs/hemispheres.v1.json`** — 8 projections for hemisphere routing (North Star #7)
+- Routing state machine: init → classify → add → unwrap (4 kernel steps per decision)
+- Three automatic routes: null→r_null, closure→r_a, default→lobes
+- Entry schema: `{state: <value>, closure_flag: <bool>, origin: "engine"}`
+- Linear-only patterns — runs through core kernel, no bridge needed
+- All intermediate state uses `hemi_*` prefix (no underscore fields, passes domain validation)
+- **Cross-substrate parity verified**: Python and JS produce identical results
+- 27 Python tests in `tests/test_hemisphere_routing.py`
+- 7 parity tests in `tests/structural/test_hemisphere_parity.py`
+- 6 parity vectors in `tests/fixtures/hemisphere_vectors.json`
+- JS JSON API: `run_hemisphere` action in `mu/host/js/eval_step.js`
+- Seed registered in `seed_integrity.py` (checksum, projection IDs, location)
+- **Answers semantic question**: Yes, routing decisions CAN be expressed purely as Mu projections
+
 ### Gate 5 CLOSED: Meta-Circular Parity Verified
 
 - **Gates 1-5 ALL COMPLETE** — hemisphere implementation unblocked

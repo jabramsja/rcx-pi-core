@@ -287,6 +287,13 @@ Items here are implemented and verified under current invariants. Changes requir
   - Cross-substrate parity intact: all 47 core projections run identically on Python and JS
   - B-structural match_mu provides non-linear pattern support via match.v2 + bridge
   - Gates 1-5 ALL COMPLETE — hemisphere implementation unblocked
+- Mu Hemispheres v0 Core (2026-02-09):
+  - `mu/programs/hemispheres.v1.json`: 8 projections (init, 3 classify, 3 add, unwrap)
+  - Entry schema locked: `{state, closure_flag, origin}` per hemisphere
+  - Three automatic routes: null→r_null, closure→r_a, default→lobes
+  - Cross-substrate parity: Python + JS produce identical results
+  - 27 Python tests, 7 parity tests, 6 parity vectors
+  - Semantic answer: routing decisions ARE expressible as pure Mu projections
 
 ---
 
@@ -309,7 +316,10 @@ See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ## NEXT (short, bounded follow-ups)
 
-*(No active items — Gate 5 closed, hemisphere implementation unblocked)*
+1. Mu Hemispheres v0 — Integration with engine output:
+- Hemisphere routing seed is complete (`mu/programs/hemispheres.v1.json`, 8 projections, cross-substrate parity verified)
+- **Semantic answer confirmed:** Routing decisions CAN be expressed purely as Mu projections (linear-only, no bridge needed)
+- [ ] Integration with rcx_engine.v1 output (engine_result → automatic hemisphere routing)
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)
@@ -329,6 +339,9 @@ Current Exhaustion Layer: META_CIRCULAR
 **Active designs:**
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
+
+**Promoted to NEXT:**
+- ~~Mu Hemispheres v0~~ (`roadmap/MuHemispheresDesign.md`) - **PROMOTED TO NEXT** (2026-02-09, Gate 5 blocker resolved)
 
 **Completed (moved to Ra):**
 - ~~Operator Exhaustion v0~~ (`docs/core/OperatorExhaustion.v0.md`) - **MOVED TO Ra** (IMPLEMENTED 2026-02-02)

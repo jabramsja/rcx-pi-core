@@ -1,0 +1,179 @@
+{
+  "description": "Hemisphere routing parity vectors. Same inputs run on both Python and JavaScript, expecting identical outputs.",
+  "version": "1.0",
+  "vectors": [
+    {
+      "id": "route_null_value",
+      "description": "Null value routes to r_null hemisphere",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": null,
+            "closure_detected": false,
+            "tau_step": null,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "r_null",
+      "expected_entry": {
+        "state": null,
+        "closure_flag": false,
+        "origin": "engine"
+      }
+    },
+    {
+      "id": "route_closure",
+      "description": "Closure detected routes to r_a hemisphere",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": 42,
+            "closure_detected": true,
+            "tau_step": 3,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "r_a",
+      "expected_entry": {
+        "state": 42,
+        "closure_flag": true,
+        "origin": "engine"
+      }
+    },
+    {
+      "id": "route_default",
+      "description": "Default (no special condition) routes to lobes hemisphere",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": "hello",
+            "closure_detected": false,
+            "tau_step": null,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "lobes",
+      "expected_entry": {
+        "state": "hello",
+        "closure_flag": false,
+        "origin": "engine"
+      }
+    },
+    {
+      "id": "route_null_with_closure",
+      "description": "Null value takes priority over closure_detected (null checked first)",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": null,
+            "closure_detected": true,
+            "tau_step": 5,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "r_null",
+      "expected_entry": {
+        "state": null,
+        "closure_flag": true,
+        "origin": "engine"
+      }
+    },
+    {
+      "id": "route_nested_value",
+      "description": "Nested dict value routes to lobes and preserves structure",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": {"a": 1, "b": {"c": 2}},
+            "closure_detected": false,
+            "tau_step": null,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "lobes",
+      "expected_entry": {
+        "state": {"a": 1, "b": {"c": 2}},
+        "closure_flag": false,
+        "origin": "engine"
+      }
+    },
+    {
+      "id": "route_preserves_existing",
+      "description": "Routing into non-empty hemispheres preserves existing entries",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": "new",
+            "closure_detected": false,
+            "tau_step": null,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null,
+            "r_inf": null,
+            "r_a": [{"state": "old_closure", "closure_flag": true, "origin": "engine"}],
+            "lobes": [{"state": "existing", "closure_flag": false, "origin": "engine"}],
+            "sink": null
+          }
+        }
+      },
+      "expected_target": "lobes",
+      "expected_entry": {
+        "state": "new",
+        "closure_flag": false,
+        "origin": "engine"
+      },
+      "expected_existing_r_a_count": 1,
+      "expected_lobes_count": 2
+    }
+  ]
+}

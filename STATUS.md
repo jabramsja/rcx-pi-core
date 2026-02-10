@@ -98,7 +98,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Closures (Core)** | recurrence.v1, exhaustion.v1 | ✅ | Required for L3 |
 | **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
 | **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
-| **Programs** | rcx_engine.v1 | Python-only | Design-only, not production |
+| **Programs** | rcx_engine.v1, hemispheres.v1 | hemispheres: ✅ | rcx_engine design-only; hemispheres testable (L3 parity) |
 
 **JS Debt Tracking (matches Python):**
 - JS file has DEBT SUMMARY header with counts
@@ -377,7 +377,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - **mu/ folder (new organized structure):**
   - Substrate: `mu/substrate/` (kernel.v1, match.v2, subst.v2)
   - Closures: `mu/closures/` (recurrence.v1, exhaustion.v1)
-  - Programs: `mu/programs/` (rcx_engine.v1)
+  - Programs: `mu/programs/` (rcx_engine.v1, hemispheres.v1)
   - Host: `mu/host/js/eval_step.js`, `mu/host/python/selfhost`
 - Task list: `TASKS.md`
 - **Documentation governance:** `docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
@@ -607,8 +607,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-09 (Gate 5 COMPLETE: meta-circular parity verified, all 56 exit criteria tests pass)
-**Next milestone:** Hemisphere implementation (unblocked by Gate 5 closure)
+**Last updated:** 2026-02-09 (Hemispheres v0 implemented: 8 projections, cross-substrate parity verified)
+**Next milestone:** Hemisphere integration with rcx_engine.v1 output (engine_result → routing decision)
 
 **Gate Snapshot (Canonical):**
 - Gate 3: COMPLETE (2026-02-07)
@@ -663,8 +663,9 @@ New organized structure makes architecture visible:
 - [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
-- [x] Total: 47 core projections across 5 L3-complete seeds
-- [x] Additional: 43 projections in utilities/programs/bridge (90 total across all mu/)
+- [x] hemispheres.v1.json: 8 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
+- [x] Total: 47 core projections across 5 L3-complete seeds + 8 hemisphere projections
+- [x] Additional: 51 projections in utilities/programs/bridge (98 total across all mu/)
 - [x] 5 EngineNews + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**
