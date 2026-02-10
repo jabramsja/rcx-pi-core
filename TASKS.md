@@ -270,6 +270,16 @@ Items here are implemented and verified under current invariants. Changes requir
   - `==` → `mu_equal()` in fuzzer tests, shared strategies extracted to `tests/strategies.py`
   - Iteration guards in match_mu.py (bindings_to_dict, denormalize_from_match)
   - INFRA_CEILING: 37 → 38, test count: 2,846
+- B-Structural Non-Linear Match (2026-02-09):
+  - `match_mu()` now uses match.v2 + bridge projections directly via `projection_runner`
+  - Non-linear pattern conflict detection: `apply_mu({a:{var:x}, b:{var:x}}, {a:1, b:2})` → NO_MATCH
+  - `projection_runner.make_projection_runner()` extended with `terminal_field` parameter for v2 support
+  - `load_match_with_bridge_projections()` loads and caches 13 combined projections (8 match.v2 + 5 bridge)
+  - Fail-closed guard: `step_mu()`/`run_mu()` reject non-linear patterns with ValueError
+  - Semantic split documented: `apply_mu`/`match_mu` (bridge-aware) vs `step_mu`/`run_mu` (core-only, fail-closed)
+  - 18 structural invariant tests in `tests/structural/test_match_bridge_invariants.py`
+  - Non-linear Hypothesis strategies + 2 fuzzer tests in `test_apply_mu_fuzzer.py`
+  - All deadlines at original 5000ms (no inflation needed)
 
 ---
 

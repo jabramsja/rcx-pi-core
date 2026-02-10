@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: IMPLEMENTATION
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -79,10 +79,10 @@ If Python provides the iteration ("try each projection in order"), emergence mig
 ## Problem Statement
 
 Phase 5/6 achieved:
-- `match_mu`: Pattern matching as Mu projections (7 projections)
+- `match_mu`: Pattern matching as Mu projections (now 13: 8 match.v2 + 5 bridge for non-linear support)
 - `subst_mu`: Substitution as Mu projections (12 projections)
 - `classify_mu`: Classification as Mu projections (6 projections)
-- `step_mu`: Composition of match_mu + subst_mu
+- `step_mu`: Composition of match_mu + subst_mu (fail-closed: rejects non-linear patterns)
 
 > Counts reflect current verified seed JSONs; see STATUS.md for authoritative updates.
 
@@ -820,7 +820,9 @@ The "guard" is implemented by **projection ordering**, not pattern syntax. Remov
 - `docs/core/SelfHosting.v0.md` - Phase 5/6 self-hosting spec
 - `docs/core/RCXKernel.v0.md` - Original kernel spec
 - `rcx_pi/selfhost/step_mu.py` - Current Python implementation
-- `mu/substrate/match.v1.json` - Match projections (7)
+- `mu/substrate/match.v1.json` - Match projections v1 (7, legacy)
+- `mu/substrate/match.v2.json` - Match projections v2 (8, used by kernel + match_mu)
+- `mu/bridge/bootstrap_structural.v1.json` - Bridge projections (5, non-linear pattern support)
 - `mu/substrate/subst.v1.json` - Subst projections (12)
 - `mu/utilities/classify.v1.json` - Classify projections (6)
 - `mu/utilities/eval.v1.json` - Eval projections (7)

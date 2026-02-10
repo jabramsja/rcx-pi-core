@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: IMPLEMENTATION
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -123,7 +123,7 @@ We follow the same pattern for match and substitute.
 | Variable site | **Pattern `{"var": x}`** | Well-formed input assumption (adversary-verified) |
 | Dict iteration | **Fixed key patterns** | Already works! Current system uses this |
 | Bindings | **Linked list** | Immutable, concatenate via append |
-| Conflicts | **Linear patterns only** (Phase 4a) | Simplify first, add non-linear later |
+| Conflicts | **Non-linear via bridge** (B-structural) | match_mu uses match.v2 + bridge projections for conflict detection |
 | Dict determinism | **Sorted keys in JSON serialization** | Fix existing code |
 
 ## Concrete Projections (Phase 4a: Match)
@@ -376,7 +376,7 @@ Grounding tests fail if seed files change. This prevents doc drift.
 |----------|------------|
 | Kernel type primitives? | **No** - structure IS type |
 | Dict key ordering? | **sorted() in JSON serialization** |
-| Non-linear patterns? | **Linear only for Phase 4** |
+| Non-linear patterns? | **Supported via bridge projections** (match_mu uses match.v2 + bridge; step_mu/run_mu are fail-closed linear-only) |
 | Conversion overhead? | **Minimal** - fixed-key patterns |
 | Eager vs lazy? | **Eager** (matches current Python) |
 
@@ -447,10 +447,18 @@ Phase 5 complete:
   - `classify_mu.py` - Linked list classification as Mu projections
 - `rcx_pi/deep_eval.py` - Deep evaluation machinery
 - `mu/` - Mu projection definitions:
-  - `substrate/match.v1.json` - Match projections (7 rules)
+  - `substrate/match.v1.json` - Match projections v1 (7 rules, legacy)
+  - `substrate/match.v2.json` - Match projections v2 (8 rules, used by match_mu + kernel)
   - `substrate/subst.v1.json` - Substitute projections (12 rules, includes lookup + typed)
+  - `bridge/bootstrap_structural.v1.json` - Bridge projections (5 rules, non-linear pattern support)
   - `utilities/eval.v1.json` - EVAL_SEED traversal projections
   - `utilities/classify.v1.json` - Classification projections (6 rules)
+
+**B-Structural Non-Linear Match (2026-02-09):**
+- `match_mu()` now uses match.v2 + bridge projections directly (13 combined projections)
+- Provides non-linear pattern conflict detection for `apply_mu()` without kernel overhead
+- `step_mu()`/`run_mu()` are fail-closed: reject non-linear patterns with ValueError
+- See `tests/structural/test_match_bridge_invariants.py` for ordering and contract tests
 
 ## Next Steps
 

@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -215,7 +215,7 @@ With only these five primitives, RCX can:
 
 | Capability | How |
 |------------|-----|
-| **Pattern matching** | match.v2 projections (structural) |
+| **Pattern matching** | match.v2 projections (structural); match.v2 + bridge for non-linear via match_mu |
 | **Substitution** | subst.v2 projections (structural) |
 | **Projection selection** | kernel.v1 projections (structural) |
 | **Fixed-point iteration** | `eval_step` + `mu_equal` (primitives) |
