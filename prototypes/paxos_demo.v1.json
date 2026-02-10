@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "version": "1.1.0",
+    "name": "PAXOS_DEMO_BUNDLE",
+    "description": "Demonstration of deadlock metabolization: Livelock + Recurrence + Healer",
+    "execution_layer": "APPLICATION",
+    "dependencies": ["recurrence.v1.json"]
+  },
+  "projections": [
+    {
+      "id": "loop.init",
+      "pattern": {"paxos_trigger": "start_paxos"},
+      "body": {
+        "state": "A"
+      }
+    },
+    {
+      "id": "loop.A_to_B",
+      "pattern": {
+        "state": "A"
+      },
+      "body": {
+        "state": "B"
+      }
+    },
+    {
+      "id": "loop.B_to_A",
+      "pattern": {
+        "state": "B"
+      },
+      "body": {
+        "state": "A"
+      }
+    },
+    {
+      "id": "healer.detect_deadlock",
+      "description": "If recurrence detected, force a resolution",
+      "pattern": {
+        "closure_detected": true,
+        "final_result": {"var": "fr"},
+        "tau_step": {"var": "tau"}
+      },
+      "body": {
+        "status": "consensus_reached",
+        "leader": "Forced_Resolution",
+        "reason": "deadlock_resolution_protocol",
+        "origin_anomaly": {"var": "fr"}
+      }
+    }
+  ]
+}
