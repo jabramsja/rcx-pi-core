@@ -294,6 +294,12 @@ Items here are implemented and verified under current invariants. Changes requir
   - Cross-substrate parity: Python + JS produce identical results
   - 27 Python tests, 7 parity tests, 6 parity vectors
   - Semantic answer: routing decisions ARE expressible as pure Mu projections
+- Hemisphere Adversarial Hardening (2026-02-10):
+  - JS seed verification parity: all 7 seeds verified at load (SHA256, structure, projection IDs)
+  - Python `validate_projection_ids` enforces exact ordered equality (first-match-wins security)
+  - JS cycle detection activated, handler duplication factored
+  - 63 hemisphere adversarial tests added
+  - Deprecated `get_seeds_dir` removed
 
 ---
 

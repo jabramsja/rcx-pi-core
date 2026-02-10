@@ -2,9 +2,9 @@
 
 > **Current State**: See [`STATUS.md`](../STATUS.md)
 > **Authorization**: See [`TASKS.md`](../TASKS.md)
-> **Scope**: This document defines DESIGN only. Gate 5 blocker resolved (2026-02-09). Promotion to NEXT requires locked semantics.
+> **Scope**: This document defines DESIGN only. V0 core implemented (2026-02-09); remaining work is engine integration.
 
-Status: design-only. Gate 5 exit criteria met — implementation unblocked pending promotion.
+Status: v0 core IMPLEMENTED (`mu/programs/hemispheres.v1.json`, 8 projections, cross-substrate parity verified). Promoted to NEXT. Remaining: integration with rcx_engine.v1 output.
 
 ## Purpose
 Define native structural routing states for RCX: `r_null`, `r_inf`, `r_a`, `lobes`, and `sink`. Routing must be expressed as Mu projections, not host logic.

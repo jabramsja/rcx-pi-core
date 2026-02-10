@@ -18,7 +18,7 @@
 | `ROADMAP.md` | Sequence view only | Reading order changes |
 | `MetaCircular_Boot0_GatePlan.md` | Gate definitions + exit criteria | Gate scope changes |
 | `AlgorithmNormalizationSpec.v0.md` | Draft design spec | Design evolves |
-| `MuHemispheresDesign.md` | Draft design spec (blocked) | Design evolves |
+| `MuHemispheresDesign.md` | Design spec (v0 core implemented, integration remaining) | Design evolves |
 | `NormalizationDecisionMemo.md` | Decision authorization | Rarely (decisions are final) |
 
 ## Gate Levels and Execution Order

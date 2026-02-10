@@ -119,6 +119,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - `child_process`, `exec(`, `spawn(` - Subprocess spawning
 - `fs.write*`, `fs.append*`, `fs.unlink`, `fs.rm*` - File mutation (read-only allowed)
 - `require.*http`, `fetch(` - Network access breaks determinism
+- `webcrypto`, `getRandomValues`, `crypto.subtle` - WebCrypto API (non-determinism)
 
 **JS AST Police (blocked by ast_police_js.sh):**
 - Indirect eval: `window['eval']`, `globalThis.eval`, `(0,eval)`
@@ -607,8 +608,16 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-09 (Hemispheres v0 implemented: 8 projections, cross-substrate parity verified)
+**Last updated:** 2026-02-10 (Hemisphere adversarial hardening: JS seed verification parity, 63 adversarial tests)
 **Next milestone:** Hemisphere integration with rcx_engine.v1 output (engine_result → routing decision)
+
+**Hemisphere Hardening (2026-02-10):**
+- JS substrate now verifies all 7 seeds at load time (SHA256 checksum, structure validation, projection ID ordering)
+- L3 parity gap closed: Python verified seeds, JS now does too
+- Python `validate_projection_ids` enforces exact ordered equality (first-match-wins security)
+- JS `classifyLegacyLinkedList` cycle detection activated
+- Deprecated `get_seeds_dir` removed
+- 63 hemisphere adversarial tests added
 
 **Gate Snapshot (Canonical):**
 - Gate 3: COMPLETE (2026-02-07)

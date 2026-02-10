@@ -14,17 +14,17 @@ Read first:
 5. `roadmap/MetaCircular_Boot0_GatePlan.md`
 6. `roadmap/MuHemispheresDesign.md`
 
-**Now (updated 2026-02-09)**
-1. Gates 1-5 ALL COMPLETE. Canonical trackers (`STATUS.md`, `TASKS.md`) reflect this.
-2. Hemisphere implementation is unblocked. Promote from VECTOR to NEXT when ready.
+**Now (updated 2026-02-10)**
+1. Gates 1-5 ALL COMPLETE. Hemispheres v0 core DONE (8 projections, cross-substrate parity verified).
+2. Hemisphere adversarial hardening complete (JS seed verification parity, 63 adversarial tests).
 3. Keep Gate 4/5 guarantees intact: structural default active, bootstrap explicit fallback only.
 
 **Next**
-1. Promote hemisphere design (`roadmap/MuHemispheresDesign.md`) to NEXT when semantics are locked.
+1. Hemisphere integration with rcx_engine.v1 output (engine_result → automatic hemisphere routing). Core seed is done (`mu/programs/hemispheres.v1.json`, 8 projections, cross-substrate parity verified).
 2. Keep all L2/L3 invariants intact (structural execution default, cross-substrate parity).
 
 **Vector (Design Only)**
-1. Mu-only hemisphere routing design in `roadmap/MuHemispheresDesign.md`. Gate 5 blocker resolved — ready for promotion when design is locked.
+1. ~~Mu-only hemisphere routing design~~ — **PROMOTED TO NEXT** (2026-02-09). Core v0 implemented; remaining work is engine integration.
 2. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
 
 **Sink (Parked)**

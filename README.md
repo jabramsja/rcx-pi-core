@@ -2,21 +2,23 @@
 
 A projection-based computational substrate where **structure is the primitive**.
 
-## Current Status: L3 Substrate Portability COMPLETE
+## Current Status: Phase 8c — Gates 1-5 COMPLETE
 
 | Level | Description | Status |
 |-------|-------------|--------|
 | **L1** | match/subst algorithms as Mu projections | ✅ DONE |
 | **L2** | Kernel state machine as Mu projections | ✅ FULL |
 | **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
-| **Step 5** | EngineNews structural closure detection | ✅ DONE |
+| **Gates 1-5** | Meta-circular parity (structural default) | ✅ COMPLETE |
+| **Hemispheres v0** | Native structural routing (8 projections) | ✅ DONE |
 
-- **2,100+ tests** across 90+ test files
+- **2,846+ tests** across 90+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
 - **43 CRITICAL_TEST_FILES** protected from silent skipping
+- **47 core projections** across 5 L3-complete seeds + 8 hemisphere projections
 
-**Step 5 Achievement:** EngineNews closure detection (Rule 2.2♢) implemented as pure Mu projections.
-All logic is in `mu/closures/recurrence.v1.json` (9 projections). Bootstrap provides only mechanical execution.
+**Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
+Three automatic routes: null→r_null, closure→r_a, default→lobes. Cross-substrate parity verified.
 
 See `STATUS.md` for full details.
 
@@ -80,9 +82,13 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/substrate/kernel.v1.json` | Structural kernel (7 projections) - state machine |
 | `mu/substrate/match.v2.json` | Pattern matching (8 projections) - with context passthrough |
 | `mu/substrate/subst.v2.json` | Substitution (12 projections) - with context passthrough |
+| `mu/bridge/bootstrap_structural.v1.json` | Non-linear pattern support (5 projections) |
+| `mu/closures/recurrence.v1.json` | Closure detection (9 projections) - Rule 2.2♢ |
+| `mu/closures/exhaustion.v1.json` | Operator exhaustion (11 projections) - Rule 3.1 |
+| `mu/programs/hemispheres.v1.json` | Hemisphere routing (8 projections) - native structural routing |
+| `mu/programs/rcx_engine.v1.json` | Engine orchestration (6 projections) - design-only |
 | `mu/utilities/classify.v1.json` | Type classification (~6 projections) |
 | `mu/utilities/eval.v1.json` | Evaluation (~7 projections) |
-| `mu/closures/recurrence.v1.json` | Closure detection (9 projections) - Rule 2.2♢ |
 
 ### Core Modules
 
@@ -184,4 +190,4 @@ See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emi
 
 ---
 
-*Last updated: 2026-02-01*
+*Last updated: 2026-02-10*

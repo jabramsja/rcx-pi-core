@@ -2,6 +2,18 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-10
+
+### Seed Integrity Verification Parity + Adversarial Hardening
+
+- **JS substrate now verifies all 7 seeds at load time** — SHA256 checksum, structure validation, projection ID ordering
+- Closes L3 parity gap where Python verified seeds but JS loaded blindly
+- Python `validate_projection_ids` now enforces exact ordered equality (security-critical for first-match-wins routing)
+- JS `classifyLegacyLinkedList` cycle detection activated
+- Handler duplication factored in JS substrate
+- Deprecated `get_seeds_dir` removed from Python
+- 63 hemisphere adversarial tests added
+
 ## 2026-02-09
 
 ### Mu Hemispheres v0: Native Structural Routing
