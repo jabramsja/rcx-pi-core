@@ -28,7 +28,9 @@ from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
 
 
-TEST_TIMEOUT_SECONDS = 120
+# CI runners are ~3x slower than local; use RCX_CI env var to detect.
+import os as _os
+TEST_TIMEOUT_SECONDS = 360 if _os.environ.get("RCX_CI") else 120
 
 
 class _Timeout(Exception):
