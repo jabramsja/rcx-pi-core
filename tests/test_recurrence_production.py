@@ -20,13 +20,13 @@ from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
 from rcx_pi.selfhost.mu_type import mu_equal, mu_hash
 from rcx_pi.selfhost.kernel import reset_step_budget
 
+# Module-level slow marker: meta-circular recurrence is inherently expensive
+# (~500 eval_steps per projection application). Skipped in CI fast gate;
+# runs in audit_all.sh and nightly.
+pytestmark = pytest.mark.slow
 
-# Time limit per test (seconds).  The meta-circular kernel is inherently slow
-# (~500 eval_steps per recurrence projection application).  Hash comparison
-# makes each check O(1) but kernel normalization is still O(trace_length) per step.
-# CI runners are ~3x slower than local; use RCX_CI env var to detect.
-import os as _os
-TEST_TIMEOUT_SECONDS = 360 if _os.environ.get("RCX_CI") else 120
+# Time limit per test (seconds).
+TEST_TIMEOUT_SECONDS = 120
 
 
 def load_projections(seed_name: str) -> list:

@@ -102,10 +102,11 @@ run_python() {
   ./tools/audit_semantic_purity.sh
   echo
 
-  echo "[PY 8/11] Python test suite (excludes stress tests - those run in audit_all)"
+  echo "[PY 8/11] Python test suite (excludes stress + slow tests)"
   # Stress tests have 60-120s deadlines per example, run separately in audit_all.sh
+  # Slow tests (meta-circular recurrence, paxos e2e) run in audit_all.sh / nightly
   # Also exclude test_js_parity_automated.py - JS parity verified via node run in step 11
-  python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
+  python3 -m pytest $PARALLEL_FLAG -m "not slow" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
   echo
 
   echo "[PY 9/11] Fixture v2 validation"

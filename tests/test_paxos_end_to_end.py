@@ -27,10 +27,13 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
 
+# Module-level slow marker: full paxos e2e goes through meta-circular
+# recurrence which is inherently expensive. Skipped in CI fast gate;
+# runs in audit_all.sh and nightly.
+pytestmark = pytest.mark.slow
 
-# CI runners are ~3x slower than local; use RCX_CI env var to detect.
-import os as _os
-TEST_TIMEOUT_SECONDS = 360 if _os.environ.get("RCX_CI") else 120
+# Time limit per test (seconds).
+TEST_TIMEOUT_SECONDS = 120
 
 
 class _Timeout(Exception):

@@ -33,6 +33,9 @@ addopts = "--import-mode=importlib"  # Required for tools.* imports to work prop
 filterwarnings = [
     "error::DeprecationWarning:rcx_pi.*",
 ]
+markers = [
+    "slow: marks tests as slow (meta-circular recurrence, full paxos e2e). Deselected by default in CI; run with --run-slow or audit_all.sh",
+]
 # NOTE: Parallel execution (-n auto) is NOT enabled by default because:
 # - Single-file runs have 3s worker spawn overhead that makes them slower
 # - Full suite runs use audit scripts which add -n auto explicitly
