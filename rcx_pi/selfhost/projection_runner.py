@@ -89,6 +89,8 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
         """
         budget = get_step_budget()
         state = initial_state
+        # INVARIANT: step() is functionally pure — state_hash caching is safe.
+        state_hash = mu_hash_cached(initial_state)
         for i in range(max_steps):
             # Check if done
             if is_done(state):
@@ -100,13 +102,15 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
             next_state = step(projections, state)
 
             # Check for stall (no change) - use mu_hash_cached to avoid Python type coercion
-            if mu_hash_cached(next_state) == mu_hash_cached(state):
+            next_hash = mu_hash_cached(next_state)
+            if next_hash == state_hash:
                 # Report steps consumed to global budget.
                 # A step was executed before stall detection, so consume i + 1.
                 budget.consume(i + 1)
                 return state, i, True
 
             state = next_state
+            state_hash = next_hash
 
         # Max steps exceeded - treat as stall
         # Report steps consumed to global budget

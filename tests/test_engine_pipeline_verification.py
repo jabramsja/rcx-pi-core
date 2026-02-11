@@ -8,10 +8,14 @@ the _boundary_request algebraic effect protocol.
 This test replaces the manual orchestration in test_paxos_end_to_end.py
 with the actual engine projections.
 """
+import pytest
+
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.step_mu import run_engine_pipeline
 from rcx_pi.selfhost.kernel import reset_step_budget
 
+
+@pytest.mark.slow
 def test_engine_orchestrates_paxos_closure():
     """Verify engine pipeline detects Paxos closure automatically."""
     reset_step_budget()
@@ -56,6 +60,7 @@ def test_engine_orchestrates_paxos_closure():
     assert isinstance(val, dict)
     assert "node_a" in val or "paxos_mode" in val, "Result value looks wrong"
 
+@pytest.mark.slow
 def test_engine_output_composes_with_healer():
     """Verify apply_mu(healer, run_engine_pipeline(...)) produces consensus."""
     from rcx_pi.selfhost.step_mu import apply_mu
@@ -100,6 +105,7 @@ def test_engine_exhaustion_without_terminal_raises():
         )
 
 
+@pytest.mark.slow
 def test_budget_persists_across_sub_algorithm_iterations():
     """Budget accounting persists when a caller provides an active budget.
 

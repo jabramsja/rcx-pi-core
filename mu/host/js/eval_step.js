@@ -1093,6 +1093,8 @@ function run(projections, input, maxSteps = 10000) {
   }
 
   let current = input;
+  // INVARIANT: step() is functionally pure — currentHash caching is safe.
+  let currentHash = muHashCached(input);
   const trace = [];
 
   for (let i = 0; i < maxSteps; i++) {
@@ -1110,10 +1112,12 @@ function run(projections, input, maxSteps = 10000) {
     const next = step(projections, current);
 
     // Check for stall (no change) — hash comparison
-    if (muHashCached(next) === muHashCached(current)) {
+    const nextHash = muHashCached(next);
+    if (nextHash === currentHash) {
       return { result: current, steps: i, stalled: true, trace };
     }
     current = next;
+    currentHash = nextHash;
   }
   return { result: current, steps: maxSteps, stalled: false, trace };
 }
@@ -1218,6 +1222,8 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     // kernel.unwrap extracts the result, forcing value equality fallback
     // that misclassifies identity projections as stalls.
     let current = kernelInput;
+    // INVARIANT: step() is functionally pure — currentHash caching is safe.
+    let currentHash = muHashCached(kernelInput);
     for (let i = 0; i < maxSteps; i++) {
       const result = step(projections, current);
 
@@ -1235,12 +1241,14 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       }
 
       // Stall check: no change means no progress (skip for intermediate states)
-      if (muHashCached(result) === muHashCached(current)) {
+      const resultHash = muHashCached(result);
+      if (resultHash === currentHash) {
         validator(domainInput, 'stepKernel output');
         return { output: domainInput, stall: true };
       }
 
       current = result;
+      currentHash = resultHash;
     }
     // Max steps exceeded — stall
     validator(domainInput, 'stepKernel output');
@@ -1258,6 +1266,8 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
  * Mirrors Python _resolve_trace_projection_id() (step_mu.py:1100-1148).
  */
 function resolveTraceProjectionId(projections, current, nextValue) {
+  // Cache nextValue hash — it doesn't change across iterations.
+  const nextValueHash = muHashCached(nextValue);
   for (const proj of projections) {
     if (typeof proj !== 'object' || proj === null) continue;
     if (!('pattern' in proj) || !('body' in proj)) continue;
@@ -1266,7 +1276,7 @@ function resolveTraceProjectionId(projections, current, nextValue) {
       returnMeta: true,
     });
     if (candidate.stall) continue;
-    if (muHashCached(candidate.output) === muHashCached(nextValue)) {
+    if (muHashCached(candidate.output) === nextValueHash) {
       return proj.id || null;
     }
   }
@@ -1322,6 +1332,8 @@ function runStructural(projections, input, maxSteps = 10000) {
 
   const traceEntries = [];
   let current = input;
+  // INVARIANT: stepKernel returns new structures — currentHash caching is safe.
+  let currentHash = muHashCached(input);
 
   for (let i = 0; i < maxSteps; i++) {
     // Gate 5 parity: route through kernel with bridge projections
@@ -1340,7 +1352,8 @@ function runStructural(projections, input, maxSteps = 10000) {
     });
 
     // Check for stall (no change) — hash comparison
-    if (muHashCached(result) === muHashCached(current)) {
+    const resultHash = muHashCached(result);
+    if (resultHash === currentHash) {
       // Add NEW entry for stall - MUST match Python exactly (step_mu.py:1221-1227)
       traceEntries.push({
         step: i + 1,
@@ -1357,6 +1370,7 @@ function runStructural(projections, input, maxSteps = 10000) {
     }
 
     current = result;
+    currentHash = resultHash;
   }
 
   // Hit max steps without stall - add NEW entry (MUST match Python step_mu.py:1238-1243)

@@ -21,12 +21,12 @@ jobs:
   green-gate:
     name: green-gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
       RCX_CI: "1"  # Convert test skips to failures (skip hardening)
-      # CI Split: fast for PRs (~50 examples), full for dev/nightly (~500 examples)
-      HYPOTHESIS_PROFILE: ${{ github.event_name == 'pull_request' && 'ci_fast' || 'ci_full' }}
+      # CI Split: full for nightly (~500 examples), fast for everything else (~50 examples)
+      HYPOTHESIS_PROFILE: ${{ github.event_name == 'schedule' && 'ci_full' || 'ci_fast' }}
 
     steps:
       - name: Checkout

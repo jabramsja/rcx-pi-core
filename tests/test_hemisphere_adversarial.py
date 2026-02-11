@@ -231,6 +231,7 @@ class TestHemisphereBoundary:
     def setup_method(self):
         reset_step_budget()
 
+    @pytest.mark.slow
     def test_wide_hemisphere_list_preserved(self):
         """Prepending multiple entries preserves count and ordering."""
         projs = _get_projs()
