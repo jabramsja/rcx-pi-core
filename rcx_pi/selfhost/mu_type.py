@@ -10,6 +10,7 @@ See docs/core/MuType.v0.md for the full specification.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -384,21 +385,17 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
 # =============================================================================
 
 
-# BOOTSTRAP_PRIMITIVE: mu_equal
-# This is the irreducible fixed-point detection primitive.
-# Cannot be structural because comparison requires touching every node.
-# Used for stall detection: if mu_equal(before, after), no progress was made.
-# See docs/core/BootstrapPrimitives.v0.md for full justification.
+# ELIMINATED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
+# Previously a bootstrap primitive for fixed-point detection.
+# Now derivable from mu_hash_cached: mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)
+# Production code uses mu_hash_cached directly. This wrapper remains for test convenience.
+# Bootstrap primitives reduced from 5 to 4. See docs/core/BootstrapPrimitives.v0.md.
 def mu_equal(a: Any, b: Any) -> bool:
     """
-    BOOTSTRAP PRIMITIVE: Compare two Mu values for structural equality.
+    Convenience wrapper: compare two Mu values for structural equality.
 
-    This is the irreducible mu_equal primitive - analogous to a hardware
-    comparator circuit. Stall detection requires comparing "before" and "after"
-    structurally (not Python object identity).
-
-    Uses canonical JSON serialization to avoid Python's type coercion.
-    This ensures True != 1 and other edge cases are handled correctly.
+    Delegates to mu_hash_cached. No longer a bootstrap primitive — production
+    code uses mu_hash_cached directly for stall detection and binding conflict.
 
     Args:
         a: First Mu value.
@@ -409,15 +406,41 @@ def mu_equal(a: Any, b: Any) -> bool:
 
     Raises:
         TypeError: If either value is not a valid Mu.
-
-    See: docs/core/BootstrapPrimitives.v0.md
     """
     assert_mu(a, "mu_equal.a")
     assert_mu(b, "mu_equal.b")
-    return (
-        json.dumps(a, sort_keys=True, ensure_ascii=False) ==
-        json.dumps(b, sort_keys=True, ensure_ascii=False)
-    )
+    return mu_hash_cached(a) == mu_hash_cached(b)
+
+
+# Cache for mu_hash: canonical JSON → SHA-256 hex digest
+_mu_hash_cache: dict[str, str] = {}
+
+
+def mu_hash_cached(value: Any) -> str:
+    """
+    Compute deterministic hash of a Mu value with caching.
+
+    Caches by canonical JSON serialization to avoid re-hashing identical
+    structures. Used for hash-accelerated equality comparison (Content-Addressed
+    Mu Level 1).
+
+    Args:
+        value: A Mu value.
+
+    Returns:
+        Hex string of SHA-256 hash.
+
+    Raises:
+        TypeError: If value is not a valid Mu.
+    """
+    assert_mu(value, "mu_hash_cached")
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    cached = _mu_hash_cache.get(canonical)
+    if cached is not None:
+        return cached
+    h = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    _mu_hash_cache[canonical] = h
+    return h
 
 
 def mu_hash(value: Any) -> str:
@@ -435,7 +458,6 @@ def mu_hash(value: Any) -> str:
     Raises:
         TypeError: If value is not a valid Mu.
     """
-    import hashlib
     assert_mu(value, "mu_hash")
     canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()

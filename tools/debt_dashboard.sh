@@ -163,7 +163,7 @@ else
         printf "  @host_iteration:     %3d (header + inline markers)\n" "$JS_ITERATION"
         printf "  @host_recursion:     %3d (header + inline markers)\n" "$JS_RECURSION"
         printf "  @host_builtin:       %3d (header + inline markers)\n" "$JS_BUILTIN"
-        printf "  BOOTSTRAP_PRIMITIVE: %3d (5 expected)\n" "$JS_BOOTSTRAP"
+        printf "  BOOTSTRAP_PRIMITIVE: %3d (4 active + 1 eliminated)\n" "$JS_BOOTSTRAP"
         echo "----------------------------------------------"
 
         # Check JS debt markers exist

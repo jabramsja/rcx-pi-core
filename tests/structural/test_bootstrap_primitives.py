@@ -1,10 +1,13 @@
 """
 Grounding tests for Bootstrap Primitives (Phase 8a).
 
-These tests verify that the five bootstrap primitives are:
+These tests verify that the four bootstrap primitives are:
 1. Minimal (cannot be reduced further)
 2. Mechanical (no semantic decisions)
 3. Correctly documented in BootstrapPrimitives.v0.md
+
+Note: mu_equal was eliminated as the 5th primitive (Content-Addressed Mu Level 1).
+Tests for the mu_equal convenience wrapper remain for backward compatibility.
 
 Tests convert claims in the document into executable verifications.
 
@@ -132,9 +135,9 @@ class TestMuEqualPrimitive:
         assert "def mu_equal(a:" in content, (
             "mu_equal primitive not found"
         )
-        # Verify it's marked as BOOTSTRAP_PRIMITIVE
-        assert "BOOTSTRAP_PRIMITIVE: mu_equal" in content, (
-            "mu_equal should be marked with BOOTSTRAP_PRIMITIVE"
+        # Verify it's marked as ELIMINATED PRIMITIVE (Content-Addressed Mu Level 1)
+        assert "ELIMINATED PRIMITIVE: mu_equal" in content, (
+            "mu_equal should be marked as eliminated primitive (replaced by mu_hash_cached)"
         )
 
     def test_mu_equal_uses_content_comparison(self):
@@ -488,15 +491,15 @@ class TestDocumentationClaims:
         doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
         assert doc_path.exists()
 
-    def test_five_primitives_documented(self):
-        """Document lists exactly 5 primitives."""
+    def test_primitives_documented(self):
+        """Document lists all primitives (4 active + mu_equal eliminated)."""
         doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
         content = doc_path.read_text()
 
-        # Check for the five primitive sections
+        # 4 active primitives + mu_equal (eliminated, still documented)
         primitives = [
             "eval_step",
-            "mu_equal",
+            "mu_equal",  # eliminated as primitive, still referenced in doc
             "max_steps",
             "stack_guard",
             "projection_loader"

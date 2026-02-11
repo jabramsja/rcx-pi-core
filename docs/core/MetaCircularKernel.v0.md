@@ -560,7 +560,7 @@ Then kernel.unwrap:
 
 This is acceptable because:
 1. The iteration primitive (for-loop) is **operational**, not **semantic**
-2. Stall detection (`mu_equal(before, after)`) is already structural
+2. Stall detection (`mu_hash_cached(before) == mu_hash_cached(after)`) is already structural
 3. Max-steps is a **resource limit**, not algorithmic logic
 
 **Phase 7 scope:** Self-host projection selection, not the outer repeat-until-stall loop.

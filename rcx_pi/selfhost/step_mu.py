@@ -34,7 +34,7 @@ import json
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, mu_equal
+from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached
 from .kernel import get_step_budget
 from .seed_integrity import get_seed_path, load_verified_seed
 
@@ -165,6 +165,7 @@ ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = (
     ALGORITHM_ENTRYPOINT_KEYS
     | ALGORITHM_INTERNAL_UNRESERVED_FIELDS
     | frozenset((
+        "_check_hash",
         "_check_list",
         "_current",
         "_frozen",
@@ -174,6 +175,7 @@ ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = (
         "_result",
         "_seen",
         "_stall",
+        "_state_hash",
         "_step",
         "_tau_step",
         "_type",
@@ -652,11 +654,11 @@ def is_kernel_intermediate(result: Mu) -> bool:
     - _mode with value other than "done" (kernel loop in progress)
 
     These are NOT stalls - the kernel is actively working.
-    We skip the mu_equal stall check for these because:
+    We skip the stall check for these because:
     1. They may have deeply nested linked-list structures
     2. They're intermediate by definition - no comparison needed
 
-    Phase 8b: This prevents mu_equal from being called on kernel internals.
+    Phase 8b: This prevents stall detection from being called on kernel internals.
     """
     if not isinstance(result, dict):
         return False
@@ -723,7 +725,7 @@ def step_kernel_mu(
     The loop ONLY does:
     - is_kernel_terminal(): Check for structural marker {_mode: "done", ...}
     - extract_kernel_result(): Unpack the marker (no semantic decisions)
-    - mu_equal(): Detect no-progress stall
+    - mu_hash_cached(): Detect no-progress stall (hash comparison)
 
     L2 FULL: Projection SELECTION is structural (linked-list cursor).
     Projection EXECUTION uses Python for-loop (accepted as bootstrap primitive per Phase 8 decision).
@@ -844,7 +846,7 @@ def step_kernel_mu(
             # Stall check - no change means no progress
             # Skip for intermediate kernel states (they have deep nested structures
             # and are mid-execution by definition, not stalls)
-            if not is_kernel_intermediate(result) and mu_equal(result, current):
+            if not is_kernel_intermediate(result) and mu_hash_cached(result) == mu_hash_cached(current):
                 validator(input_value, "step_kernel_mu output")
                 if return_meta:
                     return {"output": input_value, "stall": True}
@@ -978,7 +980,7 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     # Single bootstrap step: preserves first-match-wins semantics without
     # embedding a projection-application loop in this helper.
     normalized_result = step(projections, normalized_input)
-    if mu_equal(normalized_result, normalized_input):
+    if mu_hash_cached(normalized_result) == mu_hash_cached(normalized_input):
         return input_value
 
     result = denormalize_from_match(normalized_result)
@@ -1164,7 +1166,7 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
         result = step_mu(projections, current)
 
         # Check for stall (no change)
-        if mu_equal(result, current):
+        if mu_hash_cached(result) == mu_hash_cached(current):
             trace.append({"step": i + 1, "value": result, "stall": True})
             return result, trace, True
 
@@ -1217,7 +1219,7 @@ def _resolve_trace_projection_id(
             )
             if candidate["stall"] is True:
                 continue
-            if mu_equal(candidate["output"], next_value):
+            if mu_hash_cached(candidate["output"]) == mu_hash_cached(next_value):
                 return proj.get("id")
         return None
     finally:
@@ -1296,7 +1298,7 @@ def run_mu_structural(
             })
 
             # Check for stall (no change)
-            if mu_equal(result, current):
+            if mu_hash_cached(result) == mu_hash_cached(current):
                 trace_entries.append({
                     "step": i + 1,
                     "state": result,
@@ -1328,3 +1330,36 @@ def run_mu_structural(
     finally:
         if started_budget:
             budget.stop()
+
+
+def hash_trace_for_recurrence(trace: Mu) -> Mu:  # AST_OK: infra — boundary scaffolding, iterative
+    """Add state_hash to each entry in a Mu linked-list trace.
+
+    Walks the trace (boundary operation, not a projection) and adds
+    mu_hash(state) to each entry.  This enables recurrence.v2 to compare
+    hash strings instead of deep structural equality.
+
+    Uses iterative linked-list traversal to avoid Python recursion limit
+    on long traces (max_steps can exceed Python's ~1000 frame limit).
+
+    Args:
+        trace: Mu linked-list of trace entries (from run_mu_structural).
+
+    Returns:
+        New Mu linked-list with state_hash added to each entry.
+    """
+    # Collect entries iteratively (avoids recursion limit on long traces)
+    entries = []
+    current = trace
+    while isinstance(current, dict) and "head" in current:
+        entry = current["head"]
+        if isinstance(entry, dict) and "state" in entry:
+            entry = dict(entry)
+            entry["state_hash"] = mu_hash(entry["state"])
+        entries.append(entry)
+        current = current.get("tail")
+    # Rebuild linked list from tail to head
+    result = current  # Preserve terminal (None or non-list value)
+    for entry in reversed(entries):
+        result = {"head": entry, "tail": result}
+    return result

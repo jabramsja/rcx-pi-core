@@ -93,7 +93,7 @@ print(f'Completed: {len(trace)} steps')
 
 ### 1. Infinite/Very Long Loops in `run_mu()`
 The `run_mu()` function in `step_mu.py` runs a projection repeatedly until stall or max_steps. With certain hypothesis-generated inputs, this may:
-- Never detect stall (mu_equal fails to match)
+- Never detect stall (hash comparison fails to match)
 - Create exponentially growing structures
 - Hit edge cases in normalization
 
@@ -156,7 +156,7 @@ def run_mu(projections, value, max_steps=1000, max_depth=100):
 ### Option D: Skip Problematic Tests Temporarily
 ```python
 @pytest.mark.skip(reason="Performance investigation needed")
-def test_max_steps_uses_mu_equal_for_stall():
+def test_max_steps_uses_hash_for_stall():
     ...
 ```
 

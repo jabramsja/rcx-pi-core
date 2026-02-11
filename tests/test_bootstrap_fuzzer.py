@@ -1,12 +1,14 @@
 """
 Bootstrap Primitives Fuzzer - Property-Based Testing for Phase 8a
 
-This test suite attacks the 5 bootstrap primitives from BootstrapPrimitives.v0.md:
+This test suite attacks the 4 bootstrap primitives from BootstrapPrimitives.v0.md:
 1. eval_step - Projection application (first-match-wins)
-2. mu_equal - Structural equality via hash
-3. max_steps - Resource exhaustion guard
-4. stack_guard - Overflow protection (via MAX_MU_DEPTH)
-5. projection_loader - Seed validation
+2. max_steps - Resource exhaustion guard
+3. stack_guard - Overflow protection (via MAX_MU_DEPTH)
+4. projection_loader - Seed validation
+
+Note: mu_equal was eliminated as a bootstrap primitive (Content-Addressed Mu Level 1).
+It is now derivable from mu_hash_cached. Tests for the mu_equal wrapper remain below.
 
 Uses Hypothesis to generate 1000+ random inputs per property to find edge cases
 that would break the bootstrap boundary.

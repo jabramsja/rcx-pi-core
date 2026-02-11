@@ -20,7 +20,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 **Goal:** Define honest boundaries for self-hosting while maximizing structural execution
 
 > **Implementation Status:** See `STATUS.md` for current phase (8a/8b complete).
-> See `docs/core/BootstrapPrimitives.v0.md` for the 5 irreducible primitives.
+> See `docs/core/BootstrapPrimitives.v0.md` for the 4 irreducible primitives (mu_equal eliminated).
 > The design below captures the approach.
 
 ---
@@ -88,12 +88,12 @@ The goal isn't "zero Python" - that's impossible. The goal is ensuring:
 
 ### What Python MUST Provide (Bootstrap Primitives)
 
-**See `docs/core/BootstrapPrimitives.v0.md`** for the canonical documentation of these 5 irreducible primitives:
+**See `docs/core/BootstrapPrimitives.v0.md`** for the canonical documentation of these 4 irreducible primitives (+ 1 eliminated):
 
 | Primitive | Why Irreducible | Analogy |
 |-----------|-----------------|---------|
 | `eval_step()` first-match-wins | Projection application | Forth's NEXT |
-| `mu_equal()` hash comparison | Fixed-point detection | Hardware comparator |
+| ~~`mu_equal()`~~ | ~~Fixed-point detection~~ | **ELIMINATED** — replaced by `mu_hash_cached()` |
 | `max_steps` resource limit | Termination guarantee | Watchdog timer |
 | Stack depth protection | Prevent overflow | Memory protection |
 | Projection loader | Parse JSON, validate | ROM bootstrap |
@@ -124,12 +124,12 @@ These are the "hardware" that structural projections run on.
                    (honest boundary)
                          │
 ┌─────────────────────────────────────────────────────┐
-│  PYTHON SUBSTRATE (bootstrap primitives)            │
+│  PYTHON SUBSTRATE (4 bootstrap primitives)           │
 │  - eval_step: apply first matching projection       │
-│  - mu_equal: detect fixed-point (structural hash)   │
 │  - max_steps: resource exhaustion protection        │
 │  - stack guard: prevent overflow                    │
 │  - loader: parse seeds, validate schema             │
+│  (mu_equal ELIMINATED → mu_hash_cached)             │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -254,10 +254,10 @@ def eval_step(projections: list, value: Mu) -> Mu:
             return substitute(proj["body"], bindings)
     return value  # stall
 
-# mu_equal: Hash-based fixed-point detection
-# Structural comparison via content hash
-def mu_equal(a: Mu, b: Mu) -> bool:
-    return content_hash(a) == content_hash(b)  # PRIMITIVE
+# mu_hash_cached: Hash-based fixed-point detection (ELIMINATED mu_equal as primitive)
+# Structural comparison via cached content hash
+def mu_hash_cached(value: Mu) -> str:
+    return cached_sha256(canonical_json(value))  # boundary scaffolding, not primitive
 
 # Resource limits: Termination guarantee
 MAX_STEPS = 10000  # PRIMITIVE - prevents runaway
@@ -453,7 +453,7 @@ Where:
 - **closure:** Rule 2.2 (trace token recurs independently)
 
 RCX substrate must support this cycle. The bootstrap primitives provide:
-- `mu_equal` → stall detection
+- `mu_hash_cached` → stall detection (hash comparison, not a primitive — boundary scaffolding)
 - `eval_step` → projection application (fix)
 - Trace accumulation → closure detection
 

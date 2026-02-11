@@ -137,7 +137,7 @@ The kernel provides exactly these operations:
 
 Note: Memory management (get_mem, copy_mem) is handled by the host language (Python). The kernel doesn't expose raw memory operations.
 
-**See `docs/core/BootstrapPrimitives.v0.md`** for the canonical list of 5 irreducible bootstrap primitives (eval_step, mu_equal, max_steps, stack_guard, projection_loader).
+**See `docs/core/BootstrapPrimitives.v0.md`** for the canonical list of 4 irreducible bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader). mu_equal was eliminated via Level 1 Content-Addressed Mu (2026-02-10).
 
 ## Why apply_projection is NOT in the Kernel
 
@@ -404,7 +404,7 @@ Each step gets tests. Failure at any step → stop, understand, adjust.
 ## References
 
 - `docs/core/MuType.v0.md` - Mu type definition
-- `docs/core/BootstrapPrimitives.v0.md` - 5 irreducible bootstrap primitives
+- `docs/core/BootstrapPrimitives.v0.md` - 4 irreducible bootstrap primitives (mu_equal eliminated)
 - `docs/core/MetaCircularKernel.v0.md` - Kernel state machine design
 - `docs/core/EngineNewsStructural.v0.md` - Recurrence closure detection
 - `RCXEngineNew.pdf` - Recurrence formal specification (canonical reference)

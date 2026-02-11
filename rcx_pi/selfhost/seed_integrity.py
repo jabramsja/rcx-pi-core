@@ -51,7 +51,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
     # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
-    "recurrence.v1.json": "7de48c0b8ded041ae7b681e2364ca7e7b188358fc82923cd3f53b141a5143baf",
+    # v1.2.0 + PROOF_OF_CONCEPT marker (superseded by recurrence.v2.json)
+    "recurrence.v1.json": "b916f17b2b21b1c194567e515dce535f1acd84a91f32cfd8a11f3cc01aa7fe41",
     # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
     # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
@@ -69,7 +70,9 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
     "hemispheres.v1.json": "107b49d413102ef4cdb80662f48324e3757ebe40dcbc7c74935ca7aa1106ecfd",
     # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
-    "paxos_demo.v1.json": "cc2c36db7613190ab118df3f2ac18180801d8e49a958fcd621c83b5c081be624",
+    "paxos_demo.v1.json": "d3179863324e155daade6ee7d640bdcf93736180e251fe33c31ca73642735a18",
+    # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)
+    "recurrence.v2.json": "a43c73b2698db76d8dfb0b0bd5cdf18c76b8a7c4292640f3040b1790b93e5679",
 }
 
 # Expected projection IDs for each seed.
@@ -151,6 +154,18 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "recurrence.found_in_seen",      # State in seen-set -> closure!
         "recurrence.not_in_head",        # State not in head -> check tail
         "recurrence.not_found",          # State not in seen -> add and advance
+        "recurrence.unwrap",             # Exit: extract final result
+    ],
+    # recurrence.v2.json = hash-accelerated closure detection
+    "recurrence.v2.json": [
+        "recurrence.init",               # Entry: _detect_closure -> internal state
+        "recurrence.end_of_trace",       # End of trace (null) -> no closure
+        "recurrence.check_state_stall",  # Extract state+hash from stall entry
+        "recurrence.check_state_maxsteps",  # Extract state+hash from max_steps entry
+        "recurrence.check_state",        # Extract state+hash from trace entry
+        "recurrence.hash_match",         # Hash in seen-set (non-linear) -> closure!
+        "recurrence.hash_no_match",      # Hash not in head -> check tail
+        "recurrence.not_found",          # Hash not in seen -> add {hash,state} and advance
         "recurrence.unwrap",             # Exit: extract final result
     ],
     # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
@@ -236,6 +251,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     "bootstrap_structural.v1.json": "bridge",
     # Closure detection seeds
     "recurrence.v1.json": "closures",
+    "recurrence.v2.json": "closures",
     "exhaustion.v1.json": "closures",
     # Utilities
     "classify.v1.json": "utilities",

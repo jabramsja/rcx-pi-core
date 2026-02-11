@@ -327,8 +327,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 37 (iteration guards from PR #219, 2026-02-08)
-    assert infra_count == 37, (
-        f"Expected 37 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 38 (37 from PR #219 + 1 for hash_trace_for_recurrence iterative conversion)
+    assert infra_count == 38, (
+        f"Expected 38 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

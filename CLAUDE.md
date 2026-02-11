@@ -42,7 +42,7 @@ If Python provides the control flow, emergence might be a Python artifact. True 
 
 **L3 Parity Requirement (MANDATORY):**
 - Python (`rcx_pi/selfhost/`) and JavaScript (`mu/host/js/eval_step.js`) must remain in parity
-- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`, `exhaustion.v1.json`
+- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`, `recurrence.v2.json`, `exhaustion.v1.json`, `hemispheres.v1.json`
 - Any change to projection behavior in Python MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Run `node mu/host/js/eval_step.js` to verify JS parity after Python changes

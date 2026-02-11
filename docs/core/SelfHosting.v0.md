@@ -451,6 +451,11 @@ Phase 5 complete:
   - `substrate/match.v2.json` - Match projections v2 (8 rules, used by match_mu + kernel)
   - `substrate/subst.v1.json` - Substitute projections (12 rules, includes lookup + typed)
   - `bridge/bootstrap_structural.v1.json` - Bridge projections (5 rules, non-linear pattern support)
+  - `closures/recurrence.v1.json` - Closure detection v1 (9 projections, proof-of-concept)
+  - `closures/recurrence.v2.json` - Closure detection v2 (9 projections, hash-accelerated)
+  - `closures/exhaustion.v1.json` - Operator exhaustion (11 projections)
+  - `programs/hemispheres.v1.json` - Hemisphere routing (8 projections)
+  - `programs/paxos_demo.v1.json` - Paxos deadlock demo (5 projections)
   - `utilities/eval.v1.json` - EVAL_SEED traversal projections
   - `utilities/classify.v1.json` - Classification projections (6 rules)
 
@@ -490,7 +495,7 @@ Phase 5 complete:
 - See `STATUS.md` for current phase and `TASKS.md` for Phase 7 sub-phases
 
 **Phase 8 (Bootstrap Primitives + Mechanical Kernel):**
-- [x] 8a: Document 5 bootstrap primitives (eval_step, mu_equal, etc.)
+- [x] 8a: Document 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader; mu_equal eliminated)
 - [x] 8b: Simplify step_kernel_mu to mechanical operation (~15 lines)
 - [ ] 8c: Oscillation detection (future)
 - [ ] 8d: EngineNews trace model (in progress - see L3 plan below)
@@ -502,15 +507,15 @@ Phase 5 complete:
 - [x] Step 2: Cross-substrate parity tests (`tests/test_parity_python.py`, 20 vectors)
 - [x] Step 3: Phase 8d trace model in Python (`tests/test_structural_trace.py`, 14 tests)
 - [x] Step 4: Port trace to JS POC (`runStructural()`, 5 tests)
-- [ ] Step 5: EngineNews demo on both substrates (CRITICAL: must be structural)
+- [x] Step 5: EngineNews demo on both substrates (structural, 2026-01-30)
 
 **EngineNews Structural Closure Detection (IMPLEMENTED 2026-01-30)**
 
-EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.json`:
+EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.json` (proof-of-concept, 9 projections) and `mu/closures/recurrence.v2.json` (hash-accelerated production version, 9 projections). See `docs/core/recurrence_v2_design.md` for the v2 design and `roadmap/ContentAddressedMu.md` for the broader Content-Addressed Mu direction.
 
 1. **Why this matters:** If EngineNews runs via Python loops/logic, emergence might be a Python artifact. For structural honesty, closure detection must be pattern matching on traces.
 
-2. **What's acceptable:** The bootstrap primitives (eval_step, mu_equal, for-loop driver) are fine - they're like Forth's NEXT. The LOGIC must be projections.
+2. **What's acceptable:** The bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader, for-loop driver) are fine - they're like Forth's NEXT. The LOGIC must be projections. (mu_equal eliminated via Level 1 Content-Addressed Mu.)
 
 3. **Success criteria (ALL MET):**
    - [x] `mu/closures/recurrence.v1.json` exists with 9 projections
@@ -542,4 +547,4 @@ EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.j
 - `tests/test_structural_trace.py` - 14 structural trace tests
 - `tests/fixtures/parity_vectors.json` - 23 shared test vectors
 
-**What L3 proves:** All meaning is in projections. The host (Python or JS) provides only mechanical execution via the 5 bootstrap primitives. Emergence is structural, not a Python artifact. This is the Hex0/Forth precedent.
+**What L3 proves:** All meaning is in projections. The host (Python or JS) provides only mechanical execution via the 4 bootstrap primitives. Emergence is structural, not a Python artifact. This is the Hex0/Forth precedent.

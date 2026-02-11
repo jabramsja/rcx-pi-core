@@ -24,7 +24,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 ## Executive Summary
 
-RCX achieves self-hosting/meta-circularity with an explicit bootstrap boundary. This document defines the **five primitives** that Python must provide - everything above this layer is structural Mu projections.
+RCX achieves self-hosting/meta-circularity with an explicit bootstrap boundary. This document defines the **four primitives** that Python must provide - everything above this layer is structural Mu projections. (Originally five; `mu_equal` was eliminated via Content-Addressed Mu Level 1 — see below.)
 
 This is analogous to:
 - **Forth's NEXT** - the inner interpreter that runs threaded code
@@ -43,9 +43,9 @@ It does NOT define the complete architecture for self-hosting. The primitives ar
 
 | Level | What | Status | Enabled By |
 |-------|------|--------|------------|
-| **L1: Algorithmic** | match/subst as projections | DONE | eval_step + mu_equal |
-| **L2: Operational** | kernel loop as projections | FULL | All 5 primitives |
-| **L3: Substrate Portability** | Same projections run on Python + JS | COMPLETE | All 5 primitives on both substrates |
+| **L1: Algorithmic** | match/subst as projections | DONE | eval_step + mu_hash_cached |
+| **L2: Operational** | kernel loop as projections | FULL | All 4 primitives |
+| **L3: Substrate Portability** | Same projections run on Python + JS | COMPLETE | All 4 primitives on both substrates |
 | **L4: True Self-Hosting** | Bootstrap primitives eliminated | SINK | Research question |
 
 All three levels USE these primitives. The primitives enable self-hosting but don't guarantee it.
@@ -54,7 +54,7 @@ All three levels USE these primitives. The primitives enable self-hosting but do
 
 | Category | Definition | Examples |
 |----------|------------|----------|
-| **Bootstrap Primitive** | Irreducible - cannot be expressed as projection | eval_step, mu_equal, max_steps, stack_guard, loader |
+| **Bootstrap Primitive** | Irreducible - cannot be expressed as projection | eval_step, max_steps, stack_guard, loader |
 | **Scaffolding** | Temporary Python that COULD become structural | run_mu outer loop (L3 boundary) |
 | **Debt** | Python making semantic decisions that SHOULD be projections | Unmarked semantic branching |
 
@@ -62,7 +62,7 @@ All three levels USE these primitives. The primitives enable self-hosting but do
 
 ---
 
-## The Five Bootstrap Primitives
+## The Four Bootstrap Primitives (+ 1 Eliminated)
 
 ### 1. `eval_step` - Projection Application
 
@@ -98,30 +98,19 @@ def eval_step(projections: list[Projection], value: Mu) -> Mu:
 
 ---
 
-### 2. `mu_equal` - Fixed-Point Detection
+### ~~2. `mu_equal` - Fixed-Point Detection~~ (ELIMINATED)
 
-**What it does:**
-```python
-def mu_equal(a: Mu, b: Mu) -> bool:
-    """Structural equality via content hash."""
-    return content_hash(a) == content_hash(b)
-```
+**Status:** ELIMINATED as bootstrap primitive (Content-Addressed Mu Level 1, 2026-02-10).
 
-**Why irreducible:**
-- Stall detection requires comparing "before" and "after"
-- Comparison must be structural (not Python object identity)
-- Hash computation touches every node - cannot be partial
+`mu_equal` is now derivable from `mu_hash_cached`: `mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)`. Production code uses `mu_hash_cached` directly for stall detection and binding conflict. The `mu_equal` function remains as a convenience wrapper for test code.
 
-**What it does NOT do:**
-- No semantic interpretation of values
-- No type-specific comparison logic
-- No ordering or ranking
+**How it was eliminated:** Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) Level 1: hash-identity at construction. All 8 production call sites replaced with `mu_hash_cached()` comparisons. Bootstrap primitives reduced from 5 to 4.
 
-**Analogy:** Hardware comparator circuit
+**Historical role:** Stall detection (comparing "before" and "after" structurally).
 
 ---
 
-### 3. `max_steps` - Resource Exhaustion Guard
+### 2. `max_steps` - Resource Exhaustion Guard
 
 **What it does:**
 ```python
@@ -131,8 +120,8 @@ def run_with_limit(projections, value, max_steps=MAX_STEPS):
     steps = 0
     while steps < max_steps:
         result = eval_step(projections, value)
-        if mu_equal(result, value):
-            return result  # stall
+        if mu_hash_cached(result) == mu_hash_cached(value):
+            return result  # stall (hash comparison)
         value = result
         steps += 1
     return value  # resource exhaustion
@@ -152,7 +141,7 @@ def run_with_limit(projections, value, max_steps=MAX_STEPS):
 
 ---
 
-### 4. `stack_guard` - Overflow Protection
+### 3. `stack_guard` - Overflow Protection
 
 **What it does:**
 ```python
@@ -182,7 +171,7 @@ def is_mu(value: Any, _seen: set | None = None, _depth: int = 0) -> bool:
 
 ---
 
-### 5. `projection_loader` - Seed Bootstrap
+### 4. `projection_loader` - Seed Bootstrap
 
 **What it does:**
 ```python
@@ -211,14 +200,14 @@ def load_verified_seed(path: Path) -> dict:
 
 ## What These Primitives Enable
 
-With only these five primitives, RCX can:
+With only these four primitives, RCX can:
 
 | Capability | How |
 |------------|-----|
 | **Pattern matching** | match.v2 projections (structural); match.v2 + bridge for non-linear via match_mu |
 | **Substitution** | subst.v2 projections (structural) |
 | **Projection selection** | kernel.v1 projections (structural) |
-| **Fixed-point iteration** | `eval_step` + `mu_equal` (primitives) |
+| **Fixed-point iteration** | `eval_step` + `mu_hash_cached` (hash comparison) |
 | **Domain logic** | User projections (structural) |
 | **EngineNews engine cycle** | stall/fix/promote as projections |
 
@@ -269,14 +258,14 @@ If code needs any of these, it must be expressed as **projections**, not Python.
 │                   BOOTSTRAP PRIMITIVES                      │
 │                                                             │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐              │
-│  │ eval_step  │ │  mu_equal  │ │ max_steps  │              │
-│  │ (execute)  │ │  (compare) │ │  (limit)   │              │
+│  │ eval_step  │ │ max_steps  │ │stack_guard │              │
+│  │ (execute)  │ │  (limit)   │ │ (protect)  │              │
 │  └────────────┘ └────────────┘ └────────────┘              │
 │                                                             │
-│  ┌────────────┐ ┌────────────┐                             │
-│  │stack_guard │ │  loader    │                             │
-│  │ (protect)  │ │ (bootstrap)│                             │
-│  └────────────┘ └────────────┘                             │
+│  ┌────────────┐                                            │
+│  │  loader    │  (mu_equal ELIMINATED — now derived from   │
+│  │ (bootstrap)│   mu_hash_cached, Content-Addressed Mu L1) │
+│  └────────────┘                                            │
 │                                                             │
 │  Minimal, mechanical, documented. No semantic decisions.   │
 │  This is the "hardware" that runs the structural layer.    │
@@ -288,23 +277,23 @@ If code needs any of these, it must be expressed as **projections**, not Python.
 
 ## Hidden/Implicit Primitives
 
-The five named primitives depend on these Python capabilities that are baked into the host:
+The four named primitives depend on these Python capabilities that are baked into the host:
 
 | Implicit Primitive | Used By | Why Irreducible |
 |-------------------|---------|-----------------|
 | **Python for-loop** | eval_step | Iteration over projection list |
-| **json.dumps** | mu_equal, mu_hash | Canonical serialization for comparison |
+| **json.dumps** | mu_hash_cached, mu_hash | Canonical serialization for comparison |
 | **hashlib.sha256** | mu_hash | Content hashing for equality |
 | **NO_MATCH sentinel** | eval_step | Distinguish "no match" from "matched to None" |
 | **Type validation (is_mu)** | All primitives | Reject non-Mu values at boundary |
 | **File I/O** | projection_loader | Read seed JSON from disk |
 
 **Why not count these separately?**
-- They are implementation details OF the five primitives
+- They are implementation details OF the four primitives
 - No RCX code interacts with them directly
 - They don't make semantic decisions
 
-The five named primitives form the API boundary. The implicit primitives are their implementation.
+The four named primitives form the API boundary. The implicit primitives are their implementation.
 
 ---
 
@@ -314,7 +303,7 @@ EngineNews (stall/fix/promote/closure) is **NOT** part of the bootstrap layer. I
 
 | EngineNews Concept | RCX Implementation | Layer |
 |--------------------|---------------------|-------|
-| **Stall detection** (Ξ(O(G)) = Ξ(G)) | `mu_equal(before, after)` | Primitive |
+| **Stall detection** (Ξ(O(G)) = Ξ(G)) | `mu_hash_cached(before) == mu_hash_cached(after)` | Boundary (derived) |
 | **Fix operation** (apply ω) | Domain projections | Structural |
 | **Promote** (lift grounded values) | Kernel selection (kernel.v1) | Structural |
 | **Closure** (Rule 2.2: τ recurs independently) | Trace accumulation (structural linked-list) | Structural |
@@ -324,7 +313,7 @@ EngineNews (stall/fix/promote/closure) is **NOT** part of the bootstrap layer. I
 ### What EngineNews Requires From Primitives
 
 1. **eval_step** - Apply projections (fix operations)
-2. **mu_equal** - Detect stalls (fixed-point)
+2. **mu_hash_cached** - Detect stalls (hash comparison, derived from boundary hashing)
 3. **max_steps** - Prevent runaway (resource guard)
 
 EngineNews does NOT require direct access to stack_guard or projection_loader.
@@ -338,11 +327,11 @@ EngineNews does NOT require direct access to stack_guard or projection_loader.
 | **Forth** | NEXT (inner interpreter) | Threaded code words | Accepted |
 | **Lisp** | eval/apply in C | S-expressions | Accepted |
 | **PyPy** | CPython interpreter | RPython code | Accepted |
-| **RCX** | eval_step + 4 others | Mu projections | **This doc** |
+| **RCX** | eval_step + 3 others | Mu projections | **This doc** |
 
 RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 - A way to apply the next operation (NEXT / eval_step)
-- A way to detect termination (stack empty / mu_equal)
+- A way to detect termination (stack empty / mu_hash_cached)
 - Resource protection (return stack / max_steps + stack_guard)
 
 ---
@@ -351,12 +340,12 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 **Location:** `mu/host/js/eval_step.js` (~1300 LOC core + ~900 LOC inline tests)
 
-**What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
+**What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json, recurrence.v1.json, exhaustion.v1.json, hemispheres.v1.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 
 | Primitive | Python Implementation | JavaScript Implementation |
 |-----------|----------------------|---------------------------|
 | eval_step | `eval_seed.py:step()` | `eval_step.js:step()` |
-| mu_equal | `mu_type.py:mu_equal()` | `eval_step.js:muEqual()` |
+| mu_hash_cached | `mu_type.py:mu_hash_cached()` | `eval_step.js:muHashCached()` |
 | max_steps | `step_mu.py:max_steps` | `eval_step.js:maxSteps` |
 | stack_guard | `mu_type.py:MAX_MU_DEPTH` | `eval_step.js:MAX_DEPTH` |
 | projection_loader | `seed_integrity.py` | `eval_step.js:JSON.parse()` |
@@ -380,7 +369,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## Verification Questions for Agents
 
-1. **Verifier:** Do these five primitives violate any North Star invariants?
+1. **Verifier:** Do these four primitives violate any North Star invariants?
 
 2. **Adversary:** Can any primitive be exploited to forge structural results?
 
@@ -405,7 +394,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 | Primitive | Current Location | Status |
 |-----------|------------------|--------|
 | `eval_step` | `rcx_pi/selfhost/eval_seed.py:step()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
-| `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
+| `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | ELIMINATED - `# ELIMINATED PRIMITIVE` (now wrapper around mu_hash_cached) |
 | `max_steps` | `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `stack_guard` | `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `projection_loader` | `rcx_pi/selfhost/seed_integrity.py` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
@@ -414,7 +403,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## Success Criteria
 
-- [x] All five primitives marked with `# BOOTSTRAP_PRIMITIVE` comment
+- [x] All four active primitives marked with `# BOOTSTRAP_PRIMITIVE` comment (mu_equal eliminated)
 - [x] Each primitive has docstring explaining why irreducible
 - [ ] No other Python code makes semantic decisions (Phase 8b)
 - [ ] 9-agent consensus that boundary is honest and minimal

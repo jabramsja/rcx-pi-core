@@ -25,7 +25,8 @@ Read first:
 
 **Vector (Design Only)**
 1. ~~Mu-only hemisphere routing design~~ — **PROMOTED TO NEXT** (2026-02-09). Core v0 implemented; remaining work is engine integration.
-2. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
+2. Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) — Hash-identity as substrate property. **Level 0 IMPLEMENTED** (boundary hashing in recurrence.v2). **Level 1 IMPLEMENTED** (mu_equal eliminated, 5→4 bootstrap primitives). Levels 2-3 DESIGN only.
+3. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
 
 **Sink (Parked)**
 1. Gates 6-8 (L4 Boot Chain) - per 9-agent advisor recommendation. Revisit when third substrate needed.

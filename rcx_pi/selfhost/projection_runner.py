@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .mu_type import Mu, mu_equal
+from .mu_type import Mu, mu_hash_cached
 from .eval_seed import step
 from .kernel import get_step_budget
 
@@ -99,8 +99,8 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
             # Take a step
             next_state = step(projections, state)
 
-            # Check for stall (no change) - use mu_equal to avoid Python type coercion
-            if mu_equal(next_state, state):
+            # Check for stall (no change) - use mu_hash_cached to avoid Python type coercion
+            if mu_hash_cached(next_state) == mu_hash_cached(state):
                 # Report steps consumed to global budget.
                 # A step was executed before stall detection, so consume i + 1.
                 budget.consume(i + 1)

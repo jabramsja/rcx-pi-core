@@ -20,8 +20,8 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, exhaustion.v1 (all 47 projections)
-    - Same bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, hemispheres.v1 (47+ core projections)
+    - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
 14. **Seeds must declare their execution layer.** Every seed is either:
@@ -198,20 +198,18 @@ Items here are implemented and verified under current invariants. Changes requir
   - 26 new tests in `tests/test_classify_mu.py`
 - Boot0 Architecture v0.4 (`docs/core/Boot0Architecture.v0.md`) - 9-agent reviewed 2026-01-31:
   - Hex0-inspired staged bootstrap design: Boot0 → Boot1 → Boot2
-  - 5 irreducible bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+  - 4 irreducible bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal eliminated via Level 1 Content-Addressed Mu)
   - Boot0=structural, Boot1=none, Boot2=kernel validation boundaries
   - v0.4: Added "stable semantics, shrinking substrate", JSON as Phase 0 format, explicit handshake ABI, security invariants, L3 parity contract
   - Design COMPLETE, implementation DEFERRED per 9-agent Advisor recommendation
   - L3 is complete; Boot0 extraction can wait until L4 research drives it
-- mu_equal Phase 1/2 Review (9-agent dialectic 2026-01-31):
-  - **Phase 1 DONE**: Centralized binding conflict checks to call mu_equal (2-line fix in eval_seed.py)
-  - **Phase 2 DEFERRED**: Structural recursion to replace json.dumps - NOT WORTH IT
-  - Reason: json.dumps IS structural equality for JSON data. Mu IS JSON by definition.
-  - 9-agent consensus: "Cosmetic change, not semantic. Both use host mechanisms."
-  - Structural-proof: "Cannot find ONE example where json.dumps gives wrong answer"
-  - Expert: "4 lines → 40-60 lines with identical semantics"
-  - L4 research question remains open: "Can mu_equal become projections?"
-  - Parity fuzzer created: `tests/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
+- mu_equal ELIMINATED as Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):
+  - **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all 8 production call sites (eval_seed 2, step_mu 5, projection_runner 1)
+  - Bootstrap primitives: 5 → 4. `mu_equal` retained as convenience wrapper only.
+  - JS parity: `muHashCached()` added, `muEqual()` delegates. 6 JS call sites updated.
+  - Paxos e2e pipeline test: `tests/test_paxos_end_to_end.py` (6 tests) validates deadlock metabolization
+  - Historical: 9-agent consensus (2026-01-31) confirmed json.dumps IS structural equality for JSON data
+  - Parity fuzzer: `tests/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
 - Testing Tier System (2026-01-28):
   - 9-agent review resolved fuzzer hang issue (rejected circuit breaker, chose Option B)
   - Tier 1: `audit_fast.sh` (~3 min) - Core tests for local iteration
@@ -345,6 +343,7 @@ Current Exhaustion Layer: META_CIRCULAR
 
 
 **Active designs:**
+- Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Level 0 IMPLEMENTED** (boundary hashing in recurrence.v2). **Level 1 IMPLEMENTED** (mu_equal eliminated, mu_hash_cached replaces all 8 production call sites, bootstrap primitives 5→4). Levels 2-3 are DESIGN. **Semantic question:** Can substrate-level identity (hash-first equality) make the meta-circular kernel viable for production programs?
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
 

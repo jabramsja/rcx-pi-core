@@ -29,7 +29,7 @@ Self-hosting has four levels:
 - **L3 (Substrate Portability)**: Same projections run on Python + JS ✅ COMPLETE
 - **L4 (True Self-Hosting)**: Bootstrap primitives eliminated - SINK (research)
 
-At L2, Python provides the bootstrap primitives (eval_step, mu_equal, etc.) that run projections. This creates ambiguity: which Python code is "acceptable scaffolding" and which is "semantic debt that smuggles emergence"?
+At L2, Python provides the bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) that run projections. This creates ambiguity: which Python code is "acceptable scaffolding" and which is "semantic debt that smuggles emergence"?
 
 This document answers that question.
 
@@ -75,7 +75,7 @@ Code that **interprets Mu** or **determines what operations mean**.
 | `lookup_binding()` | Traverses linked list to find name | Part of lookup projection |
 | `is_dict_linked_list()` | Examines structure to classify | Classification projection |
 | `max_steps` parameter | Determines when stall occurs | Structural termination |
-| `mu_equal()` | Defines equality semantics for stall detection | Structural equality |
+| ~~`mu_equal()`~~ | ~~Defines equality semantics for stall detection~~ | **ELIMINATED** — replaced by `mu_hash_cached()` (no longer semantic debt) |
 
 **Key insight:** Semantic debt directly affects emergence. If Python's `isinstance(value, list)` check behaves differently, match semantics change.
 
