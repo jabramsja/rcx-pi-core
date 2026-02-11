@@ -1,13 +1,14 @@
 {
   "meta": {
-    "description": "Test vectors for rcx_engine.v1.json projections",
+    "description": "Test vectors for rcx_engine.v1.json projections (boundary_request protocol)",
     "created": "2026-02-03",
+    "updated": "2026-02-10",
     "seed": "rcx_engine.v1.json"
   },
   "vectors": [
     {
       "id": "engine.init_default",
-      "description": "Initialize engine with default config",
+      "description": "Initialize engine with default config — emits run_trace boundary request",
       "input": {
         "_run_engine": {
           "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
@@ -15,20 +16,24 @@
         }
       },
       "expected": {
-        "_mode": "engine",
-        "_phase": "run_trace",
-        "_projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-        "_input": {"value": 42},
-        "_max_steps": 100,
-        "_frozen": null,
-        "_trace_result": null,
-        "_recurrence_result": null,
-        "_exhaustion_result": null
+        "_boundary_request": {
+          "operation": "run_trace",
+          "input": {
+            "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
+            "value": {"value": 42},
+            "max_steps": 100
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": null
+          },
+          "inject_key": "_trace_result"
+        }
       }
     },
     {
       "id": "engine.init_custom",
-      "description": "Initialize engine with custom config",
+      "description": "Initialize engine with custom config — emits run_trace boundary request",
       "input": {
         "_run_engine": {
           "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
@@ -38,88 +43,130 @@
         }
       },
       "expected": {
-        "_mode": "engine",
-        "_phase": "run_trace",
-        "_projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-        "_input": {"value": 42},
-        "_max_steps": 50,
-        "_frozen": {"head": "op1", "tail": null},
-        "_trace_result": null,
-        "_recurrence_result": null,
-        "_exhaustion_result": null
+        "_boundary_request": {
+          "operation": "run_trace",
+          "input": {
+            "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
+            "value": {"value": 42},
+            "max_steps": 50
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": {"head": "op1", "tail": null}
+          },
+          "inject_key": "_trace_result"
+        }
       }
     },
     {
       "id": "engine.trace_done",
-      "description": "Trace complete triggers recurrence detection",
+      "description": "Trace complete — emits hash_trace boundary request",
       "input": {
         "_mode": "engine",
-        "_phase": "run_trace",
-        "_projections": [],
-        "_input": {"value": 42},
-        "_max_steps": 100,
         "_frozen": null,
         "_trace_result": {
           "result": {"final": "value"},
           "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
           "stall": false
-        },
-        "_recurrence_result": null,
-        "_exhaustion_result": null
+        }
       },
       "expected": {
-        "_detect_closure": {
-          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-          "result": {"final": "value"}
-        },
-        "_engine_context": {
-          "frozen": null,
-          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-          "stall": false
+        "_boundary_request": {
+          "operation": "hash_trace",
+          "input": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+          "context": {
+            "_mode": "engine",
+            "_result": {"final": "value"},
+            "_frozen": null,
+            "_stall": false,
+            "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null}
+          },
+          "inject_key": "_hashed_trace"
+        }
+      }
+    },
+    {
+      "id": "engine.hash_done",
+      "description": "Trace hashed — emits run_algorithm boundary request for recurrence",
+      "input": {
+        "_mode": "engine",
+        "_result": {"final": "value"},
+        "_frozen": null,
+        "_stall": false,
+        "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+        "_hashed_trace": {"head": {"step": 0, "state": "A", "state_hash": "abc123", "projection": "p1"}, "tail": null}
+      },
+      "expected": {
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "recurrence.v2.json",
+          "input": {
+            "_detect_closure": {
+              "trace": {"head": {"step": 0, "state": "A", "state_hash": "abc123", "projection": "p1"}, "tail": null},
+              "result": {"final": "value"}
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": null,
+            "_stall": false,
+            "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null}
+          },
+          "inject_key": "_recurrence_result"
         }
       }
     },
     {
       "id": "engine.recurrence_done_to_exhaustion",
-      "description": "Recurrence result triggers exhaustion detection",
+      "description": "Recurrence complete — emits run_algorithm boundary request for exhaustion",
       "input": {
-        "closure_detected": true,
-        "tau_step": 5,
-        "final_result": {"computed": "result"},
-        "_engine_context": {
-          "frozen": null,
-          "trace": {"head": {"step": 5, "state": "A", "projection": "op1"}, "tail": null},
-          "stall": false
+        "_mode": "engine",
+        "_frozen": null,
+        "_stall": false,
+        "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "op1"}, "tail": null},
+        "_recurrence_result": {
+          "closure_detected": true,
+          "tau_step": 5,
+          "final_result": {"computed": "result"}
         }
       },
       "expected": {
-        "_detect_exhaustion": {
-          "trace": {"head": {"step": 5, "state": "A", "projection": "op1"}, "tail": null},
-          "frozen": null,
-          "tau_step": 5,
-          "operator_ids": null
-        },
-        "_engine_recurrence": {
-          "closure_detected": true,
-          "tau_step": 5,
-          "result": {"computed": "result"},
-          "stall": false
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "exhaustion.v1.json",
+          "input": {
+            "_detect_exhaustion": {
+              "trace": {"head": {"step": 0, "state": "A", "projection": "op1"}, "tail": null},
+              "frozen": null,
+              "tau_step": 5,
+              "operator_ids": null
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_stall": false,
+            "_closure_detected": true,
+            "_tau_step": 5,
+            "_final_result": {"computed": "result"}
+          },
+          "inject_key": "_exhaustion_result"
         }
       }
     },
     {
       "id": "engine.exhaustion_done",
-      "description": "Exhaustion result produces final engine output",
+      "description": "Exhaustion complete — produces final engine result (no boundary request)",
       "input": {
-        "exhaustion_detected": true,
-        "operator_to_freeze": "op1",
-        "frozen": {"head": "op1", "tail": null},
-        "action": "freeze",
-        "_engine_recurrence": {
-          "closure_detected": true,
-          "tau_step": 5,
-          "result": {"computed": "result"},
-          "stall": false
+        "_mode": "engine",
+        "_stall": false,
+        "_closure_detected": true,
+        "_tau_step": 5,
+        "_final_result": {"computed": "result"},
+        "_exhaustion_result": {
+          "exhaustion_detected": true,
+          "operator_to_freeze": "op1",
+          "frozen": {"head": "op1", "tail": null},
+          "action": "freeze"
         }
       },
       "expected": {
@@ -163,29 +210,38 @@
     },
     {
       "id": "engine.no_closure",
-      "description": "No closure detected passes through to exhaustion",
+      "description": "No closure detected — still emits exhaustion boundary request",
       "input": {
-        "closure_detected": false,
-        "tau_step": null,
-        "final_result": {"computed": "result"},
-        "_engine_context": {
-          "frozen": null,
-          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-          "stall": true
+        "_mode": "engine",
+        "_frozen": null,
+        "_stall": true,
+        "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+        "_recurrence_result": {
+          "closure_detected": false,
+          "tau_step": null,
+          "final_result": {"computed": "result"}
         }
       },
       "expected": {
-        "_detect_exhaustion": {
-          "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-          "frozen": null,
-          "tau_step": null,
-          "operator_ids": null
-        },
-        "_engine_recurrence": {
-          "closure_detected": false,
-          "tau_step": null,
-          "result": {"computed": "result"},
-          "stall": true
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "exhaustion.v1.json",
+          "input": {
+            "_detect_exhaustion": {
+              "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
+              "frozen": null,
+              "tau_step": null,
+              "operator_ids": null
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_stall": true,
+            "_closure_detected": false,
+            "_tau_step": null,
+            "_final_result": {"computed": "result"}
+          },
+          "inject_key": "_exhaustion_result"
         }
       }
     }

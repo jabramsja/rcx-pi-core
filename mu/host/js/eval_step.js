@@ -466,7 +466,9 @@ function muHash(value) {
  * Mirrors Python mu_hash_cached(). Cache avoids re-hashing identical structures.
  * Used for hash-accelerated equality comparison (Content-Addressed Mu Level 1).
  */
+const MAX_MU_HASH_CACHE = 10000;
 const _muHashCache = new Map();
+function muHashCacheClear() { _muHashCache.clear(); }
 function muHashCached(value) {
   // Deterministic cache key: sorted-key JSON (JS-local, not cross-substrate)
   const key = JSON.stringify(value, (_, v) => {
@@ -478,9 +480,19 @@ function muHashCached(value) {
     return v;
   });
   const cached = _muHashCache.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    // LRU: delete and re-insert to move to end (most recently used)
+    _muHashCache.delete(key);
+    _muHashCache.set(key, cached);
+    return cached;
+  }
   const hash = muHash(value);
   _muHashCache.set(key, hash);
+  // Evict oldest if over limit
+  if (_muHashCache.size > MAX_MU_HASH_CACHE) {
+    const oldest = _muHashCache.keys().next().value;
+    _muHashCache.delete(oldest);
+  }
   return hash;
 }
 
@@ -1157,6 +1169,25 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   validator(domainInput, 'domainInput');
   for (let i = 0; i < domainProjections.length; i++) {
     const proj = domainProjections[i];
+    // SECURITY: Fail closed — projection must be a non-null object with pattern and body
+    // Matches Python step_kernel_mu validation (parity requirement)
+    if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) {
+      throw new Error(
+        `SECURITY: domainProjections[${i}] must be an object, got ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`
+      );
+    }
+    if (!('pattern' in proj)) {
+      throw new Error(`SECURITY: domainProjections[${i}] missing required 'pattern' key`);
+    }
+    if (!('body' in proj)) {
+      throw new Error(`SECURITY: domainProjections[${i}] missing required 'body' key`);
+    }
+    if (!isValidMu(proj.pattern)) {
+      throw new Error(`SECURITY: domainProjections[${i}].pattern is not valid Mu`);
+    }
+    if (!isValidMu(proj.body)) {
+      throw new Error(`SECURITY: domainProjections[${i}].body is not valid Mu`);
+    }
     validator(proj.pattern, `domainProjections[${i}].pattern`);
     validator(proj.body, `domainProjections[${i}].body`);
   }
@@ -1376,10 +1407,10 @@ const SEED_CHECKSUMS = {
   'match.v2.json': '55a6b58a6c8fe31d4c3a8c704603d453fc04c1a757a45fcf7f6570afa1fe27b1',
   'subst.v2.json': 'e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621',
   'recurrence.v1.json': 'b916f17b2b21b1c194567e515dce535f1acd84a91f32cfd8a11f3cc01aa7fe41',
-  'recurrence.v2.json': 'a43c73b2698db76d8dfb0b0bd5cdf18c76b8a7c4292640f3040b1790b93e5679',
+  'recurrence.v2.json': '664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b',
   'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
   'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
-  'hemispheres.v1.json': '107b49d413102ef4cdb80662f48324e3757ebe40dcbc7c74935ca7aa1106ecfd',
+  'hemispheres.v1.json': 'aa91c6f346db9da86a3bb0614688a05fc4a9f5a2fa96b19daa4aad3090ff397c',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -1423,9 +1454,11 @@ const EXPECTED_PROJECTION_IDS = {
     'bridge.lookup.not_found',
   ],
   'hemispheres.v1.json': [
-    'hemisphere.init', 'hemisphere.classify.null', 'hemisphere.classify.closure',
-    'hemisphere.classify.default', 'hemisphere.add.r_null', 'hemisphere.add.r_a',
-    'hemisphere.add.lobes', 'hemisphere.unwrap',
+    'hemisphere.init', 'hemisphere.classify.exhaustion', 'hemisphere.classify.stall',
+    'hemisphere.classify.null', 'hemisphere.classify.closure',
+    'hemisphere.classify.default', 'hemisphere.add.r_null', 'hemisphere.add.r_inf',
+    'hemisphere.add.r_a', 'hemisphere.add.lobes', 'hemisphere.add.sink',
+    'hemisphere.unwrap',
   ],
 };
 

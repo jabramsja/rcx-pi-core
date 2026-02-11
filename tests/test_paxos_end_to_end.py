@@ -6,7 +6,7 @@ Proves the full pipeline:
 
 All building blocks already exist; this test wires them together.
 
-See: mu/programs/paxos_demo.v1.json (5 projections)
+See: mu/programs/paxos_demo.v1.json (6 projections)
      mu/closures/recurrence.v2.json (9 projections)
      docs/core/recurrence_v2_design.md
      roadmap/ContentAddressedMu.md
@@ -70,8 +70,14 @@ def paxos_cycle_projs(paxos_seed):
 
 @pytest.fixture(scope="module")
 def healer_proj(paxos_seed):
-    """5th projection: healer.detect_deadlock."""
+    """5th projection: healer.detect_deadlock (recurrence shape)."""
     return paxos_seed["projections"][4]
+
+
+@pytest.fixture(scope="module")
+def healer_engine_proj(paxos_seed):
+    """6th projection: healer.detect_deadlock_engine (engine output shape)."""
+    return paxos_seed["projections"][5]
 
 
 @pytest.fixture(scope="module")
@@ -265,3 +271,53 @@ class TestPaxosEndToEnd:
             f"Expected repeated state hashes in livelock trace. "
             f"Got {len(hashes)} entries with {len(unique)} unique hashes."
         )
+
+    # ------------------------------------------------------------------
+    # Engine output → healer composability
+    # ------------------------------------------------------------------
+
+    def test_healer_matches_engine_output(self, healer_engine_proj):
+        """healer.detect_deadlock_engine matches the engine pipeline output shape."""
+        # Simulate engine output shape (what run_engine_pipeline returns)
+        engine_output = {
+            "value": {"paxos_mode": "paxos_run", "status": "voting", "node_a": "idle", "node_b": "idle"},
+            "closure_detected": True,
+            "tau_step": 3,
+            "exhaustion_detected": False,
+            "operator_frozen": None,
+            "frozen_set": None,
+            "action": "continue",
+            "stall": True,
+        }
+
+        healer_result = apply_mu(healer_engine_proj, engine_output)
+
+        assert healer_result is not None, "Engine healer should match engine output"
+        assert isinstance(healer_result, dict)
+        assert healer_result.get("status") == "consensus_reached"
+        assert healer_result.get("leader") == "Node_A"
+        assert healer_result.get("reason") == "deadlock_resolution_protocol"
+        assert healer_result.get("origin_anomaly") == engine_output["value"]
+
+    def test_healer_rejects_no_closure_engine_output(self, healer_engine_proj):
+        """healer should NOT match when closure_detected is false."""
+        engine_output = {
+            "value": {"x": 1},
+            "closure_detected": False,
+            "tau_step": None,
+            "exhaustion_detected": False,
+            "operator_frozen": None,
+            "frozen_set": None,
+            "action": "continue",
+            "stall": True,
+        }
+
+        healer_result = apply_mu(healer_engine_proj, engine_output)
+
+        # When closure_detected=False, pattern has literal `true` so it shouldn't match
+        # apply_mu returns the input unchanged when no match
+        assert healer_result is not None
+        if isinstance(healer_result, dict):
+            assert healer_result.get("status") != "consensus_reached", (
+                "Healer should NOT match when closure_detected=False"
+            )

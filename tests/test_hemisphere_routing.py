@@ -113,6 +113,8 @@ class TestHemisphereInit:
         assert result["hemi_mode"] == "classify"
         assert result["hemi_value"] == 42
         assert result["hemi_closure"] is True
+        assert "hemi_exhaustion" in result
+        assert "hemi_stall" in result
 
     def test_init_passes_hemispheres_through(self):
         projs = _load_hemisphere_projections()
@@ -176,6 +178,26 @@ class TestHemisphereClassify:
         assert result["lobes"] is not None
         assert result["lobes"][0]["state"] == nested
 
+    def test_exhaustion_routes_to_sink(self):
+        projs = _load_hemisphere_projections()
+        result = _route(projs, _make_engine_result(value="frozen_op", exhaustion_detected=True))
+        assert result["sink"] is not None
+        assert result["sink"][0]["state"] == "frozen_op"
+        assert result["lobes"] is None
+        assert result["r_a"] is None
+        assert result["r_null"] is None
+        assert result["r_inf"] is None
+
+    def test_stall_routes_to_r_inf(self):
+        projs = _load_hemisphere_projections()
+        result = _route(projs, _make_engine_result(value="divergent", stall=True))
+        assert result["r_inf"] is not None
+        assert result["r_inf"][0]["state"] == "divergent"
+        assert result["lobes"] is None
+        assert result["r_a"] is None
+        assert result["r_null"] is None
+        assert result["sink"] is None
+
 
 # =============================================================================
 # TestHemispherePriorityOrder
@@ -183,7 +205,7 @@ class TestHemisphereClassify:
 
 
 class TestHemispherePriorityOrder:
-    """Verify first-match-wins priority: null > closure > default."""
+    """Verify first-match-wins priority: exhaustion > stall > null > closure > default."""
 
     def test_null_takes_priority_over_closure(self):
         projs = _load_hemisphere_projections()
@@ -193,6 +215,28 @@ class TestHemispherePriorityOrder:
         assert result["r_a"] is None
         # But closure_flag is preserved in entry
         assert result["r_null"][0]["closure_flag"] is True
+
+    def test_exhaustion_takes_priority_over_closure(self):
+        projs = _load_hemisphere_projections()
+        result = _route(projs, _make_engine_result(
+            value="val", closure_detected=True, exhaustion_detected=True))
+        # exhaustion overrides closure
+        assert result["sink"] is not None
+        assert result["r_a"] is None
+
+    def test_stall_takes_priority_over_default(self):
+        projs = _load_hemisphere_projections()
+        result = _route(projs, _make_engine_result(value="val", stall=True))
+        assert result["r_inf"] is not None
+        assert result["lobes"] is None
+
+    def test_exhaustion_takes_priority_over_stall(self):
+        projs = _load_hemisphere_projections()
+        result = _route(projs, _make_engine_result(
+            value="val", exhaustion_detected=True, stall=True))
+        # exhaustion before stall in projection order
+        assert result["sink"] is not None
+        assert result["r_inf"] is None
 
 
 # =============================================================================
@@ -230,11 +274,15 @@ class TestHemisphereAdd:
         assert len(result["r_a"]) == 1
         assert result["r_a"][0]["state"] == "stable"
 
-    def test_r_inf_and_sink_untouched(self):
+    def test_non_target_hemispheres_untouched(self):
         projs = _load_hemisphere_projections()
         result = _route(projs, _make_engine_result(value="test"))
+        # Default routes to lobes; all other hemispheres stay None
+        assert result["lobes"] is not None
         assert result["r_inf"] is None
         assert result["sink"] is None
+        assert result["r_null"] is None
+        assert result["r_a"] is None
 
 
 # =============================================================================
@@ -389,19 +437,23 @@ class TestHemisphereSeedIntegrity:
         seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
         assert seed["meta"]["name"] == "HEMISPHERES"
         assert seed["meta"]["execution_layer"] == "APPLICATION"
-        assert len(seed["projections"]) == 8
+        assert len(seed["projections"]) == 12
 
     def test_projection_ids_match(self):
         seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
         ids = [p["id"] for p in seed["projections"]]
         assert ids == [
             "hemisphere.init",
+            "hemisphere.classify.exhaustion",
+            "hemisphere.classify.stall",
             "hemisphere.classify.null",
             "hemisphere.classify.closure",
             "hemisphere.classify.default",
             "hemisphere.add.r_null",
+            "hemisphere.add.r_inf",
             "hemisphere.add.r_a",
             "hemisphere.add.lobes",
+            "hemisphere.add.sink",
             "hemisphere.unwrap",
         ]
 

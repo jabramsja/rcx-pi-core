@@ -19,7 +19,7 @@
 | `MetaCircular_Boot0_GatePlan.md` | Gate definitions + exit criteria | Gate scope changes |
 | `AlgorithmNormalizationSpec.v0.md` | Draft design spec | Design evolves |
 | `MuHemispheresDesign.md` | Design spec (v0 core implemented, integration remaining) | Design evolves |
-| `ContentAddressedMu.md` | Design spec (Level 0+1 implemented, Levels 2-3 design) | Design evolves |
+| `ContentAddressedMu.md` | Design spec (Levels 0-2 implemented, Level 3 deferred) | Design evolves |
 | `NormalizationDecisionMemo.md` | Decision authorization | Rarely (decisions are final) |
 
 ## Gate Levels and Execution Order

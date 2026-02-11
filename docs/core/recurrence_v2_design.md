@@ -29,13 +29,16 @@ The `recurrence.v1.json` seed detects closures in small test cases but **fails o
 1. **Keep flat linked-list** for `_seen` — simple and sufficient for production traces
 2. **Pre-hash at boundary** via `hash_trace_for_recurrence()` — adds `state_hash` to trace entries before feeding to the meta-circular kernel
 3. **Non-linear pattern matching** for hash comparison — the `hash_match` projection binds `hash` to both `_state_hash` and `_check_list.head.state_hash`; the bridge enforces string equality
-4. **No new bootstrap primitives** — uses existing `mu_hash` (already in Fix/Xi layer)
+4. **No new bootstrap primitives** — uses existing `mu_hash` (boundary primitive in `rcx_pi/selfhost/mu_type.py`)
 
 **`_seen` structure change:**
 ```
-v1: {head: state,                           tail: ...}
-v2: {head: {state_hash: "abc...", state: S}, tail: ...}
+v1:      {head: state,                           tail: ...}
+v2 init: {head: {state_hash: "abc...", state: S}, tail: ...}  (Level 1)
+v2 now:  {head: {state_hash: "abc..."},           tail: ...}  (Level 2: state dropped)
 ```
+
+**Level 2 optimization:** The `state` field in `_seen` entries was never used after storage — `hash_match` and `hash_no_match` bind `_seen_state` but neither reference it in their bodies. Dropping `state` saves ~77% memory per seen entry with zero behavioral change.
 
 **Cost comparison (15-step trace, ~210 comparisons):**
 - v1: 210 × ~30 kernel steps (structural) = ~6,300 → EXCEEDS BUDGET
@@ -52,7 +55,7 @@ v2: {head: {state_hash: "abc...", state: S}, tail: ...}
 | `recurrence.check_state` | Extract state + hash from normal entries |
 | `recurrence.hash_match` | Non-linear: hash equality → closure detected |
 | `recurrence.hash_no_match` | Hash differs → advance `_check_list` |
-| `recurrence.not_found` | Store `{state_hash, state}` pair in `_seen` |
+| `recurrence.not_found` | Store `{state_hash}` in `_seen` (Level 2: state dropped) |
 | `recurrence.unwrap` | Extract final result |
 
 See `tests/structural/test_seed_counts.py` for count (9 projections).

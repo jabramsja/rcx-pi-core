@@ -3,7 +3,7 @@ Parity tests for rcx_engine.v1.json (Main RCX Engine).
 
 These tests verify that the engine projections correctly orchestrate
 recurrence and exhaustion detection. The engine is currently marked
-as "design_only" - these tests verify projection pattern matching.
+as "structural_specification" - these tests verify projection pattern matching.
 
 See: docs/core/RCXEngine.v0.md
 """
@@ -17,6 +17,7 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
+from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
@@ -51,7 +52,7 @@ def run_until_stable(projections: list, value: dict, max_steps: int = 100) -> di
     current = value
     for _ in range(max_steps):
         result = step(projections, current)
-        if result == current:
+        if mu_equal(result, current):
             return result
         current = result
     return current
@@ -120,8 +121,8 @@ class TestEngineStructure:
     """Test engine structural properties."""
 
     def test_projections_count(self, engine_projections):
-        """Engine has expected 6 projections."""
-        assert len(engine_projections) == 6, f"Expected 6 projections, got {len(engine_projections)}"
+        """Engine has expected 7 projections."""
+        assert len(engine_projections) == 7, f"Expected 7 projections, got {len(engine_projections)}"
 
     def test_projection_ids(self, engine_projections):
         """All expected projection IDs present."""
@@ -130,6 +131,7 @@ class TestEngineStructure:
             "engine.init",
             "engine.init_config",
             "engine.trace_done",
+            "engine.hash_done",
             "engine.recurrence_done",
             "engine.exhaustion_done",
             "engine.unwrap",
@@ -169,10 +171,10 @@ class TestEngineDesignStatus:
     """Tests related to design_only status."""
 
     def test_seed_has_design_only_status(self):
-        """Seed meta indicates design_only status."""
+        """Seed meta indicates structural_specification status."""
         seed = load_verified_seed(get_seed_path("rcx_engine.v1.json"))
-        assert seed["meta"].get("status") == "design_only", \
-            "rcx_engine.v1.json should have status: design_only"
+        assert seed["meta"].get("status") == "structural_specification", \
+            "rcx_engine.v1.json should have status: structural_specification"
 
     def test_seed_has_dependencies_documented(self):
         """Seed meta documents dependencies."""

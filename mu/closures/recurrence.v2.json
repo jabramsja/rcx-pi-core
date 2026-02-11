@@ -15,7 +15,7 @@
         "invariants": [
             "All projections are pure Mu (JSON-compatible)",
             "Closure detection uses pattern matching, NOT Python conditionals",
-            "Seen-set entries store {state_hash, state} pairs for O(1) hash comparison",
+            "Seen-set entries store {state_hash} only (Level 2: frozen hashes, state dropped)",
             "Hash comparison via non-linear pattern (same hash var bound twice)",
             "Pre-computed mu_hash boundary primitive enables hash-accelerated lookup",
             "Non-linear patterns enforced by bootstrap_structural binding conflict detection"
@@ -850,26 +850,15 @@
                         "head": {
                             "head": {
                                 "head": {
-                                    "head": "state",
+                                    "head": "state_hash",
                                     "tail": {
                                         "head": {
-                                            "var": "_seen_state"
+                                            "var": "hash"
                                         },
                                         "tail": null
                                     }
                                 },
-                                "tail": {
-                                    "head": {
-                                        "head": "state_hash",
-                                        "tail": {
-                                            "head": {
-                                                "var": "hash"
-                                            },
-                                            "tail": null
-                                        }
-                                    },
-                                    "tail": null
-                                },
+                                "tail": null,
                                 "_type": "dict"
                             },
                             "tail": {
@@ -1019,26 +1008,15 @@
                         "head": {
                             "head": {
                                 "head": {
-                                    "head": "state",
+                                    "head": "state_hash",
                                     "tail": {
                                         "head": {
-                                            "var": "_seen_state"
+                                            "var": "other_hash"
                                         },
                                         "tail": null
                                     }
                                 },
-                                "tail": {
-                                    "head": {
-                                        "head": "state_hash",
-                                        "tail": {
-                                            "head": {
-                                                "var": "other_hash"
-                                            },
-                                            "tail": null
-                                        }
-                                    },
-                                    "tail": null
-                                },
+                                "tail": null,
                                 "_type": "dict"
                             },
                             "tail": {
@@ -1235,7 +1213,7 @@
         },
         {
             "id": "recurrence.not_found",
-            "description": "Exhausted check_list (null) without match -> add {state_hash, state} to seen, advance",
+            "description": "Exhausted check_list (null) without match -> add {state_hash} to seen (Level 2: state dropped), advance",
             "pattern": {
                 "head": {
                     "head": "_check_list",
@@ -1374,26 +1352,15 @@
                                         "head": {
                                             "head": {
                                                 "head": {
-                                                    "head": "state",
+                                                    "head": "state_hash",
                                                     "tail": {
                                                         "head": {
-                                                            "var": "state"
+                                                            "var": "state_hash"
                                                         },
                                                         "tail": null
                                                     }
                                                 },
-                                                "tail": {
-                                                    "head": {
-                                                        "head": "state_hash",
-                                                        "tail": {
-                                                            "head": {
-                                                                "var": "state_hash"
-                                                            },
-                                                            "tail": null
-                                                        }
-                                                    },
-                                                    "tail": null
-                                                },
+                                                "tail": null,
                                                 "_type": "dict"
                                             },
                                             "tail": {

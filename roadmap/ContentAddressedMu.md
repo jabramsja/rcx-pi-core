@@ -9,7 +9,7 @@ FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 
 > **Current State**: See [`STATUS.md`](../STATUS.md)
 > **Authorization**: See [`TASKS.md`](../TASKS.md)
-> **Scope**: Level 0 (boundary hashing) and Level 1 (mu_equal elimination) are IMPLEMENTED. Levels 2-3 are DESIGN only — no implementation until promoted to NEXT.
+> **Scope**: Levels 0-2 IMPLEMENTED. Level 3 (trie) DEFERRED — not beneficial for production traces.
 
 ## Problem Statement
 
@@ -41,9 +41,9 @@ This is not a new idea. It is the same principle behind:
 |-----------|--------|-------|
 | `mu_equal(a, b)` | Bootstrap primitive, O(depth) | **Eliminated** — non-linear patterns on `_hash` fields |
 | `mu_hash` | Runtime infrastructure | Boundary scaffolding (computed once at value construction) |
-| Recurrence seen-set | Linear scan + deep compare O(N * depth) | Linear scan + hash compare O(N) |
+| Recurrence seen-set | Linear scan + deep compare O(N * depth) | Linear scan + hash compare O(N), frozen hashes (state dropped) |
 | Non-linear pattern matching | Deep compare on binding conflict | Hash compare on binding conflict |
-| Normalization | Re-normalize on every kernel step | Normalize once, hash marks "done" |
+| Normalization | Re-normalize on every kernel step | Normalize once at boundary (Level 2: state dropped from _seen) |
 | Memoization | Not available | Free: cache results by input hash |
 | Bootstrap primitives | 5 | 4 (mu_equal removed) |
 
@@ -134,21 +134,39 @@ JS parity: `muHashCached()` added to `eval_step.js` with Map-based cache. All 6 
 - **Benefits**: Recurrence, exhaustion, non-linear pattern matching, general equality, L4 advancement
 - **Verification**: 1991+ tests pass, `test_mu_equal_parity_fuzzer.py` confirms semantic equivalence
 
-### Level 2: Cached Hashing (Normalize-Once)
+### Level 2: Frozen Hashes (IMPLEMENTED — 2026-02-10)
 
-Cache the hash of normalized Mu values so normalization + hashing happens once per unique structure. Subsequent equality checks are pure hash lookups.
+Dropped the `state` field from `_seen` entries in `recurrence.v2.json`. The seen-set now stores only `{state_hash}` instead of `{state_hash, state}`.
 
-- **Scope**: Eliminates redundant normalization
-- **Debt impact**: Adds caching infrastructure (host mechanism, but not new semantic debt — like projection_loader's cache)
-- **Benefits**: Addresses the verifier's "normalization cost" concern directly
+**Why this is safe:** The `hash_match` and `hash_no_match` projections bind `_seen_state` from the `state` field but **never reference it in their bodies**. It was dead weight — ~77% of `_seen` memory was wasted storing full state objects that were never read.
 
-### Level 3: Structural Trie Indexing (Future — VECTOR candidate)
+**Changes (3 projections in recurrence.v2.json):**
+1. `recurrence.not_found` body: prepends `{state_hash}` instead of `{state_hash, state}`
+2. `recurrence.hash_match` pattern: matches `{state_hash}` instead of `{state, state_hash}`
+3. `recurrence.hash_no_match` pattern: same removal
 
-If Level 1-2 prove insufficient for very large traces, the seen-set can be organized as a structural trie indexed by hash characters. This is the verifier's v3 proposal, but as an optimization ON TOP of content-addressing rather than instead of it.
+- **Scope**: Recurrence seen-set memory optimization
+- **Debt impact**: Zero (pure projection change, no host code)
+- **Benefits**: ~77% memory reduction in `_seen` list, cleaner data flow
+- **Verification**: 8/8 recurrence production tests pass, 6/6 paxos e2e tests pass, JS parity intact
 
-- **Scope**: Large trace optimization
+### Level 3: Structural Trie Indexing (DEFERRED — Evidence-Based)
+
+Agent analysis (2026-02-10) conclusively showed a radix trie in Mu is **not beneficial** for production traces:
+
+| Metric | Linear Scan (current) | Radix Trie |
+|--------|----------------------|------------|
+| Additional projections | 0 | 21+ new |
+| Trace < 50 steps | ~100 kernel steps | ~500 kernel steps (5x slower) |
+| Break-even | — | ~100 trace steps |
+| Production traces | 3-30 steps | Not reached |
+| Complexity | Simple | High (bit extraction, node splitting) |
+
+**Decision:** DEFERRED. Revisit only if traces routinely exceed 100 steps. The per-projection overhead of Mu kernel steps (~2 steps/projection) makes the trie's O(64) lookup slower than linear scan's O(N) for small N.
+
+- **Scope**: Large trace optimization (not currently needed)
 - **Debt impact**: Zero (pure Mu projections)
-- **Benefits**: O(hash_length) lookup instead of O(N) scan
+- **Benefits**: O(hash_length) lookup instead of O(N) scan — only valuable for N > 100
 
 ## Why Not Just the Trie?
 
@@ -227,13 +245,14 @@ The Forth precedent: This is like Forth discovering that its comparator (=) is r
 | `mu/host/js/eval_step.js` | `muHashCached()` added; `muEqual()` delegates; 6 call sites updated |
 | `tests/test_paxos_end_to_end.py` | Paxos deadlock metabolization pipeline test (6 tests) |
 
-**Level 2+ (PROJECTED — requires NEXT promotion):**
+**Level 2 (IMPLEMENTED — 2026-02-10):**
 
-| File | Proposed Change |
-|------|----------------|
-| `rcx_pi/selfhost/mu_type.py` | `_hash` field on Mu values (normalize-once) |
-| `mu/closures/recurrence.v2.json` | Pattern match on `_hash` field instead of `state_hash` |
-| Tests | Cache hit rate profiling, normalize-once regression tests |
+| File | Change |
+|------|--------|
+| `mu/closures/recurrence.v2.json` | 3 projections edited: `state` dropped from `_seen` entries |
+| `rcx_pi/selfhost/seed_integrity.py` | Updated SHA-256 hash for recurrence.v2.json |
+| `mu/host/js/eval_step.js` | Updated SHA-256 hash for recurrence.v2.json |
+| `docs/core/recurrence_v2_design.md` | Updated `_seen` description |
 
 ## Exit Criteria
 
@@ -247,14 +266,17 @@ The Forth precedent: This is like Forth discovering that its comparator (=) is r
 6. Bootstrap primitive count: 5 → 4 (`mu_equal` eliminated). ✅
 7. L3 cross-substrate parity intact. ✅ (JS `muHashCached` mirrors Python)
 
-### Level 2-3 (FUTURE)
+### Level 2 (ACHIEVED)
 
-8. Hash cached per Mu value (normalize-once)
-9. Structural trie indexing for large traces
+8. `_seen` entries store only `{state_hash}`, not `{state_hash, state}` — ~77% memory savings. ✅
+
+### Level 3 (DEFERRED)
+
+9. Structural trie indexing — not beneficial for production traces (<50 steps). Revisit if traces exceed 100 steps.
 
 ## Open Questions
 
-1. **Caching strategy (Level 2)**: Should hashes be cached on the Mu value (requires mutable annotation) or in a separate WeakRef table? The latter preserves immutability.
+1. ~~**Caching strategy (Level 2)**: Should hashes be cached on the Mu value or in a separate table?~~ → RESOLVED: Level 2 implemented as frozen hashes (state dropped from _seen), not _hash-on-value. The parallel cache in `mu_hash_cached()` handles value-level caching.
 2. **Hash of normalized vs raw**: Should we hash the normalized (linked-list) form or the raw (Python dict) form? Normalized is canonical and substrate-independent. Raw is faster but substrate-dependent.
 3. **Incremental hashing**: When a projection produces output by substitution, can we compute the output hash incrementally from input hashes? (Probably not for SHA-256, but worth investigating for future hash functions.)
-4. **When to promote Level 3 (trie)**: What trace length triggers the need for trie indexing? Profile production programs first.
+4. ~~**When to promote Level 3 (trie)**: What trace length triggers the need?~~ → RESOLVED: Analysis shows break-even at ~100 steps. Production traces are 3-30 steps. DEFERRED.

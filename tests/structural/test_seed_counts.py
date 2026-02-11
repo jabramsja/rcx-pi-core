@@ -55,9 +55,9 @@ EXPECTED_COUNTS = {
     "recurrence.v2.json": 9,   # hash-accelerated closure detection
     "exhaustion.v1.json": 11,  # operator exhaustion
     # mu/programs/
-    "rcx_engine.v1.json": 6,   # main program
-    "hemispheres.v1.json": 8,  # native structural routing
-    "paxos_demo.v1.json": 5,   # consensus demo
+    "rcx_engine.v1.json": 7,   # main program (+ hash_done boundary stall)
+    "hemispheres.v1.json": 12,  # native structural routing (5-way: null, inf, a, lobes, sink)
+    "paxos_demo.v1.json": 6,   # consensus demo (+ engine-output healer)
     # mu/bridge/
     "bootstrap_structural.v1.json": 5,  # non-linear pattern support
 }

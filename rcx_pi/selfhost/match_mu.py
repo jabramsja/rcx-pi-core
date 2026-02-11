@@ -353,6 +353,12 @@ def normalize_for_match(value: Mu) -> Mu:
                 stack.append(("eval", val[keys[-1]]))
                 continue
 
+            # FAIL CLOSED: unsupported type (bytes, function, etc.)
+            raise TypeError(
+                f"normalize_for_match: unsupported type {type(val).__name__}. "
+                f"Only valid Mu types (None, bool, int, float, str, list, dict) are accepted."
+            )
+
         elif op == "ht_typed":
             # Type-tagged: head is done, now process tail (preserving _type)
             _type, tail_val = item[1], item[2]
@@ -737,6 +743,12 @@ def denormalize_from_match(value: Mu) -> Mu:
                     stack.append(("dict_kv", key, result_dict))
                     stack.append(("eval", val[key]))
                 continue
+
+            # FAIL CLOSED: unsupported type (bytes, function, etc.)
+            raise TypeError(
+                f"denormalize_from_match: unsupported type {type(val).__name__}. "
+                f"Only valid Mu types (None, bool, int, float, str, list, dict) are accepted."
+            )
 
         elif op == "finalize_list":
             result = item[1]  # The now-populated list

@@ -79,6 +79,26 @@
         "reason": "deadlock_resolution_protocol",
         "origin_anomaly": {"var": "fr"}
       }
+    },
+    {
+      "id": "healer.detect_deadlock_engine",
+      "description": "If engine pipeline detected closure, force a winner (matches engine output shape)",
+      "pattern": {
+        "value": {"var": "val"},
+        "closure_detected": true,
+        "tau_step": {"var": "tau"},
+        "exhaustion_detected": {"var": "exh"},
+        "operator_frozen": {"var": "op"},
+        "frozen_set": {"var": "fs"},
+        "action": {"var": "act"},
+        "stall": {"var": "stall"}
+      },
+      "body": {
+        "status": "consensus_reached",
+        "leader": "Node_A",
+        "reason": "deadlock_resolution_protocol",
+        "origin_anomaly": {"var": "val"}
+      }
     }
   ]
 }

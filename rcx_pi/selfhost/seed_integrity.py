@@ -1,10 +1,11 @@
 """
 Seed Integrity Verification - Security foundation for self-hosting.
 
-This module validates seed files (match.v1.json, subst.v1.json) on load:
+Validates all registered seed files across mu/ (substrate, closures,
+bridge, programs, utilities) on load:
 1. SHA256 checksum verification (detects tampering)
 2. Structure validation (expected keys present)
-3. Projection ID verification (expected projections present)
+3. Projection ID ordering verification (first-match-wins security)
 
 See docs/core/SelfHosting.v0.md for design.
 """
@@ -58,21 +59,20 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
     # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
     "exhaustion.v1.json": "3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c",
-    # RCX Engine: main program orchestrating recurrence + exhaustion
-    # Updated: Added status: "design_only" marker
-    # Updated: Fixed meta.doc path (docs/core/RCXEngine.v0.md -> docs/core/EngineNewsStructural.v0.md)
-    "rcx_engine.v1.json": "dfc3c8fcd4545687b614b9ee8d80d687a29d72e36c69f148615061d0341b0456",
+    # RCX Engine: structural specification for pipeline orchestration (7 projections)
+    # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
+    "rcx_engine.v1.json": "aa6581b41f9750ab18b52c1078c4eaedf89d165f239ff81e3d919abeab3723bf",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
     # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> docs/core/EVAL_SEED.v0.md)
     "eval.v1.json": "22232b172f883271845d013d8e39b1b75555bd94899deb8276548c5f0d10f53e",
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
-    "hemispheres.v1.json": "107b49d413102ef4cdb80662f48324e3757ebe40dcbc7c74935ca7aa1106ecfd",
+    "hemispheres.v1.json": "aa91c6f346db9da86a3bb0614688a05fc4a9f5a2fa96b19daa4aad3090ff397c",
     # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
-    "paxos_demo.v1.json": "d3179863324e155daade6ee7d640bdcf93736180e251fe33c31ca73642735a18",
+    "paxos_demo.v1.json": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
     # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)
-    "recurrence.v2.json": "a43c73b2698db76d8dfb0b0bd5cdf18c76b8a7c4292640f3040b1790b93e5679",
+    "recurrence.v2.json": "664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b",
 }
 
 # Expected projection IDs for each seed.
@@ -186,7 +186,8 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
     "rcx_engine.v1.json": [
         "engine.init",            # Entry: default config
         "engine.init_config",     # Entry: custom config
-        "engine.trace_done",      # Trace complete -> recurrence
+        "engine.trace_done",      # Trace complete -> request boundary hash
+        "engine.hash_done",       # Boundary hash serviced -> start recurrence
         "engine.recurrence_done", # Recurrence done -> exhaustion
         "engine.exhaustion_done", # Exhaustion done -> final result
         "engine.unwrap",          # Extract final result
@@ -216,24 +217,22 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "paxos.reject_b",
         "paxos.reject_a",
         "healer.detect_deadlock",
+        "healer.detect_deadlock_engine",
     ],
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
     "hemispheres.v1.json": [
-        "hemisphere.init",              # Entry: decompose engine_result
-        "hemisphere.classify.null",     # Value is null -> r_null
-        "hemisphere.classify.closure",  # Closure detected -> r_a
-        "hemisphere.classify.default",  # Default -> lobes
-        "hemisphere.add.r_null",        # Prepend entry to r_null
-        "hemisphere.add.r_a",           # Prepend entry to r_a
-        "hemisphere.add.lobes",         # Prepend entry to lobes
-        "hemisphere.unwrap",            # Extract final result
-    ],
-    "paxos_demo.v1.json": [
-        "paxos.init",
-        "paxos.vote_a",
-        "paxos.reject_b",
-        "paxos.reject_a",
-        "healer.detect_deadlock",
+        "hemisphere.init",                  # Entry: decompose engine_result
+        "hemisphere.classify.exhaustion",   # Exhaustion detected -> sink
+        "hemisphere.classify.stall",        # Stall detected -> r_inf
+        "hemisphere.classify.null",         # Value is null -> r_null
+        "hemisphere.classify.closure",      # Closure detected -> r_a
+        "hemisphere.classify.default",      # Default -> lobes
+        "hemisphere.add.r_null",            # Prepend entry to r_null
+        "hemisphere.add.r_inf",             # Prepend entry to r_inf
+        "hemisphere.add.r_a",               # Prepend entry to r_a
+        "hemisphere.add.lobes",             # Prepend entry to lobes
+        "hemisphere.add.sink",              # Prepend entry to sink
+        "hemisphere.unwrap",                # Extract final result
     ],
 }
 
@@ -315,6 +314,10 @@ def validate_seed_structure(seed_name: str, seed: dict[str, Any]) -> None:
     Raises:
         ValueError: If structure is invalid.
     """
+    # Top-level must be a dict
+    if not isinstance(seed, dict):
+        raise ValueError(f"Seed {seed_name} must be a dict, got {type(seed).__name__}")
+
     # Must have meta and projections
     if "meta" not in seed:
         raise ValueError(f"Seed {seed_name} missing 'meta' key")
@@ -324,15 +327,19 @@ def validate_seed_structure(seed_name: str, seed: dict[str, Any]) -> None:
     meta = seed["meta"]
     projections = seed["projections"]
 
+    # Meta must be a dict (not list, string, etc.)
+    if not isinstance(meta, dict):
+        raise ValueError(f"Seed {seed_name} 'meta' must be a dict, got {type(meta).__name__}")
+
+    # Projections must be a list
+    if not isinstance(projections, list):
+        raise ValueError(f"Seed {seed_name} 'projections' must be a list, got {type(projections).__name__}")
+
     # Meta must have required fields
     required_meta = {"version", "name", "description"}  # AST_OK: infra
     missing = required_meta - set(meta.keys())
     if missing:
         raise ValueError(f"Seed {seed_name} meta missing keys: {missing}")
-
-    # Projections must be a list
-    if not isinstance(projections, list):
-        raise ValueError(f"Seed {seed_name} 'projections' must be a list")
 
     # Each projection must have id, pattern, body
     for i, proj in enumerate(projections):

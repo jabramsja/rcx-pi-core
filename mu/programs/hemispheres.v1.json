@@ -1,6 +1,6 @@
 {
   "meta": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "name": "HEMISPHERES",
     "description": "Native structural routing: routes engine_result to hemispheres (r_null, r_inf, r_a, lobes, sink)",
     "doc": "roadmap/MuHemispheresDesign.md",
@@ -16,6 +16,8 @@
       "Routing decisions expressed as structural projections, not host logic",
       "Input: route_hemisphere with engine_result and current hemispheres",
       "Output: updated hemispheres dict with entry prepended to target hemisphere",
+      "All 5 hemisphere lanes active: r_null, r_inf, r_a, lobes, sink",
+      "Exhaustion routes to sink, stall routes to r_inf",
       "Linear-only patterns (no bridge required)",
       "No kernel-reserved underscore fields in intermediate state"
     ]
@@ -23,7 +25,7 @@
   "projections": [
     {
       "id": "hemisphere.init",
-      "description": "Entry point: decompose engine_result, extract value and closure_detected for classification",
+      "description": "Entry point: decompose engine_result, extract signals for classification",
       "pattern": {
         "route_hemisphere": {
           "engine_result": {
@@ -43,6 +45,52 @@
         "hemi_mode": "classify",
         "hemi_value": {"var": "v"},
         "hemi_closure": {"var": "c"},
+        "hemi_exhaustion": {"var": "e"},
+        "hemi_stall": {"var": "s"},
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.classify.exhaustion",
+      "description": "Exhaustion detected -> route to sink (dead-end, operator frozen)",
+      "pattern": {
+        "hemi_mode": "classify",
+        "hemi_value": {"var": "v"},
+        "hemi_closure": {"var": "c"},
+        "hemi_exhaustion": true,
+        "hemi_stall": {"var": "s"},
+        "hemi_h": {"var": "h"}
+      },
+      "body": {
+        "hemi_mode": "add",
+        "hemi_target": "sink",
+        "hemi_entry": {
+          "state": {"var": "v"},
+          "closure_flag": {"var": "c"},
+          "origin": "engine"
+        },
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.classify.stall",
+      "description": "Stall detected -> route to r_inf (divergent, no progress)",
+      "pattern": {
+        "hemi_mode": "classify",
+        "hemi_value": {"var": "v"},
+        "hemi_closure": {"var": "c"},
+        "hemi_exhaustion": {"var": "e"},
+        "hemi_stall": true,
+        "hemi_h": {"var": "h"}
+      },
+      "body": {
+        "hemi_mode": "add",
+        "hemi_target": "r_inf",
+        "hemi_entry": {
+          "state": {"var": "v"},
+          "closure_flag": {"var": "c"},
+          "origin": "engine"
+        },
         "hemi_h": {"var": "h"}
       }
     },
@@ -53,6 +101,8 @@
         "hemi_mode": "classify",
         "hemi_value": null,
         "hemi_closure": {"var": "c"},
+        "hemi_exhaustion": {"var": "e"},
+        "hemi_stall": {"var": "s"},
         "hemi_h": {"var": "h"}
       },
       "body": {
@@ -73,6 +123,8 @@
         "hemi_mode": "classify",
         "hemi_value": {"var": "v"},
         "hemi_closure": true,
+        "hemi_exhaustion": {"var": "e"},
+        "hemi_stall": {"var": "s"},
         "hemi_h": {"var": "h"}
       },
       "body": {
@@ -93,6 +145,8 @@
         "hemi_mode": "classify",
         "hemi_value": {"var": "v"},
         "hemi_closure": {"var": "c"},
+        "hemi_exhaustion": {"var": "e"},
+        "hemi_stall": {"var": "s"},
         "hemi_h": {"var": "h"}
       },
       "body": {
@@ -125,6 +179,31 @@
         "hemisphere_result": {
           "r_null": {"head": {"var": "entry"}, "tail": {"var": "existing"}},
           "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.add.r_inf",
+      "description": "Prepend entry to r_inf hemisphere list",
+      "pattern": {
+        "hemi_mode": "add",
+        "hemi_target": "r_inf",
+        "hemi_entry": {"var": "entry"},
+        "hemi_h": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "existing"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "hemisphere_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"head": {"var": "entry"}, "tail": {"var": "existing"}},
           "r_a": {"var": "ra"},
           "lobes": {"var": "l"},
           "sink": {"var": "sk"}
@@ -178,6 +257,31 @@
           "r_a": {"var": "ra"},
           "lobes": {"head": {"var": "entry"}, "tail": {"var": "existing"}},
           "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.add.sink",
+      "description": "Prepend entry to sink hemisphere list",
+      "pattern": {
+        "hemi_mode": "add",
+        "hemi_target": "sink",
+        "hemi_entry": {"var": "entry"},
+        "hemi_h": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "existing"}
+        }
+      },
+      "body": {
+        "hemisphere_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"head": {"var": "entry"}, "tail": {"var": "existing"}}
         }
       }
     },

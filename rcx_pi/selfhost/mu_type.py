@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from typing import Any
 
 
@@ -413,7 +414,15 @@ def mu_equal(a: Any, b: Any) -> bool:
 
 
 # Cache for mu_hash: canonical JSON → SHA-256 hex digest
-_mu_hash_cache: dict[str, str] = {}
+# Bounded LRU: evicts oldest entries when MAX_MU_HASH_CACHE exceeded.
+# Prevents unbounded memory growth during long-running evaluations.
+MAX_MU_HASH_CACHE = 10_000
+_mu_hash_cache: OrderedDict[str, str] = OrderedDict()
+
+
+def mu_hash_cache_clear() -> None:
+    """Clear the mu_hash cache. Useful for testing and memory management."""
+    _mu_hash_cache.clear()
 
 
 def mu_hash_cached(value: Any) -> str:
@@ -423,6 +432,8 @@ def mu_hash_cached(value: Any) -> str:
     Caches by canonical JSON serialization to avoid re-hashing identical
     structures. Used for hash-accelerated equality comparison (Content-Addressed
     Mu Level 1).
+
+    Cache is bounded to MAX_MU_HASH_CACHE entries (LRU eviction).
 
     Args:
         value: A Mu value.
@@ -437,9 +448,14 @@ def mu_hash_cached(value: Any) -> str:
     canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
     cached = _mu_hash_cache.get(canonical)
     if cached is not None:
+        # Move to end (most recently used)
+        _mu_hash_cache.move_to_end(canonical)
         return cached
     h = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
     _mu_hash_cache[canonical] = h
+    # Evict oldest if over limit
+    if len(_mu_hash_cache) > MAX_MU_HASH_CACHE:
+        _mu_hash_cache.popitem(last=False)
     return h
 
 

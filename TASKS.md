@@ -124,13 +124,13 @@ Items here are implemented and verified under current invariants. Changes requir
 - Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
   - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
   - Docs: `docs/archive/bytecode/` (archived)
-- Mu Type v0 (`rcx_pi/mu_type.py`, `docs/MuType.v0.md`, 58 tests)
+- Mu Type v0 (`rcx_pi/mu_type.py`, `docs/core/MuType.v0.md`, 58 tests)
 - Structural Purity Guardrails v0 (`docs/StructuralPurity.v0.md`, 32 additional tests):
   - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
   - `assert_handler_pure()`, `validate_kernel_boundary()`
   - `tools/audit_semantic_purity.sh` extended with checks 9-11
 - RCX Kernel Phase 1 (`rcx_pi/kernel.py`, `docs/RCXKernel.v0.md`, 47 tests)
-- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/EVAL_SEED.v0.md`, 125 tests):
+- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/core/EVAL_SEED.v0.md`, 125 tests):
   - Core operations: `match`, `substitute`, `apply_projection`, `step`
   - Only special form: `{"var": "x"}` (variable binding)
   - Kernel handlers: step, stall, init
@@ -310,7 +310,7 @@ such that a structural program can cause new structure to emerge only via
 Stall → Fix → Trace → Closure, and in no other way?
 
 **Answer:** The Structural Reduction Loop (MATCH → REDUCE/STALL → TRACE → NORMAL_FORM).
-See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
+See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
@@ -343,7 +343,7 @@ Current Exhaustion Layer: META_CIRCULAR
 
 
 **Active designs:**
-- Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Level 0 IMPLEMENTED** (boundary hashing in recurrence.v2). **Level 1 IMPLEMENTED** (mu_equal eliminated, mu_hash_cached replaces all 8 production call sites, bootstrap primitives 5→4). Levels 2-3 are DESIGN. **Semantic question:** Can substrate-level identity (hash-first equality) make the meta-circular kernel viable for production programs?
+- Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
 

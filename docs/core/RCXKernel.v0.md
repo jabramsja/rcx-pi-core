@@ -49,7 +49,7 @@ This is the difference between simulating physics and being physics.
 ### Mu (μ)
 
 The universal data type. A Mu is:
-- A JSON-compatible value (see `docs/MuType.v0.md`)
+- A JSON-compatible value (see `docs/core/MuType.v0.md`)
 - Equivalently: a tree/DAG structure serialized as JSON
 - Equivalently: a "motif" - a pattern that can be matched and transformed
 

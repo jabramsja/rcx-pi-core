@@ -995,7 +995,7 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - Updated `docs/RuleAsMotif.v0.md` to reflect implementation status
 - Updated `docs/cli_quickstart.md` with rules commands
-- Updated `docs/IndependentEncounter.v0.md` to IMPLEMENTED status
+- Updated `docs/execution/IndependentEncounter.v0.md` to IMPLEMENTED status
 
 ## Unreleased
 
@@ -1021,7 +1021,7 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - `docs/TraceReadingPrimer.v0.md` - Human-readable trace guide
 - `docs/Flags.md` - Flag discipline contract
-- `docs/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
+- `docs/archive/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
 - Removed `NEXT_STEPS.md` (redundant with TASKS.md)
 
 ### Tests
