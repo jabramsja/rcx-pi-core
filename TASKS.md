@@ -91,6 +91,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-02-07): `match_mu` var-name scan cycle guard was corrected to allow shared substructures (DAG reuse) while still rejecting true active-path cycles; no phase/task promotion.
 - Tracker sync note (2026-02-10): `match_mu` bridge cache defensive copy + `seed_integrity` MU_SEED_LOCATIONS moved to module level; agent verdict extraction hardened across all 9 prompts; no phase/debt/task change.
 - Tracker sync note (2026-02-10): `seed_integrity` fail-closed warning on unregistered seeds + paxos_demo registration; `run_review` memory_context sanitization; translator max_turns increased; no phase/debt/task change.
+- Tracker sync note (2026-02-11): `_run_sub_algorithm` budget fix — removed cross-iteration budget sharing that caused CI exhaustion; per-call budget in step_kernel_mu is sufficient, outer loop bounded by max_iterations; no phase/debt/task change.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
 - Golden fixtures in place

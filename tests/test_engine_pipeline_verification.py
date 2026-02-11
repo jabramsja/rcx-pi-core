@@ -101,11 +101,12 @@ def test_engine_exhaustion_without_terminal_raises():
 
 
 def test_budget_persists_across_sub_algorithm_iterations():
-    """Budget accounting persists across _run_sub_algorithm iterations.
+    """Budget accounting persists when a caller provides an active budget.
 
-    Regression test: reset_step_budget() inside _run_sub_algorithm was creating
-    fresh budget instances each iteration, allowing unbounded step consumption.
-    With the fix, the budget accumulates across all iterations continuously.
+    Verifies that step_kernel_mu piggybacks on a caller-provided budget
+    (accumulating steps) rather than creating independent per-call budgets.
+    _run_sub_algorithm delegates budget to step_kernel_mu; the outer loop
+    is bounded by max_iterations, not budget.
     """
     from rcx_pi.selfhost.kernel import get_step_budget
     reset_step_budget()

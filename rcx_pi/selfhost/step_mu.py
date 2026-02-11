@@ -1391,34 +1391,27 @@ def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:
     Services the boundary between engine phases: the engine projection
     defines WHICH algorithm to run, this function runs it to stall/terminal.
 
-    Budget accounting: starts a step budget if none is active, otherwise
-    piggybacks on the caller's budget. All iterations share one budget
-    to prevent split accounting across sub-algorithm phases.
+    Budget accounting: each inner step_kernel_mu call manages its own
+    per-call budget (50k steps). The outer iteration count is bounded by
+    max_iterations. No cross-iteration budget sharing — that causes
+    premature exhaustion on slower CI runners.
 
     Terminates when:
     1. Semantic final shape detected (recurrence or exhaustion terminal output)
     2. Hash-stall fallback (no change between iterations)
     3. Iteration limit reached (fail-safe)
     """
-    budget = get_step_budget()
-    started_here = not budget.is_active()
-    if started_here:
-        budget.start()
-    try:
-        current = initial
-        for _ in range(max_iterations):  # AST_OK: infra — boundary iteration loop
-            result = run_algorithm_meta_circular(projs, current)
-            # Early termination: semantic final shape detected
-            if _is_terminal_shape(result):
-                return result
-            # Hash-stall fallback: algorithm converged
-            if mu_hash_cached(result) == mu_hash_cached(current):
-                return result
-            current = result
-        return current
-    finally:
-        if started_here:
-            budget.stop()
+    current = initial
+    for _ in range(max_iterations):  # AST_OK: infra — boundary iteration loop
+        result = run_algorithm_meta_circular(projs, current)
+        # Early termination: semantic final shape detected
+        if _is_terminal_shape(result):
+            return result
+        # Hash-stall fallback: algorithm converged
+        if mu_hash_cached(result) == mu_hash_cached(current):
+            return result
+        current = result
+    return current
 
 
 def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engine state machine
