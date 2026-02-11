@@ -73,7 +73,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | Planned |
-| **Python Substrate** | ~2000 LOC, 2,846 tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~2000 LOC, 3,155 tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~1300 LOC core + ~900 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
@@ -672,9 +672,9 @@ New organized structure makes architecture visible:
 - [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
-- [x] hemispheres.v1.json: 8 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
-- [x] Total: 47 core projections across 5 L3-complete seeds + 8 hemisphere projections
-- [x] Additional: 51 projections in utilities/programs/bridge (98 total across all mu/)
+- [x] hemispheres.v1.json: 12 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
+- [x] Total: 47 core projections across 5 L3-complete seeds + 12 hemisphere projections
+- [x] Additional: 71 projections in utilities/programs/bridge (118 total across all mu/)
 - [x] 5 Recurrence + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**
