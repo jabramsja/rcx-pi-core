@@ -10,6 +10,8 @@ from rcx_pi.selfhost.step_mu import run_mu_structural, list_to_linked as _list_t
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
+pytestmark = [pytest.mark.slow]
+
 
 class TestListToLinked:
     """Test helper for list-to-linked conversion."""

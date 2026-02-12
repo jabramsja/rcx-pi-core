@@ -14,6 +14,14 @@ All notable changes to RCX are documented in this file.
 - **pytest-timeout added to test extras** — `pyproject.toml` now declares `pytest-timeout` for `--timeout=300` in nightly/audit_all
 - **Fragile grounding test fixed** — `test_green_gate_check_order` used `}` boundary detection that broke on `${VAR:-}` parameter expansions
 
+### Static Speed Enforcer
+
+- **Created `tools/check_test_speed.sh`** — grep-based static analysis catches test files importing slow kernel functions without `@pytest.mark.slow`
+- **Pre-commit integration** — `tools/pre-commit-doc-check` section 4b enforces speed marking on staged test files (~instant)
+- **7 unmarked test files fixed** — `test_structural_trace`, `test_self_hosting_v0`, `test_gate4_runtime_hardening`, `test_bootstrap_primitives`, `test_recurrence_parity`, `test_execution_path_verification`, `test_match_bridge_invariants`
+- **Slow function set** — `run_mu`, `run_mu_structural`, `run_algorithm_meta_circular`, `run_engine_pipeline`, `run_hemisphere_routing`
+- **Whitelist** — `# SPEED_OK: reason` for files that import but don't call slow functions
+
 ## 2026-02-10
 
 ### Content-Addressed Mu Level 1 IMPLEMENTED: mu_equal Eliminated (5→4 Bootstrap Primitives)

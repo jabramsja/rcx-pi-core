@@ -17,6 +17,8 @@ from rcx_pi.selfhost.match_mu import (
 )
 from rcx_pi.selfhost.projection_runner import make_projection_runner
 
+pytestmark = [pytest.mark.slow]
+
 
 # =============================================================================
 # Bridge Ordering Invariants

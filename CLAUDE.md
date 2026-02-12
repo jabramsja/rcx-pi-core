@@ -222,6 +222,13 @@ pytest --collect-only -m "fuzzer" tests/your_test.py -q                   # Shou
 pytest --collect-only -m "not slow and not fuzzer" --ignore=tests/stress/ -q 2>&1 | tail -3
 ```
 
+**Enforcement:** `tools/check_test_speed.sh` statically catches test files that import slow kernel functions without `@pytest.mark.slow`. Runs automatically in the pre-commit hook on staged test files. Whitelist with `# SPEED_OK: reason` if a file imports but doesn't actually call them.
+
+```bash
+bash tools/check_test_speed.sh          # Scan all tests/
+bash tools/check_test_speed.sh tests/foo.py  # Scan specific file
+```
+
 **Git hooks:**
 
 | Script | Purpose | When |

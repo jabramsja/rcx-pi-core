@@ -20,6 +20,8 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.match_mu import match_mu
 from rcx_pi.selfhost.kernel import get_step_budget, reset_step_budget
 
+pytestmark = [pytest.mark.slow]
+
 
 def test_apply_mu_rejects_reserved_input_field():
     projection = {"pattern": {"var": "x"}, "body": {"ok": {"var": "x"}}}

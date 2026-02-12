@@ -28,6 +28,8 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import step
 
+pytestmark = [pytest.mark.slow]
+
 
 # =============================================================================
 # Test Infrastructure: Projection Tracing
