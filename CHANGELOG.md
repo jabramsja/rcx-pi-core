@@ -2,6 +2,18 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-11
+
+### CI Green Gate Optimization (28 min → 2 min)
+
+- **Hypothesis fuzzers auto-marked** — `pytest_collection_modifyitems` in `conftest.py` detects `item.obj.is_hypothesis_test` and applies `fuzzer` marker (452 tests deselected from green gate)
+- **Slow tests excluded from green gate** — 168 meta-circular, hemisphere, paxos e2e, and engine pipeline tests marked `@pytest.mark.slow`
+- **Green gate runs ~2,500 core tests in ~50s on CI** — Total wall time ~2 min (down from ~28 min)
+- **4-tier test structure:** audit_fast (local), audit_all (pre-push), CI green gate (push/PR), CI nightly (ci_full)
+- **Nightly branch** — `HYPOTHESIS_PROFILE=ci_full` runs everything including fuzzers and slow tests
+- **pytest-timeout added to test extras** — `pyproject.toml` now declares `pytest-timeout` for `--timeout=300` in nightly/audit_all
+- **Fragile grounding test fixed** — `test_green_gate_check_order` used `}` boundary detection that broke on `${VAR:-}` parameter expansions
+
 ## 2026-02-10
 
 ### Content-Addressed Mu Level 1 IMPLEMENTED: mu_equal Eliminated (5→4 Bootstrap Primitives)
