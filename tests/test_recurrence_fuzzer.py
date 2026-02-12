@@ -524,6 +524,7 @@ class TestRecurrenceEdgeCasesFromReview:
         assert result["closure_detected"] is True, \
             "Deep nested states should trigger closure on exact repeat"
 
+    @pytest.mark.slow
     def test_long_trace_performance(self):
         """Long trace (100+ unique states) completes without timeout.
 

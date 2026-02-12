@@ -26,7 +26,6 @@ from rcx_pi.selfhost.seed_integrity import (
     EXPECTED_PROJECTION_IDS,
 )
 
-
 # =============================================================================
 # Strategies for generating test inputs
 # =============================================================================

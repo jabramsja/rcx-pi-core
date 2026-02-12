@@ -102,11 +102,18 @@ run_python() {
   ./tools/audit_semantic_purity.sh
   echo
 
-  echo "[PY 8/11] Python test suite (excludes stress + slow tests)"
-  # Stress tests have 60-120s deadlines per example, run separately in audit_all.sh
-  # Slow tests (meta-circular recurrence, paxos e2e) run in audit_all.sh / nightly
-  # Also exclude test_js_parity_automated.py - JS parity verified via node run in step 11
-  python3 -m pytest $PARALLEL_FLAG -m "not slow" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
+  # Nightly (ci_full) runs ALL tests including fuzzers and slow; push/PR excludes them
+  if [ "${HYPOTHESIS_PROFILE:-}" = "ci_full" ]; then
+    echo "[PY 8/11] Python test suite — NIGHTLY (includes fuzzers + slow)"
+    python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py --timeout=300
+  else
+    echo "[PY 8/11] Python test suite (excludes stress, slow, and fuzzer tests)"
+    # Fuzzer tests run 50+ hypothesis examples each, consuming ~22 min on CI
+    # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
+    # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
+    # Also exclude test_js_parity_automated.py - JS parity verified via node run in step 11
+    python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
+  fi
   echo
 
   echo "[PY 9/11] Fixture v2 validation"

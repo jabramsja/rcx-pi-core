@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=False, text=True, capture_output=True)
@@ -33,6 +35,7 @@ def test_mutation_sandbox_runner_none_still_works(tmp_path: Path):
     assert obj["comparison"]["enabled"] is True
 
 
+@pytest.mark.slow
 def test_mutation_sandbox_runner_trace_cli_does_not_crash(tmp_path: Path):
     # We don't assume the CLI can execute arbitrary tiny worlds; we only assert no crash.
     w = tmp_path / "w.mu"

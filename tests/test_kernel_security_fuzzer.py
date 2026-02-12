@@ -25,7 +25,6 @@ from rcx_pi.selfhost.step_mu import (
     KERNEL_RESERVED_FIELDS,
 )
 
-
 # =============================================================================
 # Strategies for generating test data
 # =============================================================================

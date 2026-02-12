@@ -118,8 +118,10 @@ class TestAuditScriptStructure:
 
         # Extract run_python function for ordering check
         # (avoid false positives from comments about pytest-xdist)
+        # Use "\n}" to find the function-closing brace at column 0,
+        # not inline "}" from bash parameter expansions like ${VAR:-}
         run_python_start = content.find("run_python()")
-        run_python_end = content.find("}", run_python_start)
+        run_python_end = content.find("\n}", run_python_start)
         run_python_func = content[run_python_start:run_python_end]
 
         # Find positions within run_python function

@@ -24,6 +24,8 @@ from rcx_pi.selfhost.step_mu import (
 )
 
 
+pytestmark = pytest.mark.slow
+
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 

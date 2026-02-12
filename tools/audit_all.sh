@@ -13,7 +13,7 @@ export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci_fast}"
 # ============================================================================
 #
 # This is the comprehensive audit for CI and pre-push validation. It runs:
-# - All 3,100+ tests including fuzzer (hash-seeded for determinism)
+# - All 3,155+ tests including fuzzer and slow (hash-seeded for determinism)
 # - Semantic purity checks, contraband detection, AST police
 # - Anti-cheat scans, fixture validation
 #

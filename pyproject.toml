@@ -22,7 +22,7 @@ rcx-world-trace = "rcx_pi.worlds.world_trace_cli:main"
 packages = ["rcx_pi", "rcx_pi.core", "rcx_pi.engine", "rcx_pi.reduction", "rcx_pi.specs", "rcx_pi.utils", "rcx_pi.worlds"]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-xdist", "pytest-cov", "jsonschema", "hypothesis", "pytest-testmon"]
+test = ["pytest", "pytest-xdist", "pytest-cov", "pytest-timeout", "jsonschema", "hypothesis", "pytest-testmon"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "rcx_pi"]
@@ -35,6 +35,7 @@ filterwarnings = [
 ]
 markers = [
     "slow: marks tests as slow (meta-circular recurrence, full paxos e2e). Deselected by default in CI; run with --run-slow or audit_all.sh",
+    "fuzzer: marks hypothesis property-based fuzzers. Excluded from green gate; run via audit_all.sh or nightly CI",
 ]
 # NOTE: Parallel execution (-n auto) is NOT enabled by default because:
 # - Single-file runs have 3s worker spawn overhead that makes them slower
