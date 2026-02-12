@@ -94,6 +94,8 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-02-11): `_run_sub_algorithm` budget fix — removed cross-iteration budget sharing; per-call budget in step_kernel_mu is sufficient, outer loop bounded by max_iterations. Slow test split: `test_paxos_end_to_end.py` and `test_recurrence_production.py` marked `@pytest.mark.slow`, excluded from CI fast gate, run in `audit_all.sh`; no phase/debt/task change.
 - Tracker sync note (2026-02-11): Stall-detection hash caching — cache `current_hash` across loop iterations in 6 Python sites (step_kernel_mu, run_mu, run_mu_structural, _run_sub_algorithm, _resolve_trace_projection_id, projection_runner) + 4 JS sites (L3 parity). Halves hash calls per iteration. green_gate.yml: ci_fast on push (was ci_full), timeout 20→30m. 5 additional tests marked slow (3 engine pipeline, 1 hemisphere adversarial, 1 structural trace fuzzer). No phase/debt/task change.
 - Tracker sync note (2026-02-11): CI green gate 28 min → 2 min — hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` (452 tests deselected), 168 slow tests moved out of gate, `pytest-timeout` added to test extras, fragile grounding test fixed. Green gate runs ~2,500 core tests in ~50s CI. Nightly (ci_full) still runs everything. No phase/debt change.
+- Tracker sync note (2026-02-11): Static speed enforcer — `tools/check_test_speed.sh` grep-based detection of test files importing slow kernel functions without `@pytest.mark.slow`. Integrated into `tools/pre-commit-doc-check` (section 4b). 7 existing violations fixed. No phase/debt change.
+- Mu Hemispheres v0 — Engine integration COMPLETE (2026-02-11): `run_engine_with_routing()` chains `run_engine_pipeline()` → `run_hemisphere_routing()` with fail-closed input/output validation. `hash_trace_for_recurrence` cycle guard added (visited set + 10000 iteration cap). 10 integration tests (8 fast + 2 slow). Paxos livelock → closure → r_a proven end-to-end.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
 - Golden fixtures in place
@@ -325,10 +327,7 @@ See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
-1. Mu Hemispheres v0 — Integration with engine output:
-- Hemisphere routing seed is complete (`mu/programs/hemispheres.v1.json`, 8 projections, cross-substrate parity verified)
-- **Semantic answer confirmed:** Routing decisions CAN be expressed purely as Mu projections (linear-only, no bridge needed)
-- [ ] Integration with rcx_engine.v1 output (engine_result → automatic hemisphere routing)
+No active items. Promote from VECTOR when ready.
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)

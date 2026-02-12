@@ -4,6 +4,14 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-02-11
 
+### Engine → Hemisphere Integration
+
+- **`run_engine_with_routing()`** — Chains `run_engine_pipeline()` → `run_hemisphere_routing()` with fail-closed input/output validation
+- **`hash_trace_for_recurrence` cycle guard** — `id(current)` visited set + 10000 iteration cap, `raise ValueError` (fail-closed)
+- **`_default_hemispheres()`** — Canonical empty hemisphere state, single source of truth
+- **10 integration tests** — 8 fast (wiring, input/output validation, cycle guard, default consistency) + 2 slow (manual chain equivalence, Paxos closure → r_a E2E proof)
+- **Paxos livelock → closure → r_a** proven end-to-end through the full engine + hemisphere pipeline
+
 ### CI Green Gate Optimization (28 min → 2 min)
 
 - **Hypothesis fuzzers auto-marked** — `pytest_collection_modifyitems` in `conftest.py` detects `item.obj.is_hypothesis_test` and applies `fuzzer` marker (452 tests deselected from green gate)

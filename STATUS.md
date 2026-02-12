@@ -617,8 +617,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-11 (CI green gate optimized: 28 min → 2 min via fuzzer/slow split, pytest-timeout added to test extras)
-**Next milestone:** Hemisphere integration with rcx_engine.v1 output (engine_result → routing decision)
+**Last updated:** 2026-02-11 (Engine→hemisphere integration: `run_engine_with_routing()`, `hash_trace_for_recurrence` cycle guard, 10 integration tests)
+**Next milestone:** See TASKS.md VECTOR for next promotion candidates
 
 **Hemisphere Hardening (2026-02-10):**
 - JS substrate now verifies all 7 seeds at load time (SHA256 checksum, structure validation, projection ID ordering)
