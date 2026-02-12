@@ -2,9 +2,9 @@
 
 > **Current State**: See [`STATUS.md`](../STATUS.md)
 > **Authorization**: See [`TASKS.md`](../TASKS.md)
-> **Scope**: This document defines DESIGN only. V0 core implemented (2026-02-09); remaining work is engine integration.
+> **Scope**: This document defines DESIGN only. V0 core + engine integration IMPLEMENTED.
 
-Status: v0 core IMPLEMENTED (2026-02-09). See `TASKS.md` for current work items and `STATUS.md` for hemisphere parity status.
+Status: v0 core + engine integration IMPLEMENTED (2026-02-11). See `TASKS.md` for current work items and `STATUS.md` for hemisphere parity status.
 
 ## Purpose
 Define native structural routing states for RCX: `r_null`, `r_inf`, `r_a`, `lobes`, and `sink`. Routing must be expressed as Mu projections, not host logic.
@@ -50,6 +50,26 @@ Define native structural routing states for RCX: `r_null`, `r_inf`, `r_a`, `lobe
 1. Parity vectors for routing decisions across Python and JS substrates.
 2. Execution-path verification tests proving routing runs via structural projections.
 3. Determinism fuzzers for routing stability.
+
+## Integration (IMPLEMENTED 2026-02-11)
+
+Engine output flows to hemisphere routing via `run_engine_with_routing()`:
+
+    projections → run_engine_pipeline() → engine_result (8-field)
+                                           ↓
+                                  run_hemisphere_routing(engine_result, hemispheres)
+                                           ↓
+                                  updated hemispheres (5 buckets)
+
+Usage:
+
+    from rcx_pi.selfhost.step_mu import run_engine_with_routing
+    result = run_engine_with_routing(projs, input_value)
+    # result["engine_result"] — 8-field engine output
+    # result["hemispheres"] — updated 5-bucket dict
+
+Fail-closed validation on both input (hemisphere shape) and output (routing result shape).
+`hash_trace_for_recurrence` cycle guard added (visited set + iteration cap).
 
 ## Open Questions
 1. Minimum entry schema for each hemisphere.

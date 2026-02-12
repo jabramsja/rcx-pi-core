@@ -1543,7 +1543,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     )
 
 
-def hash_trace_for_recurrence(trace: Mu) -> Mu:  # AST_OK: infra — boundary scaffolding, iterative
+def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST_OK: infra — boundary scaffolding, iterative
     """Add state_hash to each entry in a Mu linked-list trace.
 
     Walks the trace (boundary operation, not a projection) and adds
@@ -1555,14 +1555,27 @@ def hash_trace_for_recurrence(trace: Mu) -> Mu:  # AST_OK: infra — boundary sc
 
     Args:
         trace: Mu linked-list of trace entries (from run_mu_structural).
+        max_entries: Defense-in-depth iteration cap. Not a semantic limit —
+            configurable if callers need longer traces. Default 10000 is
+            100x the engine pipeline default (max_steps=100).
 
     Returns:
         New Mu linked-list with state_hash added to each entry.
+
+    Raises:
+        ValueError: If cyclic linked list detected or entry cap exceeded.
     """
     # Collect entries iteratively (avoids recursion limit on long traces)
     entries = []
+    visited = set()  # AST_OK: cycle — cycle detection guard
     current = trace
     while isinstance(current, dict) and "head" in current:
+        node_id = id(current)
+        if node_id in visited:
+            raise ValueError("hash_trace_for_recurrence: cyclic linked list detected")
+        visited.add(node_id)
+        if len(entries) >= max_entries:
+            raise ValueError(f"hash_trace_for_recurrence: trace exceeds {max_entries} entries")
         entry = current["head"]
         if isinstance(entry, dict) and "state" in entry:
             entry = dict(entry)
@@ -1606,3 +1619,54 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
         f"Hemisphere routing did not produce valid hemisphere dict. "
         f"Got: {sorted(result.keys()) if isinstance(result, dict) else type(result).__name__}"
     )
+
+
+# --- Engine → Hemisphere Integration ---
+
+_HEMISPHERE_KEY_ORDER = ("r_null", "r_inf", "r_a", "lobes", "sink")  # AST_OK: constant
+_HEMISPHERE_KEYS = frozenset(_HEMISPHERE_KEY_ORDER)  # AST_OK: constant — validation only
+
+
+def _default_hemispheres():  # AST_OK: infra
+    """Canonical empty hemisphere state. Single source of truth."""
+    return {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
+
+
+def run_engine_with_routing(projections, input_value, hemispheres=None, **engine_kwargs):
+    """Chain run_engine_pipeline() → run_hemisphere_routing().
+
+    Top-level integration: projections → trace → recurrence → exhaustion → routing.
+
+    Args:
+        projections: Application projections to run.
+        input_value: Initial input value.
+        hemispheres: Current hemisphere state (default: empty 5-bucket).
+        **engine_kwargs: Passed to run_engine_pipeline (max_steps, frozen, etc.)
+
+    Returns:
+        {"engine_result": <8-field dict>, "hemispheres": <updated 5-field dict>}
+
+    Raises:
+        TypeError: If hemispheres is not a dict.
+        ValueError: If hemispheres has wrong key set.
+        RuntimeError: If routing output has unexpected shape.
+    """
+    if hemispheres is None:
+        hemispheres = _default_hemispheres()
+    else:
+        if not isinstance(hemispheres, dict):  # AST_OK: boundary
+            raise TypeError(f"hemispheres must be dict, got {type(hemispheres).__name__}")
+        actual = set(hemispheres.keys())
+        if actual != _HEMISPHERE_KEYS:
+            missing = sorted(_HEMISPHERE_KEYS - actual, key=str)
+            extra = sorted(actual - _HEMISPHERE_KEYS, key=str)
+            raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
+
+    engine_result = run_engine_pipeline(projections, input_value, **engine_kwargs)
+    updated_hemispheres = run_hemisphere_routing(engine_result, hemispheres)
+
+    # Fail-closed: validate output shape before returning
+    if not isinstance(updated_hemispheres, dict) or set(updated_hemispheres.keys()) != _HEMISPHERE_KEYS:  # AST_OK: boundary
+        raise RuntimeError("run_hemisphere_routing returned unexpected shape")
+
+    return {"engine_result": engine_result, "hemispheres": updated_hemispheres}

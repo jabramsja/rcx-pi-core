@@ -332,8 +332,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 45 (44 base + 1 for run_hemisphere_routing boundary validation)
-    assert infra_count == 45, (
-        f"Expected 45 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 46 (44 base + 1 run_hemisphere_routing + 1 _default_hemispheres)
+    assert infra_count == 46, (
+        f"Expected 46 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
