@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 
-from .eval_seed import NO_MATCH, host_iteration, step as eval_step
+from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached
@@ -853,7 +853,7 @@ def step_kernel_mu(
         for _ in range(max_steps):
             # Account for kernel-driver work in the shared global budget.
             budget.consume(1)
-            result = eval_step(kernel_projs, current)
+            result = _step_trusted(kernel_projs, current)
 
             # Terminal state check - simple structural marker detection
             if is_kernel_terminal(result):
@@ -974,7 +974,7 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
     """
-    from rcx_pi.selfhost.eval_seed import step
+    from rcx_pi.selfhost.eval_seed import _step_trusted
     from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 
     assert_mu(input_value, "step_algorithm_with_bridge.input")
@@ -1003,9 +1003,8 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     # normalize_for_match is idempotent, so already-normalized state is unchanged.
     normalized_input = normalize_for_match(input_value)
 
-    # Single bootstrap step: preserves first-match-wins semantics without
-    # embedding a projection-application loop in this helper.
-    normalized_result = step(projections, normalized_input)
+    # Single bootstrap step — trusted because we validated at boundary above.
+    normalized_result = _step_trusted(projections, normalized_input)
     if mu_hash_cached(normalized_result) == mu_hash_cached(normalized_input):
         return input_value
 
@@ -1476,8 +1475,6 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     Raises:
         RuntimeError: If engine loop exhausts without producing terminal result.
     """
-    from .eval_seed import step as eval_step
-
     # Backwards compatibility: max_iterations sets both limits
     if max_iterations is not None:
         max_engine_iterations = max_iterations
@@ -1490,8 +1487,8 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 
     # Generic effect handler loop
     for iteration in range(max_engine_iterations):  # AST_OK: infra — boundary host loop iteration
-        # Step engine projections (APPLICATION-layer, bootstrap evaluator)
-        next_state = eval_step(engine_projs, state)
+        # Step engine projections — trusted: engine state built from validated input
+        next_state = _step_trusted(engine_projs, state)
 
         # Engine stalled (no projection matched) — check for terminal result
         if next_state is state:
@@ -1613,7 +1610,7 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
     result, _trace, stall = run_mu(projs, wrapped, max_steps=30)
     # Stall is the EXPECTED completion signal: init→classify→add→unwrap→stall
     # Verify the result looks like a completed hemisphere dict
-    if isinstance(result, dict) and all(k in result for k in ("r_null", "r_inf", "r_a", "lobes", "sink")):
+    if isinstance(result, dict) and set(result.keys()) == _HEMISPHERE_KEYS:
         return result
     raise RuntimeError(
         f"Hemisphere routing did not produce valid hemisphere dict. "

@@ -13,7 +13,7 @@ import pytest
 from rcx_pi.selfhost.match_mu import (
     load_match_with_bridge_projections,
     clear_match_bridge_cache,
-    _validate_match_bridge_ordering,
+    _validate_match_bridge_ordering,  # ANTICHEAT_OK: grounding test for bridge ordering invariant
 )
 from rcx_pi.selfhost.projection_runner import make_projection_runner
 

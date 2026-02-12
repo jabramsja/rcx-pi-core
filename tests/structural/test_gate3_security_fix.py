@@ -22,7 +22,7 @@ from rcx_pi.selfhost.step_mu import (
     validate_algorithm_runtime_fields,
     KERNEL_RESERVED_FIELDS,
     ALGORITHM_ENTRYPOINT_KEYS,
-    _iter_normalized_dict_pairs,
+    _iter_normalized_dict_pairs,  # ANTICHEAT_OK: grounding test for internal security function
 )
 
 

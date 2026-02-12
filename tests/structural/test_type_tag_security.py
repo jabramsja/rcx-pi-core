@@ -243,28 +243,46 @@ class TestKernelInternalStateBypass:
             "SECURITY BUG: 'subst' field should NOT trigger kernel state bypass!"
         )
 
-    def test_reserved_mode_field_triggers_detection(self):
-        """_mode field SHOULD trigger kernel internal state detection.
+    def test_reserved_mode_field_with_known_mode_triggers_detection(self):
+        """_mode with known kernel mode string SHOULD trigger detection.
 
-        GROUNDING: Verifies legitimate kernel states are still detected.
+        GROUNDING: Verifies legitimate kernel states are detected.
+        Phase 8c tightening: _mode must be a KNOWN kernel mode string
+        (from seed files), not just any string.
         """
         from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
 
-        # Real kernel state has _mode
-        kernel_state = {"_mode": "match", "_phase": "init"}
+        # Real kernel state uses known mode "kernel"
+        kernel_state = {"_mode": "kernel", "_input": 42}
 
         assert _is_kernel_internal_state(kernel_state) is True, (
-            "_mode should trigger kernel state detection"
+            "_mode with known kernel mode should trigger detection"
         )
 
-    def test_reserved_phase_field_triggers_detection(self):
-        """_phase field SHOULD trigger kernel internal state detection."""
+    def test_reserved_mode_field_with_unknown_mode_blocked(self):
+        """_mode with unknown mode string should NOT trigger detection.
+
+        GROUNDING (Phase 8c): Tighter security - arbitrary mode strings
+        no longer bypass validation. Only seed-defined modes are trusted.
+        """
+        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+
+        # _mode: "match" is NOT a known kernel mode (kernel.v1 uses "kernel", not "match")
+        assert _is_kernel_internal_state({"_mode": "match", "_phase": "init"}) is False
+        assert _is_kernel_internal_state({"_mode": "arbitrary"}) is False
+
+    def test_phase_field_alone_does_not_trigger_detection(self):
+        """_phase alone should NOT trigger detection (tighter Phase 8c check).
+
+        GROUNDING: Phase 8c requires either known _mode or context key.
+        _phase alone is insufficient — prevents forgery with just _phase.
+        """
         from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
 
         kernel_state = {"_phase": "execute"}
 
-        assert _is_kernel_internal_state(kernel_state) is True, (
-            "_phase should trigger kernel state detection"
+        assert _is_kernel_internal_state(kernel_state) is False, (
+            "_phase alone should NOT trigger detection (Phase 8c tightening)"
         )
 
     def test_combined_attack_blocked(self):

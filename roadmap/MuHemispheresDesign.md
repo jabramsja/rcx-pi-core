@@ -71,6 +71,10 @@ Usage:
 Fail-closed validation on both input (hemisphere shape) and output (routing result shape).
 `hash_trace_for_recurrence` cycle guard added (visited set + iteration cap).
 
+**JS L3 Parity (2026-02-12):** All 4 orchestration functions ported to `mu/host/js/eval_step.js`:
+`runEnginePipeline()`, `hashTraceForRecurrence()`, `runHemisphereRouting()`, `runEngineWithRouting()`.
+rcx_engine.v1.json loaded in JS (9 seeds total). 36 cross-substrate parity tests pass.
+
 ## Open Questions
 1. Minimum entry schema for each hemisphere.
 2. Whether re-expression from `sink` is automatic or requires explicit triggers.

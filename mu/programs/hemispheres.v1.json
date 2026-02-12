@@ -17,7 +17,7 @@
       "Input: route_hemisphere with engine_result and current hemispheres",
       "Output: updated hemispheres dict with entry prepended to target hemisphere",
       "All 5 hemisphere lanes active: r_null, r_inf, r_a, lobes, sink",
-      "Exhaustion routes to sink, stall routes to r_inf",
+      "Priority: exhaustion > null > closure > stall > default",
       "Linear-only patterns (no bridge required)",
       "No kernel-reserved underscore fields in intermediate state"
     ]
@@ -73,28 +73,6 @@
       }
     },
     {
-      "id": "hemisphere.classify.stall",
-      "description": "Stall detected -> route to r_inf (divergent, no progress)",
-      "pattern": {
-        "hemi_mode": "classify",
-        "hemi_value": {"var": "v"},
-        "hemi_closure": {"var": "c"},
-        "hemi_exhaustion": {"var": "e"},
-        "hemi_stall": true,
-        "hemi_h": {"var": "h"}
-      },
-      "body": {
-        "hemi_mode": "add",
-        "hemi_target": "r_inf",
-        "hemi_entry": {
-          "state": {"var": "v"},
-          "closure_flag": {"var": "c"},
-          "origin": "engine"
-        },
-        "hemi_h": {"var": "h"}
-      }
-    },
-    {
       "id": "hemisphere.classify.null",
       "description": "Value is null -> route to r_null (void/zero-structure)",
       "pattern": {
@@ -133,6 +111,28 @@
         "hemi_entry": {
           "state": {"var": "v"},
           "closure_flag": true,
+          "origin": "engine"
+        },
+        "hemi_h": {"var": "h"}
+      }
+    },
+    {
+      "id": "hemisphere.classify.stall",
+      "description": "Stall detected -> route to r_inf (divergent, no progress)",
+      "pattern": {
+        "hemi_mode": "classify",
+        "hemi_value": {"var": "v"},
+        "hemi_closure": {"var": "c"},
+        "hemi_exhaustion": {"var": "e"},
+        "hemi_stall": true,
+        "hemi_h": {"var": "h"}
+      },
+      "body": {
+        "hemi_mode": "add",
+        "hemi_target": "r_inf",
+        "hemi_entry": {
+          "state": {"var": "v"},
+          "closure_flag": {"var": "c"},
           "origin": "engine"
         },
         "hemi_h": {"var": "h"}

@@ -20,7 +20,7 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, hemispheres.v1 (47+ core projections)
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 7 engine)
     - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
@@ -95,6 +95,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-02-11): Stall-detection hash caching — cache `current_hash` across loop iterations in 6 Python sites (step_kernel_mu, run_mu, run_mu_structural, _run_sub_algorithm, _resolve_trace_projection_id, projection_runner) + 4 JS sites (L3 parity). Halves hash calls per iteration. green_gate.yml: ci_fast on push (was ci_full), timeout 20→30m. 5 additional tests marked slow (3 engine pipeline, 1 hemisphere adversarial, 1 structural trace fuzzer). No phase/debt/task change.
 - Tracker sync note (2026-02-11): CI green gate 28 min → 2 min — hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` (452 tests deselected), 168 slow tests moved out of gate, `pytest-timeout` added to test extras, fragile grounding test fixed. Green gate runs ~2,500 core tests in ~50s CI. Nightly (ci_full) still runs everything. No phase/debt change.
 - Tracker sync note (2026-02-11): Static speed enforcer — `tools/check_test_speed.sh` grep-based detection of test files importing slow kernel functions without `@pytest.mark.slow`. Integrated into `tools/pre-commit-doc-check` (section 4b). 7 existing violations fixed. No phase/debt change.
+- Tracker sync note (2026-02-12): JS engine-hemisphere parity — `runEnginePipeline`, `hashTraceForRecurrence`, `runHemisphereRouting`, `runEngineWithRouting` added to `eval_step.js`. rcx_engine.v1.json + recurrence.v2.json now loaded in JS. 4 JSON API actions, 6 inline tests, 6 cross-substrate parity tests (36 total pass). `_state_hash`/`_check_hash` added to JS ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS (pre-existing parity gap). JS debt: 13→15. No phase change.
 - Mu Hemispheres v0 — Engine integration COMPLETE (2026-02-11): `run_engine_with_routing()` chains `run_engine_pipeline()` → `run_hemisphere_routing()` with fail-closed input/output validation. `hash_trace_for_recurrence` cycle guard added (visited set + 10000 iteration cap). 10 integration tests (8 fast + 2 slow). Paxos livelock → closure → r_a proven end-to-end.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
@@ -293,7 +294,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - B-structural match_mu provides non-linear pattern support via match.v2 + bridge
   - Gates 1-5 ALL COMPLETE — hemisphere implementation unblocked
 - Mu Hemispheres v0 Core (2026-02-09):
-  - `mu/programs/hemispheres.v1.json`: 8 projections (init, 3 classify, 3 add, unwrap)
+  - `mu/programs/hemispheres.v1.json`: 12 projections (init, 5 classify, 5 add, unwrap)
   - Entry schema locked: `{state, closure_flag, origin}` per hemisphere
   - Three automatic routes: null→r_null, closure→r_a, default→lobes
   - Cross-substrate parity: Python + JS produce identical results

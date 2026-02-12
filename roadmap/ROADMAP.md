@@ -15,12 +15,12 @@ Read first:
 6. `roadmap/MuHemispheresDesign.md`
 
 **Now (updated 2026-02-10)**
-1. Gates 1-5 ALL COMPLETE. Hemispheres v0 core DONE (8 projections, cross-substrate parity verified).
+1. Gates 1-5 ALL COMPLETE. Hemispheres v0 core DONE (12 projections, cross-substrate parity verified).
 2. Hemisphere adversarial hardening complete (JS seed verification parity, 63 adversarial tests).
 3. Keep Gate 4/5 guarantees intact: structural default active, bootstrap explicit fallback only.
 
 **Next**
-1. Hemisphere integration with rcx_engine.v1 output (engine_result → automatic hemisphere routing). Core seed is done (`mu/programs/hemispheres.v1.json`, 8 projections, cross-substrate parity verified).
+1. Hemisphere integration with rcx_engine.v1 output (engine_result → automatic hemisphere routing) COMPLETE. Core seed is done (`mu/programs/hemispheres.v1.json`, 12 projections, cross-substrate parity verified).
 2. Keep all L2/L3 invariants intact (structural execution default, cross-substrate parity).
 
 **Vector (Design Only)**

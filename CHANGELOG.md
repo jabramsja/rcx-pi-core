@@ -2,6 +2,19 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-12
+
+### JS Engine-Hemisphere Parity (L3 Mandatory)
+
+- **4 core functions ported to JS** — `runEnginePipeline()`, `hashTraceForRecurrence()`, `runHemisphereRouting()`, `runEngineWithRouting()` mirror Python implementations in `eval_step.js`
+- **rcx_engine.v1.json + recurrence.v2.json loaded in JS** — 9 seeds now verified at startup (was 8); `seedProjectionMap` for boundary `run_algorithm` operations
+- **4 JSON API actions added** — `run_engine_pipeline`, `hash_trace`, `run_hemisphere_routing`, `run_engine_with_routing` for cross-substrate testing
+- **6 cross-substrate parity tests** — 3 fast (hash_trace, overcap, routing validation) + 3 slow (engine pipeline, hemisphere routing, full pipeline E2E); 36 total parity tests pass
+- **Pre-existing parity gap fixed** — `_state_hash` and `_check_hash` added to JS `ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS` (recurrence.v2 fields present in Python but missing from JS)
+- **JS debt 13→15** — `runAlgorithmWithBridge` + `runEnginePipeline` added to `@host_iteration` tracking
+- **Constants and helpers** — `isTerminalShape()`, `isEngineTerminal()`, `runSubAlgorithm()`, `setsEqual()`, `defaultHemispheres()`, hemisphere/terminal key sets
+- **Inline JS tests** — `isEngineTerminal`, `isTerminalShape`, `hashTraceForRecurrence` (simple, cycle, overcap), `defaultHemispheres`/`setsEqual`
+
 ## 2026-02-11
 
 ### Engine → Hemisphere Integration

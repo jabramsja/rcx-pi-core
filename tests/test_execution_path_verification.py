@@ -43,7 +43,7 @@ def step_with_trace(projections: list[dict], state: dict, trace: list[str]) -> d
     This provides EVIDENCE that specific projections are executed,
     not just that behavior is correct.
     """
-    from rcx_pi.selfhost.eval_seed import match, substitute, _NoMatch
+    from rcx_pi.selfhost.eval_seed import match, substitute, _NoMatch  # ANTICHEAT_OK: execution path verification
     from rcx_pi.selfhost.match_mu import denormalize_from_match
 
     for proj in projections:

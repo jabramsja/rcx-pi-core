@@ -58,10 +58,12 @@ try:
         derandomize=False,
     )
 
-    # Full CI profile: comprehensive fuzzing for dev/nightly (500 examples)
+    # Full CI profile: comprehensive fuzzing for nightly (200 examples)
+    # Reduced from 500 to fit 30min CI budget. Deep fuzz (500) runs weekly
+    # via .github/workflows/weekly_deep_fuzz.yml (HYPOTHESIS_PROFILE=ci).
     settings.register_profile(
         "ci_full",
-        max_examples=500,
+        max_examples=200,
         deadline=5000,
         suppress_health_check=[HealthCheck.too_slow],
         print_blob=True,

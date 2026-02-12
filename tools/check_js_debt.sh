@@ -95,6 +95,8 @@ check_function_marker() {
 check_function_marker "step" "@host_iteration"
 check_function_marker "run" "@host_iteration"
 check_function_marker "runStructural" "@host_iteration"
+check_function_marker "runAlgorithmWithBridge" "@host_iteration"
+check_function_marker "runEnginePipeline" "@host_iteration"
 check_function_marker "match" "@host_recursion"
 check_function_marker "substitute" "@host_recursion"
 check_function_marker "normalize" "@host_recursion"
@@ -112,4 +114,4 @@ fi
 
 echo "PASSED: All JS debt markers present"
 echo ""
-echo "Note: JS debt (13) matches Python debt (13) - same bootstrap primitives"
+echo "Note: JS debt (15) = 8 iteration + 4 recursion + 3 builtin"

@@ -63,15 +63,9 @@ run_python() {
   fi
   echo "OK"
 
-  # No underscored imports from rcx_pi in tests/ or prototypes/
-  echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
-  if grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ 2>/dev/null | \
-      grep -v 'test_type_tag_security.py' | \
-      grep -v '# ANTICHEAT_OK' | \
-      grep -v '__pycache__'; then
-    echo "ERROR: Found underscored import from rcx_pi"
-    exit 1
-  fi
+  # No underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)
+  echo "-- no underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)"
+  python3 tools/check_underscore_imports.py || exit 1
   echo "OK"
 
   # No underscore-prefixed keys in prototype JSON
@@ -102,16 +96,17 @@ run_python() {
   ./tools/audit_semantic_purity.sh
   echo
 
-  # Nightly (ci_full) runs ALL tests including fuzzers and slow; push/PR excludes them
+  # Nightly (ci_full) runs ALL tests including fuzzers, slow, and JS parity;
+  # push/PR excludes fuzzers and slow (JS parity verified via node run in step 11)
   if [ "${HYPOTHESIS_PROFILE:-}" = "ci_full" ]; then
-    echo "[PY 8/11] Python test suite — NIGHTLY (includes fuzzers + slow)"
-    python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py --timeout=300
+    echo "[PY 8/11] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
+    python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --timeout=300
   else
-    echo "[PY 8/11] Python test suite (excludes stress, slow, and fuzzer tests)"
+    echo "[PY 8/11] Python test suite (excludes stress, slow, fuzzer, and JS parity tests)"
     # Fuzzer tests run 50+ hypothesis examples each, consuming ~22 min on CI
     # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
     # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
-    # Also exclude test_js_parity_automated.py - JS parity verified via node run in step 11
+    # JS parity tests spawn node subprocesses — nightly only; fast path has step 11
     python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
   fi
   echo

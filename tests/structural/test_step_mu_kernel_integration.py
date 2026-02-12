@@ -82,11 +82,11 @@ class TestStepMuUsesKernelProjections:
             calls.append({"projs_count": len(projs), "state_keys": set(state.keys()) if isinstance(state, dict) else None})
             return original_eval_step(projs, state)
 
-        with patch('rcx_pi.selfhost.step_mu.eval_step', side_effect=tracking_eval_step):
+        with patch('rcx_pi.selfhost.step_mu._step_trusted', side_effect=tracking_eval_step):
             # Simple projection that matches
             result = step_kernel_mu([{"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}], 42)
 
-        # Should have made calls to eval_step
+        # Should have made calls to _step_trusted
         assert len(calls) > 0
         # First call should be with kernel entry state (has _step and _projs)
         assert calls[0]["state_keys"] == {"_step", "_projs"}
@@ -217,7 +217,7 @@ class TestKernelStallPathComplete:
             transitions.append({"input_mode": input_mode, "output_mode": output_mode})
             return result
 
-        with patch('rcx_pi.selfhost.step_mu.eval_step', side_effect=tracking_step):
+        with patch('rcx_pi.selfhost.step_mu._step_trusted', side_effect=tracking_step):
             result = step_kernel_mu([], 42)
 
         # Should return original input

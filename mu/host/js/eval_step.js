@@ -29,13 +29,15 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   @host_iteration: 6
- *     - step()              - for loop over projections
- *     - run()               - for loop until stall
- *     - runStructural()     - for loop until stall (Gate 5: routes through stepKernel)
- *     - normalize()         - for loop for array conversion
- *     - denormalize()       - while loop for linked list
- *     - listToLinked()      - for loop for conversion
+ *   @host_iteration: 8
+ *     - step()                    - for loop over projections
+ *     - run()                     - for loop until stall
+ *     - runStructural()           - for loop until stall (Gate 5: routes through stepKernel)
+ *     - normalize()               - for loop for array conversion
+ *     - denormalize()             - while loop for linked list
+ *     - listToLinked()            - for loop for conversion
+ *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
+ *     - runEnginePipeline()       - engine state machine effect handler loop
  *
  *   @host_recursion: 4
  *     - match()             - recursive pattern matching
@@ -48,7 +50,7 @@
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 13 (matches Python's 13 semantic debt markers)
+ * TOTAL DEBT: 15 (8 iteration + 4 recursion + 3 builtin)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
  * exist in Python. Both substrates have identical bootstrap footprint.
@@ -115,6 +117,7 @@ const ALGORITHM_INTERNAL_UNRESERVED_FIELDS = new Set([
 const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
   ...ALGORITHM_ENTRYPOINT_KEYS,
   ...ALGORITHM_INTERNAL_UNRESERVED_FIELDS,
+  '_check_hash',   // recurrence.v2 hash comparison field (matches Python)
   '_check_list',
   '_current',
   '_frozen',
@@ -124,6 +127,7 @@ const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
   '_result',
   '_seen',
   '_stall',
+  '_state_hash',   // recurrence.v2 hash-accelerated closure detection (matches Python)
   '_step',
   '_tau_step',
   '_type',
@@ -131,6 +135,40 @@ const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
 
 // Maximum depth for validation traversal (fail closed)
 const MAX_VALIDATION_DEPTH = 100;
+
+// =============================================================================
+// Typed Error Class (for parity manifest error_code assertions)
+// =============================================================================
+
+/**
+ * RcxError carries a structured error_code alongside the human-readable message.
+ * Parity tests assert on error_code (never message text).
+ */
+class RcxError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.error_code = code;
+  }
+}
+
+/**
+ * Classify an error into a parity error_code.
+ * Primary path: if the error already has error_code (RcxError), pass through.
+ * Fallback: message-pattern matching for untyped exceptions.
+ */
+function classifyError(e) {
+  if (e && e.error_code) return e.error_code;
+  const msg = (e && e.message || '').toLowerCase();
+  if (msg.includes('cyclic linked list')) return 'trace.cycle_detected';
+  if (msg.includes('exceeds') && msg.includes('entries')) return 'trace.overcap';
+  if (msg.includes('engine pipeline exhausted')) return 'engine.exhausted';
+  if (msg.includes('engine stalled')) return 'engine.stalled_non_terminal';
+  if (msg.includes('must be a dict') || msg.includes('must be dict')) return 'input.invalid_type';
+  if (msg.includes('shape mismatch') || msg.includes('unexpected shape')) return 'input.shape_mismatch';
+  if (msg.includes('reserved') || msg.includes('kernel-reserved') || msg.includes('unsupported algorithm underscore')) return 'input.reserved_field';
+  if (msg.includes('not valid mu') || msg.includes('max depth exceeded')) return 'input.malformed_normalized';
+  return 'api.bad_request';
+}
 
 // =============================================================================
 // Security Validation (matches Python step_mu.py security hardening)
@@ -1424,7 +1462,8 @@ const SEED_CHECKSUMS = {
   'recurrence.v2.json': '664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b',
   'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
   'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
-  'hemispheres.v1.json': 'aa91c6f346db9da86a3bb0614688a05fc4a9f5a2fa96b19daa4aad3090ff397c',
+  'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
+  'rcx_engine.v1.json': 'aa6581b41f9750ab18b52c1078c4eaedf89d165f239ff81e3d919abeab3723bf',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -1468,11 +1507,16 @@ const EXPECTED_PROJECTION_IDS = {
     'bridge.lookup.not_found',
   ],
   'hemispheres.v1.json': [
-    'hemisphere.init', 'hemisphere.classify.exhaustion', 'hemisphere.classify.stall',
-    'hemisphere.classify.null', 'hemisphere.classify.closure',
+    'hemisphere.init', 'hemisphere.classify.exhaustion', 'hemisphere.classify.null',
+    'hemisphere.classify.closure', 'hemisphere.classify.stall',
     'hemisphere.classify.default', 'hemisphere.add.r_null', 'hemisphere.add.r_inf',
     'hemisphere.add.r_a', 'hemisphere.add.lobes', 'hemisphere.add.sink',
     'hemisphere.unwrap',
+  ],
+  'rcx_engine.v1.json': [
+    'engine.init', 'engine.init_config', 'engine.trace_done',
+    'engine.hash_done', 'engine.recurrence_done', 'engine.exhaustion_done',
+    'engine.unwrap',
   ],
 };
 
@@ -1545,6 +1589,7 @@ const recurrenceV2Seed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v2.
 const exhaustionSeed = loadVerifiedSeed(path.join(closuresDir, 'exhaustion.v1.json'), 'exhaustion.v1.json');
 const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'bootstrap_structural.v1.json');
 const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
+const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json'), 'rcx_engine.v1.json');
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -1564,6 +1609,19 @@ const exhaustionProjections = exhaustionSeed.projections;
 
 // Hemisphere projections (APPLICATION level - structural routing, linear-only, no bridge needed)
 const hemisphereProjections = hemisphereSeed.projections;
+
+// Engine projections (APPLICATION level - orchestrates trace/recurrence/exhaustion pipeline)
+const engineProjections = engineSeed.projections;
+
+// Recurrence v2 projections (hash-accelerated, used by engine run_algorithm boundary)
+const recurrenceV2Projections = recurrenceV2Seed.projections;
+
+// Seed name → projections mapping for engine boundary operations
+const seedProjectionMap = {
+  'recurrence.v1.json': recurrenceProjections,
+  'recurrence.v2.json': recurrenceV2Projections,
+  'exhaustion.v1.json': exhaustionProjections,
+};
 
 // Combined projections WITH BRIDGE for meta-circular algorithm execution
 // Order: kernel -> bridge -> match -> subst (bridge extends match for non-linear patterns)
@@ -1610,8 +1668,265 @@ const allProjectionsWithExhaustionAndBridge = [
   ...substSeed.projections
 ];
 
+// =============================================================================
+// Engine-Hemisphere Orchestration (L3 Parity with Python step_mu.py)
+// =============================================================================
+
+// Terminal shape key sets (mirrors Python step_mu.py:42-47)
+const RECURRENCE_TERMINAL_KEYS = new Set(['closure_detected', 'final_result', 'tau_step']);
+const EXHAUSTION_TERMINAL_KEYS = new Set(['action', 'exhaustion_detected', 'frozen', 'operator_to_freeze']);
+const ENGINE_TERMINAL_KEYS = new Set([
+  'value', 'closure_detected', 'tau_step', 'exhaustion_detected',
+  'operator_frozen', 'frozen_set', 'action', 'stall',
+]);
+
+// Hemisphere constants (mirrors Python step_mu.py:1626-1632)
+const HEMISPHERE_KEY_ORDER = ['r_null', 'r_inf', 'r_a', 'lobes', 'sink'];
+const HEMISPHERE_KEYS = new Set(HEMISPHERE_KEY_ORDER);
+
+function defaultHemispheres() {
+  return { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null };
+}
+
+/**
+ * Compare two Sets for equality.
+ */
+function setsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
+
+/**
+ * Check for recurrence/exhaustion terminal output shape.
+ * Mirrors Python _is_terminal_shape() (step_mu.py:1371).
+ */
+function isTerminalShape(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = new Set(Object.keys(value));
+  return setsEqual(keys, RECURRENCE_TERMINAL_KEYS) || setsEqual(keys, EXHAUSTION_TERMINAL_KEYS);
+}
+
+/**
+ * Check if engine has produced its final unwrapped result (8-key shape).
+ * Mirrors Python _is_engine_terminal() (step_mu.py:1391).
+ */
+function isEngineTerminal(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  return setsEqual(new Set(Object.keys(value)), ENGINE_TERMINAL_KEYS);
+}
+
+/**
+ * Run a sub-algorithm (recurrence/exhaustion) to completion.
+ * Mirrors Python _run_sub_algorithm() (step_mu.py:1404).
+ * AST_OK: infra — boundary sub-algorithm runner
+ */
+function runSubAlgorithm(algorithmProjs, initial, maxIterations) {
+  let current = initial;
+  let currentHash = muHashCached(initial);
+  for (let i = 0; i < maxIterations; i++) {
+    const result = runAlgorithmWithBridge(allProjectionsWithBridge, current, algorithmProjs, 200);
+    if (isTerminalShape(result)) return result;
+    const resultHash = muHashCached(result);
+    if (resultHash === currentHash) return result;
+    current = result;
+    currentHash = resultHash;
+  }
+  return current;
+}
+
+/**
+ * Add state_hash to each entry in a Mu linked-list trace.
+ * Mirrors Python hash_trace_for_recurrence() (step_mu.py:1546-1589).
+ * Iterative linked-list traversal (no recursion).
+ * FAIL-CLOSED: throws on cycle or overcap.
+ * AST_OK: infra — boundary scaffolding, iterative
+ */
+function hashTraceForRecurrence(trace, maxEntries) {
+  maxEntries = maxEntries ?? 10000;
+  const entries = [];
+  const visited = new Set();
+  let current = trace;
+  while (current !== null && typeof current === 'object' && 'head' in current) {
+    if (visited.has(current)) {
+      throw new RcxError('trace.cycle_detected', 'hash_trace_for_recurrence: cyclic linked list detected');
+    }
+    visited.add(current);
+    if (entries.length >= maxEntries) {
+      throw new RcxError('trace.overcap', `hash_trace_for_recurrence: trace exceeds ${maxEntries} entries`);
+    }
+    let entry = current.head;
+    if (entry !== null && typeof entry === 'object' && 'state' in entry) {
+      entry = Object.assign({}, entry);
+      entry.state_hash = muHash(entry.state);
+    }
+    entries.push(entry);
+    current = current.tail !== undefined ? current.tail : null;
+  }
+  // Rebuild linked list from tail to head
+  let result = current;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    result = { head: entries[i], tail: result };
+  }
+  return result;
+}
+
+/**
+ * Host loop that drives the engine state machine (rcx_engine.v1.json).
+ * Mirrors Python run_engine_pipeline() (step_mu.py:1437-1543).
+ * Services 3 boundary operations via algebraic effects pattern:
+ *   - run_trace: generate execution trace via runStructural()
+ *   - hash_trace: compute mu_hash per entry via hashTraceForRecurrence()
+ *   - run_algorithm: run a sub-algorithm seed to completion via runSubAlgorithm()
+ * FAIL-CLOSED: throws if engine loop exhausts without terminal result.
+ * @host_iteration (boundary host loop, services engine state machine)
+ */
+function runEnginePipeline(projections, inputValue, options) {
+  const {
+    maxSteps = 100,
+    frozen = null,
+    maxEngineIterations = 20,
+    maxAlgorithmIterations = 50,
+  } = options || {};
+
+  // Feed engine its initial input (always use full config form -> engine.init_config)
+  let state = {
+    _run_engine: {
+      projections: projections,
+      input: inputValue,
+      max_steps: maxSteps,
+      frozen: frozen,
+    }
+  };
+
+  // Generic effect handler loop
+  for (let iteration = 0; iteration < maxEngineIterations; iteration++) {
+    // Step engine projections (APPLICATION-layer, bootstrap evaluator)
+    const nextState = step(engineProjections, state);
+
+    // Engine stalled (no projection matched)
+    if (nextState === state) {
+      if (isEngineTerminal(state)) return state;
+      throw new RcxError('engine.stalled_non_terminal',
+        `Engine stalled at iteration ${iteration} without producing terminal result. ` +
+        `State keys: ${typeof state === 'object' && state !== null ? JSON.stringify(Object.keys(state).sort()) : typeof state}`
+      );
+    }
+
+    // Check for boundary effect request
+    if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
+      const request = nextState._boundary_request;
+      const operation = request.operation;
+      const reqInput = request.input;
+      const context = Object.assign({}, request.context);
+      const injectKey = request.inject_key;
+
+      let result;
+      if (operation === 'run_trace') {
+        const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
+        result = { result: raw.result, trace: raw.trace, stall: raw.stall };
+      } else if (operation === 'hash_trace') {
+        result = hashTraceForRecurrence(reqInput);
+      } else if (operation === 'run_algorithm') {
+        const algoName = request.algorithm;
+        const algoProjs = seedProjectionMap[algoName];
+        if (!algoProjs) {
+          throw new Error(`Unknown algorithm seed: ${algoName}`);
+        }
+        result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
+      } else {
+        throw new Error(`Unknown boundary operation: ${operation}`);
+      }
+
+      context[injectKey] = result;
+      state = context;
+      continue;
+    }
+
+    // Check if engine produced terminal result
+    if (isEngineTerminal(nextState)) return nextState;
+
+    // Engine advanced internally -- keep stepping
+    state = nextState;
+  }
+
+  throw new RcxError('engine.exhausted',
+    `Engine pipeline exhausted ${maxEngineIterations} iterations without terminal result. ` +
+    `State keys: ${typeof state === 'object' && state !== null ? JSON.stringify(Object.keys(state).sort()) : typeof state}`
+  );
+}
+
+/**
+ * Route engine result to hemispheres with input shape validation.
+ * Mirrors Python run_hemisphere_routing() (step_mu.py:1592-1621).
+ * FAIL-CLOSED: throws if routing result invalid.
+ * AST_OK: infra — hemisphere boundary validation
+ */
+function runHemisphereRouting(engineResult, hemispheres) {
+  if (engineResult === null || typeof engineResult !== 'object' || Array.isArray(engineResult)) {
+    throw new RcxError('input.invalid_type', 'engine_result must be a dict');
+  }
+  const wrapped = {
+    route_hemisphere: {
+      engine_result: engineResult,
+      hemispheres: hemispheres,
+    }
+  };
+  let current = wrapped;
+  const limit = 30;
+  for (let i = 0; i < limit; i++) {
+    const meta = stepKernel(
+      allProjections, current, hemisphereProjections,
+      { returnMeta: true }
+    );
+    if (meta.stall) break;
+    current = meta.output;
+  }
+  if (typeof current === 'object' && current !== null &&
+      setsEqual(new Set(Object.keys(current)), HEMISPHERE_KEYS)) {
+    return current;
+  }
+  throw new Error(
+    `Hemisphere routing did not produce valid hemisphere dict. ` +
+    `Got: ${typeof current === 'object' && current !== null ? JSON.stringify(Object.keys(current).sort()) : typeof current}`
+  );
+}
+
+/**
+ * Chain runEnginePipeline -> runHemisphereRouting.
+ * Mirrors Python run_engine_with_routing() (step_mu.py:1635-1672).
+ * FAIL-CLOSED: validates input and output shapes.
+ */
+function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs) {
+  if (hemispheres === undefined || hemispheres === null) {
+    hemispheres = defaultHemispheres();
+  } else {
+    if (typeof hemispheres !== 'object' || Array.isArray(hemispheres)) {
+      throw new TypeError(`hemispheres must be dict, got ${Array.isArray(hemispheres) ? 'array' : typeof hemispheres}`);
+    }
+    const actual = new Set(Object.keys(hemispheres));
+    if (!setsEqual(actual, HEMISPHERE_KEYS)) {
+      const missing = [...HEMISPHERE_KEYS].filter(k => !actual.has(k)).sort();
+      const extra = [...actual].filter(k => !HEMISPHERE_KEYS.has(k)).sort();
+      throw new RcxError('input.shape_mismatch', `hemispheres shape mismatch: missing=${JSON.stringify(missing)}, extra=${JSON.stringify(extra)}`);
+    }
+  }
+
+  const engineResult = runEnginePipeline(projections, inputValue, engineKwargs);
+  const updatedHemispheres = runHemisphereRouting(engineResult, hemispheres);
+
+  const outputKeys = new Set(Object.keys(updatedHemispheres));
+  if (typeof updatedHemispheres !== 'object' || !setsEqual(outputKeys, HEMISPHERE_KEYS)) {
+    throw new RcxError('input.shape_mismatch', 'runHemisphereRouting returned unexpected shape');
+  }
+
+  return { engine_result: engineResult, hemispheres: updatedHemispheres };
+}
+
 console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
-console.log('Seed integrity: 8 seeds verified (checksum + structure + projection order)');
+console.log('Seed integrity: 9 seeds verified (checksum + structure + projection order)');
 console.log(`Loaded projections from mu/ folder:`);
 console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
@@ -1621,6 +1936,7 @@ console.log(`  - closures/recurrence.v1.json: ${recurrenceSeed.projections.lengt
 console.log(`  - closures/recurrence.v2.json: ${recurrenceV2Seed.projections.length} projections (hash-accelerated)`);
 console.log(`  - closures/exhaustion.v1.json: ${exhaustionSeed.projections.length} projections`);
 console.log(`  - programs/hemispheres.v1.json: ${hemisphereSeed.projections.length} projections`);
+console.log(`  - programs/rcx_engine.v1.json: ${engineSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
 console.log(`  - Total (with Bridge): ${allProjectionsWithBridge.length} projections`);
 console.log(`  - Total (with Recurrence): ${allProjectionsWithRecurrence.length} projections`);
@@ -2228,6 +2544,95 @@ try {
 console.log(`\nPASS recurrence e2e: ${e2ePassed}`);
 
 // =============================================================================
+// Test: Engine-Hemisphere Helpers (L3 Parity)
+// =============================================================================
+
+console.log('\n=== Test: Engine-Hemisphere Helpers ===\n');
+let engineHelpersPassed = true;
+
+// Test isEngineTerminal
+const terminalShape = {
+  value: 'x', closure_detected: false, tau_step: 0,
+  exhaustion_detected: false, operator_frozen: false,
+  frozen_set: null, action: 'continue', stall: true,
+};
+const terminalDetected = isEngineTerminal(terminalShape);
+const nonTerminalRejected = !isEngineTerminal({ partial: true });
+const nullRejected = !isEngineTerminal(null);
+console.log(`  isEngineTerminal(8-key): ${terminalDetected} (expected: true)`);
+console.log(`  isEngineTerminal(partial): ${nonTerminalRejected} (expected: true)`);
+console.log(`  isEngineTerminal(null): ${nullRejected} (expected: true)`);
+engineHelpersPassed = engineHelpersPassed && terminalDetected && nonTerminalRejected && nullRejected;
+
+// Test isTerminalShape (recurrence)
+const recTerminal = { closure_detected: true, final_result: 'x', tau_step: 2 };
+const exhTerminal = { action: 'freeze', exhaustion_detected: true, frozen: null, operator_to_freeze: 'op1' };
+const recDetected = isTerminalShape(recTerminal);
+const exhDetected = isTerminalShape(exhTerminal);
+const nonShapeRejected = !isTerminalShape({ random: 1 });
+console.log(`  isTerminalShape(recurrence): ${recDetected} (expected: true)`);
+console.log(`  isTerminalShape(exhaustion): ${exhDetected} (expected: true)`);
+console.log(`  isTerminalShape(other): ${nonShapeRejected} (expected: true)`);
+engineHelpersPassed = engineHelpersPassed && recDetected && exhDetected && nonShapeRejected;
+
+// Test hashTraceForRecurrence
+try {
+  const simpleTrace = {
+    head: { step: 0, state: { x: 1 }, projection: 'test' },
+    tail: {
+      head: { step: 1, state: { x: 1 }, stall: true },
+      tail: null
+    }
+  };
+  const hashed = hashTraceForRecurrence(simpleTrace);
+  const hasHash0 = 'state_hash' in hashed.head;
+  const hasHash1 = 'state_hash' in hashed.tail.head;
+  console.log(`  hashTrace adds state_hash: ${hasHash0 && hasHash1} (expected: true)`);
+  engineHelpersPassed = engineHelpersPassed && hasHash0 && hasHash1;
+} catch (e) {
+  console.log(`  hashTrace failed: ${e.message}`);
+  engineHelpersPassed = false;
+}
+
+// Test hashTraceForRecurrence cycle detection
+try {
+  const nodeA = { head: { state: 'A', step: 0 }, tail: null };
+  const nodeB = { head: { state: 'B', step: 1 }, tail: nodeA };
+  nodeA.tail = nodeB;
+  hashTraceForRecurrence(nodeA);
+  console.log(`  hashTrace cycle detection: false (should have thrown)`);
+  engineHelpersPassed = false;
+} catch (e) {
+  const cycleDetected = e.message.includes('cyclic');
+  console.log(`  hashTrace cycle detection: ${cycleDetected} (expected: true)`);
+  engineHelpersPassed = engineHelpersPassed && cycleDetected;
+}
+
+// Test hashTraceForRecurrence overcap
+try {
+  let overcapTrace = null;
+  for (let i = 4; i >= 0; i--) {
+    overcapTrace = { head: { state: String(i), step: i }, tail: overcapTrace };
+  }
+  hashTraceForRecurrence(overcapTrace, 3);
+  console.log(`  hashTrace overcap detection: false (should have thrown)`);
+  engineHelpersPassed = false;
+} catch (e) {
+  const overcapDetected = e.message.includes('exceeds');
+  console.log(`  hashTrace overcap detection: ${overcapDetected} (expected: true)`);
+  engineHelpersPassed = engineHelpersPassed && overcapDetected;
+}
+
+// Test defaultHemispheres and setsEqual
+const hemi = defaultHemispheres();
+const hemiKeys = new Set(Object.keys(hemi));
+const hemiKeysMatch = setsEqual(hemiKeys, HEMISPHERE_KEYS);
+console.log(`  defaultHemispheres keys match HEMISPHERE_KEYS: ${hemiKeysMatch} (expected: true)`);
+engineHelpersPassed = engineHelpersPassed && hemiKeysMatch;
+
+console.log(`\nPASS engine-hemisphere helpers: ${engineHelpersPassed}`);
+
+// =============================================================================
 // Summary
 // =============================================================================
 
@@ -2236,7 +2641,7 @@ const allPassed = passed && passedStall && pass3a && pass3b && pass3c &&
                   nanRejected && infRejected && shallowOk && deepRejected &&
                   passReservedFields && isNormalizedAsDict && isPreservedAsHeadTail &&
                   parityAllPassed && securityAllPassed && structuralTraceAllPassed &&
-                  recurrenceAllPassed && e2ePassed;
+                  recurrenceAllPassed && e2ePassed && engineHelpersPassed;
 console.log(`All tests passed: ${allPassed}`);
 if (!allPassed) process.exit(1);
 console.log(`\nSecurity hardening (v7 - L3 Recurrence Parity, mu/ reorg):`);
@@ -2269,7 +2674,7 @@ console.log(`  10. Same projections, same semantics, two substrates ✓`);
 function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
   let current = input;
   let steps = 0;
-  const limit = maxSteps || 200;
+  const limit = maxSteps ?? 200;
   while (steps < limit) {
     const wrapped = stepKernel(
       allProjs, current, domainProjs,
@@ -2315,7 +2720,7 @@ if (process.argv.includes('--json-api')) {
         const denormalized = denormalize(result);
         response = { success: true, result: denormalized };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'run_all_vectors') {
       // Run all parity vectors and return results
@@ -2339,6 +2744,7 @@ if (process.argv.includes('--json-api')) {
           results.push({
             id: vector.id,
             success: false,
+            error_code: classifyError(e),
             error: e.message
           });
         }
@@ -2348,11 +2754,11 @@ if (process.argv.includes('--json-api')) {
       // Run Recurrence closure detection
       const { projections, input, maxSteps } = request;
       try {
-        const traceResult = runStructural(projections || [], input, maxSteps || 100);
+        const traceResult = runStructural(projections ?? [], input, maxSteps ?? 100);
         const closureResult = runRecurrence(traceResult);
         response = { success: true, result: closureResult };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'run_exhaustion') {
       // Run Exhaustion detection on provided input
@@ -2360,7 +2766,7 @@ if (process.argv.includes('--json-api')) {
       try {
         let current = input;
         let steps = 0;
-        const limit = maxSteps || 200;
+        const limit = maxSteps ?? 200;
         while (steps < limit) {
           const next = step(allProjectionsWithExhaustion, current);
           if (muEqual(current, next)) break;
@@ -2369,7 +2775,7 @@ if (process.argv.includes('--json-api')) {
         }
         response = { success: true, result: current };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'get_constants') {
       // Return constants for cross-substrate verification
@@ -2404,7 +2810,7 @@ if (process.argv.includes('--json-api')) {
           denormalized: denormalized
         };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'validate_mu') {
       // Validate a value against Mu type rules - for cross-substrate parity testing
@@ -2424,7 +2830,7 @@ if (process.argv.includes('--json-api')) {
         const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, recurrenceProjections, maxSteps);
         response = { success: true, result };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'run_exhaustion_with_bridge') {
       // Run Exhaustion with bridge (meta-circular path)
@@ -2433,7 +2839,7 @@ if (process.argv.includes('--json-api')) {
         const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, exhaustionProjections, maxSteps);
         response = { success: true, result };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'validate_reserved_fields') {
       // Validate strict domain-mode reserved field policy for cross-substrate parity.
@@ -2442,7 +2848,7 @@ if (process.argv.includes('--json-api')) {
         validateNoKernelReservedFields(value, 'test');
         response = { success: true, valid: true, error: '' };
       } catch (e) {
-        response = { success: true, valid: false, error: e.message };
+        response = { success: true, valid: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'validate_algorithm_runtime_fields') {
       // Validate trusted algorithm-runtime underscore allowlist policy.
@@ -2451,14 +2857,14 @@ if (process.argv.includes('--json-api')) {
         validateAlgorithmRuntimeFields(value, 'test');
         response = { success: true, valid: true, error: '' };
       } catch (e) {
-        response = { success: true, valid: false, error: e.message };
+        response = { success: true, valid: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'run_structural_trace') {
       // Run structural trace and return trace with projection IDs.
       // For cross-substrate parity testing of trace projection-id assignment.
       const { projections: userProjs, input, maxSteps } = request;
       try {
-        const traceResult = runStructural(userProjs || [], input, maxSteps || 100);
+        const traceResult = runStructural(userProjs ?? [], input, maxSteps ?? 100);
         // Convert trace linked list to array for JSON serialization
         const traceArray = [];
         let node = traceResult.trace;
@@ -2474,7 +2880,7 @@ if (process.argv.includes('--json-api')) {
           steps: traceResult.steps,
         };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
     } else if (request.action === 'run_hemisphere') {
       // Run hemisphere routing (APPLICATION level, core kernel, linear-only)
@@ -2483,7 +2889,7 @@ if (process.argv.includes('--json-api')) {
       try {
         let current = input;
         let steps = 0;
-        const limit = maxSteps || 100;
+        const limit = maxSteps ?? 100;
         while (steps < limit) {
           const wrapped = stepKernel(
             allProjections,
@@ -2497,15 +2903,78 @@ if (process.argv.includes('--json-api')) {
         }
         response = { success: true, result: current };
       } catch (e) {
-        response = { success: false, error: e.message };
+        response = { success: false, error_code: classifyError(e), error: e.message };
       }
+    } else if (request.action === 'run_engine_pipeline') {
+      // Run engine pipeline (APPLICATION level, algebraic effects pattern)
+      const { projections: userProjs, input, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
+      try {
+        const result = runEnginePipeline(userProjs ?? [], input, {
+          maxSteps: maxSteps ?? 100,
+          frozen: frozen ?? null,
+          maxEngineIterations: maxEngineIterations ?? 20,
+          maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
+        });
+        response = { success: true, result };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
+    } else if (request.action === 'hash_trace') {
+      // Hash trace entries for recurrence (boundary primitive)
+      const { trace, maxEntries } = request;
+      try {
+        const result = hashTraceForRecurrence(trace, maxEntries ?? 10000);
+        response = { success: true, result };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
+    } else if (request.action === 'run_hemisphere_routing') {
+      // Route engine result to hemispheres (L3 parity with Python run_hemisphere_routing)
+      const { engine_result, hemispheres } = request;
+      try {
+        const result = runHemisphereRouting(engine_result, hemispheres ?? defaultHemispheres());
+        response = { success: true, result };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
+    } else if (request.action === 'run_engine_with_routing') {
+      // Full engine -> hemisphere pipeline (L3 parity with Python run_engine_with_routing)
+      const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
+      try {
+        const result = runEngineWithRouting(
+          userProjs ?? [], input,
+          hemispheres ?? null,
+          {
+            maxSteps: maxSteps ?? 100,
+            frozen: frozen ?? null,
+            maxEngineIterations: maxEngineIterations ?? 20,
+            maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
+          }
+        );
+        response = { success: true, result };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
+    } else if (request.action === 'list_actions') {
+      response = {
+        success: true,
+        actions: [
+          'run_vector', 'run_all_vectors', 'run_recurrence', 'run_exhaustion',
+          'get_constants', 'normalize_roundtrip', 'validate_mu',
+          'run_recurrence_with_bridge', 'run_exhaustion_with_bridge',
+          'validate_reserved_fields', 'validate_algorithm_runtime_fields',
+          'run_structural_trace', 'run_hemisphere', 'run_engine_pipeline',
+          'hash_trace', 'run_hemisphere_routing', 'run_engine_with_routing',
+          'list_actions'
+        ]
+      };
     } else {
-      response = { success: false, error: `Unknown action: ${request.action}` };
+      response = { success: false, error_code: 'api.unknown_action', error: `Unknown action: ${request.action}` };
     }
 
     // Output JSON on single line (for easy parsing)
     console.log('JSON_API_RESPONSE:' + JSON.stringify(response));
   } catch (e) {
-    console.log('JSON_API_RESPONSE:' + JSON.stringify({ success: false, error: e.message }));
+    console.log('JSON_API_RESPONSE:' + JSON.stringify({ success: false, error_code: classifyError(e), error: e.message }));
   }
 }

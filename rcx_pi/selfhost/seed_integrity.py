@@ -68,7 +68,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> docs/core/EVAL_SEED.v0.md)
     "eval.v1.json": "22232b172f883271845d013d8e39b1b75555bd94899deb8276548c5f0d10f53e",
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
-    "hemispheres.v1.json": "aa91c6f346db9da86a3bb0614688a05fc4a9f5a2fa96b19daa4aad3090ff397c",
+    "hemispheres.v1.json": "fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8",
     # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
     "paxos_demo.v1.json": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
     # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)
@@ -223,9 +223,9 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
     "hemispheres.v1.json": [
         "hemisphere.init",                  # Entry: decompose engine_result
         "hemisphere.classify.exhaustion",   # Exhaustion detected -> sink
-        "hemisphere.classify.stall",        # Stall detected -> r_inf
         "hemisphere.classify.null",         # Value is null -> r_null
         "hemisphere.classify.closure",      # Closure detected -> r_a
+        "hemisphere.classify.stall",        # Stall detected -> r_inf
         "hemisphere.classify.default",      # Default -> lobes
         "hemisphere.add.r_null",            # Prepend entry to r_null
         "hemisphere.add.r_inf",             # Prepend entry to r_inf

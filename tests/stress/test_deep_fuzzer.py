@@ -204,6 +204,211 @@ class TestRunMuDeepStress:
 
 
 # =============================================================================
+# Perf Regression: match() validate-once optimization
+# =============================================================================
+
+class TestMatchValidateOnceRegression:
+    """Perf regression gate for the match() validate-once refactor.
+
+    Before the refactor, run_mu with 60 steps of the "double" projection
+    took >120s due to O(N²) assert_mu calls inside match().
+    After: <20s. This test enforces the perf bound.
+    """
+
+    def test_double_projection_60_steps_under_20s(self):
+        """Deterministic perf gate: 60 steps of double projection in <20s."""
+        double = {"pattern": {"var": "x"}, "body": {"doubled": {"var": "x"}}}
+
+        start = time.time()
+        result, trace, is_stall = run_mu([double], 100, max_steps=60)
+        elapsed = time.time() - start
+
+        assert not is_stall
+        assert len(trace) == 61
+        assert is_mu(result)
+        assert elapsed < 20.0, (
+            f"run_mu(double, max_steps=60) took {elapsed:.1f}s (limit: 20s). "
+            f"match() validate-once optimization may have regressed."
+        )
+
+
+class TestMatchBoundaryValidation:
+    """Correctness: match() still rejects invalid Mu at the public boundary."""
+
+    def test_match_rejects_non_mu_pattern(self):
+        """match() raises TypeError for non-Mu pattern."""
+        from rcx_pi.selfhost.eval_seed import match
+        with pytest.raises(TypeError, match="match.pattern"):
+            match(set(), "hello")
+
+    def test_match_rejects_non_mu_input(self):
+        """match() raises TypeError for non-Mu input."""
+        from rcx_pi.selfhost.eval_seed import match
+        with pytest.raises(TypeError, match="match.input"):
+            match("hello", set())
+
+    def test_match_still_works_for_valid_mu(self):
+        """match() correctly matches valid Mu after refactor."""
+        from rcx_pi.selfhost.eval_seed import match, NO_MATCH
+
+        # Variable match
+        result = match({"var": "x"}, 42)
+        assert result == {"x": 42}
+
+        # Literal match
+        result = match(42, 42)
+        assert result == {}
+
+        # Literal mismatch
+        result = match(42, 99)
+        assert result is NO_MATCH
+
+        # Dict match
+        result = match({"a": {"var": "x"}}, {"a": 1})
+        assert result == {"x": 1}
+
+        # List match
+        result = match([{"var": "x"}, {"var": "y"}], [1, 2])
+        assert result == {"x": 1, "y": 2}
+
+
+class TestHybridMatchPerimeter:
+    """Perimeter tests for the Hybrid trust architecture.
+
+    Verifies:
+    - Public match() is ALWAYS strict (never weakened)
+    - apply_projection() and step() reject forged kernel-like non-Mu inputs
+    - Known kernel modes + shallow type check make forgery fail-closed
+    - Legitimate kernel states still use the fast path
+    """
+
+    # -- match() always strict --
+
+    def test_match_validates_crafted_domain_with_mode_key(self):
+        """match() still validates even if domain value has _mode key."""
+        from rcx_pi.selfhost.eval_seed import match
+        crafted = {"_mode": "kernel", "bad": set()}
+        with pytest.raises(TypeError, match="match.input"):
+            match({"var": "x"}, crafted)
+
+    def test_match_validates_unknown_mode(self):
+        """match() validates dicts with unknown _mode values."""
+        from rcx_pi.selfhost.eval_seed import match
+        crafted = {"_mode": "evil", "payload": set()}
+        with pytest.raises(TypeError, match="match.input"):
+            match({"var": "x"}, crafted)
+
+    # -- Forged kernel-like inputs fail closed in apply_projection --
+
+    def test_apply_projection_rejects_forged_kernel_with_non_mu(self):
+        """CRITICAL: forged kernel-like dict with non-Mu payload must fail closed.
+
+        Regression guard: a dict with _mode="kernel" but set() value must NOT
+        bypass assert_mu validation. The shallow type check in
+        _is_kernel_internal_state catches this.
+        """
+        from rcx_pi.selfhost.eval_seed import apply_projection
+        projection = {"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}
+        forged = {"_mode": "kernel", "payload": set()}  # set() not Mu
+        with pytest.raises(TypeError, match="apply.input"):
+            apply_projection(projection, forged)
+
+    def test_apply_projection_rejects_unknown_mode_with_non_mu(self):
+        """Unknown mode string with non-Mu is rejected (not a known kernel mode)."""
+        from rcx_pi.selfhost.eval_seed import apply_projection
+        projection = {"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}
+        forged = {"_mode": "evil_mode", "payload": set()}
+        with pytest.raises(TypeError, match="apply.input"):
+            apply_projection(projection, forged)
+
+    # -- Forged inputs fail closed in step() --
+
+    def test_step_rejects_forged_kernel_with_non_mu(self):
+        """step() rejects forged kernel-like dict with non-Mu payload."""
+        from rcx_pi.selfhost.eval_seed import step
+        projs = [{"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+        forged = {"_mode": "kernel", "payload": set()}
+        with pytest.raises(TypeError, match="step.input"):
+            step(projs, forged)
+
+    # -- Public API always validates (caller-trust model) --
+
+    def test_apply_projection_validates_kernel_looking_state(self):
+        """apply_projection() validates even kernel-shaped dicts (caller-trust model).
+
+        Kernel states are valid Mu, so validation passes — but it always runs.
+        Trust is explicit via _apply_projection_trusted(), not shape-inferred.
+        """
+        from rcx_pi.selfhost.eval_seed import apply_projection, NO_MATCH
+        projection = {
+            "id": "test",
+            "pattern": {"_mode": "kernel", "value": {"var": "v"}},
+            "body": {"var": "v"},
+        }
+        # Valid Mu kernel state — passes validation, then matches
+        kernel_state = {"_mode": "kernel", "value": 42}
+        assert apply_projection(projection, kernel_state) == 42
+
+        kernel_state_miss = {"_mode": "done", "value": 42}
+        assert apply_projection(projection, kernel_state_miss) is NO_MATCH
+
+    def test_apply_projection_rejects_non_mu_always(self):
+        """Non-Mu values always rejected by apply_projection (no shape bypass)."""
+        from rcx_pi.selfhost.eval_seed import apply_projection
+        projection = {"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}
+        with pytest.raises(TypeError, match="apply.input"):
+            apply_projection(projection, set())
+
+    # -- Behavioral tests through public API --
+    # (Tests assert observable behavior, not internal _is_kernel_internal_state directly)
+
+    def test_apply_projection_rejects_non_dict_input(self):
+        """Non-dict non-Mu values are always rejected by apply_projection."""
+        from rcx_pi.selfhost.eval_seed import apply_projection
+        projection = {"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}
+        with pytest.raises(TypeError):
+            apply_projection(projection, set())
+
+    def test_apply_projection_rejects_unknown_mode_cleanly(self):
+        """Dict with unknown _mode and valid Mu values goes through strict path."""
+        from rcx_pi.selfhost.eval_seed import apply_projection, NO_MATCH
+        projection = {"id": "t", "pattern": {"_mode": "evil", "x": {"var": "v"}}, "body": {"var": "v"}}
+        # Unknown mode — goes through strict match(), which validates. Dict IS valid Mu, so
+        # it should match (or not) without error, just won't use fast path.
+        result = apply_projection(projection, {"_mode": "evil", "x": 42})
+        assert result == 42  # match succeeds through strict path
+
+    def test_step_processes_match_subst_context_states(self):
+        """States with _match_ctx/_subst_ctx context keys are accepted by step."""
+        from rcx_pi.selfhost.eval_seed import step
+        projs = [{"id": "t", "pattern": {"_match_ctx": {"var": "c"}}, "body": {"var": "c"}}]
+        match_state = {"_match_ctx": {"saved": "data"}}
+        result = step(projs, match_state)
+        assert result == {"saved": "data"}
+
+    def test_forged_context_key_with_non_mu_rejected(self):
+        """Forged dict with _match_ctx but non-Mu payload is rejected."""
+        from rcx_pi.selfhost.eval_seed import apply_projection
+        projection = {"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}
+        forged = {"_match_ctx": {}, "bad": set()}
+        with pytest.raises(TypeError):
+            apply_projection(projection, forged)
+
+    def test_nested_non_mu_in_kernel_shape_rejected(self):
+        """CRITICAL: nested non-Mu in kernel-shaped dict rejected by step().
+
+        Regression test for the trust-bypass gap: {"_mode":"kernel","bad":[{1,2}]}
+        has valid Mu types at the top level (list is Mu) but contains set() nested
+        inside. With caller-trust model, step() always validates — catches this.
+        """
+        from rcx_pi.selfhost.eval_seed import step
+        projs = [{"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+        forged = {"_mode": "kernel", "bad": [{1, 2}]}
+        with pytest.raises(TypeError, match="step.input"):
+            step(projs, forged)
+
+
+# =============================================================================
 # Stress Tests: mu_equal Performance
 # =============================================================================
 

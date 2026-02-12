@@ -20,6 +20,23 @@ from typing import Any
 from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 
 
+_VALID_MU_TYPES = (type(None), bool, int, float, str, list, dict)
+
+# Known kernel mode strings from substrate seeds (kernel.v1, match.v2, subst.v2, rcx_engine.v1).
+# Only these are trusted for validation-skip. Domain values cannot forge these
+# without also matching the shallow type check below.
+_KNOWN_KERNEL_MODES = frozenset({  # AST_OK: security constant — enumeration of trusted modes
+    'kernel', 'done', 'error',           # kernel.v1
+    'match_done', 'subst_done',          # match.v2, subst.v2
+    'engine',                            # rcx_engine.v1
+})
+
+# Kernel context keys that identify algorithm intermediate states.
+# match.v2 states have _match_ctx, subst.v2 states have _subst_ctx.
+# These are underscore-prefixed kernel-reserved fields — domain values must not use them.
+_KERNEL_CONTEXT_KEYS = frozenset({'_match_ctx', '_subst_ctx', '_kernel_ctx'})  # AST_OK: security constant
+
+
 def _is_kernel_internal_state(value: Any) -> bool:
     """
     Check if value is kernel-internal state (deeply nested, skip validation).
@@ -28,20 +45,34 @@ def _is_kernel_internal_state(value: Any) -> bool:
     They may exceed MAX_MU_DEPTH due to linked-list normalization but are
     safe to process. We skip deep validation for them.
 
-    This is NOT a security bypass - the input was already validated at the
-    boundary before kernel processing began.
+    Trust model: validate at boundary (run_mu), trust the interior.
+    step() and apply_projection() use this to skip redundant O(depth)
+    validation on states already produced by the kernel.
 
-    SECURITY FIX (Phase 8b Round 6): Now requires underscore-prefixed kernel
-    fields from KERNEL_RESERVED_FIELDS, NOT 'match'/'subst' which are generic.
-    Attack vector blocked: {"match": {}, "bomb": <depth 500>} no longer bypasses.
+    SECURITY (Phase 8c): Three-layer check:
+      1. Must be a dict with either '_mode' or a kernel context key (_match_ctx, etc.)
+      2. If '_mode' present, must be a known kernel mode string (from seed files)
+      3. All top-level values must be valid Mu types (shallow check)
+    This makes forgery fail-closed: {"_mode": "kernel", "bad": set()} → False.
     """
     if not isinstance(value, dict):
         return False
-    # SECURITY: Only check for underscore-prefixed reserved kernel fields
-    # 'match' and 'subst' are too generic - domain data legitimately uses them
-    # Kernel-internal state ALWAYS has _mode or _phase (reserved fields)
-    kernel_fields = ('_mode', '_phase', '_match_ctx', '_subst_ctx', '_kernel_ctx')
-    return any(f in value for f in kernel_fields)  # AST_OK: infra
+    # Layer 1+2: must have known kernel identifier
+    mode = value.get('_mode')
+    if mode is not None:
+        # _mode present — must be a known kernel mode string
+        if not isinstance(mode, str) or mode not in _KNOWN_KERNEL_MODES:
+            return False
+    else:
+        # No _mode — check for kernel context keys (match.v2/subst.v2 intermediate states)
+        if not any(k in value for k in _KERNEL_CONTEXT_KEYS):
+            return False
+    # Layer 3: shallow type check — all top-level values must be valid Mu types.
+    # This catches non-Mu payloads (set, object, etc.) without O(depth) traversal.
+    for v in value.values():
+        if not isinstance(v, _VALID_MU_TYPES):
+            return False
+    return True  # AST_OK: infra
 
 
 # =============================================================================
@@ -283,7 +314,9 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     Returns:
         Dict of bindings {"var_name": value} if match, NO_MATCH otherwise.
     """
-    # Guardrails
+    # Guardrails — validate once at entry, not on every recursive call.
+    # _match_inner recurses without re-validating (safe: sub-elements of
+    # valid Mu are themselves valid Mu).
     assert_mu(pattern, "match.pattern")
     assert_mu(input_value, "match.input")
 
@@ -294,6 +327,11 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
 
+    return _match_inner(pattern, input_value)
+
+
+def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
+    """Internal recursive matcher — no validation (already done at match() entry)."""
     # Variable site - matches anything
     if is_var(pattern):
         name = get_var_name(pattern)
@@ -336,7 +374,7 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             return NO_MATCH
         bindings: dict[str, Mu] = {}
         for p_elem, i_elem in zip(pattern, input_value):
-            sub_bindings = match(p_elem, i_elem)
+            sub_bindings = _match_inner(p_elem, i_elem)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
             # Merge bindings (check for conflicts)
@@ -367,7 +405,7 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
                 return NO_MATCH
         bindings = {}
         for key in pattern:
-            sub_bindings = match(pattern[key], input_value[key])
+            sub_bindings = _match_inner(pattern[key], input_value[key])
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
             # Merge bindings
@@ -443,9 +481,7 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
         Transformed value if pattern matched, NO_MATCH otherwise.
     """
     assert_mu(projection, "apply.projection")
-    # Skip deep validation for kernel-internal states (already valid, just deeply nested)
-    if not _is_kernel_internal_state(input_value):
-        assert_mu(input_value, "apply.input")
+    assert_mu(input_value, "apply.input")
 
     # Guardrail: reject lambda-calculus-like patterns
     assert_not_lambda_calculus(projection)
@@ -459,6 +495,7 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     body = projection["body"]
 
     bindings = match(pattern, input_value)
+
     if bindings is NO_MATCH:
         return NO_MATCH
 
@@ -500,11 +537,7 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
     """
     from rcx_pi.projection_coverage import coverage
 
-    # Skip deep validation for kernel-internal states (already valid, just deeply nested)
-    # Kernel states are constructed from valid Mu and may exceed MAX_MU_DEPTH
-    # due to linked-list normalization. This is safe - boundary was already validated.
-    if not _is_kernel_internal_state(input_value):
-        assert_mu(input_value, "step.input")
+    assert_mu(input_value, "step.input")
 
     if coverage.is_enabled():
         coverage.record_step()
@@ -523,6 +556,76 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
                 coverage.record_no_match(proj_id)
 
     # No match - return input unchanged (stall)
+    return input_value
+
+
+# =============================================================================
+# Trusted Internal Entrypoints (caller-trust model)
+# =============================================================================
+#
+# These bypass assert_mu validation entirely. Trust is EXPLICIT: only kernel
+# loops that validated at the boundary may call these. Public callers must
+# use step() / apply_projection() which always validate.
+#
+# Why not shape-based trust: _is_kernel_internal_state can be bypassed with
+# nested non-Mu payloads (e.g. {"_mode":"kernel","bad":[{1,2}]}). Caller-trust
+# eliminates shape-inference from the security model entirely.
+
+def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
+    """Internal: apply projection without validating input_value.
+
+    ONLY for use by kernel loops that have already validated at the boundary.
+    Callers: _step_trusted, step_kernel_mu (via _step_trusted).
+    """
+    if not isinstance(projection, dict):
+        raise TypeError(f"Projection must be dict, got {type(projection)}")
+    if "pattern" not in projection or "body" not in projection:
+        raise KeyError("Projection must have 'pattern' and 'body' keys")
+
+    pattern = projection["pattern"]
+    body = projection["body"]
+
+    # Use _match_inner directly — no assert_mu on input_value
+    if isinstance(pattern, dict) and pattern.get("_type") == "dict":
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        input_value = normalize_for_match(input_value)
+    bindings = _match_inner(pattern, input_value)
+
+    if bindings is NO_MATCH:
+        return NO_MATCH
+
+    result = substitute(body, bindings)
+
+    if isinstance(body, dict) and body.get("_type") == "dict":
+        from rcx_pi.selfhost.match_mu import denormalize_from_match
+        result = denormalize_from_match(result)
+
+    return result
+
+
+def _step_trusted(projections: list[Mu], input_value: Mu) -> Mu:
+    """Internal: step without validating input_value.
+
+    ONLY for use by kernel loops that have already validated at the boundary.
+    Callers: step_kernel_mu, run_engine_pipeline, projection_runner.run.
+    """
+    from rcx_pi.projection_coverage import coverage
+
+    if coverage.is_enabled():
+        coverage.record_step()
+
+    for proj in projections:
+        proj_id = proj.get("id", "<anonymous>") if isinstance(proj, dict) else "<invalid>"
+
+        result = _apply_projection_trusted(proj, input_value)
+        if result is not NO_MATCH:
+            if coverage.is_enabled():
+                coverage.record_match(proj_id, input_value, result)
+            return result
+        else:
+            if coverage.is_enabled():
+                coverage.record_no_match(proj_id)
+
     return input_value
 
 

@@ -297,9 +297,9 @@ class TestHemisphereProjectionOrderSecurity:
         assert ids == [
             "hemisphere.init",
             "hemisphere.classify.exhaustion",
-            "hemisphere.classify.stall",
             "hemisphere.classify.null",
             "hemisphere.classify.closure",
+            "hemisphere.classify.stall",
             "hemisphere.classify.default",
             "hemisphere.add.r_null",
             "hemisphere.add.r_inf",
