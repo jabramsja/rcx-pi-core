@@ -119,6 +119,8 @@ See `docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mod
 
 ## Workflow
 
+**Branching model:** `dev` is the primary branch. There is no `main` branch in active use. All PRs target `dev`. CI workflows (green gate, fixture gates) trigger on push/PR to `dev`.
+
 **Audit scripts (four tiers):**
 
 | Tier | Script | Time | Purpose | When |
