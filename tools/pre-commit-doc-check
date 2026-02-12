@@ -104,6 +104,24 @@ if [ -n "$STAGED_SEEDS" ]; then
     fi
 fi
 
+# === 4b. Speed enforcer for staged test files (BLOCKING) ===
+STAGED_TESTS=$(echo "$STAGED_PY" | grep '^tests/' || true)
+if [ -n "$STAGED_TESTS" ]; then
+    echo "Running speed enforcer on staged test files..."
+    for f in $STAGED_TESTS; do
+        if [ -f "$f" ] && grep -qE 'from\s+rcx_pi\.(selfhost\.)?(step_mu|engine)\s+import' "$f" 2>/dev/null; then
+            if grep -qE '\b(run_mu_structural|run_algorithm_meta_circular|run_engine_pipeline|run_hemisphere_routing|run_mu)\b' "$f" 2>/dev/null; then
+                if ! grep -qE 'pytest\.mark\.slow|pytest\.mark\.fuzzer|from hypothesis|# SPEED_OK' "$f" 2>/dev/null; then
+                    echo ""
+                    echo "❌ SPEED: $f imports slow kernel functions but lacks @pytest.mark.slow"
+                    echo "   Add: pytestmark = [pytest.mark.slow] or # SPEED_OK: reason"
+                    FAILED=1
+                fi
+            fi
+        fi
+    done
+fi
+
 # === 5. Enforce tracker sync for core changes (BLOCKING) ===
 if [ -f "./tools/enforce_tracker_sync.sh" ]; then
     if ! ./tools/enforce_tracker_sync.sh --staged; then

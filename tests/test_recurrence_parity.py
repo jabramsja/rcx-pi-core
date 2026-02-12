@@ -18,6 +18,8 @@ from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
 
+pytestmark = [pytest.mark.slow]
+
 
 def get_fixtures_dir() -> Path:
     """Get path to test fixtures directory."""

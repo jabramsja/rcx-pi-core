@@ -15,6 +15,8 @@ from rcx_pi.eval_seed import step, NO_MATCH
 from rcx_pi.step_mu import step_mu, run_mu
 from rcx_pi.mu_type import mu_equal
 
+pytestmark = [pytest.mark.slow]
+
 
 def run_python(projections, initial, max_steps=100):
     """Run projections using Python step() - reference implementation."""
