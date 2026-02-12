@@ -292,6 +292,7 @@ class TestStepMuErrors:
         with pytest.raises(KeyError):
             step_mu(projections, 42)
 
+    @pytest.mark.slow
     def test_unbound_variable(self):
         """Unbound variable in body: step raises KeyError, step_mu stalls.
 

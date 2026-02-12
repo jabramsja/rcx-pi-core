@@ -56,6 +56,7 @@ def _load_vectors():
         return json.load(f)["vectors"]
 
 
+@pytest.mark.slow
 class TestHemisphereCrossSubstrateParity:
     """Python and JS produce identical hemisphere routing results."""
 

@@ -132,7 +132,7 @@ JS parity: `muHashCached()` added to `eval_step.js` with Map-based cache. All 6 
 - **Scope**: All structural equality checks in production code
 - **Debt impact**: **Negative** — removes `mu_equal` as bootstrap primitive (5 → 4)
 - **Benefits**: Recurrence, exhaustion, non-linear pattern matching, general equality, L4 advancement
-- **Verification**: 3,100+ tests pass, `test_mu_equal_parity_fuzzer.py` confirms semantic equivalence
+- **Verification**: 3,155+ tests pass, `test_mu_equal_parity_fuzzer.py` confirms semantic equivalence
 
 ### Level 2: Frozen Hashes (IMPLEMENTED — 2026-02-10)
 
@@ -260,7 +260,7 @@ The Forth precedent: This is like Forth discovering that its comparator (=) is r
 
 1. ~~Every Mu value carries its content hash (computed at boundary)~~ → Level 0: boundary hashing for recurrence. Level 1: `mu_hash_cached()` for all equality. ✅
 2. ~~`mu_equal()` replaced by hash string comparison~~ → All 8 production call sites use `mu_hash_cached()`. ✅
-3. All existing parity tests pass (no semantic change). ✅ (3,100+ tests)
+3. All existing parity tests pass (no semantic change). ✅ (3,155+ tests)
 4. Recurrence production tests pass (paxos_demo closure detection). ✅ (`test_paxos_end_to_end.py`)
 5. No new `@host_*` decorators required. ✅
 6. Bootstrap primitive count: 5 → 4 (`mu_equal` eliminated). ✅

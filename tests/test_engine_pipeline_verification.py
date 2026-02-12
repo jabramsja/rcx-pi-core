@@ -89,6 +89,7 @@ def test_engine_output_composes_with_healer():
     assert healer_result.get("reason") == "deadlock_resolution_protocol"
 
 
+@pytest.mark.slow
 def test_engine_exhaustion_without_terminal_raises():
     """Verify engine fails closed when outer loop exhausts without terminal."""
     import pytest

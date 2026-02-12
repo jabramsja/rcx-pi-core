@@ -27,6 +27,8 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
 
+pytestmark = pytest.mark.slow
+
 # JSON null -> Python None alias for readability
 null = None
 

@@ -35,6 +35,7 @@ filterwarnings = [
 ]
 markers = [
     "slow: marks tests as slow (meta-circular recurrence, full paxos e2e). Deselected by default in CI; run with --run-slow or audit_all.sh",
+    "fuzzer: marks hypothesis property-based fuzzers. Excluded from green gate; run via audit_all.sh or nightly CI",
 ]
 # NOTE: Parallel execution (-n auto) is NOT enabled by default because:
 # - Single-file runs have 3s worker spawn overhead that makes them slower

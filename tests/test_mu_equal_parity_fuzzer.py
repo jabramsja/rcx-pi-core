@@ -17,12 +17,11 @@ on detecting when state hasn't changed between cycles.
 """
 
 import json
+import pytest
 from hypothesis import given, strategies as st, settings
 
 from rcx_pi.selfhost.eval_seed import match, NO_MATCH
 from rcx_pi.selfhost.mu_type import mu_equal
-
-
 # Strategy for generating valid Mu values
 mu_scalar = st.one_of(
     st.integers(min_value=-1000, max_value=1000),

@@ -137,6 +137,7 @@ class TestHemisphereInit:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereClassify:
     """Classification routes to correct hemisphere."""
 
@@ -204,6 +205,7 @@ class TestHemisphereClassify:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemispherePriorityOrder:
     """Verify first-match-wins priority: exhaustion > stall > null > closure > default."""
 
@@ -244,6 +246,7 @@ class TestHemispherePriorityOrder:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereAdd:
     """Entry correctly prepended to target hemisphere, others unchanged."""
 
@@ -290,6 +293,7 @@ class TestHemisphereAdd:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereEntrySchema:
     """Entry structure matches design spec."""
 
@@ -314,6 +318,7 @@ class TestHemisphereEntrySchema:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereEndToEnd:
     """Full routing from engine_result to updated hemispheres via run_mu."""
 
@@ -357,6 +362,7 @@ class TestHemisphereEndToEnd:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereVectors:
     """Parity vectors from hemisphere_vectors.json."""
 

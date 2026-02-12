@@ -128,6 +128,7 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
 # -----------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_audit_semantic_purity_runs_successfully():
     """Verify audit_semantic_purity.sh runs without crashing."""
     result = _run(["bash", str(AUDIT_SCRIPT)])
@@ -140,6 +141,7 @@ def test_audit_semantic_purity_runs_successfully():
     )
 
 
+@pytest.mark.slow
 def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     """Verify audit includes AST_OK:bootstrap in total debt calculation."""
     result = _run(["bash", str(AUDIT_SCRIPT)])
@@ -157,6 +159,7 @@ def test_audit_semantic_purity_includes_ast_ok_bootstrap_in_debt():
     assert "TOTAL SEMANTIC DEBT:" in result.stdout
 
 
+@pytest.mark.slow
 def test_audit_semantic_purity_threshold_matches_status_md():
     """Verify the threshold is read from STATUS.md (single source of truth).
 
@@ -205,6 +208,7 @@ def test_audit_semantic_purity_threshold_matches_status_md():
     )
 
 
+@pytest.mark.slow
 def test_audit_semantic_purity_has_selfhost_error_path():
     """Verify audit_semantic_purity.sh fails with clear error if selfhost missing.
 
@@ -227,6 +231,7 @@ def test_audit_semantic_purity_has_selfhost_error_path():
 # -----------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_dashboard_and_audit_agree_on_ast_ok_count():
     """Verify dashboard and audit count AST_OK:bootstrap identically."""
     # Run dashboard

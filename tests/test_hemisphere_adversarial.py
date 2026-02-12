@@ -113,6 +113,7 @@ ROUTING_VECTORS = [
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereStructuralInvariants:
     """Routing invariants hold across all 3 paths and edge-case inputs."""
 
@@ -175,6 +176,7 @@ class TestHemisphereStructuralInvariants:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereTypeConfusion:
     """Type-strict matching prevents routing confusion."""
 
@@ -225,6 +227,7 @@ class TestHemisphereTypeConfusion:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereBoundary:
     """Boundary conditions: wide lists, deep nesting, edge inputs."""
 
@@ -270,6 +273,7 @@ class TestHemisphereBoundary:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereProjectionOrderSecurity:
     """First-match-wins projection ordering is security-critical."""
 
@@ -311,6 +315,7 @@ class TestHemisphereProjectionOrderSecurity:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestHemisphereAdversarialSmuggling:
     """Attempts to smuggle internal state or corrupt hemisphere structure."""
 

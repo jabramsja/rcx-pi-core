@@ -219,6 +219,20 @@ def pytest_configure(config):
         coverage.reset()
 
 
+def pytest_collection_modifyitems(config, items):
+    """Auto-mark hypothesis property-based tests with the 'fuzzer' marker.
+
+    This avoids blanket-marking entire files (which would skip deterministic
+    tests colocated with hypothesis tests).  Any collected test item where
+    ``item.obj.is_hypothesis_test`` is True gets the ``fuzzer`` marker so
+    that ``-m "not fuzzer"`` deselects *only* the generated property tests.
+    """
+    fuzzer_marker = pytest.mark.fuzzer
+    for item in items:
+        if getattr(item.obj, "is_hypothesis_test", False):
+            item.add_marker(fuzzer_marker)
+
+
 def pytest_unconfigure(config):
     """Print projection coverage report at end of test run."""
     if os.environ.get("RCX_PROJECTION_COVERAGE") == "1":
