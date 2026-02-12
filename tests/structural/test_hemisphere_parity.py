@@ -134,6 +134,6 @@ class TestHemisphereProjectionCountParity:
         assert last["success"]
         js_count = last["hemisphere_projection_count"]
 
-        assert py_count == js_count == 8, (
+        assert py_count == js_count == 12, (
             f"Projection count mismatch: Python={py_count}, JS={js_count}"
         )

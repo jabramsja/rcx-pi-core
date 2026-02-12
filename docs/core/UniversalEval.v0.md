@@ -396,7 +396,7 @@ Options:
 
 - `docs/core/RecursiveKernel.v0.md` - L4 "honest boundaries" approach (implemented Phase 8a/8b)
 - `docs/core/MetaCircularKernel.v0.md` - L2 kernel.v1.json design (COMPLETE)
-- `docs/core/BootstrapPrimitives.v0.md` - The 5 irreducible primitives (canonical)
+- `docs/core/BootstrapPrimitives.v0.md` - The 4 irreducible primitives (mu_equal eliminated, canonical)
 - `STATUS.md` - Current phase (L1/L2/L3 complete, L4 SINK)
 - `mu/substrate/kernel.v1.json` - Current L2 kernel (7 projections)
 

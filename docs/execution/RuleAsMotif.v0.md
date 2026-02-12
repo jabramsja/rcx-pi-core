@@ -227,7 +227,7 @@ Implementation:
 - `tests/test_rule_motifs_cli.py` (11 tests)
 - `tests/test_rule_motif_validation_cli.py` (16 tests)
 Dependencies:
-- `docs/MinimalNativeExecutionPrimitive.v0.md`
+- `docs/archive/MinimalNativeExecutionPrimitive.v0.md`
 - `docs/archive/bytecode/BytecodeMapping.v1.md` (archived)
-- `docs/MetaCircularReadiness.v1.md`
+- `docs/audit/MetaCircularReadiness.v1.md`
 - `EntropyBudget.md`

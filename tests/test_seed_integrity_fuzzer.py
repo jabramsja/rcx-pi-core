@@ -252,7 +252,7 @@ class TestProjectionIdValidationFuzzing:
         removed = seed["projections"].pop(idx)
 
         # Should fail
-        with pytest.raises(ValueError, match="missing expected projection IDs"):
+        with pytest.raises(ValueError, match="projection ID mismatch"):
             validate_projection_ids(seed_name, seed)
 
     @given(unknown_seed=st.text(min_size=1, max_size=30).filter(
@@ -300,7 +300,7 @@ class TestProjectionOrderSecurity:
         projections.insert(0, wrap_proj)
 
         # Should fail
-        with pytest.raises(ValueError, match="must be last"):
+        with pytest.raises(ValueError, match="projection order mismatch"):
             validate_projection_ids(seed_name, seed)
 
     def test_kernel_wrap_must_be_first(self):
@@ -328,7 +328,7 @@ class TestProjectionOrderSecurity:
         projections.append(wrap_proj)
 
         # Should fail
-        with pytest.raises(ValueError, match="must be first"):
+        with pytest.raises(ValueError, match="projection order mismatch"):
             validate_projection_ids("kernel.v1.json", seed)
 
     def test_kernel_unwrap_must_be_last(self):
@@ -357,7 +357,7 @@ class TestProjectionOrderSecurity:
             projections[-1], projections[-2] = projections[-2], projections[-1]
 
         # Should fail
-        with pytest.raises(ValueError, match="must be last"):
+        with pytest.raises(ValueError, match="projection order mismatch"):
             validate_projection_ids("kernel.v1.json", seed)
 
 

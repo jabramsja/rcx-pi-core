@@ -35,6 +35,7 @@ from tools.shared_agent_utils import (
     GOOD_VERDICTS,
     build_sdk_options,
     extract_text_from_message,
+    extract_verdict_secure,
     resolve_agent_model,
     validate_compliance,
 )
@@ -251,20 +252,9 @@ async def run_analysis_agent(
     if not result_text and fragments:
         result_text = "\n".join(dict.fromkeys(fragments))
 
-    # Extract verdict
-    verdict = "UNKNOWN"
-    verdict_patterns = [
-        r"Verdict:\s*(ALIGNED|DRIFT_DETECTED)",
-        r"Verdict:\s*(SECURE|CONCERNS)",
-        r"Verdict:\s*(GROUNDED|GAPS_FOUND)",
-        r"Verdict:\s*(VALID|INVALID)",
-        r"Verdict:\s*(HEALTHY|NEEDS_ATTENTION|AT_RISK)",
-    ]
-    for pattern in verdict_patterns:
-        match = re.search(pattern, result_text, re.IGNORECASE)
-        if match:
-            verdict = match.group(1).upper()
-            break
+    # Extract verdict using shared secure parser (handles markdown formatting)
+    deep_agent_key = "deep_structural" if agent_name == "structural-proof" else f"deep_{agent_name}"
+    verdict = extract_verdict_secure(result_text, agent_name=deep_agent_key)
 
     status_icon = "✅" if verdict in GOOD_VERDICTS else "⚠️"
     print(f"{status_icon} {verdict}")

@@ -130,14 +130,22 @@ class TestMuEqualUsesStructuralComparison:
         """mu_equal must use sort_keys=True for deterministic dict comparison.
 
         EntropyBudget.md: Dict determinism requires sorted keys.
+        mu_equal may delegate to mu_hash_cached which uses sort_keys=True.
         """
         from rcx_pi.selfhost import mu_type
 
+        # mu_equal may delegate to mu_hash_cached; check the full chain
         source = inspect.getsource(mu_type.mu_equal)
-
-        assert "sort_keys=True" in source, (
-            "mu_equal must use json.dumps(..., sort_keys=True) for determinism"
-        )
+        if "mu_hash_cached" in source:
+            # Hash-accelerated path: verify mu_hash_cached uses sort_keys
+            cached_source = inspect.getsource(mu_type.mu_hash_cached)
+            assert "sort_keys=True" in cached_source, (
+                "mu_hash_cached must use json.dumps(..., sort_keys=True) for determinism"
+            )
+        else:
+            assert "sort_keys=True" in source, (
+                "mu_equal must use json.dumps(..., sort_keys=True) for determinism"
+            )
 
     def test_mu_equal_no_id_or_hash(self):
         """mu_equal implementation must not use id() or hash().

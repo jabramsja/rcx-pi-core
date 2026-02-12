@@ -86,8 +86,12 @@ check_pattern "require.*vm" "vm module provides eval capabilities"
 check_pattern "vm\.run" "vm.run* provides code execution"
 
 # Crypto randomness (non-determinism)
+# Note: crypto.createHash (SHA256) is deterministic and allowed for seed integrity verification
 check_pattern "crypto\.random" "crypto.randomBytes breaks determinism"
-check_pattern "require.*crypto" "crypto module may provide randomness"
+check_pattern "crypto\.generateKey" "crypto.generateKey breaks determinism"
+check_pattern "webcrypto" "webcrypto API provides getRandomValues (non-determinism)"
+check_pattern "getRandomValues" "getRandomValues breaks determinism"
+check_pattern "crypto\.subtle" "crypto.subtle API may generate non-deterministic keys"
 
 # WebAssembly (arbitrary code execution - CRITICAL)
 check_pattern "WebAssembly" "WebAssembly allows arbitrary compiled code execution"

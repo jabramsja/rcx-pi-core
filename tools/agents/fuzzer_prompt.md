@@ -34,7 +34,7 @@ Stress invariants with adversarial inputs and expose fragile behavior.
 2. If no failure found, specify explored fuzz space and residual risk.
 
 ### Verdict
-[ROBUST / FRAGILE / BROKEN / NOT_EXECUTED]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `ROBUST`: explored fuzz space did not break targeted invariants.
 - `FRAGILE`: weaknesses found that can become failures under modest stress.

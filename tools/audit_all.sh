@@ -13,7 +13,7 @@ export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci_fast}"
 # ============================================================================
 #
 # This is the comprehensive audit for CI and pre-push validation. It runs:
-# - All 2,100+ tests including fuzzer (hash-seeded for determinism)
+# - All 3,100+ tests including fuzzer (hash-seeded for determinism)
 # - Semantic purity checks, contraband detection, AST police
 # - Anti-cheat scans, fixture validation
 #
@@ -57,12 +57,12 @@ echo "== 0b) Doc consistency check =="
 TIME_STRUCTURAL=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS
-echo "== 1a) Core + Fuzzer tests (hash-seeded) =="
-# Run all tests EXCEPT stress tests (those have very long timeouts)
+echo "== 1a) Core + Fuzzer tests (hash-seeded, excludes slow) =="
+# Run all tests EXCEPT stress and slow tests
+# Slow tests (meta-circular recurrence, paxos e2e) run in 1c below
 # Stress tests are for edge case validation, not CI blocking
 # Also exclude test_js_parity_automated.py - JS parity verified via node run below
-# Capture test counts from pytest output
-TEST_OUTPUT=$(pytest $PARALLEL_FLAG -q --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py 2>&1) || { echo "$TEST_OUTPUT"; exit 1; }
+TEST_OUTPUT=$(pytest $PARALLEL_FLAG -q -m "not slow" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py 2>&1) || { echo "$TEST_OUTPUT"; exit 1; }
 echo "$TEST_OUTPUT"
 # Parse test counts (format: "X passed, Y skipped in Zs" or "X passed in Zs")
 if echo "$TEST_OUTPUT" | grep -qE '[0-9]+ passed'; then
@@ -70,7 +70,16 @@ if echo "$TEST_OUTPUT" | grep -qE '[0-9]+ passed'; then
 fi
 test -z "$(git status --porcelain)" || { echo "Dirty after core pytest"; git status --porcelain; exit 1; }
 
-echo "== 1b) Stress tests (deep/wide edge cases, optional) =="
+echo "== 1b) Slow tests (meta-circular recurrence, paxos e2e) =="
+# These go through the full meta-circular kernel path and take 2-10 minutes
+SLOW_OUTPUT=$(pytest -q -m slow --timeout=300 2>&1) || { echo "$SLOW_OUTPUT"; exit 1; }
+echo "$SLOW_OUTPUT"
+if echo "$SLOW_OUTPUT" | grep -qE '[0-9]+ passed'; then
+    SLOW_PASSED=$(echo "$SLOW_OUTPUT" | grep -oE '[0-9]+ passed' | tail -1 | grep -oE '[0-9]+')
+    TESTS_PASSED=$((TESTS_PASSED + SLOW_PASSED))
+fi
+
+echo "== 1c) Stress tests (deep/wide edge cases, optional) =="
 # Stress tests probe pathological inputs - run sequentially with longer timeouts
 # These are for comprehensive validation, not CI blocking
 if [ "${RCX_SKIP_STRESS:-}" = "1" ]; then

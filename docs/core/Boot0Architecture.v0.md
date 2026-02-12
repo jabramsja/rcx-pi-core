@@ -50,7 +50,7 @@ This document describes a Hex0-inspired staged bootstrap architecture for RCX. L
 │   Built using: Boot0 primitives                             │
 ├─────────────────────────────────────────────────────────────┤
 │ Boot0: Trusted Kernel (Hex0 equivalent)                     │
-│   - 5 bootstrap primitives (Python, ~150-200 LOC)           │
+│   - 4 bootstrap primitives (Python, ~150-200 LOC)           │
 │   - Includes bootstrap match/subst (replaced by Boot1)      │
 │   - Must be audited, minimal changes                        │
 │   Built using: Host language (Python)                       │
@@ -61,12 +61,12 @@ This document describes a Hex0-inspired staged bootstrap architecture for RCX. L
 
 Boot0 is the Hex0 equivalent - the minimal trusted base that must be implemented in the host language. Everything else is built on top of it.
 
-### The 5 Bootstrap Primitives
+### The 4 Bootstrap Primitives (+ 1 Eliminated)
 
 | Primitive | Purpose | Current Location |
 |-----------|---------|------------------|
 | `eval_step` | Single projection application | `eval_seed.py:step()` |
-| `mu_equal` | Structural equality comparison | `mu_type.py:mu_equal()` |
+| ~~`mu_equal`~~ | ~~Structural equality comparison~~ | **ELIMINATED** — replaced by `mu_hash_cached()` (Level 1 Content-Addressed Mu, 2026-02-10) |
 | `max_steps` | Termination guarantee | `step_mu.py:step_kernel_mu()` |
 | `stack_guard` | Recursion depth limit | `mu_type.py:MAX_MU_DEPTH` |
 | `projection_loader` | Load seeds from JSON | `seed_integrity.py:load_verified_seed()` |
@@ -257,10 +257,10 @@ Boot1.subst(B, bindings) = Boot0.run_until_done(subst_projections, {"_subst_ctx"
 
 ```python
 def run_until_done(projections, value):
-    """Apply projections until stall (mu_equal) or max_steps."""
+    """Apply projections until stall (hash match) or max_steps."""
     for _ in range(max_steps):        # Primitive: max_steps
         next_value = eval_step(projections, value)  # Primitive: eval_step
-        if mu_equal(next_value, value):             # Primitive: mu_equal
+        if mu_hash_cached(next_value) == mu_hash_cached(value):  # hash comparison (not a primitive)
             return value  # Stalled
         value = next_value
     return value  # Max steps reached
@@ -326,7 +326,7 @@ Boot2.eval(projections, value) =
 | `eval_seed.py:substitute()` | Boot0 primitive | Extract to clean interface |
 | `step_mu.py` | Boot1 orchestrator | Rename/restructure |
 | `kernel.py` | Boot2 orchestrator | Clarify boundary |
-| `mu_type.py:mu_equal()` | Boot0 primitive | Already clean |
+| `mu_type.py:mu_hash_cached()` | Boot0 boundary scaffolding | mu_equal eliminated as primitive |
 
 ### What Stays the Same
 
@@ -394,7 +394,7 @@ This contract is verified by `tests/test_js_parity_automated.py` which runs the 
 
 | Boot Layer | Current Files | Seeds |
 |------------|---------------|-------|
-| Boot0 | `eval_seed.py` (match, substitute), `mu_type.py` (mu_equal), `kernel.py` (budget) | None (pure Python) |
+| Boot0 | `eval_seed.py` (match, substitute), `mu_type.py` (mu_hash_cached), `kernel.py` (budget) | None (pure Python) |
 | Boot1 | `step_mu.py`, `match_mu.py`, `subst_mu.py` | `match.v2.json`, `subst.v2.json` |
 | Boot2 | `kernel.py`, `eval_seed.py` (step) | `kernel.v1.json`, `recurrence.v1.json`, `eval.v1.json`, `classify.v1.json` |
 
@@ -420,7 +420,7 @@ This contract is verified by `tests/test_js_parity_automated.py` which runs the 
 | Lambda calculus smuggling | Boot0 | `assert_not_lambda_calculus()` |
 | Kernel state forgery | Boot2 | `validate_no_kernel_reserved_fields()` |
 | Projection order tampering | Boot2 | `validate_kernel_projections_first()` |
-| Stall detection bypass | Boot2 | `mu_equal()` for cycle detection |
+| Stall detection bypass | Boot2 | `mu_hash_cached()` for cycle detection |
 
 ### Why 3 Layers Doesn't Triple Attack Surface
 

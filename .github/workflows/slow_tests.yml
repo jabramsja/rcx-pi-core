@@ -1,0 +1,44 @@
+name: Slow Tests (Nightly)
+
+on:
+  schedule:
+    # Nightly at 15:00 UTC (10:00 AM Detroit) — runs after green-gate (14:00 UTC)
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: slow-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  slow-tests:
+    name: slow-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONHASHSEED: "0"
+      RCX_CI: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install project
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[test]"
+
+      - name: Run slow tests (meta-circular recurrence, paxos e2e)
+        run: |
+          set -euo pipefail
+          python -m pytest -m slow -v --timeout=300 2>&1
+          echo "✅ Slow tests passed"

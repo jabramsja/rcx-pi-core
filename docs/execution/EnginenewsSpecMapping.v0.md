@@ -79,7 +79,7 @@ High stall density indicates pressure; low density indicates smooth refinement.
 
 ### 3.3 Closure Evidence Count
 
-Computed per `docs/IndependentEncounter.v0.md`:
+Computed per `docs/execution/IndependentEncounter.v0.md`:
 
 - Maintain `stall_memory[pattern_id] = value_hash` for each `execution.stall`
 - On `execution.stall(value_hash=v, pattern_id=p)`:
@@ -167,6 +167,6 @@ Expected:
 Document version: v0
 Last updated: 2026-01-24
 Dependencies:
-- `docs/IndependentEncounter.v0.md` (closure evidence semantics)
+- `docs/execution/IndependentEncounter.v0.md` (closure evidence semantics)
 - `docs/archive/bytecode/BytecodeMapping.v1.md` (execution event definitions, archived)
 - `rcx_pi.replay_cli` (public CLI interface)

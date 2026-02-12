@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "PAXOS_DEMO_BUNDLE",
+    "description": "Demonstration of deadlock metabolization: Livelock + Recurrence + Healer",
+    "execution_layer": "APPLICATION",
+    "dependencies": ["recurrence.v2.json"]
+  },
+  "projections": [
+    {
+      "id": "paxos.init",
+      "pattern": {"paxos_trigger": "start_paxos"},
+      "body": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "idle",
+        "node_b": "idle"
+      }
+    },
+    {
+      "id": "paxos.vote_a",
+      "description": "Node A tries to become leader",
+      "pattern": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "idle",
+        "node_b": "idle"
+      },
+      "body": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "propose",
+        "node_b": "idle"
+      }
+    },
+    {
+      "id": "paxos.reject_b",
+      "description": "Node B rejects A (conflict)",
+      "pattern": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "propose",
+        "node_b": "idle"
+      },
+      "body": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "rejected",
+        "node_b": "propose"
+      }
+    },
+    {
+      "id": "paxos.reject_a",
+      "description": "Node A rejects B (conflict loop)",
+      "pattern": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "rejected",
+        "node_b": "propose"
+      },
+      "body": {
+        "paxos_mode": "paxos_run",
+        "status": "voting",
+        "node_a": "idle",
+        "node_b": "idle"
+      }
+    },
+    {
+      "id": "healer.detect_deadlock",
+      "description": "If recurrence detected during voting, force a winner",
+      "pattern": {
+        "closure_detected": true,
+        "final_result": {"var": "fr"},
+        "tau_step": {"var": "tau"}
+      },
+      "body": {
+        "status": "consensus_reached",
+        "leader": "Node_A",
+        "reason": "deadlock_resolution_protocol",
+        "origin_anomaly": {"var": "fr"}
+      }
+    },
+    {
+      "id": "healer.detect_deadlock_engine",
+      "description": "If engine pipeline detected closure, force a winner (matches engine output shape)",
+      "pattern": {
+        "value": {"var": "val"},
+        "closure_detected": true,
+        "tau_step": {"var": "tau"},
+        "exhaustion_detected": {"var": "exh"},
+        "operator_frozen": {"var": "op"},
+        "frozen_set": {"var": "fs"},
+        "action": {"var": "act"},
+        "stall": {"var": "stall"}
+      },
+      "body": {
+        "status": "consensus_reached",
+        "leader": "Node_A",
+        "reason": "deadlock_resolution_protocol",
+        "origin_anomaly": {"var": "val"}
+      }
+    }
+  ]
+}

@@ -114,7 +114,7 @@ It is part of the claim.
 - **L3 (Substrate Portability):** COMPLETE - Python and JavaScript run identical seeds with verified parity
 
 **Key Achievements:**
-- 5 bootstrap primitives identified and documented (see BootstrapPrimitives.v0.md)
+- 4 bootstrap primitives identified and documented (mu_equal eliminated, see BootstrapPrimitives.v0.md)
 - Comprehensive test coverage with hypothesis fuzzer (see STATUS.md for counts)
 - Debt floor reached (12 irreducible markers - host scaffolding, not smuggled semantics)
 - Full seed suite: kernel.v1 (~7), match.v2 (~8), subst.v2 (~12), recurrence.v1 (~9), exhaustion.v1 (~11)

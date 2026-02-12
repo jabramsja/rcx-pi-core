@@ -32,7 +32,7 @@ v1c-alpha adds R0: the register that holds the current value being reduced.
 
 | Register | Type | Purpose |
 |----------|------|---------|
-| R0 | Mu | Current value (JSON-compatible, see `docs/MuType.v0.md`) |
+| R0 | Mu | Current value (JSON-compatible, see `docs/core/MuType.v0.md`) |
 
 Existing: RS (status), RP (pattern_id), RH (value_hash), RF (fix target)
 
@@ -114,7 +114,7 @@ def op_fixed(self, after_value: Any, after_hash: str) -> None:
 
 ## Design Decisions
 
-1. **Type of R0**: `Mu` (JSON-compatible value). Defined in `docs/MuType.v0.md` and validated by `rcx_pi/mu_type.py`. This ensures no Python-specific types leak into the VM, preserving self-hosting readiness.
+1. **Type of R0**: `Mu` (JSON-compatible value). Defined in `docs/core/MuType.v0.md` and validated by `rcx_pi/mu_type.py`. This ensures no Python-specific types leak into the VM, preserving self-hosting readiness.
 
 2. **Hash function**: Reuse `value_hash` from `trace_canon.py`. Determinism requires the same hash function everywhere.
 

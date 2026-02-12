@@ -253,6 +253,7 @@ class TestStallDetection:
         assert result["steps"] == 1
 
     @given(value=simple_mu, projs=projection_lists(min_size=1, max_size=2))
+    @pytest.mark.slow
     @settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_stall_result_equals_final_state(self, value, projs):
         """When stall=True, result equals the state that caused stall."""

@@ -77,15 +77,13 @@ True == 1  # True in Python, but semantically different in Mu
 [] == False  # False, but what if some edge case exists?
 ```
 
-**Mitigation:** Compare via canonical JSON serialization, not Python `==`.
+**Mitigation:** Compare via cached content hash, not Python `==`. (`mu_equal` was ELIMINATED as a bootstrap primitive — all production code now uses `mu_hash_cached()` directly.)
 
 ```python
-def mu_equal(a: Mu, b: Mu) -> bool:
-    """Structural equality via canonical serialization."""
-    return (
-        json.dumps(a, sort_keys=True, ensure_ascii=False) ==
-        json.dumps(b, sort_keys=True, ensure_ascii=False)
-    )
+def mu_hash_cached(value: Mu) -> str:
+    """Cached SHA-256 of canonical JSON. Used for all equality checks."""
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return _cache.get(canonical) or _compute_and_cache(canonical)
 ```
 
 **Test:** `test_mu_equal_rejects_python_coercion`
@@ -374,17 +372,15 @@ json.dumps(big)  # May work in Python, may fail in other JSON parsers
 
 ## New Guardrails Needed
 
-### 1. `mu_equal()` - Structural Equality
+### 1. ~~`mu_equal()`~~ → `mu_hash_cached()` - Structural Equality (IMPLEMENTED + ELIMINATED)
+
+`mu_equal` was eliminated as a bootstrap primitive. All 8 production call sites now use `mu_hash_cached()` directly. The convenience wrapper `mu_equal()` still exists but is no longer a bootstrap primitive.
 
 ```python
-def mu_equal(a: Mu, b: Mu) -> bool:
-    """Compare Mu values via canonical JSON, not Python ==."""
-    assert_mu(a, "mu_equal.a")
-    assert_mu(b, "mu_equal.b")
-    return (
-        json.dumps(a, sort_keys=True) ==
-        json.dumps(b, sort_keys=True)
-    )
+def mu_hash_cached(value: Mu) -> str:
+    """Cached SHA-256 hash for O(1) amortized equality checks."""
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    # ... cache lookup and SHA-256 computation
 ```
 
 ### 2. `assert_no_isinstance_dispatch()` - Static Check
@@ -466,7 +462,7 @@ Add meta-test that fails if any test mocks guardrail functions.
 |------|-------------------|------|------------|
 | Lambda in seed | `assert_seed_pure` | No | ✅ |
 | Non-Mu type | `is_mu/assert_mu` | No | ✅ |
-| Python == for matching | None | **YES** | Add `mu_equal()` |
+| Python == for matching | `mu_hash_cached()` | No | ✅ RESOLVED — all sites use hash comparison |
 | isinstance dispatch | Audit script | Partial | Strengthen audit |
 | Private methods bypass | None | **YES** | No private methods in kernel |
 | Test mocking guardrails | None | **YES** | Add meta-test |
@@ -486,7 +482,7 @@ Add meta-test that fails if any test mocks guardrail functions.
 
 ## Implementation Order
 
-1. **Add `mu_equal()` to mu_type.py** - Structural equality
+1. ~~**Add `mu_equal()` to mu_type.py**~~ - DONE + ELIMINATED (now `mu_hash_cached()`)
 2. **Add meta-test for no guardrail mocking** - Prevent false positives
 3. **Update audit script** - Check for isinstance dispatch, string patterns, bare except
 4. **Add BOOTSTRAP markers** - Document temporary Python code

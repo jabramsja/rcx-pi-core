@@ -1,0 +1,1465 @@
+{
+    "meta": {
+        "version": "2.0.0",
+        "name": "RECURRENCE_V2_SEED",
+        "description": "Hash-accelerated structural closure detection for Rule 2.2",
+        "doc": "docs/core/recurrence_v2_design.md",
+        "spec_ref": "RCXEngineNew.pdf Rule 2.2, A.10",
+        "execution_layer": "META_CIRCULAR",
+        "meta_circular_capable": true,
+        "requires_patterns": [
+            "non-linear"
+        ],
+        "requires_bridge": "bootstrap_structural.v1",
+        "production_execution": "META_CIRCULAR",
+        "invariants": [
+            "All projections are pure Mu (JSON-compatible)",
+            "Closure detection uses pattern matching, NOT Python conditionals",
+            "Seen-set entries store {state_hash} only (Level 2: frozen hashes, state dropped)",
+            "Hash comparison via non-linear pattern (same hash var bound twice)",
+            "Pre-computed mu_hash boundary primitive enables hash-accelerated lookup",
+            "Non-linear patterns enforced by bootstrap_structural binding conflict detection"
+        ],
+        "kernel_requirements": [
+            "kernel.v1.json (7 projections) for iteration",
+            "match.v2.json (8 projections) for pattern matching",
+            "bootstrap_structural.v1.json (5 projections) for non-linear pattern support",
+            "subst.v2.json (12 projections) for substitution"
+        ]
+    },
+    "projections": [
+        {
+            "id": "recurrence.init",
+            "description": "Initialize closure detection state from trace result",
+            "pattern": {
+                "head": {
+                    "head": "_detect_closure",
+                    "tail": {
+                        "head": {
+                            "head": {
+                                "head": "result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "trace",
+                                    "tail": {
+                                        "head": {
+                                            "var": "trace"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            },
+                            "_type": "dict"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": null,
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_current",
+                    "tail": {
+                        "head": {
+                            "var": "trace"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "scan",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_seen",
+                                    "tail": {
+                                        "head": null,
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.end_of_trace",
+            "description": "Reached end of trace (null) without finding closure",
+            "pattern": {
+                "head": {
+                    "head": "_current",
+                    "tail": {
+                        "head": null,
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "scan",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_seen",
+                                    "tail": {
+                                        "head": {
+                                            "var": "seen"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_closure",
+                    "tail": {
+                        "head": false,
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence_done",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_result",
+                            "tail": {
+                                "head": {
+                                    "var": "result"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_tau_step",
+                                "tail": {
+                                    "head": null,
+                                    "tail": null
+                                }
+                            },
+                            "tail": null
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.check_state_stall",
+            "description": "Extract state and state_hash from stall entry (has extra 'stall' key)",
+            "pattern": {
+                "head": {
+                    "head": "_current",
+                    "tail": {
+                        "head": {
+                            "head": {
+                                "head": {
+                                    "head": "projection",
+                                    "tail": {
+                                        "head": {
+                                            "var": "proj"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "stall",
+                                        "tail": {
+                                            "head": {
+                                                "var": "_stall"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "state_hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                },
+                                "_type": "dict"
+                            },
+                            "tail": {
+                                "var": "rest"
+                            }
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "scan",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_seen",
+                                    "tail": {
+                                        "head": {
+                                            "var": "seen"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": {
+                            "var": "seen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "state_hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.check_state_maxsteps",
+            "description": "Extract state and state_hash from max_steps entry (has extra 'max_steps' key)",
+            "pattern": {
+                "head": {
+                    "head": "_current",
+                    "tail": {
+                        "head": {
+                            "head": {
+                                "head": {
+                                    "head": "max_steps",
+                                    "tail": {
+                                        "head": {
+                                            "var": "_maxsteps"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "projection",
+                                        "tail": {
+                                            "head": {
+                                                "var": "proj"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "state_hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                },
+                                "_type": "dict"
+                            },
+                            "tail": {
+                                "var": "rest"
+                            }
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "scan",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_seen",
+                                    "tail": {
+                                        "head": {
+                                            "var": "seen"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": {
+                            "var": "seen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "state_hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.check_state",
+            "description": "Extract state and state_hash from current trace entry and check against seen-set",
+            "pattern": {
+                "head": {
+                    "head": "_current",
+                    "tail": {
+                        "head": {
+                            "head": {
+                                "head": {
+                                    "head": "projection",
+                                    "tail": {
+                                        "head": {
+                                            "var": "proj"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "state",
+                                        "tail": {
+                                            "head": {
+                                                "var": "state"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "state_hash",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state_hash"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "step",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "step"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": null
+                                        }
+                                    }
+                                },
+                                "_type": "dict"
+                            },
+                            "tail": {
+                                "var": "rest"
+                            }
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "scan",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_seen",
+                                    "tail": {
+                                        "head": {
+                                            "var": "seen"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": {
+                            "var": "seen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "state_hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.hash_match",
+            "description": "Hash found in seen-set (non-linear match: same 'hash' var bound from _state_hash and _check_list head) -> closure detected!",
+            "pattern": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": {
+                            "head": {
+                                "head": {
+                                    "head": "state_hash",
+                                    "tail": {
+                                        "head": {
+                                            "var": "hash"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null,
+                                "_type": "dict"
+                            },
+                            "tail": {
+                                "var": "_check_tail"
+                            }
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_closure",
+                    "tail": {
+                        "head": true,
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence_done",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_result",
+                            "tail": {
+                                "head": {
+                                    "var": "result"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_tau_step",
+                                "tail": {
+                                    "head": {
+                                        "var": "step"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": null
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.hash_no_match",
+            "description": "Hash not in seen-set head (different var 'other_hash' vs 'hash'), continue checking tail",
+            "pattern": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": {
+                            "head": {
+                                "head": {
+                                    "head": "state_hash",
+                                    "tail": {
+                                        "head": {
+                                            "var": "other_hash"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null,
+                                "_type": "dict"
+                            },
+                            "tail": {
+                                "var": "check_rest"
+                            }
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": {
+                            "var": "check_rest"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.not_found",
+            "description": "Exhausted check_list (null) without match -> add {state_hash} to seen (Level 2: state dropped), advance",
+            "pattern": {
+                "head": {
+                    "head": "_check_list",
+                    "tail": {
+                        "head": null,
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "check_seen",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_rest",
+                                "tail": {
+                                    "head": {
+                                        "var": "rest"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_result",
+                                    "tail": {
+                                        "head": {
+                                            "var": "result"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_seen",
+                                        "tail": {
+                                            "head": {
+                                                "var": "seen"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_state",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "state"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": {
+                                            "head": {
+                                                "head": "_state_hash",
+                                                "tail": {
+                                                    "head": {
+                                                        "var": "state_hash"
+                                                    },
+                                                    "tail": null
+                                                }
+                                            },
+                                            "tail": {
+                                                "head": {
+                                                    "head": "_step",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "step"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_current",
+                    "tail": {
+                        "head": {
+                            "var": "rest"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_phase",
+                            "tail": {
+                                "head": "scan",
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_result",
+                                "tail": {
+                                    "head": {
+                                        "var": "result"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_seen",
+                                    "tail": {
+                                        "head": {
+                                            "head": {
+                                                "head": {
+                                                    "head": "state_hash",
+                                                    "tail": {
+                                                        "head": {
+                                                            "var": "state_hash"
+                                                        },
+                                                        "tail": null
+                                                    }
+                                                },
+                                                "tail": null,
+                                                "_type": "dict"
+                                            },
+                                            "tail": {
+                                                "var": "seen"
+                                            }
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": null
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "recurrence.unwrap",
+            "description": "Extract final closure detection result with tau_step for exhaustion",
+            "pattern": {
+                "head": {
+                    "head": "_closure",
+                    "tail": {
+                        "head": {
+                            "var": "closure"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "recurrence_done",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_result",
+                            "tail": {
+                                "head": {
+                                    "var": "result"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_tau_step",
+                                "tail": {
+                                    "head": {
+                                        "var": "tau"
+                                    },
+                                    "tail": null
+                                }
+                            },
+                            "tail": null
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "closure_detected",
+                    "tail": {
+                        "head": {
+                            "var": "closure"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "final_result",
+                        "tail": {
+                            "head": {
+                                "var": "result"
+                            },
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "tau_step",
+                            "tail": {
+                                "head": {
+                                    "var": "tau"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": null
+                    }
+                },
+                "_type": "dict"
+            }
+        }
+    ]
+}

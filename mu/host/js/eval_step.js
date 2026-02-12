@@ -21,12 +21,12 @@
  * DEBT SUMMARY (L3 Parity - must match Python bootstrap primitives)
  * =============================================================================
  *
- * BOOTSTRAP PRIMITIVES (5 - irreducible, same as Python):
+ * BOOTSTRAP PRIMITIVES (4 - irreducible, same as Python):
  *   1. eval_step    - step()           - applies first matching projection
- *   2. mu_equal     - muEqual()        - structural equality
- *   3. max_steps    - maxSteps param   - termination guard
- *   4. stack_guard  - MAX_DEPTH        - recursion depth limit
- *   5. proj_loader  - fs.readFileSync  - loads JSON seeds
+ *   2. max_steps    - maxSteps param   - termination guard
+ *   3. stack_guard  - MAX_DEPTH        - recursion depth limit
+ *   4. proj_loader  - fs.readFileSync  - loads JSON seeds
+ *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
  *   @host_iteration: 6
@@ -43,11 +43,12 @@
  *     - normalize()         - recursive normalization
  *     - denormalize()       - recursive denormalization
  *
- *   @host_builtin: 2
- *     - muEqual()           - structural equality (primitive)
+ *   @host_builtin: 3
+ *     - muEqual()           - structural equality (convenience wrapper, delegates to muHashCached)
+ *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 12 (matches Python's 12 semantic debt markers)
+ * TOTAL DEBT: 13 (matches Python's 13 semantic debt markers)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
  * exist in Python. Both substrates have identical bootstrap footprint.
@@ -426,38 +427,73 @@ function isValidMu(value, _depth = 0) {
 }
 
 /**
- * BOOTSTRAP_PRIMITIVE: mu_equal
- * Structural equality for Mu values (key-order independent).
- * Rejects objects with Symbol keys (not valid Mu).
- * @host_builtin - BOOTSTRAP: structural equality primitive
+ * ELIMINATED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
+ * Previously a bootstrap primitive. Now derivable from muHashCached.
+ * Production code uses muHashCached directly. This wrapper remains for
+ * test convenience and backward compatibility.
+ * @host_builtin - convenience wrapper around muHashCached
  */
 function muEqual(a, b) {
-  if (a === b) return true;
-  if (a === null || b === null) return a === b;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== 'object') return a === b;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  return muHashCached(a) === muHashCached(b);
+}
 
-  if (Array.isArray(a)) {
-    if (a.length !== b.length) return false;
-    return a.every((v, i) => muEqual(v, b[i]));
+/**
+ * Compute deterministic SHA-256 hash of a Mu value.
+ * Matches Python mu_hash(): canonical JSON with sorted keys.
+ * @host_builtin: BOOTSTRAP_PRIMITIVE (irreducible, required for hash-accelerated closure detection)
+ */
+function muHash(value) {
+  // Must match Python: json.dumps(value, sort_keys=True, ensure_ascii=False)
+  // Python uses `, ` between items and `: ` between key/value (separators=(', ', ': '))
+  function canonicalize(v) {
+    if (v === null) return 'null';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'number') return JSON.stringify(v);
+    if (typeof v === 'string') return JSON.stringify(v);
+    if (Array.isArray(v)) {
+      return '[' + v.map(canonicalize).join(', ') + ']';
+    }
+    // Object: sort keys, use Python separators
+    const keys = Object.keys(v).sort();
+    const pairs = keys.map(k => JSON.stringify(k) + ': ' + canonicalize(v[k]));
+    return '{' + pairs.join(', ') + '}';
   }
+  return crypto.createHash('sha256').update(canonicalize(value), 'utf8').digest('hex');
+}
 
-  // Use Reflect.ownKeys to detect Symbol keys, filter to strings only
-  const aAllKeys = Reflect.ownKeys(a);
-  const bAllKeys = Reflect.ownKeys(b);
-
-  // Reject if any Symbol keys exist (not valid Mu)
-  if (aAllKeys.some(k => typeof k === 'symbol') ||
-      bAllKeys.some(k => typeof k === 'symbol')) {
-    return false;
+/**
+ * Compute deterministic SHA-256 hash with caching.
+ * Mirrors Python mu_hash_cached(). Cache avoids re-hashing identical structures.
+ * Used for hash-accelerated equality comparison (Content-Addressed Mu Level 1).
+ */
+const MAX_MU_HASH_CACHE = 10000;
+const _muHashCache = new Map();
+function muHashCacheClear() { _muHashCache.clear(); }
+function muHashCached(value) {
+  // Deterministic cache key: sorted-key JSON (JS-local, not cross-substrate)
+  const key = JSON.stringify(value, (_, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const sorted = {};
+      for (const k of Object.keys(v).sort()) sorted[k] = v[k];
+      return sorted;
+    }
+    return v;
+  });
+  const cached = _muHashCache.get(key);
+  if (cached !== undefined) {
+    // LRU: delete and re-insert to move to end (most recently used)
+    _muHashCache.delete(key);
+    _muHashCache.set(key, cached);
+    return cached;
   }
-
-  const aKeys = aAllKeys.filter(k => typeof k === 'string').sort();
-  const bKeys = bAllKeys.filter(k => typeof k === 'string').sort();
-  if (aKeys.length !== bKeys.length) return false;
-  if (!aKeys.every((k, i) => k === bKeys[i])) return false;
-  return aKeys.every(k => muEqual(a[k], b[k]));
+  const hash = muHash(value);
+  _muHashCache.set(key, hash);
+  // Evict oldest if over limit
+  if (_muHashCache.size > MAX_MU_HASH_CACHE) {
+    const oldest = _muHashCache.keys().next().value;
+    _muHashCache.delete(oldest);
+  }
+  return hash;
 }
 
 // =============================================================================
@@ -524,9 +560,12 @@ function classifyLegacyLinkedList(value) {
       return 'list';
     }
 
-    // Cycle detection
-    // Note: Can't use object identity in same way as Python, but we can check structure
-    // For simplicity, just use depth guard as protection
+    // Cycle detection: reject cyclic structures (parity with iterNormalizedDictPairs)
+    if (visited.has(current)) {
+      return 'list';
+    }
+    visited.add(current);
+
     const keys = Object.keys(current).sort();
 
     // Must be exactly {head, tail}
@@ -902,7 +941,7 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
-        if (k in bindings && !muEqual(bindings[k], v)) {
+        if (k in bindings && muHashCached(bindings[k]) !== muHashCached(v)) {
           return NO_MATCH;
         }
         bindings[k] = v;
@@ -942,7 +981,7 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
-        if (bk in bindings && !muEqual(bindings[bk], bv)) {
+        if (bk in bindings && muHashCached(bindings[bk]) !== muHashCached(bv)) {
           return NO_MATCH;
         }
         bindings[bk] = bv;
@@ -1054,6 +1093,8 @@ function run(projections, input, maxSteps = 10000) {
   }
 
   let current = input;
+  // INVARIANT: step() is functionally pure — currentHash caching is safe.
+  let currentHash = muHashCached(input);
   const trace = [];
 
   for (let i = 0; i < maxSteps; i++) {
@@ -1070,11 +1111,13 @@ function run(projections, input, maxSteps = 10000) {
 
     const next = step(projections, current);
 
-    // Check for stall (no change)
-    if (muEqual(next, current)) {
+    // Check for stall (no change) — hash comparison
+    const nextHash = muHashCached(next);
+    if (nextHash === currentHash) {
       return { result: current, steps: i, stalled: true, trace };
     }
     current = next;
+    currentHash = nextHash;
   }
   return { result: current, steps: maxSteps, stalled: false, trace };
 }
@@ -1130,6 +1173,25 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   validator(domainInput, 'domainInput');
   for (let i = 0; i < domainProjections.length; i++) {
     const proj = domainProjections[i];
+    // SECURITY: Fail closed — projection must be a non-null object with pattern and body
+    // Matches Python step_kernel_mu validation (parity requirement)
+    if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) {
+      throw new Error(
+        `SECURITY: domainProjections[${i}] must be an object, got ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`
+      );
+    }
+    if (!('pattern' in proj)) {
+      throw new Error(`SECURITY: domainProjections[${i}] missing required 'pattern' key`);
+    }
+    if (!('body' in proj)) {
+      throw new Error(`SECURITY: domainProjections[${i}] missing required 'body' key`);
+    }
+    if (!isValidMu(proj.pattern)) {
+      throw new Error(`SECURITY: domainProjections[${i}].pattern is not valid Mu`);
+    }
+    if (!isValidMu(proj.body)) {
+      throw new Error(`SECURITY: domainProjections[${i}].body is not valid Mu`);
+    }
     validator(proj.pattern, `domainProjections[${i}].pattern`);
     validator(proj.body, `domainProjections[${i}].body`);
   }
@@ -1160,6 +1222,8 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     // kernel.unwrap extracts the result, forcing value equality fallback
     // that misclassifies identity projections as stalls.
     let current = kernelInput;
+    // INVARIANT: step() is functionally pure — currentHash caching is safe.
+    let currentHash = muHashCached(kernelInput);
     for (let i = 0; i < maxSteps; i++) {
       const result = step(projections, current);
 
@@ -1177,12 +1241,14 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       }
 
       // Stall check: no change means no progress (skip for intermediate states)
-      if (muEqual(result, current)) {
+      const resultHash = muHashCached(result);
+      if (resultHash === currentHash) {
         validator(domainInput, 'stepKernel output');
         return { output: domainInput, stall: true };
       }
 
       current = result;
+      currentHash = resultHash;
     }
     // Max steps exceeded — stall
     validator(domainInput, 'stepKernel output');
@@ -1200,6 +1266,8 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
  * Mirrors Python _resolve_trace_projection_id() (step_mu.py:1100-1148).
  */
 function resolveTraceProjectionId(projections, current, nextValue) {
+  // Cache nextValue hash — it doesn't change across iterations.
+  const nextValueHash = muHashCached(nextValue);
   for (const proj of projections) {
     if (typeof proj !== 'object' || proj === null) continue;
     if (!('pattern' in proj) || !('body' in proj)) continue;
@@ -1208,7 +1276,7 @@ function resolveTraceProjectionId(projections, current, nextValue) {
       returnMeta: true,
     });
     if (candidate.stall) continue;
-    if (muEqual(candidate.output, nextValue)) {
+    if (muHashCached(candidate.output) === nextValueHash) {
       return proj.id || null;
     }
   }
@@ -1264,6 +1332,8 @@ function runStructural(projections, input, maxSteps = 10000) {
 
   const traceEntries = [];
   let current = input;
+  // INVARIANT: stepKernel returns new structures — currentHash caching is safe.
+  let currentHash = muHashCached(input);
 
   for (let i = 0; i < maxSteps; i++) {
     // Gate 5 parity: route through kernel with bridge projections
@@ -1281,8 +1351,9 @@ function runStructural(projections, input, maxSteps = 10000) {
       projection: matchedId
     });
 
-    // Check for stall (no change)
-    if (muEqual(result, current)) {
+    // Check for stall (no change) — hash comparison
+    const resultHash = muHashCached(result);
+    if (resultHash === currentHash) {
       // Add NEW entry for stall - MUST match Python exactly (step_mu.py:1221-1227)
       traceEntries.push({
         step: i + 1,
@@ -1299,6 +1370,7 @@ function runStructural(projections, input, maxSteps = 10000) {
     }
 
     current = result;
+    currentHash = resultHash;
   }
 
   // Hit max steps without stall - add NEW entry (MUST match Python step_mu.py:1238-1243)
@@ -1332,6 +1404,7 @@ function stepKernelStructural(domainProjections, domainInput, options = {}) {
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // BOOTSTRAP_PRIMITIVE: projection_loader
 // Load all seed files (JSON parsing is the irreducible I/O primitive)
@@ -1340,17 +1413,138 @@ const path = require('path');
 //   mu/closures/  - recurrence, exhaustion (closure detection)
 //   mu/bridge/    - bootstrap_structural (non-linear pattern support)
 //   mu/programs/  - rcx_engine, hemispheres (application programs)
+
+// Seed integrity verification — parity with Python's seed_integrity.py
+// SHA256 checksums must match Python's SEED_CHECKSUMS exactly
+const SEED_CHECKSUMS = {
+  'kernel.v1.json': '813cae10f2a7f19bd494e56e5c8cf2feaf92f32ae6988d626bca21ee01811daa',
+  'match.v2.json': '55a6b58a6c8fe31d4c3a8c704603d453fc04c1a757a45fcf7f6570afa1fe27b1',
+  'subst.v2.json': 'e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621',
+  'recurrence.v1.json': 'b916f17b2b21b1c194567e515dce535f1acd84a91f32cfd8a11f3cc01aa7fe41',
+  'recurrence.v2.json': '664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b',
+  'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
+  'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
+  'hemispheres.v1.json': 'aa91c6f346db9da86a3bb0614688a05fc4a9f5a2fa96b19daa4aad3090ff397c',
+};
+
+// Expected projection IDs in security-critical order (first-match-wins)
+// Must match Python's EXPECTED_PROJECTION_IDS exactly
+const EXPECTED_PROJECTION_IDS = {
+  'kernel.v1.json': [
+    'kernel.wrap', 'kernel.stall', 'kernel.try', 'kernel.match_success',
+    'kernel.match_fail', 'kernel.subst_success', 'kernel.unwrap',
+  ],
+  'match.v2.json': [
+    'match.done', 'match.sibling', 'match.equal', 'match.var',
+    'match.typed.descend', 'match.dict.descend', 'match.fail', 'match.wrap',
+  ],
+  'subst.v2.json': [
+    'subst.done', 'subst.ascend', 'subst.sibling', 'subst.var',
+    'subst.lookup.found', 'subst.lookup.next', 'subst.typed.descend',
+    'subst.typed.sibling', 'subst.typed.ascend', 'subst.descend',
+    'subst.primitive', 'subst.wrap',
+  ],
+  'recurrence.v1.json': [
+    'recurrence.init', 'recurrence.end_of_trace', 'recurrence.check_state_stall',
+    'recurrence.check_state_maxsteps', 'recurrence.check_state',
+    'recurrence.found_in_seen', 'recurrence.not_in_head', 'recurrence.not_found',
+    'recurrence.unwrap',
+  ],
+  'recurrence.v2.json': [
+    'recurrence.init', 'recurrence.end_of_trace', 'recurrence.check_state_stall',
+    'recurrence.check_state_maxsteps', 'recurrence.check_state',
+    'recurrence.hash_match', 'recurrence.hash_no_match', 'recurrence.not_found',
+    'recurrence.unwrap',
+  ],
+  'exhaustion.v1.json': [
+    'exhaustion.init_null', 'exhaustion.init', 'exhaustion.find_match',
+    'exhaustion.find_continue', 'exhaustion.find_not_found', 'exhaustion.scan_same',
+    'exhaustion.scan_different', 'exhaustion.scan_end', 'exhaustion.frozen_found',
+    'exhaustion.frozen_check_tail', 'exhaustion.do_freeze',
+  ],
+  'bootstrap_structural.v1.json': [
+    'bridge.var.check_existing', 'bridge.lookup.found_same',
+    'bridge.lookup.found_different', 'bridge.lookup.not_found_yet',
+    'bridge.lookup.not_found',
+  ],
+  'hemispheres.v1.json': [
+    'hemisphere.init', 'hemisphere.classify.exhaustion', 'hemisphere.classify.stall',
+    'hemisphere.classify.null', 'hemisphere.classify.closure',
+    'hemisphere.classify.default', 'hemisphere.add.r_null', 'hemisphere.add.r_inf',
+    'hemisphere.add.r_a', 'hemisphere.add.lobes', 'hemisphere.add.sink',
+    'hemisphere.unwrap',
+  ],
+};
+
+function verifySeedChecksum(seedName, rawContent) {
+  const expected = SEED_CHECKSUMS[seedName];
+  if (!expected) return; // Unknown seed — skip (matches Python behavior)
+  const actual = crypto.createHash('sha256').update(rawContent).digest('hex');
+  if (actual !== expected) {
+    throw new Error(
+      `Seed ${seedName} checksum mismatch: expected ${expected}, got ${actual}`
+    );
+  }
+}
+
+function validateSeedStructure(seedName, seed) {
+  if (!seed.meta || typeof seed.meta !== 'object') {
+    throw new Error(`Seed ${seedName}: missing or invalid 'meta' field`);
+  }
+  if (!Array.isArray(seed.projections)) {
+    throw new Error(`Seed ${seedName}: missing or invalid 'projections' field`);
+  }
+  for (let i = 0; i < seed.projections.length; i++) {
+    const proj = seed.projections[i];
+    if (!proj.id || !proj.pattern || !proj.body) {
+      throw new Error(
+        `Seed ${seedName}: projection ${i} missing required field (id/pattern/body)`
+      );
+    }
+  }
+}
+
+function validateProjectionIds(seedName, seed) {
+  const expected = EXPECTED_PROJECTION_IDS[seedName];
+  if (!expected) return; // Unknown seed — skip
+  const actualIds = seed.projections.map(p => p.id);
+  // Enforce exact ordered equality — projection order is security-critical
+  if (actualIds.length !== expected.length) {
+    throw new Error(
+      `Seed ${seedName}: expected ${expected.length} projections, got ${actualIds.length}`
+    );
+  }
+  for (let i = 0; i < expected.length; i++) {
+    if (actualIds[i] !== expected[i]) {
+      throw new Error(
+        `Seed ${seedName}: projection order mismatch at index ${i}: ` +
+        `expected '${expected[i]}', got '${actualIds[i]}'`
+      );
+    }
+  }
+}
+
+function loadVerifiedSeed(seedPath, seedName) {
+  const raw = fs.readFileSync(seedPath, 'utf8');
+  verifySeedChecksum(seedName, raw);
+  const seed = JSON.parse(raw);
+  validateSeedStructure(seedName, seed);
+  validateProjectionIds(seedName, seed);
+  return seed;
+}
+
 const substrateDir = path.join(__dirname, '..', '..', 'substrate');
 const closuresDir = path.join(__dirname, '..', '..', 'closures');
 const bridgeDir = path.join(__dirname, '..', '..', 'bridge');
 const programsDir = path.join(__dirname, '..', '..', 'programs');
-const kernel = JSON.parse(fs.readFileSync(path.join(substrateDir, 'kernel.v1.json'), 'utf8'));
-const matchSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'match.v2.json'), 'utf8'));
-const substSeed = JSON.parse(fs.readFileSync(path.join(substrateDir, 'subst.v2.json'), 'utf8'));
-const recurrenceSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'recurrence.v1.json'), 'utf8'));
-const exhaustionSeed = JSON.parse(fs.readFileSync(path.join(closuresDir, 'exhaustion.v1.json'), 'utf8'));
-const bridgeSeed = JSON.parse(fs.readFileSync(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'utf8'));
-const hemisphereSeed = JSON.parse(fs.readFileSync(path.join(programsDir, 'hemispheres.v1.json'), 'utf8'));
+const kernel = loadVerifiedSeed(path.join(substrateDir, 'kernel.v1.json'), 'kernel.v1.json');
+const matchSeed = loadVerifiedSeed(path.join(substrateDir, 'match.v2.json'), 'match.v2.json');
+const substSeed = loadVerifiedSeed(path.join(substrateDir, 'subst.v2.json'), 'subst.v2.json');
+const recurrenceSeed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v1.json'), 'recurrence.v1.json');
+const recurrenceV2Seed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v2.json'), 'recurrence.v2.json');
+const exhaustionSeed = loadVerifiedSeed(path.join(closuresDir, 'exhaustion.v1.json'), 'exhaustion.v1.json');
+const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'bootstrap_structural.v1.json');
+const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -1417,12 +1611,14 @@ const allProjectionsWithExhaustionAndBridge = [
 ];
 
 console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
+console.log('Seed integrity: 8 seeds verified (checksum + structure + projection order)');
 console.log(`Loaded projections from mu/ folder:`);
 console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
 console.log(`  - substrate/subst.v2.json: ${substSeed.projections.length} projections`);
 console.log(`  - bridge/bootstrap_structural.v1.json: ${bridgeSeed.projections.length} projections`);
-console.log(`  - closures/recurrence.v1.json: ${recurrenceSeed.projections.length} projections`);
+console.log(`  - closures/recurrence.v1.json: ${recurrenceSeed.projections.length} projections (proof-of-concept)`);
+console.log(`  - closures/recurrence.v2.json: ${recurrenceV2Seed.projections.length} projections (hash-accelerated)`);
 console.log(`  - closures/exhaustion.v1.json: ${exhaustionSeed.projections.length} projections`);
 console.log(`  - programs/hemispheres.v1.json: ${hemisphereSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
@@ -2061,9 +2257,31 @@ console.log(`  4. mu/closures/recurrence.v1.json runs on JavaScript ✓`);
 console.log(`  5. mu/closures/exhaustion.v1.json runs on JavaScript ✓`);
 console.log(`  6. Normalization/denormalization works ✓`);
 console.log(`  7. Complete kernel cycle works ✓`);
-console.log(`  8. Security parity with Python (5 bootstrap primitives) ✓`);
+console.log(`  8. Security parity with Python (4 bootstrap primitives) ✓`);
 console.log(`  9. Recurrence closure detection parity ✓`);
 console.log(`  10. Same projections, same semantics, two substrates ✓`);
+
+/**
+ * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
+ * Shared helper for run_recurrence_with_bridge and run_exhaustion_with_bridge JSON API actions.
+ * @host_iteration (bridge-backed algorithm execution loop)
+ */
+function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
+  let current = input;
+  let steps = 0;
+  const limit = maxSteps || 200;
+  while (steps < limit) {
+    const wrapped = stepKernel(
+      allProjs, current, domainProjs,
+      { validationMode: 'algorithm_runtime' }
+    );
+    const next = denormalize(wrapped.result);
+    if (muEqual(current, next)) break;
+    current = next;
+    steps++;
+  }
+  return current;
+}
 
 // =============================================================================
 // JSON API Mode (for cross-substrate verification)
@@ -2160,6 +2378,8 @@ if (process.argv.includes('--json-api')) {
         MAX_DEPTH,
         max_width: MAX_MU_WIDTH,  // Added for Tooling Delta parity check
         KERNEL_RESERVED_FIELDS: [...KERNEL_RESERVED_FIELDS],
+        seed_integrity_verified: true,
+        seed_count: Object.keys(SEED_CHECKSUMS).length,
         kernel_projection_count: kernel.projections.length,
         match_projection_count: matchSeed.projections.length,
         subst_projection_count: substSeed.projections.length,
@@ -2201,22 +2421,8 @@ if (process.argv.includes('--json-api')) {
       // Run Recurrence with bridge (meta-circular path)
       const { input, maxSteps } = request;
       try {
-        let current = input;
-        let steps = 0;
-        const limit = maxSteps || 200;
-        while (steps < limit) {
-          const wrapped = stepKernel(
-            allProjectionsWithBridge,
-            current,
-            recurrenceProjections,
-            { validationMode: 'algorithm_runtime' }
-          );
-          const next = denormalize(wrapped.result);
-          if (muEqual(current, next)) break;
-          current = next;
-          steps++;
-        }
-        response = { success: true, result: current };
+        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, recurrenceProjections, maxSteps);
+        response = { success: true, result };
       } catch (e) {
         response = { success: false, error: e.message };
       }
@@ -2224,22 +2430,8 @@ if (process.argv.includes('--json-api')) {
       // Run Exhaustion with bridge (meta-circular path)
       const { input, maxSteps } = request;
       try {
-        let current = input;
-        let steps = 0;
-        const limit = maxSteps || 200;
-        while (steps < limit) {
-          const wrapped = stepKernel(
-            allProjectionsWithBridge,
-            current,
-            exhaustionProjections,
-            { validationMode: 'algorithm_runtime' }
-          );
-          const next = denormalize(wrapped.result);
-          if (muEqual(current, next)) break;
-          current = next;
-          steps++;
-        }
-        response = { success: true, result: current };
+        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, exhaustionProjections, maxSteps);
+        response = { success: true, result };
       } catch (e) {
         response = { success: false, error: e.message };
       }

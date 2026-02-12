@@ -119,6 +119,31 @@ class TestStructureValidation:
         # Should not raise
         validate_seed_structure("test.json", seed)
 
+    def test_non_dict_seed_fails(self):
+        """Seed that isn't a dict fails with ValueError (not AttributeError)."""
+        with pytest.raises(ValueError, match="must be a dict"):
+            validate_seed_structure("test.json", [])
+        with pytest.raises(ValueError, match="must be a dict"):
+            validate_seed_structure("test.json", "not a dict")
+
+    def test_meta_not_dict_fails(self):
+        """Seed with non-dict meta fails with ValueError (not AttributeError)."""
+        seed = {
+            "meta": [],  # Should be dict
+            "projections": []
+        }
+        with pytest.raises(ValueError, match="'meta' must be a dict"):
+            validate_seed_structure("test.json", seed)
+
+    def test_meta_as_string_fails(self):
+        """Seed with string meta fails with ValueError."""
+        seed = {
+            "meta": "not a dict",
+            "projections": []
+        }
+        with pytest.raises(ValueError, match="'meta' must be a dict"):
+            validate_seed_structure("test.json", seed)
+
     def test_missing_meta_fails(self):
         """Seed without meta key fails."""
         seed = {"projections": []}
@@ -201,7 +226,7 @@ class TestProjectionIdValidation:
                 # Missing other expected IDs
             ]
         }
-        with pytest.raises(ValueError, match="missing expected projection IDs"):
+        with pytest.raises(ValueError, match="projection ID mismatch"):
             validate_projection_ids("match.v1.json", seed)
 
     def test_wrap_not_last_fails(self):
@@ -217,7 +242,7 @@ class TestProjectionIdValidation:
                 {"id": "match.dict.descend", "pattern": {}, "body": {}},
             ]
         }
-        with pytest.raises(ValueError, match="must be last"):
+        with pytest.raises(ValueError, match="projection order mismatch"):
             validate_projection_ids("match.v1.json", seed)
 
     def test_unknown_seed_skips_validation(self):

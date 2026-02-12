@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .mu_type import Mu, mu_equal
+from .mu_type import Mu, mu_hash_cached
 from .eval_seed import step
 from .kernel import get_step_budget
 
@@ -49,7 +49,7 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
         Tuple of (is_done, is_state, run_projections) functions
 
     Example:
-        is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
+        is_match_done, _, run_match_projections = make_projection_runner("match")
         result, steps, is_stall = run_match_projections(projections, initial_state)
 
         # For v2 projections with _mode terminal field:
@@ -89,6 +89,8 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
         """
         budget = get_step_budget()
         state = initial_state
+        # INVARIANT: step() is functionally pure — state_hash caching is safe.
+        state_hash = mu_hash_cached(initial_state)
         for i in range(max_steps):
             # Check if done
             if is_done(state):
@@ -99,14 +101,16 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
             # Take a step
             next_state = step(projections, state)
 
-            # Check for stall (no change) - use mu_equal to avoid Python type coercion
-            if mu_equal(next_state, state):
+            # Check for stall (no change) - use mu_hash_cached to avoid Python type coercion
+            next_hash = mu_hash_cached(next_state)
+            if next_hash == state_hash:
                 # Report steps consumed to global budget.
                 # A step was executed before stall detection, so consume i + 1.
                 budget.consume(i + 1)
                 return state, i, True
 
             state = next_state
+            state_hash = next_hash
 
         # Max steps exceeded - treat as stall
         # Report steps consumed to global budget

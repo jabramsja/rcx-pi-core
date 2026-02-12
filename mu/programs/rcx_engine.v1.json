@@ -1,28 +1,31 @@
 {
   "meta": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "name": "RCX_ENGINE",
     "description": "Main RCX engine combining recurrence and exhaustion detection",
     "doc": "docs/core/RCXEngine.v0.md",
     "spec_ref": "RCXEngineNew.pdf Rule 2.2♢, Rule 3.1",
-    "status": "design_only",
+    "status": "structural_specification",
     "execution_layer": "APPLICATION",
     "requires_patterns": ["non-linear"],
     "dependencies": [
-      "recurrence.v1.json (closure detection)",
+      "recurrence.v2.json (hash-accelerated closure detection)",
       "exhaustion.v1.json (operator exhaustion)"
     ],
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
       "Engine orchestrates recurrence and exhaustion detection",
       "Input: _run_engine with projections, input, and config",
-      "Output: result with closure_detected, exhaustion_detected, frozen set"
+      "Output: result with closure_detected, exhaustion_detected, frozen set",
+      "Boundary operations use _boundary_request (algebraic effect protocol)",
+      "Host services _boundary_request generically: operation, input, context, inject_key",
+      "Any host (Python, JS, Rust) can drive the engine from one generic dispatch loop"
     ]
   },
   "projections": [
     {
       "id": "engine.init",
-      "description": "Initialize engine run with default config",
+      "description": "Initialize engine run with default config — request trace generation",
       "pattern": {
         "_run_engine": {
           "projections": {"var": "projs"},
@@ -30,20 +33,24 @@
         }
       },
       "body": {
-        "_mode": "engine",
-        "_phase": "run_trace",
-        "_projections": {"var": "projs"},
-        "_input": {"var": "input"},
-        "_max_steps": 100,
-        "_frozen": null,
-        "_trace_result": null,
-        "_recurrence_result": null,
-        "_exhaustion_result": null
+        "_boundary_request": {
+          "operation": "run_trace",
+          "input": {
+            "projections": {"var": "projs"},
+            "value": {"var": "input"},
+            "max_steps": 100
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": null
+          },
+          "inject_key": "_trace_result"
+        }
       }
     },
     {
       "id": "engine.init_config",
-      "description": "Initialize engine run with custom config",
+      "description": "Initialize engine run with custom config — request trace generation",
       "pattern": {
         "_run_engine": {
           "projections": {"var": "projs"},
@@ -53,88 +60,130 @@
         }
       },
       "body": {
-        "_mode": "engine",
-        "_phase": "run_trace",
-        "_projections": {"var": "projs"},
-        "_input": {"var": "input"},
-        "_max_steps": {"var": "max"},
-        "_frozen": {"var": "frozen"},
-        "_trace_result": null,
-        "_recurrence_result": null,
-        "_exhaustion_result": null
+        "_boundary_request": {
+          "operation": "run_trace",
+          "input": {
+            "projections": {"var": "projs"},
+            "value": {"var": "input"},
+            "max_steps": {"var": "max"}
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": {"var": "frozen"}
+          },
+          "inject_key": "_trace_result"
+        }
       }
     },
     {
       "id": "engine.trace_done",
-      "description": "Trace complete, start recurrence detection",
+      "description": "Trace complete — request boundary hash (mu_hash is a host primitive)",
       "pattern": {
         "_mode": "engine",
-        "_phase": "run_trace",
-        "_projections": {"var": "projs"},
-        "_input": {"var": "input"},
-        "_max_steps": {"var": "max"},
         "_frozen": {"var": "frozen"},
         "_trace_result": {
           "result": {"var": "result"},
           "trace": {"var": "trace"},
           "stall": {"var": "stall"}
-        },
-        "_recurrence_result": null,
-        "_exhaustion_result": null
+        }
       },
       "body": {
-        "_detect_closure": {
-          "trace": {"var": "trace"},
-          "result": {"var": "result"}
-        },
-        "_engine_context": {
-          "frozen": {"var": "frozen"},
-          "trace": {"var": "trace"},
-          "stall": {"var": "stall"}
+        "_boundary_request": {
+          "operation": "hash_trace",
+          "input": {"var": "trace"},
+          "context": {
+            "_mode": "engine",
+            "_result": {"var": "result"},
+            "_frozen": {"var": "frozen"},
+            "_stall": {"var": "stall"},
+            "_raw_trace": {"var": "trace"}
+          },
+          "inject_key": "_hashed_trace"
+        }
+      }
+    },
+    {
+      "id": "engine.hash_done",
+      "description": "Trace hashed — request recurrence detection (run_algorithm effect)",
+      "pattern": {
+        "_mode": "engine",
+        "_result": {"var": "result"},
+        "_frozen": {"var": "frozen"},
+        "_stall": {"var": "stall"},
+        "_raw_trace": {"var": "raw_trace"},
+        "_hashed_trace": {"var": "hashed_trace"}
+      },
+      "body": {
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "recurrence.v2.json",
+          "input": {
+            "_detect_closure": {
+              "trace": {"var": "hashed_trace"},
+              "result": {"var": "result"}
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": {"var": "frozen"},
+            "_stall": {"var": "stall"},
+            "_raw_trace": {"var": "raw_trace"}
+          },
+          "inject_key": "_recurrence_result"
         }
       }
     },
     {
       "id": "engine.recurrence_done",
-      "description": "Recurrence detection complete, start exhaustion if closure found",
+      "description": "Recurrence complete — request exhaustion detection (run_algorithm effect)",
       "pattern": {
-        "closure_detected": {"var": "closure"},
-        "tau_step": {"var": "tau"},
-        "final_result": {"var": "result"},
-        "_engine_context": {
-          "frozen": {"var": "frozen"},
-          "trace": {"var": "trace"},
-          "stall": {"var": "stall"}
+        "_mode": "engine",
+        "_frozen": {"var": "frozen"},
+        "_stall": {"var": "stall"},
+        "_raw_trace": {"var": "raw_trace"},
+        "_recurrence_result": {
+          "closure_detected": {"var": "closure"},
+          "tau_step": {"var": "tau"},
+          "final_result": {"var": "result"}
         }
       },
       "body": {
-        "_detect_exhaustion": {
-          "trace": {"var": "trace"},
-          "frozen": {"var": "frozen"},
-          "tau_step": {"var": "tau"},
-          "operator_ids": null
-        },
-        "_engine_recurrence": {
-          "closure_detected": {"var": "closure"},
-          "tau_step": {"var": "tau"},
-          "result": {"var": "result"},
-          "stall": {"var": "stall"}
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "exhaustion.v1.json",
+          "input": {
+            "_detect_exhaustion": {
+              "trace": {"var": "raw_trace"},
+              "frozen": {"var": "frozen"},
+              "tau_step": {"var": "tau"},
+              "operator_ids": null
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_stall": {"var": "stall"},
+            "_closure_detected": {"var": "closure"},
+            "_tau_step": {"var": "tau"},
+            "_final_result": {"var": "result"}
+          },
+          "inject_key": "_exhaustion_result"
         }
       }
     },
     {
       "id": "engine.exhaustion_done",
-      "description": "Exhaustion detection complete, produce final result",
+      "description": "Exhaustion complete — produce final engine result",
       "pattern": {
-        "exhaustion_detected": {"var": "exhausted"},
-        "operator_to_freeze": {"var": "op"},
-        "frozen": {"var": "new_frozen"},
-        "action": {"var": "action"},
-        "_engine_recurrence": {
-          "closure_detected": {"var": "closure"},
-          "tau_step": {"var": "tau"},
-          "result": {"var": "result"},
-          "stall": {"var": "stall"}
+        "_mode": "engine",
+        "_stall": {"var": "stall"},
+        "_closure_detected": {"var": "closure"},
+        "_tau_step": {"var": "tau"},
+        "_final_result": {"var": "result"},
+        "_exhaustion_result": {
+          "exhaustion_detected": {"var": "exhausted"},
+          "operator_to_freeze": {"var": "op"},
+          "frozen": {"var": "new_frozen"},
+          "action": {"var": "action"}
         }
       },
       "body": {

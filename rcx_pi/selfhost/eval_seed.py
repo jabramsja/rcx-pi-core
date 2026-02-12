@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_equal
+from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 
 
 def _is_kernel_internal_state(value: Any) -> bool:
@@ -343,7 +343,7 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             for k, v in sub_bindings.items():
                 if k in bindings:
                     # Same variable bound twice - must be same value (non-linear pattern)
-                    if not mu_equal(bindings[k], v):
+                    if mu_hash_cached(bindings[k]) != mu_hash_cached(v):
                         return NO_MATCH
                 bindings[k] = v
         return bindings
@@ -374,7 +374,7 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             for k, v in sub_bindings.items():
                 if k in bindings:
                     # Same variable bound twice - must be same value (non-linear pattern)
-                    if not mu_equal(bindings[k], v):
+                    if mu_hash_cached(bindings[k]) != mu_hash_cached(v):
                         return NO_MATCH
                 bindings[k] = v
         return bindings

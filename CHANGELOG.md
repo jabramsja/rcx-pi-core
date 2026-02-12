@@ -2,6 +2,46 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-10
+
+### Content-Addressed Mu Level 1 IMPLEMENTED: mu_equal Eliminated (5→4 Bootstrap Primitives)
+
+- **`mu_hash_cached()` added to `mu_type.py`** — SHA-256 with canonical-JSON-keyed cache for O(1) amortized equality
+- **`mu_equal` eliminated as bootstrap primitive** — All 8 production call sites replaced with `mu_hash_cached()`:
+  - `eval_seed.py`: 2 binding conflict detection sites
+  - `step_mu.py`: 5 stall detection sites
+  - `projection_runner.py`: 1 stall detection site
+- **JS parity: `muHashCached()` added to `eval_step.js`** — Map-based cache, 6 JS call sites updated, `muEqual()` delegates to hash comparison
+- **`mu_equal` retained as convenience wrapper** — Delegates to `mu_hash_cached(a) == mu_hash_cached(b)`. Marked ELIMINATED PRIMITIVE, not BOOTSTRAP_PRIMITIVE.
+- **Bootstrap primitive count: 5 → 4** — eval_step, max_steps, stack_guard, projection_loader
+- **Paxos end-to-end pipeline test created** — `tests/test_paxos_end_to_end.py` (6 tests): paxos livelock → trace → hash → recurrence.v2 → healer → consensus
+- **Design docs updated**: BootstrapPrimitives.v0.md, ContentAddressedMu.md (Level 1 IMPLEMENTED), STATUS.md
+- All 1991+ tests pass, JS tests pass, L3 parity intact
+
+### Content-Addressed Mu Design + Recurrence v2 Hash Acceleration
+
+- **Created `roadmap/ContentAddressedMu.md`** — Design doc for Content-Addressed Mu values (hash-identity as substrate property)
+- **Key insight: mu_equal elimination (5→4 bootstrap primitives)** — With content-addressing, `mu_equal` is subsumed by non-linear pattern matching on hash strings. `mu_hash` moves from runtime infrastructure to boundary scaffolding (like JSON parsing)
+- **Created `mu/closures/recurrence.v2.json`** — 9 hash-accelerated projections for closure detection
+  - Pre-computes SHA-256 hashes at boundary; compares 64-char hash strings (O(1)) instead of deep structural match (O(depth))
+  - Reduces Paxos 15-step trace from ~6,300 kernel steps to ~420 (theoretical estimate)
+- **Created `docs/core/recurrence_v2_design.md`** — Design spec for hash-accelerated closure detection
+- **Converted `hash_trace_for_recurrence()` to iterative** — Avoids Python recursion limit on long traces (max_steps=10,000 > Python limit ~1,000)
+- **Updated `mu/programs/paxos_demo.v1.json`** — Dependency changed from recurrence.v1 to recurrence.v2
+- **Added Content-Addressed Mu to TASKS.md VECTOR** — Promotion criteria: Level 1 promotes to NEXT when recurrence.v2 production tests validate Level 0
+- **INFRA_CURRENT: 37→38** — New AST_OK:infra marker for iterative hash_trace_for_recurrence
+- Agent review: 3 iterative cycles (8, 12, 16 turns). Final: verifier APPROVE, structural-proof PROVEN
+
+### Seed Integrity Verification Parity + Adversarial Hardening
+
+- **JS substrate now verifies all 7 seeds at load time** — SHA256 checksum, structure validation, projection ID ordering
+- Closes L3 parity gap where Python verified seeds but JS loaded blindly
+- Python `validate_projection_ids` now enforces exact ordered equality (security-critical for first-match-wins routing)
+- JS `classifyLegacyLinkedList` cycle detection activated
+- Handler duplication factored in JS substrate
+- Deprecated `get_seeds_dir` removed from Python
+- 63 hemisphere adversarial tests added
+
 ## 2026-02-09
 
 ### Mu Hemispheres v0: Native Structural Routing
@@ -955,7 +995,7 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - Updated `docs/RuleAsMotif.v0.md` to reflect implementation status
 - Updated `docs/cli_quickstart.md` with rules commands
-- Updated `docs/IndependentEncounter.v0.md` to IMPLEMENTED status
+- Updated `docs/execution/IndependentEncounter.v0.md` to IMPLEMENTED status
 
 ## Unreleased
 
@@ -981,7 +1021,7 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - `docs/TraceReadingPrimer.v0.md` - Human-readable trace guide
 - `docs/Flags.md` - Flag discipline contract
-- `docs/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
+- `docs/archive/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
 - Removed `NEXT_STEPS.md` (redundant with TASKS.md)
 
 ### Tests

@@ -17,6 +17,8 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 # mu_equal Binding Conflict Fix - Summary for Review
 
+> **SUPERSEDED (2026-02-10):** mu_equal has been ELIMINATED as a bootstrap primitive. All 8 production call sites now use `mu_hash_cached()` directly (Level 1 Content-Addressed Mu). This review documents the historical Phase 1 centralization work that preceded elimination. See `roadmap/ContentAddressedMu.md` for current state.
+
 **Date:** 2026-01-31
 **Branch:** feat/step5-enginenews-closure-detection
 

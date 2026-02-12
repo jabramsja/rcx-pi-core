@@ -114,8 +114,8 @@ def load_match_with_bridge_projections() -> list[Mu]:
     """
     global _match_bridge_cache
     if _match_bridge_cache is not None:
-        _validate_match_bridge_ordering(_match_bridge_cache)
-        return _match_bridge_cache
+        import json as _json
+        return _json.loads(_json.dumps(_match_bridge_cache))
 
     from .seed_integrity import load_verified_seed, get_seed_path
 
@@ -144,7 +144,9 @@ def load_match_with_bridge_projections() -> list[Mu]:
 
     _validate_match_bridge_ordering(combined)
     _match_bridge_cache = combined
-    return _match_bridge_cache
+    # Return defensive copy — callers must not mutate the cached projections
+    import json as _json
+    return _json.loads(_json.dumps(_match_bridge_cache))
 
 
 def clear_match_bridge_cache() -> None:
@@ -350,6 +352,12 @@ def normalize_for_match(value: Mu) -> Mu:
                 stack.append(("dict_tail", len(keys) - 1, keys, [], val))
                 stack.append(("eval", val[keys[-1]]))
                 continue
+
+            # FAIL CLOSED: unsupported type (bytes, function, etc.)
+            raise TypeError(
+                f"normalize_for_match: unsupported type {type(val).__name__}. "
+                f"Only valid Mu types (None, bool, int, float, str, list, dict) are accepted."
+            )
 
         elif op == "ht_typed":
             # Type-tagged: head is done, now process tail (preserving _type)
@@ -736,6 +744,12 @@ def denormalize_from_match(value: Mu) -> Mu:
                     stack.append(("eval", val[key]))
                 continue
 
+            # FAIL CLOSED: unsupported type (bytes, function, etc.)
+            raise TypeError(
+                f"denormalize_from_match: unsupported type {type(val).__name__}. "
+                f"Only valid Mu types (None, bool, int, float, str, list, dict) are accepted."
+            )
+
         elif op == "finalize_list":
             result = item[1]  # The now-populated list
 
@@ -814,7 +828,7 @@ def dict_to_bindings(d: dict[str, Mu]) -> Mu:
 # =============================================================================
 
 # v1 runner (legacy, used by load_match_projections / match.v1.json)
-is_match_done, is_match_state, run_match_projections = make_projection_runner("match")
+is_match_done, _, run_match_projections = make_projection_runner("match")
 
 # v2 runner (bridge-aware, uses _mode terminal field for match.v2 + bridge)
 is_match_done_v2, _, run_match_bridge = make_projection_runner("match", terminal_field="_mode")

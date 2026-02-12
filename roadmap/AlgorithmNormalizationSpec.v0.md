@@ -6,6 +6,8 @@
 
 Status: **Gate 1 complete** (2026-02-04). Open questions resolved. Ready for approval and migration to `docs/core/`.
 
+**Note (2026-02-10):** This spec describes the base normalization rules for recurrence.v1. Since Gate 1, `recurrence.v2.json` was created with hash-accelerated closure detection (boundary hashing via `hash_trace_for_recurrence()`). v2 adds `state_hash` fields to trace entries but does not change the normalization rules defined here. See `docs/core/recurrence_v2_design.md` and `roadmap/ContentAddressedMu.md` for the v2 evolution.
+
 ## Purpose
 Define a single canonical normalized representation for algorithm state used by recurrence, exhaustion, and rcx_engine so these algorithms can run via structural match/subst without hybrid host execution.
 

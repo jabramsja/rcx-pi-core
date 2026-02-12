@@ -100,6 +100,7 @@ check_function_marker "substitute" "@host_recursion"
 check_function_marker "normalize" "@host_recursion"
 check_function_marker "denormalize" "@host_recursion"
 check_function_marker "muEqual" "@host_builtin"
+check_function_marker "muHash" "@host_builtin"
 check_function_marker "isValidMu" "@host_builtin"
 
 echo ""
@@ -111,4 +112,4 @@ fi
 
 echo "PASSED: All JS debt markers present"
 echo ""
-echo "Note: JS debt (12) matches Python debt (12) - same bootstrap primitives"
+echo "Note: JS debt (13) matches Python debt (13) - same bootstrap primitives"

@@ -20,8 +20,8 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, exhaustion.v1 (all 47 projections)
-    - Same bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, hemispheres.v1 (47+ core projections)
+    - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
 14. **Seeds must declare their execution layer.** Every seed is either:
@@ -89,6 +89,10 @@ Items here are implemented and verified under current invariants. Changes requir
 
 - Deterministic trace core (v1) complete
 - Tracker sync note (2026-02-07): `match_mu` var-name scan cycle guard was corrected to allow shared substructures (DAG reuse) while still rejecting true active-path cycles; no phase/task promotion.
+- Tracker sync note (2026-02-10): `match_mu` bridge cache defensive copy + `seed_integrity` MU_SEED_LOCATIONS moved to module level; agent verdict extraction hardened across all 9 prompts; no phase/debt/task change.
+- Tracker sync note (2026-02-10): `seed_integrity` fail-closed warning on unregistered seeds + paxos_demo registration; `run_review` memory_context sanitization; translator max_turns increased; no phase/debt/task change.
+- Tracker sync note (2026-02-11): `_run_sub_algorithm` budget fix — removed cross-iteration budget sharing; per-call budget in step_kernel_mu is sufficient, outer loop bounded by max_iterations. Slow test split: `test_paxos_end_to_end.py` and `test_recurrence_production.py` marked `@pytest.mark.slow`, excluded from CI fast gate, run in `audit_all.sh`; no phase/debt/task change.
+- Tracker sync note (2026-02-11): Stall-detection hash caching — cache `current_hash` across loop iterations in 6 Python sites (step_kernel_mu, run_mu, run_mu_structural, _run_sub_algorithm, _resolve_trace_projection_id, projection_runner) + 4 JS sites (L3 parity). Halves hash calls per iteration. green_gate.yml: ci_fast on push (was ci_full), timeout 20→30m. 5 additional tests marked slow (3 engine pipeline, 1 hemisphere adversarial, 1 structural trace fuzzer). No phase/debt/task change.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
 - Golden fixtures in place
@@ -122,13 +126,13 @@ Items here are implemented and verified under current invariants. Changes requir
 - Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
   - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
   - Docs: `docs/archive/bytecode/` (archived)
-- Mu Type v0 (`rcx_pi/mu_type.py`, `docs/MuType.v0.md`, 58 tests)
+- Mu Type v0 (`rcx_pi/mu_type.py`, `docs/core/MuType.v0.md`, 58 tests)
 - Structural Purity Guardrails v0 (`docs/StructuralPurity.v0.md`, 32 additional tests):
   - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
   - `assert_handler_pure()`, `validate_kernel_boundary()`
   - `tools/audit_semantic_purity.sh` extended with checks 9-11
 - RCX Kernel Phase 1 (`rcx_pi/kernel.py`, `docs/RCXKernel.v0.md`, 47 tests)
-- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/EVAL_SEED.v0.md`, 125 tests):
+- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/core/EVAL_SEED.v0.md`, 125 tests):
   - Core operations: `match`, `substitute`, `apply_projection`, `step`
   - Only special form: `{"var": "x"}` (variable binding)
   - Kernel handlers: step, stall, init
@@ -196,20 +200,18 @@ Items here are implemented and verified under current invariants. Changes requir
   - 26 new tests in `tests/test_classify_mu.py`
 - Boot0 Architecture v0.4 (`docs/core/Boot0Architecture.v0.md`) - 9-agent reviewed 2026-01-31:
   - Hex0-inspired staged bootstrap design: Boot0 → Boot1 → Boot2
-  - 5 irreducible bootstrap primitives: eval_step, mu_equal, max_steps, stack_guard, projection_loader
+  - 4 irreducible bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal eliminated via Level 1 Content-Addressed Mu)
   - Boot0=structural, Boot1=none, Boot2=kernel validation boundaries
   - v0.4: Added "stable semantics, shrinking substrate", JSON as Phase 0 format, explicit handshake ABI, security invariants, L3 parity contract
   - Design COMPLETE, implementation DEFERRED per 9-agent Advisor recommendation
   - L3 is complete; Boot0 extraction can wait until L4 research drives it
-- mu_equal Phase 1/2 Review (9-agent dialectic 2026-01-31):
-  - **Phase 1 DONE**: Centralized binding conflict checks to call mu_equal (2-line fix in eval_seed.py)
-  - **Phase 2 DEFERRED**: Structural recursion to replace json.dumps - NOT WORTH IT
-  - Reason: json.dumps IS structural equality for JSON data. Mu IS JSON by definition.
-  - 9-agent consensus: "Cosmetic change, not semantic. Both use host mechanisms."
-  - Structural-proof: "Cannot find ONE example where json.dumps gives wrong answer"
-  - Expert: "4 lines → 40-60 lines with identical semantics"
-  - L4 research question remains open: "Can mu_equal become projections?"
-  - Parity fuzzer created: `tests/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
+- mu_equal ELIMINATED as Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):
+  - **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all 8 production call sites (eval_seed 2, step_mu 5, projection_runner 1)
+  - Bootstrap primitives: 5 → 4. `mu_equal` retained as convenience wrapper only.
+  - JS parity: `muHashCached()` added, `muEqual()` delegates. 6 JS call sites updated.
+  - Paxos e2e pipeline test: `tests/test_paxos_end_to_end.py` (6 tests) validates deadlock metabolization
+  - Historical: 9-agent consensus (2026-01-31) confirmed json.dumps IS structural equality for JSON data
+  - Parity fuzzer: `tests/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
 - Testing Tier System (2026-01-28):
   - 9-agent review resolved fuzzer hang issue (rejected circuit breaker, chose Option B)
   - Tier 1: `audit_fast.sh` (~3 min) - Core tests for local iteration
@@ -294,6 +296,12 @@ Items here are implemented and verified under current invariants. Changes requir
   - Cross-substrate parity: Python + JS produce identical results
   - 27 Python tests, 7 parity tests, 6 parity vectors
   - Semantic answer: routing decisions ARE expressible as pure Mu projections
+- Hemisphere Adversarial Hardening (2026-02-10):
+  - JS seed verification parity: all 7 seeds verified at load (SHA256, structure, projection IDs)
+  - Python `validate_projection_ids` enforces exact ordered equality (first-match-wins security)
+  - JS cycle detection activated, handler duplication factored
+  - 63 hemisphere adversarial tests added
+  - Deprecated `get_seeds_dir` removed
 
 ---
 
@@ -304,7 +312,7 @@ such that a structural program can cause new structure to emerge only via
 Stall → Fix → Trace → Closure, and in no other way?
 
 **Answer:** The Structural Reduction Loop (MATCH → REDUCE/STALL → TRACE → NORMAL_FORM).
-See `docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
+See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
@@ -337,6 +345,7 @@ Current Exhaustion Layer: META_CIRCULAR
 
 
 **Active designs:**
+- Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
 

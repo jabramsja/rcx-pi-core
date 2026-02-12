@@ -34,9 +34,17 @@ import json
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, mu_equal
+from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached
 from .kernel import get_step_budget
 from .seed_integrity import get_seed_path, load_verified_seed
+
+# Terminal shape key sets (module-level constants, avoids repeated construction)
+_RECURRENCE_TERMINAL_KEYS = frozenset({"closure_detected", "final_result", "tau_step"})  # AST_OK: constant — recurrence output shape
+_EXHAUSTION_TERMINAL_KEYS = frozenset({"action", "exhaustion_detected", "frozen", "operator_to_freeze"})  # AST_OK: constant — exhaustion output shape
+_ENGINE_TERMINAL_KEYS = frozenset({  # AST_OK: constant — engine unwrapped output shape
+    "value", "closure_detected", "tau_step", "exhaustion_detected",
+    "operator_frozen", "frozen_set", "action", "stall",
+})
 
 
 # =============================================================================
@@ -165,6 +173,7 @@ ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = (
     ALGORITHM_ENTRYPOINT_KEYS
     | ALGORITHM_INTERNAL_UNRESERVED_FIELDS
     | frozenset((
+        "_check_hash",
         "_check_list",
         "_current",
         "_frozen",
@@ -174,6 +183,7 @@ ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = (
         "_result",
         "_seen",
         "_stall",
+        "_state_hash",
         "_step",
         "_tau_step",
         "_type",
@@ -652,11 +662,11 @@ def is_kernel_intermediate(result: Mu) -> bool:
     - _mode with value other than "done" (kernel loop in progress)
 
     These are NOT stalls - the kernel is actively working.
-    We skip the mu_equal stall check for these because:
+    We skip the stall check for these because:
     1. They may have deeply nested linked-list structures
     2. They're intermediate by definition - no comparison needed
 
-    Phase 8b: This prevents mu_equal from being called on kernel internals.
+    Phase 8b: This prevents stall detection from being called on kernel internals.
     """
     if not isinstance(result, dict):
         return False
@@ -723,7 +733,7 @@ def step_kernel_mu(
     The loop ONLY does:
     - is_kernel_terminal(): Check for structural marker {_mode: "done", ...}
     - extract_kernel_result(): Unpack the marker (no semantic decisions)
-    - mu_equal(): Detect no-progress stall
+    - mu_hash_cached(): Detect no-progress stall (hash comparison)
 
     L2 FULL: Projection SELECTION is structural (linked-list cursor).
     Projection EXECUTION uses Python for-loop (accepted as bootstrap primitive per Phase 8 decision).
@@ -778,14 +788,26 @@ def step_kernel_mu(
                 f"got kernel projection at index {i}: {proj_id}"
             )
 
-    # SECURITY: Validate each domain projection's pattern and body for reserved fields
+    # SECURITY: Validate each domain projection structure and Mu validity
+    # Fail closed: reject non-dict projections, missing pattern/body, non-Mu content
     # This matches JS stepKernel validation (parity requirement)
     for i, proj in enumerate(projections):
-        if isinstance(proj, dict):
-            if "pattern" in proj:
-                validator(proj["pattern"], f"projection[{i}].pattern")
-            if "body" in proj:
-                validator(proj["body"], f"projection[{i}].body")
+        if not isinstance(proj, dict):
+            raise TypeError(
+                f"SECURITY: projection[{i}] must be a dict, got {type(proj).__name__}"
+            )
+        if "pattern" not in proj:
+            raise KeyError(
+                f"SECURITY: projection[{i}] missing required 'pattern' key"
+            )
+        if "body" not in proj:
+            raise KeyError(
+                f"SECURITY: projection[{i}] missing required 'body' key"
+            )
+        assert_mu(proj["pattern"], f"projection[{i}].pattern")
+        assert_mu(proj["body"], f"projection[{i}].body")
+        validator(proj["pattern"], f"projection[{i}].pattern")
+        validator(proj["body"], f"projection[{i}].body")
 
     # Load combined kernel projections (skip deep copy — eval_step never mutates)
     if kernel_mode == "core":
@@ -811,7 +833,10 @@ def step_kernel_mu(
     }
 
     # Run kernel until done or stall
+    # INVARIANT: eval_step is functionally pure — it returns new structures,
+    # never mutates its input. current_hash caching depends on this property.
     current = kernel_entry
+    current_hash = mu_hash_cached(kernel_entry)
     # BOOTSTRAP_PRIMITIVE: max_steps
     # This is the irreducible resource exhaustion guard.
     # Cannot be structural (would require arithmetic on fuel).
@@ -844,11 +869,14 @@ def step_kernel_mu(
             # Stall check - no change means no progress
             # Skip for intermediate kernel states (they have deep nested structures
             # and are mid-execution by definition, not stalls)
-            if not is_kernel_intermediate(result) and mu_equal(result, current):
-                validator(input_value, "step_kernel_mu output")
-                if return_meta:
-                    return {"output": input_value, "stall": True}
-                return input_value
+            if not is_kernel_intermediate(result):
+                result_hash = mu_hash_cached(result)
+                if result_hash == current_hash:
+                    validator(input_value, "step_kernel_mu output")
+                    if return_meta:
+                        return {"output": input_value, "stall": True}
+                    return input_value
+                current_hash = result_hash
 
             current = result
 
@@ -978,7 +1006,7 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     # Single bootstrap step: preserves first-match-wins semantics without
     # embedding a projection-application loop in this helper.
     normalized_result = step(projections, normalized_input)
-    if mu_equal(normalized_result, normalized_input):
+    if mu_hash_cached(normalized_result) == mu_hash_cached(normalized_input):
         return input_value
 
     result = denormalize_from_match(normalized_result)
@@ -1157,6 +1185,8 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
 
     trace = []
     current = initial
+    # INVARIANT: step_mu is functionally pure — current_hash caching is safe.
+    current_hash = mu_hash_cached(initial)
 
     for i in range(max_steps):
         trace.append({"step": i, "value": current})
@@ -1164,11 +1194,13 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
         result = step_mu(projections, current)
 
         # Check for stall (no change)
-        if mu_equal(result, current):
+        result_hash = mu_hash_cached(result)
+        if result_hash == current_hash:
             trace.append({"step": i + 1, "value": result, "stall": True})
             return result, trace, True
 
         current = result
+        current_hash = result_hash
 
     # Hit max steps without stall
     trace.append({"step": max_steps, "value": current, "max_steps": True})
@@ -1203,6 +1235,8 @@ def _resolve_trace_projection_id(
         budget.stop()
 
     try:
+        # Cache next_value hash — it doesn't change across iterations.
+        next_value_hash = mu_hash_cached(next_value)
         for proj in projections:
             if not isinstance(proj, dict):
                 continue
@@ -1217,7 +1251,7 @@ def _resolve_trace_projection_id(
             )
             if candidate["stall"] is True:
                 continue
-            if mu_equal(candidate["output"], next_value):
+            if mu_hash_cached(candidate["output"]) == next_value_hash:
                 return proj.get("id")
         return None
     finally:
@@ -1276,6 +1310,8 @@ def run_mu_structural(
 
     trace_entries = []
     current = initial
+    # INVARIANT: step_kernel_mu returns new structures — current_hash caching is safe.
+    current_hash = mu_hash_cached(initial)
 
     try:
         for i in range(max_steps):
@@ -1296,7 +1332,8 @@ def run_mu_structural(
             })
 
             # Check for stall (no change)
-            if mu_equal(result, current):
+            result_hash = mu_hash_cached(result)
+            if result_hash == current_hash:
                 trace_entries.append({
                     "step": i + 1,
                     "state": result,
@@ -1311,6 +1348,7 @@ def run_mu_structural(
                 }
 
             current = result
+            current_hash = result_hash
 
         # Hit max steps without stall
         trace_entries.append({
@@ -1328,3 +1366,243 @@ def run_mu_structural(
     finally:
         if started_budget:
             budget.stop()
+
+
+def _is_terminal_shape(value: Mu) -> bool:  # AST_OK: infra — terminal shape detection
+    """Check if a value is a terminal output shape from recurrence or exhaustion.
+
+    Terminal shapes are the final results that sub-algorithms produce:
+    - recurrence: {closure_detected, final_result, tau_step}
+    - exhaustion: {action, exhaustion_detected, frozen, operator_to_freeze}
+
+    Detecting these early avoids unnecessary hash-stall iterations.
+    Uses module-level frozenset constants for AST compliance.
+    """
+    if not isinstance(value, dict):
+        return False
+    keys = frozenset(value.keys())  # AST_OK: key — terminal shape comparison
+    if keys == _RECURRENCE_TERMINAL_KEYS:
+        return True
+    if keys == _EXHAUSTION_TERMINAL_KEYS:
+        return True
+    return False
+
+
+def _is_engine_terminal(value: Mu) -> bool:  # AST_OK: infra — engine terminal shape detection
+    """Check if engine has produced its final unwrapped result.
+
+    After engine.exhaustion_done → engine.unwrap, the output has shape:
+    {value, closure_detected, tau_step, exhaustion_detected, operator_frozen,
+     frozen_set, action, stall}
+    Uses module-level frozenset constant for AST compliance.
+    """
+    if not isinstance(value, dict):
+        return False
+    return frozenset(value.keys()) == _ENGINE_TERMINAL_KEYS  # AST_OK: key — engine terminal comparison
+
+
+def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:  # AST_OK: infra — boundary sub-algorithm runner
+    """Run a sub-algorithm (recurrence/exhaustion) to completion.
+
+    Services the boundary between engine phases: the engine projection
+    defines WHICH algorithm to run, this function runs it to stall/terminal.
+
+    Budget accounting: each inner step_kernel_mu call manages its own
+    per-call budget (50k steps). The outer iteration count is bounded by
+    max_iterations. No cross-iteration budget sharing — that causes
+    premature exhaustion on slower CI runners.
+
+    Terminates when:
+    1. Semantic final shape detected (recurrence or exhaustion terminal output)
+    2. Hash-stall fallback (no change between iterations)
+    3. Iteration limit reached (fail-safe)
+    """
+    current = initial
+    # INVARIANT: run_algorithm_meta_circular returns new structures — hash caching is safe.
+    current_hash = mu_hash_cached(initial)
+    for _ in range(max_iterations):  # AST_OK: infra — boundary iteration loop
+        result = run_algorithm_meta_circular(projs, current)
+        # Early termination: semantic final shape detected
+        if _is_terminal_shape(result):
+            return result
+        # Hash-stall fallback: algorithm converged
+        result_hash = mu_hash_cached(result)
+        if result_hash == current_hash:
+            return result
+        current = result
+        current_hash = result_hash
+    return current
+
+
+def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engine state machine
+    projections: list[Mu],
+    input_value: Mu,
+    *,
+    max_steps: int = 100,
+    frozen: Mu = None,
+    max_engine_iterations: int = 20,
+    max_algorithm_iterations: int = 50,
+    max_iterations: int | None = None,
+) -> Mu:
+    """Host loop that drives the engine state machine defined in rcx_engine.v1.json.
+
+    The engine projections emit _boundary_request effects (algebraic effects pattern):
+      {_boundary_request: {operation, input, context, inject_key}}
+
+    This function is the GENERIC effect handler. It:
+      1. Steps engine projections (eval_seed.step)
+      2. If result contains _boundary_request, services the operation
+      3. Injects result into context at inject_key
+      4. Feeds context back to engine
+      5. Repeats until engine produces final result (no _boundary_request)
+
+    The host knows THREE generic operations (not engine-specific phases):
+      - run_trace:     generate execution trace
+      - hash_trace:    compute mu_hash per entry (boundary primitive)
+      - run_algorithm: run a sub-algorithm seed to completion
+
+    Engine projections decide WHAT to do and WHERE to put results.
+    Python decides nothing — it only services generic boundary primitives.
+    Any host (JS, Rust, FPGA) can implement these same 3 operations.
+
+    Args:
+        max_engine_iterations: Max outer loop iterations (engine state machine
+            has ~7 phases; 20 is generous). Controls engine orchestration.
+        max_algorithm_iterations: Max inner iterations for sub-algorithms
+            (recurrence/exhaustion). Controls convergence within a phase.
+        max_iterations: DEPRECATED — if provided, sets both engine and algorithm
+            limits for backwards compatibility. Will be removed.
+
+    Raises:
+        RuntimeError: If engine loop exhausts without producing terminal result.
+    """
+    from .eval_seed import step as eval_step
+
+    # Backwards compatibility: max_iterations sets both limits
+    if max_iterations is not None:
+        max_engine_iterations = max_iterations
+        max_algorithm_iterations = max_iterations
+
+    engine_projs = load_verified_seed(get_seed_path("rcx_engine.v1.json"))["projections"]
+
+    # Feed engine its initial input (always use full config form → engine.init_config)
+    state: Mu = {"_run_engine": {"projections": projections, "input": input_value, "max_steps": max_steps, "frozen": frozen}}
+
+    # Generic effect handler loop
+    for iteration in range(max_engine_iterations):  # AST_OK: infra — boundary host loop iteration
+        # Step engine projections (APPLICATION-layer, bootstrap evaluator)
+        next_state = eval_step(engine_projs, state)
+
+        # Engine stalled (no projection matched) — check for terminal result
+        if next_state is state:
+            if _is_engine_terminal(state):
+                return state
+            # Non-terminal stall — engine stuck in intermediate state
+            raise RuntimeError(
+                f"Engine stalled at iteration {iteration} without producing terminal result. "
+                f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
+            )
+
+        # Check for boundary effect request
+        if isinstance(next_state, dict) and "_boundary_request" in next_state:
+            request = next_state["_boundary_request"]
+            operation = request["operation"]
+            req_input = request["input"]
+            context = dict(request["context"])  # copy — we'll mutate with inject
+            inject_key = request["inject_key"]
+
+            # Service the boundary operation (3 generic primitives)
+            if operation == "run_trace":
+                raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
+                # Strip boundary-only field (steps) — engine expects {result, trace, stall}
+                result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
+            elif operation == "hash_trace":
+                result = hash_trace_for_recurrence(req_input)
+            elif operation == "run_algorithm":
+                algo_projs = load_verified_seed(get_seed_path(request["algorithm"]))["projections"]
+                result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
+            else:
+                raise ValueError(f"Unknown boundary operation: {operation}")
+
+            # Inject result into context and resume engine
+            context[inject_key] = result
+            state = context
+            continue
+
+        # Check if engine produced terminal result (e.g. after engine.unwrap)
+        if _is_engine_terminal(next_state):
+            return next_state
+
+        # Engine advanced internally — keep stepping
+        state = next_state
+
+    # FAIL CLOSED: engine loop exhausted without terminal result
+    raise RuntimeError(
+        f"Engine pipeline exhausted {max_engine_iterations} iterations without terminal result. "
+        f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
+    )
+
+
+def hash_trace_for_recurrence(trace: Mu) -> Mu:  # AST_OK: infra — boundary scaffolding, iterative
+    """Add state_hash to each entry in a Mu linked-list trace.
+
+    Walks the trace (boundary operation, not a projection) and adds
+    mu_hash(state) to each entry.  This enables recurrence.v2 to compare
+    hash strings instead of deep structural equality.
+
+    Uses iterative linked-list traversal to avoid Python recursion limit
+    on long traces (max_steps can exceed Python's ~1000 frame limit).
+
+    Args:
+        trace: Mu linked-list of trace entries (from run_mu_structural).
+
+    Returns:
+        New Mu linked-list with state_hash added to each entry.
+    """
+    # Collect entries iteratively (avoids recursion limit on long traces)
+    entries = []
+    current = trace
+    while isinstance(current, dict) and "head" in current:
+        entry = current["head"]
+        if isinstance(entry, dict) and "state" in entry:
+            entry = dict(entry)
+            entry["state_hash"] = mu_hash(entry["state"])
+        entries.append(entry)
+        current = current.get("tail")
+    # Rebuild linked list from tail to head
+    result = current  # Preserve terminal (None or non-list value)
+    for entry in reversed(entries):
+        result = {"head": entry, "tail": result}
+    return result
+
+
+def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK: infra — hemisphere boundary validation
+    """Route engine result to hemispheres with input shape validation.
+
+    Wraps input in route_hemisphere shape before running hemisphere projections.
+    This prevents direct injection of internal hemi_* shapes (bypass vulnerability).
+
+    Args:
+        engine_result: Engine output dict (8-field terminal shape).
+        hemispheres: Current hemisphere state dict (r_null, r_inf, r_a, lobes, sink).
+
+    Returns:
+        Updated hemispheres dict with entry routed to appropriate hemisphere.
+
+    Raises:
+        ValueError: If engine_result is not a dict.
+        RuntimeError: If hemisphere routing stalls.
+    """
+    if not isinstance(engine_result, dict):
+        raise ValueError("engine_result must be a dict")
+    projs = load_verified_seed(get_seed_path("hemispheres.v1.json"))["projections"]
+    wrapped = {"route_hemisphere": {"engine_result": engine_result, "hemispheres": hemispheres}}
+    result, _trace, stall = run_mu(projs, wrapped, max_steps=30)
+    # Stall is the EXPECTED completion signal: init→classify→add→unwrap→stall
+    # Verify the result looks like a completed hemisphere dict
+    if isinstance(result, dict) and all(k in result for k in ("r_null", "r_inf", "r_a", "lobes", "sink")):
+        return result
+    raise RuntimeError(
+        f"Hemisphere routing did not produce valid hemisphere dict. "
+        f"Got: {sorted(result.keys()) if isinstance(result, dict) else type(result).__name__}"
+    )

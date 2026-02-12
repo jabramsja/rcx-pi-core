@@ -36,7 +36,7 @@ Break RCX North Star invariants with concrete evidence.
 3. Approval requires explicit blocked-attack evidence, not prose confidence.
 
 ### Verdict
-[APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION]
+Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
 - `APPROVE`: all attempted invariant attacks were blocked with evidence.
 - `REQUEST_CHANGES`: one or more violations are demonstrated.

@@ -309,3 +309,130 @@ class TestBoundaryGuardIntegration:
         }
         validate_type_tag(tag)
         assert_seed_pure(seed, "type_tagged_value")
+
+
+# =============================================================================
+# P1: Fail-Closed Projection Validation (step_kernel_mu + normalize/denormalize)
+# =============================================================================
+
+
+class TestStepKernelMuProjectionValidation:
+    """Verify step_kernel_mu rejects invalid projections (fail-closed).
+
+    Note: step_kernel_mu(projections, input_value) — projections first.
+    """
+
+    def test_rejects_non_dict_projection(self):
+        """Non-dict projections must raise TypeError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(TypeError, match="SECURITY.*must be a dict"):
+            step_kernel_mu(["not_a_dict"], {"x": 1})
+
+    def test_rejects_none_projection(self):
+        """None projection must raise TypeError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(TypeError, match="SECURITY.*must be a dict"):
+            step_kernel_mu([None], {"x": 1})
+
+    def test_rejects_list_projection(self):
+        """List projection must raise TypeError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(TypeError, match="SECURITY.*must be a dict"):
+            step_kernel_mu([[1, 2]], {"x": 1})
+
+    def test_rejects_missing_pattern(self):
+        """Projection without pattern key must raise KeyError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(KeyError, match="SECURITY.*missing required.*pattern"):
+            step_kernel_mu([{"body": 1}], {"x": 1})
+
+    def test_rejects_missing_body(self):
+        """Projection without body key must raise KeyError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(KeyError, match="SECURITY.*missing required.*body"):
+            step_kernel_mu([{"pattern": 1}], {"x": 1})
+
+    def test_rejects_non_mu_pattern(self):
+        """Projection with non-Mu pattern must raise TypeError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(TypeError, match="must be a Mu"):
+            step_kernel_mu([{"pattern": b"bytes", "body": 1}], {"x": 1})
+
+    def test_rejects_non_mu_body(self):
+        """Projection with non-Mu body must raise TypeError."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        with pytest.raises(TypeError, match="must be a Mu"):
+            step_kernel_mu([{"pattern": 1, "body": b"bytes"}], {"x": 1})
+
+    def test_valid_projection_accepted(self):
+        """Valid projection with pattern and body should not raise on validation."""
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+        # This should succeed through validation (may stall or return normally)
+        result = step_kernel_mu(
+            [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            {"x": 1}
+        )
+        assert result is not None  # Just verify it ran
+
+
+class TestNormalizeDenormalizeFailClosed:
+    """Verify normalize/denormalize reject unsupported types (fail-closed)."""
+
+    def test_normalize_rejects_bytes(self):
+        """normalize_for_match must reject bytes."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        with pytest.raises(TypeError, match="unsupported type.*bytes"):
+            normalize_for_match(b"hello")
+
+    def test_normalize_rejects_set(self):
+        """normalize_for_match must reject set."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        with pytest.raises(TypeError, match="unsupported type.*set"):
+            normalize_for_match({1, 2, 3})
+
+    def test_normalize_rejects_tuple(self):
+        """normalize_for_match must reject tuple."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        with pytest.raises(TypeError, match="unsupported type.*tuple"):
+            normalize_for_match((1, 2))
+
+    def test_denormalize_rejects_bytes(self):
+        """denormalize_from_match must reject bytes."""
+        from rcx_pi.selfhost.match_mu import denormalize_from_match
+        with pytest.raises(TypeError, match="unsupported type.*bytes"):
+            denormalize_from_match(b"hello")
+
+    def test_denormalize_rejects_set(self):
+        """denormalize_from_match must reject set."""
+        from rcx_pi.selfhost.match_mu import denormalize_from_match
+        with pytest.raises(TypeError, match="unsupported type.*set"):
+            denormalize_from_match({1, 2, 3})
+
+    def test_denormalize_rejects_tuple(self):
+        """denormalize_from_match must reject tuple."""
+        from rcx_pi.selfhost.match_mu import denormalize_from_match
+        with pytest.raises(TypeError, match="unsupported type.*tuple"):
+            denormalize_from_match((1, 2))
+
+    def test_normalize_accepts_valid_mu(self):
+        """normalize_for_match must accept all valid Mu types."""
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        # Primitives
+        normalize_for_match(None)
+        normalize_for_match(True)
+        normalize_for_match(42)
+        normalize_for_match(3.14)
+        normalize_for_match("hello")
+        # Containers
+        normalize_for_match([1, 2, 3])
+        normalize_for_match({"key": "value"})
+
+    def test_denormalize_accepts_valid_mu(self):
+        """denormalize_from_match must accept all valid Mu types."""
+        from rcx_pi.selfhost.match_mu import denormalize_from_match
+        # Primitives
+        assert denormalize_from_match(None) is None
+        assert denormalize_from_match(True) is True
+        assert denormalize_from_match(42) == 42
+        assert denormalize_from_match(3.14) == 3.14
+        assert denormalize_from_match("hello") == "hello"

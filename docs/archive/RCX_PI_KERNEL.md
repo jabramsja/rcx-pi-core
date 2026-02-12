@@ -23,9 +23,9 @@ Pattern matching and projection application are NOT kernel primitives - they are
 | Doc | Purpose |
 |-----|---------|
 | `docs/RCXKernel.v0.md` | Kernel specification (4 primitives, seed hierarchy) |
-| `docs/EVAL_SEED.v0.md` | Evaluator specification (match, substitute, step) |
+| `docs/core/EVAL_SEED.v0.md` | Evaluator specification (match, substitute, step) |
 | `docs/StructuralPurity.v0.md` | Guardrails for Mu purity |
-| `docs/MuType.v0.md` | Universal data type definition |
+| `docs/core/MuType.v0.md` | Universal data type definition |
 
 ---
 

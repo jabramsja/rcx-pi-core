@@ -1,6 +1,8 @@
 {
     "meta": {
         "version": "1.2.0",
+        "status": "PROOF_OF_CONCEPT",
+        "superseded_by": "recurrence.v2.json",
         "name": "RECURRENCE_SEED",
         "description": "Structural closure detection for Rule 2.2 (Closure-on-Second-Demand)",
         "doc": "docs/core/EngineNewsStructural.v0.md",

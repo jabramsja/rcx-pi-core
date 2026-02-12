@@ -21,6 +21,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 **Created:** 2026-01-30
 **Origin:** 7-agent review requirement before Step 5 implementation
 **Canonical Reference:** RCXEngineNew.pdf (RCX Core Engine Stateless Specification, May 2025)
+**Note:** This spec covers `recurrence.v1.json` (proof-of-concept, 9 projections). For production use, see `recurrence.v2.json` (hash-accelerated, same 9 projections with SHA-256 boundary hashing). Design: `docs/core/recurrence_v2_design.md`.
 
 ---
 
@@ -33,7 +34,7 @@ instead of Mu projections.
 **Why this matters:**
 - If Recurrence runs via Python loops/logic, emergence might be a Python artifact
 - For structural honesty, closure detection must be pattern matching on traces
-- The bootstrap (eval_step, mu_equal) is acceptable - the LOGIC must be projections
+- The bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) are acceptable - the LOGIC must be projections
 
 ---
 
@@ -66,7 +67,7 @@ Our implementation must:
 
 This means:
 - Recurrence rules MUST be expressed as Mu projections in JSON
-- Python provides only the 5 bootstrap primitives
+- Python provides only the 4 bootstrap primitives (mu_equal eliminated)
 - Closure detection is structural pattern matching, NOT Python conditionals
 
 ---
@@ -169,7 +170,7 @@ Step 5 is COMPLETE:
    ```python
    # WRONG - Python iterates trace
    for entry in trace:
-       if mu_equal(entry.state, current):
+       if mu_hash_cached(entry.state) == mu_hash_cached(current):
            ...
    ```
 
@@ -211,10 +212,10 @@ These Python operations are ALLOWED (irreducible substrate):
 | Primitive | Location | Why Allowed |
 |-----------|----------|-------------|
 | `eval_step` | `eval_seed.step()` | Applies projections |
-| `mu_equal` | `mu_type.mu_equal()` | Structural equality |
 | `max_steps` | `step_mu.py:step_kernel_mu()` | Termination guarantee |
 | `stack_guard` | `mu_type.MAX_MU_DEPTH` | Resource limit |
 | `projection_loader` | `seed_integrity.load_verified_seed()` | Load JSON seeds |
+| ~~`mu_equal`~~ | ~~`mu_type.mu_equal()`~~ | **ELIMINATED** — replaced by `mu_hash_cached()` |
 
 All Recurrence logic must be **above** these primitives.
 
@@ -302,7 +303,7 @@ Recurrence projections must pattern-match on this trace to detect τ recurrence.
 ### Rule 0.7c′ LeafInvariance
 > "If... the recursion is degenerate. Log a tracetoken τ, freeze the operator..."
 
-**Our implementation:** When `mu_equal(before, after)` in step loop → stall detected.
+**Our implementation:** When `mu_hash_cached(before) == mu_hash_cached(after)` in step loop → stall detected.
 This is the τ logging moment.
 
 ### A.5 Independence

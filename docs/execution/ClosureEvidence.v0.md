@@ -20,7 +20,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 Status: COMPLETE (design + reporting tool)
 
 **Implementation status:**
-- ✅ Design doc complete (`docs/ClosureEvidence.v0.md`)
+- ✅ Design doc complete (`docs/execution/ClosureEvidence.v0.md`)
 - ✅ Event vocabulary defined (`evidence.closure` with value_hash, pattern_id, reason)
 - ✅ Reporting tool: `--print-closure-evidence` CLI flag, `closure_evidence_v2()` helper
 - ✅ Detection logic: `ExecutionEngine.closure_evidence` property (via Second Independent Encounter)

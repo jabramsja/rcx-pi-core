@@ -191,6 +191,30 @@ class TestContrabandjsDetectsCryptoRandom:
         result = run_contraband_on_js(code)
         assert result.returncode != 0, "Should fail on crypto.randomBytes"
 
+    def test_detects_webcrypto(self):
+        """contraband_js.sh must fail when webcrypto found."""
+        code = "const wc = crypto.webcrypto;"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on webcrypto"
+
+    def test_detects_get_random_values(self):
+        """contraband_js.sh must fail when getRandomValues found."""
+        code = "crypto.webcrypto.getRandomValues(new Uint8Array(16));"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on getRandomValues"
+
+    def test_detects_crypto_subtle(self):
+        """contraband_js.sh must fail when crypto.subtle found."""
+        code = "crypto.subtle.generateKey(algo, true, ['sign']);"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on crypto.subtle"
+
+    def test_detects_crypto_generate_key(self):
+        """contraband_js.sh must fail when crypto.generateKey found."""
+        code = "crypto.generateKey('aes', { length: 256 }, callback);"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on crypto.generateKey"
+
 
 class TestContrabandjsDetectsWebAssembly:
     """Verify contraband_js.sh catches WebAssembly (arbitrary code execution)."""

@@ -606,6 +606,14 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
                 r'claims?\s+(proven|verified|validated)',
                 r'projections?\s+(exist|found|verified)',
                 r'result:\s*(pass|proven|clean|secure)',
+                # Natural-language approval evidence agents commonly produce
+                r'(all|each)\s+(claims?|invariants?|boundaries?)\s+(verified|validated|hold|intact)',
+                r'no\s+(vulnerabilities?|exploits?|injection|drift|smuggling)\s+(found|detected|identified|present)',
+                r'(code|implementation|architecture)\s+(aligns?|matches?|consistent)',
+                r'within\s+(ceiling|threshold|budget|limits?)',
+                r'(attacks?|exploits?)\s+(blocked|prevented|mitigated)',
+                r'(invariants?|constraints?)\s+(maintained|preserved|respected|intact)',
+                r'VERDICT:\s*\w+',  # Explicit VERDICT: line is itself evidence of deliberate review
             ]
             has_clean_review_evidence = any(
                 re.search(pattern, output, re.IGNORECASE)
