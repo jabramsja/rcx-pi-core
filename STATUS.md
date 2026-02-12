@@ -209,16 +209,25 @@ The pre-commit hook checks doc consistency, debt ceiling, targeted staged-file c
 ## Testing Tiers
 
 ```
-Tier 1: Fast Audit    ./tools/audit_fast.sh    ~3 min   Core tests only
-Tier 2: Full Audit    ./tools/audit_all.sh     ~5-8 min Core + Fuzzer tests
-Tier 3: Stress Tests  pytest tests/stress/     ~10+ min Deep edge cases
+Tier 1: Fast Audit    ./tools/audit_fast.sh         ~3 min   Core tests only (local iteration)
+Tier 2: Full Audit    ./tools/audit_all.sh          ~5-8 min Core + Fuzzer + Slow (before push)
+Tier 3: CI Green Gate scripts/green_gate.sh          ~2 min   Core only, no fuzzers/slow (push/PR)
+Tier 4: CI Nightly    scripts/green_gate.sh ci_full  ~30 min  Everything (scheduled nightly)
 ```
 
 | Tier | What It Tests | When to Run |
 |------|---------------|-------------|
 | Tier 1 | Core algorithms, syntax, contraband, security tool grounding | Local iteration |
-| Tier 2 | All tests including 200+ example fuzzers | Before push, CI |
-| Tier 3 | Deep nesting, wide structures, pathological inputs | Comprehensive validation |
+| Tier 2 | All tests including 450+ hypothesis fuzzers + 168 slow tests | Before push (local) |
+| Tier 3 | ~2,500 core tests (no fuzzers, no slow) | CI push/PR gate (~2 min) |
+| Tier 4 | Everything including fuzzers + slow (ci_full profile) | Nightly CI schedule |
+
+**CI Green Gate Optimization (2026-02-11):**
+- Hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` in `conftest.py` (452 tests)
+- Slow tests (meta-circular, paxos e2e, hemispheres, engine pipeline) deselected (168 tests)
+- Green gate `-m "not slow and not fuzzer"` runs ~2,500 core tests in ~50s on CI
+- Total green gate wall time: **~2 min** (down from ~28 min)
+- Nightly (`HYPOTHESIS_PROFILE=ci_full`) runs everything including fuzzers and slow
 
 **Tier 1 includes (2026-02-01):**
 - `tests/structural/` (17 files) - structural claims grounding
@@ -608,7 +617,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-10 (Content-Addressed Mu Level 1 IMPLEMENTED: mu_equal eliminated as bootstrap primitive (5→4), mu_hash_cached replaces all 8 production call sites, paxos e2e pipeline test)
+**Last updated:** 2026-02-11 (CI green gate optimized: 28 min → 2 min via fuzzer/slow split, pytest-timeout added to test extras)
 **Next milestone:** Hemisphere integration with rcx_engine.v1 output (engine_result → routing decision)
 
 **Hemisphere Hardening (2026-02-10):**

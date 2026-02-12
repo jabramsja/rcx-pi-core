@@ -125,7 +125,7 @@ See `docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mod
 |------|--------|------|---------|------|
 | 1 | `./tools/audit_fast.sh` | ~3 min | Core tests only | Local iteration |
 | 2 | `./tools/audit_all.sh` | ~5-8 min | Core + Fuzzer + Slow | Before push |
-| 3 | CI green gate | ~5 min | Core only (no fuzzer, no slow) | Push/PR to dev |
+| 3 | CI green gate | ~2 min | Core only (no fuzzer, no slow) | Push/PR to dev |
 | 4 | CI nightly | ~30 min | Everything (all tests, ci_full) | Nightly schedule |
 
 Both audit scripts use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
