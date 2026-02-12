@@ -185,6 +185,43 @@ pytest -n auto --dist worksteal
 - Full suite (1000+ tests): Parallel is 6x faster (44s vs 255s)
 - Audit scripts auto-detect xdist and enable parallel when available
 
+### Test Classification (IMPORTANT — Read Before Adding Tests)
+
+Every test must be classifiable into one of three categories. The CI green gate excludes `slow` and `fuzzer` tests to maintain sub-2-minute runs. **Misclassified tests break CI timing.**
+
+| Category | Marker | Rule | Where It Runs |
+|----------|--------|------|---------------|
+| **Core** | *(none)* | Completes in <10s. Deterministic. No hypothesis. | All tiers (green gate, audit_fast, audit_all, nightly) |
+| **Slow** | `@pytest.mark.slow` | Takes >10s OR uses meta-circular kernel (`run_mu`, `run_algorithm_meta_circular`, `run_engine_pipeline`, `run_hemisphere_routing`). No exceptions. | audit_all, nightly only |
+| **Fuzzer** | *(auto-marked)* | Uses `@given` / `@hypothesis.settings`. Auto-detected by `conftest.py` via `item.obj.is_hypothesis_test`. Do NOT manually mark. | audit_all, nightly only |
+
+**When creating new tests:**
+
+1. **Default is core** — no marker needed. Must complete in <10s locally.
+2. **If it calls `run_mu()`, `run_algorithm_meta_circular()`, `run_engine_pipeline()`, or `run_hemisphere_routing()`** — mark `@pytest.mark.slow` (class-level or function-level).
+3. **If it uses Hypothesis `@given`** — do nothing. `conftest.py` auto-marks it as `fuzzer` at collection time.
+4. **If a non-hypothesis test takes >10s** — mark `@pytest.mark.slow`. Profile with `pytest --durations=10` to verify.
+5. **File-level marking** (`pytestmark = pytest.mark.slow`) is fine when ALL tests in a file are slow (e.g., `test_engine_orchestration.py`).
+6. **Never blanket-mark a file as `fuzzer`** — use auto-marking only. Mixed files contain both hypothesis and deterministic tests.
+
+**How auto-marking works:**
+```python
+# In tests/conftest.py — pytest_collection_modifyitems hook
+# Detects hypothesis tests via item.obj.is_hypothesis_test attribute
+# Applies fuzzer marker automatically — no manual action needed
+```
+
+**Verification after adding tests:**
+```bash
+# Check your test is in the right bucket
+pytest --collect-only -m "not slow and not fuzzer" tests/your_test.py -q  # Should appear here if core
+pytest --collect-only -m "slow" tests/your_test.py -q                     # Should appear here if slow
+pytest --collect-only -m "fuzzer" tests/your_test.py -q                   # Should appear here if hypothesis
+
+# Verify green gate count hasn't regressed
+pytest --collect-only -m "not slow and not fuzzer" --ignore=tests/stress/ -q 2>&1 | tail -3
+```
+
 **Git hooks:**
 
 | Script | Purpose | When |
