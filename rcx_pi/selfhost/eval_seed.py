@@ -20,59 +20,11 @@ from typing import Any
 from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 
 
-_VALID_MU_TYPES = (type(None), bool, int, float, str, list, dict)
-
-# Known kernel mode strings from substrate seeds (kernel.v1, match.v2, subst.v2, rcx_engine.v1).
-# Only these are trusted for validation-skip. Domain values cannot forge these
-# without also matching the shallow type check below.
-_KNOWN_KERNEL_MODES = frozenset({  # AST_OK: security constant — enumeration of trusted modes
-    'kernel', 'done', 'error',           # kernel.v1
-    'match_done', 'subst_done',          # match.v2, subst.v2
-    'engine',                            # rcx_engine.v1
-})
-
-# Kernel context keys that identify algorithm intermediate states.
-# match.v2 states have _match_ctx, subst.v2 states have _subst_ctx.
-# These are underscore-prefixed kernel-reserved fields — domain values must not use them.
-_KERNEL_CONTEXT_KEYS = frozenset({'_match_ctx', '_subst_ctx', '_kernel_ctx'})  # AST_OK: security constant
-
-
-def _is_kernel_internal_state(value: Any) -> bool:
-    """
-    Check if value is kernel-internal state (deeply nested, skip validation).
-
-    Kernel-internal states are constructed by the kernel from valid Mu input.
-    They may exceed MAX_MU_DEPTH due to linked-list normalization but are
-    safe to process. We skip deep validation for them.
-
-    Trust model: validate at boundary (run_mu), trust the interior.
-    step() and apply_projection() use this to skip redundant O(depth)
-    validation on states already produced by the kernel.
-
-    SECURITY (Phase 8c): Three-layer check:
-      1. Must be a dict with either '_mode' or a kernel context key (_match_ctx, etc.)
-      2. If '_mode' present, must be a known kernel mode string (from seed files)
-      3. All top-level values must be valid Mu types (shallow check)
-    This makes forgery fail-closed: {"_mode": "kernel", "bad": set()} → False.
-    """
-    if not isinstance(value, dict):
-        return False
-    # Layer 1+2: must have known kernel identifier
-    mode = value.get('_mode')
-    if mode is not None:
-        # _mode present — must be a known kernel mode string
-        if not isinstance(mode, str) or mode not in _KNOWN_KERNEL_MODES:
-            return False
-    else:
-        # No _mode — check for kernel context keys (match.v2/subst.v2 intermediate states)
-        if not any(k in value for k in _KERNEL_CONTEXT_KEYS):
-            return False
-    # Layer 3: shallow type check — all top-level values must be valid Mu types.
-    # This catches non-Mu payloads (set, object, etc.) without O(depth) traversal.
-    for v in value.values():
-        if not isinstance(v, _VALID_MU_TYPES):
-            return False
-    return True  # AST_OK: infra
+    # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
+# _KNOWN_KERNEL_MODES, _KERNEL_CONTEXT_KEYS) were removed from production code.
+# Zero production callers after caller-trust model replaced shape-based trust.
+# The function is preserved in tests/structural/test_type_tag_security.py as a
+# local fixture for regression testing the 3-layer check logic.
 
 
 # =============================================================================

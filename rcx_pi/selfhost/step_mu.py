@@ -36,6 +36,7 @@ from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached
 from .kernel import get_step_budget
+from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed
 
 # Terminal shape key sets (module-level constants, avoids repeated construction)
@@ -119,9 +120,9 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
 
 # Fields reserved for kernel internal state - domain data cannot contain these
 # Note: 'subst' and 'match' are NOT included - they're too generic as domain keys.
-# The bypass functions (is_kernel_intermediate, _is_kernel_internal_state) check
-# for these to skip validation of kernel states, but domain data with these keys
-# cannot forge kernel state because kernel projections require specific patterns.
+# is_kernel_intermediate() checks for these to skip stall detection on kernel
+# states, but domain data with these keys cannot forge kernel state because
+# kernel projections require specific patterns.
 #
 # Gate 4 hardening (2026-02-07):
 # Domain-mode validation is strict: kernel-reserved fields are rejected everywhere.
@@ -292,6 +293,82 @@ def _looks_like_normalized_dict_candidate(value: Mu) -> bool:
     return tail is None or isinstance(tail, dict)
 
 
+_MAX_VALIDATION_DEPTH = 100  # AST_OK: infra - constant definition
+
+
+def _walk_and_validate(
+    value: Mu,
+    key_checker: Callable[[str], str | None],
+    context: str,
+    _depth: int = 0,
+) -> None:
+    """
+    Walk a Mu value tree and validate keys via key_checker.
+
+    Shared traversal for validate_no_kernel_reserved_fields and
+    validate_algorithm_runtime_fields (expert finding: ~60% duplicate boilerplate).
+
+    Args:
+        value: The Mu value to validate.
+        key_checker: Function that takes a key string and returns an error
+            message if invalid, or None if valid.
+        context: Description for error messages.
+        _depth: Internal recursion depth tracker.
+    Raises:
+        ValueError: If key_checker rejects a key, depth exceeded, or
+            malformed normalized dict detected.
+    """
+    if _depth > _MAX_VALIDATION_DEPTH:
+        raise ValueError(
+            f"SECURITY: {context} exceeded maximum validation depth ({_MAX_VALIDATION_DEPTH}). "
+            f"Possible deeply nested attack structure."
+        )
+
+    if isinstance(value, dict):
+        pairs = _iter_normalized_dict_pairs(value)
+        if pairs is not None:
+            for key, val in pairs:
+                err = key_checker(key)
+                if err:
+                    raise ValueError(f"SECURITY: {context} {err}")
+                _walk_and_validate(val, key_checker, context, _depth + 1)
+            return
+        if _looks_like_normalized_dict_candidate(value):
+            raise ValueError(
+                f"SECURITY: {context} contains malformed normalized dict encoding. "
+                "Failing closed to prevent reserved-field bypass."
+            )
+        for key, val in value.items():
+            err = key_checker(key)
+            if err:
+                raise ValueError(f"SECURITY: {context} {err}")
+            _walk_and_validate(val, key_checker, context, _depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            _walk_and_validate(item, key_checker, context, _depth + 1)
+
+
+def _check_kernel_reserved(key: str) -> str | None:
+    """Key checker: reject kernel-reserved fields."""
+    if key in KERNEL_RESERVED_FIELDS:
+        return (
+            f"cannot contain kernel-reserved field: {key}. "
+            f"Reserved fields: {sorted(KERNEL_RESERVED_FIELDS)}"
+        )
+    return None
+
+
+def _check_algorithm_runtime(key: str) -> str | None:
+    """Key checker: reject unknown underscore fields."""
+    if isinstance(key, str) and key.startswith("_"):
+        if key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS:
+            return (
+                f"contains unsupported algorithm underscore field: {key}. "
+                f"Allowed: {sorted(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)}"
+            )
+    return None
+
+
 def validate_no_kernel_reserved_fields(
     value: Mu,
     context: str = "input",
@@ -301,68 +378,10 @@ def validate_no_kernel_reserved_fields(
     Validate that a value does not contain kernel-reserved fields (DEEP).
 
     SECURITY: Prevents domain data from forging kernel state by including
-    fields like _mode, _match_ctx, etc. If domain input contains these
-    at ANY nesting level, it could potentially confuse the kernel state machine.
-
-    Gate 4 hardening: domain validation is strict. Reserved fields are rejected
-    everywhere, including inside `_detect_closure` and `_detect_exhaustion`.
-    Trusted algorithm state must use `validate_algorithm_runtime_fields()`.
-
-    This validation is called at the kernel entry point (step_kernel_mu)
-    to ensure domain inputs are clean at all depths.
-
-    Args:
-        value: The Mu value to validate.
-        context: Description for error message (e.g., "input", "projection body").
-        _depth: Internal recursion depth tracker (prevents stack overflow).
-    Raises:
-        ValueError: If value contains kernel-reserved fields.
+    fields like _mode, _match_ctx, etc. Called at kernel entry point
+    (step_kernel_mu) to ensure domain inputs are clean at all depths.
     """
-    # Depth guard - FAIL CLOSED on pathological inputs (Phase 8b expert fix)
-    # Adversary model: Domain inputs may be untrusted (e.g., from network).
-    # Trade-off: Depth 100 allows reasonable nesting but prevents stack overflow.
-    # Security: Fail CLOSED (reject) rather than open (trust).
-    MAX_VALIDATION_DEPTH = 100  # AST_OK: infra - constant definition
-    if _depth > MAX_VALIDATION_DEPTH:
-        raise ValueError(
-            f"SECURITY: {context} exceeded maximum validation depth ({MAX_VALIDATION_DEPTH}). "
-            f"Possible deeply nested attack structure."
-        )
-
-    if isinstance(value, dict):
-        # Gate 3 Security: Check normalized dict encoding (keys stored as values).
-        # Without this, reserved fields in normalized dicts bypass validation.
-        pairs = _iter_normalized_dict_pairs(value)
-        if pairs is not None:
-            for key, val in pairs:
-                if key in KERNEL_RESERVED_FIELDS:
-                    raise ValueError(
-                        f"SECURITY: {context} cannot contain kernel-reserved field: {key}. "
-                        f"Reserved fields: {sorted(KERNEL_RESERVED_FIELDS)}"
-                    )
-                validate_no_kernel_reserved_fields(
-                    val, context, _depth + 1,
-                )
-            return
-        if _looks_like_normalized_dict_candidate(value):
-            raise ValueError(
-                f"SECURITY: {context} contains malformed normalized dict encoding. "
-                "Failing closed to prevent reserved-field bypass."
-            )
-
-        # Regular dict: check keys directly
-        for key, val in value.items():
-            if key in KERNEL_RESERVED_FIELDS:
-                raise ValueError(
-                    f"SECURITY: {context} cannot contain kernel-reserved field: {key}. "
-                    f"Reserved fields: {sorted(KERNEL_RESERVED_FIELDS)}"
-                )
-            validate_no_kernel_reserved_fields(
-                val, context, _depth + 1,
-            )
-    elif isinstance(value, list):
-        for item in value:
-            validate_no_kernel_reserved_fields(item, context, _depth + 1)
+    _walk_and_validate(value, _check_kernel_reserved, context, _depth)
 
 
 def validate_algorithm_runtime_fields(
@@ -373,49 +392,11 @@ def validate_algorithm_runtime_fields(
     """
     Validate trusted algorithm runtime state at kernel entry.
 
-    Gate 4 prep: algorithm execution requires underscore-heavy state keys at the
-    top level (for example `_mode`, `_phase`) that domain validation rejects.
-    This validator is stricter than a blanket bypass:
-    - Unknown underscore fields are rejected (fail closed).
-    - Underscore keys inside normalized dict encodings are also checked.
-
-    This mode is for internal algorithm execution only.
+    Gate 4 prep: algorithm execution requires underscore-heavy state keys
+    at the top level. This validator is stricter than a blanket bypass:
+    unknown underscore fields are rejected (fail closed).
     """
-    MAX_VALIDATION_DEPTH = 100
-    if _depth > MAX_VALIDATION_DEPTH:
-        raise ValueError(
-            f"SECURITY: {context} exceeded maximum validation depth ({MAX_VALIDATION_DEPTH}). "
-            f"Possible deeply nested attack structure."
-        )
-
-    if isinstance(value, dict):
-        pairs = _iter_normalized_dict_pairs(value)
-        if pairs is not None:
-            for key, val in pairs:
-                if key.startswith("_") and key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS:
-                    raise ValueError(
-                        f"SECURITY: {context} contains unsupported algorithm underscore field: {key}. "
-                        f"Allowed: {sorted(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)}"
-                    )
-                validate_algorithm_runtime_fields(val, context, _depth + 1)
-            return
-        if _looks_like_normalized_dict_candidate(value):
-            raise ValueError(
-                f"SECURITY: {context} contains malformed normalized dict encoding. "
-                "Failing closed."
-            )
-
-        for key, val in value.items():
-            if isinstance(key, str) and key.startswith("_"):
-                if key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS:
-                    raise ValueError(
-                        f"SECURITY: {context} contains unsupported algorithm underscore field: {key}. "
-                        f"Allowed: {sorted(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)}"
-                    )
-            validate_algorithm_runtime_fields(val, context, _depth + 1)
-    elif isinstance(value, list):
-        for item in value:
-            validate_algorithm_runtime_fields(item, context, _depth + 1)
+    _walk_and_validate(value, _check_algorithm_runtime, context, _depth)
 
 
 # =============================================================================
@@ -1223,40 +1204,27 @@ def _resolve_trace_projection_id(
     Returns:
         Projection id if a matching projection is found, otherwise None.
     """
-    budget = get_step_budget()
-    restore_budget = budget.is_active()
-    snapshot_total = 0
-    snapshot_limit = 0
-    if restore_budget:
-        snapshot_total = budget.get_total()
-        snapshot_limit = snapshot_total + budget.get_remaining()
-        # Suspend the caller's active budget while probing projection IDs.
-        budget.stop()
-
-    try:
-        # Cache next_value hash — it doesn't change across iterations.
-        next_value_hash = mu_hash_cached(next_value)
-        for proj in projections:
-            if not isinstance(proj, dict):
-                continue
-            if "pattern" not in proj or "body" not in proj:
-                continue
-            candidate = step_kernel_mu(
-                [proj],
-                current,
-                kernel_mode="bridge",
-                validation_mode="domain",
-                return_meta=True,
-            )
-            if candidate["stall"] is True:
-                continue
-            if mu_hash_cached(candidate["output"]) == next_value_hash:
-                return proj.get("id")
-        return None
-    finally:
-        if restore_budget:
-            budget.start(limit=snapshot_limit)
-            budget.consume(snapshot_total)
+    # SECURITY: Do NOT suspend the step budget. Probes must consume from the
+    # caller's budget to prevent unbounded computation (adversary finding #1).
+    # Cache next_value hash — it doesn't change across iterations.
+    next_value_hash = mu_hash_cached(next_value)
+    for proj in projections:
+        if not isinstance(proj, dict):
+            continue
+        if "pattern" not in proj or "body" not in proj:
+            continue
+        candidate = step_kernel_mu(
+            [proj],
+            current,
+            kernel_mode="bridge",
+            validation_mode="domain",
+            return_meta=True,
+        )
+        if candidate["stall"] is True:
+            continue
+        if mu_hash_cached(candidate["output"]) == next_value_hash:
+            return proj.get("id")
+    return None
 
 
 @host_iteration("Phase 8d trace model - structural trace for EngineNews")
@@ -1508,6 +1476,14 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
             context = dict(request["context"])  # copy — we'll mutate with inject
             inject_key = request["inject_key"]
 
+            # SECURITY: inject_key must not be a kernel-reserved field.
+            # Prevents boundary requests from forging kernel state (adversary finding #2).
+            if inject_key in KERNEL_RESERVED_FIELDS:
+                raise ValueError(
+                    f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
+                    f"Boundary requests cannot inject reserved fields."
+                )
+
             # Service the boundary operation (3 generic primitives)
             if operation == "run_trace":
                 raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
@@ -1540,6 +1516,9 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     )
 
 
+_MAX_TRACE_ENTRIES_HARD_CAP = 100000  # AST_OK: infra - constant definition
+
+
 def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST_OK: infra — boundary scaffolding, iterative
     """Add state_hash to each entry in a Mu linked-list trace.
 
@@ -1552,9 +1531,10 @@ def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST
 
     Args:
         trace: Mu linked-list of trace entries (from run_mu_structural).
-        max_entries: Defense-in-depth iteration cap. Not a semantic limit —
-            configurable if callers need longer traces. Default 10000 is
-            100x the engine pipeline default (max_steps=100).
+        max_entries: Defense-in-depth iteration cap. Clamped to
+            _MAX_TRACE_ENTRIES_HARD_CAP (100000) regardless of caller
+            request (adversary finding #3). Default 10000 is 100x the
+            engine pipeline default (max_steps=100).
 
     Returns:
         New Mu linked-list with state_hash added to each entry.
@@ -1563,6 +1543,8 @@ def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST
         ValueError: If cyclic linked list detected or entry cap exceeded.
     """
     # Collect entries iteratively (avoids recursion limit on long traces)
+    # SECURITY: Clamp max_entries to hard cap (adversary finding #3)
+    max_entries = min(max_entries, _MAX_TRACE_ENTRIES_HARD_CAP)
     entries = []
     visited = set()  # AST_OK: cycle — cycle detection guard
     current = trace

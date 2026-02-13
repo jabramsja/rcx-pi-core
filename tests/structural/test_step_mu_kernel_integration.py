@@ -72,24 +72,31 @@ class TestStepMuUsesKernelProjections:
             assert mock_load.called
 
     def test_step_kernel_mu_calls_eval_step_with_kernel_projs(self):
-        """step_kernel_mu uses eval_step with kernel projections."""
+        """step_kernel_mu uses eval_step with kernel projections.
+
+        Proves this through public API:
+        1. return_meta=True confirms the kernel path is taken
+        2. Manual eval_step on kernel entry state confirms kernel projections
+           transform it (kernel.wrap fires)
+        """
         kernel_projs = load_combined_kernel_projections()
 
-        calls = []
-        original_eval_step = eval_step
+        # 1. step_kernel_mu with return_meta proves kernel processes input
+        meta = step_kernel_mu(
+            [{"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}],
+            42,
+            return_meta=True,
+        )
+        assert isinstance(meta, dict)
+        assert "output" in meta and "stall" in meta
+        assert meta["stall"] is False
+        assert meta["output"] == {"result": 42}
 
-        def tracking_eval_step(projs, state):
-            calls.append({"projs_count": len(projs), "state_keys": set(state.keys()) if isinstance(state, dict) else None})
-            return original_eval_step(projs, state)
-
-        with patch('rcx_pi.selfhost.step_mu._step_trusted', side_effect=tracking_eval_step):
-            # Simple projection that matches
-            result = step_kernel_mu([{"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}], 42)
-
-        # Should have made calls to _step_trusted
-        assert len(calls) > 0
-        # First call should be with kernel entry state (has _step and _projs)
-        assert calls[0]["state_keys"] == {"_step", "_projs"}
+        # 2. Manually verify kernel entry state is processed by kernel projections
+        entry_state = {"_step": 42, "_projs": None}
+        result = eval_step(kernel_projs, entry_state)
+        assert isinstance(result, dict)
+        assert result.get("_mode") == "kernel"  # kernel.wrap fired
 
     def test_kernel_wrap_projection_fires(self):
         """Verify kernel.wrap projection transforms entry state."""
@@ -203,35 +210,37 @@ class TestKernelStallPathComplete:
         reset_step_budget()
 
     def test_empty_projections_full_stall_path(self):
-        """Empty projections go through kernel.wrap → kernel.stall → kernel.unwrap."""
+        """Empty projections go through kernel.wrap → kernel.stall → kernel.unwrap.
+
+        Traces the kernel state machine through the public eval_step function
+        to prove mode transitions without patching private internals.
+        """
         kernel_projs = load_combined_kernel_projections()
 
-        # Track state transitions by recording both input and output of eval_step
-        transitions = []
-        original_eval_step = eval_step
+        # Manually step through the kernel state machine via public eval_step
+        entry_state = {"_step": 42, "_projs": None}
+        modes_seen = []
 
-        def tracking_step(projs, state):
-            result = original_eval_step(projs, state)
-            input_mode = state.get("_mode") if isinstance(state, dict) else None
-            output_mode = result.get("_mode") if isinstance(result, dict) else None
-            transitions.append({"input_mode": input_mode, "output_mode": output_mode})
-            return result
-
-        with patch('rcx_pi.selfhost.step_mu._step_trusted', side_effect=tracking_step):
-            result = step_kernel_mu([], 42)
-
-        # Should return original input
-        assert result == 42
-
-        # Extract modes from transitions
-        input_modes = [t["input_mode"] for t in transitions]
-        output_modes = [t["output_mode"] for t in transitions]
+        state = entry_state
+        for _ in range(20):
+            result = eval_step(kernel_projs, state)
+            out_mode = result.get("_mode") if isinstance(result, dict) else None
+            modes_seen.append(out_mode)
+            if result == state:
+                break  # fixpoint
+            state = result
 
         # Should have transitioned through:
-        # None (entry) → kernel (after wrap) → done (after stall) → unwrapped
-        assert None in input_modes  # Entry state has no _mode
-        assert "kernel" in output_modes  # kernel.wrap produces _mode: kernel
-        assert "done" in output_modes  # kernel.stall produces _mode: done
+        # kernel.wrap → _mode: kernel (try phase)
+        # kernel.stall → _mode: done (all projections exhausted)
+        # kernel.unwrap → no _mode (unwrapped to domain value)
+        assert "kernel" in modes_seen, f"kernel.wrap did not fire: {modes_seen}"
+        assert "done" in modes_seen, f"kernel.stall did not fire: {modes_seen}"
+
+        # Also verify through the public API
+        meta = step_kernel_mu([], 42, return_meta=True)
+        assert meta["stall"] is True
+        assert meta["output"] == 42
 
     def test_no_match_projections_stall(self):
         """Projections that don't match cause stall."""

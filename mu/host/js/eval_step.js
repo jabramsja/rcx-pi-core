@@ -222,8 +222,10 @@ function iterNormalizedDictPairs(value) {
     if (current.tail === null) break;
     current = current.tail;
     steps++;
-    // Parity with Python _iter_normalized_dict_pairs: fail at width 101 when
-    // MAX_VALIDATION_DEPTH is 100 (protects validator against oversized encodings).
+    // Parity with Python _iter_normalized_dict_pairs: both substrates process
+    // exactly 100 pairs max. Python increments steps at loop top and checks
+    // steps > 100; JS increments after push and checks steps >= 100. Both
+    // return null when a 101st pair would be processed.
     if (steps >= MAX_VALIDATION_DEPTH) return null;
   }
   return pairs;
@@ -918,8 +920,10 @@ function denormalize(value, _depth = 0) {
  * Normalize a projection (pattern and body).
  */
 function normalizeProjection(proj) {
+  // Return only pattern/body — no spread. Extra fields (id, etc.) are stripped
+  // downstream at kernelDomainProjs construction anyway, but avoiding the spread
+  // makes the data flow explicit and prevents accidental field leakage.
   return {
-    ...proj,
     pattern: normalize(proj.pattern),
     body: normalize(proj.body)
   };
@@ -1054,8 +1058,9 @@ function substitute(body, bindings, _depth = 0) {
   if (isVar(body)) {
     const name = body.var;
     if (!(name in bindings)) {
-      // Stall behavior: return body unchanged (matches Python Phase 7d-1)
-      return body;
+      // Parity with Python eval_seed.substitute: raise on unbound variables.
+      // Silent return was masking projection bugs as stalls.
+      throw new Error(`Unbound variable: ${name}`);
     }
     return bindings[name];
   }
@@ -1116,6 +1121,34 @@ function step(projections, input) {
     }
   }
   return input;
+}
+
+/**
+ * Check if result is a kernel terminal state {_mode:"done", _result:..., _stall:...}.
+ * Parity with Python is_kernel_terminal() in step_mu.py.
+ */
+function isKernelTerminal(result) {
+  return typeof result === 'object' && result !== null &&
+    result._mode === 'done' && '_result' in result && '_stall' in result;
+}
+
+/**
+ * Check if result is an intermediate kernel state (mid-execution).
+ * Parity with Python is_kernel_intermediate() in step_mu.py.
+ *
+ * Intermediate states have kernel-internal fields indicating active processing:
+ * - _subst_ctx, _match_ctx, _kernel_ctx (algorithm contexts)
+ * - _mode with value other than "done" (kernel loop in progress)
+ *
+ * These are NOT stalls — skip hash-based stall detection for these.
+ */
+function isKernelIntermediate(result) {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return false;
+  // Kernel context fields indicate mid-execution
+  if ('_subst_ctx' in result || '_match_ctx' in result || '_kernel_ctx' in result) return true;
+  // _mode present but not "done" means kernel loop in progress
+  if ('_mode' in result && result._mode !== 'done') return true;
+  return false;
 }
 
 /**
@@ -1266,8 +1299,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       const result = step(projections, current);
 
       // Check for kernel terminal state BEFORE unwrap
-      if (typeof result === 'object' && result !== null &&
-          result._mode === 'done' && '_result' in result && '_stall' in result) {
+      if (isKernelTerminal(result)) {
         const stall = result._stall === true;
         if (stall) {
           validator(domainInput, 'stepKernel output');
@@ -1278,24 +1310,46 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
         return { output, stall: false };
       }
 
-      // Stall check: no change means no progress (skip for intermediate states)
-      const resultHash = muHashCached(result);
-      if (resultHash === currentHash) {
-        validator(domainInput, 'stepKernel output');
-        return { output: domainInput, stall: true };
+      // Stall check: no change means no progress.
+      // Skip for intermediate kernel states — they are mid-execution by definition.
+      // Parity with Python step_kernel_mu: `if not is_kernel_intermediate(result):`
+      if (!isKernelIntermediate(result)) {
+        const resultHash = muHashCached(result);
+        if (resultHash === currentHash) {
+          validator(domainInput, 'stepKernel output');
+          return { output: domainInput, stall: true };
+        }
+        currentHash = resultHash;
       }
 
       current = result;
-      currentHash = resultHash;
     }
     // Max steps exceeded — stall
     validator(domainInput, 'stepKernel output');
     return { output: domainInput, stall: true };
   }
 
-  // Non-meta mode: use run() as before
-  const runResult = run(projections, kernelInput, maxSteps);
-  return runResult;
+  // Non-meta mode: run() with isKernelIntermediate stall-skip.
+  // Like run() but skips hash-based stall checks for intermediate kernel
+  // states (parity with Python step_kernel_mu's is_kernel_intermediate guard).
+  let current = kernelInput;
+  let currentHash = muHashCached(kernelInput);
+  const trace = [];
+  for (let i = 0; i < maxSteps; i++) {
+    const next = step(projections, current);
+
+    // Skip stall check for intermediate kernel states — they are mid-execution.
+    if (!isKernelIntermediate(next)) {
+      const nextHash = muHashCached(next);
+      if (nextHash === currentHash) {
+        return { result: current, steps: i, stalled: true, trace };
+      }
+      currentHash = nextHash;
+    }
+
+    current = next;
+  }
+  return { result: current, steps: maxSteps, stalled: false, trace };
 }
 
 /**
@@ -1746,6 +1800,9 @@ function runSubAlgorithm(algorithmProjs, initial, maxIterations) {
  */
 function hashTraceForRecurrence(trace, maxEntries) {
   maxEntries = maxEntries ?? 10000;
+  // SECURITY: Hard cap parity with Python _MAX_TRACE_ENTRIES_HARD_CAP (step_mu.py:1518)
+  const MAX_TRACE_ENTRIES_HARD_CAP = 100000;
+  if (maxEntries > MAX_TRACE_ENTRIES_HARD_CAP) maxEntries = MAX_TRACE_ENTRIES_HARD_CAP;
   const entries = [];
   const visited = new Set();
   let current = trace;
@@ -1789,7 +1846,7 @@ function runEnginePipeline(projections, inputValue, options) {
     frozen = null,
     maxEngineIterations = 20,
     maxAlgorithmIterations = 50,
-  } = options || {};
+  } = options ?? {};
 
   // Feed engine its initial input (always use full config form -> engine.init_config)
   let state = {
@@ -1823,6 +1880,15 @@ function runEnginePipeline(projections, inputValue, options) {
       const context = Object.assign({}, request.context);
       const injectKey = request.inject_key;
 
+      // SECURITY: inject_key must not be a kernel-reserved field.
+      // Parity with Python run_engine_pipeline (step_mu.py:1480).
+      if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
+        throw new RcxError('input.reserved_field',
+          `SECURITY: inject_key '${injectKey}' is a kernel-reserved field. ` +
+          `Boundary requests cannot inject reserved fields.`
+        );
+      }
+
       let result;
       if (operation === 'run_trace') {
         const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
@@ -1833,11 +1899,11 @@ function runEnginePipeline(projections, inputValue, options) {
         const algoName = request.algorithm;
         const algoProjs = seedProjectionMap[algoName];
         if (!algoProjs) {
-          throw new Error(`Unknown algorithm seed: ${algoName}`);
+          throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
         }
         result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
       } else {
-        throw new Error(`Unknown boundary operation: ${operation}`);
+        throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
       }
 
       context[injectKey] = result;

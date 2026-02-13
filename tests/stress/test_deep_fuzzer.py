@@ -304,8 +304,8 @@ class TestHybridMatchPerimeter:
         """CRITICAL: forged kernel-like dict with non-Mu payload must fail closed.
 
         Regression guard: a dict with _mode="kernel" but set() value must NOT
-        bypass assert_mu validation. The shallow type check in
-        _is_kernel_internal_state catches this.
+        bypass assert_mu validation. The caller-trust model ensures public
+        API always validates via assert_mu.
         """
         from rcx_pi.selfhost.eval_seed import apply_projection
         projection = {"id": "t", "pattern": {"var": "x"}, "body": {"var": "x"}}
@@ -360,7 +360,7 @@ class TestHybridMatchPerimeter:
             apply_projection(projection, set())
 
     # -- Behavioral tests through public API --
-    # (Tests assert observable behavior, not internal _is_kernel_internal_state directly)
+    # (Tests assert observable behavior through public API)
 
     def test_apply_projection_rejects_non_dict_input(self):
         """Non-dict non-Mu values are always rejected by apply_projection."""
