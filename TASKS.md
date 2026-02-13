@@ -96,6 +96,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-02-11): CI green gate 28 min → 2 min — hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` (452 tests deselected), 168 slow tests moved out of gate, `pytest-timeout` added to test extras, fragile grounding test fixed. Green gate runs ~2,500 core tests in ~50s CI. Nightly (ci_full) still runs everything. No phase/debt change.
 - Tracker sync note (2026-02-11): Static speed enforcer — `tools/check_test_speed.sh` grep-based detection of test files importing slow kernel functions without `@pytest.mark.slow`. Integrated into `tools/pre-commit-doc-check` (section 4b). 7 existing violations fixed. No phase/debt change.
 - Tracker sync note (2026-02-12): JS engine-hemisphere parity — `runEnginePipeline`, `hashTraceForRecurrence`, `runHemisphereRouting`, `runEngineWithRouting` added to `eval_step.js`. rcx_engine.v1.json + recurrence.v2.json now loaded in JS. 4 JSON API actions, 6 inline tests, 6 cross-substrate parity tests (36 total pass). `_state_hash`/`_check_hash` added to JS ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS (pre-existing parity gap). JS debt: 13→15. No phase change.
+- Hemisphere hardening (2026-02-12, PR #239): caller-trust model (`_step_trusted`/`_apply_projection_trusted`), JS parity (substitute throw, isKernelIntermediate, inject_key guard, `||`→`??` numeric defaults, hard-cap 100k parity, RcxError at boundaries), boundary result validation in engine pipeline, `_walk_and_validate` shared traversal, dead code removal (eval_seed.py), test dedup (`hemisphere_helpers.py`, `EXPECTED_PROJECTION_IDS`, DummyBudget consolidation). 3 rounds of 9-agent rigorous review. No phase/debt change.
 - Mu Hemispheres v0 — Engine integration COMPLETE (2026-02-11): `run_engine_with_routing()` chains `run_engine_pipeline()` → `run_hemisphere_routing()` with fail-closed input/output validation. `hash_trace_for_recurrence` cycle guard added (visited set + 10000 iteration cap). 10 integration tests (8 fast + 2 slow). Paxos livelock → closure → r_a proven end-to-end.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
@@ -328,7 +329,7 @@ See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
-- [ ] **Hemisphere hardening** (`fix/hemisphere-hardening` branch): caller-trust model, JS parity fixes (substitute throw, isKernelIntermediate, inject_key guard, `??` defaults, hard-cap parity), test dedup (hemisphere_helpers.py), boundary result validation in engine pipeline, stale comment cleanup. No behavior/phase change.
+No active items. Promote from VECTOR when ready.
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)
