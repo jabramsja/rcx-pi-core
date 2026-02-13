@@ -115,7 +115,7 @@ Fix must not introduce structures that violate the engine's acyclicity constrain
 All of the following must be satisfied before GAP-04-FIX can be promoted from VECTOR to NEXT:
 
 - [ ] **E1: Stall-recovery failure test** — A test demonstrating that the current implicit fix (engine re-application) fails on a specific input where an explicit Fix projection would succeed. This proves the gap is not merely theoretical.
-- [ ] **E2: Fix seed draft** — A concrete `fix.v1.json` seed file with at least 2 projections (one for edge_add, one for vertex_add) conforming to the input/output shapes above.
+- [ ] **E2: Fix seed draft** — A concrete `fix.v1.json` seed file with projections for both edge_add and vertex_add, conforming to the input/output shapes above.
 - [ ] **E3: Invariant test suite** — Tests verifying I1–I5 against the draft seed using test-local fixtures.
 - [ ] **E4: Engine integration sketch** — Design showing how `engine.trace_done` (or a new `engine.stall_detected`) would dispatch to Fix via `_boundary_request`, and how the fixed state re-enters step 5.
 - [ ] **E5: VECTOR → NEXT promotion** — Explicit entry in TASKS.md with rationale referencing E1–E4.
