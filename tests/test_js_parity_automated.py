@@ -1253,6 +1253,126 @@ class TestEngineHelpersParity:
         assert js_response.get("error_code") == "input.reserved_field"
 
 
+# API_MAX_STEPS must match eval_step.js constant
+_API_MAX_STEPS = 10000
+
+_MAX_STEPS_GUARDED_ACTIONS = [
+    pytest.param(
+        "run_structural_trace",
+        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1},
+        id="run_structural_trace",
+    ),
+    pytest.param(
+        "run_hemisphere",
+        {"input": {"route_hemisphere": {"engine_result": {"value": None}, "hemispheres": {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}}}, "maxSteps": _API_MAX_STEPS + 1},
+        id="run_hemisphere",
+    ),
+    pytest.param(
+        "run_recurrence",
+        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1},
+        id="run_recurrence",
+    ),
+    pytest.param(
+        "run_exhaustion",
+        {"input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1},
+        id="run_exhaustion",
+    ),
+    pytest.param(
+        "run_engine_pipeline",
+        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+        id="run_engine_pipeline",
+    ),
+    pytest.param(
+        "run_engine_with_routing",
+        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+        id="run_engine_with_routing",
+    ),
+    pytest.param(
+        "run_recurrence_with_bridge",
+        {"input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1},
+        id="run_recurrence_with_bridge",
+    ),
+    pytest.param(
+        "run_exhaustion_with_bridge",
+        {"input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1},
+        id="run_exhaustion_with_bridge",
+    ),
+]
+
+
+# Base args for each guarded action (maxSteps placeholder — tests override it)
+_GUARDED_ACTION_BASE_ARGS = {
+    "run_structural_trace": {"projections": [], "input": {"test": True}},
+    "run_hemisphere": {"input": {"route_hemisphere": {"engine_result": {"value": None}, "hemispheres": {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}}}},
+    "run_recurrence": {"projections": [], "input": {"test": True}},
+    "run_exhaustion": {"input": {"test": True}},
+    "run_engine_pipeline": {"projections": [], "input": {"test": True}, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+    "run_engine_with_routing": {"projections": [], "input": {"test": True}, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+    "run_recurrence_with_bridge": {"input": {"test": True}},
+    "run_exhaustion_with_bridge": {"input": {"test": True}},
+}
+
+_INVALID_MAX_STEPS_VALUES = [
+    pytest.param("abc", id="string"),
+    pytest.param({}, id="object"),
+    pytest.param(-1, id="negative"),
+    pytest.param(1.5, id="float"),
+]
+
+
+class TestAPIMaxStepsGuard:
+    """Verify API_MAX_STEPS cap and type validation on all guarded endpoints."""
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True, text=True, cwd=ROOT, timeout=30
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+        raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+
+    @pytest.mark.parametrize("action_name,args", _MAX_STEPS_GUARDED_ACTIONS)
+    def test_max_steps_over_cap_rejected(self, action_name, args):
+        """maxSteps > API_MAX_STEPS returns api.bad_request, never silently clamped."""
+        js_response = self._run_js_json_api({"action": action_name, **args})
+        assert js_response["success"] is False, (
+            f"{action_name}: expected failure for maxSteps={_API_MAX_STEPS + 1}, got success"
+        )
+        assert js_response.get("error_code") == "api.bad_request", (
+            f"{action_name}: expected error_code=api.bad_request, "
+            f"got {js_response.get('error_code')}"
+        )
+        assert str(_API_MAX_STEPS) in js_response.get("error", ""), (
+            f"{action_name}: error message should mention cap value {_API_MAX_STEPS}"
+        )
+
+    @pytest.mark.parametrize("action_name,args", _MAX_STEPS_GUARDED_ACTIONS)
+    def test_max_steps_at_cap_accepted(self, action_name, args):
+        """maxSteps == API_MAX_STEPS is accepted (boundary check: guard is > not >=)."""
+        at_cap_args = {**args, "maxSteps": _API_MAX_STEPS}
+        js_response = self._run_js_json_api({"action": action_name, **at_cap_args})
+        assert js_response.get("error_code") != "api.bad_request", (
+            f"{action_name}: maxSteps={_API_MAX_STEPS} (at cap) should be accepted, "
+            f"got error_code={js_response.get('error_code')}"
+        )
+
+    @pytest.mark.parametrize("action_name", list(_GUARDED_ACTION_BASE_ARGS.keys()))
+    @pytest.mark.parametrize("bad_value", _INVALID_MAX_STEPS_VALUES)
+    def test_max_steps_invalid_type_rejected(self, action_name, bad_value):
+        """Non-integer and negative maxSteps values return api.bad_request."""
+        base = _GUARDED_ACTION_BASE_ARGS[action_name]
+        request = {"action": action_name, **base, "maxSteps": bad_value}
+        js_response = self._run_js_json_api(request)
+        assert js_response["success"] is False, (
+            f"{action_name}: expected failure for maxSteps={bad_value!r}, got success"
+        )
+        assert js_response.get("error_code") == "api.bad_request", (
+            f"{action_name}: expected error_code=api.bad_request for maxSteps={bad_value!r}, "
+            f"got {js_response.get('error_code')}"
+        )
+
 
 @pytest.mark.slow
 class TestEnginePipelineCrossSubstrateParity:
@@ -1587,13 +1707,18 @@ class TestErrorEdgeCoverageRatchet:
         )
 
     def test_required_edges_all_have_error_code(self):
-        """For requires_error_edges=true, EVERY edge_args entry must have expected_error_code."""
+        """For requires_error_edges=true, EVERY failure edge must have expected_error_code.
+
+        Edges with expected_success=true are success-path edges and are exempt.
+        """
         manifest = _load_manifest()
         incomplete = []
         for name, defn in manifest["actions"].items():
             if not defn.get("requires_error_edges"):
                 continue
             for i, edge in enumerate(defn.get("edge_args", [])):
+                if edge.get("expected_success"):
+                    continue  # success-path edge — no error_code expected
                 if "expected_error_code" not in edge:
                     incomplete.append(f"{name}.edge_args[{i}]")
         assert not incomplete, (
@@ -1850,6 +1975,9 @@ class TestManifestEdgeCaseParity:
                 )
 
         # Run through Python and compare error_codes
+        if edge.get("js_api_only"):
+            # JS-API-layer guard (e.g., API_MAX_STEPS) — no Python equivalent
+            return
         py_success, py_error_code = _run_python_edge_case(action_name, edge["args"])
         if py_success is None:
             # No Python adapter for this action — skip comparison

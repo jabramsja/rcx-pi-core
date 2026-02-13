@@ -42,8 +42,7 @@
     },
     "run_recurrence": {
       "type": "operation",
-      "requires_error_edges": false,
-      "success_only_reason": "Wraps runStructural+runRecurrence; boundary validation covered by run_structural_trace edge",
+      "requires_error_edges": true,
       "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
       "edge_args": [
@@ -51,16 +50,40 @@
           "description": "maxSteps=0 produces empty trace, recurrence on empty is benign",
           "args": {"projections": [], "input": {"test": true}, "maxSteps": 0},
           "expected_success": true
+        },
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": 10001},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": "abc"},
+          "expected_error_code": "api.bad_request"
         }
       ]
     },
     "run_exhaustion": {
       "type": "operation",
-      "requires_error_edges": false,
-      "success_only_reason": "Simple step loop; always succeeds or stalls gracefully",
+      "requires_error_edges": true,
       "required_args": {"input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 200},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"input": {"test": true}, "maxSteps": 10001},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"input": {"test": true}, "maxSteps": "abc"},
+          "expected_error_code": "api.bad_request"
+        }
+      ]
     },
     "get_constants": {
       "type": "operation",
@@ -93,19 +116,43 @@
     },
     "run_recurrence_with_bridge": {
       "type": "operation",
-      "requires_error_edges": false,
-      "success_only_reason": "Meta-circular recurrence path; boundary validation shared with run_recurrence",
+      "requires_error_edges": true,
       "required_args": {"input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"input": {"test": true}, "maxSteps": 10001},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"input": {"test": true}, "maxSteps": "abc"},
+          "expected_error_code": "api.bad_request"
+        }
+      ]
     },
     "run_exhaustion_with_bridge": {
       "type": "operation",
-      "requires_error_edges": false,
-      "success_only_reason": "Meta-circular exhaustion path; always succeeds or stalls gracefully",
+      "requires_error_edges": true,
       "required_args": {"input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"input": {"test": true}, "maxSteps": 10001},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"input": {"test": true}, "maxSteps": "abc"},
+          "expected_error_code": "api.bad_request"
+        }
+      ]
     },
     "validate_reserved_fields": {
       "type": "validation",
@@ -143,6 +190,18 @@
           "description": "Reserved field in input rejected at domain boundary",
           "args": {"input": {"_mode": "evil"}},
           "expected_error_code": "input.reserved_field"
+        },
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": 10001},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": "abc"},
+          "expected_error_code": "api.bad_request"
         }
       ]
     },
@@ -156,6 +215,18 @@
           "description": "Reserved field in input rejected at domain boundary",
           "args": {"input": {"_mode": "evil"}},
           "expected_error_code": "input.reserved_field"
+        },
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"input": {"route_hemisphere": {"engine_result": {"value": null}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}}}, "maxSteps": 10001},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"input": {"route_hemisphere": {"engine_result": {"value": null}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}}}, "maxSteps": "abc"},
+          "expected_error_code": "api.bad_request"
         }
       ]
     },
@@ -170,6 +241,18 @@
           "description": "Empty projections + simple input exhausts engine iterations",
           "args": {"projections": [], "input": {"test": true}, "maxSteps": 1, "maxEngineIterations": 2, "maxAlgorithmIterations": 2},
           "expected_error_code": "engine.exhausted"
+        },
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": 10001, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": "abc", "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+          "expected_error_code": "api.bad_request"
         }
       ]
     },
@@ -210,6 +293,18 @@
           "description": "Bad hemispheres shape",
           "args": {"projections": [], "input": {"test": true}, "hemispheres": {"bad": "shape"}, "maxSteps": 1},
           "expected_error_code": "input.shape_mismatch"
+        },
+        {
+          "description": "maxSteps exceeds API_MAX_STEPS cap",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": 10001, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "maxSteps non-integer rejected at API boundary",
+          "js_api_only": true,
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": "abc", "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+          "expected_error_code": "api.bad_request"
         }
       ]
     },
