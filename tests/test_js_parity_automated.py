@@ -1480,6 +1480,187 @@ class TestEnginePipelineCrossSubstrateParity:
 
 
 # =============================================================================
+# TestEngineFixPathParity — E4 fix-path cross-substrate lock
+# =============================================================================
+
+
+class TestEngineFixPathParity:
+    """Cross-substrate parity for the engine fix path (GAP-04-FIX).
+
+    Verifies both substrates handle the stall→fix dispatch identically:
+    - Graph input + identity projection → fix applied, stall=false, value perturbed
+    - Non-graph input + identity projection → fix pass-through, stall=true, value unchanged
+    """
+
+    IDENTITY_PROJS = [
+        {"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}},
+    ]
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True, text=True, cwd=ROOT, timeout=120
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+        raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+
+    def test_engine_fix_path_graph_identity_parity(self):
+        """Graph + identity stalls → fix applied, stall=false, value perturbed (both substrates)."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
+
+        reset_step_budget()
+        py_result = run_engine_pipeline(
+            self.IDENTITY_PROJS, graph_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": self.IDENTITY_PROJS,
+            "input": graph_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS engine pipeline failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # Both substrates: fix broke the stall
+        assert py_result["stall"] is False, f"Python stall should be False, got: {py_result['stall']}"
+        assert js_result["stall"] is False, f"JS stall should be False, got: {js_result['stall']}"
+
+        # Both substrates: value differs from input (fix edge prepended)
+        py_norm = _normalize_for_cross_substrate(py_result["value"])
+        js_norm = _normalize_for_cross_substrate(js_result["value"])
+        input_norm = _normalize_for_cross_substrate(graph_input)
+        assert py_norm != input_norm, "Python value should differ from input after fix"
+        assert js_norm != input_norm, "JS value should differ from input after fix"
+
+        # Cross-substrate: both produce the same fixed value
+        assert _cross_substrate_equal(py_result["value"], js_result["value"]), (
+            f"Fix path value mismatch:\n  Python: {py_result['value']}\n  JS: {js_result['value']}"
+        )
+
+    def test_engine_fix_path_non_graph_pass_through_parity(self):
+        """Non-graph + identity stalls → fix pass-through, stall=true, value unchanged (both substrates)."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        scalar_input = {"value": 42, "status": "test"}
+
+        reset_step_budget()
+        py_result = run_engine_pipeline(
+            self.IDENTITY_PROJS, scalar_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": self.IDENTITY_PROJS,
+            "input": scalar_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS engine pipeline failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # Both substrates: stall persists (fix pass-through)
+        assert py_result["stall"] is True, f"Python stall should be True, got: {py_result['stall']}"
+        assert js_result["stall"] is True, f"JS stall should be True, got: {js_result['stall']}"
+
+        # Both substrates: value unchanged (fix.pass_through returns original)
+        assert _cross_substrate_equal(py_result["value"], scalar_input), (
+            f"Python value should equal input after pass-through fix"
+        )
+        assert _cross_substrate_equal(js_result["value"], scalar_input), (
+            f"JS value should equal input after pass-through fix"
+        )
+
+    def test_engine_fix_path_routing_graph_parity(self):
+        """Graph fix path routes correctly through hemisphere routing (both substrates)."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
+
+        reset_step_budget()
+        py_result = run_engine_with_routing(
+            self.IDENTITY_PROJS, graph_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_with_routing",
+            "projections": self.IDENTITY_PROJS,
+            "input": graph_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS routing failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # stall=false after fix → should NOT route to r_inf
+        py_er = py_result["engine_result"]
+        js_er = js_result["engine_result"]
+        assert py_er["stall"] is False, "Python engine_result stall should be False"
+        assert js_er["stall"] is False, "JS engine_result stall should be False"
+
+        # Hemisphere assignment: both substrates agree
+        assert _cross_substrate_equal(py_result["hemispheres"], js_result["hemispheres"]), (
+            f"Hemisphere mismatch:\n  Python: {py_result['hemispheres']}\n"
+            f"  JS: {js_result['hemispheres']}"
+        )
+
+        # r_inf should be None (stall=false means no stall routing)
+        assert py_result["hemispheres"]["r_inf"] is None, (
+            "Graph with fix should not route to r_inf"
+        )
+
+    def test_engine_fix_path_routing_non_graph_parity(self):
+        """Non-graph fix pass-through routes consistently through hemispheres (both substrates)."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        scalar_input = {"value": 42, "status": "test"}
+
+        reset_step_budget()
+        py_result = run_engine_with_routing(
+            self.IDENTITY_PROJS, scalar_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_with_routing",
+            "projections": self.IDENTITY_PROJS,
+            "input": scalar_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS routing failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # stall=true persists → routes to r_inf
+        py_er = py_result["engine_result"]
+        js_er = js_result["engine_result"]
+        assert py_er["stall"] is True, "Python engine_result stall should be True"
+        assert js_er["stall"] is True, "JS engine_result stall should be True"
+
+        # Hemisphere assignment: both substrates agree
+        assert _cross_substrate_equal(py_result["hemispheres"], js_result["hemispheres"]), (
+            f"Hemisphere mismatch:\n  Python: {py_result['hemispheres']}\n"
+            f"  JS: {js_result['hemispheres']}"
+        )
+
+
+# =============================================================================
 # TestFalsyDefaultParity — Phase 2 (P4) falsy-default divergence
 # =============================================================================
 

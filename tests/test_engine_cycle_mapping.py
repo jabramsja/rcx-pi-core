@@ -6,7 +6,7 @@ artifacts. This is EVIDENCE MAPPING, not feature implementation.
 
 Spec source: RCXEngineNew.pdf (10-step stall-fix-promote cycle)
 Runtime doc: docs/core/RCXEngine.v0.md (Engine Cycle section)
-Engine seed: mu/programs/rcx_engine.v1.json (7 projections)
+Engine seed: mu/programs/rcx_engine.v1.json (10 projections)
 """
 
 from __future__ import annotations
@@ -68,21 +68,25 @@ CYCLE_MAPPING: tuple[CycleStep, ...] = (
     CycleStep(
         step_id=4,
         enginenew_label="Fix routine: apply Fix(G) (Rule 0.6)",
-        runtime_artifact="—",
-        evidence_type="gap",
+        runtime_artifact="engine.hash_done_fix → fix.v1.json via run_algorithm, engine.fix_done_applied, engine.fix_done_none",
+        evidence_type="structural",
         evidence_note=(
-            "No Fix projection exists in any seed. Fix semantics (add minimal "
-            "structural edge) are implicit in engine re-application. "
-            "Rule 0.6 requires explicit structural Fix — not yet implemented."
+            "engine.hash_done_fix dispatches fix.v1.json via _boundary_request "
+            "operation=run_algorithm when _stall=true. fix.v1.json has 6 projections "
+            "(init + edge_add_guard/edge_add + vertex_add_guard/vertex_add + pass_through). "
+            "engine.fix_done_applied routes fixed result to recurrence (stall=false). "
+            "engine.fix_done_none routes original result to recurrence (stall persists). "
+            "Invariants I1-I5 verified by tests/test_fix_invariants.py (19 tests)."
         ),
     ),
     CycleStep(
         step_id=5,
         enginenew_label="Recurrence detection (Rule 2.2♢)",
-        runtime_artifact="engine.hash_done → recurrence.v2.json via run_algorithm",
+        runtime_artifact="engine.hash_done / engine.fix_done_* → recurrence.v2.json via run_algorithm",
         evidence_type="structural",
         evidence_note=(
-            "engine.hash_done dispatches recurrence.v2.json via _boundary_request "
+            "engine.hash_done (non-stall) and engine.fix_done_applied/fix_done_none "
+            "(post-fix) all dispatch recurrence.v2.json via _boundary_request "
             "operation=run_algorithm. Recurrence seed has 9 projections for "
             "hash-accelerated closure detection."
         ),
@@ -163,31 +167,10 @@ class GapEntry(NamedTuple):
 
 
 GAP_REGISTRY: tuple[GapEntry, ...] = (
-    GapEntry(
-        step_id=4,
-        gap_id="GAP-04-FIX",
-        rationale=(
-            "No Fix projection exists. Fix semantics (add minimal structural "
-            "edge per Rule 0.6) are implicit in engine re-application. An "
-            "explicit Fix projection requires structural seed design + "
-            "evidence that implicit fix is insufficient."
-        ),
-        owner="VECTOR",
-        unblock_condition=(
-            "Requires all 5 evidence items from EngineNewFixContract.v0.md: "
-            "(E1) stall-recovery failure test, (E2) fix.v1.json seed draft, "
-            "(E3) invariant test suite for I1-I5, (E4) engine integration "
-            "sketch, (E5) VECTOR → NEXT promotion with rationale."
-        ),
-        contract_doc="docs/core/EngineNewFixContract.v0.md",
-        invariants=(
-            "I1:minimality",
-            "I2:structural_purity",
-            "I3:idempotence_safety",
-            "I4:stall_breaking",
-            "I5:no_semantic_drift",
-        ),
-    ),
+    # GAP-04-FIX RESOLVED: fix.v1.json integrated into engine via
+    # engine.hash_done_fix / engine.fix_done_applied / engine.fix_done_none.
+    # Evidence: E1-E4 complete, invariants I1-I5 verified (19 tests).
+    # Contract doc: docs/core/EngineNewFixContract.v0.md (retained as reference).
     GapEntry(
         step_id=10,
         gap_id="GAP-10-LOOP",
@@ -274,7 +257,10 @@ class TestEngineCycleMapping:
         required = {
             "engine.init",
             "engine.trace_done",
+            "engine.hash_done_fix",
             "engine.hash_done",
+            "engine.fix_done_applied",
+            "engine.fix_done_none",
             "engine.recurrence_done",
             "engine.exhaustion_done",
             "engine.unwrap",
@@ -314,9 +300,10 @@ class TestEngineCycleMapping:
             p["id"] for p in seed["projections"]
             if "_boundary_request" in str(p.get("body", {}))
         ]
-        # init, init_config, trace_done, hash_done, recurrence_done all use boundary
-        assert len(boundary_users) >= 5, (
-            f"Expected ≥5 projections using _boundary_request, "
+        # init, init_config, trace_done, hash_done_fix, hash_done,
+        # fix_done_applied, fix_done_none, recurrence_done all use boundary
+        assert len(boundary_users) >= 8, (
+            f"Expected ≥8 projections using _boundary_request, "
             f"got {len(boundary_users)}: {boundary_users}"
         )
 
@@ -394,8 +381,8 @@ class TestGapRegistry:
         structural = [s for s in CYCLE_MAPPING if s.evidence_type == "structural"]
         gaps = [s for s in CYCLE_MAPPING if s.evidence_type == "gap"]
         assert len(structural) + len(gaps) == 10
-        assert len(structural) == 8, f"Expected 8 structural, got {len(structural)}"
-        assert len(gaps) == 2, f"Expected 2 gaps, got {len(gaps)}"
+        assert len(structural) == 9, f"Expected 9 structural, got {len(structural)}"
+        assert len(gaps) == 1, f"Expected 1 gap, got {len(gaps)}"
 
 
 class TestGapContractDocs:
@@ -403,53 +390,9 @@ class TestGapContractDocs:
 
     ROOT = Path(__file__).parent.parent
 
-    def test_gap04_fix_has_contract_doc(self):
-        """GAP-04-FIX must reference a contract doc that exists on disk."""
-        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
-        assert gap.contract_doc, "GAP-04-FIX must have a contract_doc path"
-        doc_path = self.ROOT / gap.contract_doc
-        assert doc_path.exists(), (
-            f"Contract doc not found: {gap.contract_doc}"
-        )
-
-    def test_gap04_fix_has_invariants(self):
-        """GAP-04-FIX must declare at least 3 invariants."""
-        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
-        assert len(gap.invariants) >= 3, (
-            f"GAP-04-FIX has {len(gap.invariants)} invariants, need ≥3"
-        )
-
-    def test_gap04_fix_invariants_in_contract_doc(self):
-        """Every invariant ID declared in GAP-04-FIX must appear in the contract doc."""
-        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
-        doc_path = self.ROOT / gap.contract_doc
-        doc_text = doc_path.read_text()
-        for inv in gap.invariants:
-            # Invariant format is "I1:minimality" — check the label part
-            label = inv.split(":")[0]  # e.g., "I1"
-            assert label in doc_text, (
-                f"Invariant {inv} (label {label}) not found in {gap.contract_doc}"
-            )
-
-    def test_gap04_fix_unblock_references_evidence(self):
-        """GAP-04-FIX unblock_condition must reference evidence items from contract doc."""
-        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
-        for evidence_id in ("E1", "E2", "E3", "E4", "E5"):
-            assert evidence_id in gap.unblock_condition, (
-                f"GAP-04-FIX unblock_condition missing evidence reference {evidence_id}"
-            )
-
-    def test_contract_doc_has_doc_status_header(self):
-        """Contract docs must have a DOC_STATUS header for governance compliance."""
-        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
-        doc_path = self.ROOT / gap.contract_doc
-        doc_text = doc_path.read_text()
-        assert "DOC_STATUS" in doc_text, (
-            f"{gap.contract_doc} missing DOC_STATUS header"
-        )
-        assert "DESIGN_SPEC" in doc_text, (
-            f"{gap.contract_doc} should be TYPE: DESIGN_SPEC"
-        )
+    # GAP-04-FIX tests removed: gap resolved via engine integration (E4).
+    # Contract doc retained at docs/core/EngineNewFixContract.v0.md.
+    # Invariants verified by tests/test_fix_invariants.py (19 tests).
 
     def test_gaps_without_contract_doc_have_empty_invariants(self):
         """Gaps with no contract doc should have empty invariants (nothing to check yet)."""

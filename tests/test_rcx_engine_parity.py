@@ -121,8 +121,8 @@ class TestEngineStructure:
     """Test engine structural properties."""
 
     def test_projections_count(self, engine_projections):
-        """Engine has expected 7 projections."""
-        assert len(engine_projections) == 7, f"Expected 7 projections, got {len(engine_projections)}"
+        """Engine has expected 10 projections."""
+        assert len(engine_projections) == 10, f"Expected 10 projections, got {len(engine_projections)}"
 
     def test_projection_ids(self, engine_projections):
         """All expected projection IDs present."""
@@ -131,7 +131,10 @@ class TestEngineStructure:
             "engine.init",
             "engine.init_config",
             "engine.trace_done",
+            "engine.hash_done_fix",
             "engine.hash_done",
+            "engine.fix_done_applied",
+            "engine.fix_done_none",
             "engine.recurrence_done",
             "engine.exhaustion_done",
             "engine.unwrap",
