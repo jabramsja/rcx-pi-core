@@ -1,5 +1,7 @@
 # RCX TeX Canon Contract (Machine-Ingestible Spec)
 
+Status: ARCHIVED (historical contract reference)
+
 This document defines the **binding contract** for `wrapper.tex` (and any included TeX files) as a
 **machine-ingestible** RCX specification source.
 
@@ -132,11 +134,11 @@ Current version:
 
 Before committing any wrapper/TeX spec change:
 
-- [ ] No existing `sec:` anchors changed or removed
-- [ ] No existing `rule:` IDs changed
-- [ ] New semantic items have anchors
-- [ ] If semantics changed, note it near the change
-- [ ] `python3 -m pytest -q` remains green (repo truth gate)
+- No existing `sec:` anchors changed or removed
+- No existing `rule:` IDs changed
+- New semantic items have anchors
+- If semantics changed, note it near the change
+- `python3 -m pytest -q` remains green (repo truth gate)
 
 ------------------------------------------------------------
 ## 8) Relationship to Governance Rails
@@ -148,4 +150,3 @@ If there is any ambiguity:
 - Governance overrides enthusiasm
 - Tests override documentation
 - Repo state overrides conversation state
-

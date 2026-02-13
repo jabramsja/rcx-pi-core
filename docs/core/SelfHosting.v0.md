@@ -465,7 +465,7 @@ Phase 5 complete:
 - `step_mu()`/`run_mu()` are fail-closed: reject non-linear patterns with ValueError
 - See `tests/structural/test_match_bridge_invariants.py` for ordering and contract tests
 
-## Next Steps
+## Historical Phase Log and Deferred Follow-Ups
 
 **Completed (Phase 4a-4d):**
 1. [x] Review this doc with agents (verifier, adversary, expert)
@@ -497,8 +497,8 @@ Phase 5 complete:
 **Phase 8 (Bootstrap Primitives + Mechanical Kernel):**
 - [x] 8a: Document 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader; mu_equal eliminated)
 - [x] 8b: Simplify step_kernel_mu to mechanical operation (~15 lines)
-- [ ] 8c: Oscillation detection (future)
-- [ ] 8d: EngineNews trace model (in progress - see L3 plan below)
+- Deferred: 8c oscillation detection (future research)
+- [x] 8d: EngineNews trace model (complete; see L3 notes below)
 
 **L3 Substrate Portability (7-agent reviewed 2026-01-30):**
 - [x] JS POC exists (`mu/host/js/eval_step.js`, ~1300 LOC core + ~900 LOC inline tests)

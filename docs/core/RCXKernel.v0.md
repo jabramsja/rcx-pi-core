@@ -385,15 +385,15 @@ Each step gets tests. Failure at any step → stop, understand, adjust.
 
 5. **Bootstrap validation**: How do we verify that EVAL_SEED running EVAL_SEED produces identical behavior to Python running EVAL_SEED?
 
-## Promotion Checklist (VECTOR → NEXT)
+## Historical Promotion Notes (VECTOR → NEXT Draft)
 
-- [x] Decided: Kernel has 4 primitives (identity, stall, trace, dispatch)
-- [x] Decided: apply_projection is seed responsibility, not kernel
-- [x] Decided: Self-hosting required to prove emergence
-- [ ] Attempt: Write EVAL_SEED in Python to understand complexity
-- [ ] Verify: EVAL_SEED is tractable (not impossibly complex)
+- Decided: Kernel has 4 primitives (identity, stall, trace, dispatch).
+- Decided: `apply_projection` is seed responsibility, not kernel.
+- Decided: Self-hosting is required to prove emergence.
+- Historical gating question (resolved in later phases): write EVAL_SEED in Python to understand complexity.
+- Historical gating question (resolved in later phases): verify EVAL_SEED tractability.
 
-## Next Steps
+## Historical Next Steps (Draft-Era)
 
 1. ~~Review spec with user~~ ✓ (this conversation)
 2. Implement Phase 1: Minimal kernel in Python

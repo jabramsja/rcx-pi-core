@@ -366,16 +366,17 @@ These can be added in later versions.
 ### Property tests
 - For any tree T and projections P: `deep_step(P, T)` produces same result as Python recursive version
 
-## Promotion Checklist (VECTOR → NEXT)
+## Promotion Criteria (Historical Draft, VECTOR → NEXT)
 
-- [ ] State schema finalized
-- [ ] All projection categories defined (with concrete Mu)
-- [ ] Guard condition strategy decided
-- [ ] Example worked through completely (all 12+ steps)
-- [ ] Complexity acceptable for Phase 3 goals
-- [ ] Alternative approaches considered and rejected/deferred
+At original draft time, promotion required:
+1. State schema finalized.
+2. All projection categories defined (with concrete Mu).
+3. Guard condition strategy decided.
+4. Example worked through completely (all 12+ steps).
+5. Complexity acceptable for Phase 3 goals.
+6. Alternative approaches considered and rejected/deferred.
 
-## Next Steps
+## Historical Next Steps (Draft-Era)
 
 1. ~~Write this design doc~~ ✓
 2. Work through append example BY HAND (all steps, all frames)
@@ -422,7 +423,7 @@ State validation defends against:
 
 The projection logic itself is pure Mu - no host dependencies.
 
-### Promotion Checklist (VECTOR → NEXT)
+### Promotion Criteria (Historical, Achieved)
 
 - [x] State schema finalized
 - [x] All projection categories defined (8 categories, concrete Mu)

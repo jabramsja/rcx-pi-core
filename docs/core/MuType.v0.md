@@ -151,7 +151,7 @@ The Mu type validation is implemented in `rcx_pi/mu_type.py`:
 
 The semantic purity audit (`tools/audit_semantic_purity.sh`) verifies these guardrails exist.
 
-## Next Steps
+## Historical Implementation Notes
 
 1. ~~Implement `is_mu()` and `validate_mu()` in `rcx_pi/mu_type.py`~~ ✅
 2. ~~Extend `audit_semantic_purity.sh` to check Mu type guardrails~~ ✅

@@ -7,7 +7,8 @@
 1. [`STATUS.md`](../STATUS.md) - Current state (L1-L4, phase, debt) - **ALWAYS READ FIRST**
 2. [`TASKS.md`](../TASKS.md) - Authorized work, North Star invariants, governance
 3. [`ROADMAP.md`](./ROADMAP.md) - Sequence overview (what order, not current state)
-4. Gate/spec docs as needed for specific work
+4. [`Hex0_Boot0_Checklist.md`](./Hex0_Boot0_Checklist.md) - Operational CI and merge gates (`C1-C8`)
+5. Gate/spec docs as needed for specific work
 
 ## Document Roles
 
@@ -16,9 +17,10 @@
 | `STATUS.md` | Current L1-L4 status, phase, debt | Any state change |
 | `TASKS.md` | North Star, Ra/NEXT/VECTOR/SINK | Work promoted or completed |
 | `ROADMAP.md` | Sequence view only | Reading order changes |
+| `Hex0_Boot0_Checklist.md` | Operational CI and merge gates (`C1-C8`) | Gate policy changes |
 | `MetaCircular_Boot0_GatePlan.md` | Gate definitions + exit criteria | Gate scope changes |
 | `AlgorithmNormalizationSpec.v0.md` | Draft design spec | Design evolves |
-| `MuHemispheresDesign.md` | Design spec (v0 core + engine integration IMPLEMENTED) | Design evolves |
+| `MuHemispheresDesign.md` | Design spec (v0 core + engine integration) | Design evolves |
 | `ContentAddressedMu.md` | Design spec (Levels 0-2 implemented, Level 3 deferred) | Design evolves |
 | `NormalizationDecisionMemo.md` | Decision authorization | Rarely (decisions are final) |
 
@@ -33,6 +35,8 @@
 | 6-8 | L4 | Boot chain / substrate independence | PARKED |
 
 **Rationale:** Spec (Gate 1) first; baseline freeze (Gate 0) immediately before code changes.
+
+**Naming note:** Gate numbers (`0-8`) are conceptual architecture gates. `C1-C8` in `Hex0_Boot0_Checklist.md` are operational CI/merge gates.
 
 ## Linking Rules
 

@@ -1410,6 +1410,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     max_engine_iterations: int = 20,
     max_algorithm_iterations: int = 50,
     max_iterations: int | None = None,
+    observer: list | None = None,
 ) -> Mu:
     """Host loop that drives the engine state machine defined in rcx_engine.v1.json.
 
@@ -1450,6 +1451,28 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 
     engine_projs = load_verified_seed(get_seed_path("rcx_engine.v1.json"))["projections"]
 
+    # Observer event helper — no-op when observer is None
+    _obs_ts = [0]  # mutable counter for logical timestamp
+
+    def _emit(event_name, step, state_val, error_code=None):
+        if observer is None:
+            return
+        state_hash = None
+        if isinstance(state_val, (dict, list, str, int, float, bool)) or state_val is None:
+            try:
+                state_hash = mu_hash(state_val)
+            except Exception:
+                pass
+        observer.append({
+            "event_name": event_name,
+            "step": step,
+            "state_hash": state_hash,
+            "error_code": error_code,
+            "substrate": "python",
+            "timestamp": _obs_ts[0],
+        })
+        _obs_ts[0] += 1
+
     # Feed engine its initial input (always use full config form → engine.init_config)
     state: Mu = {"_run_engine": {"projections": projections, "input": input_value, "max_steps": max_steps, "frozen": frozen}}
 
@@ -1458,11 +1481,20 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
         # Step engine projections — trusted: engine state built from validated input
         next_state = _step_trusted(engine_projs, state)
 
+        _emit("step_boundary", iteration, state)
+
         # Engine stalled (no projection matched) — check for terminal result
         if next_state is state:
             if _is_engine_terminal(state):
+                # Check for closure/stall signals in terminal result
+                if isinstance(state, dict):
+                    if state.get("closure_detected"):
+                        _emit("closure_detected", iteration, state)
+                    if state.get("stall"):
+                        _emit("stall_detected", iteration, state)
                 return state
             # Non-terminal stall — engine stuck in intermediate state
+            _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
             raise RuntimeError(
                 f"Engine stalled at iteration {iteration} without producing terminal result. "
                 f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
@@ -1479,6 +1511,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
             # SECURITY: inject_key must not be a kernel-reserved field.
             # Prevents boundary requests from forging kernel state (adversary finding #2).
             if inject_key in KERNEL_RESERVED_FIELDS:
+                _emit("fail_closed", iteration, state, error_code="input.reserved_field")
                 raise ValueError(
                     f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
                     f"Boundary requests cannot inject reserved fields."
@@ -1495,6 +1528,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
                 algo_projs = load_verified_seed(get_seed_path(request["algorithm"]))["projections"]
                 result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
             else:
+                _emit("fail_closed", iteration, state, error_code="api.bad_request")
                 raise ValueError(f"Unknown boundary operation: {operation}")
 
             # SECURITY: validate boundary result before re-injection.
@@ -1509,12 +1543,19 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 
         # Check if engine produced terminal result (e.g. after engine.unwrap)
         if _is_engine_terminal(next_state):
+            # Emit signals found in terminal result
+            if isinstance(next_state, dict):
+                if next_state.get("closure_detected"):
+                    _emit("closure_detected", iteration, next_state)
+                if next_state.get("stall"):
+                    _emit("stall_detected", iteration, next_state)
             return next_state
 
         # Engine advanced internally — keep stepping
         state = next_state
 
     # FAIL CLOSED: engine loop exhausted without terminal result
+    _emit("fail_closed", max_engine_iterations - 1, state, error_code="engine.exhausted")
     raise RuntimeError(
         f"Engine pipeline exhausted {max_engine_iterations} iterations without terminal result. "
         f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"

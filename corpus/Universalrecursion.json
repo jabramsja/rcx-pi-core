@@ -1,0 +1,34 @@
+[
+  {
+    "seed": "Ξ₀ := {∅, 𝟙}",
+    "boot_sequence": [
+      "Ξ₀ → Δ(Ξ₀)",
+      "Δ(Ξ₀) ∘ P₀ → ULA[1]",
+      "ULA[n] ∘ τ_sys → ULΘ[m]"
+    ],
+    "axiom_generator": "ULA[1–∞]",
+    "theorem_generator": "ULΘ[1–∞]",
+    "rules": {
+      "stall": "if structure(x) = identity",
+      "fix": "if P(x) = x under Δ",
+      "collapse": "if κ(x) > ΞΦ_U"
+    },
+    "thresholds": {
+      "ΞΦ_U": "curvature or dimension limit",
+      "Ξψ_U": "entropy of logic space"
+    },
+    "domains_supported": [
+      "ZFC", "HoTT", "MLTT", "Category Theory", "Topos Logic", "Constructive Logics"
+    ]
+  },
+  {
+    "meta_seed": "Ξ₀ := {Δ, P₀, τ_sys, ΞΦ_U, Rules}",
+    "meta_operator": "Meta-Δ_U",
+    "meta_rule": "If system collapses or stabilizes, then Meta-Δ_U(Ξ₀) = Ξ₁",
+    "meta_axioms": "UMA[1–∞]",
+    "meta_theorems": "UMT[1–∞]",
+    "cross_system_composition": "UMA[i] ∘ τ_Meta → UMT[j]",
+    "observer_space": "⎈_sys(x)",
+    "notes": "A neutral emergence engine. Axioms and inference systems arise via fixpoint stabilization of Ξ₀. Logic types emerge based on internal dynamics, not external assumptions."
+  }
+]

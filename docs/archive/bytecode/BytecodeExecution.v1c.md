@@ -105,12 +105,12 @@ def op_fixed(self, after_value: Any, after_hash: str) -> None:
 9. `test_hash_determinism`: Same value → same hash
 10. `test_hash_uses_canonical_form`: {a:1, b:2} == {b:2, a:1}
 
-## Promotion Checklist (VECTOR → NEXT)
+## Promotion Notes (Historical, VECTOR → NEXT Draft)
 
-- [x] Decided: R0 type is `Any`
-- [x] Decided: Use `value_hash` from trace_canon
-- [ ] Resolve: Should load_value clear stall_memory?
-- [ ] Scope: ~30 lines of code, ~10 tests
+- Decided: R0 type is `Any`.
+- Decided: Use `value_hash` from `trace_canon`.
+- Open research question: should `load_value()` clear `stall_memory`?
+- Draft scope estimate: ~30 lines of code, ~10 tests.
 
 ## Design Decisions
 

@@ -70,6 +70,14 @@ If a task is not listed here, it is NOT to be implemented.
   - Draft specs live in `roadmap/`; approved specs migrate to `docs/core/`
   - See `roadmap/MANIFEST.md` for reading order and linking rules
 
+## Collaboration Protocol (Default Working Mode)
+
+- **VECTOR mode (design/creation)**: Explore ontology-to-runtime mappings, propose alternatives, and identify missing mechanisms. No implementation begins in VECTOR.
+- **NEXT mode (execution/verification)**: Implement bounded, testable slices only. Mirror Python/JS semantics and preserve deterministic behavior.
+- **Falsifiability gate**: Every new design claim must map to a measurable runtime behavior and at least one concrete test criterion.
+- **Cross-model continuity**: Inputs from Codex, Claude, or Gemini are design references, not authority. Canonical authority remains `STATUS.md` + `TASKS.md`.
+- **Promotion discipline**: Creative proposals must be explicitly promoted (`VECTOR -> NEXT`) before code changes.
+
 ---
 
 ## Promotion Criteria (Non-Negotiable)
@@ -350,6 +358,15 @@ Current Exhaustion Layer: META_CIRCULAR
 - Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
+- Hemisphere Metabolization Contract (`roadmap/MuHemispheresDesign.md` § "FUTURE_TARGET: Hemisphere Metabolization Contract") - Sink re-expression cycle: sink → (r_inf | r_null) metabolization → (lobes | r_a) storage → residual → sink. Stall recovery: lobes-first, then sink. 6 projection IDs designed (pattern/body sketches). Engine exception policy dependency documented (Option A active, Option B deferred). **Promotion criteria (all required for VECTOR → NEXT):**
+  - Re-expression trigger model decided (automatic + manual/debug, per founder directive) ✓ designed
+  - At least 4 metabolization projection specs drafted with pattern/body ✓ 6 designed
+  - Extended truth-table coverage criteria defined (≥8 metabolization transitions)
+  - Engine exception policy Option B (synthesized routable terminal → sink) designed with sink-safety invariants
+  - Explicit VECTOR → NEXT promotion in this file with rationale before any implementation
+
+**Reference:**
+- Corpus Status Registry (`docs/corpus_registry.csv`) - 18-artifact classification with taxonomy labels, confidence scores, and evidence refs. Ontology-to-runtime mapping reference for VECTOR design work.
 
 **Promoted to NEXT:**
 - ~~Mu Hemispheres v0~~ (`roadmap/MuHemispheresDesign.md`) - **PROMOTED TO NEXT** (2026-02-09, Gate 5 blocker resolved)

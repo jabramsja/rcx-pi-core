@@ -370,37 +370,40 @@ User calls: run_mu(user_projections, input)
 
 ---
 
-## Success Criteria
+## Success Criteria (Historical Draft Targets)
+
+These criteria are preserved as draft targets from the original proposal.  
+Current execution state and acceptance are tracked in `STATUS.md` and `TASKS.md`.
 
 ### Honest Boundaries Documented
 
-- [ ] Bootstrap primitives documented in `docs/core/BootstrapPrimitives.v0.md`
-- [ ] Each primitive justified (why irreducible)
-- [ ] 9-agent consensus on completeness
+- Bootstrap primitives documented in `docs/core/BootstrapPrimitives.v0.md`.
+- Each primitive justified (why irreducible).
+- 9-agent consensus on completeness.
 
 ### Structural Maximization Achieved
 
-- [ ] `step_kernel_mu` has NO semantic branching (only terminal check)
-- [ ] Projection SELECTION is fully structural (kernel.v1)
-- [ ] Trace accumulation is structural (linked list)
+- `step_kernel_mu` has no semantic branching (only terminal check).
+- Projection selection is fully structural (`kernel.v1`).
+- Trace accumulation is structural (linked list).
 
 ### Debt Reclassification
 
-- [ ] `eval_step` loop marked as PRIMITIVE (not debt)
-- [ ] `run_mu` loop marked as L3 BOUNDARY (scaffolding)
-- [ ] Only true debt tracked: semantic decisions in Python
+- `eval_step` loop marked as PRIMITIVE (not debt).
+- `run_mu` loop marked as L3 BOUNDARY (scaffolding).
+- Only true debt tracked: semantic decisions in Python.
 
 ### Test Suite Passing
 
-- [ ] All 1600+ existing tests pass
-- [ ] Grounding tests document structural claims
-- [ ] Fuzzer tests stress boundaries (3500+ examples)
+- All existing tests pass.
+- Grounding tests document structural claims.
+- Fuzzer tests stress boundaries.
 
 ### EngineNews Compatibility
 
-- [ ] Trace model supports Rule 2.2 (closure-on-second-demand)
-- [ ] Engine cycle (stall/fix/promote) expressible as projections
-- [ ] EngineNews can run on RCX substrate
+- Trace model supports Rule 2.2 (closure-on-second-demand).
+- Engine cycle (stall/fix/promote) is expressible as projections.
+- EngineNews can run on RCX substrate.
 
 ---
 

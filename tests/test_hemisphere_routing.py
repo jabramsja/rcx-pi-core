@@ -488,3 +488,86 @@ class TestHemisphereSeedIntegrity:
         for proj in seed["projections"]:
             validate_no_kernel_reserved_fields(proj["pattern"], f"{proj['id']}.pattern")
             validate_no_kernel_reserved_fields(proj["body"], f"{proj['id']}.body")
+
+
+# =============================================================================
+# TestCurrentEnforcedFalsification (F1-F4)
+# =============================================================================
+
+
+@pytest.mark.slow
+class TestCurrentEnforcedFalsification:
+    """CURRENT_ENFORCED falsification tests F1-F4.
+
+    These tests prove that hemisphere routing invariants can be broken by
+    specific mutations, confirming the invariants are real (not vacuous).
+    """
+
+    def test_f1_reorder_breaks_compound_priority(self):
+        """F1: Swapping classify.closure before classify.null in-memory
+        breaks the compound signal (closure+null) priority guarantee.
+
+        With correct order (null before closure), closure+null → r_null.
+        With swapped order (closure before null), closure+null → r_a.
+        """
+        seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
+        projs = list(seed["projections"])  # copy
+
+        # Find indices of classify.null and classify.closure
+        ids = [p["id"] for p in projs]
+        null_idx = ids.index("hemisphere.classify.null")
+        closure_idx = ids.index("hemisphere.classify.closure")
+        assert null_idx < closure_idx, "null must precede closure in correct order"
+
+        # Swap them (in-memory only — never write seed files)
+        projs[null_idx], projs[closure_idx] = projs[closure_idx], projs[null_idx]
+
+        # With swapped order: closure+null should now wrongly route to r_a
+        er = _make_engine_result(value=None, closure_detected=True)
+        result = _route(projs, er)
+        # The WRONG result: r_a gets the entry instead of r_null
+        assert result["r_a"] is not None, (
+            "Swapping null/closure projections should misroute closure+null to r_a"
+        )
+        assert result["r_null"] is None, (
+            "Swapping null/closure projections should prevent r_null routing"
+        )
+
+    def test_f2_closure_plus_stall_routes_to_r_a(self):
+        """F2: closure=true + stall=true → r_a (not r_inf).
+
+        Closure has higher priority than stall in projection order.
+        """
+        projs = _load_hemisphere_projections()
+        er = _make_engine_result(value="test", closure_detected=True, stall=True)
+        result = _route(projs, er)
+        assert result["r_a"] is not None, "closure+stall must route to r_a"
+        assert result["r_inf"] is None, "closure+stall must NOT route to r_inf"
+
+    def test_f3_exhaustion_routes_to_sink_never_lobes(self):
+        """F3: exhaustion=true → sink, regardless of other signals."""
+        projs = _load_hemisphere_projections()
+        # Exhaustion with non-null value and no other signals
+        er = _make_engine_result(value="alive", exhaustion_detected=True)
+        result = _route(projs, er)
+        assert result["sink"] is not None, "exhaustion must route to sink"
+        assert result["lobes"] is None, "exhaustion must NOT route to lobes"
+        assert result["r_a"] is None, "exhaustion must NOT route to r_a"
+        assert result["r_inf"] is None, "exhaustion must NOT route to r_inf"
+        assert result["r_null"] is None, "exhaustion must NOT route to r_null"
+
+    def test_f4_no_signals_non_null_routes_to_lobes(self):
+        """F4: all signals false + non-null value → lobes (default)."""
+        projs = _load_hemisphere_projections()
+        er = _make_engine_result(
+            value="structure",
+            closure_detected=False,
+            exhaustion_detected=False,
+            stall=False,
+        )
+        result = _route(projs, er)
+        assert result["lobes"] is not None, "no-signal + non-null must route to lobes"
+        assert result["sink"] is None
+        assert result["r_a"] is None
+        assert result["r_inf"] is None
+        assert result["r_null"] is None

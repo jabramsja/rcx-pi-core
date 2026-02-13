@@ -1,0 +1,19 @@
+artifact_path,status_class,authority,usable_now,implementation_target,confidence_0_1,notes,evidence_refs
+RCXPhoenix/rcxcore.txt,ONTOLOGY_CANON,founder,yes,ontology alignment,0.95,5-law genome (collapse/fixpoint/promotion/recursion/drift); maps to structural primitives,Round 2 Phase D
+RCXPhoenix/RCXCodexv1.0.tex,ONTOLOGY_CANON,founder,yes,ontology alignment,0.90,Dual-lens ontology; operator definitions (Delta/Fix/Box); carrier space Xi,Round 2 Phase D
+RCXPhoenix/Symbol definitions.txt,ONTOLOGY_CANON,founder,yes,ontology alignment,0.90,Core operator LaTeX definitions; formalizes notation used in rcxcore.txt and Codex,Round 4B Section C
+RMDL.txt,ONTOLOGY_CANON,founder,reference only,none (formal logic layer),0.85,Recursive Modal-Dependent Logic; entropy collapse rule explicitly out-of-scope per founder,Round 3B Evidence Corrections
+XiBranchDNA_Final.rcx.txt,ONTOLOGY_CANON,founder,reference only,ontology alignment,0.80,Branch DNA taxonomy; hydration concept maps to seed loading,Round 2 Phase D
+Universalrecursion.txt,RUNTIME_CANON,founder,yes (after normalization),boot sequence reference,0.90,Boot sequence JSON (malformed); normalize to valid JSON per E6,Round 4B Section D
+RCXEngineNew.pdf,RUNTIME_CANON,founder,yes,engine cycle mapping,0.95,Core spec: 10-step stall-fix-promote cycle; gate flags = projection set loading; Section 0 Optional Extensions,Round 3B Gate Profile
+rcx-pi-paper.pdf,RUNTIME_CANON,founder,yes,implementation reference,0.90,Closest doc to actual WorkingRCX implementation; projection-based execution model,Round 2 Phase D
+XIRCX_Codex_WITH_RUN_AND_TRACE.txt,DESIGN_VECTOR,founder,reference only,trace/rewrite design,0.75,XIRun engine + rewrite rules; design patterns not yet mapped to runtime,Round 2 Phase D
+pure_rcx_programs.txt,DESIGN_VECTOR,founder,reference only,program format design,0.70,Mu-notation programs; potential test vector source,Round 2 Phase D
+XiBranchIndex0.txt,HISTORICAL_REFERENCE,founder,no,none,0.60,Hydration map; historical context for BranchDNA concept,Round 2 Phase D
+RCXPhoenix/RCXmath.docx,HISTORICAL_REFERENCE,founder,no,none,0.50,Master equation Psi; founder says not premium; pattern match for value,Round 2 founder answer #8
+Mendelbrodtequivalence.txt,HISTORICAL_REFERENCE,founder,no,none,0.40,Fractal dynamics analogy; REFERENCE_ONLY per founder,Round 2 founder answer #10
+UNDERSTANDING RCX.txt,HISTORICAL_REFERENCE,founder,no,none,0.55,RCX vs Coq comparison; useful for onboarding context only,Round 2 Phase D
+RCX_PI_TECHNICAL_MASTER_GUIDE.md,DEPRECATED_IMPLEMENTATION,founder,no,none (abandoned .rcx binary),0.30,Documents abandoned 3-opcode .rcx binary model; not WorkingRCX,Round 3B Evidence Correction #1
+rcxpi_compliance_check.txt,DEPRECATED_IMPLEMENTATION,founder,no,none (abandoned .rcx binary),0.30,Compliance check for abandoned model; does not apply to WorkingRCX,Round 2 Phase D
+true_minimal_kernel.asm,DEPRECATED_IMPLEMENTATION,founder,no,none (abandoned .rcx binary),0.25,x86-64 assembly kernel for .rcx binary; superseded by JSON seed approach,Round 2 Phase D
+selfhost_working.rcx,DEPRECATED_IMPLEMENTATION,none,no,none (binary blob does not work),0.10,262KB binary blob with RCX\0 header; README says stuck in initialization; test harness expects failure,Round 3B Evidence Correction #1

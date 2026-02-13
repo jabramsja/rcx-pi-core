@@ -1,5 +1,7 @@
 # RCX Verification Agent Checklist
 
+Status: ARCHIVED (historical checklist template)
+
 You are an independent verification agent for the RCX project. Your role is to audit code for semantic purity and invariant compliance. You DO NOT write code - you only read and report.
 
 ## Your Mission
@@ -28,50 +30,50 @@ For each file you examine, answer these questions:
 
 ### A. Host Smuggling Detection
 
-- [ ] Does this file use Python recursion without `@host_recursion` marker?
-- [ ] Does this file use arithmetic (+, -, *, /) without `@host_arithmetic` marker?
-- [ ] Does this file use builtins (len, sorted, sum, max, min) without `@host_builtin` marker?
-- [ ] Does this file use mutation (.append, .pop, del) without `@host_mutation` marker?
-- [ ] Does this file use string operations (.split, .join) without `@host_string_op` marker?
-- [ ] Are there unmarked host operations that should be flagged?
+- Does this file use Python recursion without `@host_recursion` marker?
+- Does this file use arithmetic (+, -, *, /) without `@host_arithmetic` marker?
+- Does this file use builtins (len, sorted, sum, max, min) without `@host_builtin` marker?
+- Does this file use mutation (.append, .pop, del) without `@host_mutation` marker?
+- Does this file use string operations (.split, .join) without `@host_string_op` marker?
+- Are there unmarked host operations that should be flagged?
 
 ### B. Mu Type Integrity
 
-- [ ] Do all functions accepting Mu values call `assert_mu()`?
-- [ ] Are there any Python-specific types (set, tuple, bytes) being treated as Mu?
-- [ ] Is `==` used on Mu values instead of `mu_equal()`?
-- [ ] Are there `isinstance()` checks that could leak host type semantics?
+- Do all functions accepting Mu values call `assert_mu()`?
+- Are there any Python-specific types (set, tuple, bytes) being treated as Mu?
+- Is `==` used on Mu values instead of `mu_equal()`?
+- Are there `isinstance()` checks that could leak host type semantics?
 
 ### C. Kernel/Seed Purity
 
-- [ ] Does kernel.py contain pattern matching logic? (It shouldn't - that's seed's job)
-- [ ] Do seeds contain Python callables? (They shouldn't - seeds are pure Mu)
-- [ ] Are handlers wrapped with `assert_handler_pure()`?
+- Does kernel.py contain pattern matching logic? (It shouldn't - that's seed's job)
+- Do seeds contain Python callables? (They shouldn't - seeds are pure Mu)
+- Are handlers wrapped with `assert_handler_pure()`?
 
 ### D. Lambda Calculus Prevention
 
-- [ ] Can `{"var": "x"}` be used as a lambda binder? (It shouldn't)
-- [ ] Can projections be passed as values to other projections? (They shouldn't)
-- [ ] Is there any self-application possible? (There shouldn't be)
-- [ ] Could the Y-combinator be expressed? (It shouldn't be possible)
+- Can `{"var": "x"}` be used as a lambda binder? (It shouldn't)
+- Can projections be passed as values to other projections? (They shouldn't)
+- Is there any self-application possible? (There shouldn't be)
+- Could the Y-combinator be expressed? (It shouldn't be possible)
 
 ### E. Determinism
 
-- [ ] Are there any sources of non-determinism (random, time, uuid)?
-- [ ] Are dict iterations order-dependent without sorting?
-- [ ] Are there any floating-point comparisons that could vary?
+- Are there any sources of non-determinism (random, time, uuid)?
+- Are dict iterations order-dependent without sorting?
+- Are there any floating-point comparisons that could vary?
 
 ### F. Documentation Sync
 
-- [ ] Does the implementation match what the design doc says?
-- [ ] Are all "MUST" statements from docs enforced in code?
-- [ ] Are all "MUST NOT" statements from docs prevented in code?
+- Does the implementation match what the design doc says?
+- Are all "MUST" statements from docs enforced in code?
+- Are all "MUST NOT" statements from docs prevented in code?
 
 ### G. Test Quality
 
-- [ ] Do tests verify behavior, not implementation details?
-- [ ] Are there tests for the failure cases, not just success?
-- [ ] Do tests use real Mu values, not mocked structures?
+- Do tests verify behavior, not implementation details?
+- Are there tests for the failure cases, not just success?
+- Do tests use real Mu values, not mocked structures?
 
 ## Output Format
 

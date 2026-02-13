@@ -434,25 +434,25 @@ Add meta-test that fails if any test mocks guardrail functions.
 ## Audit Checklist (Run Before Each Phase)
 
 ### Pre-Phase 1 Audit
-- [ ] All guardrail functions have tests
-- [ ] No isinstance dispatch in kernel code
-- [ ] No bare except around Mu validation
-- [ ] All dict iteration uses sorted() where order matters
-- [ ] BOOTSTRAP markers on Python-only matching code
-- [ ] No tests mock guardrail functions
-- [ ] audit_semantic_purity.sh passes
+- All guardrail functions have tests
+- No isinstance dispatch in kernel code
+- No bare except around Mu validation
+- All dict iteration uses sorted() where order matters
+- BOOTSTRAP markers on Python-only matching code
+- No tests mock guardrail functions
+- audit_semantic_purity.sh passes
 
 ### Pre-Phase 2 Audit
-- [ ] All Phase 1 items
-- [ ] EVAL_SEED is pure Mu (assert_seed_pure passes)
-- [ ] Python matching code still has BOOTSTRAP markers
-- [ ] Traces from Python-EVAL match EVAL-SEED execution
+- All Phase 1 items
+- EVAL_SEED is pure Mu (assert_seed_pure passes)
+- Python matching code still has BOOTSTRAP markers
+- Traces from Python-EVAL match EVAL-SEED execution
 
 ### Pre-Phase 3 Audit
-- [ ] All Phase 2 items
-- [ ] EVAL_SEED runs EVAL_SEED successfully
-- [ ] Traces from Python-EVAL match EVAL-EVAL exactly
-- [ ] Can remove BOOTSTRAP-marked code without breaking seeds
+- All Phase 2 items
+- EVAL_SEED runs EVAL_SEED successfully
+- Traces from Python-EVAL match EVAL-EVAL exactly
+- Can remove BOOTSTRAP-marked code without breaking seeds
 
 ---
 

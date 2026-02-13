@@ -145,3 +145,171 @@ class TestHemisphereProjectionCountParity:
         assert py_count == js_count == 12, (
             f"Projection count mismatch: Python={py_count}, JS={js_count}"
         )
+
+
+# =============================================================================
+# TestCurrentEnforcedParityFalsification (F5-F8)
+# =============================================================================
+
+
+def _js_api(request_dict):
+    """Send a JSON API request to JS and return the parsed response."""
+    req = json.dumps(request_dict)
+    proc = subprocess.run(
+        ["node", "mu/host/js/eval_step.js", "--json-api", req],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    last = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("JSON_API_RESPONSE:"):
+            last = json.loads(line[len("JSON_API_RESPONSE:"):])
+    assert last is not None, f"no JSON_API_RESPONSE in stdout: {proc.stdout[:500]}"
+    return last
+
+
+def _make_engine_result_dict(
+    value=None, closure_detected=False, exhaustion_detected=False,
+    stall=False, tau_step=None, operator_frozen=None,
+    frozen_set=None, action="continue",
+):
+    return {
+        "value": value,
+        "closure_detected": closure_detected,
+        "tau_step": tau_step,
+        "exhaustion_detected": exhaustion_detected,
+        "operator_frozen": operator_frozen,
+        "frozen_set": frozen_set,
+        "action": action,
+        "stall": stall,
+    }
+
+
+def _empty_hemi():
+    return {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
+
+
+@pytest.mark.slow
+class TestCurrentEnforcedParityFalsification:
+    """CURRENT_ENFORCED cross-substrate falsification tests F5-F8.
+
+    These tests verify that Python and JS agree on hemisphere routing
+    results AND failure behavior.
+    """
+
+    def test_f5_identical_engine_result_identical_hemispheres(self):
+        """F5: Same engine_result → structurally equal hemisphere dicts."""
+        projs = _load_hemisphere_projections()
+        er = _make_engine_result_dict(value="parity_check", closure_detected=True)
+        hemispheres = _empty_hemi()
+        input_val = {"route_hemisphere": {"engine_result": er, "hemispheres": hemispheres}}
+
+        py_result = _run_python(projs, input_val)
+        js_result = _run_js(input_val)
+
+        assert mu_equal(py_result, js_result), (
+            f"F5 parity failure:\n"
+            f"  Python: {json.dumps(py_result, default=str)[:300]}\n"
+            f"  JS:     {json.dumps(js_result, default=str)[:300]}"
+        )
+        # Confirm it went to r_a (closure=true)
+        assert py_result["r_a"] is not None
+
+    def test_f6_extra_key_both_reject(self):
+        """F6: engine_result with extra key → both substrates reject.
+
+        Python raises via run_hemisphere_routing shape check.
+        JS returns {success: false, error_code: ...} via JSON API.
+        Both must fail-closed — equivalent failure category.
+        """
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+
+        er = _make_engine_result_dict(value="test")
+        er["extra_bogus_key"] = "should_not_be_here"  # 9 keys instead of 8
+
+        # Python: run_hemisphere_routing should fail because hemisphere.init
+        # pattern expects exactly 8 fields — extra key prevents match.
+        # The routing stalls and fails shape check.
+        py_failed = False
+        try:
+            run_hemisphere_routing(er, _empty_hemi())
+        except (RuntimeError, ValueError):
+            py_failed = True
+        assert py_failed, "Python must reject engine_result with extra key"
+
+        # JS: run_hemisphere_routing via JSON API
+        js_resp = _js_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": er,
+            "hemispheres": _empty_hemi(),
+        })
+        assert not js_resp["success"], "JS must reject engine_result with extra key"
+        # Verify equivalent failure category (not same class name)
+        assert "error_code" in js_resp, "JS must return error_code on failure"
+        allowed = {"api.bad_request", "input.shape_mismatch"}
+        assert js_resp["error_code"] in allowed, (
+            f"JS error_code should be one of {allowed}, got '{js_resp['error_code']}'"
+        )
+
+    def test_f7_null_engine_result_both_fail_closed(self):
+        """F7: null engine_result → both fail-closed with equivalent failure category.
+
+        Python raises ValueError; JS returns {success: false, error_code: "input.invalid_type"}.
+        Parity is on failure category, not exception class name.
+        """
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+
+        # Python: ValueError expected
+        py_error_type = None
+        try:
+            run_hemisphere_routing(None, _empty_hemi())
+        except ValueError:
+            py_error_type = "invalid_type"
+        except TypeError:
+            py_error_type = "invalid_type"
+        assert py_error_type == "invalid_type", (
+            "Python must raise ValueError/TypeError for null engine_result"
+        )
+
+        # JS: error_code should indicate type/input error
+        js_resp = _js_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": None,
+            "hemispheres": _empty_hemi(),
+        })
+        assert not js_resp["success"], "JS must reject null engine_result"
+        assert js_resp.get("error_code") == "input.invalid_type", (
+            f"JS error_code should be 'input.invalid_type', got '{js_resp.get('error_code')}'"
+        )
+
+    def test_f8_six_key_hemispheres_both_reject(self):
+        """F8: hemispheres with 6 keys (extra key) → both reject before routing.
+
+        Both substrates must reject the malformed hemisphere dict.
+        """
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+
+        bad_hemi = _empty_hemi()
+        bad_hemi["extra_bucket"] = None  # 6 keys
+
+        # Python: run_engine_with_routing validates hemisphere shape on input
+        py_failed = False
+        try:
+            run_engine_with_routing([], "dummy", hemispheres=bad_hemi)
+        except (ValueError, TypeError):
+            py_failed = True
+        assert py_failed, "Python must reject hemispheres with 6 keys"
+
+        # JS: run_engine_with_routing via JSON API
+        js_resp = _js_api({
+            "action": "run_engine_with_routing",
+            "input": "dummy",
+            "hemispheres": bad_hemi,
+        })
+        assert not js_resp["success"], "JS must reject hemispheres with 6 keys"
+        assert js_resp.get("error_code") == "input.shape_mismatch", (
+            f"JS error_code should be 'input.shape_mismatch', got '{js_resp.get('error_code')}'"
+        )
