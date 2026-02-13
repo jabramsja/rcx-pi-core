@@ -1,10 +1,12 @@
-# Meta-Circular and Boot0-Aligned Gate Plan (Draft)
+# Meta-Circular and Boot0-Aligned Gate Plan (Historical Record)
 
 > **Current State**: See [`STATUS.md`](../STATUS.md)
 > **Authorization**: See [`TASKS.md`](../TASKS.md)
-> **Scope**: This document defines SEQUENCE and EXIT CRITERIA only. Gate completion updates TASKS.md, not this file.
+> **Scope**: This document defines SEQUENCE and EXIT CRITERIA as a historical record; active sequencing and merge policy live in `TASKS.md` and `roadmap/Hex0_Boot0_Checklist.md`.
+> **Operational CI Gates**: See [`roadmap/Hex0_Boot0_Checklist.md`](./Hex0_Boot0_Checklist.md) for merge-blocking checks and fail conditions.
 
-This is a sequential gate plan with explicit dependencies and exit criteria. Gates must be completed in order.
+This is a historical gate plan with explicit dependencies and exit criteria used during Gates 0-5 execution.
+Use it as rationale and constraints context, not as the live tracker of current state.
 
 **Gate Levels:**
 - Gates 1, 0, 2–5: L2/L3 (structural algorithm execution)
@@ -76,6 +78,8 @@ Exit criteria:
 ## Gate 3: Rewrite Algorithm Seeds for Normalized State
 Goal: make recurrence and exhaustion projections operate on normalized state.
 
+**Status:** COMPLETE (2026-02-07).
+
 Work:
 1. Update `mu/closures/recurrence.v1.json` for normalized input and output.
 2. Update `mu/closures/exhaustion.v1.json` for normalized input and output.
@@ -95,6 +99,8 @@ Exit criteria:
 
 ## Gate 4: Structural Algorithm Execution
 Goal: remove Python match or substitute from algorithm execution.
+
+**Status:** COMPLETE (2026-02-07 structural cutover).
 
 Work:
 1. Update `run_algorithm_meta_circular()` to use structural match and substitute.
@@ -145,6 +151,8 @@ Resolved in Gate 5 parity cleanup (2026-02-08): `run_mu_structural()` now execut
 ## Gate 5: Full Meta-Circular Parity
 Goal: confirm no semantic drift after structural execution.
 
+**Status:** COMPLETE (2026-02-09).
+
 Work:
 1. Add parity tests that compare structural execution to prior baseline outputs.
 2. Ensure JS parity remains green for the same vectors.
@@ -152,8 +160,9 @@ Work:
 Exit criteria:
 1. All parity tests pass with structural execution.
 2. Cross-substrate parity remains intact.
+3. Observer isomorphism is defined and testable: canonical event stream (or canonical event hash-chain) equivalence across Python and JS.
 
-**Milestone:** After Gate 5, hemisphere implementation may proceed (currently blocked).
+**Milestone:** Achieved. After Gate 5 completion, hemisphere implementation proceeded and is complete.
 
 ---
 
@@ -189,6 +198,7 @@ Work:
 
 Exit criteria:
 1. End-to-end chain produces identical outputs to the current Python substrate.
+2. Boot-chain observer stream (or canonical hash-chain) matches across Python and JS for canonical vectors.
 
 ## Timeline Summary (Gantt-Style)
 

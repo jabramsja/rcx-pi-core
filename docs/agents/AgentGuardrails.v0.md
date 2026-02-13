@@ -134,11 +134,11 @@ Findings without file:line evidence will be REJECTED.
 ## Compliance Validation
 
 Agent outputs are checked for:
-- [ ] At least 1 `FILE:` citation per finding
-- [ ] At least 1 `CODE:` block per finding
-- [ ] Zero `VERIFIED: No` entries
-- [ ] `STATUS.md` mentioned in first 50 lines
-- [ ] No hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS` for current list)
+- At least 1 `FILE:` citation per finding
+- At least 1 `CODE:` block per finding
+- Zero `VERIFIED: No` entries
+- `STATUS.md` mentioned in first 50 lines
+- No hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS` for current list)
 
 **Non-compliant outputs require revision before acceptance.**
 

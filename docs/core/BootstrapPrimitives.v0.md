@@ -354,7 +354,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 - [x] `KERNEL_RESERVED_FIELDS` validation (22 fields: 12 base + 3 EngineNews + 3 Exhaustion + 4 Bridge)
 - [x] `validate_type_tag()` - whitelist enforcement
 - [x] Dict kv-pair normalization parity fix
-- [ ] Lambda calculus guard (future - not critical for L3)
+- Deferred: Lambda calculus guard (future; not critical for L3)
 
 **Cross-substrate parity tests (completed 2026-01-30):**
 - `tests/test_parity_python.py` - 20 parity + 3 security vectors
@@ -403,12 +403,13 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## Success Criteria
 
-- [x] All four active primitives marked with `# BOOTSTRAP_PRIMITIVE` comment (mu_equal eliminated)
-- [x] Each primitive has docstring explaining why irreducible
-- [ ] No other Python code makes semantic decisions (Phase 8b)
-- [ ] 9-agent consensus that boundary is honest and minimal
-- [ ] Grounding tests verify structural claims
-- [ ] Documentation complete for external review
+- Completed: All four active primitives marked with `# BOOTSTRAP_PRIMITIVE` comment (mu_equal eliminated)
+- Completed: Each primitive has docstring explaining why irreducible
+- Open external-review targets:
+  1. No other Python code makes semantic decisions (Phase 8b)
+  2. 9-agent consensus that boundary is honest and minimal
+  3. Grounding tests verify structural claims
+  4. Documentation complete for external review
 
 ---
 

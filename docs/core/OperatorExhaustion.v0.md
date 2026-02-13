@@ -279,10 +279,11 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 - **Note:** JS uses its own bootstrap match/substitute implementation. Cross-substrate parity tests verify identical results.
 
 ### 4. Integration Tests
-- [ ] Single operator exhaustion detected and frozen
-- [ ] Multiple operator exhaustion leads to fallback
-- [ ] All operators frozen leads to globalstall
-- [ ] Already-frozen operators skipped correctly
+Validated integration scenarios (see `tests/test_exhaustion_parity.py` and `tests/fixtures/exhaustion_vectors.json`):
+1. Single operator exhaustion detected and frozen.
+2. Multiple operators frozen still allow unfrozen operator progression/freeze.
+3. All operators frozen leads to global stall.
+4. Already-frozen operators are skipped correctly.
 
 ---
 

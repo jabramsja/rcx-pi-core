@@ -316,14 +316,14 @@ python3 tools/ast_police.py
 
 ```markdown
 ## Agent Review
-- [ ] verifier:
-- [ ] adversary:
-- [ ] expert:
-- [ ] structural-proof:
-- [ ] grounding: (if applicable)
-- [ ] fuzzer: (if applicable)
-- [ ] translator: (on request)
-- [ ] visualizer: (on request)
+- verifier:
+- adversary:
+- expert:
+- structural-proof:
+- grounding: (if applicable)
+- fuzzer: (if applicable)
+- translator: (on request)
+- visualizer: (on request)
 ```
 
 ### CI Output Retrieval

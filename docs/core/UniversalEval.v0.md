@@ -381,14 +381,14 @@ Options:
 **Current Status:** SINK (research question)
 
 **Promotion Criteria (SINK → VECTOR):**
-- [ ] Answer: "What semantic question does this resolve that L2 doesn't?"
-- [ ] Add missing projections (vm.stall, vm.unwrap)
-- [ ] Clarify bootstrap: who runs the first projection?
+1. Answer: "What semantic question does this resolve that L2 doesn't?"
+2. Add missing projections (`vm.stall`, `vm.unwrap`).
+3. Clarify bootstrap: who runs the first projection?
 
 **Promotion Criteria (VECTOR → NEXT):**
-- [ ] 9-agent consensus on design completeness
-- [ ] Test plan grounded with executable tests
-- [ ] JavaScript parity strategy defined
+1. 9-agent consensus on design completeness.
+2. Test plan grounded with executable tests.
+3. JavaScript parity strategy defined.
 
 ---
 

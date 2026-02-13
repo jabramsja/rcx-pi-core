@@ -1846,7 +1846,25 @@ function runEnginePipeline(projections, inputValue, options) {
     frozen = null,
     maxEngineIterations = 20,
     maxAlgorithmIterations = 50,
+    observer = null,
   } = options ?? {};
+
+  // Observer event helper — no-op when observer is null
+  let obsTs = 0;
+  function emit(eventName, stepNum, stateVal, errorCode) {
+    if (observer === null) return;
+    let stateHash = null;
+    try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
+    observer.push({
+      event_name: eventName,
+      step: stepNum,
+      state_hash: stateHash,
+      error_code: errorCode ?? null,
+      substrate: 'js',
+      timestamp: obsTs,
+    });
+    obsTs++;
+  }
 
   // Feed engine its initial input (always use full config form -> engine.init_config)
   let state = {
@@ -1863,9 +1881,18 @@ function runEnginePipeline(projections, inputValue, options) {
     // Step engine projections (APPLICATION-layer, bootstrap evaluator)
     const nextState = step(engineProjections, state);
 
+    emit('step_boundary', iteration, state);
+
     // Engine stalled (no projection matched)
     if (nextState === state) {
-      if (isEngineTerminal(state)) return state;
+      if (isEngineTerminal(state)) {
+        if (typeof state === 'object' && state !== null) {
+          if (state.closure_detected) emit('closure_detected', iteration, state);
+          if (state.stall) emit('stall_detected', iteration, state);
+        }
+        return state;
+      }
+      emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
       throw new RcxError('engine.stalled_non_terminal',
         `Engine stalled at iteration ${iteration} without producing terminal result. ` +
         `State keys: ${typeof state === 'object' && state !== null ? JSON.stringify(Object.keys(state).sort()) : typeof state}`
@@ -1883,6 +1910,7 @@ function runEnginePipeline(projections, inputValue, options) {
       // SECURITY: inject_key must not be a kernel-reserved field.
       // Parity with Python run_engine_pipeline (step_mu.py:1480).
       if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
+        emit('fail_closed', iteration, state, 'input.reserved_field');
         throw new RcxError('input.reserved_field',
           `SECURITY: inject_key '${injectKey}' is a kernel-reserved field. ` +
           `Boundary requests cannot inject reserved fields.`
@@ -1903,6 +1931,7 @@ function runEnginePipeline(projections, inputValue, options) {
         }
         result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
       } else {
+        emit('fail_closed', iteration, state, 'api.bad_request');
         throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
       }
 
@@ -1912,12 +1941,19 @@ function runEnginePipeline(projections, inputValue, options) {
     }
 
     // Check if engine produced terminal result
-    if (isEngineTerminal(nextState)) return nextState;
+    if (isEngineTerminal(nextState)) {
+      if (typeof nextState === 'object' && nextState !== null) {
+        if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
+        if (nextState.stall) emit('stall_detected', iteration, nextState);
+      }
+      return nextState;
+    }
 
     // Engine advanced internally -- keep stepping
     state = nextState;
   }
 
+  emit('fail_closed', maxEngineIterations - 1, state, 'engine.exhausted');
   throw new RcxError('engine.exhausted',
     `Engine pipeline exhausted ${maxEngineIterations} iterations without terminal result. ` +
     `State keys: ${typeof state === 'object' && state !== null ? JSON.stringify(Object.keys(state).sort()) : typeof state}`
@@ -2974,16 +3010,20 @@ if (process.argv.includes('--json-api')) {
     } else if (request.action === 'run_engine_pipeline') {
       // Run engine pipeline (APPLICATION level, algebraic effects pattern)
       const { projections: userProjs, input, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
+      const observerEvents = request.observer ? [] : null;
       try {
         const result = runEnginePipeline(userProjs ?? [], input, {
           maxSteps: maxSteps ?? 100,
           frozen: frozen ?? null,
           maxEngineIterations: maxEngineIterations ?? 20,
           maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
+          observer: observerEvents,
         });
         response = { success: true, result };
+        if (observerEvents) response.observer_events = observerEvents;
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
+        if (observerEvents) response.observer_events = observerEvents;
       }
     } else if (request.action === 'hash_trace') {
       // Hash trace entries for recurrence (boundary primitive)
@@ -3006,6 +3046,7 @@ if (process.argv.includes('--json-api')) {
     } else if (request.action === 'run_engine_with_routing') {
       // Full engine -> hemisphere pipeline (L3 parity with Python run_engine_with_routing)
       const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
+      const observerEvents = request.observer ? [] : null;
       try {
         const result = runEngineWithRouting(
           userProjs ?? [], input,
@@ -3015,11 +3056,14 @@ if (process.argv.includes('--json-api')) {
             frozen: frozen ?? null,
             maxEngineIterations: maxEngineIterations ?? 20,
             maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
+            observer: observerEvents,
           }
         );
         response = { success: true, result };
+        if (observerEvents) response.observer_events = observerEvents;
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
+        if (observerEvents) response.observer_events = observerEvents;
       }
     } else if (request.action === 'list_actions') {
       response = {

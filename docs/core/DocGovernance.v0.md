@@ -58,7 +58,7 @@ They do NOT answer: "How far along are we?" (That's STATUS.md)
 ```markdown
 ## Current State (Updated 2026-01-15)
 - Phase 2 complete
-- Phase 3 in progress
+- Phase 3 ongoing
 - Blocker: deep_step
 ```
 

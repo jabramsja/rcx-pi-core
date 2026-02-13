@@ -1652,3 +1652,314 @@ class TestManifestEdgeCaseParity:
             assert py_success is True, (
                 f"Python {action_name}: expected success but got error_code={py_error_code}"
             )
+
+
+# =============================================================================
+# N6b: Observer Event Stream Isomorphism Tests
+# =============================================================================
+
+def _js_api_observer(request_dict):
+    """Send a JSON API request to JS and return the parsed response."""
+    req = json.dumps(request_dict)
+    proc = subprocess.run(
+        ["node", "mu/host/js/eval_step.js", "--json-api", req],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    last = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("JSON_API_RESPONSE:"):
+            last = json.loads(line[len("JSON_API_RESPONSE:"):])
+    assert last is not None, f"no JSON_API_RESPONSE in stdout: {proc.stdout[:500]}"
+    return last
+
+
+def _canonical_event_json(event):
+    """Canonical JSON serialization per ObserverEventContract.v0.md."""
+    return json.dumps(event, sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_stream(events):
+    """Sort events by (step, timestamp) and strip substrate field for comparison."""
+    return sorted(
+        [
+            {
+                "event_name": e["event_name"],
+                "step": e["step"],
+                "state_hash": e["state_hash"],
+                "error_code": e["error_code"],
+            }
+            for e in events
+        ],
+        key=lambda e: (e["step"], events[[
+            i for i, x in enumerate(events)
+            if x["event_name"] == e["event_name"] and x["step"] == e["step"]
+        ][0]]["timestamp"]),
+    )
+
+
+def _normalize_stream_simple(events):
+    """Normalize event stream: sort by (step, timestamp), drop substrate."""
+    sorted_events = sorted(events, key=lambda e: (e["step"], e["timestamp"]))
+    return [
+        {
+            "event_name": e["event_name"],
+            "step": e["step"],
+            "state_hash": e["state_hash"],
+            "error_code": e["error_code"],
+        }
+        for e in sorted_events
+    ]
+
+
+@pytest.mark.slow
+class TestObserverIsomorphism:
+    """N6b: Cross-substrate observer event stream isomorphism.
+
+    Verifies that Python and JS emit identical observer event streams
+    (modulo substrate field) for the same inputs.
+    """
+
+    def _run_python_with_observer(self, projections, input_value, **kwargs):
+        """Run Python engine pipeline with observer capture."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        observer = []
+        result = run_engine_pipeline(
+            projections, input_value, observer=observer, **kwargs
+        )
+        return result, observer
+
+    def _run_js_with_observer(self, input_value, **kwargs):
+        """Run JS engine pipeline with observer capture via JSON API."""
+        request = {
+            "action": "run_engine_pipeline",
+            "input": input_value,
+            "observer": True,
+        }
+        for k, v in kwargs.items():
+            request[k] = v
+        resp = _js_api_observer(request)
+        assert resp.get("success"), f"JS pipeline failed: {resp.get('error')}"
+        return resp["result"], resp.get("observer_events", [])
+
+    def test_observer_stream_isomorphism_simple_value(self):
+        """Identical simple input → identical event streams on both substrates."""
+        # Empty projections with a simple value — engine will stall quickly
+        # Use run_engine_pipeline directly with a value that triggers stall
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+
+        # Use a trivial input that produces a quick terminal result
+        # The engine with no user projections will init → trace (empty) → hash → recurrence → exhaustion → terminal
+        py_observer = []
+        try:
+            py_result = run_engine_pipeline([], "test_value", observer=py_observer)
+        except RuntimeError:
+            pass  # May stall — that's fine, we still get events
+
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "test_value",
+            "observer": True,
+        })
+        js_events = js_resp.get("observer_events", [])
+
+        # Both must emit events
+        assert len(py_observer) > 0, "Python emitted no observer events"
+        assert len(js_events) > 0, "JS emitted no observer events"
+
+        # Normalize and compare (drop substrate, sort by step+timestamp)
+        py_normalized = _normalize_stream_simple(py_observer)
+        js_normalized = _normalize_stream_simple(js_events)
+
+        assert len(py_normalized) == len(js_normalized), (
+            f"Event count mismatch: Python={len(py_normalized)}, JS={len(js_normalized)}\n"
+            f"Python events: {[e['event_name'] for e in py_normalized]}\n"
+            f"JS events: {[e['event_name'] for e in js_normalized]}"
+        )
+
+        for i, (pe, je) in enumerate(zip(py_normalized, js_normalized)):
+            assert pe == je, (
+                f"Event {i} mismatch:\n"
+                f"  Python: {_canonical_event_json(pe)}\n"
+                f"  JS:     {_canonical_event_json(je)}"
+            )
+
+    def test_observer_step_boundary_emitted(self):
+        """Both substrates emit at least one step_boundary event."""
+        py_observer = []
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        try:
+            run_engine_pipeline([], "obs_test", observer=py_observer)
+        except RuntimeError:
+            pass
+
+        py_step_boundaries = [e for e in py_observer if e["event_name"] == "step_boundary"]
+        assert len(py_step_boundaries) > 0, "Python emitted no step_boundary events"
+
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "obs_test",
+            "observer": True,
+        })
+        js_events = js_resp.get("observer_events", [])
+        js_step_boundaries = [e for e in js_events if e["event_name"] == "step_boundary"]
+        assert len(js_step_boundaries) > 0, "JS emitted no step_boundary events"
+
+    def test_observer_events_have_contract_fields(self):
+        """All emitted events conform to N6a schema (6 required fields)."""
+        required_fields = {"event_name", "step", "state_hash", "error_code", "substrate", "timestamp"}
+
+        py_observer = []
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        try:
+            run_engine_pipeline([], "schema_test", observer=py_observer)
+        except RuntimeError:
+            pass
+
+        for event in py_observer:
+            assert set(event.keys()) == required_fields, (
+                f"Python event has wrong fields: {set(event.keys())} != {required_fields}"
+            )
+            assert event["substrate"] == "python"
+            assert isinstance(event["step"], int) and event["step"] >= 0
+            assert isinstance(event["timestamp"], int) and event["timestamp"] >= 0
+
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "schema_test",
+            "observer": True,
+        })
+        for event in js_resp.get("observer_events", []):
+            assert set(event.keys()) == required_fields, (
+                f"JS event has wrong fields: {set(event.keys())} != {required_fields}"
+            )
+            assert event["substrate"] == "js"
+            assert isinstance(event["step"], int) and event["step"] >= 0
+            assert isinstance(event["timestamp"], int) and event["timestamp"] >= 0
+
+    def test_observer_timestamps_monotonic(self):
+        """Timestamps are monotonically increasing within each substrate."""
+        py_observer = []
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        try:
+            run_engine_pipeline([], "mono_test", observer=py_observer)
+        except RuntimeError:
+            pass
+
+        py_timestamps = [e["timestamp"] for e in py_observer]
+        assert py_timestamps == sorted(py_timestamps), (
+            f"Python timestamps not monotonic: {py_timestamps}"
+        )
+        # Verify strictly increasing (each event gets unique timestamp)
+        assert len(set(py_timestamps)) == len(py_timestamps), (
+            f"Python timestamps not unique: {py_timestamps}"
+        )
+
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "mono_test",
+            "observer": True,
+        })
+        js_timestamps = [e["timestamp"] for e in js_resp.get("observer_events", [])]
+        assert js_timestamps == sorted(js_timestamps), (
+            f"JS timestamps not monotonic: {js_timestamps}"
+        )
+        assert len(set(js_timestamps)) == len(js_timestamps), (
+            f"JS timestamps not unique: {js_timestamps}"
+        )
+
+    def test_observer_state_hash_parity(self):
+        """state_hash values match between Python and JS for identical states."""
+        py_observer = []
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        try:
+            run_engine_pipeline([], "hash_parity", observer=py_observer)
+        except RuntimeError:
+            pass
+
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "hash_parity",
+            "observer": True,
+        })
+        js_events = js_resp.get("observer_events", [])
+
+        # Compare state_hash at matching (step, event_name) pairs
+        py_by_key = {(e["step"], e["event_name"]): e for e in py_observer}
+        js_by_key = {(e["step"], e["event_name"]): e for e in js_events}
+
+        common_keys = set(py_by_key.keys()) & set(js_by_key.keys())
+        assert len(common_keys) > 0, "No matching (step, event_name) pairs found"
+
+        for key in sorted(common_keys):
+            py_hash = py_by_key[key]["state_hash"]
+            js_hash = js_by_key[key]["state_hash"]
+            assert py_hash == js_hash, (
+                f"state_hash mismatch at {key}: Python={py_hash}, JS={js_hash}"
+            )
+
+    def test_observer_off_by_default(self):
+        """When observer is not passed, no events are collected (default path unchanged)."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        # No observer parameter — should work exactly as before
+        try:
+            run_engine_pipeline([], "default_test")
+        except RuntimeError:
+            pass  # May stall — that's fine
+
+        # JS without observer flag
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "default_test",
+        })
+        assert "observer_events" not in js_resp, (
+            "JS returned observer_events when observer was not requested"
+        )
+
+    def test_observer_canonicalization_cross_substrate(self):
+        """Canonical JSON of matching events is byte-identical across substrates."""
+        py_observer = []
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        try:
+            run_engine_pipeline([], "canon_test", observer=py_observer)
+        except RuntimeError:
+            pass
+
+        js_resp = _js_api_observer({
+            "action": "run_engine_pipeline",
+            "input": "canon_test",
+            "observer": True,
+        })
+        js_events = js_resp.get("observer_events", [])
+
+        py_by_key = {(e["step"], e["event_name"]): e for e in py_observer}
+        js_by_key = {(e["step"], e["event_name"]): e for e in js_events}
+
+        common_keys = set(py_by_key.keys()) & set(js_by_key.keys())
+        assert len(common_keys) > 0
+
+        for key in sorted(common_keys):
+            # Strip substrate and timestamp for content comparison
+            py_content = {
+                "event_name": py_by_key[key]["event_name"],
+                "step": py_by_key[key]["step"],
+                "state_hash": py_by_key[key]["state_hash"],
+                "error_code": py_by_key[key]["error_code"],
+            }
+            js_content = {
+                "event_name": js_by_key[key]["event_name"],
+                "step": js_by_key[key]["step"],
+                "state_hash": js_by_key[key]["state_hash"],
+                "error_code": js_by_key[key]["error_code"],
+            }
+            py_canon = _canonical_event_json(py_content)
+            js_canon = _canonical_event_json(js_content)
+            assert py_canon == js_canon, (
+                f"Canonical JSON mismatch at {key}:\n"
+                f"  Python: {py_canon}\n"
+                f"  JS:     {js_canon}"
+            )
