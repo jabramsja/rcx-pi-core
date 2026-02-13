@@ -313,7 +313,8 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
   if (dictPairs !== null) {
     for (const [key, val] of dictPairs) {
       if (KERNEL_RESERVED_FIELDS.has(key)) {
-        throw new Error(
+        throw new RcxError(
+          'input.reserved_field',
           `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
           `Reserved fields are not allowed in domain input.`
         );
@@ -323,7 +324,8 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
     return;
   }
   if (looksLikeNormalizedDictCandidate(value)) {
-    throw new Error(
+    throw new RcxError(
+      'input.reserved_field',
       `SECURITY: Malformed normalized dict encoding at ${context}. ` +
       `Failing closed to prevent reserved-field bypass.`
     );
@@ -332,7 +334,8 @@ function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
   // Regular objects: check keys and recurse into values
   for (const [key, val] of Object.entries(value)) {
     if (KERNEL_RESERVED_FIELDS.has(key)) {
-      throw new Error(
+      throw new RcxError(
+        'input.reserved_field',
         `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
         `Reserved fields are not allowed in domain input.`
       );
@@ -371,7 +374,8 @@ function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
   if (dictPairs !== null) {
     for (const [key, val] of dictPairs) {
       if (key.startsWith('_') && !ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
-        throw new Error(
+        throw new RcxError(
+          'input.reserved_field',
           `SECURITY: ${context} contains unsupported algorithm underscore field: ${key}. ` +
           `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
         );
@@ -382,7 +386,8 @@ function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
   }
 
   if (looksLikeNormalizedDictCandidate(value)) {
-    throw new Error(
+    throw new RcxError(
+      'input.reserved_field',
       `SECURITY: ${context} contains malformed normalized dict encoding. Failing closed.`
     );
   }
@@ -390,7 +395,8 @@ function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
   for (const [key, val] of Object.entries(value)) {
     if (typeof key === 'string' && key.startsWith('_')) {
       if (!ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
-        throw new Error(
+        throw new RcxError(
+          'input.reserved_field',
           `SECURITY: ${context} contains unsupported algorithm underscore field: ${key}. ` +
           `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
         );
@@ -688,13 +694,13 @@ function normalize(value, _depth = 0) {
 
   // Reject invalid types (function, undefined, symbol)
   if (value === undefined) {
-    throw new Error('undefined is not valid Mu');
+    throw new RcxError('input.malformed_normalized', 'undefined is not valid Mu');
   }
   if (typeof value === 'function') {
-    throw new Error('Functions are not valid Mu');
+    throw new RcxError('input.malformed_normalized', 'Functions are not valid Mu');
   }
   if (typeof value === 'symbol') {
-    throw new Error('Symbols are not valid Mu');
+    throw new RcxError('input.malformed_normalized', 'Symbols are not valid Mu');
   }
 
   // Validate primitives
@@ -1110,7 +1116,7 @@ function applyProjection(projection, input) {
 function step(projections, input) {
   // Validate input at API boundary
   if (!isValidMu(input)) {
-    throw new Error('Invalid Mu input to step()');
+    throw new RcxError('input.invalid_type', 'Invalid Mu input to step()');
   }
 
   // @host_iteration: projection selection loop
@@ -1160,7 +1166,7 @@ function isKernelIntermediate(result) {
 function run(projections, input, maxSteps = 10000) {
   // Validate input at API boundary
   if (!isValidMu(input)) {
-    throw new Error('Invalid Mu input to run()');
+    throw new RcxError('input.invalid_type', 'Invalid Mu input to run()');
   }
 
   let current = input;
@@ -1405,7 +1411,7 @@ function resolveTraceProjectionId(projections, current, nextValue) {
 function runStructural(projections, input, maxSteps = 10000) {
   // Validate input at API boundary
   if (!isValidMu(input)) {
-    throw new Error('Invalid Mu input to runStructural()');
+    throw new RcxError('input.invalid_type', 'Invalid Mu input to runStructural()');
   }
   validateNoKernelReservedFields(input, 'runStructural input');
 
@@ -1990,7 +1996,8 @@ function runHemisphereRouting(engineResult, hemispheres) {
       setsEqual(new Set(Object.keys(current)), HEMISPHERE_KEYS)) {
     return current;
   }
-  throw new Error(
+  throw new RcxError(
+    'input.shape_mismatch',
     `Hemisphere routing did not produce valid hemisphere dict. ` +
     `Got: ${typeof current === 'object' && current !== null ? JSON.stringify(Object.keys(current).sort()) : typeof current}`
   );
@@ -2006,7 +2013,7 @@ function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs
     hemispheres = defaultHemispheres();
   } else {
     if (typeof hemispheres !== 'object' || Array.isArray(hemispheres)) {
-      throw new TypeError(`hemispheres must be dict, got ${Array.isArray(hemispheres) ? 'array' : typeof hemispheres}`);
+      throw new RcxError('input.invalid_type', `hemispheres must be dict, got ${Array.isArray(hemispheres) ? 'array' : typeof hemispheres}`);
     }
     const actual = new Set(Object.keys(hemispheres));
     if (!setsEqual(actual, HEMISPHERE_KEYS)) {
