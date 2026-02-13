@@ -2809,6 +2809,23 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
 // 9-agent Round 3 (Grounding finding): Previous tests were theater - just checked
 // for strings like "0 failed". This JSON API enables actual output comparison.
 
+// API-level cap for maxSteps on externally reachable endpoints.
+// Closes HF2 Mode-B DoS vector (see reports/round11a_hostile_findings.md).
+const API_MAX_STEPS = 10000;
+
+function guardMaxSteps(value, fieldName) {
+  if (value == null) return; // omitted — caller uses default
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new RcxError('api.bad_request', `${fieldName} must be an integer, got ${typeof value}`);
+  }
+  if (value < 0) {
+    throw new RcxError('api.bad_request', `${fieldName} must be >= 0, got ${value}`);
+  }
+  if (value > API_MAX_STEPS) {
+    throw new RcxError('api.bad_request', `${fieldName} exceeds API cap of ${API_MAX_STEPS}`);
+  }
+}
+
 if (process.argv.includes('--json-api')) {
   const apiArg = process.argv[process.argv.indexOf('--json-api') + 1];
 
@@ -2863,6 +2880,7 @@ if (process.argv.includes('--json-api')) {
       // Run Recurrence closure detection
       const { projections, input, maxSteps } = request;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         const traceResult = runStructural(projections ?? [], input, maxSteps ?? 100);
         const closureResult = runRecurrence(traceResult);
         response = { success: true, result: closureResult };
@@ -2873,6 +2891,7 @@ if (process.argv.includes('--json-api')) {
       // Run Exhaustion detection on provided input
       const { input, maxSteps } = request;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         let current = input;
         let steps = 0;
         const limit = maxSteps ?? 200;
@@ -2936,6 +2955,7 @@ if (process.argv.includes('--json-api')) {
       // Run Recurrence with bridge (meta-circular path)
       const { input, maxSteps } = request;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, recurrenceProjections, maxSteps);
         response = { success: true, result };
       } catch (e) {
@@ -2945,6 +2965,7 @@ if (process.argv.includes('--json-api')) {
       // Run Exhaustion with bridge (meta-circular path)
       const { input, maxSteps } = request;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, exhaustionProjections, maxSteps);
         response = { success: true, result };
       } catch (e) {
@@ -2973,6 +2994,7 @@ if (process.argv.includes('--json-api')) {
       // For cross-substrate parity testing of trace projection-id assignment.
       const { projections: userProjs, input, maxSteps } = request;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         const traceResult = runStructural(userProjs ?? [], input, maxSteps ?? 100);
         // Convert trace linked list to array for JSON serialization
         const traceArray = [];
@@ -2996,6 +3018,7 @@ if (process.argv.includes('--json-api')) {
       // Uses returnMeta for proper kernel terminal detection (matches Python run_mu path)
       const { input, maxSteps } = request;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         let current = input;
         let steps = 0;
         const limit = maxSteps ?? 100;
@@ -3019,6 +3042,7 @@ if (process.argv.includes('--json-api')) {
       const { projections: userProjs, input, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
       const observerEvents = request.observer ? [] : null;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         const result = runEnginePipeline(userProjs ?? [], input, {
           maxSteps: maxSteps ?? 100,
           frozen: frozen ?? null,
@@ -3055,6 +3079,7 @@ if (process.argv.includes('--json-api')) {
       const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
       const observerEvents = request.observer ? [] : null;
       try {
+        guardMaxSteps(maxSteps, 'maxSteps');
         const result = runEngineWithRouting(
           userProjs ?? [], input,
           hemispheres ?? null,
