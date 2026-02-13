@@ -133,14 +133,8 @@ echo "-- no private attr access in tests/ or prototypes/"
     grep -v 'test_contraband_detection.py.*"""' | \
     grep -v '__pycache__' || { echo "Found private attr access"; exit 1; }
 
-echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
-# Exclude:
-#   - test_type_tag_security.py (grounding tests for _is_kernel_internal_state security fix)
-#   - Lines marked with # ANTICHEAT_OK
-! grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ | \
-    grep -v 'test_type_tag_security.py' | \
-    grep -v '# ANTICHEAT_OK' | \
-    grep -v '__pycache__' || { echo "Found underscored import from rcx_pi"; exit 1; }
+echo "-- no underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)"
+python3 tools/check_underscore_imports.py || exit 1
 
 echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: _marker is allowed - it's a security feature for done-wrapper spoofing prevention

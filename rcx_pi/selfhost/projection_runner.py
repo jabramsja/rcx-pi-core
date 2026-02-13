@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .mu_type import Mu, mu_hash_cached
-from .eval_seed import step
+from .eval_seed import _step_trusted
 from .kernel import get_step_budget
 
 
@@ -98,8 +98,8 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
                 budget.consume(i)
                 return state, i, False
 
-            # Take a step
-            next_state = step(projections, state)
+            # Take a step — trusted: boundary validated by caller (match_mu, subst_mu)
+            next_state = _step_trusted(projections, state)
 
             # Check for stall (no change) - use mu_hash_cached to avoid Python type coercion
             next_hash = mu_hash_cached(next_state)

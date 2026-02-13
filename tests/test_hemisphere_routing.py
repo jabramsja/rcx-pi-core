@@ -19,6 +19,14 @@ from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 from rcx_pi.selfhost.step_mu import run_mu, step_mu
 
+from tests.hemisphere_helpers import (
+    EXPECTED_PROJECTION_IDS,
+    load_hemisphere_projections as _load_hemisphere_projections,
+    make_engine_result as _make_engine_result,
+    empty_hemispheres as _empty_hemispheres,
+    route as _route,
+)
+
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -39,56 +47,6 @@ def _collect_var_names(obj) -> list[str]:
             names.extend(_collect_var_names(item))
         return names
     return []
-
-
-def _load_hemisphere_projections() -> list[dict]:
-    seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
-    return seed["projections"]
-
-
-def _make_engine_result(
-    value=None,
-    closure_detected=False,
-    tau_step=None,
-    exhaustion_detected=False,
-    operator_frozen=None,
-    frozen_set=None,
-    action="continue",
-    stall=False,
-) -> dict:
-    return {
-        "value": value,
-        "closure_detected": closure_detected,
-        "tau_step": tau_step,
-        "exhaustion_detected": exhaustion_detected,
-        "operator_frozen": operator_frozen,
-        "frozen_set": frozen_set,
-        "action": action,
-        "stall": stall,
-    }
-
-
-def _empty_hemispheres() -> dict:
-    return {
-        "r_null": None,
-        "r_inf": None,
-        "r_a": None,
-        "lobes": None,
-        "sink": None,
-    }
-
-
-def _route(projs, engine_result, hemispheres=None):
-    if hemispheres is None:
-        hemispheres = _empty_hemispheres()
-    input_val = {
-        "route_hemisphere": {
-            "engine_result": engine_result,
-            "hemispheres": hemispheres,
-        }
-    }
-    result, trace, stall = run_mu(projs, input_val, max_steps=20)
-    return result
 
 
 # =============================================================================
@@ -207,7 +165,7 @@ class TestHemisphereClassify:
 
 @pytest.mark.slow
 class TestHemispherePriorityOrder:
-    """Verify first-match-wins priority: exhaustion > stall > null > closure > default."""
+    """Verify first-match-wins priority: exhaustion > null > closure > stall > default."""
 
     def test_null_takes_priority_over_closure(self):
         projs = _load_hemisphere_projections()
@@ -239,6 +197,66 @@ class TestHemispherePriorityOrder:
         # exhaustion before stall in projection order
         assert result["sink"] is not None
         assert result["r_inf"] is None
+
+
+# =============================================================================
+# TestHemisphereRoutingTruthTable
+# =============================================================================
+
+
+@pytest.mark.slow
+class TestHemisphereRoutingTruthTable:
+    """Exhaustive truth-table: all signal combinations route correctly.
+
+    Priority: exhaustion > null > closure > stall > default.
+    """
+
+    @pytest.mark.parametrize(
+        "exhaustion,closure,stall,value_none,expected",
+        [
+            (True, False, False, False, "sink"),
+            (False, True, False, False, "r_a"),
+            (False, False, True, False, "r_inf"),
+            (False, False, False, True, "r_null"),
+            (False, False, False, False, "lobes"),
+            (True, True, True, True, "sink"),
+            (False, True, True, True, "r_null"),
+            (False, True, True, False, "r_a"),
+            (False, False, True, True, "r_null"),
+            (True, True, False, False, "sink"),
+            (True, False, True, False, "sink"),
+            (True, False, False, True, "sink"),
+        ],
+        ids=[
+            "exhaustion_only",
+            "closure_only",
+            "stall_only",
+            "null_only",
+            "no_signals_default",
+            "all_signals",
+            "closure+stall+null",
+            "closure+stall",
+            "stall+null",
+            "exhaustion+closure",
+            "exhaustion+stall",
+            "exhaustion+null",
+        ],
+    )
+    def test_signal_combination(self, exhaustion, closure, stall, value_none, expected):
+        projs = _load_hemisphere_projections()
+        value = None if value_none else "test_value"
+        er = _make_engine_result(
+            value=value,
+            closure_detected=closure,
+            exhaustion_detected=exhaustion,
+            stall=stall,
+        )
+        result = _route(projs, er)
+        populated = [k for k in ("r_null", "r_inf", "r_a", "lobes", "sink") if result[k] is not None]
+        assert len(populated) == 1, f"Expected 1 populated, got {populated}"
+        assert result[expected] is not None, (
+            f"Expected {expected}, got {populated[0]}"
+        )
 
 
 # =============================================================================
@@ -448,20 +466,7 @@ class TestHemisphereSeedIntegrity:
     def test_projection_ids_match(self):
         seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
         ids = [p["id"] for p in seed["projections"]]
-        assert ids == [
-            "hemisphere.init",
-            "hemisphere.classify.exhaustion",
-            "hemisphere.classify.stall",
-            "hemisphere.classify.null",
-            "hemisphere.classify.closure",
-            "hemisphere.classify.default",
-            "hemisphere.add.r_null",
-            "hemisphere.add.r_inf",
-            "hemisphere.add.r_a",
-            "hemisphere.add.lobes",
-            "hemisphere.add.sink",
-            "hemisphere.unwrap",
-        ]
+        assert ids == EXPECTED_PROJECTION_IDS
 
     def test_all_projections_linear(self):
         """Verify no non-linear patterns (same var appearing twice)."""

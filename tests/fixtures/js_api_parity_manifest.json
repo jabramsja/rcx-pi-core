@@ -1,0 +1,170 @@
+{
+  "version": "1.0.0",
+  "description": "Parity manifest for JS API actions. Drives parametrized tests.",
+  "error_codes": {
+    "api.unknown_action": "Action not recognized",
+    "api.bad_request": "Malformed request or missing required fields",
+    "input.invalid_type": "Wrong type (e.g., non-dict where dict required)",
+    "input.shape_mismatch": "Dict has wrong key set",
+    "input.reserved_field": "Contains kernel-reserved or disallowed underscore field",
+    "input.malformed_normalized": "Value fails Mu normalization",
+    "trace.cycle_detected": "Linked-list trace has a cycle",
+    "trace.overcap": "Trace exceeds max_entries cap",
+    "engine.exhausted": "Engine reached max iterations without terminal",
+    "engine.stalled_non_terminal": "Engine stalled on non-terminal state"
+  },
+  "actions": {
+    "run_vector": {
+      "type": "operation",
+      "required_args": {"input": {"a": 1}, "projection": {"id": "test", "pattern": {"a": {"var": "x"}}, "body": {"result": {"var": "x"}}}},
+      "optional_args": {},
+      "edge_args": []
+    },
+    "run_all_vectors": {
+      "type": "operation",
+      "required_args": {},
+      "optional_args": {},
+      "edge_args": []
+    },
+    "run_recurrence": {
+      "type": "operation",
+      "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 10},
+      "optional_args": {"maxSteps": 100},
+      "edge_args": [
+        {
+          "description": "maxSteps=0 produces empty trace, recurrence on empty is benign",
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": 0},
+          "expected_success": true
+        }
+      ]
+    },
+    "run_exhaustion": {
+      "type": "operation",
+      "required_args": {"input": {"test": true}, "maxSteps": 10},
+      "optional_args": {"maxSteps": 200},
+      "edge_args": []
+    },
+    "get_constants": {
+      "type": "operation",
+      "required_args": {},
+      "optional_args": {},
+      "edge_args": []
+    },
+    "normalize_roundtrip": {
+      "type": "operation",
+      "required_args": {"value": {"a": 1, "b": 2}},
+      "optional_args": {},
+      "edge_args": []
+    },
+    "validate_mu": {
+      "type": "operation",
+      "required_args": {"value": {"a": 1}},
+      "optional_args": {},
+      "edge_args": []
+    },
+    "run_recurrence_with_bridge": {
+      "type": "operation",
+      "required_args": {"input": {"test": true}, "maxSteps": 10},
+      "optional_args": {"maxSteps": 100},
+      "edge_args": []
+    },
+    "run_exhaustion_with_bridge": {
+      "type": "operation",
+      "required_args": {"input": {"test": true}, "maxSteps": 10},
+      "optional_args": {"maxSteps": 100},
+      "edge_args": []
+    },
+    "validate_reserved_fields": {
+      "type": "validation",
+      "required_args": {"value": {"clean": "data"}},
+      "optional_args": {},
+      "edge_args": [
+        {
+          "description": "Value with kernel-reserved _mode field",
+          "args": {"value": {"_mode": "forged"}},
+          "expected_error_code": "input.reserved_field"
+        }
+      ]
+    },
+    "validate_algorithm_runtime_fields": {
+      "type": "validation",
+      "required_args": {"value": {"_detect_closure": true, "_seen": null}},
+      "optional_args": {},
+      "edge_args": [
+        {
+          "description": "Value with non-allowed underscore field",
+          "args": {"value": {"_bogus_field": true}},
+          "expected_error_code": "input.reserved_field"
+        }
+      ]
+    },
+    "run_structural_trace": {
+      "type": "operation",
+      "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 10},
+      "optional_args": {"maxSteps": 100},
+      "edge_args": []
+    },
+    "run_hemisphere": {
+      "type": "operation",
+      "required_args": {"input": {"route_hemisphere": {"engine_result": {"value": null, "closure_detected": false, "exhaustion_detected": false, "stall": false}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}}}, "maxSteps": 30},
+      "optional_args": {"maxSteps": 100},
+      "edge_args": []
+    },
+    "run_engine_pipeline": {
+      "type": "operation",
+      "happy_path_may_error": true,
+      "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 6, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+      "optional_args": {"frozen": null, "maxEngineIterations": 20, "maxAlgorithmIterations": 50},
+      "edge_args": [
+        {
+          "description": "Empty projections + simple input exhausts engine iterations",
+          "args": {"projections": [], "input": {"test": true}, "maxSteps": 1, "maxEngineIterations": 2, "maxAlgorithmIterations": 2},
+          "expected_error_code": "engine.exhausted"
+        }
+      ]
+    },
+    "hash_trace": {
+      "type": "operation",
+      "required_args": {"trace": {"head": {"state": "a", "step": 0}, "tail": null}},
+      "optional_args": {"maxEntries": 10000},
+      "edge_args": [
+        {
+          "description": "Trace exceeding maxEntries cap",
+          "args": {"trace": {"head": {"state": "a", "step": 0}, "tail": {"head": {"state": "b", "step": 1}, "tail": null}}, "maxEntries": 1},
+          "expected_error_code": "trace.overcap"
+        }
+      ]
+    },
+    "run_hemisphere_routing": {
+      "type": "operation",
+      "required_args": {"engine_result": {"value": null, "closure_detected": false, "tau_step": 0, "exhaustion_detected": false, "operator_frozen": false, "frozen_set": null, "action": "continue", "stall": false}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}},
+      "optional_args": {},
+      "edge_args": [
+        {
+          "description": "Non-dict engine_result",
+          "args": {"engine_result": "not_a_dict"},
+          "expected_error_code": "input.invalid_type"
+        }
+      ]
+    },
+    "run_engine_with_routing": {
+      "type": "operation",
+      "happy_path_may_error": true,
+      "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 6, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+      "optional_args": {"hemispheres": null, "frozen": null},
+      "edge_args": [
+        {
+          "description": "Bad hemispheres shape",
+          "args": {"projections": [], "input": {"test": true}, "hemispheres": {"bad": "shape"}, "maxSteps": 1},
+          "expected_error_code": "input.shape_mismatch"
+        }
+      ]
+    },
+    "list_actions": {
+      "type": "introspection",
+      "required_args": {},
+      "optional_args": {},
+      "edge_args": []
+    }
+  }
+}

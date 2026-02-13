@@ -17,8 +17,8 @@ from rcx_pi.selfhost.step_mu import (
     validate_algorithm_runtime_fields,
     KERNEL_RESERVED_FIELDS,
     ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS,
-    _iter_normalized_dict_pairs,
-    _looks_like_normalized_dict_candidate,
+    _iter_normalized_dict_pairs,  # ANTICHEAT_OK: fuzzer grounding test
+    _looks_like_normalized_dict_candidate,  # ANTICHEAT_OK: fuzzer grounding test
 )
 from rcx_pi.selfhost.mu_type import is_mu, mu_equal
 

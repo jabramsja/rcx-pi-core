@@ -17,14 +17,11 @@ from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 from rcx_pi.selfhost.step_mu import run_mu
 
+from tests.hemisphere_helpers import load_hemisphere_projections as _load_hemisphere_projections
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
-
-
-def _load_hemisphere_projections() -> list[dict]:
-    seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
-    return seed["projections"]
 
 
 def _run_python(projs, input_val, max_steps=20):
@@ -109,6 +106,16 @@ class TestHemisphereCrossSubstrateParity:
         result = self._compare(projs, v["input"], v["id"])
         assert len(result["lobes"]) == v["expected_lobes_count"]
         assert len(result["r_a"]) == v["expected_existing_r_a_count"]
+
+    def test_route_exhaustion_to_sink_parity(self, projs, vectors):
+        v = next(x for x in vectors if x["id"] == "route_exhaustion_to_sink")
+        result = self._compare(projs, v["input"], v["id"])
+        assert result["sink"] is not None
+
+    def test_route_stall_to_r_inf_parity(self, projs, vectors):
+        v = next(x for x in vectors if x["id"] == "route_stall_to_r_inf")
+        result = self._compare(projs, v["input"], v["id"])
+        assert result["r_inf"] is not None
 
 
 class TestHemisphereProjectionCountParity:

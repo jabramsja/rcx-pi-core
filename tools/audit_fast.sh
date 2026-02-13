@@ -100,15 +100,9 @@ if grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ 2>/dev/null | \
 fi
 echo "OK"
 
-# No underscored imports from rcx_pi in tests/ or prototypes/
-echo "-- no underscored imports from rcx_pi in tests/ or prototypes/"
-if grep -RInE 'from rcx_pi\..* import _' tests/ prototypes/ 2>/dev/null | \
-    grep -v 'test_type_tag_security.py' | \
-    grep -v '# ANTICHEAT_OK' | \
-    grep -v '__pycache__'; then
-  echo "ERROR: Found underscored import from rcx_pi"
-  exit 1
-fi
+# No underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)
+echo "-- no underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)"
+python3 tools/check_underscore_imports.py || exit 1
 echo "OK"
 
 echo "== 1h) Doc contract verification =="

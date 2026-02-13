@@ -22,16 +22,16 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 `rcx_engine.v1.json` is the **programmatic equivalent** of the RCX Core Engine Stateless Specification (RCXEngineNew.pdf). It orchestrates the stall-fix-promote loop that tests whether ZF(C)-like structures can emerge from purely structural recursion.
 
 **Key insight:** RCX doesn't assume set theory axioms - it tests whether they emerge under recursive pressure. The engine combines:
-- **Recurrence detection** (`recurrence.v1.json`) - detects when operators produce repeating patterns
+- **Recurrence detection** (`recurrence.v1.json` proof-of-concept, `recurrence.v2.json` production) - detects when operators produce repeating patterns
 - **Exhaustion detection** (`exhaustion.v1.json`) - detects when operators can make no further progress
 
 ## Relationship to RCXEngineNew.pdf
 
 | PDF Concept | Mu Implementation |
 |-------------|-------------------|
-| Stall predicate (Rule 0.5) | `recurrence.v1.json` detects fixed points |
+| Stall predicate (Rule 0.5) | `recurrence.v1.json` (v1 proof-of-concept) / `recurrence.v2.json` (v2 production) detects fixed points |
 | Fix routine (Rule 0.6) | Engine adds minimal structural change |
-| LeafInvariance (Rule 0.7c') | `recurrence.v1.json` logs trace token τ |
+| LeafInvariance (Rule 0.7c') | `recurrence.v1.json` / `recurrence.v2.json` logs trace token τ |
 | Operator exhaustion (Rule 3.1) | `exhaustion.v1.json` freezes exhausted operators |
 | Closure-on-Second-Demand (Rule 2.2♢) | Closure projection after τ recurs |
 
@@ -73,7 +73,7 @@ The engine tests whether ZFC axioms emerge from structural pressure:
     "execution_layer": "APPLICATION",
     "requires_patterns": ["non-linear"],
     "dependencies": [
-      "recurrence.v1.json",
+      "recurrence.v1.json (proof-of-concept) / recurrence.v2.json (production)",
       "exhaustion.v1.json"
     ]
   },
@@ -111,7 +111,8 @@ The closure object Ω(τ) is projected when:
 
 - `docs/core/EngineNewsStructural.v0.md` - Recurrence/exhaustion closure details
 - `docs/core/OperatorExhaustion.v0.md` - Exhaustion detection specifics
-- `mu/closures/recurrence.v1.json` - Recurrence detection projections
+- `mu/closures/recurrence.v1.json` - Recurrence detection projections (proof-of-concept)
+- `mu/closures/recurrence.v2.json` - Recurrence detection projections (hash-accelerated, production)
 - `mu/closures/exhaustion.v1.json` - Exhaustion detection projections
 - RCXEngineNew.pdf - Formal specification (external)
 

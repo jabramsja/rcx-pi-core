@@ -15,6 +15,39 @@ from rcx_pi.selfhost.match_mu import (
 )
 
 
+# ---------------------------------------------------------------------------
+# LOCAL TEST FIXTURE — NOT production code.
+#
+# _is_kernel_internal_state was removed from rcx_pi/selfhost/eval_seed.py
+# after the caller-trust model replaced shape-based trust.  Zero production
+# callers remain.  This copy exists ONLY so the 3-layer check logic can be
+# regression-tested without re-importing a deleted function.  Changes here
+# do NOT affect production behavior.
+# ---------------------------------------------------------------------------
+_VALID_MU_TYPES = (type(None), bool, int, float, str, list, dict)
+_KNOWN_KERNEL_MODES = frozenset({
+    'kernel', 'done', 'error', 'match_done', 'subst_done', 'engine',
+})
+_KERNEL_CONTEXT_KEYS = frozenset({'_match_ctx', '_subst_ctx', '_kernel_ctx'})
+
+
+def _is_kernel_internal_state(value):
+    """Three-layer kernel state check (test fixture, not production code)."""
+    if not isinstance(value, dict):
+        return False
+    mode = value.get('_mode')
+    if mode is not None:
+        if not isinstance(mode, str) or mode not in _KNOWN_KERNEL_MODES:
+            return False
+    else:
+        if not any(k in value for k in _KERNEL_CONTEXT_KEYS):
+            return False
+    for v in value.values():
+        if not isinstance(v, _VALID_MU_TYPES):
+            return False
+    return True
+
+
 class TestTypeTagWhitelist:
     """Verify type tag whitelist is correctly defined and enforced."""
 
@@ -217,7 +250,7 @@ class TestKernelInternalStateBypass:
         Before fix: {"match": ...} would trigger bypass, skipping validation.
         After fix: Only _mode, _phase, etc. trigger bypass.
         """
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+
 
         # Attack vector: domain data with 'match' field
         attack = {"match": {}, "data": "anything"}
@@ -233,7 +266,7 @@ class TestKernelInternalStateBypass:
 
         GROUNDING: Same as match - 'subst' is generic domain data.
         """
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+
 
         # Attack vector: domain data with 'subst' field
         attack = {"subst": {}, "data": "anything"}
@@ -243,28 +276,46 @@ class TestKernelInternalStateBypass:
             "SECURITY BUG: 'subst' field should NOT trigger kernel state bypass!"
         )
 
-    def test_reserved_mode_field_triggers_detection(self):
-        """_mode field SHOULD trigger kernel internal state detection.
+    def test_reserved_mode_field_with_known_mode_triggers_detection(self):
+        """_mode with known kernel mode string SHOULD trigger detection.
 
-        GROUNDING: Verifies legitimate kernel states are still detected.
+        GROUNDING: Verifies legitimate kernel states are detected.
+        Phase 8c tightening: _mode must be a KNOWN kernel mode string
+        (from seed files), not just any string.
         """
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
 
-        # Real kernel state has _mode
-        kernel_state = {"_mode": "match", "_phase": "init"}
+
+        # Real kernel state uses known mode "kernel"
+        kernel_state = {"_mode": "kernel", "_input": 42}
 
         assert _is_kernel_internal_state(kernel_state) is True, (
-            "_mode should trigger kernel state detection"
+            "_mode with known kernel mode should trigger detection"
         )
 
-    def test_reserved_phase_field_triggers_detection(self):
-        """_phase field SHOULD trigger kernel internal state detection."""
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+    def test_reserved_mode_field_with_unknown_mode_blocked(self):
+        """_mode with unknown mode string should NOT trigger detection.
+
+        GROUNDING (Phase 8c): Tighter security - arbitrary mode strings
+        no longer bypass validation. Only seed-defined modes are trusted.
+        """
+
+
+        # _mode: "match" is NOT a known kernel mode (kernel.v1 uses "kernel", not "match")
+        assert _is_kernel_internal_state({"_mode": "match", "_phase": "init"}) is False
+        assert _is_kernel_internal_state({"_mode": "arbitrary"}) is False
+
+    def test_phase_field_alone_does_not_trigger_detection(self):
+        """_phase alone should NOT trigger detection (tighter Phase 8c check).
+
+        GROUNDING: Phase 8c requires either known _mode or context key.
+        _phase alone is insufficient — prevents forgery with just _phase.
+        """
+
 
         kernel_state = {"_phase": "execute"}
 
-        assert _is_kernel_internal_state(kernel_state) is True, (
-            "_phase should trigger kernel state detection"
+        assert _is_kernel_internal_state(kernel_state) is False, (
+            "_phase alone should NOT trigger detection (Phase 8c tightening)"
         )
 
     def test_combined_attack_blocked(self):
@@ -272,7 +323,7 @@ class TestKernelInternalStateBypass:
 
         GROUNDING: Full attack scenario test.
         """
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+
 
         # Attacker tries: {"match": {}, "deeply": {"nested": {"bomb": ...}}}
         # This should NOT be detected as kernel state
@@ -347,7 +398,7 @@ class TestKernelBypassIntegration:
 
         If reversed: Domain data could forge kernel state before validation.
         """
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+
         from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
 
         # Forged kernel state (has _mode, but is domain input - MUST be rejected)
@@ -368,7 +419,7 @@ class TestKernelBypassIntegration:
         Attack: {"match": {}, "subst": {}, "nested": <depth bomb>}
         This used to bypass validation because 'match' was in kernel_fields.
         """
-        from rcx_pi.selfhost.eval_seed import _is_kernel_internal_state
+
         from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
 
         # Build depth bomb

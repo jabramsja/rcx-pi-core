@@ -15,16 +15,16 @@ Read first:
 6. `roadmap/MuHemispheresDesign.md`
 
 **Now (updated 2026-02-10)**
-1. Gates 1-5 ALL COMPLETE. Hemispheres v0 core DONE (8 projections, cross-substrate parity verified).
+1. Gates 1-5 ALL COMPLETE. Hemispheres v0 core DONE (12 projections, cross-substrate parity verified).
 2. Hemisphere adversarial hardening complete (JS seed verification parity, 63 adversarial tests).
 3. Keep Gate 4/5 guarantees intact: structural default active, bootstrap explicit fallback only.
 
 **Next**
-1. Hemisphere integration with rcx_engine.v1 output (engine_result → automatic hemisphere routing). Core seed is done (`mu/programs/hemispheres.v1.json`, 8 projections, cross-substrate parity verified).
-2. Keep all L2/L3 invariants intact (structural execution default, cross-substrate parity).
+1. Keep all L2/L3 invariants intact (structural execution default, cross-substrate parity).
+2. Hemisphere hardening: priority reorder, caller-trust model, JS parity fixes.
 
 **Vector (Design Only)**
-1. ~~Mu-only hemisphere routing design~~ — **PROMOTED TO NEXT** (2026-02-09). Core v0 implemented; remaining work is engine integration.
+1. ~~Mu-only hemisphere routing design~~ — **DONE** (2026-02-10). Core v0 + engine integration complete (`mu/programs/hemispheres.v1.json`, 12 projections, cross-substrate parity verified).
 2. Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) — Hash-identity as substrate property. **Level 0 IMPLEMENTED** (boundary hashing in recurrence.v2). **Level 1 IMPLEMENTED** (mu_equal eliminated, 5→4 bootstrap primitives). Levels 2-3 DESIGN only.
 3. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
 

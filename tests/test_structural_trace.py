@@ -6,7 +6,7 @@ execution history as Mu linked-list format that projections can analyze.
 """
 
 import pytest
-from rcx_pi.selfhost.step_mu import run_mu_structural, list_to_linked as _list_to_linked
+from rcx_pi.selfhost.step_mu import run_mu_structural, list_to_linked as list_to_linked
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
@@ -17,14 +17,14 @@ class TestListToLinked:
     """Test helper for list-to-linked conversion."""
 
     def test_empty_list(self):
-        assert _list_to_linked([]) is None
+        assert list_to_linked([]) is None
 
     def test_single_item(self):
-        result = _list_to_linked([42])
+        result = list_to_linked([42])
         assert result == {"head": 42, "tail": None}
 
     def test_multiple_items(self):
-        result = _list_to_linked([1, 2, 3])
+        result = list_to_linked([1, 2, 3])
         assert result == {
             "head": 1,
             "tail": {
@@ -37,7 +37,7 @@ class TestListToLinked:
         }
 
     def test_nested_items(self):
-        result = _list_to_linked([{"a": 1}, {"b": 2}])
+        result = list_to_linked([{"a": 1}, {"b": 2}])
         assert result["head"] == {"a": 1}
         assert result["tail"]["head"] == {"b": 2}
 

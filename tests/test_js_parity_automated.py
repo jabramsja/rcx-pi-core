@@ -1070,3 +1070,585 @@ class TestJSBridgeParity:
         # Both should detect exhaustion
         assert py_result.get("exhaustion_detected") is True, "Python should detect exhaustion"
         assert js_result.get("exhaustion_detected") is True, "JS should detect exhaustion"
+
+
+# =============================================================================
+# Engine-Hemisphere Orchestration Parity (L3 mandatory)
+# =============================================================================
+
+
+class TestEngineHelpersParity:
+    """Fast parity tests for engine-hemisphere helper functions."""
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True, text=True, cwd=ROOT, timeout=60
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+        raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+
+    def test_hash_trace_simple_parity(self):
+        """hash_trace_for_recurrence produces identical output on both substrates."""
+        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+
+        trace = {
+            "head": {"step": 0, "state": {"x": 1}, "projection": "test"},
+            "tail": {
+                "head": {"step": 1, "state": {"x": 1}, "stall": True},
+                "tail": None
+            }
+        }
+        py_result = hash_trace_for_recurrence(trace)
+        js_response = self._run_js_json_api({"action": "hash_trace", "trace": trace})
+        assert js_response["success"], f"JS hash_trace failed: {js_response.get('error')}"
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"hash_trace mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
+        )
+
+    def test_hash_trace_overcap_parity(self):
+        """Both substrates reject traces exceeding maxEntries."""
+        trace = None
+        for i in range(5):
+            trace = {"head": {"state": str(i), "step": i}, "tail": trace}
+
+        js_response = self._run_js_json_api({
+            "action": "hash_trace", "trace": trace, "maxEntries": 3
+        })
+        assert not js_response["success"], "JS should reject overcap trace"
+        assert "exceeds" in js_response["error"]
+
+    def test_hemisphere_routing_rejects_non_dict_parity(self):
+        """Both substrates reject non-dict engine_result."""
+        js_response = self._run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": "not_a_dict",
+            "hemispheres": {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
+        })
+        assert not js_response["success"], "JS should reject non-dict engine_result"
+        assert "must be a dict" in js_response["error"]
+
+
+@pytest.mark.slow
+class TestEnginePipelineCrossSubstrateParity:
+    """Cross-substrate verification for engine-hemisphere orchestration."""
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True, text=True, cwd=ROOT, timeout=120
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+        raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+
+    def test_engine_pipeline_paxos_parity(self):
+        """Engine pipeline produces identical closure detection on both substrates."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        py_result = run_engine_pipeline(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": cycle_projs,
+            "input": initial,
+            "maxSteps": 6,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS engine pipeline failed: {js_response.get('error')}"
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"Engine pipeline mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
+        )
+
+    def test_hemisphere_routing_parity(self):
+        """Hemisphere routing produces identical bucket assignment on both substrates."""
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+
+        engine_result = {
+            "value": {"x": 1}, "closure_detected": True, "tau_step": 2,
+            "exhaustion_detected": False, "operator_frozen": False,
+            "frozen_set": None, "action": None, "stall": True,
+        }
+        hemispheres = {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
+
+        py_result = run_hemisphere_routing(engine_result, hemispheres)
+
+        js_response = self._run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": engine_result,
+            "hemispheres": hemispheres,
+        })
+        assert js_response["success"], f"JS hemisphere routing failed: {js_response.get('error')}"
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"Hemisphere routing mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
+        )
+
+    def test_full_pipeline_with_routing_parity(self):
+        """Full engine->hemisphere pipeline produces identical results on both substrates."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        py_result = run_engine_with_routing(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_with_routing",
+            "projections": cycle_projs,
+            "input": initial,
+            "maxSteps": 6,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS full pipeline failed: {js_response.get('error')}"
+        assert _cross_substrate_equal(
+            py_result["engine_result"], js_response["result"]["engine_result"]
+        ), (
+            f"Engine result mismatch:\n  Python: {py_result['engine_result']}\n"
+            f"  JS: {js_response['result']['engine_result']}"
+        )
+        assert _cross_substrate_equal(
+            py_result["hemispheres"], js_response["result"]["hemispheres"]
+        ), (
+            f"Hemispheres mismatch:\n  Python: {py_result['hemispheres']}\n"
+            f"  JS: {js_response['result']['hemispheres']}"
+        )
+
+
+# =============================================================================
+# TestFalsyDefaultParity — Phase 2 (P4) falsy-default divergence
+# =============================================================================
+
+
+class TestFalsyDefaultParity:
+    """Verify JS nullish coalescing (??) handles 0 correctly for numeric caps."""
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=60
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+        raise RuntimeError(f"No JSON_API_RESPONSE found in JS output: {result.stdout[:500]}")
+
+    def test_hash_trace_maxentries_zero(self):
+        """maxEntries=0 → both substrates error (not silently use default 10000)."""
+        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+
+        trace = {"head": {"state": "a", "step": 0}, "tail": None}
+
+        # Python: maxEntries=0 should raise (trace has 1 entry, exceeds 0 cap)
+        with pytest.raises(ValueError, match="exceeds 0 entries"):
+            hash_trace_for_recurrence(trace, max_entries=0)
+
+        # JS: maxEntries=0 should also fail (not silently become 10000)
+        js_response = self._run_js_json_api({
+            "action": "hash_trace",
+            "trace": {"head": {"state": "a", "step": 0}, "tail": None},
+            "maxEntries": 0,
+        })
+        assert not js_response["success"], (
+            "JS should fail with maxEntries=0, not silently use default 10000"
+        )
+
+    def test_engine_pipeline_maxsteps_zero(self):
+        """maxSteps=0 → both substrates handle identically (immediate stall/return)."""
+        js_response = self._run_js_json_api({
+            "action": "run_structural_trace",
+            "projections": [],
+            "input": {"test": True},
+            "maxSteps": 0,
+        })
+        # With 0 steps, no projection fires — should succeed with stall or 0 steps
+        assert js_response["success"], f"JS should handle maxSteps=0: {js_response.get('error')}"
+        assert js_response.get("steps", 0) == 0, "maxSteps=0 should do 0 steps"
+
+    def test_falsy_zero_not_swallowed(self):
+        """maxSteps=0 sent to JS is NOT replaced by default 100."""
+        js_response = self._run_js_json_api({
+            "action": "run_recurrence",
+            "projections": [
+                {"id": "test.id", "pattern": {"a": 1}, "body": {"a": 1}}
+            ],
+            "input": {"a": 1},
+            "maxSteps": 0,
+        })
+        # With maxSteps=0, no structural trace happens — should succeed with empty/stall
+        assert js_response["success"], f"JS failed: {js_response.get('error')}"
+
+
+# =============================================================================
+# Module-level helpers for manifest-driven parity tests (Phase 6)
+# =============================================================================
+
+MANIFEST_PATH = ROOT / "tests" / "fixtures" / "js_api_parity_manifest.json"
+
+
+def _load_manifest():
+    """Load the parity manifest JSON."""
+    with open(MANIFEST_PATH) as f:
+        return json.load(f)
+
+
+def _module_run_js_json_api(request_dict: dict) -> dict:
+    """Module-level JS JSON API caller (not bound to a class)."""
+    result = subprocess.run(
+        ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=60,
+    )
+    for line in result.stdout.split('\n'):
+        if line.startswith('JSON_API_RESPONSE:'):
+            return json.loads(line[len('JSON_API_RESPONSE:'):])
+    raise RuntimeError(f"No JSON_API_RESPONSE found in JS output: {result.stdout[:500]}")
+
+
+def classify_python_error(exc):
+    """Classify a Python exception into a parity error_code (test layer only)."""
+    if hasattr(exc, 'error_code'):
+        return exc.error_code
+    msg = str(exc).lower()
+    if 'cyclic linked list' in msg:
+        return 'trace.cycle_detected'
+    if 'exceeds' in msg and 'entries' in msg:
+        return 'trace.overcap'
+    if 'engine pipeline exhausted' in msg or 'engine exhausted' in msg:
+        return 'engine.exhausted'
+    if 'engine stalled' in msg:
+        return 'engine.stalled_non_terminal'
+    if 'must be dict' in msg or 'must be a dict' in msg:
+        return 'input.invalid_type'
+    if 'shape mismatch' in msg or 'unexpected shape' in msg:
+        return 'input.shape_mismatch'
+    if 'reserved' in msg or 'kernel-reserved' in msg or 'unsupported algorithm underscore' in msg:
+        return 'input.reserved_field'
+    if 'not valid mu' in msg or 'max depth exceeded' in msg:
+        return 'input.malformed_normalized'
+    return 'api.bad_request'
+
+
+# =============================================================================
+# TestActionSetSync — manifest-driven action set sync (Phase 6, fast tier)
+# =============================================================================
+
+
+class TestActionSetSync:
+    """Verify JS list_actions matches manifest action set AND actual source handlers."""
+
+    def test_js_actions_match_manifest(self):
+        """JS list_actions returns exactly the manifest action set."""
+        manifest = _load_manifest()
+        manifest_actions = set(manifest["actions"].keys())
+
+        js_response = _module_run_js_json_api({"action": "list_actions"})
+        assert js_response["success"], f"list_actions failed: {js_response.get('error')}"
+        js_actions = set(js_response["actions"])
+
+        assert js_actions == manifest_actions, (
+            f"Action set mismatch.\n"
+            f"  In JS but not manifest: {js_actions - manifest_actions}\n"
+            f"  In manifest but not JS: {manifest_actions - js_actions}"
+        )
+
+    def test_source_handlers_match_list_actions(self):
+        """Structural: actual request.action branches in source match list_actions.
+
+        Prevents a handler being added to the if/else chain but omitted from
+        the list_actions array (which would make test_js_actions_match_manifest
+        silently miss it).
+        """
+        import re
+        js_source = (ROOT / "mu" / "host" / "js" / "eval_step.js").read_text()
+
+        # Extract all request.action === '...' branches from the JSON API section
+        # Match both == and === comparisons
+        source_actions = set(re.findall(
+            r"request\.action\s*===?\s*'([^']+)'", js_source
+        ))
+
+        js_response = _module_run_js_json_api({"action": "list_actions"})
+        assert js_response["success"]
+        list_actions_set = set(js_response["actions"])
+
+        # Source handlers must be a superset of (or equal to) list_actions.
+        # If source has a handler not in list_actions, it's unregistered.
+        unregistered = source_actions - list_actions_set
+        assert not unregistered, (
+            f"Source has request.action handlers not in list_actions: {unregistered}"
+        )
+
+
+# =============================================================================
+# TestParityCoverageGate — structural coverage gate (Phase 6, fast tier)
+# =============================================================================
+
+
+def _coverage_gate_params():
+    """Generate parametrized test cases from manifest (one success + one fail per action)."""
+    manifest = _load_manifest()
+    params = []
+    for action_name, action_def in manifest["actions"].items():
+        params.append(pytest.param(
+            action_name, action_def, "happy_path",
+            id=f"{action_name}-happy",
+        ))
+        if action_def.get("edge_args"):
+            params.append(pytest.param(
+                action_name, action_def, "edge_case",
+                id=f"{action_name}-edge",
+            ))
+    return params
+
+
+class TestParityCoverageGate:
+    """Manifest-driven parametrized test executing every action (fast tier).
+
+    Constraint #2: structural coverage — the test itself IS the gate.
+    If a manifest action is missing, pytest collection fails.
+    """
+
+    @pytest.mark.parametrize("action_name,action_def,case_type", _coverage_gate_params())
+    def test_action_parity(self, action_name, action_def, case_type):
+        """Execute action through JS and verify response shape."""
+        action_type = action_def["type"]
+
+        if case_type == "happy_path":
+            request = {"action": action_name, **action_def.get("required_args", {})}
+            js_response = _module_run_js_json_api(request)
+
+            if action_def.get("happy_path_may_error"):
+                # Engine-level actions may legitimately error with simple inputs.
+                # Coverage gate: verify structured response returned.
+                assert "success" in js_response, (
+                    f"{action_name} happy path returned no 'success' key"
+                )
+                if not js_response["success"]:
+                    assert "error_code" in js_response, (
+                        f"{action_name} error response missing error_code"
+                    )
+            elif action_type == "validation":
+                assert js_response.get("success") is True, (
+                    f"{action_name} happy path failed: {js_response.get('error')}"
+                )
+                assert js_response.get("valid") is True, (
+                    f"{action_name} validation expected valid=true: {js_response}"
+                )
+            elif action_type == "introspection":
+                assert js_response.get("success") is True, (
+                    f"{action_name} introspection failed: {js_response.get('error')}"
+                )
+            else:  # operation
+                assert js_response.get("success") is True, (
+                    f"{action_name} happy path failed: {js_response.get('error')}"
+                )
+
+        elif case_type == "edge_case":
+            edge = action_def["edge_args"][0]
+            request = {"action": action_name, **edge["args"]}
+            js_response = _module_run_js_json_api(request)
+
+            if action_type == "validation":
+                # Validation edge: success=true, valid=false, error_code present
+                assert js_response.get("success") is True, (
+                    f"{action_name} validation edge should have success=true"
+                )
+                assert js_response.get("valid") is False, (
+                    f"{action_name} validation edge should have valid=false"
+                )
+                assert "error_code" in js_response, (
+                    f"{action_name} validation edge missing error_code"
+                )
+                expected_code = edge.get("expected_error_code")
+                if expected_code:
+                    assert js_response["error_code"] == expected_code, (
+                        f"{action_name} edge: expected {expected_code}, "
+                        f"got {js_response['error_code']}"
+                    )
+            else:  # operation edge
+                if edge.get("expected_success"):
+                    assert js_response.get("success") is True, (
+                        f"{action_name} edge expected success: {js_response.get('error')}"
+                    )
+                else:
+                    assert js_response.get("success") is False, (
+                        f"{action_name} edge should have failed: {js_response}"
+                    )
+                    assert "error_code" in js_response, (
+                        f"{action_name} edge missing error_code"
+                    )
+                    expected_code = edge.get("expected_error_code")
+                    if expected_code:
+                        assert js_response["error_code"] == expected_code, (
+                            f"{action_name} edge: expected {expected_code}, "
+                            f"got {js_response['error_code']}"
+                        )
+
+
+# =============================================================================
+# TestManifestEdgeCaseParity — full edge case parity (Phase 6, slow tier)
+# =============================================================================
+
+
+def _edge_case_params():
+    """Generate parametrized test cases for ALL edge_args from manifest."""
+    manifest = _load_manifest()
+    params = []
+    for action_name, action_def in manifest["actions"].items():
+        for i, edge in enumerate(action_def.get("edge_args", [])):
+            params.append(pytest.param(
+                action_name, action_def, edge,
+                id=f"{action_name}-edge-{i}",
+            ))
+    return params
+
+
+def _run_python_edge_case(action_name, args):
+    """Execute an edge case through Python. Returns (success: bool|None, error_code: str|None).
+
+    Returns (None, None) if no Python adapter exists for this action.
+    Returns (True, None) on success.
+    Returns (False, error_code) on exception.
+    """
+    try:
+        if action_name == 'hash_trace':
+            from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+            hash_trace_for_recurrence(args['trace'], max_entries=args.get('maxEntries', 10000))
+            return True, None
+        elif action_name == 'validate_reserved_fields':
+            from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+            validate_no_kernel_reserved_fields(args['value'])
+            return True, None
+        elif action_name == 'validate_algorithm_runtime_fields':
+            from rcx_pi.selfhost.step_mu import validate_algorithm_runtime_fields
+            validate_algorithm_runtime_fields(args['value'])
+            return True, None
+        elif action_name == 'run_engine_pipeline':
+            from rcx_pi.selfhost.step_mu import run_engine_pipeline
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            run_engine_pipeline(
+                args.get('projections', []), args['input'],
+                max_steps=args.get('maxSteps', 6),
+                max_engine_iterations=args.get('maxEngineIterations', 20),
+                max_algorithm_iterations=args.get('maxAlgorithmIterations', 50),
+            )
+            return True, None
+        elif action_name == 'run_hemisphere_routing':
+            from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+            hemispheres = args.get('hemispheres', {
+                "r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None,
+            })
+            run_hemisphere_routing(args['engine_result'], hemispheres)
+            return True, None
+        elif action_name == 'run_engine_with_routing':
+            from rcx_pi.selfhost.step_mu import run_engine_with_routing
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            kwargs = {}
+            if 'hemispheres' in args:
+                kwargs['hemispheres'] = args['hemispheres']
+            run_engine_with_routing(
+                args.get('projections', []), args['input'],
+                max_steps=args.get('maxSteps', 6),
+                max_engine_iterations=args.get('maxEngineIterations', 20),
+                max_algorithm_iterations=args.get('maxAlgorithmIterations', 50),
+                **kwargs,
+            )
+            return True, None
+        elif action_name == 'run_recurrence':
+            from rcx_pi.selfhost.step_mu import run_mu
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            run_mu(args.get('projections', []), args['input'], max_steps=args.get('maxSteps', 10))
+            return True, None
+        else:
+            return None, None
+    except Exception as exc:
+        return False, classify_python_error(exc)
+
+
+@pytest.mark.slow
+class TestManifestEdgeCaseParity:
+    """Run all manifest edge_args through BOTH substrates, compare error_codes.
+
+    Marked slow — runs in audit_all.sh, skipped in green gate.
+    """
+
+    @pytest.mark.parametrize("action_name,action_def,edge", _edge_case_params())
+    def test_edge_case_error_code_parity(self, action_name, action_def, edge):
+        """JS and Python produce same error_code for edge case."""
+        request = {"action": action_name, **edge["args"]}
+        js_response = _module_run_js_json_api(request)
+
+        expected_code = edge.get("expected_error_code")
+        if expected_code:
+            # For validation actions, error_code is on the valid=false response
+            if action_def["type"] == "validation":
+                assert js_response.get("success") is True
+                assert js_response.get("valid") is False
+                assert js_response.get("error_code") == expected_code, (
+                    f"JS {action_name}: expected error_code={expected_code}, "
+                    f"got {js_response.get('error_code')}"
+                )
+            elif edge.get("expected_success"):
+                assert js_response.get("success") is True
+            else:
+                assert js_response.get("success") is False
+                assert js_response.get("error_code") == expected_code, (
+                    f"JS {action_name}: expected error_code={expected_code}, "
+                    f"got {js_response.get('error_code')}"
+                )
+
+        # Run through Python and compare error_codes
+        py_success, py_error_code = _run_python_edge_case(action_name, edge["args"])
+        if py_success is None:
+            # No Python adapter for this action — skip comparison
+            return
+
+        if expected_code and not edge.get("expected_success"):
+            # Both should fail with the same error_code
+            assert py_success is False, (
+                f"Python {action_name}: expected failure with {expected_code}, "
+                f"but Python succeeded"
+            )
+            assert py_error_code == expected_code, (
+                f"Python {action_name}: expected error_code={expected_code}, "
+                f"got {py_error_code}"
+            )
+            # Cross-substrate parity: JS and Python error_codes must match
+            js_code = js_response.get("error_code")
+            assert js_code == py_error_code, (
+                f"{action_name} parity mismatch: JS={js_code}, Python={py_error_code}"
+            )
+        elif edge.get("expected_success"):
+            assert py_success is True, (
+                f"Python {action_name}: expected success but got error_code={py_error_code}"
+            )

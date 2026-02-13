@@ -19,6 +19,14 @@ from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 from rcx_pi.selfhost.step_mu import run_mu
 
+from tests.hemisphere_helpers import (
+    EXPECTED_PROJECTION_IDS,
+    load_hemisphere_projections,
+    make_engine_result as _make_engine_result,
+    empty_hemispheres as _empty_hemispheres,
+    route as _route,
+)
+
 
 # =============================================================================
 # Helpers
@@ -32,48 +40,8 @@ def _get_projs():
     """Lazy-load projections (module-level cache)."""
     global HEMISPHERE_PROJS
     if HEMISPHERE_PROJS is None:
-        seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
-        HEMISPHERE_PROJS = seed["projections"]
+        HEMISPHERE_PROJS = load_hemisphere_projections()
     return HEMISPHERE_PROJS
-
-
-def _empty_hemispheres() -> dict:
-    return {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
-
-
-def _make_engine_result(
-    value=None,
-    closure_detected=False,
-    tau_step=None,
-    exhaustion_detected=False,
-    operator_frozen=None,
-    frozen_set=None,
-    action="continue",
-    stall=False,
-) -> dict:
-    return {
-        "value": value,
-        "closure_detected": closure_detected,
-        "tau_step": tau_step,
-        "exhaustion_detected": exhaustion_detected,
-        "operator_frozen": operator_frozen,
-        "frozen_set": frozen_set,
-        "action": action,
-        "stall": stall,
-    }
-
-
-def _route(projs, engine_result, hemispheres=None):
-    if hemispheres is None:
-        hemispheres = _empty_hemispheres()
-    input_val = {
-        "route_hemisphere": {
-            "engine_result": engine_result,
-            "hemispheres": hemispheres,
-        }
-    }
-    result, trace, stall = run_mu(projs, input_val, max_steps=20)
-    return result
 
 
 # Curated inputs covering all 3 routing paths + edge cases.
@@ -294,20 +262,7 @@ class TestHemisphereProjectionOrderSecurity:
         """Projection IDs must be in exact security-critical order."""
         seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
         ids = [p["id"] for p in seed["projections"]]
-        assert ids == [
-            "hemisphere.init",
-            "hemisphere.classify.exhaustion",
-            "hemisphere.classify.stall",
-            "hemisphere.classify.null",
-            "hemisphere.classify.closure",
-            "hemisphere.classify.default",
-            "hemisphere.add.r_null",
-            "hemisphere.add.r_inf",
-            "hemisphere.add.r_a",
-            "hemisphere.add.lobes",
-            "hemisphere.add.sink",
-            "hemisphere.unwrap",
-        ]
+        assert ids == EXPECTED_PROJECTION_IDS
 
 
 # =============================================================================
@@ -337,17 +292,26 @@ class TestHemisphereAdversarialSmuggling:
             "hemi_h": _empty_hemispheres(),
         }
         result, trace, stall = run_mu(projs, smuggled, max_steps=20)
-        # The bypass succeeds: hemisphere.add.r_a matches directly
-        if not stall and isinstance(result, dict):
-            for key in ("r_null", "r_inf", "r_a", "lobes", "sink"):
-                entries = result.get(key)
-                if isinstance(entries, list):
-                    for e in entries:
-                        if isinstance(e, dict) and mu_equal(e.get("state"), "smuggled"):
-                            # Bypass confirmed — this is expected without boundary validation
-                            return
-        # If we get here, the bypass did NOT work (projections may have changed)
-        # Either stalled or no smuggled entry found — both acceptable
+        # Smuggled input must NOT produce a valid hemisphere dict.
+        # Either it stalls (no projection matches the raw hemi_* shape)
+        # or if it does match, the smuggled entry must not appear in a
+        # valid hemisphere bucket. Both outcomes prove the projections
+        # reject raw internal-state injection.
+        if stall:
+            # Stall = no projection matched the smuggled shape. Safe.
+            return
+        # If not stalled, verify the smuggled entry did NOT land in a valid bucket
+        assert isinstance(result, dict), "Expected dict result"
+        for key in ("r_null", "r_inf", "r_a", "lobes", "sink"):
+            entries = result.get(key)
+            if isinstance(entries, list):
+                for e in entries:
+                    if isinstance(e, dict) and mu_equal(e.get("state"), "smuggled"):
+                        pytest.fail(
+                            f"SECURITY: Smuggled entry landed in '{key}' — "
+                            f"projection-level bypass succeeded. "
+                            f"Add boundary validation."
+                        )
 
     def test_boundary_validation_blocks_smuggling(self):
         """run_hemisphere_routing() rejects raw hemi_* injection by wrapping input."""

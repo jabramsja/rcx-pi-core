@@ -174,6 +174,62 @@
       },
       "expected_existing_r_a_count": 1,
       "expected_lobes_count": 2
+    },
+    {
+      "id": "route_exhaustion_to_sink",
+      "description": "Exhaustion detected routes to sink hemisphere",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": 99,
+            "closure_detected": false,
+            "tau_step": null,
+            "exhaustion_detected": true,
+            "operator_frozen": "op1",
+            "frozen_set": null,
+            "action": "halt",
+            "stall": false
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "sink",
+      "expected_entry": {
+        "state": 99,
+        "closure_flag": false,
+        "origin": "engine"
+      }
+    },
+    {
+      "id": "route_stall_to_r_inf",
+      "description": "Stall without null/closure/exhaustion routes to r_inf hemisphere",
+      "input": {
+        "route_hemisphere": {
+          "engine_result": {
+            "value": "stalled_value",
+            "closure_detected": false,
+            "tau_step": null,
+            "exhaustion_detected": false,
+            "operator_frozen": null,
+            "frozen_set": null,
+            "action": "continue",
+            "stall": true
+          },
+          "hemispheres": {
+            "r_null": null, "r_inf": null, "r_a": null,
+            "lobes": null, "sink": null
+          }
+        }
+      },
+      "expected_target": "r_inf",
+      "expected_entry": {
+        "state": "stalled_value",
+        "closure_flag": false,
+        "origin": "engine"
+      }
     }
   ]
 }

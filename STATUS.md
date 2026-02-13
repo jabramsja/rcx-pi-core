@@ -72,9 +72,9 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
-| **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | Planned |
-| **Python Substrate** | ~2000 LOC, 3,155 tests, production-ready | ✅ PRIMARY | - |
-| **JS Substrate** | ~1300 LOC core + ~900 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
+| **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
+| **Python Substrate** | ~2000 LOC, 3,235 tests, production-ready | ✅ PRIMARY | - |
+| **JS Substrate** | ~1970 LOC core + ~1010 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
 **What L3 proves:**
@@ -86,7 +86,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 **L3 Parity Requirement (MANDATORY - North Star #13):**
 - Any change to Python projection behavior MUST be mirrored in JavaScript
 - **Core L3 seeds** (kernel, match, subst, recurrence, exhaustion, bootstrap_structural) MUST be loaded in BOTH substrates
-- **Utility seeds** (classify.v1, eval.v1) and **application seeds** (rcx_engine.v1) are Python-only for now
+- **Utility seeds** (classify.v1, eval.v1) are Python-only for now
 - Parity vectors in `tests/fixtures/` are shared by both implementations
 - Run `node mu/host/js/eval_step.js` after Python changes to verify JS parity
 - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
@@ -96,10 +96,10 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | Category | Seeds | JS Loaded | Notes |
 |----------|-------|-----------|-------|
 | **Substrate (Core)** | kernel.v1, match.v2, subst.v2 | ✅ | Required for L3 |
-| **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1 | v1/exhaust: ✅, v2: Planned | v1 is POC; v2 is hash-accelerated production version |
+| **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1 | ✅ | v1 is POC; v2 is hash-accelerated production version |
 | **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
 | **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
-| **Programs** | rcx_engine.v1, hemispheres.v1, paxos_demo.v1 | hemispheres: ✅ | rcx_engine design-only; hemispheres L3 parity; paxos_demo application |
+| **Programs** | rcx_engine.v1, hemispheres.v1, paxos_demo.v1 | rcx_engine + hemispheres: ✅ | Engine orchestration + hemisphere routing L3 parity; paxos_demo application |
 
 **JS Debt Tracking (matches Python):**
 - JS file has DEBT SUMMARY header with counts
@@ -146,7 +146,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `mu/host/js/eval_step.js` (~1300 LOC core + ~900 LOC inline tests)
+**JS POC location:** `mu/host/js/eval_step.js` (~1970 LOC core + ~1010 LOC inline tests)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -212,7 +212,8 @@ The pre-commit hook checks doc consistency, debt ceiling, targeted staged-file c
 Tier 1: Fast Audit    ./tools/audit_fast.sh         ~3 min   Core tests only (local iteration)
 Tier 2: Full Audit    ./tools/audit_all.sh          ~5-8 min Core + Fuzzer + Slow (before push)
 Tier 3: CI Green Gate scripts/green_gate.sh          ~2 min   Core only, no fuzzers/slow (push/PR)
-Tier 4: CI Nightly    scripts/green_gate.sh ci_full  ~30 min  Everything (scheduled nightly)
+Tier 4: CI Nightly    scripts/green_gate.sh ci_full  ~45 min  Everything (200 examples, scheduled nightly)
+Tier 5: CI Weekly     weekly_deep_fuzz.yml          ~60 min  Deep fuzz (500 examples, scheduled weekly)
 ```
 
 | Tier | What It Tests | When to Run |
@@ -617,7 +618,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-11 (Engine→hemisphere integration: `run_engine_with_routing()`, `hash_trace_for_recurrence` cycle guard, 10 integration tests)
+**Last updated:** 2026-02-12 (JS parity: engine pipeline, hemisphere routing, hash_trace — 4 core functions + 4 JSON API actions + 6 cross-substrate tests)
 **Next milestone:** See TASKS.md VECTOR for next promotion candidates
 
 **Hemisphere Hardening (2026-02-10):**

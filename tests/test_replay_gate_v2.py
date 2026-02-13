@@ -316,7 +316,7 @@ def test_record_mode_stall_then_fix() -> None:
         PatternMatcher,
         PROJECTION,
         PATTERN_VAR_MARKER,
-        _motif_to_json,
+        _motif_to_json,  # ANTICHEAT_OK: replay gate grounding test
     )
     from rcx_pi.core.motif import Motif, μ
 
@@ -411,7 +411,7 @@ def test_record_mode_fixture_matches_generated_trace() -> None:
         PatternMatcher,
         PROJECTION,
         PATTERN_VAR_MARKER,
-        _motif_to_json,
+        _motif_to_json,  # ANTICHEAT_OK: replay gate grounding test
     )
     from rcx_pi.core.motif import μ
 
