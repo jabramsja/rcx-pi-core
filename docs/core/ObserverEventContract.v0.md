@@ -72,14 +72,14 @@ This ensures `sha256(canonical_json(event))` produces identical hashes on both s
 
 | Event Name | When Emitted | error_code |
 |------------|-------------|------------|
-| `step_boundary` | After each projection step in the engine pipeline | null |
+| `step_boundary` | At each engine iteration boundary (pre-step state) | null |
 | `stall_detected` | When the engine detects a stall (no progress) | null (stall is a signal, not an error) |
 | `closure_detected` | When recurrence detection finds a closure | null |
 | `fail_closed` | When a fail-closed guard triggers (bad shape, cycle, etc.) | required (from error taxonomy) |
 
 ### Event Point Semantics
 
-- **`step_boundary`**: Emitted after each step of `run_engine_pipeline`. `state_hash` should reflect the current engine state. This is the heartbeat of the event stream.
+- **`step_boundary`**: Emitted at each iteration boundary of `run_engine_pipeline`, capturing the current state *before* the projection step produces `next_state`. `state_hash` reflects the pre-transition engine state. This is the heartbeat of the event stream. Rationale: snapshotting pre-step state is deterministic and unambiguous in fail-closed paths (the state that caused the failure is always recorded).
 - **`stall_detected`**: Emitted when `run_engine_pipeline` detects that the engine has stalled (non-terminal state with no progress). `state_hash` reflects the stalled state.
 - **`closure_detected`**: Emitted when recurrence detection sets `closure_detected=true`. `state_hash` reflects the state at closure.
 - **`fail_closed`**: Emitted when any fail-closed validation rejects input. `error_code` is mandatory and must match the existing dotted error taxonomy (e.g. `input.shape_mismatch`, `trace.cycle_detected`).
