@@ -20,6 +20,7 @@ from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 from rcx_pi.selfhost.step_mu import run_mu
 
 from tests.hemisphere_helpers import (
+    EXPECTED_PROJECTION_IDS,
     load_hemisphere_projections,
     make_engine_result as _make_engine_result,
     empty_hemispheres as _empty_hemispheres,
@@ -261,20 +262,7 @@ class TestHemisphereProjectionOrderSecurity:
         """Projection IDs must be in exact security-critical order."""
         seed = load_verified_seed(get_seed_path("hemispheres.v1.json"))
         ids = [p["id"] for p in seed["projections"]]
-        assert ids == [
-            "hemisphere.init",
-            "hemisphere.classify.exhaustion",
-            "hemisphere.classify.null",
-            "hemisphere.classify.closure",
-            "hemisphere.classify.stall",
-            "hemisphere.classify.default",
-            "hemisphere.add.r_null",
-            "hemisphere.add.r_inf",
-            "hemisphere.add.r_a",
-            "hemisphere.add.lobes",
-            "hemisphere.add.sink",
-            "hemisphere.unwrap",
-        ]
+        assert ids == EXPECTED_PROJECTION_IDS
 
 
 # =============================================================================

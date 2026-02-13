@@ -7,12 +7,26 @@ Used by: test_hemisphere_routing.py, test_hemisphere_adversarial.py,
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.slow]
-
-from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed  # SPEED_OK: helper module, all consumers independently mark @slow
 from rcx_pi.selfhost.step_mu import run_mu
+
+
+# Security-critical projection ordering (single source of truth for tests).
+# Must match hemispheres.v1.json exactly. Priority: exhaustion > null > closure > stall > default.
+EXPECTED_PROJECTION_IDS = [
+    "hemisphere.init",
+    "hemisphere.classify.exhaustion",
+    "hemisphere.classify.null",
+    "hemisphere.classify.closure",
+    "hemisphere.classify.stall",
+    "hemisphere.classify.default",
+    "hemisphere.add.r_null",
+    "hemisphere.add.r_inf",
+    "hemisphere.add.r_a",
+    "hemisphere.add.lobes",
+    "hemisphere.add.sink",
+    "hemisphere.unwrap",
+]
 
 
 def load_hemisphere_projections() -> list[dict]:

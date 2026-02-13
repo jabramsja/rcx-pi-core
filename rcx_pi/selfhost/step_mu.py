@@ -1497,6 +1497,11 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
             else:
                 raise ValueError(f"Unknown boundary operation: {operation}")
 
+            # SECURITY: validate boundary result before re-injection.
+            # Prevents boundary operations from smuggling kernel-reserved
+            # fields back into engine state (adversary finding r3-P1).
+            validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
+
             # Inject result into context and resume engine
             context[inject_key] = result
             state = context

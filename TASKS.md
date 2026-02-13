@@ -328,7 +328,7 @@ See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
-- [ ] **Hemisphere hardening** (`fix/hemisphere-hardening` branch): caller-trust model, JS parity fixes (substitute throw, isKernelIntermediate, inject_key guard, `??` defaults, hard-cap parity), test dedup (hemisphere_helpers.py), stale comment cleanup. No behavior/phase change.
+- [ ] **Hemisphere hardening** (`fix/hemisphere-hardening` branch): caller-trust model, JS parity fixes (substitute throw, isKernelIntermediate, inject_key guard, `??` defaults, hard-cap parity), test dedup (hemisphere_helpers.py), boundary result validation in engine pipeline, stale comment cleanup. No behavior/phase change.
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)
