@@ -16,18 +16,34 @@
   "actions": {
     "run_vector": {
       "type": "operation",
+      "requires_error_edges": true,
       "required_args": {"input": {"a": 1}, "projection": {"id": "test", "pattern": {"a": {"var": "x"}}, "body": {"result": {"var": "x"}}}},
       "optional_args": {},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "Missing projection (undefined) rejected at stepKernel boundary",
+          "args": {"input": {"a": 1}},
+          "expected_error_code": "api.bad_request"
+        },
+        {
+          "description": "Reserved field in input rejected at domain boundary",
+          "args": {"input": {"_mode": "evil"}, "projection": {"pattern": {"x": "X"}, "body": {"x": "X"}}},
+          "expected_error_code": "input.reserved_field"
+        }
+      ]
     },
     "run_all_vectors": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Batch iteration of built-in parity vectors; always succeeds",
       "required_args": {},
       "optional_args": {},
       "edge_args": []
     },
     "run_recurrence": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Wraps runStructural+runRecurrence; boundary validation covered by run_structural_trace edge",
       "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
       "edge_args": [
@@ -40,42 +56,60 @@
     },
     "run_exhaustion": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Simple step loop; always succeeds or stalls gracefully",
       "required_args": {"input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 200},
       "edge_args": []
     },
     "get_constants": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Pure read of constants; no input to reject",
       "required_args": {},
       "optional_args": {},
       "edge_args": []
     },
     "normalize_roundtrip": {
       "type": "operation",
+      "requires_error_edges": true,
       "required_args": {"value": {"a": 1, "b": 2}},
       "optional_args": {},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "Missing value key (JS undefined) rejected by normalize",
+          "args": {},
+          "expected_error_code": "input.malformed_normalized"
+        }
+      ]
     },
     "validate_mu": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Always returns success with is_valid boolean; never throws",
       "required_args": {"value": {"a": 1}},
       "optional_args": {},
       "edge_args": []
     },
     "run_recurrence_with_bridge": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Meta-circular recurrence path; boundary validation shared with run_recurrence",
       "required_args": {"input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
       "edge_args": []
     },
     "run_exhaustion_with_bridge": {
       "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Meta-circular exhaustion path; always succeeds or stalls gracefully",
       "required_args": {"input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
       "edge_args": []
     },
     "validate_reserved_fields": {
       "type": "validation",
+      "requires_error_edges": true,
       "required_args": {"value": {"clean": "data"}},
       "optional_args": {},
       "edge_args": [
@@ -88,6 +122,7 @@
     },
     "validate_algorithm_runtime_fields": {
       "type": "validation",
+      "requires_error_edges": true,
       "required_args": {"value": {"_detect_closure": true, "_seen": null}},
       "optional_args": {},
       "edge_args": [
@@ -100,18 +135,33 @@
     },
     "run_structural_trace": {
       "type": "operation",
+      "requires_error_edges": true,
       "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 10},
       "optional_args": {"maxSteps": 100},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "Reserved field in input rejected at domain boundary",
+          "args": {"input": {"_mode": "evil"}},
+          "expected_error_code": "input.reserved_field"
+        }
+      ]
     },
     "run_hemisphere": {
       "type": "operation",
+      "requires_error_edges": true,
       "required_args": {"input": {"route_hemisphere": {"engine_result": {"value": null, "closure_detected": false, "exhaustion_detected": false, "stall": false}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}}}, "maxSteps": 30},
       "optional_args": {"maxSteps": 100},
-      "edge_args": []
+      "edge_args": [
+        {
+          "description": "Reserved field in input rejected at domain boundary",
+          "args": {"input": {"_mode": "evil"}},
+          "expected_error_code": "input.reserved_field"
+        }
+      ]
     },
     "run_engine_pipeline": {
       "type": "operation",
+      "requires_error_edges": true,
       "happy_path_may_error": true,
       "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 6, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
       "optional_args": {"frozen": null, "maxEngineIterations": 20, "maxAlgorithmIterations": 50},
@@ -125,6 +175,7 @@
     },
     "hash_trace": {
       "type": "operation",
+      "requires_error_edges": true,
       "required_args": {"trace": {"head": {"state": "a", "step": 0}, "tail": null}},
       "optional_args": {"maxEntries": 10000},
       "edge_args": [
@@ -137,6 +188,7 @@
     },
     "run_hemisphere_routing": {
       "type": "operation",
+      "requires_error_edges": true,
       "required_args": {"engine_result": {"value": null, "closure_detected": false, "tau_step": 0, "exhaustion_detected": false, "operator_frozen": false, "frozen_set": null, "action": "continue", "stall": false}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}},
       "optional_args": {},
       "edge_args": [
@@ -149,6 +201,7 @@
     },
     "run_engine_with_routing": {
       "type": "operation",
+      "requires_error_edges": true,
       "happy_path_may_error": true,
       "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 6, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
       "optional_args": {"hemispheres": null, "frozen": null},
@@ -162,6 +215,8 @@
     },
     "list_actions": {
       "type": "introspection",
+      "requires_error_edges": false,
+      "success_only_reason": "Introspection endpoint; no inputs to reject",
       "required_args": {},
       "optional_args": {},
       "edge_args": []

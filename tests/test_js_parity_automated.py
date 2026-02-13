@@ -1130,6 +1130,129 @@ class TestEngineHelpersParity:
         assert not js_response["success"], "JS should reject non-dict engine_result"
         assert "must be a dict" in js_response["error"]
 
+    def test_hemisphere_routing_non_dict_error_code(self):
+        """run_hemisphere_routing non-dict rejection carries typed error_code."""
+        js_response = self._run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": "not_a_dict",
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.invalid_type"
+
+    def test_hemisphere_routing_bad_shape_error_code(self):
+        """run_hemisphere_routing invalid output shape carries typed error_code."""
+        # An empty dict as engine_result will route through projections
+        # and fail the output shape check (not a valid hemisphere dict).
+        js_response = self._run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": {},
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.shape_mismatch"
+
+    def test_engine_with_routing_bad_hemispheres_type_error_code(self):
+        """run_engine_with_routing rejects non-dict hemispheres with typed error_code."""
+        js_response = self._run_js_json_api({
+            "action": "run_engine_with_routing",
+            "input": {"x": 1},
+            "hemispheres": "not_a_dict",
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.invalid_type"
+
+    def test_engine_with_routing_bad_hemispheres_shape_error_code(self):
+        """run_engine_with_routing rejects wrong-shape hemispheres with typed error_code."""
+        js_response = self._run_js_json_api({
+            "action": "run_engine_with_routing",
+            "input": {"x": 1},
+            "hemispheres": {"wrong_key": None},
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.shape_mismatch"
+
+    # -- Slice-2: normalize + validation boundary error codes --
+
+    def test_normalize_undefined_error_code(self):
+        """normalize rejects JS undefined (missing value key) with typed error_code."""
+        js_response = self._run_js_json_api({
+            "action": "normalize_roundtrip",
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.malformed_normalized"
+
+    def test_reserved_field_direct_error_code(self):
+        """validate_reserved_fields reports typed error_code for reserved field."""
+        js_response = self._run_js_json_api({
+            "action": "validate_reserved_fields",
+            "value": {"_mode": "evil"},
+        })
+        assert js_response["success"]  # validation query succeeds
+        assert js_response.get("valid") is False
+        assert js_response.get("error_code") == "input.reserved_field"
+
+    def test_algorithm_runtime_fields_error_code(self):
+        """validate_algorithm_runtime_fields reports typed error_code for unknown underscore."""
+        js_response = self._run_js_json_api({
+            "action": "validate_algorithm_runtime_fields",
+            "value": {"_evil_field": "bad"},
+        })
+        assert js_response["success"]  # validation query succeeds
+        assert js_response.get("valid") is False
+        assert js_response.get("error_code") == "input.reserved_field"
+
+    # -- Slice-3: hash_trace, run_structural_trace, run_hemisphere error codes --
+
+    def test_hash_trace_overcap_error_code(self):
+        """hash_trace overcap returns typed trace.overcap error_code."""
+        trace = None
+        for i in range(5):
+            trace = {"head": {"state": str(i), "step": i}, "tail": trace}
+        js_response = self._run_js_json_api({
+            "action": "hash_trace", "trace": trace, "maxEntries": 3,
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "trace.overcap"
+
+    def test_structural_trace_reserved_field_error_code(self):
+        """run_structural_trace rejects reserved-field input with typed error_code."""
+        js_response = self._run_js_json_api({
+            "action": "run_structural_trace",
+            "input": {"_mode": "evil"},
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.reserved_field"
+
+    def test_hemisphere_reserved_field_error_code(self):
+        """run_hemisphere rejects reserved-field input with typed error_code."""
+        js_response = self._run_js_json_api({
+            "action": "run_hemisphere",
+            "input": {"_mode": "evil"},
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.reserved_field"
+
+    # -- Round 10C: ratchet integrity corrections --
+
+    def test_run_vector_missing_projection_error_code(self):
+        """run_vector with missing projection returns api.bad_request."""
+        js_response = self._run_js_json_api({
+            "action": "run_vector",
+            "input": {"a": 1},
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "api.bad_request"
+
+    def test_run_vector_reserved_field_error_code(self):
+        """run_vector with reserved field in input returns input.reserved_field."""
+        js_response = self._run_js_json_api({
+            "action": "run_vector",
+            "input": {"_mode": "evil"},
+            "projection": {"pattern": {"x": "X"}, "body": {"x": "X"}},
+        })
+        assert not js_response["success"]
+        assert js_response.get("error_code") == "input.reserved_field"
+
+
 
 @pytest.mark.slow
 class TestEnginePipelineCrossSubstrateParity:
@@ -1403,6 +1526,105 @@ class TestActionSetSync:
         unregistered = source_actions - list_actions_set
         assert not unregistered, (
             f"Source has request.action handlers not in list_actions: {unregistered}"
+        )
+
+
+# =============================================================================
+# TestErrorEdgeCoverageRatchet — N1b closure gate
+# =============================================================================
+
+
+class TestErrorEdgeCoverageRatchet:
+    """Enforce that every public action has error-edge coverage or explicit opt-out.
+
+    Prevents regression: new actions cannot be added to JS list_actions without
+    either (a) at least one edge_args entry with expected_error_code, or
+    (b) requires_error_edges=false with a success_only_reason.
+    """
+
+    def test_all_actions_in_manifest(self):
+        """Every JS list_actions entry must exist in manifest."""
+        manifest = _load_manifest()
+        manifest_actions = set(manifest["actions"].keys())
+        js_response = _module_run_js_json_api({"action": "list_actions"})
+        assert js_response["success"]
+        js_actions = set(js_response["actions"])
+        missing = js_actions - manifest_actions
+        assert not missing, (
+            f"Actions in JS list_actions but not in manifest: {missing}. "
+            f"Add them to tests/fixtures/js_api_parity_manifest.json."
+        )
+
+    def test_all_manifest_actions_have_coverage_declaration(self):
+        """Every manifest action must declare requires_error_edges (true or false)."""
+        manifest = _load_manifest()
+        missing = [
+            name for name, defn in manifest["actions"].items()
+            if "requires_error_edges" not in defn
+        ]
+        assert not missing, (
+            f"Actions missing requires_error_edges declaration: {missing}. "
+            f"Set true (and add edge_args with expected_error_code) or "
+            f"false (with success_only_reason)."
+        )
+
+    def test_required_edges_have_error_code(self):
+        """Actions with requires_error_edges=true must have >=1 edge with expected_error_code."""
+        manifest = _load_manifest()
+        missing = []
+        for name, defn in manifest["actions"].items():
+            if not defn.get("requires_error_edges"):
+                continue
+            edges = defn.get("edge_args", [])
+            has_error_edge = any(
+                "expected_error_code" in e for e in edges
+            )
+            if not has_error_edge:
+                missing.append(name)
+        assert not missing, (
+            f"Actions with requires_error_edges=true but no expected_error_code edge: {missing}. "
+            f"Add at least one edge_args entry with expected_error_code."
+        )
+
+    def test_required_edges_all_have_error_code(self):
+        """For requires_error_edges=true, EVERY edge_args entry must have expected_error_code."""
+        manifest = _load_manifest()
+        incomplete = []
+        for name, defn in manifest["actions"].items():
+            if not defn.get("requires_error_edges"):
+                continue
+            for i, edge in enumerate(defn.get("edge_args", [])):
+                if "expected_error_code" not in edge:
+                    incomplete.append(f"{name}.edge_args[{i}]")
+        assert not incomplete, (
+            f"Edge entries missing expected_error_code: {incomplete}. "
+            f"Every edge on a requires_error_edges=true action must declare expected_error_code."
+        )
+
+    def test_required_edges_no_success_only_reason(self):
+        """Actions with requires_error_edges=true must not have success_only_reason."""
+        manifest = _load_manifest()
+        conflicting = [
+            name for name, defn in manifest["actions"].items()
+            if defn.get("requires_error_edges") and defn.get("success_only_reason")
+        ]
+        assert not conflicting, (
+            f"Actions with requires_error_edges=true AND success_only_reason: {conflicting}. "
+            f"Remove success_only_reason when requires_error_edges is true."
+        )
+
+    def test_success_only_actions_have_reason(self):
+        """Actions with requires_error_edges=false must have success_only_reason."""
+        manifest = _load_manifest()
+        missing = []
+        for name, defn in manifest["actions"].items():
+            if defn.get("requires_error_edges") is not False:
+                continue
+            if not defn.get("success_only_reason"):
+                missing.append(name)
+        assert not missing, (
+            f"Actions with requires_error_edges=false but no success_only_reason: {missing}. "
+            f"Add a short reason explaining why error edges are not needed."
         )
 
 
