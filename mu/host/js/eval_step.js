@@ -1523,7 +1523,8 @@ const SEED_CHECKSUMS = {
   'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
   'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
-  'rcx_engine.v1.json': 'aa6581b41f9750ab18b52c1078c4eaedf89d165f239ff81e3d919abeab3723bf',
+  'rcx_engine.v1.json': '52f001f9216e387b740a9f4d3972dece9258ca2572769aa84c4fc31e8e60d34a',
+  'fix.v1.json': '00e92921fef19da5f5133ef115d3264ed84dace9612d0cd9d933bae670883efa',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -1575,8 +1576,13 @@ const EXPECTED_PROJECTION_IDS = {
   ],
   'rcx_engine.v1.json': [
     'engine.init', 'engine.init_config', 'engine.trace_done',
-    'engine.hash_done', 'engine.recurrence_done', 'engine.exhaustion_done',
+    'engine.hash_done_fix', 'engine.hash_done',
+    'engine.fix_done_applied', 'engine.fix_done_none',
+    'engine.recurrence_done', 'engine.exhaustion_done',
     'engine.unwrap',
+  ],
+  'fix.v1.json': [
+    'fix.init', 'fix.edge_add_guard', 'fix.edge_add', 'fix.vertex_add_guard', 'fix.vertex_add', 'fix.pass_through',
   ],
 };
 
@@ -1647,6 +1653,7 @@ const substSeed = loadVerifiedSeed(path.join(substrateDir, 'subst.v2.json'), 'su
 const recurrenceSeed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v1.json'), 'recurrence.v1.json');
 const recurrenceV2Seed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v2.json'), 'recurrence.v2.json');
 const exhaustionSeed = loadVerifiedSeed(path.join(closuresDir, 'exhaustion.v1.json'), 'exhaustion.v1.json');
+const fixSeed = loadVerifiedSeed(path.join(closuresDir, 'fix.v1.json'), 'fix.v1.json');
 const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'bootstrap_structural.v1.json');
 const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
 const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json'), 'rcx_engine.v1.json');
@@ -1667,6 +1674,9 @@ const recurrenceProjections = recurrenceSeed.projections;
 // Exhaustion projections (separate - used for operator exhaustion after recurrence)
 const exhaustionProjections = exhaustionSeed.projections;
 
+// Fix projections (separate - used for structural fix of stalled states, GAP-04-FIX)
+const fixProjections = fixSeed.projections;
+
 // Hemisphere projections (APPLICATION level - structural routing, linear-only, no bridge needed)
 const hemisphereProjections = hemisphereSeed.projections;
 
@@ -1681,6 +1691,7 @@ const seedProjectionMap = {
   'recurrence.v1.json': recurrenceProjections,
   'recurrence.v2.json': recurrenceV2Projections,
   'exhaustion.v1.json': exhaustionProjections,
+  'fix.v1.json': fixProjections,
 };
 
 // Combined projections WITH BRIDGE for meta-circular algorithm execution
@@ -2035,7 +2046,7 @@ function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs
 }
 
 console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
-console.log('Seed integrity: 9 seeds verified (checksum + structure + projection order)');
+console.log('Seed integrity: 10 seeds verified (checksum + structure + projection order)');
 console.log(`Loaded projections from mu/ folder:`);
 console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
@@ -2044,6 +2055,7 @@ console.log(`  - bridge/bootstrap_structural.v1.json: ${bridgeSeed.projections.l
 console.log(`  - closures/recurrence.v1.json: ${recurrenceSeed.projections.length} projections (proof-of-concept)`);
 console.log(`  - closures/recurrence.v2.json: ${recurrenceV2Seed.projections.length} projections (hash-accelerated)`);
 console.log(`  - closures/exhaustion.v1.json: ${exhaustionSeed.projections.length} projections`);
+console.log(`  - closures/fix.v1.json: ${fixSeed.projections.length} projections (draft — GAP-04-FIX)`);
 console.log(`  - programs/hemispheres.v1.json: ${hemisphereSeed.projections.length} projections`);
 console.log(`  - programs/rcx_engine.v1.json: ${engineSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);

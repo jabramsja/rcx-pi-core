@@ -24,7 +24,7 @@ MU_DIR = ROOT / "mu"
 # mu/ folder structure (canonical location for all seeds)
 MU_SEEDS = {
     "substrate": ["kernel.v1.json", "match.v1.json", "match.v2.json", "subst.v1.json", "subst.v2.json"],
-    "closures": ["recurrence.v1.json", "recurrence.v2.json", "exhaustion.v1.json"],
+    "closures": ["recurrence.v1.json", "recurrence.v2.json", "exhaustion.v1.json", "fix.v1.json"],
     "programs": ["rcx_engine.v1.json", "hemispheres.v1.json", "paxos_demo.v1.json"],
     "utilities": ["classify.v1.json", "eval.v1.json"],
     "bridge": ["bootstrap_structural.v1.json"],
@@ -54,8 +54,9 @@ EXPECTED_COUNTS = {
     "recurrence.v1.json": 9,   # closure detection
     "recurrence.v2.json": 9,   # hash-accelerated closure detection
     "exhaustion.v1.json": 11,  # operator exhaustion
+    "fix.v1.json": 6,          # structural fix (GAP-04-FIX, Rule 0.6) + idempotence guards
     # mu/programs/
-    "rcx_engine.v1.json": 7,   # main program (+ hash_done boundary stall)
+    "rcx_engine.v1.json": 10,  # main program (+ fix dispatch + fix routing)
     "hemispheres.v1.json": 12,  # native structural routing (5-way: null, inf, a, lobes, sink)
     "paxos_demo.v1.json": 6,   # consensus demo (+ engine-output healer)
     # mu/bridge/
