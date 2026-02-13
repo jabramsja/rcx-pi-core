@@ -368,7 +368,13 @@ Current Exhaustion Layer: META_CIRCULAR
   - Explicit VECTOR → NEXT promotion in this file with rationale before any implementation
 
 **EngineNew gap contracts** (locked by `tests/test_engine_cycle_mapping.py::TestGapRegistry`):
-- GAP-04-FIX: Explicit Fix projection (Rule 0.6). No Fix seed exists; fix semantics implicit in engine re-application. **Promotion criteria:** (1) stall-recovery test showing implicit fix fails, (2) explicit Fix seed draft with pattern/body, (3) VECTOR → NEXT promotion with rationale. **Blocks:** structural completeness of EngineNew 10-step cycle.
+- GAP-04-FIX: Explicit Fix projection (Rule 0.6). No Fix seed exists; fix semantics implicit in engine re-application. **Contract:** `docs/core/EngineNewFixContract.v0.md` (input/output shape, 5 invariants I1-I5, disallowed behaviors). **Promotion checklist (all required for VECTOR → NEXT):**
+  - [ ] E1: Stall-recovery failure test (implicit fix fails on specific input)
+  - [ ] E2: `fix.v1.json` seed draft (≥2 projections: edge_add, vertex_add)
+  - [ ] E3: Invariant test suite (I1-I5 verified against draft seed)
+  - [ ] E4: Engine integration sketch (`engine.stall_detected` → Fix → step 5)
+  - [ ] E5: VECTOR → NEXT promotion entry with rationale referencing E1-E4
+  - **Blocks:** structural completeness of EngineNew 10-step cycle (8/10 → 9/10).
 - GAP-10-LOOP: Structural iteration control. Host-driven while loop in run_engine_pipeline; no loop-as-projection exists. **Promotion criteria:** (1) Boot1 recursive kernel design, (2) loop-as-projection seed draft, (3) evidence host loop can be replaced without breaking engine_result contract, (4) VECTOR → NEXT promotion with rationale. **Blocks:** full meta-circular engine (all 10 steps structural).
 
 **Reference:**

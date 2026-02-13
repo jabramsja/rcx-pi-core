@@ -46,6 +46,7 @@
     "^tests/archive/",
     "^tests/golden/",
     "^docs/TESTING_PERFORMANCE_ISSUE\\.md$",
-    "^reports/"
+    "^reports/",
+    "^AGENT_BRIDGE\\.md$"
   ]
 }

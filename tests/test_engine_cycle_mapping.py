@@ -158,6 +158,8 @@ class GapEntry(NamedTuple):
     rationale: str
     owner: str  # VECTOR item or SINK
     unblock_condition: str
+    contract_doc: str  # path to design contract doc, or "" if none yet
+    invariants: tuple[str, ...]  # invariant IDs that must hold when gap is closed
 
 
 GAP_REGISTRY: tuple[GapEntry, ...] = (
@@ -172,10 +174,18 @@ GAP_REGISTRY: tuple[GapEntry, ...] = (
         ),
         owner="VECTOR",
         unblock_condition=(
-            "Design a Fix projection seed with pattern/body that adds a "
-            "minimal structural perturbation to stalled state. Requires: "
-            "(1) stall-recovery test showing implicit fix fails, "
-            "(2) explicit Fix seed draft, (3) VECTOR → NEXT promotion."
+            "Requires all 5 evidence items from EngineNewFixContract.v0.md: "
+            "(E1) stall-recovery failure test, (E2) fix.v1.json seed draft, "
+            "(E3) invariant test suite for I1-I5, (E4) engine integration "
+            "sketch, (E5) VECTOR → NEXT promotion with rationale."
+        ),
+        contract_doc="docs/core/EngineNewFixContract.v0.md",
+        invariants=(
+            "I1:minimality",
+            "I2:structural_purity",
+            "I3:idempotence_safety",
+            "I4:stall_breaking",
+            "I5:no_semantic_drift",
         ),
     ),
     GapEntry(
@@ -194,6 +204,8 @@ GAP_REGISTRY: tuple[GapEntry, ...] = (
             "draft, (3) evidence that host loop can be replaced without "
             "breaking engine_result contract, (4) VECTOR → NEXT promotion."
         ),
+        contract_doc="",  # no contract doc yet — design not started
+        invariants=(),
     ),
 )
 
@@ -384,3 +396,66 @@ class TestGapRegistry:
         assert len(structural) + len(gaps) == 10
         assert len(structural) == 8, f"Expected 8 structural, got {len(structural)}"
         assert len(gaps) == 2, f"Expected 2 gaps, got {len(gaps)}"
+
+
+class TestGapContractDocs:
+    """Verify gap entries with contract docs have complete design contracts."""
+
+    ROOT = Path(__file__).parent.parent
+
+    def test_gap04_fix_has_contract_doc(self):
+        """GAP-04-FIX must reference a contract doc that exists on disk."""
+        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
+        assert gap.contract_doc, "GAP-04-FIX must have a contract_doc path"
+        doc_path = self.ROOT / gap.contract_doc
+        assert doc_path.exists(), (
+            f"Contract doc not found: {gap.contract_doc}"
+        )
+
+    def test_gap04_fix_has_invariants(self):
+        """GAP-04-FIX must declare at least 3 invariants."""
+        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
+        assert len(gap.invariants) >= 3, (
+            f"GAP-04-FIX has {len(gap.invariants)} invariants, need ≥3"
+        )
+
+    def test_gap04_fix_invariants_in_contract_doc(self):
+        """Every invariant ID declared in GAP-04-FIX must appear in the contract doc."""
+        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
+        doc_path = self.ROOT / gap.contract_doc
+        doc_text = doc_path.read_text()
+        for inv in gap.invariants:
+            # Invariant format is "I1:minimality" — check the label part
+            label = inv.split(":")[0]  # e.g., "I1"
+            assert label in doc_text, (
+                f"Invariant {inv} (label {label}) not found in {gap.contract_doc}"
+            )
+
+    def test_gap04_fix_unblock_references_evidence(self):
+        """GAP-04-FIX unblock_condition must reference evidence items from contract doc."""
+        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
+        for evidence_id in ("E1", "E2", "E3", "E4", "E5"):
+            assert evidence_id in gap.unblock_condition, (
+                f"GAP-04-FIX unblock_condition missing evidence reference {evidence_id}"
+            )
+
+    def test_contract_doc_has_doc_status_header(self):
+        """Contract docs must have a DOC_STATUS header for governance compliance."""
+        gap = next(g for g in GAP_REGISTRY if g.gap_id == "GAP-04-FIX")
+        doc_path = self.ROOT / gap.contract_doc
+        doc_text = doc_path.read_text()
+        assert "DOC_STATUS" in doc_text, (
+            f"{gap.contract_doc} missing DOC_STATUS header"
+        )
+        assert "DESIGN_SPEC" in doc_text, (
+            f"{gap.contract_doc} should be TYPE: DESIGN_SPEC"
+        )
+
+    def test_gaps_without_contract_doc_have_empty_invariants(self):
+        """Gaps with no contract doc should have empty invariants (nothing to check yet)."""
+        for gap in GAP_REGISTRY:
+            if not gap.contract_doc:
+                assert len(gap.invariants) == 0, (
+                    f"{gap.gap_id} has no contract_doc but declares invariants: "
+                    f"{gap.invariants}. Add a contract doc first."
+                )
