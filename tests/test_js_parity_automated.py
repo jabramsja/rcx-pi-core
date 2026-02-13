@@ -1547,6 +1547,68 @@ class TestFalsyDefaultParity:
 
 
 # =============================================================================
+# TestNoOrBarBarNumericDefaults — source-level regression lock for P4
+# =============================================================================
+
+
+class TestNoOrBarBarNumericDefaults:
+    """Regression lock: numeric cap fields must use ?? (not ||) in JS API paths.
+
+    P4 fix replaced || with ?? for maxSteps, maxEntries, maxEngineIterations,
+    maxAlgorithmIterations. This test prevents reintroduction.
+    """
+
+    _FORBIDDEN_PATTERNS = [
+        r"maxSteps\s*\|\|",
+        r"max_steps\s*\|\|",
+        r"maxEntries\s*\|\|",
+        r"maxEngineIterations\s*\|\|",
+        r"maxAlgorithmIterations\s*\|\|",
+    ]
+
+    def test_no_or_bar_bar_on_numeric_caps(self):
+        """No numeric cap field uses || default in eval_step.js."""
+        import re
+        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
+        source = js_path.read_text(encoding="utf-8")
+        lines = source.splitlines()
+
+        violations = []
+        for line_num, line in enumerate(lines, 1):
+            # Skip comments
+            stripped = line.lstrip()
+            if stripped.startswith("//") or stripped.startswith("*"):
+                continue
+            for pattern in self._FORBIDDEN_PATTERNS:
+                if re.search(pattern, line):
+                    violations.append(f"  eval_step.js:{line_num}: {line.strip()}")
+
+        assert not violations, (
+            "Numeric cap fields must use ?? (nullish coalescing), not || (logical OR).\n"
+            "P4 fix: || treats 0 as falsy, silently replacing with default.\n"
+            "Violations:\n" + "\n".join(violations)
+        )
+
+    def test_nullish_coalescing_present(self):
+        """Confirm ?? is used for numeric defaults (positive check)."""
+        import re
+        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
+        source = js_path.read_text(encoding="utf-8")
+
+        expected_patterns = [
+            (r"maxSteps\s*\?\?", "maxSteps"),
+            (r"maxEntries\s*\?\?", "maxEntries"),
+            (r"maxEngineIterations\s*\?\?", "maxEngineIterations"),
+            (r"maxAlgorithmIterations\s*\?\?", "maxAlgorithmIterations"),
+        ]
+
+        for pattern, field in expected_patterns:
+            assert re.search(pattern, source), (
+                f"Expected ?? default for {field} in eval_step.js but not found"
+            )
+
+
+# =============================================================================
 # Module-level helpers for manifest-driven parity tests (Phase 6)
 # =============================================================================
 
