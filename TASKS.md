@@ -367,6 +367,10 @@ Current Exhaustion Layer: META_CIRCULAR
   - Engine exception policy Option B (synthesized routable terminal → sink) designed with sink-safety invariants
   - Explicit VECTOR → NEXT promotion in this file with rationale before any implementation
 
+**EngineNew gap contracts** (locked by `tests/test_engine_cycle_mapping.py::TestGapRegistry`):
+- GAP-04-FIX: Explicit Fix projection (Rule 0.6). No Fix seed exists; fix semantics implicit in engine re-application. **Promotion criteria:** (1) stall-recovery test showing implicit fix fails, (2) explicit Fix seed draft with pattern/body, (3) VECTOR → NEXT promotion with rationale. **Blocks:** structural completeness of EngineNew 10-step cycle.
+- GAP-10-LOOP: Structural iteration control. Host-driven while loop in run_engine_pipeline; no loop-as-projection exists. **Promotion criteria:** (1) Boot1 recursive kernel design, (2) loop-as-projection seed draft, (3) evidence host loop can be replaced without breaking engine_result contract, (4) VECTOR → NEXT promotion with rationale. **Blocks:** full meta-circular engine (all 10 steps structural).
+
 **Reference:**
 - Corpus Status Registry (`docs/corpus_registry.csv`) - 18-artifact classification with taxonomy labels, confidence scores, and evidence refs. Ontology-to-runtime mapping reference for VECTOR design work.
 

@@ -148,6 +148,57 @@ CYCLE_MAPPING: tuple[CycleStep, ...] = (
 
 
 # ---------------------------------------------------------------------------
+# Gap registry: canonical record of non-structural steps
+# ---------------------------------------------------------------------------
+
+
+class GapEntry(NamedTuple):
+    step_id: int
+    gap_id: str
+    rationale: str
+    owner: str  # VECTOR item or SINK
+    unblock_condition: str
+
+
+GAP_REGISTRY: tuple[GapEntry, ...] = (
+    GapEntry(
+        step_id=4,
+        gap_id="GAP-04-FIX",
+        rationale=(
+            "No Fix projection exists. Fix semantics (add minimal structural "
+            "edge per Rule 0.6) are implicit in engine re-application. An "
+            "explicit Fix projection requires structural seed design + "
+            "evidence that implicit fix is insufficient."
+        ),
+        owner="VECTOR",
+        unblock_condition=(
+            "Design a Fix projection seed with pattern/body that adds a "
+            "minimal structural perturbation to stalled state. Requires: "
+            "(1) stall-recovery test showing implicit fix fails, "
+            "(2) explicit Fix seed draft, (3) VECTOR → NEXT promotion."
+        ),
+    ),
+    GapEntry(
+        step_id=10,
+        gap_id="GAP-10-LOOP",
+        rationale=(
+            "Iteration is host-driven: run_engine_pipeline runs a while "
+            "loop dispatching _boundary_request effects. No structural loop "
+            "projection exists. Structural iteration requires a recursive "
+            "kernel that can re-enter itself (Boot1+ capability)."
+        ),
+        owner="VECTOR",
+        unblock_condition=(
+            "Implement recursive kernel capable of self-re-entry. Requires: "
+            "(1) Boot1 recursive kernel design, (2) loop-as-projection seed "
+            "draft, (3) evidence that host loop can be replaced without "
+            "breaking engine_result contract, (4) VECTOR → NEXT promotion."
+        ),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -270,3 +321,66 @@ class TestEngineCycleMapping:
                     f"Step {step.step_id} falsely references "
                     f"{claim!r}: {step.evidence_note[:100]}"
                 )
+
+
+class TestGapRegistry:
+    """Lock EngineNew gaps as intentional contracts with promotion criteria."""
+
+    def test_gap_count_matches_mapping(self):
+        """GAP_REGISTRY count must equal gap steps in CYCLE_MAPPING."""
+        mapping_gaps = [s for s in CYCLE_MAPPING if s.evidence_type == "gap"]
+        assert len(GAP_REGISTRY) == len(mapping_gaps), (
+            f"GAP_REGISTRY has {len(GAP_REGISTRY)} entries but "
+            f"CYCLE_MAPPING has {len(mapping_gaps)} gap steps. "
+            f"Registry step_ids: {[g.step_id for g in GAP_REGISTRY]}, "
+            f"Mapping gap step_ids: {[s.step_id for s in mapping_gaps]}"
+        )
+
+    def test_gap_step_ids_match_mapping(self):
+        """GAP_REGISTRY step_ids must exactly match gap steps in CYCLE_MAPPING."""
+        mapping_gap_ids = {s.step_id for s in CYCLE_MAPPING if s.evidence_type == "gap"}
+        registry_ids = {g.step_id for g in GAP_REGISTRY}
+        assert registry_ids == mapping_gap_ids, (
+            f"Step ID mismatch: registry={sorted(registry_ids)}, "
+            f"mapping gaps={sorted(mapping_gap_ids)}"
+        )
+
+    def test_each_gap_has_required_fields(self):
+        """Every gap entry has non-trivial rationale, owner, and unblock condition."""
+        for gap in GAP_REGISTRY:
+            assert len(gap.rationale) >= 30, (
+                f"{gap.gap_id}: rationale too short ({len(gap.rationale)} chars)"
+            )
+            assert gap.owner in ("VECTOR", "SINK", "NEXT"), (
+                f"{gap.gap_id}: owner must be VECTOR/SINK/NEXT, got {gap.owner!r}"
+            )
+            assert len(gap.unblock_condition) >= 30, (
+                f"{gap.gap_id}: unblock_condition too short ({len(gap.unblock_condition)} chars)"
+            )
+
+    def test_gap_ids_are_unique(self):
+        """No duplicate gap IDs."""
+        ids = [g.gap_id for g in GAP_REGISTRY]
+        assert len(ids) == len(set(ids)), f"Duplicate gap IDs: {ids}"
+
+    def test_no_gap_flipped_without_evidence(self):
+        """A step cannot be structural in CYCLE_MAPPING while still in GAP_REGISTRY.
+
+        If a gap is resolved, the GAP_REGISTRY entry must be removed first.
+        This prevents silent gap→structural flips without explicit promotion.
+        """
+        structural_ids = {s.step_id for s in CYCLE_MAPPING if s.evidence_type == "structural"}
+        for gap in GAP_REGISTRY:
+            assert gap.step_id not in structural_ids, (
+                f"{gap.gap_id} (step {gap.step_id}) is in GAP_REGISTRY but "
+                f"CYCLE_MAPPING marks it as 'structural'. Remove the gap entry "
+                f"only after evidence is provided and VECTOR → NEXT promotion."
+            )
+
+    def test_structural_gap_tally(self):
+        """Print and assert the current structural/gap tally."""
+        structural = [s for s in CYCLE_MAPPING if s.evidence_type == "structural"]
+        gaps = [s for s in CYCLE_MAPPING if s.evidence_type == "gap"]
+        assert len(structural) + len(gaps) == 10
+        assert len(structural) == 8, f"Expected 8 structural, got {len(structural)}"
+        assert len(gaps) == 2, f"Expected 2 gaps, got {len(gaps)}"
