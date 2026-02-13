@@ -20,7 +20,7 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 7 engine)
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 10 engine + 6 fix)
     - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
@@ -108,6 +108,10 @@ Items here are implemented and verified under current invariants. Changes requir
 - HF2 maxSteps guard (2026-02-10): `guardMaxSteps()` enforces type (integer), range (>=0), and cap (<=10000) on all 8 maxSteps-accepting JSON API endpoints. Closes HF2 Mode-B DoS vector. Manifest: 14/18 actions now `requires_error_edges=true`. 169 parity/coverage tests green.
 - N1b typed-error parity (2026-02-13): 14 JS boundary throw sites converted from untyped `Error`/`TypeError` to `RcxError` with stable `error_code` (normalize, step/run/runStructural, validateNoKernelReservedFields, validateAlgorithmRuntimeFields, runHemisphereRouting, runEngineWithRouting). Manifest ratchet: all 18 actions declare `requires_error_edges`; 10 with error edges, 8 with `success_only_reason`. 22 error_code parity tests + 8 ratchet invariant tests. No phase/debt change.
 - Mu Hemispheres v0 — Engine integration COMPLETE (2026-02-11): `run_engine_with_routing()` chains `run_engine_pipeline()` → `run_hemisphere_routing()` with fail-closed input/output validation. `hash_trace_for_recurrence` cycle guard added (visited set + 10000 iteration cap). 10 integration tests (8 fast + 2 slow). Paxos livelock → closure → r_a proven end-to-end.
+- Hemisphere hardening Phases 1–4 CLOSED (2026-02-13, no runtime changes): P1 routing priority confirmed correct across all 4 layers (seed, Python, JS, tests — 130 hemisphere + 28 JS parity tests); P4 JS falsy-default `??` already correct for all 14 numeric caps, regression lock added (`TestNoOrBarBarNumericDefaults`); P2a `import ast` confirmed absent from `rcx_pi/`, structural guard added (`test_ast_import_guard.py`); P3a hemisphere output validation already exact-keyset + typed RcxError + cross-substrate parity. Commits: `d2a7cac` (PR #245 GAP-04-FIX contract), `c73d68b` (PR #246 test hardening). No phase/debt change.
+- Hemisphere hardening Phase 6 already complete (2026-02-13): Parity manifest (`tests/fixtures/js_api_parity_manifest.json`, 18 actions, 10 error codes, 3 types), `RcxError` + `classifyError()` in JS (16 catch sites), `list_actions` API action, `classify_python_error()` in test layer, `TestActionSetSync`/`TestParityCoverageGate`/`TestManifestEdgeCaseParity` test classes, `@pytest.mark.slow` tier split. 169 parity tests pass. Hemisphere hardening stream CLOSED (all 6 phases).
+- Tracker sync note (2026-02-13, Round 15I): GAP-04-FIX E1–E5 execution CLOSED. E1: gap proven pre-integration in Round 15D (`TestImplicitFixFailure`, since renamed to `TestFixIntegrationEvidence` after E4 closed the gap). E2: `mu/closures/fix.v1.json` v1.1.0 (6 projections, idempotence guards). E3: 19 invariant tests (`tests/test_fix_invariants.py`, I1–I5). E4: `mu/programs/rcx_engine.v1.json` v1.2.0 (10 projections, 3 fix-dispatch). E5: TASKS closure + contract update. Cross-substrate parity locked (4 fix-path tests). EngineNew tally: 9/10 structural, 1/10 gap (GAP-10-LOOP only). No phase/debt change.
+- GAP-04-FIX promoted VECTOR → NEXT (2026-02-13, Round 15C): E1–E5 plan approved (Round 15B). Design contract test-locked, all prerequisites satisfied. Execution authorized under NEXT; E1 starts next. No phase/debt change.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
 - Golden fixtures in place
@@ -368,13 +372,7 @@ Current Exhaustion Layer: META_CIRCULAR
   - Explicit VECTOR → NEXT promotion in this file with rationale before any implementation
 
 **EngineNew gap contracts** (locked by `tests/test_engine_cycle_mapping.py::TestGapRegistry`):
-- GAP-04-FIX: Explicit Fix projection (Rule 0.6). No Fix seed exists; fix semantics implicit in engine re-application. **Contract:** `docs/core/EngineNewFixContract.v0.md` (input/output shape, 5 invariants I1-I5, disallowed behaviors). **Promotion checklist (all required for VECTOR → NEXT):**
-  - [ ] E1: Stall-recovery failure test (implicit fix fails on specific input)
-  - [ ] E2: `fix.v1.json` seed draft (≥2 projections: edge_add, vertex_add)
-  - [ ] E3: Invariant test suite (I1-I5 verified against draft seed)
-  - [ ] E4: Engine integration sketch (`engine.stall_detected` → Fix → step 5)
-  - [ ] E5: VECTOR → NEXT promotion entry with rationale referencing E1-E4
-  - **Blocks:** structural completeness of EngineNew 10-step cycle (8/10 → 9/10).
+- ~~GAP-04-FIX~~ — **CLOSED** (2026-02-13, Round 15I). E1–E5 complete. `fix.v1.json` (6 projections) + `rcx_engine.v1.json` (10 projections, 3 fix-dispatch). 19 invariant tests, 4 cross-substrate parity tests. EngineNew 9/10 structural.
 - GAP-10-LOOP: Structural iteration control. Host-driven while loop in run_engine_pipeline; no loop-as-projection exists. **Promotion criteria:** (1) Boot1 recursive kernel design, (2) loop-as-projection seed draft, (3) evidence host loop can be replaced without breaking engine_result contract, (4) VECTOR → NEXT promotion with rationale. **Blocks:** full meta-circular engine (all 10 steps structural).
 
 **Reference:**

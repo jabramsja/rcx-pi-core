@@ -61,7 +61,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     "exhaustion.v1.json": "3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c",
     # RCX Engine: structural specification for pipeline orchestration (7 projections)
     # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
-    "rcx_engine.v1.json": "aa6581b41f9750ab18b52c1078c4eaedf89d165f239ff81e3d919abeab3723bf",
+    "rcx_engine.v1.json": "52f001f9216e387b740a9f4d3972dece9258ca2572769aa84c4fc31e8e60d34a",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
@@ -73,6 +73,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "paxos_demo.v1.json": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
     # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)
     "recurrence.v2.json": "664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b",
+    # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6, APPLICATION)
+    "fix.v1.json": "00e92921fef19da5f5133ef115d3264ed84dace9612d0cd9d933bae670883efa",
 }
 
 # Expected projection IDs for each seed.
@@ -184,13 +186,16 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
     ],
     # RCX Engine: main program orchestrating recurrence + exhaustion
     "rcx_engine.v1.json": [
-        "engine.init",            # Entry: default config
-        "engine.init_config",     # Entry: custom config
-        "engine.trace_done",      # Trace complete -> request boundary hash
-        "engine.hash_done",       # Boundary hash serviced -> start recurrence
-        "engine.recurrence_done", # Recurrence done -> exhaustion
-        "engine.exhaustion_done", # Exhaustion done -> final result
-        "engine.unwrap",          # Extract final result
+        "engine.init",              # Entry: default config
+        "engine.init_config",       # Entry: custom config
+        "engine.trace_done",        # Trace complete -> request boundary hash
+        "engine.hash_done_fix",     # Stall detected -> dispatch fix.v1.json (Rule 0.6)
+        "engine.hash_done",         # Non-stall -> start recurrence
+        "engine.fix_done_applied",  # Fix applied -> recurrence with fixed result
+        "engine.fix_done_none",     # Fix not applicable -> recurrence with original
+        "engine.recurrence_done",   # Recurrence done -> exhaustion
+        "engine.exhaustion_done",   # Exhaustion done -> final result
+        "engine.unwrap",            # Extract final result
     ],
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": [
@@ -234,6 +239,15 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "hemisphere.add.sink",              # Prepend entry to sink
         "hemisphere.unwrap",                # Extract final result
     ],
+    # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6)
+    "fix.v1.json": [
+        "fix.init",              # Entry: decompose apply_fix request
+        "fix.edge_add_guard",    # I3 idempotence: already has fix edge
+        "fix.edge_add",          # Add one edge to graph with edges
+        "fix.vertex_add_guard",  # I3 idempotence: already has fix vertex
+        "fix.vertex_add",        # Add one vertex to graph with vertices
+        "fix.pass_through",      # Fallback: no perturbation possible
+    ],
 }
 
 
@@ -252,6 +266,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     "recurrence.v1.json": "closures",
     "recurrence.v2.json": "closures",
     "exhaustion.v1.json": "closures",
+    "fix.v1.json": "closures",
     # Utilities
     "classify.v1.json": "utilities",
     "eval.v1.json": "utilities",

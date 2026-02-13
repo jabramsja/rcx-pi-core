@@ -1,0 +1,207 @@
+{
+    "meta": {
+        "version": "1.1.0",
+        "name": "FIX_SEED",
+        "description": "Structural Fix routine for GAP-04-FIX (Rule 0.6): minimal perturbation of stalled state",
+        "doc": "docs/core/EngineNewFixContract.v0.md",
+        "spec_ref": "RCXEngineNew.pdf Rule 0.6",
+        "execution_layer": "APPLICATION",
+        "requires_patterns": ["linear"],
+        "status": "draft",
+        "invariants": [
+            "I1: Minimality — add exactly one structural element (edge or vertex)",
+            "I2: Structural purity — all projections are pure Mu, no host escapes",
+            "I3: Idempotence safety — double-apply returns fix_applied=false or same output",
+            "I4: Stall-breaking — fixed_state hash differs from stall_hash when fix_applied=true",
+            "I5: No semantic drift — fixed_state is valid engine input"
+        ],
+        "design_notes": [
+            "All internal routing uses non-underscore keys (fix_mode, fix_state, etc.) to avoid algorithm-runtime allowlist conflicts",
+            "fix.edge_add_guard detects already-fixed graphs (first edge is fix_origin) for I3 idempotence",
+            "fix.edge_add matches graph dicts with vertices+edges — prepends one fix edge to edges list",
+            "fix.vertex_add_guard detects already-fixed graphs (first vertex is empty_set_emergence) for I3 idempotence",
+            "fix.vertex_add matches graph dicts with only vertices — prepends one fix vertex to vertices list",
+            "fix.pass_through catches all remaining classified states — truly reachable fallback",
+            "Perturbations are shape-preserving: edge_add extends edges list, vertex_add extends vertices list"
+        ]
+    },
+    "projections": [
+        {
+            "id": "fix.init",
+            "description": "Entry: decompose apply_fix request into internal classified state",
+            "pattern": {
+                "apply_fix": {
+                    "stalled_state": {"var": "state"},
+                    "stall_hash": {"var": "hash"},
+                    "tau_step": {"var": "tau"},
+                    "engine_iteration": {"var": "iter"}
+                }
+            },
+            "body": {
+                "fix_mode": "classify",
+                "fix_state": {"var": "state"},
+                "fix_hash": {"var": "hash"},
+                "fix_tau": {"var": "tau"},
+                "fix_iter": {"var": "iter"}
+            }
+        },
+        {
+            "id": "fix.edge_add_guard",
+            "description": "Idempotence guard: graph already has fix edge at head — return unchanged (I3)",
+            "pattern": {
+                "fix_mode": "classify",
+                "fix_state": {
+                    "graph": {
+                        "vertices": {"var": "verts"},
+                        "edges": {
+                            "head": {
+                                "src": "fix_origin",
+                                "dst": "fix_target",
+                                "tau_step": {"var": "guard_tau"}
+                            },
+                            "tail": {"var": "rest_edges"}
+                        }
+                    }
+                },
+                "fix_hash": {"var": "hash"},
+                "fix_tau": {"var": "tau"},
+                "fix_iter": {"var": "iter"}
+            },
+            "body": {
+                "fixed_state": {
+                    "graph": {
+                        "vertices": {"var": "verts"},
+                        "edges": {
+                            "head": {
+                                "src": "fix_origin",
+                                "dst": "fix_target",
+                                "tau_step": {"var": "guard_tau"}
+                            },
+                            "tail": {"var": "rest_edges"}
+                        }
+                    }
+                },
+                "fix_applied": false,
+                "fix_type": "none"
+            }
+        },
+        {
+            "id": "fix.edge_add",
+            "description": "Graph with edges list: prepend one fix edge (I1: minimality, shape-preserving)",
+            "pattern": {
+                "fix_mode": "classify",
+                "fix_state": {
+                    "graph": {
+                        "vertices": {"var": "verts"},
+                        "edges": {"var": "edges"}
+                    }
+                },
+                "fix_hash": {"var": "hash"},
+                "fix_tau": {"var": "tau"},
+                "fix_iter": {"var": "iter"}
+            },
+            "body": {
+                "fixed_state": {
+                    "graph": {
+                        "vertices": {"var": "verts"},
+                        "edges": {
+                            "head": {
+                                "src": "fix_origin",
+                                "dst": "fix_target",
+                                "tau_step": {"var": "tau"}
+                            },
+                            "tail": {"var": "edges"}
+                        }
+                    }
+                },
+                "fix_applied": true,
+                "fix_type": "edge_add"
+            }
+        },
+        {
+            "id": "fix.vertex_add_guard",
+            "description": "Idempotence guard: graph already has fix vertex at head — return unchanged (I3)",
+            "pattern": {
+                "fix_mode": "classify",
+                "fix_state": {
+                    "graph": {
+                        "vertices": {
+                            "head": {
+                                "id": 0,
+                                "label": "empty_set_emergence",
+                                "tau_step": {"var": "guard_tau"}
+                            },
+                            "tail": {"var": "rest_verts"}
+                        }
+                    }
+                },
+                "fix_hash": {"var": "hash"},
+                "fix_tau": {"var": "tau"},
+                "fix_iter": {"var": "iter"}
+            },
+            "body": {
+                "fixed_state": {
+                    "graph": {
+                        "vertices": {
+                            "head": {
+                                "id": 0,
+                                "label": "empty_set_emergence",
+                                "tau_step": {"var": "guard_tau"}
+                            },
+                            "tail": {"var": "rest_verts"}
+                        }
+                    }
+                },
+                "fix_applied": false,
+                "fix_type": "none"
+            }
+        },
+        {
+            "id": "fix.vertex_add",
+            "description": "Graph with vertices list only: prepend one fix vertex (I1: minimality, shape-preserving)",
+            "pattern": {
+                "fix_mode": "classify",
+                "fix_state": {
+                    "graph": {
+                        "vertices": {"var": "verts"}
+                    }
+                },
+                "fix_hash": {"var": "hash"},
+                "fix_tau": {"var": "tau"},
+                "fix_iter": {"var": "iter"}
+            },
+            "body": {
+                "fixed_state": {
+                    "graph": {
+                        "vertices": {
+                            "head": {
+                                "id": 0,
+                                "label": "empty_set_emergence",
+                                "tau_step": {"var": "tau"}
+                            },
+                            "tail": {"var": "verts"}
+                        }
+                    }
+                },
+                "fix_applied": true,
+                "fix_type": "vertex_add"
+            }
+        },
+        {
+            "id": "fix.pass_through",
+            "description": "Non-graph state: no valid structural perturbation — pass through unchanged (I1: none)",
+            "pattern": {
+                "fix_mode": "classify",
+                "fix_state": {"var": "state"},
+                "fix_hash": {"var": "hash"},
+                "fix_tau": {"var": "tau"},
+                "fix_iter": {"var": "iter"}
+            },
+            "body": {
+                "fixed_state": {"var": "state"},
+                "fix_applied": false,
+                "fix_type": "none"
+            }
+        }
+    ]
+}

@@ -1,25 +1,27 @@
 {
   "meta": {
-    "version": "1.1.0",
+    "version": "1.2.0",
     "name": "RCX_ENGINE",
-    "description": "Main RCX engine combining recurrence and exhaustion detection",
+    "description": "Main RCX engine combining fix, recurrence, and exhaustion detection",
     "doc": "docs/core/RCXEngine.v0.md",
-    "spec_ref": "RCXEngineNew.pdf Rule 2.2♢, Rule 3.1",
+    "spec_ref": "RCXEngineNew.pdf Rule 0.6, Rule 2.2♢, Rule 3.1",
     "status": "structural_specification",
     "execution_layer": "APPLICATION",
     "requires_patterns": ["non-linear"],
     "dependencies": [
+      "fix.v1.json (structural fix routine, Rule 0.6)",
       "recurrence.v2.json (hash-accelerated closure detection)",
       "exhaustion.v1.json (operator exhaustion)"
     ],
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",
-      "Engine orchestrates recurrence and exhaustion detection",
+      "Engine orchestrates fix, recurrence, and exhaustion detection",
       "Input: _run_engine with projections, input, and config",
       "Output: result with closure_detected, exhaustion_detected, frozen set",
       "Boundary operations use _boundary_request (algebraic effect protocol)",
       "Host services _boundary_request generically: operation, input, context, inject_key",
-      "Any host (Python, JS, Rust) can drive the engine from one generic dispatch loop"
+      "Any host (Python, JS, Rust) can drive the engine from one generic dispatch loop",
+      "Stall triggers Fix dispatch (Rule 0.6) before recurrence detection"
     ]
   },
   "projections": [
@@ -103,8 +105,43 @@
       }
     },
     {
+      "id": "engine.hash_done_fix",
+      "description": "Stall detected after hash — dispatch Fix routine (Rule 0.6) before recurrence",
+      "pattern": {
+        "_mode": "engine",
+        "_result": {"var": "result"},
+        "_frozen": {"var": "frozen"},
+        "_stall": true,
+        "_raw_trace": {"var": "raw_trace"},
+        "_hashed_trace": {"var": "hashed_trace"}
+      },
+      "body": {
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "fix.v1.json",
+          "input": {
+            "apply_fix": {
+              "stalled_state": {"var": "result"},
+              "stall_hash": "structural_stall",
+              "tau_step": 1,
+              "engine_iteration": 0
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_result": {"var": "result"},
+            "_frozen": {"var": "frozen"},
+            "_stall": true,
+            "_raw_trace": {"var": "raw_trace"},
+            "_hashed_trace": {"var": "hashed_trace"}
+          },
+          "inject_key": "_fix_result"
+        }
+      }
+    },
+    {
       "id": "engine.hash_done",
-      "description": "Trace hashed — request recurrence detection (run_algorithm effect)",
+      "description": "Trace hashed (non-stall) — request recurrence detection (run_algorithm effect)",
       "pattern": {
         "_mode": "engine",
         "_result": {"var": "result"},
@@ -127,6 +164,78 @@
             "_mode": "engine",
             "_frozen": {"var": "frozen"},
             "_stall": {"var": "stall"},
+            "_raw_trace": {"var": "raw_trace"}
+          },
+          "inject_key": "_recurrence_result"
+        }
+      }
+    },
+    {
+      "id": "engine.fix_done_applied",
+      "description": "Fix applied — forward fixed_state to recurrence, stall broken",
+      "pattern": {
+        "_mode": "engine",
+        "_result": {"var": "original"},
+        "_frozen": {"var": "frozen"},
+        "_stall": true,
+        "_raw_trace": {"var": "raw_trace"},
+        "_hashed_trace": {"var": "hashed_trace"},
+        "_fix_result": {
+          "fixed_state": {"var": "fixed"},
+          "fix_applied": true,
+          "fix_type": {"var": "fix_type"}
+        }
+      },
+      "body": {
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "recurrence.v2.json",
+          "input": {
+            "_detect_closure": {
+              "trace": {"var": "hashed_trace"},
+              "result": {"var": "fixed"}
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": {"var": "frozen"},
+            "_stall": false,
+            "_raw_trace": {"var": "raw_trace"}
+          },
+          "inject_key": "_recurrence_result"
+        }
+      }
+    },
+    {
+      "id": "engine.fix_done_none",
+      "description": "Fix not applicable — forward original result to recurrence, stall persists",
+      "pattern": {
+        "_mode": "engine",
+        "_result": {"var": "original"},
+        "_frozen": {"var": "frozen"},
+        "_stall": true,
+        "_raw_trace": {"var": "raw_trace"},
+        "_hashed_trace": {"var": "hashed_trace"},
+        "_fix_result": {
+          "fixed_state": {"var": "fixed"},
+          "fix_applied": false,
+          "fix_type": {"var": "fix_type"}
+        }
+      },
+      "body": {
+        "_boundary_request": {
+          "operation": "run_algorithm",
+          "algorithm": "recurrence.v2.json",
+          "input": {
+            "_detect_closure": {
+              "trace": {"var": "hashed_trace"},
+              "result": {"var": "original"}
+            }
+          },
+          "context": {
+            "_mode": "engine",
+            "_frozen": {"var": "frozen"},
+            "_stall": true,
             "_raw_trace": {"var": "raw_trace"}
           },
           "inject_key": "_recurrence_result"
