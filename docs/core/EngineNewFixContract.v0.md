@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
-TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-10
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-02-13
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/test_engine_cycle_mapping.py
@@ -21,9 +21,9 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 Define the structural contract for GAP-04-FIX (EngineNew step 4, Rule 0.6): the Fix routine that applies a minimal structural perturbation to a stalled state.
 
-**Status:** VECTOR (design-only). This document specifies WHAT Fix must do when implemented. No runtime code implements this contract yet.
+**Status:** IMPLEMENTED (2026-02-13, Rounds 15D–15I). All 5 invariants (I1–I5) verified by `tests/test_fix_invariants.py`. Engine integration via 3 dispatch projections in `rcx_engine.v1.json`. Cross-substrate parity locked.
 
-**Gap ID:** `GAP-04-FIX` (locked by `tests/test_engine_cycle_mapping.py::TestGapRegistry`)
+**Gap ID:** `GAP-04-FIX` — **CLOSED** (removed from `tests/test_engine_cycle_mapping.py::TestGapRegistry`)
 
 ## Background
 
@@ -33,7 +33,7 @@ The EngineNew 10-step stall-fix-promote cycle (RCXEngineNew.pdf) includes:
 - **Step 4** (Rule 0.6): Fix routine — `Fix(G)` adds a minimal structural edge to break the stall.
 - **Step 5** (Rule 2.2): Recurrence detection — checks if the fix produces a recurring pattern.
 
-Currently, step 4 is implicit: the engine re-applies operators to the stalled state, relying on recurrence/exhaustion detection to eventually terminate. No explicit Fix projection exists in any seed.
+Step 4 is now structural: `mu/closures/fix.v1.json` (6 projections) handles edge_add, vertex_add, and pass-through with idempotence guards. Engine dispatch via `engine.hash_done_fix`, `engine.fix_done_applied`, `engine.fix_done_none` in `mu/programs/rcx_engine.v1.json`.
 
 ## Fix Intent
 
@@ -114,14 +114,16 @@ Fix must not introduce structures that violate the engine's acyclicity constrain
 
 All of the following must be satisfied before GAP-04-FIX can be promoted from VECTOR to NEXT:
 
-- [ ] **E1: Stall-recovery failure test** — A test demonstrating that the current implicit fix (engine re-application) fails on a specific input where an explicit Fix projection would succeed. This proves the gap is not merely theoretical.
-- [ ] **E2: Fix seed draft** — A concrete `fix.v1.json` seed file with projections for both edge_add and vertex_add, conforming to the input/output shapes above.
-- [ ] **E3: Invariant test suite** — Tests verifying I1–I5 against the draft seed using test-local fixtures.
-- [ ] **E4: Engine integration sketch** — Design showing how `engine.trace_done` (or a new `engine.stall_detected`) would dispatch to Fix via `_boundary_request`, and how the fixed state re-enters step 5.
-- [ ] **E5: VECTOR → NEXT promotion** — Explicit entry in TASKS.md with rationale referencing E1–E4.
+- [x] **E1: Stall-recovery failure test** — Pre-integration gap proof established in Round 15D (`TestImplicitFixFailure`: identity+graph stalls with value unchanged, proving no fix mechanism existed). After E4 integration, tests renamed to `TestFixIntegrationEvidence` and updated to verify fix now works (stall=false, value perturbed).
+- [x] **E2: Fix seed draft** — `mu/closures/fix.v1.json` v1.1.0, 6 projections (init, edge_add_guard, edge_add, vertex_add_guard, vertex_add, pass_through). Registered in seed_integrity.py + eval_step.js. Rounds 15D–15E.
+- [x] **E3: Invariant test suite** — `tests/test_fix_invariants.py`, 19 tests across I1–I5 (6 minimality, 2 purity, 3 idempotence, 3 stall-breaking, 5 no-drift). All green. Round 15F.
+- [x] **E4: Engine integration** — `engine.hash_done_fix` dispatches to fix.v1.json on stall=true. `engine.fix_done_applied` / `engine.fix_done_none` route fixed/original state to recurrence. 10 engine projections total. Cross-substrate parity locked (4 tests). Rounds 15G–15H.
+- [x] **E5: Closure bookkeeping** — TASKS.md updated: GAP-04-FIX closed in NEXT→Ra. Contract status updated. EngineNew 9/10 structural. Round 15I.
 
 ## Related Documents
 
-- `docs/core/RCXEngine.v0.md` — Engine cycle (step 4 references Fix)
-- `tests/test_engine_cycle_mapping.py` — Gap registry (GAP-04-FIX)
-- `TASKS.md` — VECTOR item with promotion checklist
+- `docs/core/RCXEngine.v0.md` — Engine cycle (step 4 is now structural)
+- `tests/test_engine_cycle_mapping.py` — Step 4 mapped as structural; gap registry tracks remaining gaps (GAP-10-LOOP only)
+- `tests/test_fix_invariants.py` — 19 invariant tests (I1–I5)
+- `tests/test_js_parity_automated.py::TestEngineFixPathParity` — Cross-substrate parity lock (4 tests)
+- `TASKS.md` — GAP-04-FIX closed in Ra
