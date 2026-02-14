@@ -65,11 +65,8 @@ MINIMAL_GLOBS = [
     "scripts/rcx_*.py",
     "scripts/rcx_*.sh",
     "scripts/tests/*.py",
-    "rcx_pi_rust/src/*.rs",
     "rcx_pi/*.py",
     "rcx_pi/**/*.py",
-    "rcx_omega/*.py",
-    "rcx_omega/**/*.py",
     # schema locations (both)
     "docs/schemas/**/*.json",
     "docs/schemas/**/*.md",
@@ -84,11 +81,6 @@ EXTENDED_GLOBS_BASE = MINIMAL_GLOBS + [
     "docs/latex/**/*",
     "tests/**/*.py",
     "tests/golden/**/*",
-    "rcx_pi_rust/examples/**/*",
-    "rcx_pi_rust/mu_programs/**/*",
-    "rcx_pi_rust/mu_worlds/**/*",
-    "rcx_pi_rust/tests/**/*",
-    "rcx_pi_rust/docs/**/*",
 ]
 
 EXTENDED_GLOBS_WITH_FIXTURES = EXTENDED_GLOBS_BASE + [

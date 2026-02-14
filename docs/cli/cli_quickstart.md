@@ -35,7 +35,7 @@ rcx world trace --schema
 ### Program describe (Mu program descriptor)
 
 rcx program describe rcx_core --json
-rcx program describe rcx_pi_rust/mu_programs/rcx_core.mu --json
+rcx program describe mu/mu_programs/rcx_core.mu --json
 
 ### Program run (named RCX-π programs)
 

@@ -6,6 +6,5 @@
 
 # RCX core areas (adjust as you like)
 scripts/ @jabramsja
-rcx_omega/ @jabramsja
 rcx_pi/ @jabramsja
-mu_programs/ @jabramsja
+mu/ @jabramsja

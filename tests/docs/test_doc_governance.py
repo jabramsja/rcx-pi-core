@@ -60,8 +60,8 @@ EXEMPT_PATTERNS = [
     r"/archive_pre_guardrails/",   # Old agent archives
     r"tools/agents/.*_prompt\.md$", # Agent prompt templates (not docs)
     r"\.auto\.md$",                # Auto-generated docs
-    r"^rcx_pi_rust/",              # Rust subproject (separate governance)
-    r"^rcx_omega/",                # Omega subproject
+    r"^rcx_pi_rust/",              # Rust subproject (archived)
+    r"^rcx_omega/",                # Omega subproject (archive-bound, dir still present)
     r"^rcx_python_examples/",      # Examples subproject
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files
