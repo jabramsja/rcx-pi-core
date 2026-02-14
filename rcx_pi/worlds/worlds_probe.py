@@ -166,6 +166,12 @@ def probe_world(world: str, seeds: List[str], max_steps: int = 20) -> Dict[str, 
         return _probe_rcx_triad_router(seeds, max_steps)
 
     # Normal path: delegate to Rust classify CLI via worlds_bridge
+    if classify_with_world is None:
+        raise RuntimeError(
+            f"Cannot probe world {world!r}: Rust bridge unavailable "
+            "(worlds_bridge archived in Round 21D). "
+            "Use a synthetic world (godel_liar, rcx_triad_router) or restore the bridge."
+        )
     code, out = classify_with_world(world, seeds)
 
     if code != 0:

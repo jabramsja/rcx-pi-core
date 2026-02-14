@@ -133,6 +133,13 @@ def main(argv: List[str] | None = None) -> int:
     if not args.world or not args.seed:
         ap.error("world and seed are required unless --schema is used")
 
+    if orbit_with_world_parsed is None:
+        print(
+            "ERROR: Rust bridge unavailable (worlds_bridge archived in Round 21D). "
+            "Cannot run orbit traces without the Rust backend.",
+            file=sys.stderr,
+        )
+        return 1
     code, raw, parsed = orbit_with_world_parsed(
         args.world, args.seed, max_steps=args.max_steps
     )
