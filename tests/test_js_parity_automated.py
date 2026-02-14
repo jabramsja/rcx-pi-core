@@ -15,6 +15,9 @@ import subprocess
 import pytest
 from pathlib import Path
 
+from hypothesis import given, settings, HealthCheck
+from hypothesis import strategies as st
+
 # Root directory of the project
 ROOT = Path(__file__).parent.parent
 
@@ -2770,3 +2773,468 @@ class TestObserverIsomorphism:
                 f"  Python: {py_canon}\n"
                 f"  JS:     {js_canon}"
             )
+
+
+# =============================================================================
+# TestReservedFieldValidationFuzzer (R2b Slice 1 — GAP-1)
+# =============================================================================
+
+
+# Strategies for cross-substrate reserved-field fuzzing.
+# Keys without underscore prefix — guaranteed clean against KERNEL_RESERVED_FIELDS.
+_safe_keys = st.text(
+    alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="_"),
+    min_size=1,
+    max_size=8,
+).filter(lambda k: not k.startswith("_"))
+
+# Mu primitives safe for cross-substrate JSON round-trip (no floats — JS int/float parity issue).
+_mu_primitives = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(min_value=-1000, max_value=1000),
+    st.text(max_size=15),
+)
+
+# Recursive Mu values using only safe keys (no reserved fields).
+_clean_mu = st.recursive(
+    _mu_primitives,
+    lambda children: st.one_of(
+        st.lists(children, max_size=3),
+        st.dictionaries(_safe_keys, children, max_size=3),
+    ),
+    max_leaves=8,
+)
+
+
+@st.composite
+def _mu_with_reserved_field(draw, max_depth=10):
+    """Generate a Mu value with a reserved field injected at random depth."""
+    from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
+
+    reserved = draw(st.sampled_from(sorted(KERNEL_RESERVED_FIELDS)))
+    leaf = draw(_mu_primitives)
+    depth = draw(st.integers(min_value=0, max_value=max_depth))
+
+    # Innermost: dict with the reserved field
+    payload = {reserved: leaf}
+
+    # Wrap in nesting at specified depth
+    for _ in range(depth):
+        wrapper_key = draw(_safe_keys)
+        payload = {wrapper_key: payload}
+
+    return payload, reserved, depth
+
+
+@pytest.mark.slow
+class TestReservedFieldValidationFuzzer:
+    """Property-based cross-substrate reserved-field validation parity.
+
+    R2b Slice 1 (GAP-1): Python fuzzes validate_no_kernel_reserved_fields
+    extensively but has no JS counterpart. This fuzzer generates random Mu
+    values, injects reserved fields at random depths, and verifies Python
+    and JS validators produce identical accept/reject decisions.
+    """
+
+    def _run_js_validation(self, value):
+        """Call JS validate_reserved_fields and return (valid, error_code)."""
+        request = json.dumps({"action": "validate_reserved_fields", "value": value})
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", request],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=30,
+        )
+        for line in result.stdout.split("\n"):
+            if line.startswith("JSON_API_RESPONSE:"):
+                resp = json.loads(line[len("JSON_API_RESPONSE:"):])
+                return resp.get("valid", False), resp.get("error_code", "")
+        raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:200]}")
+
+    @given(value=_clean_mu)
+    @settings(max_examples=200, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_clean_values_accepted_by_both(self, value):
+        """Clean Mu values (no reserved fields) pass validation on both substrates."""
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        # Python
+        py_accepted = True
+        try:
+            validate_no_kernel_reserved_fields(value, "test")
+        except (ValueError, RecursionError):
+            py_accepted = False
+
+        # JS
+        js_valid, _ = self._run_js_validation(value)
+
+        assert py_accepted == js_valid, (
+            f"Parity violation on clean value: "
+            f"Python={'accept' if py_accepted else 'reject'}, "
+            f"JS={'accept' if js_valid else 'reject'} "
+            f"for {json.dumps(value)[:200]}"
+        )
+
+    @given(data=_mu_with_reserved_field())
+    @settings(max_examples=200, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_injected_reserved_field_rejected_by_both(self, data):
+        """Reserved field at random depth is rejected by both substrates with correct error_code."""
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        payload, reserved, depth = data
+
+        # Python must reject
+        py_rejected = False
+        try:
+            validate_no_kernel_reserved_fields(payload, "test")
+        except ValueError:
+            py_rejected = True
+
+        # JS must reject
+        js_valid, js_error_code = self._run_js_validation(payload)
+
+        assert py_rejected, (
+            f"Python MUST reject reserved field '{reserved}' at depth {depth}: "
+            f"{json.dumps(payload)[:200]}"
+        )
+        assert not js_valid, (
+            f"JS MUST reject reserved field '{reserved}' at depth {depth}: "
+            f"{json.dumps(payload)[:200]}"
+        )
+        assert js_error_code == "input.reserved_field", (
+            f"JS error_code should be 'input.reserved_field', "
+            f"got '{js_error_code}' for reserved field '{reserved}' at depth {depth}"
+        )
+
+    @given(data=_mu_with_reserved_field(max_depth=0))
+    @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_top_level_reserved_field_parity(self, data):
+        """Top-level reserved field — both substrates reject with same classification."""
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        payload, reserved, _ = data
+
+        with pytest.raises(ValueError, match="kernel-reserved"):
+            validate_no_kernel_reserved_fields(payload, "test")
+
+        js_valid, js_error_code = self._run_js_validation(payload)
+        assert not js_valid, f"JS must reject top-level '{reserved}'"
+        assert js_error_code == "input.reserved_field"
+
+    @given(
+        reserved=st.sampled_from(sorted(__import__(
+            "rcx_pi.selfhost.step_mu", fromlist=["KERNEL_RESERVED_FIELDS"]
+        ).KERNEL_RESERVED_FIELDS)),
+        inner=_mu_primitives,
+    )
+    @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_reserved_field_in_list_parity(self, reserved, inner):
+        """Reserved field inside a list element — both substrates reject."""
+        from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+
+        payload = [{"safe": 1}, {reserved: inner}]
+
+        py_rejected = False
+        try:
+            validate_no_kernel_reserved_fields(payload, "test")
+        except ValueError:
+            py_rejected = True
+
+        js_valid, js_error_code = self._run_js_validation(payload)
+
+        assert py_rejected, f"Python must reject '{reserved}' inside list"
+        assert not js_valid, f"JS must reject '{reserved}' inside list"
+        assert js_error_code == "input.reserved_field"
+
+
+# =============================================================================
+# R2b Slice 3 (GAP-2): Hemisphere Routing Property Fuzzer — Strategies
+# =============================================================================
+
+# Strategy: generate a valid 8-key engine_result with randomized signal combinations.
+@st.composite
+def _engine_result(draw):
+    """Generate a valid 8-key engine_result dict for hemisphere routing."""
+    value = draw(st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(min_value=-100, max_value=100),
+        st.text(max_size=10),
+        st.lists(_mu_primitives, max_size=2),
+        st.dictionaries(_safe_keys, _mu_primitives, max_size=2),
+    ))
+    return {
+        "value": value,
+        "closure_detected": draw(st.booleans()),
+        "tau_step": draw(st.integers(min_value=0, max_value=10)),
+        "exhaustion_detected": draw(st.booleans()),
+        "operator_frozen": draw(st.one_of(st.none(), st.text(min_size=1, max_size=8))),
+        "frozen_set": draw(st.one_of(st.none(), st.lists(st.text(max_size=5), max_size=3))),
+        "action": draw(st.sampled_from(["none", "freeze", "done", "terminal"])),
+        "stall": draw(st.booleans()),
+    }
+
+
+def _expected_hemisphere(er):
+    """Determine which hemisphere an engine_result should route to (priority order)."""
+    if er["exhaustion_detected"]:
+        return "sink"
+    if er["value"] is None:
+        return "r_null"
+    if er["closure_detected"]:
+        return "r_a"
+    if er["stall"]:
+        return "r_inf"
+    return "lobes"
+
+
+_ENGINE_RESULT_KEYS = [
+    "value", "closure_detected", "tau_step", "exhaustion_detected",
+    "operator_frozen", "frozen_set", "action", "stall",
+]
+
+
+@st.composite
+def _invalid_engine_result(draw):
+    """Generate an invalid engine_result shape (non-dict or missing key)."""
+    kind = draw(st.sampled_from(["non_dict", "missing_key"]))
+    if kind == "non_dict":
+        val = draw(st.one_of(
+            st.none(), st.booleans(),
+            st.integers(min_value=-100, max_value=100),
+            st.text(max_size=10),
+            st.lists(st.integers(min_value=-10, max_value=10), max_size=3),
+        ))
+        return val, kind
+    else:
+        to_remove = draw(st.sampled_from(_ENGINE_RESULT_KEYS))
+        er = {
+            "value": "test",
+            "closure_detected": False,
+            "tau_step": 0,
+            "exhaustion_detected": False,
+            "operator_frozen": None,
+            "frozen_set": None,
+            "action": "none",
+            "stall": False,
+        }
+        del er[to_remove]
+        return er, kind
+
+
+_DEFAULT_HEMISPHERES = {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
+
+
+@pytest.mark.slow
+class TestHemisphereRoutingPropertyFuzzer:
+    """Property-based cross-substrate hemisphere routing parity.
+
+    R2b Slice 3 (GAP-2): Generates random valid engine_result dicts with
+    various signal combinations and verifies Python and JS route identically,
+    populating exactly one hemisphere per the priority order.
+    """
+
+    @given(er=_engine_result())
+    @settings(max_examples=150, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_valid_engine_result_routing_parity(self, er):
+        """Valid engine_result routes identically on both substrates."""
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+
+        hemispheres = dict(_DEFAULT_HEMISPHERES)
+        expected = _expected_hemisphere(er)
+
+        py_result = run_hemisphere_routing(er, dict(hemispheres))
+
+        js_response = _module_run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": er,
+            "hemispheres": dict(hemispheres),
+        })
+        assert js_response["success"], (
+            f"JS run_hemisphere_routing failed: {js_response.get('error')}"
+        )
+
+        # Cross-substrate equality
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"Hemisphere routing parity mismatch:\n"
+            f"  Python: {json.dumps(py_result, sort_keys=True)[:300]}\n"
+            f"  JS:     {json.dumps(js_response['result'], sort_keys=True)[:300]}"
+        )
+
+        # Exactly one hemisphere populated (changed from null)
+        populated = [k for k in py_result if py_result[k] is not None]
+        assert len(populated) == 1, (
+            f"Expected exactly 1 populated hemisphere, got {len(populated)}: {populated}"
+        )
+
+        # Correct hemisphere per priority: exhaustion > null > closure > stall > default
+        assert populated[0] == expected, (
+            f"Expected route to '{expected}', got '{populated[0]}' "
+            f"for signals: exhaustion={er['exhaustion_detected']}, "
+            f"value={'null' if er['value'] is None else type(er['value']).__name__}, "
+            f"closure={er['closure_detected']}, stall={er['stall']}"
+        )
+
+    @given(data=_invalid_engine_result())
+    @settings(max_examples=100, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_invalid_engine_result_shape_rejection_parity(self, data):
+        """Invalid engine_result shapes rejected by both substrates with typed error_code."""
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+
+        er, kind = data
+        hemispheres = dict(_DEFAULT_HEMISPHERES)
+
+        # Python must reject
+        py_rejected = False
+        try:
+            run_hemisphere_routing(er, dict(hemispheres))
+        except (ValueError, RuntimeError):
+            py_rejected = True
+
+        # JS must reject
+        js_response = _module_run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": er,
+            "hemispheres": dict(hemispheres),
+        })
+
+        assert py_rejected, (
+            f"Python should reject invalid engine_result ({kind}): "
+            f"{json.dumps(er)[:200] if isinstance(er, (dict, list)) else repr(er)}"
+        )
+        assert not js_response["success"], (
+            f"JS should reject invalid engine_result ({kind}): "
+            f"{json.dumps(er)[:200] if isinstance(er, (dict, list)) else repr(er)}"
+        )
+
+        # JS must have typed error_code
+        expected_codes = {"input.invalid_type", "input.shape_mismatch"}
+        assert js_response.get("error_code") in expected_codes, (
+            f"JS error_code should be in {expected_codes}, "
+            f"got '{js_response.get('error_code')}' for {kind}"
+        )
+
+
+# =============================================================================
+# R2b Slice 2 (GAP-3): Cross-Substrate Trace Hash Parity Fuzzer
+# =============================================================================
+
+# Strategy: generate a single trace entry with step, state, and optional fields.
+@st.composite
+def _trace_entry(draw, step_num):
+    """Generate a trace entry: {step, state, optional projection/stall}."""
+    state_value = draw(st.one_of(
+        _mu_primitives,
+        st.dictionaries(_safe_keys, _mu_primitives, min_size=1, max_size=3),
+    ))
+    entry = {"step": step_num, "state": state_value}
+    if draw(st.booleans()):
+        entry["projection"] = draw(st.text(
+            alphabet=st.characters(whitelist_categories=("L",)),
+            min_size=1, max_size=10,
+        ))
+    if draw(st.booleans()):
+        entry["stall"] = draw(st.booleans())
+    return entry
+
+
+@st.composite
+def _linked_list_trace(draw, min_length=1, max_length=50):
+    """Generate a Mu linked-list trace of random length."""
+    length = draw(st.integers(min_value=min_length, max_value=max_length))
+    trace = None
+    for i in range(length - 1, -1, -1):
+        entry = draw(_trace_entry(i))
+        trace = {"head": entry, "tail": trace}
+    return trace, length
+
+
+@pytest.mark.slow
+class TestTraceHashParityFuzzer:
+    """Property-based cross-substrate trace hash parity.
+
+    R2b Slice 2 (GAP-3): Python has format fuzzers for hash_trace_for_recurrence
+    but no cross-substrate property tests. This fuzzer generates random valid
+    linked-list traces and verifies Python and JS produce identical hashed output.
+    """
+
+    @given(data=_linked_list_trace(min_length=1, max_length=50))
+    @settings(max_examples=120, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_valid_trace_hash_parity(self, data):
+        """Valid linked-list trace hashes identically on both substrates."""
+        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+
+        trace, length = data
+
+        py_result = hash_trace_for_recurrence(trace, max_entries=10000)
+        js_response = _module_run_js_json_api({
+            "action": "hash_trace", "trace": trace, "maxEntries": 10000,
+        })
+        assert js_response["success"], (
+            f"JS hash_trace failed on valid {length}-entry trace: "
+            f"{js_response.get('error')}"
+        )
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"hash_trace parity mismatch on {length}-entry trace:\n"
+            f"  Python: {json.dumps(py_result, sort_keys=True)[:300]}\n"
+            f"  JS:     {json.dumps(js_response['result'], sort_keys=True)[:300]}"
+        )
+
+    @given(data=_linked_list_trace(min_length=4, max_length=30))
+    @settings(max_examples=80, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_trace_hash_overcap_parity(self, data):
+        """Both substrates reject traces exceeding maxEntries with correct error_code."""
+        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+
+        trace, length = data
+        max_entries = length - 1  # Guaranteed to trigger overcap
+
+        # Python must raise ValueError
+        py_rejected = False
+        try:
+            hash_trace_for_recurrence(trace, max_entries=max_entries)
+        except ValueError as exc:
+            py_rejected = True
+            assert "exceeds" in str(exc).lower(), (
+                f"Python overcap error message unexpected: {exc}"
+            )
+
+        # JS must fail with trace.overcap
+        js_response = _module_run_js_json_api({
+            "action": "hash_trace", "trace": trace, "maxEntries": max_entries,
+        })
+
+        assert py_rejected, (
+            f"Python should reject {length}-entry trace with maxEntries={max_entries}"
+        )
+        assert not js_response["success"], (
+            f"JS should reject {length}-entry trace with maxEntries={max_entries}"
+        )
+        assert js_response.get("error_code") == "trace.overcap", (
+            f"JS error_code should be 'trace.overcap', "
+            f"got '{js_response.get('error_code')}'"
+        )
+
+    @given(data=_linked_list_trace(min_length=1, max_length=20))
+    @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_trace_hash_hardcap_clamp_parity(self, data):
+        """Oversized maxEntries is clamped — short traces not falsely rejected."""
+        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+
+        trace, length = data
+        oversized = 200000  # > 100000 hard cap — both substrates should clamp
+
+        py_result = hash_trace_for_recurrence(trace, max_entries=oversized)
+        js_response = _module_run_js_json_api({
+            "action": "hash_trace", "trace": trace, "maxEntries": oversized,
+        })
+        assert js_response["success"], (
+            f"JS should not reject {length}-entry trace with clamped maxEntries: "
+            f"{js_response.get('error')}"
+        )
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"hash_trace hardcap clamp parity mismatch on {length}-entry trace:\n"
+            f"  Python: {json.dumps(py_result, sort_keys=True)[:300]}\n"
+            f"  JS:     {json.dumps(js_response['result'], sort_keys=True)[:300]}"
+        )
