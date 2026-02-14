@@ -24,6 +24,7 @@ from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS, run_engine_pipeline
+from tests.conftest import run_until_stable
 
 
 # JSON null -> Python None alias
@@ -65,18 +66,6 @@ def combined_projections(engine_projections, recurrence_projections, exhaustion_
     Algorithm patterns (_detect_closure, _detect_exhaustion) come next.
     """
     return engine_projections + recurrence_projections + exhaustion_projections
-
-
-def run_until_stable(projections: list, value: dict, max_steps: int = 200) -> dict:
-    """Run projections until stall or max_steps."""
-    reset_step_budget()
-    current = value
-    for i in range(max_steps):
-        result = step(projections, current)
-        if result == current:
-            return result
-        current = result
-    return current
 
 
 def single_step(projections: list, value: dict) -> dict:

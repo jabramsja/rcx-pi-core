@@ -20,6 +20,7 @@ from rcx_pi.selfhost.eval_seed import step, match, substitute, NO_MATCH
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
+from tests.conftest import run_until_stable
 
 
 # =============================================================================
@@ -49,18 +50,6 @@ def make_linked_list(items: list) -> dict | None:
     for item in reversed(items):
         result = {"head": item, "tail": result}
     return result
-
-
-def run_until_stable(projections: list, value: dict, max_steps: int = 500) -> dict:
-    """Run projections until stall (no change) or max_steps."""
-    reset_step_budget()
-    current = value
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if mu_equal(result, current):
-            return result
-        current = result
-    return current
 
 
 # =============================================================================
@@ -94,7 +83,7 @@ class TestLargeFrozenListStress:
             }
         }
 
-        result = run_until_stable(exhaustion_projections, input_data)
+        result = run_until_stable(exhaustion_projections, input_data, max_steps=500)
 
         # Should detect exhaustion and freeze new_op
         assert result.get("exhaustion_detected") is True
@@ -189,7 +178,7 @@ class TestMultiStateCycleDetection:
             }
         }
 
-        result = run_until_stable(recurrence_projections, input_data)
+        result = run_until_stable(recurrence_projections, input_data, max_steps=500)
 
         assert result.get("closure_detected") is True
         assert result.get("tau_step") == 3
@@ -213,7 +202,7 @@ class TestMultiStateCycleDetection:
             }
         }
 
-        result = run_until_stable(recurrence_projections, input_data)
+        result = run_until_stable(recurrence_projections, input_data, max_steps=500)
 
         assert result.get("closure_detected") is True
         assert result.get("tau_step") == 4
@@ -235,7 +224,7 @@ class TestMultiStateCycleDetection:
             }
         }
 
-        result = run_until_stable(recurrence_projections, input_data)
+        result = run_until_stable(recurrence_projections, input_data, max_steps=500)
 
         assert result.get("closure_detected") is True
         assert result.get("tau_step") == 5
@@ -259,7 +248,7 @@ class TestMultiStateCycleDetection:
             }
         }
 
-        result = run_until_stable(recurrence_projections, input_data)
+        result = run_until_stable(recurrence_projections, input_data, max_steps=500)
 
         assert result.get("closure_detected") is True
         assert result.get("tau_step") == cycle_len

@@ -26,6 +26,7 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
+from tests.conftest import run_until_stable
 
 pytestmark = pytest.mark.slow
 
@@ -70,18 +71,6 @@ def reset_caches():
     clear_combined_kernel_cache()
     yield
     clear_combined_kernel_cache()
-
-
-def run_until_stable_bootstrap(projections: list, value: dict, max_steps: int = 100) -> dict:
-    """Run projections using BOOTSTRAP layer (eval_seed.step) until stall."""
-    reset_step_budget()
-    current = value
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if result == current:
-            return result
-        current = result
-    return current
 
 
 def run_until_stable_meta_circular(projections: list, value: dict, max_steps: int = 100) -> dict:
@@ -212,7 +201,7 @@ class TestRecurrenceMetaCircular:
             }
         }
 
-        bootstrap_result = run_until_stable_bootstrap(recurrence_projections, input_data)
+        bootstrap_result = run_until_stable(recurrence_projections, input_data)
         meta_result = run_until_stable_meta_circular(recurrence_projections, input_data)
 
         assert mu_equal(bootstrap_result, meta_result), (
@@ -239,7 +228,7 @@ class TestRecurrenceMetaCircular:
             }
         }
 
-        bootstrap_result = run_until_stable_bootstrap(recurrence_projections, input_data)
+        bootstrap_result = run_until_stable(recurrence_projections, input_data)
         meta_result = run_until_stable_meta_circular(recurrence_projections, input_data)
 
         assert mu_equal(bootstrap_result, meta_result), (
@@ -341,7 +330,7 @@ class TestExhaustionMetaCircular:
             }
         }
 
-        bootstrap_result = run_until_stable_bootstrap(exhaustion_projections, input_data)
+        bootstrap_result = run_until_stable(exhaustion_projections, input_data)
         meta_result = run_until_stable_meta_circular(exhaustion_projections, input_data)
 
         assert mu_equal(bootstrap_result, meta_result), (
@@ -367,7 +356,7 @@ class TestExhaustionMetaCircular:
             }
         }
 
-        bootstrap_result = run_until_stable_bootstrap(exhaustion_projections, input_data)
+        bootstrap_result = run_until_stable(exhaustion_projections, input_data)
         meta_result = run_until_stable_meta_circular(exhaustion_projections, input_data)
 
         assert mu_equal(bootstrap_result, meta_result), (

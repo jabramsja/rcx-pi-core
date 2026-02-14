@@ -18,6 +18,7 @@ from rcx_pi.selfhost.eval_seed import step, match, substitute
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.step_mu import run_mu_structural
+from tests.conftest import run_until_stable
 
 
 # =============================================================================
@@ -52,18 +53,6 @@ def make_linked_list(items: list) -> dict | None:
     for item in reversed(items):
         result = {"head": item, "tail": result}
     return result
-
-
-def run_until_stable(projections: list, value: dict, max_steps: int = 500) -> dict:
-    """Run projections until stall or max_steps."""
-    reset_step_budget()
-    current = value
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if result == current:
-            return result
-        current = result
-    return current
 
 
 # =============================================================================

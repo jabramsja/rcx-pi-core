@@ -14,9 +14,9 @@ import pytest
 from pathlib import Path
 
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
-from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
+from tests.conftest import run_until_stable
 
 pytestmark = [pytest.mark.slow]
 
@@ -38,17 +38,6 @@ def load_parity_vectors():
     with open(fixtures_dir / "recurrence_vectors.json") as f:
         data = json.load(f)
     return data["vectors"]
-
-
-def run_until_stable(projections, initial, max_steps=100):
-    """Run projections until stall (no change) or max steps."""
-    current = initial
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if mu_equal(result, current):
-            return current
-        current = result
-    return current
 
 
 class TestRecurrenceProjections:
