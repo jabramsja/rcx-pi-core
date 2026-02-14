@@ -120,12 +120,12 @@ TIME_SECURITY=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS
 echo "== 5) Anti-cheat scans =="
-echo "-- no private attr access in tests/ or prototypes/"
+echo "-- no private attr access in tests/ or archive/prototypes/"
 # Exclude:
 #   - self._method (private methods in test classes - Python convention)
 #   - Lines testing that contraband catches _getframe patterns (grounding tests)
 #   - Lines marked with # ANTICHEAT_OK
-! grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ | \
+! grep -RInE '\._[a-zA-Z0-9]+' tests/ archive/prototypes/ | \
     grep -v 'self\._' | \
     grep -v '_getframe.*CONTRABAND_OK' | \
     grep -v '# ANTICHEAT_OK' | \
@@ -133,7 +133,7 @@ echo "-- no private attr access in tests/ or prototypes/"
     grep -v 'test_contraband_detection.py.*"""' | \
     grep -v '__pycache__' || { echo "Found private attr access"; exit 1; }
 
-echo "-- no underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)"
+echo "-- no underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)"
 python3 tools/check_underscore_imports.py || exit 1
 
 echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
@@ -144,7 +144,7 @@ echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
 # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
 # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
 # Note: mu/host/python is a symlink to rcx_pi/selfhost - exclude it to avoid scanning Python files
-! grep -RInE --include='*.json' '"_[a-zA-Z]+":' prototypes/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' | grep -v 'bootstrap_structural.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+! grep -RInE --include='*.json' '"_[a-zA-Z]+":' archive/prototypes/ mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' | grep -v 'bootstrap_structural.v1.json' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 TIME_ANTICHEAT=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS

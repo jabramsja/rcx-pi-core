@@ -14,7 +14,7 @@ echo "Scanning $RCX_DIR for contraband..."
 echo ""
 
 # Exclude experimental and CLI directories
-EXCLUDE="--exclude-dir=worlds --exclude-dir=prototypes --exclude-dir=core"
+EXCLUDE="--exclude-dir=worlds --exclude-dir=prototypes --exclude-dir=core --exclude-dir=archive"
 # Exclude CLI files (they need subprocess/dynamic imports for error handling)
 EXCLUDE_FILES="--exclude=*_cli.py --exclude=cli_*.py --exclude=programs.py"
 
@@ -436,7 +436,7 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "No contraband syntax found in core RCX code."
     echo ""
     echo "Excluded from scan:"
-    echo "  - worlds/, prototypes/, core/ directories"
+    echo "  - worlds/, archive/, core/ directories"
     echo "  - *_cli.py files (CLI wrappers)"
     echo ""
     echo "ALLOWED patterns (not contraband):"

@@ -133,6 +133,11 @@ FORBIDDEN_PATTERNS = [
         "sandbox_runs/ is ephemeral runtime output, not a fixture source (Round 22H)",
         "Use tests/fixtures/ for test data, sandbox_runs/ for mutation output only",
     ),
+    ForbiddenPattern(
+        r'(?<![/a-z])prototypes/',
+        "prototypes/ archived to archive/prototypes/ (Round 22I)",
+        "Use archive/prototypes/ or remove reference",
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 

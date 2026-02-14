@@ -37,8 +37,8 @@ if [ "$JSON_OUTPUT" = true ]; then
     BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
     AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
     AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
-    PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
-    PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
+    PROTO_BUILTIN=$(count_markers "host_builtin" "archive/prototypes/")
+    PROTO_ITERATION=$(count_markers "host_iteration" "archive/prototypes/")
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
 
@@ -122,12 +122,12 @@ else
     fi
     echo ""
 
-    echo "Prototype Debt (prototypes/) - Acceptable during development"
+    echo "Prototype Debt (archive/prototypes/) - Acceptable during development"
     echo "----------------------------------------------"
 
-    PROTO_BUILTIN=$(count_markers "host_builtin" "prototypes/")
-    PROTO_ITERATION=$(count_markers "host_iteration" "prototypes/")
-    PROTO_RECURSION=$(count_markers "host_recursion" "prototypes/")
+    PROTO_BUILTIN=$(count_markers "host_builtin" "archive/prototypes/")
+    PROTO_ITERATION=$(count_markers "host_iteration" "archive/prototypes/")
+    PROTO_RECURSION=$(count_markers "host_recursion" "archive/prototypes/")
 
     printf "  host_builtin:     %3d\n" "$PROTO_BUILTIN"
     printf "  host_iteration:   %3d\n" "$PROTO_ITERATION"

@@ -49,9 +49,9 @@ run_python() {
   echo
 
   echo "[PY 6/11] Anti-cheat scans (test integrity)"
-  # No private attr access in tests/ or prototypes/
-  echo "-- no private attr access in tests/ or prototypes/"
-  if grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ 2>/dev/null | \
+  # No private attr access in tests/ or archive/prototypes/
+  echo "-- no private attr access in tests/ or archive/prototypes/"
+  if grep -RInE '\._[a-zA-Z0-9]+' tests/ archive/prototypes/ 2>/dev/null | \
       grep -v 'self\._' | \
       grep -v '_getframe.*CONTRABAND_OK' | \
       grep -v '# ANTICHEAT_OK' | \
@@ -63,8 +63,8 @@ run_python() {
   fi
   echo "OK"
 
-  # No underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)
-  echo "-- no underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)"
+  # No underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)
+  echo "-- no underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)"
   python3 tools/check_underscore_imports.py || exit 1
   echo "OK"
 
@@ -74,7 +74,7 @@ run_python() {
   # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
   # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
   # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
-  if grep -RInE --include='*.json' '"_[a-zA-Z]+":' prototypes/ mu/ 2>/dev/null | \
+  if grep -RInE --include='*.json' '"_[a-zA-Z]+":' archive/prototypes/ mu/ 2>/dev/null | \
       grep -v '"_marker":' | \
       grep -v '"_type":' | \
       grep -v 'kernel.v1.json' | \
