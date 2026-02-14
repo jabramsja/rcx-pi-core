@@ -46,6 +46,7 @@ DIR_PRIORITY = {
 DOC_HEADER_TEMPLATE = """<!--
 DOC_STATUS
 TYPE: REFERENCE
+LAST_VERIFIED: 2026-01-01
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -65,8 +66,8 @@ def extract_existing_header(readme_path: Path) -> str:
     if not readme_path.exists():
         return DOC_HEADER_TEMPLATE
     content = readme_path.read_text(encoding="utf-8")
-    # Match the full <!-- DOC_STATUS ... --> block
-    m = re.match(r"(<!--\s*\nDOC_STATUS\b.*?-->)", content, re.DOTALL)
+    # Match the full <!-- DOC_STATUS ... --> block (search handles BOM/leading whitespace)
+    m = re.search(r"(<!--\s*\nDOC_STATUS\b.*?-->)", content, re.DOTALL)
     if m:
         return m.group(1)
     return DOC_HEADER_TEMPLATE
