@@ -60,19 +60,9 @@ def main() -> None:
             or ("schema" in p and p.startswith("docs/")),
         ),
         Bucket(
-            "Rust Core",
-            "Rust core that emits/consumes orbit JSON and related artifacts.",
-            lambda p: p.startswith("rcx_pi_rust/src/"),
-        ),
-        Bucket(
             "Python Core (rcx_pi)",
             "Python core evaluator/program registry/worlds.",
             lambda p: p.startswith("rcx_pi/"),
-        ),
-        Bucket(
-            "Omega (rcx_omega)",
-            "Omega/trace/analyze contracts and CLIs.",
-            lambda p: p.startswith("rcx_omega/"),
         ),
         Bucket(
             "Scripts",

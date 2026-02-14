@@ -117,8 +117,6 @@ except ImportError:
 
 # Skip tests that require optional modules not present in this repo
 collect_ignore = [
-    "test_semantic_goldens.py",     # requires rcx_omega
-    "test_semantic_invariants.py",  # requires rcx_omega
     "test_normalize_graphviz_svg.py",  # requires scripts module
     "archive",  # archived tests (e.g., bytecode VM - superseded by kernel approach)
 ]

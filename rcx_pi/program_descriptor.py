@@ -29,7 +29,6 @@ def _resolve_mu_program(program: str, cwd_base: Path) -> Path:
       1) cwd/<program> (relative) or <program> (absolute)
       2) repo_root/<program> (if user passed mu/mu_programs/rcx_core.mu)
       3) repo_root/mu/mu_programs/<name>.mu (active fixture home)
-      4) repo_root/rcx_pi_rust/mu_programs/<name>.mu (LEGACY_GUARDED fallback)
     """
     repo_root = _module_repo_root()
     p = Path(program)
@@ -48,12 +47,6 @@ def _resolve_mu_program(program: str, cwd_base: Path) -> Path:
 
     # 3) active fixture home (canonical for tools/tests)
     candidates.append((repo_root / "mu" / "mu_programs" / f"{name}.mu").resolve())
-
-    # 4) LEGACY_GUARDED: rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
-    #    Retained as last-resort fallback until archive move completes.
-    candidates.append(
-        (repo_root / "rcx_pi_rust" / "mu_programs" / f"{name}.mu").resolve()
-    )
 
     for c in candidates:
         if c.exists() and c.is_file():

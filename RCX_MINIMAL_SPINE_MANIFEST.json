@@ -1,0 +1,14 @@
+{
+  "buckets": {
+    "CI / Gates": [],
+    "Python Core (rcx_pi)": [],
+    "Schemas": [],
+    "Scripts": [],
+    "Tests": [],
+    "Top-level": []
+  },
+  "file_count": 0,
+  "leftovers": [],
+  "pack_file": "rcx_pack_minimal.txt",
+  "repo_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX"
+}

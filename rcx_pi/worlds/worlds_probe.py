@@ -3,7 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Tuple
 
-from .worlds_bridge import classify_with_world
+try:
+    from .archive.worlds_bridge import classify_with_world
+except ImportError:
+    # worlds_bridge archived (Round 21D) — Rust bridge unavailable.
+    classify_with_world = None  # type: ignore[assignment]
 from .worlds_composite import probe_triad_router
 
 

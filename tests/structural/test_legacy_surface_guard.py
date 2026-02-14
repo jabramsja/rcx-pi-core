@@ -23,10 +23,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 #
 # Round 21C: Cleared GRANDFATHERED_RCX_PI_RUST_PATHS — all 4 test files
 # repointed to mu/mu_programs/.
-GRANDFATHERED_RCX_OMEGA_IMPORTS = frozenset({
-    "tests/test_semantic_goldens.py",
-    "tests/test_semantic_invariants.py",
-})
+# Round 21D: Cleared GRANDFATHERED_RCX_OMEGA_IMPORTS — both test files
+# archived to tests/archive/legacy/.
+GRANDFATHERED_RCX_OMEGA_IMPORTS: frozenset[str] = frozenset()
 
 # No test files should reference rcx_pi_rust after Round 21C repointing.
 GRANDFATHERED_RCX_PI_RUST_PATHS: frozenset[str] = frozenset()

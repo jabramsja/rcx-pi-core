@@ -13,7 +13,6 @@ from typing import Iterable, Optional
 DEFAULT_ROOTS = [
     ".rcx_library/CANON",
     ".rcx_library/CANON_EXEC",
-    "rcx_omega",
     "rcx_pi",
     "scripts",
     "tests",
