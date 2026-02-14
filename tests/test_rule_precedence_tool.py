@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=False, text=True, capture_output=True)
@@ -41,10 +43,13 @@ def test_rule_precedence_top(tmp_path: Path):
     assert obj["rule_count_detected"] == 2
 
 
+@pytest.mark.skipif(
+    not Path("rcx_pi_rust/mu_programs/rcx_core.mu").exists(),
+    reason="rcx_pi_rust archived (LegacySurfaceDecisionRecord.v0.md)"
+)
 def test_rule_precedence_detects_real_world():
     # Ensure detector matches RCX-π real .mu syntax (route/rewrite lines like "[x] -> ra").
     world = Path("rcx_pi_rust/mu_programs/rcx_core.mu")
-    assert world.is_file()
     p = _run(["bash", "scripts/rule_precedence.sh", str(world), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
