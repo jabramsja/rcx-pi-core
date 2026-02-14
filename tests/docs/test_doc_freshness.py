@@ -118,6 +118,11 @@ FORBIDDEN_PATTERNS = [
         "normalized_prototype/ archived to archive/normalized_prototype/ (Round 22E)",
         "Use archive/normalized_prototype/ or remove reference",
     ),
+    ForbiddenPattern(
+        r'(?<![/a-z])corpus/Universalrecursion',
+        "corpus/ archived to archive/corpus/ (Round 22F)",
+        "Use archive/corpus/ or remove reference",
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 
