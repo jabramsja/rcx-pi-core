@@ -1809,6 +1809,72 @@ class TestEngineLoopPathParity:
 
 
 # =============================================================================
+# TestBoundaryResultValidationParity — P1 critical parity hardening (Round 17D)
+# =============================================================================
+
+
+class TestBoundaryResultValidationParity:
+    """Regression locks for P1: JS boundary result validation in runEnginePipeline.
+
+    Python validates boundary operation results via validate_no_kernel_reserved_fields()
+    before re-injection into engine state (step_mu.py). JS must do the same
+    (eval_step.js:runEnginePipeline). These tests lock this parity.
+    """
+
+    def test_js_boundary_result_validation_source_lock(self):
+        """Source-level lock: JS runEnginePipeline contains boundary result validation."""
+        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
+        source = js_path.read_text()
+
+        # The validation call must exist in the JS source
+        assert "validateNoKernelReservedFields(result," in source, (
+            "REGRESSION: JS runEnginePipeline is missing boundary result validation. "
+            "This was added in Round 17D (P1 parity hardening). "
+            "Python validates at step_mu.py:validate_no_kernel_reserved_fields(). "
+            "JS must call validateNoKernelReservedFields(result, ...) before "
+            "context[injectKey] = result in runEnginePipeline()."
+        )
+
+        # Specifically check for the boundary_result context string
+        assert "boundary_result(" in source, (
+            "REGRESSION: JS boundary result validation must use 'boundary_result(operation)' "
+            "context string for parity with Python."
+        )
+
+    def test_js_boundary_result_validation_contract_lock(self):
+        """Contract lock: validation call is between result computation and injection."""
+        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
+        lines = js_path.read_text().splitlines(keepends=True)
+
+        # Find the validation line and the injection line within runEnginePipeline
+        validation_line = None
+        injection_line = None
+        in_engine_pipeline = False
+        for i, line in enumerate(lines, 1):
+            if 'function runEnginePipeline(' in line:
+                in_engine_pipeline = True
+            if in_engine_pipeline:
+                if 'validateNoKernelReservedFields(result,' in line:
+                    validation_line = i
+                if 'context[injectKey] = result' in line:
+                    injection_line = i
+                    break  # Found both — stop
+
+        assert validation_line is not None, (
+            "REGRESSION: validateNoKernelReservedFields(result, ...) not found "
+            "in runEnginePipeline(). See Round 17D P1 fix."
+        )
+        assert injection_line is not None, (
+            "REGRESSION: context[injectKey] = result not found in runEnginePipeline()."
+        )
+        assert validation_line < injection_line, (
+            f"REGRESSION: boundary result validation (line {validation_line}) must occur "
+            f"BEFORE injection (line {injection_line}). "
+            f"Validates boundary results cannot smuggle kernel-reserved fields."
+        )
+
+
+# =============================================================================
 # TestFalsyDefaultParity — Phase 2 (P4) falsy-default divergence
 # =============================================================================
 
