@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-# Ensure deterministic dict ordering for ALL subprocesses
-export PYTHONHASHSEED=0
-
-echo "== RCX: goldens UPDATE (explicit) =="
-RCX_UPDATE_GOLDENS=1 RCX_ACK_GOLDEN_UPDATE=YES \
-  python3 -m pytest -q tests/test_semantic_goldens.py
+# DEPRECATED (Round 19C, 2026-02-14)
+# Merged into scripts/goldens_check.sh --update
+# This wrapper remains for backward compatibility.
+exec "$(dirname "$0")/goldens_check.sh" --update

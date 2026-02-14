@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (Round 18 audit, 2026-02-14)
+# Status: No callers. Depends on rcx_pi_rust which is architecturally incompatible with L3.
+# Replacement: None — rcx_pi_rust lifecycle decision pending.
+# Owner: manual developer utility — safe to archive or delete.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 

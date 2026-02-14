@@ -160,6 +160,30 @@ def _print_promote_report(spec_name: str, max_steps: int) -> None:
     print()
 
 
+def _print_ranked_worlds_dashboard(spec_name: str, worlds: List[str]) -> None:
+    """Print a ranking dashboard for candidate worlds against a spec."""
+    if spec_name not in SPEC_PRESETS:
+        print(f"Unknown spec preset {spec_name!r}. Available: {sorted(SPEC_PRESETS.keys())}")
+        return
+
+    spec = SPEC_PRESETS[spec_name]
+    scores = rank_worlds(worlds, spec)
+
+    print(f"=== Ranked Worlds Dashboard (spec='{spec_name}') ===\n")
+    print(f"  {'Rank':<6}{'World':<24}{'Accuracy':<12}{'Match':<8}{'Miss':<8}{'Total':<8}")
+    print(f"  {'-'*6}{'-'*24}{'-'*12}{'-'*8}{'-'*8}{'-'*8}")
+
+    for i, s in enumerate(scores, 1):
+        print(
+            f"  {i:<6}{s.world:<24}{s.accuracy:>8.1%}    "
+            f"{s.matches:<8}{s.mismatches:<8}{s.total:<8}"
+        )
+
+    if scores:
+        print(f"\n  Best: {scores[0].world} ({scores[0].accuracy:.1%})")
+    print()
+
+
 def _print_indented_block(
     text: str, indent: str = "    ", max_blank_run: int = 1
 ) -> None:
@@ -246,6 +270,10 @@ def main() -> None:
 
     # Mode 1: spec dashboard over explicit worlds (with optional probing)
     if args.spec and args.worlds:
+        if args.spec not in SPEC_PRESETS:
+            raise SystemExit(
+                f"Unknown spec preset {args.spec!r}. Available: {sorted(SPEC_PRESETS.keys())}"
+            )
         _print_ranked_worlds_dashboard(args.spec, args.worlds)
 
         if args.seeds:

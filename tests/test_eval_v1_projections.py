@@ -47,18 +47,6 @@ def single_step(projections: list, value: dict) -> dict:
     return step(projections, value)
 
 
-def run_until_stable(projections: list, value: dict, max_steps: int = 100) -> dict:
-    """Run until stall or max_steps."""
-    reset_step_budget()
-    current = value
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if result == current:
-            return result
-        current = result
-    return current
-
-
 # =============================================================================
 # Projection ID Tests
 # =============================================================================

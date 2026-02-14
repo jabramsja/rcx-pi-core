@@ -27,6 +27,7 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.mu_type import is_mu, mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
+from tests.conftest import run_until_stable as _run_until_stable_base
 
 
 # =============================================================================
@@ -144,16 +145,9 @@ def eval_projections() -> list:
     return seed["projections"]
 
 
-def run_until_stable(projections: list, value, max_steps: int = 100):
-    """Run projections until stall or max_steps."""
-    reset_step_budget()
-    current = value
-    for i in range(max_steps):
-        result = step(projections, current)
-        if result == current:
-            return result, i
-        current = result
-    return current, max_steps
+def run_until_stable(projections, value, max_steps=100):
+    """Thin wrapper: delegates to conftest run_until_stable, returns (result, steps)."""
+    return _run_until_stable_base(projections, value, max_steps=max_steps, return_steps=True)
 
 
 # =============================================================================

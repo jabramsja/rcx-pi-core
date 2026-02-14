@@ -15,10 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from rcx_pi.selfhost.eval_seed import step
-from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from tests.conftest import run_until_stable
 
 
 # JSON null -> Python None alias for readability
@@ -44,18 +43,6 @@ def engine_vectors() -> list:
     with open(vectors_path) as f:
         data = json.load(f)
     return data["vectors"]
-
-
-def run_until_stable(projections: list, value: dict, max_steps: int = 100) -> dict:
-    """Run projections until stall (no change) or max_steps."""
-    reset_step_budget()
-    current = value
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if mu_equal(result, current):
-            return result
-        current = result
-    return current
 
 
 # =============================================================================

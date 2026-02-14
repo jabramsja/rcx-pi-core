@@ -432,3 +432,9 @@ Current Exhaustion Layer: META_CIRCULAR
 - Performance-first optimizations
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
 - Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
+
+**Legacy Surface Tracker (Round 19D, 2026-02-14):**
+Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
+- `rcx_pi_rust/` — ARCHIVE (incompatible with L3; owner: founder)
+- `rcx_omega/` — ARCHIVE (detached from selfhost; owner: founder)
+- `worlds_json/` — MAINTAIN as test fixtures; `rcx_core_mut4.json` deprecated (byte-identical to mut3)

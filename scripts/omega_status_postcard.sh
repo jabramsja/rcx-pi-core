@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (Round 18 audit, 2026-02-14)
+# Status: No callers. rcx_omega is architecturally detached from selfhost (L3).
+# Replacement: None — rcx_omega lifecycle decision pending (archive vs update).
+# Owner: manual developer utility — safe to archive or delete.
 set -euo pipefail
 
 TAG="${TAG:-rcx-omega-stable-baseline-20260103}"

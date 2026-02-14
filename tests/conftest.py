@@ -4,7 +4,7 @@ Pytest configuration for RCX tests.
 Provides:
 - Projection coverage tracking (enable with RCX_PROJECTION_COVERAGE=1)
 - Skips tests that require optional modules (rcx_omega, scripts)
-- Shared test utilities (run_until_done for kernel integration)
+- Shared test utilities (run_until_done, run_until_stable)
 - Hypothesis configuration for deterministic fuzzing
 """
 
@@ -337,3 +337,31 @@ def run_until_done(projections, initial, max_steps: int = 100):
             return result, trace, True
 
     return current, trace, False
+
+
+def run_until_stable(projections, initial, max_steps=100, return_steps=False):
+    """Run projections until structural stall (mu_equal) or max_steps.
+
+    Uses mu_equal() for stall detection — NOT Python ==.
+    Consolidated from 11 duplicate implementations (Round 18 finding P1 #1).
+
+    Args:
+        projections: List of Mu projections
+        initial: Initial Mu value to evaluate
+        max_steps: Maximum steps before timeout (default 100)
+        return_steps: If True, return (result, steps_taken) tuple
+
+    Returns:
+        Final result, or (result, steps_taken) if return_steps=True
+    """
+    from rcx_pi.selfhost.eval_seed import step
+    from rcx_pi.selfhost.mu_type import mu_equal
+
+    reset_step_budget()
+    current = initial
+    for i in range(max_steps):
+        result = step(projections, current)
+        if mu_equal(result, current):
+            return (result, i) if return_steps else result
+        current = result
+    return (current, max_steps) if return_steps else current

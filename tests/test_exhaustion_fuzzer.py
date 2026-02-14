@@ -18,6 +18,7 @@ from hypothesis import given, settings, strategies as st, HealthCheck
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from tests.conftest import run_until_stable
 
 
 # =============================================================================
@@ -30,18 +31,6 @@ def exhaust_projections() -> list:
     """Load exhaustion projections from seed file (module-scoped for Hypothesis)."""
     seed = load_verified_seed(get_seed_path("exhaustion.v1.json"))
     return seed["projections"]
-
-
-def run_until_stable(projections: list, value: dict, max_steps: int = 200) -> dict:
-    """Run projections until stall (no change) or max_steps."""
-    reset_step_budget()
-    current = value
-    for _ in range(max_steps):
-        result = step(projections, current)
-        if result == current:
-            return result
-        current = result
-    return current
 
 
 # =============================================================================
@@ -158,7 +147,7 @@ class TestExhaustionProperties:
     def test_always_terminates(self, exhaust_projections, input_data):
         """Exhaustion detection always terminates (no infinite loops)."""
         reset_step_budget()
-        result = run_until_stable(exhaust_projections, input_data)
+        result = run_until_stable(exhaust_projections, input_data, max_steps=200)
         # Should have reached a terminal state
         assert result is not None
 
@@ -167,7 +156,7 @@ class TestExhaustionProperties:
     def test_result_has_valid_structure(self, exhaust_projections, input_data):
         """Result has valid structure (action field or kernel intermediate)."""
         reset_step_budget()
-        result = run_until_stable(exhaust_projections, input_data)
+        result = run_until_stable(exhaust_projections, input_data, max_steps=200)
 
         # Either terminal (has action) or intermediate (has _mode)
         has_action = "action" in result
@@ -180,7 +169,7 @@ class TestExhaustionProperties:
         """Frozen list is never shortened, only preserved or extended."""
         reset_step_budget()
         original_frozen = input_data["_detect_exhaustion"]["frozen"]
-        result = run_until_stable(exhaust_projections, input_data)
+        result = run_until_stable(exhaust_projections, input_data, max_steps=200)
 
         if "frozen" not in result:
             return  # Intermediate state, skip
@@ -218,7 +207,7 @@ class TestExhaustionProperties:
                 "operator_ids": linked_list_from_python(operator_ids)
             }
         }
-        result = run_until_stable(exhaust_projections, input_data)
+        result = run_until_stable(exhaust_projections, input_data, max_steps=200)
         assert result.get("action") == "continue", f"Expected continue, got {result}"
 
     @given(operator_id_strategy)
@@ -238,7 +227,7 @@ class TestExhaustionProperties:
                 "operator_ids": linked_list_from_python([op_id])
             }
         }
-        result = run_until_stable(exhaust_projections, input_data)
+        result = run_until_stable(exhaust_projections, input_data, max_steps=200)
         assert result.get("exhaustion_detected") is True, f"Expected exhaustion, got {result}"
         assert result.get("operator_to_freeze") == op_id
 
@@ -259,7 +248,7 @@ class TestExhaustionProperties:
                 "operator_ids": linked_list_from_python(op_ids)
             }
         }
-        result = run_until_stable(exhaust_projections, input_data)
+        result = run_until_stable(exhaust_projections, input_data, max_steps=200)
         assert result.get("exhaustion_detected") is False, f"Expected no exhaustion, got {result}"
         assert result.get("action") == "continue"
 
@@ -272,10 +261,10 @@ class TestExhaustionDeterminism:
     def test_same_input_same_output(self, exhaust_projections, input_data):
         """Same input always produces same output."""
         reset_step_budget()
-        result1 = run_until_stable(exhaust_projections, input_data)
+        result1 = run_until_stable(exhaust_projections, input_data, max_steps=200)
 
         reset_step_budget()
-        result2 = run_until_stable(exhaust_projections, input_data)
+        result2 = run_until_stable(exhaust_projections, input_data, max_steps=200)
 
         assert result1 == result2, f"Non-deterministic: {result1} != {result2}"
 
