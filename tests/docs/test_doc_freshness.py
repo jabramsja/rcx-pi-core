@@ -128,6 +128,11 @@ FORBIDDEN_PATTERNS = [
         "rcx_python_examples/ archived to archive/rcx_python_examples/ (Round 22G)",
         "Use archive/rcx_python_examples/ or remove reference",
     ),
+    ForbiddenPattern(
+        r'sandbox_runs/.*\.json`',
+        "sandbox_runs/ is ephemeral runtime output, not a fixture source (Round 22H)",
+        "Use tests/fixtures/ for test data, sandbox_runs/ for mutation output only",
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 
