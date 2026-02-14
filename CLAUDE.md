@@ -277,7 +277,7 @@ Do NOT update individual agent files - they read STATUS.md.
 | `rcx_pi/selfhost/` | Core implementation |
 | `mu/` | Mu projections: substrate/, closures/, bridge/, programs/, utilities/, host/ |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
-| `tests/` | Test suite (structural, fuzzer, parity, docs) |
+| `seeds/*.json` | Seed files (legacy location, mu/ preferred) |
 
 ---
 

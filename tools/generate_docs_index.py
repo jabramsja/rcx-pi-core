@@ -43,10 +43,9 @@ DIR_PRIORITY = {
     "fixtures": 5,
 }
 
-DOC_HEADER = """<!--
+DOC_HEADER_TEMPLATE = """<!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-14
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -59,6 +58,18 @@ This header enables automated doc drift detection.
 If this doc's claims don't match reality, update the doc or fix the code.
 Run: pytest tests/docs/test_doc_contracts.py -v
 -->"""
+
+
+def extract_existing_header(readme_path: Path) -> str:
+    """Extract existing DOC_STATUS block from docs/README.md, if present."""
+    if not readme_path.exists():
+        return DOC_HEADER_TEMPLATE
+    content = readme_path.read_text(encoding="utf-8")
+    # Match the full <!-- DOC_STATUS ... --> block
+    m = re.match(r"(<!--\s*\nDOC_STATUS\b.*?-->)", content, re.DOTALL)
+    if m:
+        return m.group(1)
+    return DOC_HEADER_TEMPLATE
 
 
 def extract_title(filepath: Path) -> str:
@@ -77,8 +88,10 @@ def extract_title(filepath: Path) -> str:
 
 def generate_index(docs_dir: Path) -> str:
     """Generate the README.md content."""
+    readme_path = docs_dir / "README.md"
+    header = extract_existing_header(readme_path)
     lines = [
-        DOC_HEADER,
+        header,
         "",
         "# Documentation Index",
         "",
