@@ -1523,7 +1523,7 @@ const SEED_CHECKSUMS = {
   'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
   'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
-  'rcx_engine.v1.json': '52f001f9216e387b740a9f4d3972dece9258ca2572769aa84c4fc31e8e60d34a',
+  'rcx_engine.v1.json': '6024e9be1113d0288c06cb5073f573bd9a33e8aa9589c1d74fc55bf835ec37c7',
   'fix.v1.json': '00e92921fef19da5f5133ef115d3264ed84dace9612d0cd9d933bae670883efa',
 };
 
@@ -1578,8 +1578,8 @@ const EXPECTED_PROJECTION_IDS = {
     'engine.init', 'engine.init_config', 'engine.trace_done',
     'engine.hash_done_fix', 'engine.hash_done',
     'engine.fix_done_applied', 'engine.fix_done_none',
-    'engine.recurrence_done', 'engine.exhaustion_done',
-    'engine.unwrap',
+    'engine.recurrence_done', 'engine.exhaustion_done_freeze',
+    'engine.exhaustion_done_terminal', 'engine.unwrap',
   ],
   'fix.v1.json': [
     'fix.init', 'fix.edge_add_guard', 'fix.edge_add', 'fix.vertex_add_guard', 'fix.vertex_add', 'fix.pass_through',

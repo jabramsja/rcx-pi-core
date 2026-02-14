@@ -23,6 +23,7 @@ import pytest
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS, run_engine_pipeline
 
 
 # JSON null -> Python None alias
@@ -145,6 +146,7 @@ class TestEnginePhaseTransitions:
         input_data = {
             "_mode": "engine",
             "_frozen": None,
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_trace_result": {
                 "result": "B",
                 "trace": {
@@ -173,6 +175,7 @@ class TestEnginePhaseTransitions:
             "_frozen": None,
             "_stall": False,
             "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "to_b"}, "tail": None},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_hashed_trace": {"head": {"step": 0, "state": "A", "state_hash": "abc", "projection": "to_b"}, "tail": None}
         }
 
@@ -200,6 +203,7 @@ class TestEnginePhaseTransitions:
                     "tail": None
                 }
             },
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_recurrence_result": {
                 "closure_detected": True,
                 "tau_step": 2,
@@ -218,20 +222,22 @@ class TestEnginePhaseTransitions:
         assert req["inject_key"] == "_exhaustion_result"
 
     def test_exhaustion_done_produces_final_result(self, engine_projections):
-        """When exhaustion completes, engine should produce engine_result (no boundary request)."""
+        """When exhaustion completes (non-freeze), engine should produce engine_result."""
         # State injected by host after servicing exhaustion run_algorithm:
-        # context {_mode, _stall, _closure_detected, _tau_step, _final_result} + inject_key _exhaustion_result
+        # context {_mode, _stall, _closure_detected, _tau_step, _final_result, _config} + inject_key _exhaustion_result
+        # Note: action=freeze now produces trampoline (tested in TestLoopTrampolineProjectionLevel)
         input_data = {
             "_mode": "engine",
             "_stall": False,
             "_closure_detected": True,
             "_tau_step": 2,
             "_final_result": "final_value",
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_exhaustion_result": {
-                "exhaustion_detected": True,
-                "operator_to_freeze": "op1",
-                "frozen": {"head": "op1", "tail": None},
-                "action": "freeze"
+                "exhaustion_detected": False,
+                "operator_to_freeze": None,
+                "frozen": None,
+                "action": "continue"
             }
         }
 
@@ -240,8 +246,7 @@ class TestEnginePhaseTransitions:
         assert "engine_result" in result, f"Should produce engine_result, got: {result}"
         engine_result = result["engine_result"]
         assert engine_result["closure_detected"] is True
-        assert engine_result["exhaustion_detected"] is True
-        assert engine_result["operator_frozen"] == "op1"
+        assert engine_result["action"] == "continue"
 
     def test_unwrap_extracts_final(self, combined_projections):
         """engine.unwrap should extract the final result."""
@@ -288,6 +293,7 @@ class TestFullEngineCycle:
         input_data = {
             "_mode": "engine",
             "_frozen": None,
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_trace_result": {
                 "result": "final",
                 "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": None},
@@ -371,6 +377,7 @@ class TestEngineEdgeCases:
         input_data = {
             "_mode": "engine",
             "_frozen": None,
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_trace_result": {
                 "result": "A",  # Same as input (stalled immediately)
                 "trace": None,  # No steps taken
@@ -394,6 +401,7 @@ class TestEngineEdgeCases:
             "_closure_detected": True,
             "_tau_step": 2,
             "_final_result": "final_value",
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
             "_exhaustion_result": {
                 "exhaustion_detected": False,
                 "operator_to_freeze": None,
@@ -448,9 +456,9 @@ class TestCombinedProjectionOrder:
 
     def test_combined_projection_count(self, combined_projections):
         """Combined projections should have engine + recurrence + exhaustion."""
-        # engine: 10, recurrence: 9, exhaustion: 11 = 30 total
-        assert len(combined_projections) == 30, \
-            f"Expected 30 combined projections, got {len(combined_projections)}"
+        # engine: 11, recurrence: 9, exhaustion: 11 = 31 total
+        assert len(combined_projections) == 31, \
+            f"Expected 31 combined projections, got {len(combined_projections)}"
 
 
 # =============================================================================
@@ -686,7 +694,8 @@ class TestEngineDesignStatus:
             "engine.fix_done_applied",
             "engine.fix_done_none",
             "engine.recurrence_done",
-            "engine.exhaustion_done",
+            "engine.exhaustion_done_freeze",
+            "engine.exhaustion_done_terminal",
             "engine.unwrap"
         ]
 
@@ -694,6 +703,227 @@ class TestEngineDesignStatus:
             assert phase in ids, f"Missing projection: {phase}"
 
     def test_engine_projections_count(self, engine_projections):
-        """Engine should have exactly 10 projections."""
-        assert len(engine_projections) == 10, \
-            f"Expected 10 engine projections, got {len(engine_projections)}"
+        """Engine should have exactly 11 projections."""
+        assert len(engine_projections) == 11, \
+            f"Expected 11 engine projections, got {len(engine_projections)}"
+
+
+# =============================================================================
+# GAP-10-LOOP: Structural Iteration Tests (E1/E3)
+# =============================================================================
+
+
+class TestLoopTrampolineProjectionLevel:
+    """E1 gap proof + E3 invariant tests for GAP-10-LOOP trampoline.
+
+    Tests at projection level: step engine projections once on crafted states.
+    Proves the structural loop-back decision works correctly.
+    """
+
+    TEST_PROJS = [{"id": "test.proj", "pattern": {}, "body": {}}]
+
+    @pytest.fixture
+    def engine_projections(self) -> list:
+        seed = load_verified_seed(get_seed_path("rcx_engine.v1.json"))
+        return seed["projections"]
+
+    def test_freeze_triggers_reentry(self, engine_projections):
+        """E1/L2: action=freeze produces _run_engine trampoline (gap proof)."""
+        reset_step_budget()
+        state = {
+            "_mode": "engine",
+            "_stall": False,
+            "_closure_detected": True,
+            "_tau_step": 5,
+            "_final_result": {"computed": "result"},
+            "_config": {
+                "projections": self.TEST_PROJS,
+                "max_steps": 100
+            },
+            "_exhaustion_result": {
+                "exhaustion_detected": True,
+                "operator_to_freeze": "op1",
+                "frozen": {"head": "op1", "tail": None},
+                "action": "freeze"
+            }
+        }
+        result = step(engine_projections, state)
+        # Must produce _run_engine (trampoline re-entry), NOT engine_result (terminal)
+        assert "_run_engine" in result, \
+            f"action=freeze must produce _run_engine, got keys: {sorted(result.keys())}"
+        assert "engine_result" not in result, \
+            "action=freeze must NOT produce engine_result"
+        # Re-entry envelope carries correct values
+        re_entry = result["_run_engine"]
+        assert re_entry["projections"] == self.TEST_PROJS
+        assert re_entry["input"] == {"computed": "result"}
+        assert re_entry["max_steps"] == 100
+        assert re_entry["frozen"] == {"head": "op1", "tail": None}
+
+    def test_continue_produces_terminal(self, engine_projections):
+        """L2: action=continue produces engine_result (terminal, not re-entry)."""
+        reset_step_budget()
+        state = {
+            "_mode": "engine",
+            "_stall": False,
+            "_closure_detected": False,
+            "_tau_step": None,
+            "_final_result": {"value": 42},
+            "_config": {
+                "projections": self.TEST_PROJS,
+                "max_steps": 100
+            },
+            "_exhaustion_result": {
+                "exhaustion_detected": False,
+                "operator_to_freeze": None,
+                "frozen": None,
+                "action": "continue"
+            }
+        }
+        result = step(engine_projections, state)
+        assert "engine_result" in result, \
+            f"action=continue must produce engine_result, got keys: {sorted(result.keys())}"
+        assert "_run_engine" not in result
+
+    def test_already_frozen_produces_terminal(self, engine_projections):
+        """L2: action=already_frozen produces engine_result (terminal)."""
+        reset_step_budget()
+        state = {
+            "_mode": "engine",
+            "_stall": False,
+            "_closure_detected": True,
+            "_tau_step": 3,
+            "_final_result": {"value": 99},
+            "_config": {
+                "projections": self.TEST_PROJS,
+                "max_steps": 50
+            },
+            "_exhaustion_result": {
+                "exhaustion_detected": True,
+                "operator_to_freeze": "op1",
+                "frozen": {"head": "op1", "tail": None},
+                "action": "already_frozen"
+            }
+        }
+        result = step(engine_projections, state)
+        assert "engine_result" in result
+        assert "_run_engine" not in result
+
+    def test_config_not_in_terminal_output(self, engine_projections):
+        """L1: _config must NOT appear in terminal engine_result output."""
+        reset_step_budget()
+        state = {
+            "_mode": "engine",
+            "_stall": False,
+            "_closure_detected": False,
+            "_tau_step": None,
+            "_final_result": {"value": 42},
+            "_config": {
+                "projections": self.TEST_PROJS,
+                "max_steps": 100
+            },
+            "_exhaustion_result": {
+                "exhaustion_detected": False,
+                "operator_to_freeze": None,
+                "frozen": None,
+                "action": "continue"
+            }
+        }
+        result = step(engine_projections, state)
+        engine_result = result["engine_result"]
+        assert "_config" not in engine_result, \
+            "_config must be stripped from terminal engine_result"
+
+    def test_terminal_shape_unchanged(self, engine_projections):
+        """L3: terminal engine_result has exactly 8 keys (unchanged contract)."""
+        reset_step_budget()
+        state = {
+            "_mode": "engine",
+            "_stall": True,
+            "_closure_detected": True,
+            "_tau_step": 5,
+            "_final_result": {"value": 42},
+            "_config": {
+                "projections": self.TEST_PROJS,
+                "max_steps": 100
+            },
+            "_exhaustion_result": {
+                "exhaustion_detected": True,
+                "operator_to_freeze": "op1",
+                "frozen": {"head": "op1", "tail": None},
+                "action": "already_frozen"
+            }
+        }
+        result = step(engine_projections, state)
+        engine_result = result["engine_result"]
+        expected_keys = {
+            "value", "closure_detected", "tau_step", "exhaustion_detected",
+            "operator_frozen", "frozen_set", "action", "stall",
+        }
+        assert set(engine_result.keys()) == expected_keys, \
+            f"Terminal shape mismatch: {sorted(engine_result.keys())}"
+
+    def test_config_not_kernel_reserved(self):
+        """L6: _config is not a kernel-reserved field."""
+        assert "_config" not in KERNEL_RESERVED_FIELDS, \
+            "_config must not be kernel-reserved (would block context carry-through)"
+
+    def test_freeze_reentry_hits_init_config(self, engine_projections):
+        """L2: freeze trampoline output matches engine.init_config pattern."""
+        reset_step_budget()
+        # Craft freeze state
+        state = {
+            "_mode": "engine",
+            "_stall": False,
+            "_closure_detected": True,
+            "_tau_step": 5,
+            "_final_result": {"computed": "result"},
+            "_config": {
+                "projections": self.TEST_PROJS,
+                "max_steps": 100
+            },
+            "_exhaustion_result": {
+                "exhaustion_detected": True,
+                "operator_to_freeze": "op1",
+                "frozen": {"head": "op1", "tail": None},
+                "action": "freeze"
+            }
+        }
+        # Step 1: freeze → _run_engine
+        trampoline = step(engine_projections, state)
+        assert "_run_engine" in trampoline
+        # Step 2: _run_engine → engine.init_config → _boundary_request
+        reentry = step(engine_projections, trampoline)
+        assert "_boundary_request" in reentry, \
+            f"Trampoline output must trigger engine.init_config → _boundary_request, got: {sorted(reentry.keys())}"
+        assert reentry["_boundary_request"]["operation"] == "run_trace"
+
+
+class TestLoopPipelineLevel:
+    """E3 invariant tests at pipeline level (run_engine_pipeline).
+
+    Tests use identity projections + graph input to trigger the full
+    engine cycle including fix, recurrence, exhaustion. Verifies the
+    trampoline works end-to-end through the host effect handler loop.
+    """
+
+    IDENTITY_PROJS = [{"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+
+    @pytest.mark.slow
+    def test_pipeline_produces_terminal_result(self):
+        """L3/L5: pipeline produces terminal result within iteration bounds."""
+        result = run_engine_pipeline(
+            self.IDENTITY_PROJS,
+            {"value": 42},
+            max_steps=10,
+            max_engine_iterations=20,
+        )
+        # Must produce terminal result (8 keys)
+        expected_keys = {
+            "value", "closure_detected", "tau_step", "exhaustion_detected",
+            "operator_frozen", "frozen_set", "action", "stall",
+        }
+        assert set(result.keys()) == expected_keys, \
+            f"Pipeline result shape mismatch: {sorted(result.keys())}"
+        # _config must not leak into terminal result
+        assert "_config" not in result

@@ -618,7 +618,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-12 (JS parity: engine pipeline, hemisphere routing, hash_trace — 4 core functions + 4 JSON API actions + 6 cross-substrate tests)
+**Last updated:** 2026-02-14 (GAP-10-LOOP CLOSED: EngineNew 10/10 structural, 0 gaps. Trampoline via `_config` carry-through, 10→11 projections, zero host code changes. Boot1 sunset policy in effect.)
 **Next milestone:** See TASKS.md VECTOR for next promotion candidates
 
 **Hemisphere Hardening (2026-02-10):**

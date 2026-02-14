@@ -56,7 +56,7 @@ EXPECTED_COUNTS = {
     "exhaustion.v1.json": 11,  # operator exhaustion
     "fix.v1.json": 6,          # structural fix (GAP-04-FIX, Rule 0.6) + idempotence guards
     # mu/programs/
-    "rcx_engine.v1.json": 10,  # main program (+ fix dispatch + fix routing)
+    "rcx_engine.v1.json": 11,  # main program (+ fix dispatch + fix routing + trampoline loop)
     "hemispheres.v1.json": 12,  # native structural routing (5-way: null, inf, a, lobes, sink)
     "paxos_demo.v1.json": 6,   # consensus demo (+ engine-output healer)
     # mu/bridge/

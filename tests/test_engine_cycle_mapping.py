@@ -6,7 +6,7 @@ artifacts. This is EVIDENCE MAPPING, not feature implementation.
 
 Spec source: RCXEngineNew.pdf (10-step stall-fix-promote cycle)
 Runtime doc: docs/core/RCXEngine.v0.md (Engine Cycle section)
-Engine seed: mu/programs/rcx_engine.v1.json (10 projections)
+Engine seed: mu/programs/rcx_engine.v1.json (11 projections)
 """
 
 from __future__ import annotations
@@ -127,25 +127,29 @@ CYCLE_MAPPING: tuple[CycleStep, ...] = (
     CycleStep(
         step_id=9,
         enginenew_label="Terminal assembly (8-field engine_result)",
-        runtime_artifact="engine.exhaustion_done, engine.unwrap",
+        runtime_artifact="engine.exhaustion_done_freeze, engine.exhaustion_done_terminal, engine.unwrap",
         evidence_type="structural",
         evidence_note=(
-            "engine.exhaustion_done assembles 8-field engine_result: "
+            "engine.exhaustion_done_terminal assembles 8-field engine_result: "
             "value, closure_detected, tau_step, exhaustion_detected, "
             "operator_frozen, frozen_set, action, stall. "
+            "engine.exhaustion_done_freeze trampolines re-entry via _run_engine "
+            "(TRANSITIONAL, Boot1 sunset policy). "
             "engine.unwrap extracts the inner dict."
         ),
     ),
     CycleStep(
         step_id=10,
         enginenew_label="Iteration control (loop to step 2)",
-        runtime_artifact="host run_engine_pipeline while loop",
-        evidence_type="gap",
+        runtime_artifact="engine.exhaustion_done_freeze trampoline → engine.init_config re-entry",
+        evidence_type="structural",
         evidence_note=(
-            "Iteration is host-driven: run_engine_pipeline (Python step_mu.py / "
-            "JS eval_step.js) runs a while loop dispatching _boundary_request "
-            "effects. No structural loop projection exists. "
-            "Iteration as projection requires recursive kernel (Boot1+)."
+            "Loop-back decision is structural: engine.exhaustion_done_freeze "
+            "(action='freeze') produces {_run_engine: ...} which re-enters "
+            "engine.init_config. _config carry-through threads projections + "
+            "max_steps through all intermediate projections. Host effect handler "
+            "loop is irreducible bootstrap primitive (Boot0 v0.4). "
+            "TRANSITIONAL: Boot1 sunset policy in effect (see TASKS.md VECTOR)."
         ),
     ),
 )
@@ -167,29 +171,11 @@ class GapEntry(NamedTuple):
 
 
 GAP_REGISTRY: tuple[GapEntry, ...] = (
-    # GAP-04-FIX RESOLVED: fix.v1.json integrated into engine via
+    # GAP-04-FIX RESOLVED (2026-02-13, Round 15I): fix.v1.json integrated via
     # engine.hash_done_fix / engine.fix_done_applied / engine.fix_done_none.
-    # Evidence: E1-E4 complete, invariants I1-I5 verified (19 tests).
-    # Contract doc: docs/core/EngineNewFixContract.v0.md (retained as reference).
-    GapEntry(
-        step_id=10,
-        gap_id="GAP-10-LOOP",
-        rationale=(
-            "Iteration is host-driven: run_engine_pipeline runs a while "
-            "loop dispatching _boundary_request effects. No structural loop "
-            "projection exists. Structural iteration requires a recursive "
-            "kernel that can re-enter itself (Boot1+ capability)."
-        ),
-        owner="VECTOR",
-        unblock_condition=(
-            "Implement recursive kernel capable of self-re-entry. Requires: "
-            "(1) Boot1 recursive kernel design, (2) loop-as-projection seed "
-            "draft, (3) evidence that host loop can be replaced without "
-            "breaking engine_result contract, (4) VECTOR → NEXT promotion."
-        ),
-        contract_doc="",  # no contract doc yet — design not started
-        invariants=(),
-    ),
+    # GAP-10-LOOP RESOLVED (2026-02-14, Round 16E): trampoline via _config
+    # carry-through. engine.exhaustion_done_freeze re-enters engine.init_config.
+    # EngineNew 10/10 structural, 0 gaps.
 )
 
 
@@ -230,7 +216,7 @@ class TestEngineCycleMapping:
     def test_gap_steps_are_explicitly_marked(self):
         """Every gap step has a non-trivial evidence_note explaining what's missing."""
         gaps = [s for s in CYCLE_MAPPING if s.evidence_type == "gap"]
-        assert len(gaps) > 0, "No gaps found — suspicious; verify honesty"
+        # 0 gaps is valid when all steps are structural (10/10 achieved 2026-02-14)
         for step in gaps:
             assert len(step.evidence_note) >= 20, (
                 f"Gap step {step.step_id} ({step.enginenew_label!r}) "
@@ -262,18 +248,19 @@ class TestEngineCycleMapping:
             "engine.fix_done_applied",
             "engine.fix_done_none",
             "engine.recurrence_done",
-            "engine.exhaustion_done",
+            "engine.exhaustion_done_freeze",
+            "engine.exhaustion_done_terminal",
             "engine.unwrap",
         }
         missing = required - ids
         assert not missing, f"Missing engine projections: {missing}"
 
     def test_engine_terminal_shape_contract(self):
-        """engine.exhaustion_done produces the 8-field terminal shape."""
+        """engine.exhaustion_done_terminal produces the 8-field terminal shape."""
         seed = load_verified_seed(get_seed_path("rcx_engine.v1.json"))
         exhaust_done = next(
             p for p in seed["projections"]
-            if p["id"] == "engine.exhaustion_done"
+            if p["id"] == "engine.exhaustion_done_terminal"
         )
         # The body should contain engine_result with exactly 8 keys
         body = exhaust_done["body"]
@@ -381,8 +368,8 @@ class TestGapRegistry:
         structural = [s for s in CYCLE_MAPPING if s.evidence_type == "structural"]
         gaps = [s for s in CYCLE_MAPPING if s.evidence_type == "gap"]
         assert len(structural) + len(gaps) == 10
-        assert len(structural) == 9, f"Expected 9 structural, got {len(structural)}"
-        assert len(gaps) == 1, f"Expected 1 gap, got {len(gaps)}"
+        assert len(structural) == 10, f"Expected 10 structural, got {len(structural)}"
+        assert len(gaps) == 0, f"Expected 0 gaps, got {len(gaps)}"
 
 
 class TestGapContractDocs:

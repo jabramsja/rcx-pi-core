@@ -94,9 +94,15 @@ class TestEngineTransitions:
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
         assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
 
-    def test_exhaustion_done_produces_final_result(self, engine_projections, engine_vectors):
-        """engine.exhaustion_done: exhaustion result produces engine_result."""
-        vector = next(v for v in engine_vectors if v["id"] == "engine.exhaustion_done")
+    def test_exhaustion_done_freeze_produces_reentry(self, engine_projections, engine_vectors):
+        """engine.exhaustion_done_freeze: action=freeze produces _run_engine trampoline."""
+        vector = next(v for v in engine_vectors if v["id"] == "engine.exhaustion_done_freeze")
+        result = run_until_stable(engine_projections, vector["input"], max_steps=1)
+        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+
+    def test_exhaustion_done_terminal_produces_final_result(self, engine_projections, engine_vectors):
+        """engine.exhaustion_done_terminal: non-freeze action produces engine_result."""
+        vector = next(v for v in engine_vectors if v["id"] == "engine.exhaustion_done_terminal")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
         assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
 
@@ -121,8 +127,8 @@ class TestEngineStructure:
     """Test engine structural properties."""
 
     def test_projections_count(self, engine_projections):
-        """Engine has expected 10 projections."""
-        assert len(engine_projections) == 10, f"Expected 10 projections, got {len(engine_projections)}"
+        """Engine has expected 11 projections."""
+        assert len(engine_projections) == 11, f"Expected 11 projections, got {len(engine_projections)}"
 
     def test_projection_ids(self, engine_projections):
         """All expected projection IDs present."""
@@ -136,7 +142,8 @@ class TestEngineStructure:
             "engine.fix_done_applied",
             "engine.fix_done_none",
             "engine.recurrence_done",
-            "engine.exhaustion_done",
+            "engine.exhaustion_done_freeze",
+            "engine.exhaustion_done_terminal",
             "engine.unwrap",
         ]
         assert ids == expected, f"Expected {expected}, got {ids}"

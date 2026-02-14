@@ -20,7 +20,7 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 10 engine + 6 fix)
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 11 engine + 6 fix)
     - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
@@ -111,6 +111,9 @@ Items here are implemented and verified under current invariants. Changes requir
 - Hemisphere hardening Phases 1–4 CLOSED (2026-02-13, no runtime changes): P1 routing priority confirmed correct across all 4 layers (seed, Python, JS, tests — 130 hemisphere + 28 JS parity tests); P4 JS falsy-default `??` already correct for all 14 numeric caps, regression lock added (`TestNoOrBarBarNumericDefaults`); P2a `import ast` confirmed absent from `rcx_pi/`, structural guard added (`test_ast_import_guard.py`); P3a hemisphere output validation already exact-keyset + typed RcxError + cross-substrate parity. Commits: `d2a7cac` (PR #245 GAP-04-FIX contract), `c73d68b` (PR #246 test hardening). No phase/debt change.
 - Hemisphere hardening Phase 6 already complete (2026-02-13): Parity manifest (`tests/fixtures/js_api_parity_manifest.json`, 18 actions, 10 error codes, 3 types), `RcxError` + `classifyError()` in JS (16 catch sites), `list_actions` API action, `classify_python_error()` in test layer, `TestActionSetSync`/`TestParityCoverageGate`/`TestManifestEdgeCaseParity` test classes, `@pytest.mark.slow` tier split. 169 parity tests pass. Hemisphere hardening stream CLOSED (all 6 phases).
 - Tracker sync note (2026-02-13, Round 15I): GAP-04-FIX E1–E5 execution CLOSED. E1: gap proven pre-integration in Round 15D (`TestImplicitFixFailure`, since renamed to `TestFixIntegrationEvidence` after E4 closed the gap). E2: `mu/closures/fix.v1.json` v1.1.0 (6 projections, idempotence guards). E3: 19 invariant tests (`tests/test_fix_invariants.py`, I1–I5). E4: `mu/programs/rcx_engine.v1.json` v1.2.0 (10 projections, 3 fix-dispatch). E5: TASKS closure + contract update. Cross-substrate parity locked (4 fix-path tests). EngineNew tally: 9/10 structural, 1/10 gap (GAP-10-LOOP only). No phase/debt change.
+- GAP-10-LOOP founder GO-CONDITIONAL (2026-02-14, Round 16D governance): Trampoline labeled TRANSITIONAL (not terminal L4). Boot1 Sunset Policy + 6 Cutover Gates + 3-merge Cutover Rule added to NEXT. Boot1 Recursive Loop Contract opened as parallel VECTOR item with 5 promotion criteria. Mandatory constraints: no new host semantics, re-entry ABI Boot1-compatible from day 1, explicit sunset trigger. Staged bootstrap precedent: GCC 3-stage, Rust stage0→stage2, Hex0/Stage0. No phase/debt change.
+- GAP-10-LOOP E5 CLOSED (2026-02-14, Round 16E): EngineNew 10/10 structural, 0 gaps. E1–E4 evidence: rcx_engine.v1.json v1.3.0 (11 projections, _config carry-through, trampoline split), 8 invariant tests + 1 pipeline test + 3 cross-substrate parity tests. Acceptance battery: seed_police (15/15), cycle_mapping (17/17), integration (33/33), parity (16/16), loop parity (3/3), seed_counts (139/139), JS inline (all pass). Checkpoint/Resume Contract opened as new VECTOR item. No phase/debt change.
+- GAP-10-LOOP promoted VECTOR → NEXT (2026-02-13, Round 16C): Trampoline architecture (Option B) chosen over Boot1 recursive kernel (Option A). Boot1 evaluated and deferred — effect handler loop is accepted irreducible bootstrap primitive (Boot0 v0.4); gap is the loop-back decision, not the handler. Trampoline: `engine.exhaustion_done` splits into `freeze` (re-enters engine.init_config) + `terminal` (produces engine_result). `_config: {projections, max_steps}` threaded through all intermediate projections. 10→11 projections. Zero host code changes. E1-E5 evidence plan approved. No phase/debt change.
 - GAP-04-FIX promoted VECTOR → NEXT (2026-02-13, Round 15C): E1–E5 plan approved (Round 15B). Design contract test-locked, all prerequisites satisfied. Execution authorized under NEXT; E1 starts next. No phase/debt change.
 - Replay semantics frozen (v1)
 - Entropy sealing contract in place
@@ -343,7 +346,16 @@ See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
-No active items. Promote from VECTOR when ready.
+*(No active items — EngineNew 10/10 complete, all gaps closed)*
+
+- ~~**GAP-10-LOOP**~~ — Structural iteration control. **CLOSED** (2026-02-14, Round 16E). EngineNew 10/10 structural, 0 gaps.
+  - **Summary**: TRANSITIONAL trampoline via `_config` carry-through. `engine.exhaustion_done` split into `exhaustion_done_freeze` (action="freeze" → `{_run_engine: ...}`, re-enters `engine.init_config`) and `exhaustion_done_terminal` (any other action → `{engine_result: ...}`, terminal). `_config: {projections, max_steps}` threaded through all 8 intermediate projections. Zero host code changes. 10 → 11 projections. Boot1 sunset policy in effect (see VECTOR: Boot1 Recursive Loop Contract).
+  - **Evidence (E1–E4, Round 16D runtime)**:
+    - E2: `rcx_engine.v1.json` v1.3.0 (11 projections, `_config` carry-through, trampoline split). Checksums + projection IDs updated in seed_integrity.py + eval_step.js.
+    - E1/E3: 8 projection-level invariant tests (`TestLoopTrampolineProjectionLevel`) + 1 pipeline-level test. All existing tests updated (seed_counts, parity, cycle_mapping, vectors, integration).
+    - E4: 3 cross-substrate parity tests (`TestEngineLoopPathParity`) — freeze pipeline, non-freeze terminal, no config leak.
+    - Acceptance battery: seed_police (15/15), cycle_mapping (17/17), integration (33/33), parity (16/16), loop parity (3/3), seed_counts (139/139), JS inline (all pass).
+  - **Mandatory constraints** (founder directive, Round 16D): Trampoline is TRANSITIONAL (not terminal L4). No new host semantics. Re-entry ABI Boot1-compatible. Boot1 sunset trigger active (see VECTOR). Parallel VECTOR item: Boot1 Recursive Loop Contract.
 
 **Gate Snapshot (Canonical mirror of STATUS.md):**
 - Gate 3: COMPLETE (2026-02-07)
@@ -361,6 +373,8 @@ Current Exhaustion Layer: META_CIRCULAR
 
 
 **Active designs:**
+- Boot1 Recursive Loop Contract — Design the recursive kernel loop primitive that replaces the trampoline path for GAP-10-LOOP. Parallel to trampoline implementation (NEXT). **Opened by founder directive** (2026-02-14, Round 16D). Scope: recursive self-re-entry semantics, migration ABI from trampoline `{_run_engine: ...}` envelope, proper tail-call/tail-recursion contract (cf. R7RS §3.5, Clojure trampoline), parity plan (Boot1 loop == trampoline on canonical vectors). **Promotion criteria (all required for VECTOR → NEXT):** (1) Boot1LoopContract design doc approved, (2) ABI compatibility with EngineNewLoopContract demonstrated (shared re-entry envelope), (3) parity test plan drafted (freeze/non-freeze/stall/fix paths, both substrates), (4) security review: no new bypass paths or primitive count increase, (5) explicit VECTOR → NEXT promotion in this file with rationale.
+- Checkpoint/Resume Contract (bounded continuation semantics) — Explicit pause/resume semantics when engine or algorithm limits are hit. **Opened** (2026-02-14, Round 16E). **Invariants**: (1) Limit hit is explicit (no silent truncation), (2) Hash verifies state integrity; hash alone is not resumable state, (3) Resume token carries full continuation state (or validated pointer), state_hash, seed/version checksums, and budget metadata, (4) Resume path preserves Python/JS parity, (5) Resume path reuses existing validation/security guards, (6) No bootstrap primitive count increase without explicit approval. **Promotion criteria (all required for VECTOR → NEXT):** (1) Contract doc drafted and approved, (2) Canonical token schema defined, (3) Cross-substrate parity test plan defined, (4) Security review complete, (5) Explicit VECTOR → NEXT promotion in this file with rationale.
 - Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
 - Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
@@ -373,7 +387,7 @@ Current Exhaustion Layer: META_CIRCULAR
 
 **EngineNew gap contracts** (locked by `tests/test_engine_cycle_mapping.py::TestGapRegistry`):
 - ~~GAP-04-FIX~~ — **CLOSED** (2026-02-13, Round 15I). E1–E5 complete. `fix.v1.json` (6 projections) + `rcx_engine.v1.json` (10 projections, 3 fix-dispatch). 19 invariant tests, 4 cross-substrate parity tests. EngineNew 9/10 structural.
-- GAP-10-LOOP: Structural iteration control. Host-driven while loop in run_engine_pipeline; no loop-as-projection exists. **Promotion criteria:** (1) Boot1 recursive kernel design, (2) loop-as-projection seed draft, (3) evidence host loop can be replaced without breaking engine_result contract, (4) VECTOR → NEXT promotion with rationale. **Blocks:** full meta-circular engine (all 10 steps structural).
+- ~~GAP-10-LOOP~~ — **CLOSED** (2026-02-14, Round 16E). E1–E4 complete. Trampoline makes loop-back decision structural (11 projections). 10/10 EngineNew steps structural. Boot1 Recursive Loop Contract remains open as parallel VECTOR item for L4 path.
 
 **Reference:**
 - Corpus Status Registry (`docs/corpus_registry.csv`) - 18-artifact classification with taxonomy labels, confidence scores, and evidence refs. Ontology-to-runtime mapping reference for VECTOR design work.

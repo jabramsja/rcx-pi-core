@@ -1661,6 +1661,154 @@ class TestEngineFixPathParity:
 
 
 # =============================================================================
+# TestEngineLoopPathParity — E4 loop-trampoline cross-substrate lock
+# =============================================================================
+
+
+class TestEngineLoopPathParity:
+    """Cross-substrate parity for the engine loop trampoline (GAP-10-LOOP).
+
+    Verifies both substrates handle the exhaustion_done split identically:
+    - action=freeze → _run_engine trampoline (re-entry)
+    - action!=freeze → engine_result terminal (no re-entry)
+    """
+
+    IDENTITY_PROJS = [
+        {"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}},
+    ]
+
+    def _run_js_json_api(self, request_dict: dict) -> dict:
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
+            capture_output=True, text=True, cwd=ROOT, timeout=120
+        )
+        for line in result.stdout.split('\n'):
+            if line.startswith('JSON_API_RESPONSE:'):
+                return json.loads(line[len('JSON_API_RESPONSE:'):])
+        raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+
+    def test_engine_loop_freeze_pipeline_parity(self):
+        """E4: freeze-path pipeline produces same terminal result in both substrates.
+
+        Uses identity projections which always stall. The engine detects closure,
+        exhaustion freezes the operator, and the trampoline re-enters. On re-entry
+        with frozen operator, the engine eventually terminates. Both substrates
+        must produce the same final engine_result.
+        """
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        test_input = {"value": 42}
+
+        reset_step_budget()
+        py_result = run_engine_pipeline(
+            self.IDENTITY_PROJS, test_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": self.IDENTITY_PROJS,
+            "input": test_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS engine pipeline failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # Both substrates produce 8-key terminal shape
+        TERMINAL_KEYS = {"value", "closure_detected", "tau_step", "exhaustion_detected",
+                         "operator_frozen", "frozen_set", "action", "stall"}
+        assert set(py_result.keys()) == TERMINAL_KEYS, (
+            f"Python terminal keys: {set(py_result.keys())}"
+        )
+        assert set(js_result.keys()) == TERMINAL_KEYS, (
+            f"JS terminal keys: {set(js_result.keys())}"
+        )
+
+        # Cross-substrate: all 8 fields match
+        for key in TERMINAL_KEYS:
+            assert _cross_substrate_equal(py_result[key], js_result[key]), (
+                f"Loop path mismatch on '{key}':\n  Python: {py_result[key]}\n  JS: {js_result[key]}"
+            )
+
+    def test_engine_loop_terminal_non_freeze_parity(self):
+        """E4: non-freeze terminal path produces same result in both substrates.
+
+        Uses a projection that produces a different value (not identity), so no
+        closure is detected. Exhaustion action will be 'continue' (non-freeze),
+        and the engine terminates directly without trampoline re-entry.
+        """
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        # A projection that transforms the value (no stall, no closure)
+        transform_projs = [
+            {"id": "add_done", "pattern": {"value": {"var": "v"}},
+             "body": {"value": {"var": "v"}, "done": True}},
+        ]
+        test_input = {"value": 42}
+
+        reset_step_budget()
+        py_result = run_engine_pipeline(
+            transform_projs, test_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": transform_projs,
+            "input": test_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS engine pipeline failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # Both substrates produce terminal with no freeze
+        assert py_result["action"] != "freeze", f"Python action should not be freeze: {py_result['action']}"
+        assert js_result["action"] != "freeze", f"JS action should not be freeze: {js_result['action']}"
+
+        # Cross-substrate: terminal results match
+        TERMINAL_KEYS = {"value", "closure_detected", "tau_step", "exhaustion_detected",
+                         "operator_frozen", "frozen_set", "action", "stall"}
+        for key in TERMINAL_KEYS:
+            assert _cross_substrate_equal(py_result[key], js_result[key]), (
+                f"Terminal path mismatch on '{key}':\n  Python: {py_result[key]}\n  JS: {js_result[key]}"
+            )
+
+    def test_engine_loop_no_config_leak_parity(self):
+        """E4: _config does not leak into terminal output in either substrate."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        test_input = {"value": 42}
+
+        reset_step_budget()
+        py_result = run_engine_pipeline(
+            self.IDENTITY_PROJS, test_input,
+            max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+
+        js_response = self._run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": self.IDENTITY_PROJS,
+            "input": test_input,
+            "maxSteps": 5,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        })
+        assert js_response["success"], f"JS engine pipeline failed: {js_response.get('error')}"
+        js_result = js_response["result"]
+
+        # Neither substrate leaks _config
+        assert "_config" not in py_result, f"Python leaks _config: {py_result.keys()}"
+        assert "_config" not in js_result, f"JS leaks _config: {js_result.keys()}"
+
+
+# =============================================================================
 # TestFalsyDefaultParity — Phase 2 (P4) falsy-default divergence
 # =============================================================================
 
