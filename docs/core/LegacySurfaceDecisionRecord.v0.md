@@ -107,13 +107,11 @@ If observability is needed, create unified observers in `mu/observables/` using 
 
 ### Current Status
 
-Bridge format for RCX rule sets (Mu pattern to action routing). Contains `rcx_core.json`, 4 mutation variants (`mut1-mut4`), and `paradox_1over0.json`. Used by rcx_pi_rust examples and `test_worlds_paradox_1over0.py`.
+Bridge format for RCX rule sets (Mu pattern to action routing). Contains `rcx_core.json`, 3 mutation variants (`mut1-mut3`), and `paradox_1over0.json`. Used by rcx_pi_rust examples and `test_worlds_paradox_1over0.py`.
 
 ### Duplicate Policy
 
-**`rcx_core_mut3.json` and `rcx_core_mut4.json` are byte-identical** (confirmed via MD5). This is a duplicate artifact from `worlds_mutate_demo.py` generating the same output twice.
-
-Decision: **Keep both with deprecation note on mut4.** Rationale: deleting files is outside this governance-only round's scope. A future cleanup round may remove `rcx_core_mut4.json` after confirming no manual workflow depends on the filename.
+**`rcx_core_mut4.json` removed (Round 22J, 2026-02-14).** It was byte-identical to `rcx_core_mut3.json` — a duplicate artifact from `worlds_mutate_demo.py` generating the same output twice. Zero filename dependencies confirmed before deletion.
 
 ### Architectural Relationship to L3
 
@@ -127,7 +125,7 @@ Decision: **Keep both with deprecation note on mut4.** Rationale: deleting files
 
 ### Risks if Unchanged
 
-Minimal. The duplicate `mut4` wastes negligible space. The main risk is confusion about which mutation files are distinct.
+Minimal. Duplicate `mut4` removed (Round 22J). Remaining files are distinct mutation variants.
 
 ---
 
@@ -138,4 +136,4 @@ Minimal. The duplicate `mut4` wastes negligible space. The main risk is confusio
 | **rcx_pi_rust** | ARCHIVE | Founder | No active work | Move to `archive/` on confirmation |
 | **rcx_omega** | ARCHIVE | Founder | No active work | Move to `archive/` on confirmation |
 | **worlds_json** | MAINTAIN | Automated | Indefinite | N/A (test fixtures) |
-| **worlds_json/mut4** | DEPRECATE | — | Next cleanup round | Remove after confirming no filename dependency |
+| **worlds_json/mut4** | REMOVED | — | Round 22J | Byte-identical to mut3; deleted |

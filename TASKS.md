@@ -440,4 +440,4 @@ Current Exhaustion Layer: META_CIRCULAR
 Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `rcx_pi_rust/` — ARCHIVE (incompatible with L3; owner: founder)
 - `rcx_omega/` — ARCHIVE (detached from selfhost; owner: founder)
-- `worlds_json/` — MAINTAIN as test fixtures; `rcx_core_mut4.json` deprecated (byte-identical to mut3)
+- `worlds_json/` — MAINTAIN as test fixtures; `rcx_core_mut4.json` removed Round 22J (was byte-identical to mut3)

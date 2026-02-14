@@ -138,6 +138,12 @@ FORBIDDEN_PATTERNS = [
         "prototypes/ archived to archive/prototypes/ (Round 22I)",
         "Use archive/prototypes/ or remove reference",
     ),
+    ForbiddenPattern(
+        r'rcx_core_mut4\.json',
+        "rcx_core_mut4.json removed as duplicate of mut3 (Round 22J)",
+        "Use rcx_core_mut3.json instead",
+        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 
