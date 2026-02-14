@@ -11,7 +11,7 @@ pipeline works as a single function call.
 NOTE: Full paxos pipeline tests are in test_paxos_end_to_end.py. These tests
 use simple projections for fast validation of the orchestration function itself.
 
-See: mu/programs/rcx_engine.v1.json (7 projections, structural specification)
+See: mu/programs/rcx_engine.v1.json (11 projections, structural specification)
      rcx_pi/selfhost/step_mu.py:run_engine_pipeline()
      roadmap/ContentAddressedMu.md (Orchestration section)
 """
@@ -122,9 +122,11 @@ class TestEngineSpec:
         ids = [p["id"] for p in engine_seed["projections"]]
         expected = [
             "engine.init", "engine.init_config",
-            "engine.trace_done", "engine.hash_done",
+            "engine.trace_done", "engine.hash_done_fix", "engine.hash_done",
+            "engine.fix_done_applied", "engine.fix_done_none",
             "engine.recurrence_done",
-            "engine.exhaustion_done", "engine.unwrap"
+            "engine.exhaustion_done_freeze", "engine.exhaustion_done_terminal",
+            "engine.unwrap"
         ]
         for phase in expected:
             assert phase in ids, f"Missing phase: {phase}"
@@ -136,5 +138,5 @@ class TestEngineSpec:
         assert has_v2, f"Engine should reference recurrence.v2, deps: {deps}"
 
     def test_engine_projection_count(self, engine_seed):
-        """Engine should have exactly 7 projections."""
-        assert len(engine_seed["projections"]) == 7
+        """Engine should have exactly 11 projections."""
+        assert len(engine_seed["projections"]) == 11
