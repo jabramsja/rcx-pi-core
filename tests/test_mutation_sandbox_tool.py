@@ -108,18 +108,12 @@ def test_mutation_sandbox_shuffle_changes_order_of_rule_like_lines(tmp_path: Pat
 
 
 @pytest.mark.skipif(
-    not any(Path(c).exists() for c in ["rcx_pi_rust/mu_programs/rcx_core.mu", "rcx_pi_rust/test_w.mu"]),
-    reason="rcx_pi_rust archived (LegacySurfaceDecisionRecord.v0.md)"
+    not Path("mu/mu_programs/rcx_core.mu").exists(),
+    reason="mu/mu_programs/rcx_core.mu not found"
 )
 def test_mutation_sandbox_smoke_on_repo_world():
     # best-effort: ensure tool can run on a real repo .mu without exploding
-    world = None
-    for cand in ["rcx_pi_rust/mu_programs/rcx_core.mu", "rcx_pi_rust/test_w.mu"]:
-        p = Path(cand)
-        if p.is_file():
-            world = p
-            break
-    assert world is not None
+    world = Path("mu/mu_programs/rcx_core.mu")
     p = _run(
         [
             "bash",

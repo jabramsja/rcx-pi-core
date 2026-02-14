@@ -46,12 +46,12 @@ def test_world_doc_markdown_emits_header(tmp_path: Path):
 
 
 @pytest.mark.skipif(
-    not Path("rcx_pi_rust/mu_programs/rcx_core.mu").exists(),
-    reason="rcx_pi_rust archived (LegacySurfaceDecisionRecord.v0.md)"
+    not Path("mu/mu_programs/rcx_core.mu").exists(),
+    reason="mu/mu_programs/rcx_core.mu not found"
 )
 def test_world_doc_detects_real_world_file():
-    # Ensure this works on an actual repo world
-    world = Path("rcx_pi_rust/mu_programs/rcx_core.mu")
+    # Ensure this works on an actual repo world (active fixture home)
+    world = Path("mu/mu_programs/rcx_core.mu")
     p = _run(["bash", "scripts/world_doc.sh", str(world), "--json", "--top", "5"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)

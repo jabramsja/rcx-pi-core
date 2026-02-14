@@ -15,7 +15,7 @@ def _run(argv: list[str], repo_root: Path) -> subprocess.CompletedProcess[str]:
 def _discover_candidates(repo_root: Path) -> list[str]:
     """
     Prefer a few known names, but also discover *.mu files anywhere in-repo
-    (this repo keeps them under rcx_pi_rust/mu_programs).
+    (active fixtures live under mu/mu_programs/).
     """
     candidates: list[str] = [
         "rcx_core",
@@ -26,12 +26,9 @@ def _discover_candidates(repo_root: Path) -> list[str]:
         "vars_demo",
     ]
 
-    # Common locations (fast paths)
-    # NOTE: rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
-    #       Retained as fallback search path until archive move completes.
+    # Active fixture home (mu/mu_programs/)
     for d in [
-        repo_root / "mu_programs",
-        repo_root / "rcx_pi_rust" / "mu_programs",
+        repo_root / "mu" / "mu_programs",
     ]:
         if d.exists():
             for p in sorted(d.glob("*.mu"))[:25]:
