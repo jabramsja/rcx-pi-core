@@ -484,6 +484,25 @@ function muEqual(a, b) {
 }
 
 /**
+ * Match Python's lexicographic Unicode code-point ordering for dict keys.
+ * JS default string sort is UTF-16 code unit based and can diverge for
+ * mixed BMP/non-BMP keys, so we compare by full code points.
+ */
+function compareMuStringKeysByCodepoint(a, b) {
+  let ai = 0;
+  let bi = 0;
+  while (ai < a.length && bi < b.length) {
+    const acp = a.codePointAt(ai);
+    const bcp = b.codePointAt(bi);
+    if (acp !== bcp) return acp - bcp;
+    ai += acp > 0xffff ? 2 : 1;
+    bi += bcp > 0xffff ? 2 : 1;
+  }
+  if (ai === a.length && bi === b.length) return 0;
+  return ai === a.length ? -1 : 1;
+}
+
+/**
  * Compute deterministic SHA-256 hash of a Mu value.
  * Matches Python mu_hash(): canonical JSON with sorted keys.
  * @host_builtin: BOOTSTRAP_PRIMITIVE (irreducible, required for hash-accelerated closure detection)
@@ -500,7 +519,7 @@ function muHash(value) {
       return '[' + v.map(canonicalize).join(', ') + ']';
     }
     // Object: sort keys, use Python separators
-    const keys = Object.keys(v).sort();
+    const keys = Object.keys(v).sort(compareMuStringKeysByCodepoint);
     const pairs = keys.map(k => JSON.stringify(k) + ': ' + canonicalize(v[k]));
     return '{' + pairs.join(', ') + '}';
   }
@@ -520,7 +539,7 @@ function muHashCached(value) {
   const key = JSON.stringify(value, (_, v) => {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       const sorted = {};
-      for (const k of Object.keys(v).sort()) sorted[k] = v[k];
+      for (const k of Object.keys(v).sort(compareMuStringKeysByCodepoint)) sorted[k] = v[k];
       return sorted;
     }
     return v;
@@ -765,7 +784,7 @@ function normalize(value, _depth = 0) {
 
     // Regular dict - convert to sorted kv linked list
     // CRITICAL: kv-pair format must match Python: {"head": key, "tail": {"head": value, "tail": null}}
-    const sortedKeys = keys.sort();
+    const sortedKeys = keys.sort(compareMuStringKeysByCodepoint);
     let tail = null;
     for (let i = sortedKeys.length - 1; i >= 0; i--) {
       const k = sortedKeys[i];
