@@ -621,6 +621,11 @@ Simplified step_kernel_mu to MECHANICAL operation:
 **Last updated:** 2026-02-14 (GAP-10-LOOP CLOSED: EngineNew 10/10 structural, 0 gaps. Trampoline via `_config` carry-through, 10→11 projections, zero host code changes. Boot1 sunset policy in effect.)
 **Next milestone:** See TASKS.md VECTOR for next promotion candidates
 
+**Legacy Surface Decision Record (2026-02-14, Round 19D):**
+- rcx_pi_rust → ARCHIVE, rcx_omega → ARCHIVE, worlds_json → MAINTAIN
+- Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
+- No code changes; governance-only round
+
 **Hemisphere Hardening (2026-02-10):**
 - JS substrate now verifies all 7 seeds at load time (SHA256 checksum, structure validation, projection ID ordering)
 - L3 parity gap closed: Python verified seeds, JS now does too
