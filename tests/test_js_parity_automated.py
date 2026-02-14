@@ -2051,6 +2051,8 @@ def classify_python_error(exc):
         return 'input.invalid_type'
     if 'shape mismatch' in msg or 'unexpected shape' in msg:
         return 'input.shape_mismatch'
+    if 'did not produce valid hemisphere dict' in msg:
+        return 'input.shape_mismatch'
     if 'reserved' in msg or 'kernel-reserved' in msg or 'unsupported algorithm underscore' in msg:
         return 'input.reserved_field'
     if 'not valid mu' in msg or 'max depth exceeded' in msg:
@@ -3237,4 +3239,411 @@ class TestTraceHashParityFuzzer:
             f"hash_trace hardcap clamp parity mismatch on {length}-entry trace:\n"
             f"  Python: {json.dumps(py_result, sort_keys=True)[:300]}\n"
             f"  JS:     {json.dumps(js_response['result'], sort_keys=True)[:300]}"
+        )
+
+
+# =============================================================================
+# R3: Differential Cross-Substrate Replay Audit
+# =============================================================================
+
+_FIXTURES_DIR = ROOT / "tests" / "fixtures"
+
+# Actions with Python adapters for replay comparison.
+_R3_ADAPTED_ACTIONS = frozenset({
+    'hash_trace', 'validate_reserved_fields', 'validate_algorithm_runtime_fields',
+    'run_engine_pipeline', 'run_hemisphere_routing', 'run_engine_with_routing',
+    'run_recurrence',
+})
+
+
+def _r3_parity_corpus():
+    """Parity vectors → run_vector replay (20 cases)."""
+    data = json.load(open(_FIXTURES_DIR / 'parity_vectors.json'))
+    return [pytest.param(v, id=v['id']) for v in data['vectors']]
+
+
+def _r3_hash_corpus():
+    """Hashing vectors → hash_trace replay (38 cases)."""
+    data = json.load(open(_FIXTURES_DIR / 'hashing_vectors.json'))
+    return [pytest.param(v, id=v['id']) for v in data['vectors']]
+
+
+def _r3_hemisphere_corpus():
+    """Hemisphere vectors → run_hemisphere_routing replay (8 cases)."""
+    data = json.load(open(_FIXTURES_DIR / 'hemisphere_vectors.json'))
+    return [pytest.param(v, id=v['id']) for v in data['vectors']]
+
+
+def _r3_manifest_corpus():
+    """Manifest actions → success + edge replay (actions with Python adapters)."""
+    manifest = _load_manifest()
+    cases = []
+    for name, action_def in manifest['actions'].items():
+        if name not in _R3_ADAPTED_ACTIONS:
+            continue
+        if action_def.get('required_args'):
+            cases.append(pytest.param(
+                name, action_def,
+                {'args': action_def['required_args']},
+                id=f"required-{name}",
+            ))
+        for i, edge in enumerate(action_def.get('edge_args', [])):
+            if edge.get('js_api_only'):
+                continue
+            cases.append(pytest.param(
+                name, action_def, edge, id=f"edge-{name}-{i}",
+            ))
+    return cases
+
+
+def _run_python_r3(action, request):
+    """Execute replay through Python. Returns (success, result, error_code).
+
+    Returns (None, None, None) if no adapter exists.
+    """
+    try:
+        if action == 'run_vector':
+            from rcx_pi.selfhost.step_mu import run_mu
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            result, _trace, stall = run_mu(
+                [request['projection']], request['input'], max_steps=10,
+            )
+            return True, result, None
+        elif action == 'hash_trace':
+            from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+            result = hash_trace_for_recurrence(
+                request['trace'], max_entries=request.get('maxEntries', 10000),
+            )
+            return True, result, None
+        elif action == 'run_hemisphere_routing':
+            from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+            hemispheres = request.get('hemispheres', {
+                'r_null': None, 'r_inf': None, 'r_a': None,
+                'lobes': None, 'sink': None,
+            })
+            result = run_hemisphere_routing(request['engine_result'], hemispheres)
+            return True, result, None
+        elif action == 'run_hemisphere':
+            from rcx_pi.selfhost.step_mu import run_mu
+            from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            projs = load_verified_seed(get_seed_path("hemispheres.v1.json"))["projections"]
+            result, _trace, stall = run_mu(projs, request['input'], max_steps=100)
+            return True, result, None
+        elif action == 'validate_reserved_fields':
+            from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+            validate_no_kernel_reserved_fields(request['value'])
+            return True, None, None
+        elif action == 'validate_algorithm_runtime_fields':
+            from rcx_pi.selfhost.step_mu import validate_algorithm_runtime_fields
+            validate_algorithm_runtime_fields(request['value'])
+            return True, None, None
+        elif action == 'run_engine_pipeline':
+            from rcx_pi.selfhost.step_mu import run_engine_pipeline
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            result = run_engine_pipeline(
+                request.get('projections', []), request['input'],
+                max_steps=request.get('maxSteps', 6),
+                max_engine_iterations=request.get('maxEngineIterations', 20),
+                max_algorithm_iterations=request.get('maxAlgorithmIterations', 50),
+            )
+            return True, result, None
+        elif action == 'run_engine_with_routing':
+            from rcx_pi.selfhost.step_mu import run_engine_with_routing
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            kwargs = {}
+            if 'hemispheres' in request:
+                kwargs['hemispheres'] = request['hemispheres']
+            result = run_engine_with_routing(
+                request.get('projections', []), request['input'],
+                max_steps=request.get('maxSteps', 6),
+                max_engine_iterations=request.get('maxEngineIterations', 20),
+                max_algorithm_iterations=request.get('maxAlgorithmIterations', 50),
+                **kwargs,
+            )
+            return True, result, None
+        elif action == 'run_recurrence':
+            from rcx_pi.selfhost.step_mu import run_mu
+            from rcx_pi.selfhost.kernel import reset_step_budget
+            reset_step_budget()
+            run_mu(
+                request.get('projections', []), request['input'],
+                max_steps=request.get('maxSteps', 10),
+            )
+            return True, None, None
+        else:
+            return None, None, None
+    except Exception as exc:
+        return False, None, classify_python_error(exc)
+
+
+@pytest.mark.slow
+class TestDifferentialReplayAuditR3:
+    """R3: Differential cross-substrate replay audit.
+
+    Systematically replays >=300 cases through both Python and JS,
+    comparing success/failure parity, result equality, and error codes.
+
+    Corpus breakdown:
+        - Parity fixture vectors (20): run_vector replay
+        - Hash fixture vectors (38): hash_trace replay
+        - Hemisphere fixture vectors (8): run_hemisphere_routing replay
+        - Manifest success + edge (variable): adapted action replay
+        - Generated hemisphere routing (100): Hypothesis
+        - Generated trace hash (60): Hypothesis
+        - Generated reserved-field validation (50): Hypothesis
+        - Extra-key engine_result (10): explicit verification
+    """
+
+    # --- Fixture: Parity vectors (20 cases) ---
+    # JS run_vector uses stepKernel (multi-step with normalization); Python
+    # run_mu has different loop/stall semantics for catchall and non-linear
+    # patterns.  This test verifies JS matches the fixture expected_output.
+    # Full cross-substrate parity for these vectors is covered by
+    # TestCrossSubstrateParity (which uses the proper kernel adapter).
+
+    @pytest.mark.parametrize("vector", _r3_parity_corpus())
+    def test_parity_vector_replay(self, vector):
+        """Replay parity vector: JS run_vector matches expected output."""
+        js = _module_run_js_json_api({
+            'action': 'run_vector',
+            'projection': vector['projection'],
+            'input': vector['input'],
+        })
+        if vector.get('expected_stall') and not js['success']:
+            # Stall-expected vectors may not produce a result in JS
+            return
+        assert js['success'], f"JS failed on {vector['id']}: {js.get('error')}"
+        expected = vector['expected_output']
+        assert _cross_substrate_equal(js['result'], expected), (
+            f"JS result mismatch for {vector['id']}: "
+            f"got {json.dumps(js['result'], sort_keys=True)[:200]}"
+        )
+
+    # --- Fixture: Hash vectors (38 cases) ---
+
+    @pytest.mark.parametrize("vector", _r3_hash_corpus())
+    def test_hash_vector_replay(self, vector):
+        """Replay hashing vector: hash_trace on both substrates."""
+        trace = {"head": {"step": 0, "state": vector['value']}, "tail": None}
+        js = _module_run_js_json_api({
+            'action': 'hash_trace', 'trace': trace, 'maxEntries': 10000,
+        })
+        py_ok, py_result, py_err = _run_python_r3('hash_trace', {
+            'trace': trace, 'maxEntries': 10000,
+        })
+        assert js['success'], f"JS hash_trace failed: {js.get('error')}"
+        assert py_ok, f"Python hash_trace failed: {py_err}"
+        assert _cross_substrate_equal(py_result, js['result']), (
+            f"Hash mismatch for {vector['id']}"
+        )
+
+    # --- Fixture: Hemisphere vectors (8 cases) ---
+
+    @pytest.mark.parametrize("vector", _r3_hemisphere_corpus())
+    def test_hemisphere_vector_replay(self, vector):
+        """Replay hemisphere vector: run_hemisphere_routing on both substrates."""
+        er = vector['input']['route_hemisphere']['engine_result']
+        h = vector['input']['route_hemisphere']['hemispheres']
+        js = _module_run_js_json_api({
+            'action': 'run_hemisphere_routing',
+            'engine_result': er, 'hemispheres': h,
+        })
+        py_ok, py_result, py_err = _run_python_r3('run_hemisphere_routing', {
+            'engine_result': er, 'hemispheres': h,
+        })
+        assert js['success'], f"JS routing failed: {js.get('error')}"
+        assert py_ok, f"Python routing failed: {py_err}"
+        assert _cross_substrate_equal(py_result, js['result']), (
+            f"Hemisphere routing mismatch for {vector['id']}"
+        )
+
+    # --- Manifest: success + edge replay (variable cases) ---
+
+    @pytest.mark.parametrize("action_name,action_def,edge", _r3_manifest_corpus())
+    def test_manifest_replay(self, action_name, action_def, edge):
+        """Replay manifest case: assert cross-substrate parity."""
+        request = {'action': action_name, **edge['args']}
+        expected_code = edge.get('expected_error_code')
+
+        js = _module_run_js_json_api(request)
+        py_ok, py_result, py_err = _run_python_r3(action_name, edge['args'])
+
+        if py_ok is None:
+            pytest.skip(f"No Python adapter for {action_name}")
+
+        # Validation actions: compare valid field
+        if action_def['type'] == 'validation':
+            js_valid = js.get('valid', True) if js.get('success') else False
+            # Parity: both accept or both reject
+            assert js_valid == py_ok, (
+                f"Validation parity: JS valid={js_valid}, Python={py_ok}"
+            )
+            if not js_valid and not py_ok and expected_code and py_err:
+                assert js.get('error_code') == py_err, (
+                    f"error_code: JS={js.get('error_code')}, Python={py_err}"
+                )
+            return
+
+        # Standard operations: compare success/failure parity
+        js_ok = js.get('success', False)
+        assert js_ok == py_ok, (
+            f"Success parity for {action_name}: "
+            f"JS={js_ok} ({js.get('error_code')}), "
+            f"Python={py_ok} ({py_err})"
+        )
+        # Both succeed → compare results
+        if js_ok and py_ok and py_result is not None and 'result' in js:
+            assert _cross_substrate_equal(py_result, js['result']), (
+                f"Result mismatch for {action_name}"
+            )
+        # Both fail → compare error_codes
+        if not js_ok and not py_ok:
+            js_code = js.get('error_code')
+            if expected_code and py_err:
+                assert js_code == py_err, (
+                    f"error_code: JS={js_code}, Python={py_err}"
+                )
+
+    # --- Generated: hemisphere routing (100 cases) ---
+
+    @given(er=_engine_result())
+    @settings(max_examples=100, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_generated_hemisphere_replay(self, er):
+        """Generated hemisphere routing replay."""
+        hemispheres = dict(_DEFAULT_HEMISPHERES)
+        js = _module_run_js_json_api({
+            'action': 'run_hemisphere_routing',
+            'engine_result': er, 'hemispheres': hemispheres,
+        })
+        py_ok, py_result, py_err = _run_python_r3('run_hemisphere_routing', {
+            'engine_result': er, 'hemispheres': dict(_DEFAULT_HEMISPHERES),
+        })
+        assert js.get('success') == py_ok, (
+            f"Success parity: JS={js.get('success')}, Python={py_ok}"
+        )
+        if js.get('success') and py_ok:
+            assert _cross_substrate_equal(py_result, js['result'])
+
+    # --- Generated: trace hash (60 cases) ---
+
+    @given(data=_linked_list_trace(min_length=1, max_length=20))
+    @settings(max_examples=60, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_generated_trace_hash_replay(self, data):
+        """Generated trace hash replay."""
+        trace, length = data
+        js = _module_run_js_json_api({
+            'action': 'hash_trace', 'trace': trace, 'maxEntries': 10000,
+        })
+        py_ok, py_result, py_err = _run_python_r3('hash_trace', {
+            'trace': trace, 'maxEntries': 10000,
+        })
+        assert js.get('success') == py_ok, (
+            f"Success parity: JS={js.get('success')}, Python={py_ok}"
+        )
+        if js.get('success') and py_ok:
+            assert _cross_substrate_equal(py_result, js['result'])
+
+    # --- Generated: reserved-field validation (50 cases) ---
+
+    @given(value=_clean_mu)
+    @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    def test_generated_validation_replay(self, value):
+        """Generated reserved-field validation replay (clean values)."""
+        js = _module_run_js_json_api({
+            'action': 'validate_reserved_fields', 'value': value,
+        })
+        py_ok, _, py_err = _run_python_r3('validate_reserved_fields', {'value': value})
+        js_valid = js.get('valid', False)
+        assert js_valid == py_ok, (
+            f"Validation parity: JS valid={js_valid}, Python={'accept' if py_ok else 'reject'}"
+        )
+
+    # --- Special: extra-key engine_result verification (10 cases) ---
+
+    def test_extra_key_engine_result_parity(self):
+        """Verify extra-key engine_result behavior is identical across substrates.
+
+        R3 verification item per user directive: do not assume outcome, verify
+        and document actual behavior.
+
+        Finding: Mu dict matching is EXACT (not subset) — extra keys cause
+        hemisphere.init pattern to not match, routing stalls, both substrates
+        reject.  Success/failure parity: MATCHED.  Error code parity: MATCHED
+        (both return input.shape_mismatch after R3-F1 classifier fix in 17N).
+        """
+        base = {
+            "value": 42, "closure_detected": False, "tau_step": 0,
+            "exhaustion_detected": False, "operator_frozen": None,
+            "frozen_set": None, "action": "none", "stall": False,
+        }
+        variants = [
+            {**base, "extra_field": "test"},
+            {**base, "bonus": 123},
+            {**base, "unknown_signal": True, "another": [1, 2, 3]},
+            {**base, "nested_extra": {"deep": {"value": True}}},
+            {**base, "stall": True, "extra": "with_stall"},
+            {**base, "closure_detected": True, "extra": "with_closure"},
+            {**base, "exhaustion_detected": True, "extra": "with_exhaust"},
+            {**base, "value": None, "extra": "with_null"},
+            {**base, "closure_detected": True, "stall": True, "extra": "compound"},
+            {**base, "extra1": 1, "extra2": 2, "extra3": 3},
+        ]
+        hemispheres = dict(_DEFAULT_HEMISPHERES)
+
+        for i, er in enumerate(variants):
+            js = _module_run_js_json_api({
+                'action': 'run_hemisphere_routing',
+                'engine_result': er,
+                'hemispheres': dict(hemispheres),
+            })
+            py_ok, py_result, py_err = _run_python_r3(
+                'run_hemisphere_routing',
+                {'engine_result': er, 'hemispheres': dict(hemispheres)},
+            )
+            js_ok = js.get('success', False)
+
+            # Assert success/failure parity (both must agree on accept/reject)
+            assert js_ok == py_ok, (
+                f"Extra-key variant {i}: success parity mismatch "
+                f"(JS={js_ok}, Python={py_ok}, "
+                f"js_error={js.get('error_code')}, py_error={py_err})"
+            )
+
+            # If both succeed, results must match
+            if js_ok and py_ok:
+                assert _cross_substrate_equal(py_result, js['result']), (
+                    f"Extra-key variant {i}: result parity mismatch"
+                )
+
+            # Assert error_code parity (R3-F1 remediation: classifier now maps
+            # hemisphere routing RuntimeError to input.shape_mismatch)
+            if not js_ok and not py_ok:
+                js_code = js.get('error_code', '')
+                # py_err is already classified by _run_python_r3's except clause
+                py_code = py_err
+                assert js_code == 'input.shape_mismatch', (
+                    f"Extra-key variant {i}: JS error_code={js_code}, "
+                    f"expected input.shape_mismatch"
+                )
+                assert py_code == 'input.shape_mismatch', (
+                    f"Extra-key variant {i}: Python classified code={py_code}, "
+                    f"expected input.shape_mismatch"
+                )
+
+    def test_classify_python_error_hemisphere_regression(self):
+        """R3-F1 regression: classify_python_error maps hemisphere RuntimeError
+        to input.shape_mismatch (not api.bad_request fallthrough)."""
+        # Exact message produced by step_mu.py run_hemisphere_routing
+        exc = RuntimeError(
+            "Hemisphere routing did not produce valid hemisphere dict. "
+            "Got: {'r_null': None, 'r_inf': None}"
+        )
+        code = classify_python_error(exc)
+        assert code == 'input.shape_mismatch', (
+            f"Expected input.shape_mismatch, got {code}"
         )
