@@ -19,7 +19,10 @@ import datetime
 import sys
 from typing import Any, Dict, List
 
-from rcx_pi.worlds.worlds_bridge import orbit_with_world_parsed
+try:
+    from rcx_pi.worlds.archive.worlds_bridge import orbit_with_world_parsed
+except ImportError:
+    orbit_with_world_parsed = None  # type: ignore[assignment]
 
 
 def _as_trace_json(
