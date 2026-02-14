@@ -325,8 +325,8 @@ If `engine.exhaustion_done_freeze` body changes (e.g., `{_run_engine: ...}` → 
 
 The following must be resolved BEFORE Boot1 implementation begins (i.e., before VECTOR → NEXT):
 
-**P1 (CRITICAL): JS boundary result validation gap.**
-Python `run_engine_pipeline` validates boundary results via `validate_no_kernel_reserved_fields(result, ...)` at `step_mu.py:validate_no_kernel_reserved_fields() call in run_engine_pipeline()`. JS `runEnginePipeline` does NOT — at `eval_step.js:runEnginePipeline() boundary result injection`, boundary results are injected into engine state without validation. A malicious boundary result could inject kernel-reserved fields (including `_tail_call` if added). This is an EXISTING parity gap that affects the current trampoline too. Fix: add `validateNoKernelReservedFields(result, 'boundary_result(' + operation + ')')` in JS before `context[injectKey] = result`.
+**P1 (CRITICAL): JS boundary result validation gap — RESOLVED (Round 17D).**
+~~Python `run_engine_pipeline` validates boundary results via `validate_no_kernel_reserved_fields(result, ...)`. JS `runEnginePipeline` does NOT.~~ **Fixed:** JS `runEnginePipeline` now calls `validateNoKernelReservedFields(result, 'boundary_result(' + operation + ')')` before injection, matching Python parity. 2 regression lock tests added. Merged in hemisphere hardening PR #249.
 
 **P2 (HARDENING): `_run_engine` not in `KERNEL_RESERVED_FIELDS`.**
 The current trampoline envelope `{_run_engine: ...}` is not protected by reserved-field validation. Domain data could theoretically contain `_run_engine`, though the host loop wraps initial input at `step_mu.py:run_engine_pipeline() initial state wrapping` so direct forgery is mitigated. However, a boundary result containing `_run_engine` in JS (where P1 is unfixed) could inject it. `_run_engine` should be added to `KERNEL_RESERVED_FIELDS` as defense-in-depth.
