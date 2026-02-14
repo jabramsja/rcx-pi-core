@@ -42,7 +42,7 @@ NAME: Gate 5 Meta-Circular Parity (COMPLETE)
 - [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 - [x] `step_kernel_mu()` wired to use structural kernel
-- [x] Security hardening complete (24 reserved fields: 22 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
+- [x] Security hardening complete (26 reserved fields: 24 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py` `step_kernel_mu`, see `@host_iteration` decorator)
 
 **Seed version note:** `match_mu()` now uses match.v2 + bridge projections directly for non-linear pattern conflict detection (B-structural approach, 2026-02-09). `subst_mu()` standalone function uses v1 seeds. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
@@ -312,7 +312,7 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
 - eval_step reclassified as BOOTSTRAP_PRIMITIVE (not debt)
 - **Security hardening (9-agent reviewed):**
   - Deep validation: recursive check prevents nested smuggling
-  - KERNEL_RESERVED_FIELDS: 22 fields (12 base + 3 Recurrence + 3 Exhaustion + 4 Bridge) + 2 ALGORITHM_ENTRYPOINT_KEYS = 24 total
+  - KERNEL_RESERVED_FIELDS: 24 fields (12 base + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge) + 2 ALGORITHM_ENTRYPOINT_KEYS = 26 total
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
 - Net debt: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 

@@ -672,8 +672,8 @@ class TestJSSecurityParity:
         """
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
-        # Python has 22 reserved fields (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge)
-        assert len(KERNEL_RESERVED_FIELDS) == 22, "Python reserved fields changed"
+        # Python has 24 reserved fields (12 kernel + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge)
+        assert len(KERNEL_RESERVED_FIELDS) == 24, "Python reserved fields changed"
 
         # JS test output should confirm reserved fields are checked
         result = subprocess.run(

@@ -569,7 +569,7 @@ is safe. We can relax later without breaking correctness.
   - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
   - Cross-substrate parity: Python and JavaScript produce identical results
   - JS loads exhaustion.v1.json (47 total projections across all seeds)
-  - KERNEL_RESERVED_FIELDS updated to 22 (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge)
+  - KERNEL_RESERVED_FIELDS updated to 24 (12 kernel + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge)
   - Automated parity test verifies Python/JS reserved fields match
 - **v0.1 (2026-02-01):** Address open questions and agent review findings:
   - Q1 RESOLVED: Pass operator_ids explicitly in input

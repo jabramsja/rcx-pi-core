@@ -85,7 +85,11 @@ const KERNEL_RESERVED_FIELDS = new Set([
   // Operator Exhaustion fields (Step 6 preparation, 2026-02-02)
   '_frozen', '_tau_step', '_operator_ids',
   // Bootstrap-Structural Bridge lookup phase fields (9-agent review, 2026-02-02)
-  '_lookup_name', '_lookup_value', '_lookup_bindings', '_original_bindings'
+  '_lookup_name', '_lookup_value', '_lookup_bindings', '_original_bindings',
+  // Engine pipeline dispatch field (Boot1 P2 hardening, 2026-02-14)
+  '_run_engine',
+  // Boot1 recursive loop contract field (Boot1 P3 hardening, 2026-02-14)
+  '_tail_call'
 ]);
 
 // Algorithm entrypoint keys used by trusted algorithm-runtime validation.
