@@ -44,12 +44,12 @@ def test_rule_precedence_top(tmp_path: Path):
 
 
 @pytest.mark.skipif(
-    not Path("rcx_pi_rust/mu_programs/rcx_core.mu").exists(),
-    reason="rcx_pi_rust archived (LegacySurfaceDecisionRecord.v0.md)"
+    not Path("mu/mu_programs/rcx_core.mu").exists(),
+    reason="mu/mu_programs/rcx_core.mu not found"
 )
 def test_rule_precedence_detects_real_world():
     # Ensure detector matches RCX-π real .mu syntax (route/rewrite lines like "[x] -> ra").
-    world = Path("rcx_pi_rust/mu_programs/rcx_core.mu")
+    world = Path("mu/mu_programs/rcx_core.mu")
     p = _run(["bash", "scripts/rule_precedence.sh", str(world), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)

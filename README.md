@@ -184,9 +184,9 @@ This is a tooling inspector only; it does not change runtime semantics.
 
 Examples:
 - Show the first 25 rules detected:
-  - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --top 25`
+  - `scripts/rule_precedence.sh mu/mu_programs/rcx_core.mu --top 25`
 - Emit a stable JSON summary:
-  - `scripts/rule_precedence.sh rcx_pi_rust/mu_programs/rcx_core.mu --json`
+  - `scripts/rule_precedence.sh mu/mu_programs/rcx_core.mu --json`
 
 ## CLI Quickstart
 See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.

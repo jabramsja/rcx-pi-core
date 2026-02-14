@@ -47,6 +47,7 @@
     "^tests/golden/",
     "^docs/TESTING_PERFORMANCE_ISSUE\\.md$",
     "^reports/",
-    "^AGENT_BRIDGE\\.md$"
+    "^AGENT_BRIDGE\\.md$",
+    "^mu/mu_programs/"
   ]
 }

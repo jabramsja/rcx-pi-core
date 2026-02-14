@@ -201,11 +201,11 @@ rule_signature_basis = None
 
 world_name = obj.get("world") if isinstance(obj, dict) else None
 if isinstance(world_name, str) and world_name:
-    # NOTE: rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
-    #       Retained as fallback search path until archive move completes.
+    # mu/mu_programs/ is the active fixture home (Round 21C).
+    # LEGACY_GUARDED: rcx_pi_rust fallback retained until archive move.
     candidates = [
+        Path("mu") / "mu_programs" / f"{world_name}.mu",
         Path("rcx_pi_rust") / "mu_programs" / f"{world_name}.mu",
-        Path("mu_programs") / f"{world_name}.mu",
     ]
     for wp in candidates:
         if wp.is_file():

@@ -118,7 +118,7 @@ report: dict = {
 comparison: dict = {}
 
 def _stage_world_for_rust_mu_programs(src_path: Path, tag: str, run_dir: Path) -> str:
-    # LEGACY: stages into rcx_pi_rust/mu_programs/ for trace-cli runner.
+    # LEGACY_GUARDED: stages into rcx_pi_rust/mu_programs/ for trace-cli runner.
     # rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
     mu_dir = Path("rcx_pi_rust") / "mu_programs"
     mu_dir.mkdir(parents=True, exist_ok=True)
