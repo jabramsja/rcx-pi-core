@@ -36,7 +36,7 @@
 
 **Key principle:** If a check doesn't trace to a North Star invariant, question whether it belongs.
 
-**Definition:** "Core implementation" = files in `rcx_pi/selfhost/` and `seeds/*.json`. When checklists reference "core implementation," search these locations.
+**Definition:** "Core implementation" = files in `rcx_pi/selfhost/` and `mu/`. When checklists reference "core implementation," search these locations.
 
 ## L2 PARTIAL Definition
 
