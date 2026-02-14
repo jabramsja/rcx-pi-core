@@ -14,7 +14,7 @@ Exempt paths (no governance required):
 - .pytest_cache/, .github/ - generated/config
 - /archive/ paths - historical, read-only
 - tests/golden/, tests/archive/ - test fixtures
-- rcx_pi_rust/, rcx_omega/, rcx_python_examples/ - separate governance
+- rcx_pi_rust/, rcx_omega/ - separate governance (rcx_python_examples/ archived)
 
 See docs/core/DocGovernance.v0.md for full policy.
 
