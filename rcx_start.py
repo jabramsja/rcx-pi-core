@@ -7,7 +7,7 @@ Single entrypoint / launcher menu for RCX-π Python stuff.
 - Always runs from the repo root (WorkingRCX)
 - Ensures `rcx_pi` is importable in child processes via PYTHONPATH
 - Lets you pick demos/tests from a simple menu
-- Can dynamically run any .py in rcx_python_examples/
+- Can dynamically run any .py in archive/rcx_python_examples/
 """
 
 import os
@@ -78,23 +78,23 @@ def run_cmd(cmd: List[str], cwd: str | None = None) -> int:
 
 
 # ---------------------------------------------------------------------
-# Dynamic example picker for rcx_python_examples/
+# Dynamic example picker for archive/rcx_python_examples/
 # ---------------------------------------------------------------------
 
 
 def pick_and_run_example() -> int:
     """
-    List all *.py files in rcx_python_examples/ and let the user pick one
+    List all *.py files in archive/rcx_python_examples/ and let the user pick one
     to run. Returns the exit code of the chosen script (or 0 if nothing run).
     """
-    examples_dir = os.path.join(REPO_ROOT, "rcx_python_examples")
+    examples_dir = os.path.join(REPO_ROOT, "archive", "rcx_python_examples")
     files = sorted(glob.glob(os.path.join(examples_dir, "*.py")))
 
     if not files:
-        print("\n[examples] No .py files found in rcx_python_examples/\n")
+        print("\n[examples] No .py files found in archive/rcx_python_examples/\n")
         return 0
 
-    print("\nExamples in rcx_python_examples/:")
+    print("\nExamples in archive/rcx_python_examples/:")
     for i, path in enumerate(files, start=1):
         print(f"  {i}) {os.path.basename(path)}")
     print("  q) back\n")
@@ -115,7 +115,7 @@ def pick_and_run_example() -> int:
         return 0
 
     basename = os.path.basename(files[idx - 1])
-    rel_path = os.path.join("rcx_python_examples", basename)
+    rel_path = os.path.join("archive", "rcx_python_examples", basename)
     print(f"\n[examples] running {basename}...\n")
     return run_python_file(rel_path)
 
@@ -158,7 +158,7 @@ def make_menu() -> Dict[str, MenuEntry]:
     )
 
     menu["6"] = (
-        "Run example from rcx_python_examples/",
+        "Run example from archive/rcx_python_examples/ (legacy)",
         pick_and_run_example,
     )
 

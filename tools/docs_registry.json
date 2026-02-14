@@ -41,7 +41,7 @@
     "\\.auto\\.md$",
     "^rcx_pi_rust/",
     "^rcx_omega/",
-    "^rcx_python_examples/",
+    "^archive/rcx_python_examples/",
     "^rcx_pi/specs/",
     "^tests/archive/",
     "^tests/golden/",

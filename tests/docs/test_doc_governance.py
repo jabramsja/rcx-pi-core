@@ -62,7 +62,7 @@ EXEMPT_PATTERNS = [
     r"\.auto\.md$",                # Auto-generated docs
     r"^rcx_pi_rust/",              # Rust subproject (archived)
     r"^rcx_omega/",                # Omega subproject (archive-bound, dir still present)
-    r"^rcx_python_examples/",      # Examples subproject
+    r"^archive/rcx_python_examples/",  # Examples subproject (archived)
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files
     r"^docs/TESTING_PERFORMANCE_ISSUE\.md$",  # Historical context (resolved issue)
