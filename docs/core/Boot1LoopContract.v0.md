@@ -329,7 +329,7 @@ The following must be resolved BEFORE Boot1 implementation begins (i.e., before 
 ~~Python `run_engine_pipeline` validates boundary results via `validate_no_kernel_reserved_fields(result, ...)`. JS `runEnginePipeline` does NOT.~~ **Fixed:** JS `runEnginePipeline` now calls `validateNoKernelReservedFields(result, 'boundary_result(' + operation + ')')` before injection, matching Python parity. 2 regression lock tests added. Merged in hemisphere hardening PR #249.
 
 **P2 (HARDENING): `_run_engine` not in `KERNEL_RESERVED_FIELDS`.**
-The current trampoline envelope `{_run_engine: ...}` is not protected by reserved-field validation. Domain data could theoretically contain `_run_engine`, though the host loop wraps initial input at `step_mu.py:run_engine_pipeline() initial state wrapping` so direct forgery is mitigated. However, a boundary result containing `_run_engine` in JS (where P1 is unfixed) could inject it. `_run_engine` should be added to `KERNEL_RESERVED_FIELDS` as defense-in-depth.
+The current trampoline envelope `{_run_engine: ...}` is not protected by reserved-field validation. Domain data could theoretically contain `_run_engine`, though the host loop wraps initial input at `step_mu.py:run_engine_pipeline() initial state wrapping` so direct forgery is mitigated. Historically this was higher risk when P1 was open; now the main concern is defense-in-depth. `_run_engine` should be added to `KERNEL_RESERVED_FIELDS`.
 
 **P3 (REQUIRED): `_tail_call` in `KERNEL_RESERVED_FIELDS` from day one.**
 When `_tail_call` is implemented, it must be added to `KERNEL_RESERVED_FIELDS` BEFORE the host loop gains the `_tail_call` branch. Otherwise, domain data could forge `_tail_call` and redirect control flow.
