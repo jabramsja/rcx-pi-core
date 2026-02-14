@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# DEPRECATED (Round 21B, 2026-02-14)
+# Status: No active callers. Depends on rcx_pi_rust (Cargo) which is
+#         architecturally incompatible with L3 (LegacySurfaceDecisionRecord.v0.md).
+# Replacement: None — fixture replay is not part of L3 selfhost path.
+# Owner: manual developer utility — safe to archive when rcx_pi_rust moves.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
