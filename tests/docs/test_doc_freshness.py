@@ -113,6 +113,11 @@ FORBIDDEN_PATTERNS = [
         "Outdated bridge claim: JS now loads bootstrap_structural.v1.json",
         "Update to reflect current behavior in mu/host/js/eval_step.js",
     ),
+    ForbiddenPattern(
+        r'(?<![/a-z])normalized_prototype/',
+        "normalized_prototype/ archived to archive/normalized_prototype/ (Round 22E)",
+        "Use archive/normalized_prototype/ or remove reference",
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 
