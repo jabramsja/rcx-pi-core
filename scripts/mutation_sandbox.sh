@@ -18,7 +18,7 @@ Usage:
 
 Notes:
   - This script’s "trace-cli" runner treats input as a WORLD (.mu rules).
-  - It stages baseline/mutated into rcx_pi_rust/mu_programs and calls:
+  - It stages baseline/mutated into mu/mu_programs and calls:
         python -m rcx_pi.worlds.world_trace_cli <WORLD_NAME> <SEEDTERM> --json
   - Scoring is done via scripts/world_score.sh reading trace JSON from stdin.
 USAGE
@@ -117,10 +117,9 @@ report: dict = {
 }
 comparison: dict = {}
 
-def _stage_world_for_rust_mu_programs(src_path: Path, tag: str, run_dir: Path) -> str:
-    # LEGACY_GUARDED: stages into rcx_pi_rust/mu_programs/ for trace-cli runner.
-    # rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
-    mu_dir = Path("rcx_pi_rust") / "mu_programs"
+def _stage_world_for_mu_programs(src_path: Path, tag: str, run_dir: Path) -> str:
+    # Stage world files into mu/mu_programs/ for trace-cli runner.
+    mu_dir = Path("mu") / "mu_programs"
     mu_dir.mkdir(parents=True, exist_ok=True)
     run_id_env = os.environ.get("RCX_SANDBOX_RUN_ID") or run_dir.name or str(int(time.time()))
     world_name = f"__sandbox_{run_id_env}_{tag}"
@@ -464,7 +463,7 @@ else:
 
     base_world_path = run_dir / "__sandbox_baseline_world.mu"
     base_world_path.write_text(baseline_text, encoding="utf-8")
-    base_world_name = _stage_world_for_rust_mu_programs(base_world_path, "baseline", run_dir)
+    base_world_name = _stage_world_for_mu_programs(base_world_path, "baseline", run_dir)
 
     base_score = run_trace_and_score(base_world_name, "baseline")
     base_sig = base_score.get("trace_signature")
@@ -514,7 +513,7 @@ else:
 
         mut_world_path = run_dir / f"__sandbox_mutated_world_a{attempt}.mu"
         mut_world_path.write_text(mutated_text, encoding="utf-8")
-        mut_world_name = _stage_world_for_rust_mu_programs(mut_world_path, f"mutated_a{attempt}", run_dir)
+        mut_world_name = _stage_world_for_mu_programs(mut_world_path, f"mutated_a{attempt}", run_dir)
 
         mut_score = run_trace_and_score(mut_world_name, "mutated")
         mut_sig = mut_score.get("trace_signature")

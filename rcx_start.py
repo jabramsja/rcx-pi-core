@@ -131,8 +131,8 @@ def make_menu() -> Dict[str, MenuEntry]:
     menu: Dict[str, MenuEntry] = {}
 
     menu["1"] = (
-        "Worlds: mutation demo (rcx_pi.worlds.worlds_mutate_demo)",
-        lambda: run_python_module("rcx_pi.worlds.worlds_mutate_demo"),
+        "Worlds: mutation demo (ARCHIVED — rcx_pi.worlds.archive.worlds_mutate_demo)",
+        lambda: run_python_module("rcx_pi.worlds.archive.worlds_mutate_demo"),
     )
 
     menu["2"] = (
@@ -163,8 +163,8 @@ def make_menu() -> Dict[str, MenuEntry]:
     )
 
     menu["7"] = (
-        "Rust: green examples suite (rcx_pi_rust/scripts/green_examples.sh)",
-        lambda: run_cmd(["bash", "rcx_pi_rust/scripts/green_examples.sh"]),
+        "Rust: green examples suite (ARCHIVED — rcx_pi_rust removed)",
+        lambda: run_cmd(["bash", "scripts/green_examples.sh"]),
     )
 
     menu["8"] = (
