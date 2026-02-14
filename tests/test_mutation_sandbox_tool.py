@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=False, text=True, capture_output=True)
@@ -105,6 +107,10 @@ def test_mutation_sandbox_shuffle_changes_order_of_rule_like_lines(tmp_path: Pat
     assert mutated != ""
 
 
+@pytest.mark.skipif(
+    not any(Path(c).exists() for c in ["rcx_pi_rust/mu_programs/rcx_core.mu", "rcx_pi_rust/test_w.mu"]),
+    reason="rcx_pi_rust archived (LegacySurfaceDecisionRecord.v0.md)"
+)
 def test_mutation_sandbox_smoke_on_repo_world():
     # best-effort: ensure tool can run on a real repo .mu without exploding
     world = None

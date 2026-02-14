@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=False, text=True, capture_output=True)
@@ -43,10 +45,13 @@ def test_world_doc_markdown_emits_header(tmp_path: Path):
     assert "Action histogram" in p.stdout
 
 
+@pytest.mark.skipif(
+    not Path("rcx_pi_rust/mu_programs/rcx_core.mu").exists(),
+    reason="rcx_pi_rust archived (LegacySurfaceDecisionRecord.v0.md)"
+)
 def test_world_doc_detects_real_world_file():
     # Ensure this works on an actual repo world
     world = Path("rcx_pi_rust/mu_programs/rcx_core.mu")
-    assert world.is_file()
     p = _run(["bash", "scripts/world_doc.sh", str(world), "--json", "--top", "5"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
