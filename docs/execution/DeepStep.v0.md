@@ -388,7 +388,7 @@ At original draft time, promotion required:
 
 **Production module**: `rcx_pi/deep_eval.py`
 **Tests**: `tests/test_deep_eval_v0.py` (24 tests)
-**Prototype reference**: `prototypes/test_deep_eval_v0.py`
+**Prototype reference**: `archive/prototypes/test_deep_eval_v0.py`
 
 ### Test Results (24 tests passing)
 
@@ -440,7 +440,7 @@ The projection logic itself is pure Mu - no host dependencies.
 
 - `rcx_pi/deep_eval.py` - Production module
 - `tests/test_deep_eval_v0.py` - Production tests (24 tests)
-- `prototypes/test_deep_eval_v0.py` - Original prototype
+- `archive/prototypes/test_deep_eval_v0.py` - Original prototype
 - `docs/core/EVAL_SEED.v0.md` - EVAL_SEED spec
 - Zipper data structure - functional tree navigation
 - Abstract machines (SECD, CEK) - stack-based evaluation

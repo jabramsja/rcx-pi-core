@@ -86,9 +86,9 @@ echo "== 1f) Seed police =="
 ./tools/seed_police.sh
 
 echo "== 1g) Anti-cheat scans =="
-# No private attr access in tests/ or prototypes/
-echo "-- no private attr access in tests/ or prototypes/"
-if grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ 2>/dev/null | \
+# No private attr access in tests/ or archive/prototypes/
+echo "-- no private attr access in tests/ or archive/prototypes/"
+if grep -RInE '\._[a-zA-Z0-9]+' tests/ archive/prototypes/ 2>/dev/null | \
     grep -v 'self\._' | \
     grep -v '_getframe.*CONTRABAND_OK' | \
     grep -v '# ANTICHEAT_OK' | \
@@ -100,8 +100,8 @@ if grep -RInE '\._[a-zA-Z0-9]+' tests/ prototypes/ 2>/dev/null | \
 fi
 echo "OK"
 
-# No underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)
-echo "-- no underscored imports from rcx_pi in tests/ or prototypes/ (AST-based)"
+# No underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)
+echo "-- no underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)"
 python3 tools/check_underscore_imports.py || exit 1
 echo "OK"
 

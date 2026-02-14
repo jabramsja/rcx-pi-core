@@ -58,7 +58,7 @@ If a task is not listed here, it is NOT to be implemented.
   - Run `./tools/seed_police.sh` to verify seed integrity and no host leakage
   - New seeds must be loaded in both Python and JavaScript
   - Parity vectors must pass on both substrates before merge
-- **Pre-commit doc review**: Before committing changes to `rcx_pi/`, `prototypes/`, or `mu/`:
+- **Pre-commit doc review**: Before committing changes to `rcx_pi/` or `mu/`:
   1. Read relevant docs in `docs/` (e.g., EVAL_SEED.v0.md, DeepStep.v0.md)
   2. Update docs if implementation differs from spec
   3. Update TASKS.md status if completing/progressing items
