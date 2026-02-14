@@ -3161,6 +3161,33 @@ class TestTraceHashParityFuzzer:
     linked-list traces and verifies Python and JS produce identical hashed output.
     """
 
+    def test_unicode_key_order_hash_parity_regression(self):
+        """Regression: mixed BMP/non-BMP dict keys hash identically on both substrates."""
+        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+
+        # Python sorts dict keys by Unicode code points. JS default UTF-16 sorting
+        # diverges for this pair unless a code-point comparator is used.
+        trace = {
+            "head": {
+                "step": 0,
+                "state": {"\uf900": None, "\U00010000": None},
+            },
+            "tail": None,
+        }
+
+        py_result = hash_trace_for_recurrence(trace, max_entries=10000)
+        js_response = _module_run_js_json_api({
+            "action": "hash_trace",
+            "trace": trace,
+            "maxEntries": 10000,
+        })
+        assert js_response["success"], f"JS hash_trace failed: {js_response.get('error')}"
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"Unicode key ordering parity mismatch:\n"
+            f"  Python: {json.dumps(py_result, sort_keys=True)[:300]}\n"
+            f"  JS:     {json.dumps(js_response['result'], sort_keys=True)[:300]}"
+        )
+
     @given(data=_linked_list_trace(min_length=1, max_length=50))
     @settings(max_examples=120, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_trace_hash_parity(self, data):
