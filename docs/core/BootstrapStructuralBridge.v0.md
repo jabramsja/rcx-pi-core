@@ -573,7 +573,7 @@ To run algorithms through the full structural kernel, we need:
 2. **Body normalization control** - Substitution normalizes bodies, which breaks algorithm state format
 3. **Context-aware normalization** - Different behavior for match state vs algorithm state
 
-**Current status:** The bridge provides structural non-linear support. Algorithm execution uses the practical Python path. This is DOCUMENTED scaffolding, not a hidden dependency.
+**Current status:** The bridge provides structural non-linear support. Production algorithm execution defaults to structural kernel bridge mode via `run_algorithm_meta_circular(..., execution_mode="structural")`. Bootstrap algorithm execution remains explicit debug fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`).
 
 ---
 

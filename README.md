@@ -89,7 +89,7 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/closures/exhaustion.v1.json` | Operator exhaustion (11 projections) - Rule 3.1 |
 | `mu/programs/hemispheres.v1.json` | Hemisphere routing (12 projections) - native structural routing |
 | `mu/programs/paxos_demo.v1.json` | Paxos deadlock demo (6 projections) - application |
-| `mu/programs/rcx_engine.v1.json` | Engine orchestration (7 projections) - structural specification |
+| `mu/programs/rcx_engine.v1.json` | Engine orchestration (11 projections) - structural specification |
 | `mu/utilities/classify.v1.json` | Type classification (~6 projections) |
 | `mu/utilities/eval.v1.json` | Evaluation (~7 projections) |
 
@@ -193,4 +193,4 @@ See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emi
 
 ---
 
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-14*

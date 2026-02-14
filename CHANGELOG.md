@@ -2,6 +2,21 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-14
+
+### Documentation Drift Sync (Governance + Schemas)
+
+- Synced Boot1 prerequisite status in governance docs:
+  - `_run_engine` reservation (P2) marked resolved (Round 20B)
+  - `_tail_call` reservation (P3) marked resolved (Round 20C)
+- Updated schema-doc path references to canonical `docs/schemas/*` locations:
+  - CLI schema contract examples
+  - CLI quickstart schema links
+  - world_trace schema markdown/json `schema_doc` alignment
+- Corrected stale `rcx_engine.v1.json` projection count in root README (7 → 11)
+- Updated STATUS proof block to use `seed_police` authoritative totals (15 seeds, 102 projection IDs, 0 collisions)
+- Regenerated `docs/README.md` index to remove stale listing drift
+
 ## 2026-02-12
 
 ### JS Engine-Hemisphere Parity (L3 Mandatory)

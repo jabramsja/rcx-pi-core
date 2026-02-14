@@ -43,7 +43,7 @@ Notes:
 
 The canonical JSON Schema for this contract lives at:
 
-docs/world_trace_json_schema.json
+docs/schemas/world_trace_json_schema.json
 
 Consumers SHOULD validate against the JSON schema for strict compatibility.
 

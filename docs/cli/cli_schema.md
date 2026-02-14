@@ -25,7 +25,7 @@ Several RCX CLI entrypoints support `--schema`. When invoked, they must print ex
 
 Example:
 
-    rcx-program-run.v1 docs/program_run_schema.md docs/schemas/program_run_schema.json
+    rcx-program-run.v1 docs/schemas/program_run_schema.md docs/schemas/program_run_schema.json
 
 ### Canonical helper
 
@@ -48,7 +48,7 @@ This contract is intentionally strict (tests enforce it):
 - No leading/trailing whitespace.
 - No tabs or embedded whitespace inside any field.
 - Paths are repo-relative and follow conventions:
-  - doc: `docs/*.md`
+  - doc: `docs/schemas/*.md`
   - schema: `docs/schemas/*.json`
 
 ### Covered emitters

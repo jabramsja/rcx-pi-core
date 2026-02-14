@@ -21,8 +21,8 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 This document describes the *metadata-only* JSON shape emitted by:
 
-- `python3 -m rcx_pi.programs.program_descriptor_cli <program>`
-- `python3 -m rcx_pi.programs.program_descriptor_cli --schema`
+- `python3 -m rcx_pi.program_descriptor_cli <program>`
+- `python3 -m rcx_pi.program_descriptor_cli --schema`
 
 ## Required top-level fields
 

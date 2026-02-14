@@ -689,7 +689,7 @@ New organized structure makes architecture visible:
 - [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] hemispheres.v1.json: 12 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
 - [x] Total: 47 core projections across 5 L3-complete seeds + 12 hemisphere projections
-- [x] Additional: 71 projections in utilities/programs/bridge (118 total across all mu/)
+- [x] `seed_police.sh`: 15 seeds valid, 102 projection IDs, 0 collisions
 - [x] 5 Recurrence + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**

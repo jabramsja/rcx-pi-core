@@ -323,16 +323,16 @@ If `engine.exhaustion_done_freeze` body changes (e.g., `{_run_engine: ...}` → 
 
 ### Security Prerequisites (Round 17B Adversary Findings)
 
-The following must be resolved BEFORE Boot1 implementation begins (i.e., before VECTOR → NEXT):
+The following prerequisites were required before Boot1 implementation planning can advance:
 
 **P1 (CRITICAL): JS boundary result validation gap — RESOLVED (Round 17D).**
 ~~Python `run_engine_pipeline` validates boundary results via `validate_no_kernel_reserved_fields(result, ...)`. JS `runEnginePipeline` does NOT.~~ **Fixed:** JS `runEnginePipeline` now calls `validateNoKernelReservedFields(result, 'boundary_result(' + operation + ')')` before injection, matching Python parity. 2 regression lock tests added. Merged in hemisphere hardening PR #249.
 
-**P2 (HARDENING): `_run_engine` not in `KERNEL_RESERVED_FIELDS`.**
-The current trampoline envelope `{_run_engine: ...}` is not protected by reserved-field validation. Domain data could theoretically contain `_run_engine`, though the host loop wraps initial input at `step_mu.py:run_engine_pipeline() initial state wrapping` so direct forgery is mitigated. Historically this was higher risk when P1 was open; now the main concern is defense-in-depth. `_run_engine` should be added to `KERNEL_RESERVED_FIELDS`.
+**P2 (HARDENING): `_run_engine` in `KERNEL_RESERVED_FIELDS` — RESOLVED (Round 20B).**
+`_run_engine` is now reserved in both Python and JavaScript runtimes. This closes the defense-in-depth gap for trampoline envelope forgery.
 
-**P3 (REQUIRED): `_tail_call` in `KERNEL_RESERVED_FIELDS` from day one.**
-When `_tail_call` is implemented, it must be added to `KERNEL_RESERVED_FIELDS` BEFORE the host loop gains the `_tail_call` branch. Otherwise, domain data could forge `_tail_call` and redirect control flow.
+**P3 (REQUIRED): `_tail_call` in `KERNEL_RESERVED_FIELDS` from day one — RESOLVED (Round 20C).**
+`_tail_call` is now reserved in both Python and JavaScript runtimes ahead of Boot1 implementation, preventing control-flow forgery by domain data.
 
 ---
 
@@ -407,14 +407,14 @@ If a checkpoint is taken mid-re-entry, the resume token must capture the re-entr
 
 ### Promotion Criteria (VECTOR → NEXT)
 
-All 5 criteria from TASKS.md must be satisfied, PLUS the 3 security prerequisites (P1–P3):
+All 6 criteria from TASKS.md must be satisfied; security prerequisites P1–P3 are resolved and must remain green:
 
 1. **Boot1LoopContract design doc approved** — This document. Requires founder review.
 2. **ABI compatibility demonstrated** — §2 defines shared envelope. Shadow merge proves compatibility.
 3. **Parity test plan drafted** — §5 defines 6 test categories. Implementation deferred to NEXT.
 4. **Security review: no new bypass paths or primitive count increase** — §4 defines 7 safety invariants. Agent review required at shadow merge.
-5. **Security prerequisites resolved** — P1 (JS boundary result validation), P2 (`_run_engine` in reserved fields), P3 (`_tail_call` in reserved fields from day one). P1 and P2 are pre-existing gaps independent of Boot1.
-5. **Explicit VECTOR → NEXT promotion in TASKS.md with rationale** — Not yet. Pending founder approval of this doc.
+5. **Security prerequisites resolved (and preserved)** — P1 (Round 17D), P2 (Round 20B), P3 (Round 20C).
+6. **Explicit VECTOR → NEXT promotion in TASKS.md with rationale** — Not yet. Pending founder approval of this doc.
 
 ---
 

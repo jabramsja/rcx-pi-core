@@ -62,9 +62,9 @@ rcx-world-trace --schema
 
 ## JSON schemas
 
-- Program descriptor: docs/program_descriptor_schema.json (tag: rcx-program-descriptor.v1)
-- Program run:        docs/program_run_schema.json (tag: rcx-program-run.v1)
-- World trace:        docs/world_trace_json_schema.md (tag: rcx-world-trace.v1)
+- Program descriptor: docs/schemas/program_descriptor_schema.json (tag: rcx-program-descriptor.v1)
+- Program run:        docs/schemas/program_run_schema.json (tag: rcx-program-run.v1)
+- World trace:        docs/schemas/world_trace_json_schema.md (tag: rcx-world-trace.v1)
 
 
 ## Umbrella command (non-conflicting)
