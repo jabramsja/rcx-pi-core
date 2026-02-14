@@ -53,6 +53,11 @@ ROOT_FILES = {
         "must_contain": ["#"],  # Just needs to have some headers
         "must_link_to": [],
     },
+    "AGENT_BRIDGE.md": {
+        "required": False,  # Collaboration ledger, not a core source of truth
+        "must_contain": ["## Rules", "## Round Format"],
+        "must_link_to": [],
+    },
 }
 
 # Paths that should exist if referenced in root files

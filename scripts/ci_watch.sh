@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (Round 18 audit, 2026-02-14)
+# Status: No callers in CI, Makefile, tools, or tests.
+# Replacement: Use `gh run watch` or `gh run view` directly.
+# Owner: manual developer utility — safe to archive or delete.
 set -euo pipefail
 export HISTTIMEFORMAT="${HISTTIMEFORMAT-}"
 
