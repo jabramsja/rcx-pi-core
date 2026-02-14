@@ -10,7 +10,7 @@ These tests assume:
     - you have run:
           python3 -m rcx_pi.worlds_json to-mu \
               worlds_json/paradox_1over0.json \
-              rcx_pi_rust/mu_programs/paradox_1over0.mu
+              mu/mu_programs/paradox_1over0.mu
 
     - probe_world(world_name, seeds, max_steps) returns a fingerprint dict:
 

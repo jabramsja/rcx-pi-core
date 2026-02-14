@@ -17,6 +17,13 @@ def main() -> None:
     seed = sys.argv[2]
     max_steps = int(sys.argv[3]) if len(sys.argv) >= 4 else 20
 
+    if orbit_with_world_parsed is None:
+        print(
+            f"ERROR: Cannot run orbit for world {world!r}: Rust bridge unavailable "
+            "(worlds_bridge archived in Round 21D).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     code, raw, parsed = orbit_with_world_parsed(world, seed, max_steps)
     if code != 0:
         # Bubble up Rust-side error output so it’s visible.
