@@ -123,6 +123,11 @@ FORBIDDEN_PATTERNS = [
         "corpus/ archived to archive/corpus/ (Round 22F)",
         "Use archive/corpus/ or remove reference",
     ),
+    ForbiddenPattern(
+        r'(?<![/a-z])rcx_python_examples/',
+        "rcx_python_examples/ archived to archive/rcx_python_examples/ (Round 22G)",
+        "Use archive/rcx_python_examples/ or remove reference",
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 

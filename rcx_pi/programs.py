@@ -533,7 +533,7 @@ def activate(ev, program: Motif, arg: Motif) -> Motif:
 
 
 # ---------------------------------------------------------------------------
-# Backwards-compatibility shims for older rcx_python_examples/test_programs.py
+# Backwards-compatibility shims for older archive/rcx_python_examples/test_programs.py
 # ---------------------------------------------------------------------------
 
 # Historically, some examples treated "programs" as tagged motif blocks.
