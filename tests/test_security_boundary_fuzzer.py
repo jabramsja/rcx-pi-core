@@ -133,8 +133,8 @@ class TestReservedFieldsBasic:
         Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
         to ALGORITHM_ENTRYPOINT_KEYS.
         """
-        assert len(KERNEL_RESERVED_FIELDS) == 22, (
-            f"Expected 22 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
+        assert len(KERNEL_RESERVED_FIELDS) == 24, (
+            f"Expected 24 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
         )
 
 

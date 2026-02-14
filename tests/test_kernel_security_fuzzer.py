@@ -326,7 +326,7 @@ class TestKernelReservedFieldsFuzzer:
         Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
         to ALGORITHM_ENTRYPOINT_KEYS.
         """
-        assert len(KERNEL_RESERVED_FIELDS) == 22
+        assert len(KERNEL_RESERVED_FIELDS) == 24
 
     def test_reserved_fields_are_underscore_prefixed(self):
         """All reserved fields start with underscore."""
