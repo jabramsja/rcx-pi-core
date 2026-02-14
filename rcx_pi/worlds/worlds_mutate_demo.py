@@ -2,6 +2,10 @@
 """
 Tiny evolution demo for RCX-π worlds.
 
+LEGACY DEPENDENCY: Writes .mu files to rcx_pi_rust/mu_programs/ and probes
+via the Rust engine. rcx_pi_rust is ARCHIVE-bound
+(LegacySurfaceDecisionRecord.v0.md). No active callers in the L3 path.
+
 - Start from a base world (e.g. rcx_core).
 - Make a few JSON mutants by flipping rule actions.
 - Regenerate .mu files for those mutants.

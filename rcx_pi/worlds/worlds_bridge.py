@@ -1,6 +1,10 @@
 """
 Bridge from Python (rcx_pi) to the Rust RCX-π engine.
 
+LEGACY DEPENDENCY: This module requires rcx_pi_rust/ with a working Cargo
+toolchain. rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md)
+and architecturally incompatible with L3. No active callers in the L3 path.
+
 This module shells out to the Rust examples in rcx_pi_rust/ so that
 Python code can:
 

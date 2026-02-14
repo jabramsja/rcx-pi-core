@@ -27,6 +27,8 @@ def _discover_candidates(repo_root: Path) -> list[str]:
     ]
 
     # Common locations (fast paths)
+    # NOTE: rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
+    #       Retained as fallback search path until archive move completes.
     for d in [
         repo_root / "mu_programs",
         repo_root / "rcx_pi_rust" / "mu_programs",

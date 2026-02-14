@@ -49,7 +49,8 @@ def _resolve_mu_program(program: str, cwd_base: Path) -> Path:
     # 3) legacy location
     candidates.append((repo_root / "mu_programs" / f"{name}.mu").resolve())
 
-    # 4) current location (your layout)
+    # 4) legacy location (rcx_pi_rust — ARCHIVE decision, LegacySurfaceDecisionRecord.v0.md)
+    #    Retained as fallback until archive move completes.
     candidates.append(
         (repo_root / "rcx_pi_rust" / "mu_programs" / f"{name}.mu").resolve()
     )

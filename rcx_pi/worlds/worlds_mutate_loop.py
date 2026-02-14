@@ -1,4 +1,7 @@
 # rcx_pi/worlds/worlds_mutate_loop.py
+# LEGACY DEPENDENCY: Reads/writes .mu files from rcx_pi_rust/mu_programs/.
+# rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
+# No active callers in the L3 path.
 
 from __future__ import annotations
 
