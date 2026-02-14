@@ -61,7 +61,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     "exhaustion.v1.json": "3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c",
     # RCX Engine: structural specification for pipeline orchestration (7 projections)
     # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
-    "rcx_engine.v1.json": "52f001f9216e387b740a9f4d3972dece9258ca2572769aa84c4fc31e8e60d34a",
+    "rcx_engine.v1.json": "6024e9be1113d0288c06cb5073f573bd9a33e8aa9589c1d74fc55bf835ec37c7",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
@@ -186,16 +186,17 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
     ],
     # RCX Engine: main program orchestrating recurrence + exhaustion
     "rcx_engine.v1.json": [
-        "engine.init",              # Entry: default config
-        "engine.init_config",       # Entry: custom config
-        "engine.trace_done",        # Trace complete -> request boundary hash
-        "engine.hash_done_fix",     # Stall detected -> dispatch fix.v1.json (Rule 0.6)
-        "engine.hash_done",         # Non-stall -> start recurrence
-        "engine.fix_done_applied",  # Fix applied -> recurrence with fixed result
-        "engine.fix_done_none",     # Fix not applicable -> recurrence with original
-        "engine.recurrence_done",   # Recurrence done -> exhaustion
-        "engine.exhaustion_done",   # Exhaustion done -> final result
-        "engine.unwrap",            # Extract final result
+        "engine.init",                      # Entry: default config
+        "engine.init_config",               # Entry: custom config (+ trampoline re-entry)
+        "engine.trace_done",                # Trace complete -> request boundary hash
+        "engine.hash_done_fix",             # Stall detected -> dispatch fix.v1.json (Rule 0.6)
+        "engine.hash_done",                 # Non-stall -> start recurrence
+        "engine.fix_done_applied",          # Fix applied -> recurrence with fixed result
+        "engine.fix_done_none",             # Fix not applicable -> recurrence with original
+        "engine.recurrence_done",           # Recurrence done -> exhaustion
+        "engine.exhaustion_done_freeze",    # action=freeze -> trampoline re-entry (TRANSITIONAL)
+        "engine.exhaustion_done_terminal",  # Non-freeze -> final result
+        "engine.unwrap",                    # Extract final result
     ],
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": [

@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": "1.2.0",
+    "version": "1.3.0",
     "name": "RCX_ENGINE",
-    "description": "Main RCX engine combining fix, recurrence, and exhaustion detection",
+    "description": "Main RCX engine combining fix, recurrence, and exhaustion detection with structural iteration (TRANSITIONAL trampoline, Boot1 sunset policy applies)",
     "doc": "docs/core/RCXEngine.v0.md",
     "spec_ref": "RCXEngineNew.pdf Rule 0.6, Rule 2.2♢, Rule 3.1",
     "status": "structural_specification",
@@ -21,7 +21,9 @@
       "Boundary operations use _boundary_request (algebraic effect protocol)",
       "Host services _boundary_request generically: operation, input, context, inject_key",
       "Any host (Python, JS, Rust) can drive the engine from one generic dispatch loop",
-      "Stall triggers Fix dispatch (Rule 0.6) before recurrence detection"
+      "Stall triggers Fix dispatch (Rule 0.6) before recurrence detection",
+      "Structural iteration: action=freeze triggers trampoline re-entry via _run_engine (TRANSITIONAL, Boot1 sunset policy applies)",
+      "_config carries projections and max_steps through all phases for re-entry envelope (Boot1-compatible ABI)"
     ]
   },
   "projections": [
@@ -44,7 +46,11 @@
           },
           "context": {
             "_mode": "engine",
-            "_frozen": null
+            "_frozen": null,
+            "_config": {
+              "projections": {"var": "projs"},
+              "max_steps": 100
+            }
           },
           "inject_key": "_trace_result"
         }
@@ -71,7 +77,11 @@
           },
           "context": {
             "_mode": "engine",
-            "_frozen": {"var": "frozen"}
+            "_frozen": {"var": "frozen"},
+            "_config": {
+              "projections": {"var": "projs"},
+              "max_steps": {"var": "max"}
+            }
           },
           "inject_key": "_trace_result"
         }
@@ -83,6 +93,7 @@
       "pattern": {
         "_mode": "engine",
         "_frozen": {"var": "frozen"},
+        "_config": {"var": "config"},
         "_trace_result": {
           "result": {"var": "result"},
           "trace": {"var": "trace"},
@@ -98,7 +109,8 @@
             "_result": {"var": "result"},
             "_frozen": {"var": "frozen"},
             "_stall": {"var": "stall"},
-            "_raw_trace": {"var": "trace"}
+            "_raw_trace": {"var": "trace"},
+            "_config": {"var": "config"}
           },
           "inject_key": "_hashed_trace"
         }
@@ -113,6 +125,7 @@
         "_frozen": {"var": "frozen"},
         "_stall": true,
         "_raw_trace": {"var": "raw_trace"},
+        "_config": {"var": "config"},
         "_hashed_trace": {"var": "hashed_trace"}
       },
       "body": {
@@ -133,6 +146,7 @@
             "_frozen": {"var": "frozen"},
             "_stall": true,
             "_raw_trace": {"var": "raw_trace"},
+            "_config": {"var": "config"},
             "_hashed_trace": {"var": "hashed_trace"}
           },
           "inject_key": "_fix_result"
@@ -148,6 +162,7 @@
         "_frozen": {"var": "frozen"},
         "_stall": {"var": "stall"},
         "_raw_trace": {"var": "raw_trace"},
+        "_config": {"var": "config"},
         "_hashed_trace": {"var": "hashed_trace"}
       },
       "body": {
@@ -164,7 +179,8 @@
             "_mode": "engine",
             "_frozen": {"var": "frozen"},
             "_stall": {"var": "stall"},
-            "_raw_trace": {"var": "raw_trace"}
+            "_raw_trace": {"var": "raw_trace"},
+            "_config": {"var": "config"}
           },
           "inject_key": "_recurrence_result"
         }
@@ -179,6 +195,7 @@
         "_frozen": {"var": "frozen"},
         "_stall": true,
         "_raw_trace": {"var": "raw_trace"},
+        "_config": {"var": "config"},
         "_hashed_trace": {"var": "hashed_trace"},
         "_fix_result": {
           "fixed_state": {"var": "fixed"},
@@ -200,7 +217,8 @@
             "_mode": "engine",
             "_frozen": {"var": "frozen"},
             "_stall": false,
-            "_raw_trace": {"var": "raw_trace"}
+            "_raw_trace": {"var": "raw_trace"},
+            "_config": {"var": "config"}
           },
           "inject_key": "_recurrence_result"
         }
@@ -215,6 +233,7 @@
         "_frozen": {"var": "frozen"},
         "_stall": true,
         "_raw_trace": {"var": "raw_trace"},
+        "_config": {"var": "config"},
         "_hashed_trace": {"var": "hashed_trace"},
         "_fix_result": {
           "fixed_state": {"var": "fixed"},
@@ -236,7 +255,8 @@
             "_mode": "engine",
             "_frozen": {"var": "frozen"},
             "_stall": true,
-            "_raw_trace": {"var": "raw_trace"}
+            "_raw_trace": {"var": "raw_trace"},
+            "_config": {"var": "config"}
           },
           "inject_key": "_recurrence_result"
         }
@@ -250,6 +270,7 @@
         "_frozen": {"var": "frozen"},
         "_stall": {"var": "stall"},
         "_raw_trace": {"var": "raw_trace"},
+        "_config": {"var": "config"},
         "_recurrence_result": {
           "closure_detected": {"var": "closure"},
           "tau_step": {"var": "tau"},
@@ -273,21 +294,52 @@
             "_stall": {"var": "stall"},
             "_closure_detected": {"var": "closure"},
             "_tau_step": {"var": "tau"},
-            "_final_result": {"var": "result"}
+            "_final_result": {"var": "result"},
+            "_config": {"var": "config"}
           },
           "inject_key": "_exhaustion_result"
         }
       }
     },
     {
-      "id": "engine.exhaustion_done",
-      "description": "Exhaustion complete — produce final engine result",
+      "id": "engine.exhaustion_done_freeze",
+      "description": "Exhaustion detected with action=freeze — trampoline re-entry (TRANSITIONAL, Boot1 sunset policy)",
       "pattern": {
         "_mode": "engine",
         "_stall": {"var": "stall"},
         "_closure_detected": {"var": "closure"},
         "_tau_step": {"var": "tau"},
         "_final_result": {"var": "result"},
+        "_config": {
+          "projections": {"var": "projs"},
+          "max_steps": {"var": "max"}
+        },
+        "_exhaustion_result": {
+          "exhaustion_detected": {"var": "exhausted"},
+          "operator_to_freeze": {"var": "op"},
+          "frozen": {"var": "new_frozen"},
+          "action": "freeze"
+        }
+      },
+      "body": {
+        "_run_engine": {
+          "projections": {"var": "projs"},
+          "input": {"var": "result"},
+          "max_steps": {"var": "max"},
+          "frozen": {"var": "new_frozen"}
+        }
+      }
+    },
+    {
+      "id": "engine.exhaustion_done_terminal",
+      "description": "Exhaustion complete (non-freeze) — produce final engine result",
+      "pattern": {
+        "_mode": "engine",
+        "_stall": {"var": "stall"},
+        "_closure_detected": {"var": "closure"},
+        "_tau_step": {"var": "tau"},
+        "_final_result": {"var": "result"},
+        "_config": {"var": "config"},
         "_exhaustion_result": {
           "exhaustion_detected": {"var": "exhausted"},
           "operator_to_freeze": {"var": "op"},
