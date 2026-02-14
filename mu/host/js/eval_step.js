@@ -1952,6 +1952,11 @@ function runEnginePipeline(projections, inputValue, options) {
         throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
       }
 
+      // SECURITY: validate boundary result before re-injection.
+      // Prevents boundary operations from smuggling kernel-reserved
+      // fields back into engine state (parity with Python step_mu.py).
+      validateNoKernelReservedFields(result, `boundary_result(${operation})`);
+
       context[injectKey] = result;
       state = context;
       continue;
