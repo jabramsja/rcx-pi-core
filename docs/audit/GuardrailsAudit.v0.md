@@ -170,7 +170,7 @@ def apply_projections(self, mu, projections):
 - Clear marker: `# BOOTSTRAP: Python matching (will be replaced by EVAL_SEED)`
 
 **Test:** `test_phase1_matching_is_marked_bootstrap`
-**Audit:** All pattern matching code must have BOOTSTRAP comment or be in seeds/
+**Audit:** All pattern matching code must have BOOTSTRAP comment or be in mu/
 
 ---
 

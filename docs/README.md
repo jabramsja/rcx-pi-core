@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-05
+LAST_VERIFIED: 2026-02-14
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -42,15 +42,19 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | File | Title |
 |------|-------|
 | [Boot0Architecture.v0.md](core/Boot0Architecture.v0.md) | Boot0 Architecture: Staged Bootstrap for RCX |
+| [Boot1LoopContract.v0.md](core/Boot1LoopContract.v0.md) | Boot1 Recursive Loop Contract v0 |
 | [BootstrapPrimitives.v0.md](core/BootstrapPrimitives.v0.md) | Bootstrap Primitives (Phase 8a) |
 | [BootstrapStructuralBridge.v0.md](core/BootstrapStructuralBridge.v0.md) | Bootstrap-Structural Bridge: Non-Linear Pattern Support |
 | [DebtCategories.v0.md](core/DebtCategories.v0.md) | Debt Categories v0 |
 | [DocGovernance.v0.md](core/DocGovernance.v0.md) | Documentation Governance v0 |
 | [EVAL_SEED.v0.md](core/EVAL_SEED.v0.md) | EVAL_SEED Specification v0 |
+| [EngineNewFixContract.v0.md](core/EngineNewFixContract.v0.md) | EngineNew Fix Contract v0 |
 | [EngineNewsStructural.v0.md](core/EngineNewsStructural.v0.md) | Recurrence Structural Specification v0 |
 | [EntropyBudget.md](core/EntropyBudget.md) | RCX Entropy Budget (Contract) |
+| [LegacySurfaceDecisionRecord.v0.md](core/LegacySurfaceDecisionRecord.v0.md) | Legacy Surface Decision Record v0 |
 | [MetaCircularKernel.v0.md](core/MetaCircularKernel.v0.md) | Meta-Circular Kernel Specification v0 |
 | [MuType.v0.md](core/MuType.v0.md) | Mu Type Definition v0 |
+| [ObserverEventContract.v0.md](core/ObserverEventContract.v0.md) | Observer Event Contract v0 |
 | [OperatorExhaustion.v0.md](core/OperatorExhaustion.v0.md) | Operator Exhaustion Structural Specification v0 |
 | [RCXEngine.v0.md](core/RCXEngine.v0.md) | RCX Engine |
 | [RCXKernel.v0.md](core/RCXKernel.v0.md) | RCX Kernel Specification v0 |
@@ -59,6 +63,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [StructuralPurity.v0.md](core/StructuralPurity.v0.md) | Structural Purity Guardrails v0 |
 | [UniversalEval.v0.md](core/UniversalEval.v0.md) | Universal Eval Seed (L4 Alternative Design) |
 | [Why_RCX_PI_VM_EXISTS.md](core/Why_RCX_PI_VM_EXISTS.md) | Why RCX PI VM EXISTS |
+| [recurrence_v2_design.md](core/recurrence_v2_design.md) | Recurrence v2 Design — Hash-Accelerated Closure Detection |
 
 ## execution
 

@@ -20,7 +20,7 @@
     },
     "schema_doc": {
       "type": "string",
-      "const": "docs/world_trace_json_schema.md"
+      "const": "docs/schemas/world_trace_json_schema.md"
     },
     "world": {
       "type": "string",
