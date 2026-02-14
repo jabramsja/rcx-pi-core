@@ -1,0 +1,10 @@
+{
+  "description": "Phase 22C: Move roadmap gate docs to docs/archive/",
+  "moves": [
+    {"from": "roadmap/Gate0_Baseline_2026-02-04.md", "to": "docs/archive/Gate0_Baseline_2026-02-04.md"},
+    {"from": "roadmap/Gate3_ArchitecturalDecision.md", "to": "docs/archive/Gate3_ArchitecturalDecision.md"},
+    {"from": "roadmap/MetaCircular_Boot0_GatePlan.md", "to": "docs/archive/MetaCircular_Boot0_GatePlan.md"},
+    {"from": "roadmap/Hex0_Boot0_Checklist.md", "to": "docs/archive/Hex0_Boot0_Checklist.md"},
+    {"from": "roadmap/ToolingDelta.md", "to": "docs/archive/ToolingDelta.md"}
+  ]
+}
