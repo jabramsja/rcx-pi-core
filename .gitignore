@@ -49,6 +49,11 @@ docs/latex/build/
 # RCX tooling sandboxes
 sandbox_runs/
 
+# Archive-path generated artifacts (recurrence protection after Round 23A)
+archive/rcx_pi_rust/mu_programs/__sandbox_run_*.mu
+archive/rcx_pi_rust/mu_programs/__smoke_*.mu
+scripts/.rcx_manifest.json
+
 
 
 .quarantine_untracked_*
