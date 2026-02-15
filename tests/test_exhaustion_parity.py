@@ -4,7 +4,7 @@ Parity tests for exhaustion.v1.json (Rule 3.1 Operator Exhaustion).
 These tests verify that the structural exhaustion detection projections
 produce correct results for various scenarios.
 
-See: docs/core/OperatorExhaustion.v0.md
+See: mu/docs/core/OperatorExhaustion.v0.md
 """
 
 from __future__ import annotations

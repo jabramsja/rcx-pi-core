@@ -5,7 +5,7 @@ Maps the RCXEngineNew.pdf stall-fix-promote cycle to current runtime
 artifacts. This is EVIDENCE MAPPING, not feature implementation.
 
 Spec source: RCXEngineNew.pdf (10-step stall-fix-promote cycle)
-Runtime doc: docs/core/RCXEngine.v0.md (Engine Cycle section)
+Runtime doc: mu/docs/core/RCXEngine.v0.md (Engine Cycle section)
 Engine seed: mu/programs/rcx_engine.v1.json (11 projections)
 """
 
@@ -378,7 +378,7 @@ class TestGapContractDocs:
     ROOT = Path(__file__).parent.parent
 
     # GAP-04-FIX tests removed: gap resolved via engine integration (E4).
-    # Contract doc retained at docs/core/EngineNewFixContract.v0.md.
+    # Contract doc retained at mu/docs/core/EngineNewFixContract.v0.md.
     # Invariants verified by tests/test_fix_invariants.py (19 tests).
 
     def test_gaps_without_contract_doc_have_empty_invariants(self):

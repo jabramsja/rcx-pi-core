@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-ENGINE="docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
-SCHEMA="docs/fixtures/engine_run_schema_v1.json"
+ENGINE="mu/docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
+SCHEMA="mu/docs/fixtures/engine_run_schema_v1.json"
 
 [[ -f "$ENGINE" ]] || { echo "FAIL: missing $ENGINE" >&2; exit 1; }
 [[ -f "$SCHEMA" ]] || { echo "FAIL: missing $SCHEMA" >&2; exit 1; }

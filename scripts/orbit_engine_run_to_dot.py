@@ -86,7 +86,7 @@ def usage():
     eprint("  orbit_engine_run_to_dot.py <engine_run_json> <out.dot>")
     eprint("example:")
     eprint(
-        "  orbit_engine_run_to_dot.py docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json /tmp/orbit.dot"
+        "  orbit_engine_run_to_dot.py mu/docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json /tmp/orbit.dot"
     )
     sys.exit(2)
 

@@ -30,7 +30,7 @@ The kernel + seeds architecture for self-hosting:
 | `subst_mu.py` | Substitution as Mu projections |
 | `step_mu.py` | Self-hosting step (uses match_mu + subst_mu) |
 
-See `docs/core/RCXKernel.v0.md` and `docs/core/SelfHosting.v0.md`.
+See `mu/docs/core/RCXKernel.v0.md` and `mu/docs/core/SelfHosting.v0.md`.
 
 ## Legacy (top-level)
 

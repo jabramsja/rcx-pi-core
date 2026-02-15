@@ -55,7 +55,7 @@ echo ""
 echo "3. Checking referenced files exist..."
 
 MISSING=0
-for file in "docs/core/MetaCircularKernel.v0.md" "rcx_pi/selfhost/match_mu.py" "mu/substrate/match.v1.json"; do
+for file in "mu/docs/core/MetaCircularKernel.v0.md" "rcx_pi/selfhost/match_mu.py" "mu/substrate/match.v1.json"; do
     if [ ! -f "$file" ]; then
         echo "   MISSING: $file (referenced in STATUS.md)"
         MISSING=$((MISSING + 1))

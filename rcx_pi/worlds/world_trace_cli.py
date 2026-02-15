@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from rcx_pi.cli_schema import print_schema_triplet
 
-SCHEMA_JSON = "docs/schemas/world_trace_json_schema.json"
+SCHEMA_JSON = "mu/docs/schemas/world_trace_json_schema.json"
 # Allow running this file directly (subprocess tests, ad-hoc use) without requiring PYTHONPATH.
 # When invoked as a module (python -m rcx_pi.worlds.world_trace_cli), this block is harmless.
 if __package__ is None or __package__ == "":
@@ -52,7 +52,7 @@ def _as_trace_json(
 
     out: Dict[str, Any] = {
         "schema": "rcx-world-trace.v1",
-        "schema_doc": "docs/schemas/world_trace_json_schema.md",
+        "schema_doc": "mu/docs/schemas/world_trace_json_schema.md",
         "world": world,
         "seed": seed,
         "max_steps": max_steps,
@@ -126,7 +126,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if args.schema:
         print_schema_triplet(
-            "rcx-world-trace.v1", "docs/schemas/world_trace_json_schema.md", SCHEMA_JSON
+            "rcx-world-trace.v1", "mu/docs/schemas/world_trace_json_schema.md", SCHEMA_JSON
         )
         return 0
 

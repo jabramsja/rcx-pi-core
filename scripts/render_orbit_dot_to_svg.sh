@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-DOT_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
-SVG_OUT="docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
+DOT_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
+SVG_OUT="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
 
 [[ -f "$DOT_FIXTURE" ]] || { echo "missing dot fixture: $DOT_FIXTURE" >&2; exit 1; }
 

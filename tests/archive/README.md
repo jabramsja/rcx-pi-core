@@ -15,7 +15,7 @@ They are excluded via `collect_ignore = ["archive"]` in `tests/conftest.py`.
 ### `legacy/test_kernel_v0.py`
 - Tests for the deprecated `Kernel` class (hash/trace/dispatch scaffolding)
 - Superseded by `kernel.v1.json` projections via `step_kernel_mu()`
-- See `docs/core/MetaCircularKernel.v0.md` for terminology clarification
+- See `mu/docs/core/MetaCircularKernel.v0.md` for terminology clarification
 
 ### `test_bytecode_vm_v0.py`
 - Tests for the bytecode VM approach

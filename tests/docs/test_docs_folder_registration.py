@@ -24,7 +24,7 @@ import pytest
 from tools.shared_doc_config import REPO_ROOT, get_registered_docs_subfolders
 
 
-DOCS_ROOT = REPO_ROOT / "docs"
+DOCS_ROOT = REPO_ROOT / "mu" / "docs"
 
 
 class TestDocsFolderRegistration:

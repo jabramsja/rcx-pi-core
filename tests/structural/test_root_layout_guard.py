@@ -33,9 +33,6 @@ ALLOWED_ROOT_DIRS: frozenset[str] = frozenset({
     "tests",
     "tools",
     "scripts",
-    # Documentation
-    "docs",
-    "roadmap",
     # Archive + legacy
     "archive",
     ".rcx_library",

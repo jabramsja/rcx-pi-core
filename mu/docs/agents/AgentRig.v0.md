@@ -1,0 +1,375 @@
+<!--
+DOC_STATUS
+TYPE: REFERENCE
+LAST_VERIFIED: 2026-02-09
+OWNER: RCX Core Team
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md
+GROUNDING_TESTS: tests/docs/test_doc_contracts.py
+
+This header enables automated doc drift detection.
+- REFERENCE: Stable definitions, rarely changes
+- DESIGN_SPEC: Architectural intent, may diverge from implementation
+- IMPLEMENTATION: Active development, should match current code
+
+If this doc's claims don't match reality, update the doc or fix the code.
+Run: pytest tests/docs/test_doc_contracts.py -v
+-->
+
+# RCX Agent Rig - Lead Architect Workflow
+
+## Overview
+
+The Agent Rig is a multi-agent system that validates code changes before merge. It addresses the "fish swimming upstream" problem: using an LLM (trained on Python) to enforce structural computation principles it rarely sees.
+
+**Key Insight:** We don't trust any single agent. We trust the **fight** between agents.
+
+**Operational shortcut:** Use `mu/docs/agents/AgentRunbook.v0.md` for trigger map, gate rules, and practical usage.
+
+## STATUS.md: Single Source of Truth
+
+**All agents MUST read `STATUS.md` before any assessment.**
+
+`STATUS.md` contains:
+- Current phase and self-hosting level (L1/L2/L3)
+- What standards apply NOW vs LATER
+- Debt status and thresholds
+- Key file references
+
+**Why this matters:**
+- Agents no longer hardcode phase numbers
+- When we advance phases, update ONE file (`STATUS.md`), not 8+ agent files
+- Agents use semantic conditions ("L1+ Algorithmic") not version numbers ("Phase 6+")
+
+## Self-Hosting Levels (from STATUS.md)
+
+| Level | Description | Agent Implications |
+|-------|-------------|--------------------|
+| **L1: Algorithmic** | match/subst are Mu projections | Demand proof for match/subst, note kernel loop as scaffolding |
+| **L2: Operational** | kernel loop is Mu projections | Demand proof for ALL structural claims |
+| **L3: Full Bootstrap** | RCX runs RCX, no Python | Full meta-circular enforcement |
+
+Agents read STATUS.md to determine current level and apply standards accordingly.
+
+## The Rig Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     1. CONTRABAND LINTER                        │
+│                  (Dumb regex - no AI needed)                    │
+│              Blocks: eval, exec, globals, pickle                │
+│                   FAILS? → Stop. Don't wake AI.                 │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ PASS
+┌─────────────────────────────────────────────────────────────────┐
+│                       2. THE BUILDER                            │
+│                     Expert Agent (Sonnet)                       │
+│              Writes code, suggests simplifications              │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                  3. THE CRITICS (Parallel)                      │
+│  ┌─────────────────────┐    ┌─────────────────────┐            │
+│  │  Verifier (Sonnet)  │    │  Adversary (Sonnet) │            │
+│  │  Checks invariants  │    │  Attacks code       │            │
+│  │  North Star rules   │    │  Edge cases         │            │
+│  └─────────────────────┘    └─────────────────────┘            │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      4. THE JUDGE                               │
+│               Structural-Proof Agent (Sonnet)                   │
+│         Demands JSON projections, runs verification code        │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    5. THE GROUNDING                             │
+│                Grounding Agent (Sonnet)                         │
+│         Converts claims into executable pytest tests            │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    6. THE TRANSLATOR                            │
+│               Translator Agent (Sonnet)                         │
+│      Explains code in plain English for founder approval        │
+└─────────────────────────────────────────────────────────────────┘
+
+## Agents
+
+### 1. Contraband Linter (`tools/contraband.sh`)
+- **Type:** Bash script (no AI)
+- **Purpose:** Block obviously dangerous patterns before waking up AI
+- **Blocks:** `eval()`, `exec()`, `globals()`, `locals()`, `pickle`, metaclass dunders
+- **Run:** Before any AI agent
+
+### 1b. AST Police (`tools/ast_police.py`)
+- **Type:** Python AST parser (no AI)
+- **Purpose:** Catch what grep misses (set literals, multiline tricks, aliasing)
+- **Blocks:** Set comprehensions, walrus operator, yield, async, dangerous builtins via alias
+- **Allows:** Key comparison sets `{"head", "tail"}`, lines marked `# AST_OK:`
+- **Why:** Grep reads text. AST reads grammar. Can't fool grammar.
+
+### 2. Expert (`expert.md`)
+- **Model:** Opus (upgraded for deeper complexity analysis)
+- **Purpose:** Write code, identify complexity, suggest simplifications
+- **Focus:** Minimalism, emergent patterns, self-hosting readiness
+- **Verdict:** MINIMAL / COULD_SIMPLIFY / OVER_ENGINEERED
+
+### 3. Verifier (`verifier.md`)
+- **Model:** Opus (upgraded from Sonnet for deeper invariant reasoning)
+- **Purpose:** Check North Star invariants
+- **Focus:** Host smuggling, Mu type integrity, lambda prevention, determinism
+- **Verdict:** APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION
+
+### 4. Adversary (`adversary.md`)
+- **Model:** Opus (upgraded from Sonnet for deeper attack analysis)
+- **Purpose:** Break things, find vulnerabilities
+- **Focus:** Type confusion, lambda smuggling, non-determinism, edge cases
+- **Verdict:** SECURE / VULNERABLE / NEEDS_HARDENING
+
+### 5. Structural-Proof (`structural-proof.md`)
+- **Model:** Sonnet
+- **Purpose:** Demand concrete proof that operations are structural
+- **Focus:** Actual JSON projections, manual traces, edge case verification
+- **Enhancement:** Must generate runnable Python verification code
+- **Verdict:** PROVEN / UNPROVEN / IMPOSSIBLE_AS_CLAIMED
+
+### 6. Grounding (`grounding.md`)
+- **Model:** Sonnet
+- **Purpose:** Convert structural claims into executable tests
+- **Focus:** No mocks, no stubs - actual kernel execution
+- **Rule:** If you can't write the test, the claim is ungrounded
+- **Verdict:** GROUNDED / UNGROUNDED / PARTIALLY_GROUNDED
+
+### 7. Translator (`translator.md`)
+- **Model:** Sonnet
+- **Purpose:** Explain code to non-technical founder
+- **Focus:** Plain English, host smuggling detection, intent checking
+- **Detects:** Scope creep, oversimplification, deviation from request
+- **Verdict:** MATCHES_INTENT / DEVIATES / NEEDS_DISCUSSION
+
+### 8. Fuzzer (`fuzzer.md`)
+- **Model:** Sonnet
+- **Purpose:** Property-based testing with 1000+ random inputs
+- **Focus:** Roundtrip properties, parity, idempotency, no-crash
+- **Tool:** Uses Python `hypothesis` library
+- **Why:** AI can lie to you, but cannot lie to 1000 random CPU-generated inputs
+- **Verdict:** ROBUST / FRAGILE / BROKEN
+
+### 9. Visualizer (`visualizer.md`)
+- **Model:** Sonnet
+- **Purpose:** Draw Mu structures as Mermaid diagrams
+- **Focus:** Visual lie detection - linked lists show chains, Python lists show blobs
+- **Why:** Founder can't read code but CAN look at a picture
+- **Red flag:** Any red "blob" node = Python list smuggled in
+- **Output:** Mermaid diagram (renders in GitHub, VS Code, etc.)
+
+### 10. Advisor (`advisor.md`)
+- **Model:** Opus (upgraded from Sonnet for deeper strategic reasoning)
+- **Purpose:** Strategic advice when stuck - options, trade-offs, creative solutions
+- **Focus:** Exploring solution space, unblocking progress, out-of-the-box thinking
+- **When to use:** Design decisions, multiple valid approaches, need fresh perspective
+- **Verdict:** VIABLE_PATH / HIDDEN_CONSTRAINTS / FLAWED_APPROACH / NEEDS_MORE_CONTEXT
+- **Note:** Advisor PROPOSES, other agents VALIDATE
+
+## Agent Guardrails (Anti-Hallucination)
+
+All 9 review agents follow `AgentGuardrails.v0.md` which requires:
+
+1. **Mandatory evidence format** for every finding:
+   ```
+   FINDING: [description]
+   FILE: /absolute/path
+   LINES: start-end
+   CODE:
+       [paste from Read tool output]
+   VERIFIED: Yes
+   ```
+
+2. **Forbidden behaviors:**
+   - Claims without file:line evidence
+   - Hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS`)
+   - Citing from memory instead of Read/Grep output
+
+3. **Automatic validation:**
+   - `.claude/hooks/validate-agent-compliance.sh` runs after SubagentStop
+   - Checks for required format patterns
+   - Blocks non-compliant output
+   - Tests in `tests/tools/test_validate_agent_compliance.py`
+
+**Why this matters:** LLMs can hallucinate plausible-sounding file paths and code. Requiring paste-from-tool-output ensures agents actually read files before making claims.
+
+## Key Design Decisions
+
+### Intelligence Balance
+- **Rule:** Reviewers must be at least as smart as the builder
+- **Model distribution (2026-02-01):**
+  - **Opus:** verifier, adversary, expert, advisor (core reasoning agents)
+  - **Sonnet:** structural-proof, grounding, fuzzer, translator, visualizer (implementation agents)
+- **Source of truth:** `tools/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
+- **Override path:** `--model` flag on orchestrators/runners; fail-closed if SDK cannot apply explicit model wiring
+
+### Trust Model
+- We don't trust the Expert's code
+- We don't trust the Verifier's approval
+- We trust the **conflict** between them
+- If Adversary can't break it AND Verifier approves AND Structural-Proof is satisfied, then merge
+
+### Verdict Authority
+- **Adversary verdict = CHALLENGE** — "I found a weakness" (does not approve or reject)
+- **Verifier verdict = GATE** — "This passes/fails invariants" (approval authority)
+- **Advisor verdict = PROPOSAL** — "Here are options" (no gating authority)
+
+Adversary may claim impossibility. Verifier decides whether that impossibility violates an invariant or merely blocks progress.
+
+### Parallelization
+- Verifier and Adversary run in parallel (independent)
+- Cuts review time in half
+
+### The "No Hallucination" Rule
+- Structural-Proof must generate runnable code, not just text traces
+- Grounding must write actual pytest tests
+- Text can lie. Code that crashes doesn't lie.
+
+### Verification Protocol (NEW 2026-02-01)
+All agents MUST follow the verification protocol in `mu/docs/agents/AgentGuardrails.v0.md`:
+- Every finding requires file:line citation
+- Every claim requires actual code snippet from Read/Grep
+- Findings marked VERIFIED: No are REJECTED
+- Summaries/docs alone are NOT sufficient evidence
+
+### The Trusted Kernel Architecture
+- **The Law (Kernel):** `eval_seed.py` contains `step()`, `match()`, `substitute()`
+- **The Lawyers (Claude):** Claude writes JSON projections (data)
+- **The Rule:** Claude writes DATA. Kernel executes DATA. If kernel crashes, Claude lied.
+- **Enforcement:** Kernel files should be treated as read-only after initial bootstrap
+- This architecture makes it mathematically impossible for Claude to smuggle host semantics - JSON simply doesn't support Python features
+
+## Phase Scope (Semantic)
+
+Each agent has standards that apply at different self-hosting levels (L1/L2/L3). **Agents read STATUS.md to determine current level.**
+
+| Agent | L1 (Algorithmic) | L2 (Operational) | L3 (Bootstrap) |
+|-------|------------------|------------------|----------------|
+| **verifier** | Sections A-E required, F advisory for kernel | All sections required | Full enforcement |
+| **adversary** | All attack vectors | + Kernel loop attacks | Full red team |
+| **expert** | Simplicity + self-hosting readiness | + Kernel loop review | Full review |
+| **structural-proof** | match/subst proof required, kernel advisory | All proofs required | Full meta-circular proof |
+| **grounding** | match/subst parity tests | + Kernel loop tests | Full bootstrap tests |
+| **fuzzer** | Roundtrip, parity, determinism | + Kernel properties | Full properties |
+| **translator** | Semantic debt = FAIL, scaffolding = NOTE | All debt = FAIL | Full enforcement |
+| **visualizer** | Linked-list encoding | + Kernel state diagrams | Full visualization |
+| **advisor** | Design options, RCX patterns | + Meta-circular strategies | Full strategic advice |
+
+**Key insight:** Agents use semantic conditions, not version numbers. When STATUS.md changes, agent behavior updates automatically.
+
+## Usage
+
+### MANDATORY: Run ALL Agents Before Merge
+
+**For any code change, run these agents in parallel:**
+
+| Agent | Purpose | Always Run? |
+|-------|---------|-------------|
+| **verifier** | Check RCX invariants | ✅ YES |
+| **adversary** | Red team / attack code | ✅ YES |
+| **expert** | Simplicity review | ✅ YES |
+| **structural-proof** | Verify structural claims | ✅ YES |
+| **grounding** | Write executable tests | ✅ YES (if claims made) |
+| **fuzzer** | Property-based testing | ✅ YES (for core code) |
+| **translator** | Plain English explanation | ⚠️ On request |
+| **visualizer** | Mermaid diagrams | ⚠️ On request |
+
+**Minimum for ALL changes:** verifier, adversary, expert, structural-proof (4 agents)
+**For core kernel/seed code:** Add grounding, fuzzer (6 agents)
+**For founder review:** Add translator, visualizer (8 agents)
+
+### Workflow
+
+```bash
+# 1. Run linters first (free, fast)
+./tools/contraband.sh rcx_pi
+python3 tools/ast_police.py
+
+# 2. Run ALL mandatory agents in PARALLEL via Claude Code
+# (In a single message with multiple Task tool calls)
+```
+
+### In Claude Code Session
+
+```
+# ALWAYS run these 4 in parallel for any code change:
+[Task: verifier] "Verify <feature> implementation"
+[Task: adversary] "Attack <feature> implementation"
+[Task: expert] "Review <feature> for simplicity"
+[Task: structural-proof] "Verify structural claims in <feature>"
+
+# For core code, also run:
+[Task: grounding] "Write tests for <feature> claims"
+[Task: fuzzer] "Property-based tests for <feature>"
+
+# For founder review:
+[Task: translator] "Explain <feature> in plain English"
+[Task: visualizer] "Draw Mu structures in <feature>"
+```
+
+### Agent Checklist (Copy for PR)
+
+```markdown
+## Agent Review
+- verifier:
+- adversary:
+- expert:
+- structural-proof:
+- grounding: (if applicable)
+- fuzzer: (if applicable)
+- translator: (on request)
+- visualizer: (on request)
+```
+
+### CI Output Retrieval
+
+When Agent Review runs in GitHub Actions, the run artifact `agent-review-report` contains:
+- `review-report.md` (concise PR-safe summary)
+- `review-report-full.md` (expanded outputs, size-capped)
+- `review-results.json` (structured outputs with truncation metadata)
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `STATUS.md` | **Single source of truth** - agents read this first |
+| `tools/agents/_contract_redteam.md` | Shared injected red-team output contract for all agent prompts |
+| `tools/agents/expert_prompt.md` | Builder agent config |
+| `tools/agents/verifier_prompt.md` | Invariant checker config |
+| `tools/agents/adversary_prompt.md` | Red team attacker config |
+| `tools/agents/structural_proof_prompt.md` | Proof demander config |
+| `tools/agents/grounding_prompt.md` | Test writer config |
+| `tools/agents/translator_prompt.md` | Plain English explainer config |
+| `tools/agents/fuzzer_prompt.md` | Chaos monkey / property-based testing |
+| `tools/agents/visualizer_prompt.md` | Mermaid diagram generator |
+| `tools/agents/advisor_prompt.md` | Strategic advisor (when stuck) |
+| `tools/contraband.sh` | Dumb regex linter (no AI) |
+| `tools/ast_police.py` | AST-based linter (catches what grep misses) |
+
+## History
+
+| Date | Change |
+|------|--------|
+| 2026-01-26 | Initial rig: expert, verifier, adversary, structural-proof |
+| 2026-01-26 | Upgraded verifier/adversary from Haiku to Sonnet |
+| 2026-01-26 | Added grounding agent (test writer) |
+| 2026-01-26 | Added translator agent (plain English) |
+| 2026-01-26 | Enhanced structural-proof with "No Hallucination" rule |
+| 2026-01-26 | Created contraband.sh linter |
+| 2026-01-26 | Added fuzzer agent (Hypothesis property-based testing) |
+| 2026-01-26 | Documented Trusted Kernel architecture |
+| 2026-01-26 | Added visualizer agent (Mermaid diagrams) |
+| 2026-01-26 | Added ast_police.py (catches what grep misses) |
+| 2026-01-27 | Created STATUS.md as single source of truth for project phase |
+| 2026-01-27 | All agents now MUST read STATUS.md before assessments |
+| 2026-01-27 | Converted Phase Scope from version numbers to semantic levels (L1/L2/L3) |
+| 2026-01-27 | Clarified scaffolding debt vs semantic debt distinction |
+| 2026-01-29 | Upgraded core agents (advisor, verifier, adversary) to Opus for deeper reasoning |
+| 2026-01-29 | Deployed v4.3 prompt updates: evidence requirements, A-K attack checklist, THEATER detection, North Star tracing |
+| 2026-02-01 | Created AgentGuardrails.v0.md with mandatory verification protocol (9-agent review finding) |
+| 2026-02-01 | Added anti-hallucination checklist and prompt template for all agents |

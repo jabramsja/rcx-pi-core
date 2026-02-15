@@ -9,7 +9,7 @@ comparisons exhausting the kernel step budget.  recurrence.v2.json fixes
 this by pre-computing mu_hash at the boundary and comparing hash strings
 (O(1) per comparison) instead of full states.
 
-See: docs/core/recurrence_v2_design.md
+See: mu/docs/core/recurrence_v2_design.md
 """
 
 import signal

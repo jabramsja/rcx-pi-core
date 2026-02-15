@@ -20,5 +20,5 @@ def test_snapshot_schema_flag():
     out = r.stdout.strip()
     assert (
         out
-        == "rcx.snapshot.v1 docs/snapshot_json_schema.md docs/schemas/rcx.snapshot.v1.schema.json"
+        == "rcx.snapshot.v1 docs/snapshot_json_schema.md mu/docs/schemas/rcx.snapshot.v1.schema.json"
     )

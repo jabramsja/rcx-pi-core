@@ -62,7 +62,7 @@ ROOT_FILES = {
 
 # Paths that should exist if referenced in root files
 CRITICAL_PATHS = [
-    "docs/core/",
+    "mu/docs/core/",
     "rcx_pi/selfhost/",
     "mu/substrate/",
     "mu/host/js/eval_step.js",
@@ -568,10 +568,10 @@ class TestMarkdownSyntax:
 
                 # Check docs/ subdirectories for doc paths
                 if not found and ref_path.startswith('docs/'):
-                    # docs/Foo.md might be docs/core/Foo.md, docs/cli/Foo.md, etc.
+                    # docs/Foo.md might be mu/docs/core/Foo.md, mu/docs/cli/Foo.md, etc.
                     basename = ref_path.replace('docs/', '')
-                    for subdir in ['core', 'cli', 'audit', 'execution', 'schemas', 'archive']:
-                        if (REPO_ROOT / 'docs' / subdir / basename).exists():
+                    for subdir in ['core', 'cli', 'audit', 'execution', 'schemas', 'reviews', 'roadmap']:
+                        if (REPO_ROOT / 'mu' / 'docs' / subdir / basename).exists():
                             found = True
                             break
 
@@ -594,7 +594,7 @@ class TestLLevelConsistency:
     """L-level claims must be consistent across ALL docs, not just README."""
 
     def test_docs_dont_claim_outdated_l_levels(self):
-        """Docs in docs/core/ and docs/audit/ shouldn't claim outdated L-levels."""
+        """Docs in mu/docs/core/ and mu/docs/audit/ shouldn't claim outdated L-levels."""
         status_path = REPO_ROOT / "STATUS.md"
         if not status_path.exists():
             pytest.skip("STATUS.md doesn't exist")

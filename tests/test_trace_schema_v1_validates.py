@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-EVENT_SCHEMA = Path("docs/schemas/rcx-trace-event.v1.json")
+EVENT_SCHEMA = Path("mu/docs/schemas/rcx-trace-event.v1.json")
 FIXTURE = Path("tests/fixtures/traces/minimal.v1.jsonl")
 
 
@@ -14,7 +14,7 @@ def _load_json(p: Path):
 
 
 def test_trace_event_schema_file_exists():
-    assert EVENT_SCHEMA.exists(), "Missing docs/schemas/rcx-trace-event.v1.json"
+    assert EVENT_SCHEMA.exists(), "Missing mu/docs/schemas/rcx-trace-event.v1.json"
 
 
 def test_trace_fixture_exists():

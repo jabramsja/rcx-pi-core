@@ -1,7 +1,7 @@
 """
 Roadmap Document Governance Tests - Lightweight enforcement for roadmap/ folder.
 
-The roadmap/ folder follows DIFFERENT rules than docs/core/ and other governed folders:
+The roadmap/ folder follows DIFFERENT rules than mu/docs/core/ and other governed folders:
 - Roadmap docs define SEQUENCE and DESIGN only, not current state
 - They must link UP to STATUS.md and TASKS.md (not duplicate their content)
 - They do NOT require DOC_STATUS headers (they're planning docs, not specs)
@@ -9,7 +9,7 @@ The roadmap/ folder follows DIFFERENT rules than docs/core/ and other governed f
 This is enforced separately from the main doc governance per the exception
 documented in DocGovernance.v0.md.
 
-See roadmap/MANIFEST.md for the full linking rules.
+See mu/docs/roadmap/MANIFEST.md for the full linking rules.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/docs/test_roadmap_governance.py -v
@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-ROADMAP_FOLDER = REPO_ROOT / "roadmap"
+ROADMAP_FOLDER = REPO_ROOT / "mu" / "docs" / "roadmap"
 
 
 # =============================================================================
@@ -57,7 +57,7 @@ class TestRoadmapReferenceHeaders:
     def test_manifest_exists(self):
         """MANIFEST.md must exist to define reading order."""
         manifest = ROADMAP_FOLDER / "MANIFEST.md"
-        assert manifest.exists(), "roadmap/MANIFEST.md missing - required for linking rules"
+        assert manifest.exists(), "mu/docs/roadmap/MANIFEST.md missing - required for linking rules"
 
     def test_all_docs_have_status_reference(self):
         """All roadmap docs must reference STATUS.md."""
@@ -74,7 +74,7 @@ class TestRoadmapReferenceHeaders:
             msg = "\nRoadmap docs missing STATUS.md reference:\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
-            msg += "\nFix: Add reference header per roadmap/MANIFEST.md linking rules:\n"
+            msg += "\nFix: Add reference header per mu/docs/roadmap/MANIFEST.md linking rules:\n"
             msg += '  > **Current State**: See [`STATUS.md`](../STATUS.md)\n'
             pytest.fail(msg)
 
@@ -93,7 +93,7 @@ class TestRoadmapReferenceHeaders:
             msg = "\nRoadmap docs missing TASKS.md reference:\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
-            msg += "\nFix: Add reference header per roadmap/MANIFEST.md linking rules:\n"
+            msg += "\nFix: Add reference header per mu/docs/roadmap/MANIFEST.md linking rules:\n"
             msg += '  > **Authorization**: See [`TASKS.md`](../TASKS.md)\n'
             pytest.fail(msg)
 

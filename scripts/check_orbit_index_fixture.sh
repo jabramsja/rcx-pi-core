@@ -4,10 +4,10 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-INDEX_HTML="docs/fixtures/index.html"
-SVG_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
-DOT_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
-ENGINE_RUN_FIXTURE="docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
+INDEX_HTML="mu/docs/fixtures/index.html"
+SVG_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
+DOT_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
+ENGINE_RUN_FIXTURE="mu/docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
 DRILL_JS="orbit_drilldown_v1.js"
 
 [[ -f "$INDEX_HTML" ]] || { echo "missing index: $INDEX_HTML" >&2; exit 1; }

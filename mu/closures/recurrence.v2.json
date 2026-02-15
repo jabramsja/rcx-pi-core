@@ -3,7 +3,7 @@
         "version": "2.0.0",
         "name": "RECURRENCE_V2_SEED",
         "description": "Hash-accelerated structural closure detection for Rule 2.2",
-        "doc": "docs/core/recurrence_v2_design.md",
+        "doc": "mu/docs/core/recurrence_v2_design.md",
         "spec_ref": "RCXEngineNew.pdf Rule 2.2, A.10",
         "execution_layer": "META_CIRCULAR",
         "meta_circular_capable": true,

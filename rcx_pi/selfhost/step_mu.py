@@ -23,8 +23,8 @@ SECURITY: Projection order is security-critical. When combining kernel
 projections with domain projections (Phase 7+), kernel projections MUST
 run first to prevent domain data from forging kernel state.
 
-See docs/core/SelfHosting.v0.md for design.
-See docs/core/MetaCircularKernel.v0.md for kernel design.
+See mu/docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 """
 
 from __future__ import annotations
@@ -826,7 +826,7 @@ def step_kernel_mu(
     # This is the irreducible resource exhaustion guard.
     # Cannot be structural (would require arithmetic on fuel).
     # Prevents infinite execution - analogous to watchdog timer.
-    # See docs/core/BootstrapPrimitives.v0.md
+    # See mu/docs/core/BootstrapPrimitives.v0.md
     budget = get_step_budget()
     started_budget = False
     if not budget.is_active():

@@ -3,7 +3,7 @@
     "version": "1.3.0",
     "name": "RCX_ENGINE",
     "description": "Main RCX engine combining fix, recurrence, and exhaustion detection with structural iteration (TRANSITIONAL trampoline, Boot1 sunset policy applies)",
-    "doc": "docs/core/RCXEngine.v0.md",
+    "doc": "mu/docs/core/RCXEngine.v0.md",
     "spec_ref": "RCXEngineNew.pdf Rule 0.6, Rule 2.2♢, Rule 3.1",
     "status": "structural_specification",
     "execution_layer": "APPLICATION",

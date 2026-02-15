@@ -4,7 +4,7 @@ from pathlib import Path
 import importlib.util
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RUNBOOK_PATH = PROJECT_ROOT / "docs" / "agents" / "AgentRunbook.v0.md"
+RUNBOOK_PATH = PROJECT_ROOT / "mu" / "docs" / "agents" / "AgentRunbook.v0.md"
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 

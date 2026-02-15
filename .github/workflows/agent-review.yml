@@ -49,7 +49,7 @@ on:
   #     - 'tools/validate_agent_compliance.py'
   #     - 'tools/validate_agent_reasoning.py'
   #     - 'tools/agents/**'
-  #     - 'docs/agents/**'
+  #     - 'mu/docs/agents/**'
 
 jobs:
   agent-review:

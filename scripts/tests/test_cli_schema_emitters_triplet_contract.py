@@ -38,8 +38,8 @@ def _assert_triplet(s: str) -> None:
     assert doc.endswith(".md"), f"doc path should be a markdown file: {doc!r}"
 
     # Schema path conventions
-    assert schema.startswith("docs/schemas/"), (
-        f"schema path should be under docs/schemas/: {schema!r}"
+    assert schema.startswith("mu/docs/schemas/"), (
+        f"schema path should be under mu/docs/schemas/: {schema!r}"
     )
     assert schema.endswith(".json"), f"schema path should be a json file: {schema!r}"
 

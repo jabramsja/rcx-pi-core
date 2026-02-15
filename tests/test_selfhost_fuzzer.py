@@ -369,7 +369,7 @@ def contains_nonlinear_pattern(pattern, _seen=None, _var_names=None):
     detection which is not implemented in match.v2 (linear-only). These patterns
     work in apply_projection (Python) but not in apply_mu (via match.v2 projections).
 
-    The Bootstrap-Structural Bridge (docs/core/BootstrapStructuralBridge.v0.md) will
+    The Bootstrap-Structural Bridge (mu/docs/core/BootstrapStructuralBridge.v0.md) will
     add non-linear support. Until then, tests should skip non-linear patterns when
     comparing apply_mu with apply_projection.
     """
@@ -1520,7 +1520,7 @@ class TestApplyMuParity:
             return
         # Skip non-linear patterns (same var twice) - match.v2 is linear-only.
         # Non-linear support requires Bootstrap-Structural Bridge (mu/bridge/).
-        # See docs/core/BootstrapStructuralBridge.v0.md
+        # See mu/docs/core/BootstrapStructuralBridge.v0.md
         if contains_nonlinear_pattern(pattern):
             return
 

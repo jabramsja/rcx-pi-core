@@ -7,7 +7,7 @@ tests over curated inputs covering all 3 routing paths (null, closure,
 default) rather than random fuzzing — hemisphere routing has a small
 decision space, so targeted adversarial inputs are more effective.
 
-See: roadmap/MuHemispheresDesign.md
+See: mu/docs/roadmap/MuHemispheresDesign.md
 """
 
 from __future__ import annotations

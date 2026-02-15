@@ -5,7 +5,7 @@ These tests verify that the engine projections correctly orchestrate
 recurrence and exhaustion detection. The engine is currently marked
 as "structural_specification" - these tests verify projection pattern matching.
 
-See: docs/core/RCXEngine.v0.md
+See: mu/docs/core/RCXEngine.v0.md
 """
 
 from __future__ import annotations

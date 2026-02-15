@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "name": "MATCH_SEED_V2",
     "description": "Pattern matching with kernel context passthrough for Phase 7b",
-    "doc": "docs/core/MetaCircularKernel.v0.md",
+    "doc": "mu/docs/core/MetaCircularKernel.v0.md",
     "execution_layer": "META_CIRCULAR",
     "invariants": [
       "All projections are pure Mu (JSON-compatible)",

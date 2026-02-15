@@ -91,7 +91,7 @@ def classify_md_path(doc_path: Path) -> str:
     if doc_path.parent == REPO_ROOT and doc_path.name in ROOT_CANONICAL_FILES:
         return "root_canonical"
 
-    if rel_path.startswith("roadmap/"):
+    if rel_path.startswith("mu/docs/roadmap/"):
         return "roadmap"
 
     for folder in GOVERNED_FOLDER_NAMES:
@@ -102,7 +102,7 @@ def classify_md_path(doc_path: Path) -> str:
     # subproject README files are governed
     if re.match(r"^[^/]+/README\.md$", rel_path):
         return "governed"
-    if rel_path == "docs/README.md":
+    if rel_path == "mu/docs/README.md":
         return "governed"
 
     for pattern in EXEMPT_PATTERNS:

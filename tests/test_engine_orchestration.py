@@ -13,7 +13,7 @@ use simple projections for fast validation of the orchestration function itself.
 
 See: mu/programs/rcx_engine.v1.json (11 projections, structural specification)
      rcx_pi/selfhost/step_mu.py:run_engine_pipeline()
-     roadmap/ContentAddressedMu.md (Orchestration section)
+     mu/docs/roadmap/ContentAddressedMu.md (Orchestration section)
 """
 from __future__ import annotations
 

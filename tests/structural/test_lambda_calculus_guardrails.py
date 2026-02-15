@@ -8,7 +8,7 @@ Migrated from test_eval_seed_v0.py during kernel.py cleanup (2026-01-29).
 These tests are CRITICAL for security - they prevent higher-order pattern
 matching that could enable lambda calculus smuggling.
 
-See docs/core/StructuralPurity.v0.md for the security rationale.
+See mu/docs/core/StructuralPurity.v0.md for the security rationale.
 """
 
 import pytest

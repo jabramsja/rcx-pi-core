@@ -5,7 +5,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 # This is a static file right now, so "build" just verifies it exists.
-HTML="docs/fixtures/orbit_explorer_v1.html"
+HTML="mu/docs/fixtures/orbit_explorer_v1.html"
 [[ -f "$HTML" ]] || { echo "missing: $HTML" >&2; exit 1; }
 
 # Best-effort sanity: ensure it references rcx.orbit.v1 and a default fixture filename

@@ -5,7 +5,7 @@ A Mu is a JSON-compatible value: the portable, host-independent data type
 for all RCX values. This module provides validation to ensure no Python-specific
 types leak into the VM.
 
-See docs/core/MuType.v0.md for the full specification.
+See mu/docs/core/MuType.v0.md for the full specification.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 # This is the irreducible depth limit that prevents stack overflow.
 # Cannot be structural because Python's stack is runtime, not Mu data.
 # Protects against deeply nested structures that would overflow during traversal.
-# See docs/core/BootstrapPrimitives.v0.md for full justification.
+# See mu/docs/core/BootstrapPrimitives.v0.md for full justification.
 #
 # Phase 8b note: Increased from 200 to 300 to support deeper kernel states.
 # Kernel normalization converts dicts to linked-lists, multiplying depth by ~4x.
@@ -174,7 +174,7 @@ def mu_type_name(value: Any) -> str:
 # Structural Purity Guardrails
 # =============================================================================
 # These functions ensure we program IN RCX (using Mu) rather than ABOUT RCX
-# (using Python constructs). See docs/core/StructuralPurity.v0.md for rationale.
+# (using Python constructs). See mu/docs/core/StructuralPurity.v0.md for rationale.
 # =============================================================================
 
 
@@ -390,7 +390,7 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
 # Previously a bootstrap primitive for fixed-point detection.
 # Now derivable from mu_hash_cached: mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)
 # Production code uses mu_hash_cached directly. This wrapper remains for test convenience.
-# Bootstrap primitives reduced from 5 to 4. See docs/core/BootstrapPrimitives.v0.md.
+# Bootstrap primitives reduced from 5 to 4. See mu/docs/core/BootstrapPrimitives.v0.md.
 def mu_equal(a: Any, b: Any) -> bool:
     """
     Convenience wrapper: compare two Mu values for structural equality.

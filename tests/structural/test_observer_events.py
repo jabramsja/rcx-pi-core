@@ -1,7 +1,7 @@
 """
 N6a: Observer Event Contract — schema and canonicalization grounding tests.
 
-Validates the event contract defined in docs/core/ObserverEventContract.v0.md
+Validates the event contract defined in mu/docs/core/ObserverEventContract.v0.md
 using test-local fixtures only. No runtime hooks are modified.
 
 N6b (cross-substrate isomorphic stream comparison) is DEFERRED.
@@ -216,4 +216,4 @@ class TestObserverEventCanonicalization:
 #   1. Run identical inputs through Python and JS
 #   2. Collect event streams from both substrates
 #   3. Assert pairwise canonical equality after sorting by (step, timestamp)
-# See docs/core/ObserverEventContract.v0.md § "Parity Intent" for contract.
+# See mu/docs/core/ObserverEventContract.v0.md § "Parity Intent" for contract.

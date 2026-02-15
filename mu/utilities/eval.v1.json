@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "name": "EVAL_SEED",
     "description": "Deep evaluation projections for RCX work-stack machine",
-    "doc": "docs/core/EVAL_SEED.v0.md",
+    "doc": "mu/docs/core/EVAL_SEED.v0.md",
     "execution_layer": "BOOTSTRAP",
     "note": "Uses [] for context, not {head,tail} - requires bootstrap match/substitute",
     "invariants": [

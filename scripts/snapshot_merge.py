@@ -5,7 +5,7 @@ from rcx_pi.cli_schema import print_schema_triplet
 
 SCHEMA_TAG = "rcx.snapshot.v1"
 SCHEMA_DOC = "docs/snapshot_json_schema.md"
-SCHEMA_JSON = "docs/schemas/rcx.snapshot.v1.schema.json"
+SCHEMA_JSON = "mu/docs/schemas/rcx.snapshot.v1.schema.json"
 
 #!/usr/bin/env python3
 

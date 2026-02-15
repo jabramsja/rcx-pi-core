@@ -9,7 +9,7 @@ This module implements the core operations needed to evaluate projections:
 
 The only special form is {"var": "<name>"} which matches anything and binds.
 
-See docs/core/EVAL_SEED.v0.md for specification.
+See mu/docs/core/EVAL_SEED.v0.md for specification.
 """
 
 from __future__ import annotations
@@ -466,7 +466,7 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 # This is the irreducible execution primitive - like Forth's NEXT.
 # The for-loop cannot be expressed as a projection because projections
 # need something to apply them. This IS that something.
-# See docs/core/BootstrapPrimitives.v0.md for full justification.
+# See mu/docs/core/BootstrapPrimitives.v0.md for full justification.
 def step(projections: list[Mu], input_value: Mu) -> Mu:
     """
     BOOTSTRAP PRIMITIVE: Apply first matching projection to value.
@@ -485,7 +485,7 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
     Returns:
         Transformed value if any projection matched, input unchanged (stall) otherwise.
 
-    See: docs/core/BootstrapPrimitives.v0.md
+    See: mu/docs/core/BootstrapPrimitives.v0.md
     """
     from rcx_pi.projection_coverage import coverage
 

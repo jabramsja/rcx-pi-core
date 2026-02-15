@@ -9,13 +9,13 @@ All notable changes to RCX are documented in this file.
 - Synced Boot1 prerequisite status in governance docs:
   - `_run_engine` reservation (P2) marked resolved (Round 20B)
   - `_tail_call` reservation (P3) marked resolved (Round 20C)
-- Updated schema-doc path references to canonical `docs/schemas/*` locations:
+- Updated schema-doc path references to canonical `mu/docs/schemas/*` locations:
   - CLI schema contract examples
   - CLI quickstart schema links
   - world_trace schema markdown/json `schema_doc` alignment
 - Corrected stale `rcx_engine.v1.json` projection count in root README (7 → 11)
 - Updated STATUS proof block to use `seed_police` authoritative totals (15 seeds, 102 projection IDs, 0 collisions)
-- Regenerated `docs/README.md` index to remove stale listing drift
+- Regenerated `mu/docs/README.md` index to remove stale listing drift
 
 ## 2026-02-12
 
@@ -76,12 +76,12 @@ All notable changes to RCX are documented in this file.
 
 ### Content-Addressed Mu Design + Recurrence v2 Hash Acceleration
 
-- **Created `roadmap/ContentAddressedMu.md`** — Design doc for Content-Addressed Mu values (hash-identity as substrate property)
+- **Created `mu/docs/roadmap/ContentAddressedMu.md`** — Design doc for Content-Addressed Mu values (hash-identity as substrate property)
 - **Key insight: mu_equal elimination (5→4 bootstrap primitives)** — With content-addressing, `mu_equal` is subsumed by non-linear pattern matching on hash strings. `mu_hash` moves from runtime infrastructure to boundary scaffolding (like JSON parsing)
 - **Created `mu/closures/recurrence.v2.json`** — 9 hash-accelerated projections for closure detection
   - Pre-computes SHA-256 hashes at boundary; compares 64-char hash strings (O(1)) instead of deep structural match (O(depth))
   - Reduces Paxos 15-step trace from ~6,300 kernel steps to ~420 (theoretical estimate)
-- **Created `docs/core/recurrence_v2_design.md`** — Design spec for hash-accelerated closure detection
+- **Created `mu/docs/core/recurrence_v2_design.md`** — Design spec for hash-accelerated closure detection
 - **Converted `hash_trace_for_recurrence()` to iterative** — Avoids Python recursion limit on long traces (max_steps=10,000 > Python limit ~1,000)
 - **Updated `mu/programs/paxos_demo.v1.json`** — Dependency changed from recurrence.v1 to recurrence.v2
 - **Added Content-Addressed Mu to TASKS.md VECTOR** — Promotion criteria: Level 1 promotes to NEXT when recurrence.v2 production tests validate Level 0
@@ -259,7 +259,7 @@ All notable changes to RCX are documented in this file.
 - Fixed wiring: bridge projections now come BEFORE match.v2 in combined kernel
 
 **Agent guardrails updated:**
-- Added "Execution Path Verification" section to `docs/agents/AgentGuardrails.v0.md`
+- Added "Execution Path Verification" section to `mu/docs/agents/AgentGuardrails.v0.md`
 - Agents must now verify execution path, not just behavior
 - Claims like "runs through X" require tests that fail if X isn't used
 
@@ -311,7 +311,7 @@ rather than a combined match.v3 file. This keeps the bridge modular.
 **Files updated:**
 - `rcx_pi/selfhost/seed_integrity.py` - Added checksums for new seeds
 - `tools/seed_police.sh` - Added bridge.* to allowed prefixes, v3 version handling
-- `docs/core/BootstrapStructuralBridge.v0.md` - Updated status to IMPLEMENTED
+- `mu/docs/core/BootstrapStructuralBridge.v0.md` - Updated status to IMPLEMENTED
 
 ---
 
@@ -343,7 +343,7 @@ See `TASKS.md` Step 7 for details.
 
 ### Bootstrap-Structural Bridge: 9-Agent Review Complete
 
-**Review completed** for `docs/core/BootstrapStructuralBridge.v0.md` with all 9 agents:
+**Review completed** for `mu/docs/core/BootstrapStructuralBridge.v0.md` with all 9 agents:
 - Verifier: APPROVE (all 15 North Star invariants pass)
 - Adversary: NEEDS HARDENING → FIXED
 - Expert: MINIMAL
@@ -367,7 +367,7 @@ See `TASKS.md` Step 7 for details.
 - `tests/test_kernel_security_fuzzer.py` - Updated reserved field count (20→24)
 - `tests/test_js_parity_automated.py` - Updated reserved field count (20→24)
 - `tests/structural/test_step_mu_kernel_integration.py` - Updated expected reserved fields set
-- `docs/core/BootstrapStructuralBridge.v0.md` - Expanded test vectors, updated checklist
+- `mu/docs/core/BootstrapStructuralBridge.v0.md` - Expanded test vectors, updated checklist
 - `TASKS.md` - Marked 9-agent review complete, design ready for NEXT
 
 ---
@@ -412,14 +412,14 @@ See `TASKS.md` Step 7 for details.
 - Added Cross-Seed Compatibility Check to AgentGuardrails.v0.md
 - Updated enginenews.v1.json and exhaust.v1.json with `"execution_layer": "BOOTSTRAP"`
 - Created VECTOR item for bootstrap_structural bridge (non-linear pattern support)
-- Created design doc `docs/core/BootstrapStructuralBridge.v0.md`
+- Created design doc `mu/docs/core/BootstrapStructuralBridge.v0.md`
 
 **Files:**
 - `TASKS.md` - Added North Star #14, #15; added bootstrap_structural to VECTOR
-- `docs/agents/AgentGuardrails.v0.md` - Added Cross-Seed Compatibility Check section
+- `mu/docs/agents/AgentGuardrails.v0.md` - Added Cross-Seed Compatibility Check section
 - `seeds/enginenews.v1.json` - Added execution_layer, requires_patterns, incompatible_with
 - `seeds/exhaust.v1.json` - Added execution_layer, requires_patterns, incompatible_with
-- `docs/core/BootstrapStructuralBridge.v0.md` - Design doc for non-linear pattern support
+- `mu/docs/core/BootstrapStructuralBridge.v0.md` - Design doc for non-linear pattern support
 
 **Lesson Learned:** 9-agent review verified correctness but not architectural fit. New guardrails require verifying execution path matches claims, not just that tests pass.
 
@@ -460,7 +460,7 @@ See `TASKS.md` Step 7 for details.
 - `tests/fixtures/exhaustion_vectors.json` - 6 vectors
 - `substrates/js/eval_step.js` - Updated with exhaust.v1.json loading
 - `rcx_pi/selfhost/seed_integrity.py` - Added exhaust.v1.json checksum
-- `docs/core/OperatorExhaustion.v0.md` - Design doc updated to IMPLEMENTED
+- `mu/docs/core/OperatorExhaustion.v0.md` - Design doc updated to IMPLEMENTED
 
 ## 2026-02-01
 
@@ -469,7 +469,7 @@ See `TASKS.md` Step 7 for details.
 **Problem:** LLMs can hallucinate plausible-sounding file paths and code snippets. Previous agent outputs weren't verified for evidence.
 
 **Solution:**
-- Created `docs/agents/AgentGuardrails.v0.md` - spec requiring FILE:LINE + code evidence
+- Created `mu/docs/agents/AgentGuardrails.v0.md` - spec requiring FILE:LINE + code evidence
 - Created `tools/validate_agent_compliance.py` - regex-based output validator
 - Created `tests/tools/test_validate_agent_compliance.py` - 43 tests for validator
 - Created `.claude/hooks/validate-agent-compliance.sh` - automatic SubagentStop hook
@@ -492,7 +492,7 @@ VERIFIED: Yes
 - STATUS.md check (must be read in first 50 lines)
 
 **Files:**
-- `docs/agents/AgentGuardrails.v0.md` - specification
+- `mu/docs/agents/AgentGuardrails.v0.md` - specification
 - `tools/validate_agent_compliance.py` - validator script
 - `tests/tools/test_validate_agent_compliance.py` - 43 tests
 - `.claude/hooks/validate-agent-compliance.sh` - automatic hook
@@ -598,9 +598,9 @@ both Python and JavaScript and compared the outputs.
 | Advisor | RESOLVED | Architecture is sound |
 
 **Documentation:**
-- Updated `docs/core/EngineNewsStructural.v0.md` - marked IMPLEMENTED
-- Updated `docs/core/SelfHosting.v0.md` - added EngineNews section
-- Updated `docs/core/BootstrapPrimitives.v0.md` - added binding conflict note
+- Updated `mu/docs/core/EngineNewsStructural.v0.md` - marked IMPLEMENTED
+- Updated `mu/docs/core/SelfHosting.v0.md` - added EngineNews section
+- Updated `mu/docs/core/BootstrapPrimitives.v0.md` - added binding conflict note
 - Updated `STATUS.md` - Step 5 DONE
 - Updated `TASKS.md` - all checkboxes marked complete
 
@@ -694,13 +694,13 @@ both Python and JavaScript and compared the outputs.
   - Added deprecation warning to `Kernel` class and `create_kernel()` factory
   - Moved `test_kernel_v0.py` to `tests/archive/legacy/`
   - Created `tests/structural/test_lambda_calculus_guardrails.py` with 11 guardrail tests
-  - Updated docs/core/MetaCircularKernel.v0.md with deprecation note and max_steps clarification
+  - Updated mu/docs/core/MetaCircularKernel.v0.md with deprecation note and max_steps clarification
 
 - **Documentation: kernel.v1.json as Canonical Kernel**
   - Updated README.md: Core modules table now lists kernel.v1.json as "THE canonical kernel"
-  - Updated docs/core/SelfHosting.v0.md: kernel.py noted as "not canonical; see kernel.v1.json"
-  - Updated docs/core/RCXKernel.v0.md: Added status column marking kernel.v1.json as canonical
-  - Updated docs/audit/MetaCircularReadiness.v1.md: Current status references kernel.v1.json
+  - Updated mu/docs/core/SelfHosting.v0.md: kernel.py noted as "not canonical; see kernel.v1.json"
+  - Updated mu/docs/core/RCXKernel.v0.md: Added status column marking kernel.v1.json as canonical
+  - Updated mu/docs/audit/MetaCircularReadiness.v1.md: Current status references kernel.v1.json
 
 - **Audit Stack Cleanup**
   - Updated tools/audit_fast.sh: Removed archived test_kernel_v0.py from explicit test list
@@ -816,9 +816,9 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - **Doc Consistency Fixes**
   - All design docs now reference STATUS.md for debt numbers (no hardcoded values)
-  - `docs/core/SelfHosting.v0.md`: Removed hardcoded debt breakdown
-  - `docs/core/MetaCircularKernel.v0.md`: Updated status VECTOR → NEXT
-  - `docs/core/DebtCategories.v0.md`: Removed outdated DEBT_THRESHOLD values
+  - `mu/docs/core/SelfHosting.v0.md`: Removed hardcoded debt breakdown
+  - `mu/docs/core/MetaCircularKernel.v0.md`: Updated status VECTOR → NEXT
+  - `mu/docs/core/DebtCategories.v0.md`: Removed outdated DEBT_THRESHOLD values
 
 ### Security
 - **Kernel Projection Order Validation**
@@ -859,12 +859,12 @@ both Python and JavaScript and compared the outputs.
   - All agents now have "STATUS.md wins" override rule
   - structural-proof has exec/non-exec modes (Mode A: run, Mode B: CI verification)
 
-- **Archived**: `tools/verification_checklist.md` → `docs/archive/verification_checklist_v0.md`
+- **Archived**: `tools/verification_checklist.md` → `archive/docs/verification_checklist_v0.md`
   - Superseded by `tools/agents/verifier_prompt.md` (verifier agent)
 
 ### Design
 - **Phase 7 Design: Meta-Circular Kernel** (PR #168)
-  - Created `docs/core/MetaCircularKernel.v0.md` (VECTOR status)
+  - Created `mu/docs/core/MetaCircularKernel.v0.md` (VECTOR status)
   - Defines how kernel loop becomes structural (projections select projections)
   - Key design: linked-list cursor eliminates arithmetic (head/tail destructuring)
   - Structural-proof agent verified cursor approach is SOUND and STRUCTURAL
@@ -887,7 +887,7 @@ both Python and JavaScript and compared the outputs.
   - Updated all 8 agent `.md` files with semantic scope (L1/L2/L3, not phase numbers)
   - Agents reference STATUS.md for current level, not hardcoded version
   - Distinguishes scaffolding debt (acceptable at current L) from semantic debt (must fix)
-  - Updated `docs/agents/AgentRig.v0.md` with semantic Phase Scope table
+  - Updated `mu/docs/agents/AgentRig.v0.md` with semantic Phase Scope table
   - Prevents phase drift: agents adapt automatically when STATUS.md updates
 
 ### Tests
@@ -922,7 +922,7 @@ both Python and JavaScript and compared the outputs.
 
 ### Docs
 - **Design Decisions Documented** (PR #155)
-  - `docs/core/DebtCategories.v0.md`: Added "Known Design Decisions" section
+  - `mu/docs/core/DebtCategories.v0.md`: Added "Known Design Decisions" section
   - Empty collection normalization explained with rationale
   - Head/tail collision handling documented
 
@@ -1051,7 +1051,7 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - Updated `docs/RuleAsMotif.v0.md` to reflect implementation status
 - Updated `docs/cli_quickstart.md` with rules commands
-- Updated `docs/execution/IndependentEncounter.v0.md` to IMPLEMENTED status
+- Updated `mu/docs/execution/IndependentEncounter.v0.md` to IMPLEMENTED status
 
 ## Unreleased
 
@@ -1077,7 +1077,7 @@ both Python and JavaScript and compared the outputs.
 ### Docs
 - `docs/TraceReadingPrimer.v0.md` - Human-readable trace guide
 - `docs/Flags.md` - Flag discipline contract
-- `docs/archive/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
+- `archive/docs/MinimalNativeExecutionPrimitive.v0.md` - Boundary question answered
 - Removed `NEXT_STEPS.md` (redundant with TASKS.md)
 
 ### Tests

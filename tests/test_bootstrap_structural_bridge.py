@@ -3,7 +3,7 @@
 This module tests the binding conflict detection mechanism that enables
 recurrence.v1 and exhaustion.v1 to run through the meta-circular kernel.
 
-Test vectors from docs/core/BootstrapStructuralBridge.v0.md.
+Test vectors from mu/docs/core/BootstrapStructuralBridge.v0.md.
 """
 
 import json

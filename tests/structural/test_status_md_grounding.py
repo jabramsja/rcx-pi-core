@@ -4,7 +4,7 @@ Grounding tests for STATUS.md claims.
 These tests verify that claims in STATUS.md match actual project state.
 If a test fails, either the code changed or STATUS.md needs updating.
 
-See: docs/agents/AgentRig.v0.md (grounding agent)
+See: mu/docs/agents/AgentRig.v0.md (grounding agent)
 """
 
 import ast
@@ -157,7 +157,7 @@ class TestKeyFilesExist:
     """Verify files referenced in STATUS.md exist."""
 
     @pytest.mark.parametrize("path", [
-        "docs/core/MetaCircularKernel.v0.md",
+        "mu/docs/core/MetaCircularKernel.v0.md",
         "rcx_pi/selfhost/match_mu.py",
         "rcx_pi/selfhost/subst_mu.py",
         "rcx_pi/selfhost/step_mu.py",
@@ -183,7 +183,7 @@ class TestPhaseStatus:
 
     def test_phase_7_is_complete(self):
         """Phase 7 should be DONE status (L2 FULL achieved via explicit acceptance)."""
-        kernel_doc = ROOT / "docs" / "core" / "MetaCircularKernel.v0.md"
+        kernel_doc = ROOT / "mu" / "docs" / "core" / "MetaCircularKernel.v0.md"
         content = kernel_doc.read_text()
 
         # Should have DONE status (Phase 8 decision: accept for-loop as bootstrap primitive)

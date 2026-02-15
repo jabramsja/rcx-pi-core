@@ -553,7 +553,7 @@ echo "Checking for BOOTSTRAP markers in Python code..."
 BOOTSTRAP_COUNT=$(grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | wc -l | tr -d ' ')
 if [ "$BOOTSTRAP_COUNT" -gt 0 ]; then
     echo "  Found $BOOTSTRAP_COUNT BOOTSTRAP markers (temporary Python code)"
-    echo "  These are documented bootstrap primitives - see docs/core/BootstrapPrimitives.v0.md"
+    echo "  These are documented bootstrap primitives - see mu/docs/core/BootstrapPrimitives.v0.md"
     grep -r "# BOOTSTRAP:" rcx_pi/ 2>/dev/null | head -5
 else
     echo "  ✓ No BOOTSTRAP markers found"

@@ -52,7 +52,7 @@ EXCLUDE_SUFFIXES = {
 
 # Hard-exclude buckets (regardless of globs), unless overridden by a flag.
 HARD_EXCLUDE_PREFIXES_DEFAULT = [
-    "docs/fixtures/",  # user doesn't care about fixtures in minimal spine
+    "mu/docs/fixtures/",  # user doesn't care about fixtures in minimal spine
 ]
 
 # "Minimal spine" = what you need to understand/rehydrate the current working system.
@@ -68,8 +68,8 @@ MINIMAL_GLOBS = [
     "rcx_pi/*.py",
     "rcx_pi/**/*.py",
     # schema locations (both)
-    "docs/schemas/**/*.json",
-    "docs/schemas/**/*.md",
+    "mu/docs/schemas/**/*.json",
+    "mu/docs/schemas/**/*.md",
     "docs/*schema*.json",
     "docs/*schema*.md",
 ]
@@ -78,13 +78,13 @@ MINIMAL_GLOBS = [
 EXTENDED_GLOBS_BASE = MINIMAL_GLOBS + [
     "docs/**/*.md",
     "docs/**/*.json",
-    "docs/latex/**/*",
+    "archive/docs/latex/**/*",
     "tests/**/*.py",
     "tests/golden/**/*",
 ]
 
 EXTENDED_GLOBS_WITH_FIXTURES = EXTENDED_GLOBS_BASE + [
-    "docs/fixtures/**/*",
+    "mu/docs/fixtures/**/*",
 ]
 
 
@@ -175,7 +175,7 @@ def main() -> None:
     if args.mode in ("extended", "both") and args.include_fixtures:
         # allow fixtures by removing hard-exclude
         hard_exclude_prefixes = [
-            p for p in hard_exclude_prefixes if p != "docs/fixtures/"
+            p for p in hard_exclude_prefixes if p != "mu/docs/fixtures/"
         ]
 
     extended_globs = (
@@ -203,7 +203,7 @@ def main() -> None:
         )
 
     print(f"repo: {root}")
-    if "docs/fixtures/" in hard_exclude_prefixes:
+    if "mu/docs/fixtures/" in hard_exclude_prefixes:
         print("fixtures: excluded (hard)")
     else:
         print("fixtures: included")

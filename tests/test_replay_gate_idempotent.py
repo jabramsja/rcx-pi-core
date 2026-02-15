@@ -25,7 +25,7 @@ def _git_diff_tracked_names(cwd: Path) -> str:
             ":(exclude)rcx_pi_core.egg-info/SOURCES.txt",
             # Exclude orbit artifacts touched by test_orbit_artifacts_idempotent
             # (can change during parallel xdist execution)
-            ":(exclude)docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg",
+            ":(exclude)mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg",
         ],
         cwd=str(cwd),
         capture_output=True,

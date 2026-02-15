@@ -118,7 +118,7 @@ if [ $ERRORS -gt 0 ]; then
     echo "❌ JS contraband check FAILED: $ERRORS forbidden pattern(s) found"
     echo ""
     echo "These patterns break L3 parity guarantees (determinism, purity, isolation)."
-    echo "See docs/core/SelfHosting.v0.md for allowed bootstrap patterns."
+    echo "See mu/docs/core/SelfHosting.v0.md for allowed bootstrap patterns."
     exit 1
 fi
 

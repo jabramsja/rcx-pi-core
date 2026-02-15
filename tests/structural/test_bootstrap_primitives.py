@@ -11,8 +11,8 @@ Tests for the mu_equal convenience wrapper remain for backward compatibility.
 
 Tests convert claims in the document into executable verifications.
 
-See: docs/core/BootstrapPrimitives.v0.md
-See: docs/agents/AgentRig.v0.md (grounding agent)
+See: mu/docs/core/BootstrapPrimitives.v0.md
+See: mu/docs/agents/AgentRig.v0.md (grounding agent)
 """
 
 from pathlib import Path
@@ -490,12 +490,12 @@ class TestDocumentationClaims:
 
     def test_document_exists(self):
         """BootstrapPrimitives.v0.md exists."""
-        doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
+        doc_path = ROOT / "mu" / "docs" / "core" / "BootstrapPrimitives.v0.md"
         assert doc_path.exists()
 
     def test_primitives_documented(self):
         """Document lists all primitives (4 active + mu_equal eliminated)."""
-        doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
+        doc_path = ROOT / "mu" / "docs" / "core" / "BootstrapPrimitives.v0.md"
         content = doc_path.read_text()
 
         # 4 active primitives + mu_equal (eliminated, still documented)
@@ -514,7 +514,7 @@ class TestDocumentationClaims:
 
     def test_scope_section_exists(self):
         """Document has scope and self-hosting levels section."""
-        doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
+        doc_path = ROOT / "mu" / "docs" / "core" / "BootstrapPrimitives.v0.md"
         content = doc_path.read_text()
 
         assert "Scope and Self-Hosting Levels" in content, (
@@ -523,7 +523,7 @@ class TestDocumentationClaims:
 
     def test_recurrence_section_exists(self):
         """Document has Recurrence compatibility section."""
-        doc_path = ROOT / "docs" / "core" / "BootstrapPrimitives.v0.md"
+        doc_path = ROOT / "mu" / "docs" / "core" / "BootstrapPrimitives.v0.md"
         content = doc_path.read_text()
 
         assert "Recurrence Compatibility" in content, (

@@ -5,7 +5,7 @@ This module provides a factory for creating projection runners.
 It consolidates the duplicated runner pattern from match_mu.py, subst_mu.py,
 and classify_mu.py.
 
-See docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/SelfHosting.v0.md for design.
 """
 
 from __future__ import annotations

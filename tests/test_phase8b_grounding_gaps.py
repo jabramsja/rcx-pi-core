@@ -7,7 +7,7 @@ original test_phase8b_mechanical_kernel.py suite. They cover:
 1. Max steps exhaustion - The BOOTSTRAP_PRIMITIVE guard (line 287-292 in step_mu.py)
 2. mu_equal stall detection - The no-progress detection path (line 303 in step_mu.py)
 
-See docs/core/BootstrapPrimitives.v0.md for why max_steps is irreducible.
+See mu/docs/core/BootstrapPrimitives.v0.md for why max_steps is irreducible.
 """
 
 import pytest

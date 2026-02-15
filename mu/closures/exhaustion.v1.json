@@ -3,7 +3,7 @@
         "version": "1.2.0",
         "name": "EXHAUSTION_SEED",
         "description": "Structural operator exhaustion detection for Rule 3.1",
-        "doc": "docs/core/OperatorExhaustion.v0.md",
+        "doc": "mu/docs/core/OperatorExhaustion.v0.md",
         "spec_ref": "RCXEngineNew.pdf Rule 3.1",
         "execution_layer": "META_CIRCULAR",
         "meta_circular_capable": true,
