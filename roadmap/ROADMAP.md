@@ -9,7 +9,7 @@ Purpose: provide a clean sequencing view across normalization, meta-circular exe
 Read first:
 1. `STATUS.md`
 2. `TASKS.md`
-3. `roadmap/NormalizationDecisionMemo.md`
+3. `docs/archive/NormalizationDecisionMemo.md` (archived — decision final)
 4. `roadmap/AlgorithmNormalizationSpec.v0.md`
 5. `roadmap/MetaCircular_Boot0_GatePlan.md`
 6. `roadmap/MuHemispheresDesign.md`

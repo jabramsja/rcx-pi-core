@@ -40,7 +40,7 @@ Exit criteria:
 ## Gate 0: Baseline Freeze ✅ COMPLETE
 Goal: lock current behavior and verify parity baselines before refactor.
 
-**Status:** COMPLETE (2026-02-04). Baseline at `roadmap/Gate0_Baseline_2026-02-04.md`.
+**Status:** COMPLETE (2026-02-04). Baseline at `docs/archive/Gate0_Baseline_2026-02-04.md`.
 
 **Timing:** Run immediately before Gate 2 begins. Do not run standalone.
 

@@ -22,7 +22,7 @@
 | `AlgorithmNormalizationSpec.v0.md` | Draft design spec | Design evolves |
 | `MuHemispheresDesign.md` | Design spec (v0 core + engine integration) | Design evolves |
 | `ContentAddressedMu.md` | Design spec (Levels 0-2 implemented, Level 3 deferred) | Design evolves |
-| `NormalizationDecisionMemo.md` | Decision authorization | Rarely (decisions are final) |
+| ~~`NormalizationDecisionMemo.md`~~ | Archived to `docs/archive/` (Round 24A) | N/A |
 
 ## Gate Levels and Execution Order
 
