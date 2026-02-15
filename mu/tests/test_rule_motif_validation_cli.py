@@ -87,7 +87,7 @@ class TestCheckRuleMotifsCliRuns:
         assert "v" in report
         assert report["v"] == 1
         assert "rule_count" in report
-        assert report["rule_count"] == 8  # 8 rules from rules_pure.py
+        assert report["rule_count"] == 8  # 8 rules from rule_motifs_v0.py
         assert "ok" in report
         assert "errors" in report
         assert isinstance(report["errors"], list)

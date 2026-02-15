@@ -122,13 +122,13 @@ class TestRuleMotifsCliDeterminism:
 
 
 class TestRuleMotifsCliCoverage:
-    """Output must cover all rules from rules_pure.py."""
+    """Output must cover all rules from rule_motifs_v0.py."""
 
     def test_emitted_rule_ids_match_canonical_list(self) -> None:
         """
         Emitted rule IDs must exactly match RULE_IDS from rule_motifs_v0.py.
 
-        This prevents quiet drift: if rules_pure.py adds/removes rules,
+        This prevents quiet drift: if rule_motifs_v0.py adds/removes rules,
         either RULE_IDS or the motif definitions must be updated.
         """
         exit_code, stdout, _ = _run_cli_rule_motifs()
@@ -144,14 +144,14 @@ class TestRuleMotifsCliCoverage:
         )
 
     def test_all_expected_rules_present(self) -> None:
-        """All known rules from rules_pure.py must be present."""
+        """All known rules from rule_motifs_v0.py must be present."""
         exit_code, stdout, _ = _run_cli_rule_motifs()
         assert exit_code == 0
 
         events = _parse_jsonl(stdout)
         emitted_ids = {e["mu"]["rule"]["id"] for e in events}
 
-        # These are the rules implemented in rules_pure.py
+        # These are the rules defined in rule_motifs_v0.py
         expected_rules = {
             "add.zero",
             "add.succ",
