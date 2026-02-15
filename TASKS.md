@@ -441,3 +441,6 @@ Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `rcx_pi_rust/` — ARCHIVED Round 23A (moved to `archive/rcx_pi_rust/`)
 - `rcx_omega/` — ARCHIVED Round 23A (moved to `archive/rcx_omega/`)
 - `mu/worlds_json/` — MAINTAIN as test fixtures (moved from root Round 23B); `rcx_core_mut4.json` removed Round 22J (was byte-identical to mut3)
+- `Makefile` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
+- `rcx_runtime.py` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
+- `rcx_start.py` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
