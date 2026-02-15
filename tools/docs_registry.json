@@ -40,7 +40,7 @@
     "tools/agents/.*_prompt\\.md$",
     "\\.auto\\.md$",
     "^rcx_pi_rust/",
-    "^rcx_omega/",
+    "^archive/rcx_omega/",
     "^archive/rcx_python_examples/",
     "^rcx_pi/specs/",
     "^tests/archive/",

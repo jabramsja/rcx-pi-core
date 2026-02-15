@@ -14,7 +14,7 @@ Exempt paths (no governance required):
 - .pytest_cache/, .github/ - generated/config
 - /archive/ paths - historical, read-only
 - tests/golden/, tests/archive/ - test fixtures
-- rcx_pi_rust/, rcx_omega/ - separate governance (rcx_python_examples/ archived)
+- rcx_pi_rust/ - separate governance (rcx_omega/, rcx_python_examples/ archived)
 
 See docs/core/DocGovernance.v0.md for full policy.
 
@@ -61,7 +61,7 @@ EXEMPT_PATTERNS = [
     r"tools/agents/.*_prompt\.md$", # Agent prompt templates (not docs)
     r"\.auto\.md$",                # Auto-generated docs
     r"^rcx_pi_rust/",              # Rust subproject (archived)
-    r"^rcx_omega/",                # Omega subproject (archive-bound, dir still present)
+    r"^archive/rcx_omega/",         # Omega subproject (archived Round 23A)
     r"^archive/rcx_python_examples/",  # Examples subproject (archived)
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files

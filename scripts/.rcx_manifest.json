@@ -1,0 +1,17 @@
+{
+  "file_count": 0,
+  "files": [],
+  "format": "rcx-manifest-v1",
+  "included_roots": [],
+  "manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "missing_roots": [
+    ".rcx_library/CANON",
+    ".rcx_library/CANON_EXEC",
+    "archive/rcx_omega",
+    "rcx_pi",
+    "scripts",
+    "tests",
+    "docs"
+  ],
+  "repo_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/scripts"
+}
