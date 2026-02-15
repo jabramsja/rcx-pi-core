@@ -51,7 +51,6 @@ docs/rcx-pi-paper.pdf
 # RCX generated swarm artifacts (do not commit)
 # =========================
 rcx_pi_rust/mu_programs/vars_demo__g*.muomega.json
-omega.json
 docs/latex/build/
 *.bbl
 *.blg
