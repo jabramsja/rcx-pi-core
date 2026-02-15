@@ -1,9 +1,11 @@
 """
-Root-layout guardrail: prevent root directory sprawl.
+Root-layout guardrail: prevent root directory sprawl and artifact re-tracking.
 
 Only allowlisted directories may exist at the repo root as tracked git
 directories. This catches accidental introduction of new top-level
 folders that create "root noise" and undermine the mu-centric layout.
+
+Generated artifacts that are gitignored must not be re-tracked.
 
 Untracked/gitignored directories (e.g. __pycache__, sandbox_runs/) are
 excluded — this test only checks what git tracks.
@@ -77,4 +79,35 @@ class TestRootLayoutGuard:
             "Remove stale entries from ALLOWED_ROOT_DIRS in "
             "tests/structural/test_root_layout_guard.py.\n"
             f"Phantom entries: {phantom}"
+        )
+
+
+# Generated artifacts that must NEVER be tracked.
+# These are gitignored output files that have been accidentally committed
+# in the past. This guardrail prevents re-tracking via git add -f.
+FORBIDDEN_TRACKED_ARTIFACTS: frozenset[str] = frozenset({
+    ".rcx_manifest.json",
+    "RCX_MINIMAL_SPINE_MANIFEST.json",
+    "RCX_MINIMAL_SPINE_MANIFEST.md",
+})
+
+
+class TestGeneratedArtifactGuard:
+    """Prevent re-tracking of generated manifest artifacts."""
+
+    def test_no_generated_manifests_tracked(self):
+        """Generated manifests must not be tracked (gitignored artifacts)."""
+        result = subprocess.run(
+            ["git", "ls-files"] + sorted(FORBIDDEN_TRACKED_ARTIFACTS),
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        tracked = set(result.stdout.strip().splitlines()) if result.stdout.strip() else set()
+
+        assert not tracked, (
+            "Generated manifest artifacts are tracked in git but should not be.\n"
+            "These are gitignored generated output — untrack with: "
+            "git rm --cached <file>\n"
+            f"Violations: {sorted(tracked)}"
         )
