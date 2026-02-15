@@ -237,6 +237,9 @@ def should_include_grounding(files: list[str]) -> bool:
     """Run grounding only on high-risk changes unless explicitly forced."""
     normalized = [f.replace("\\", "/") for f in files]
     for file_path in normalized:
+        # mu/docs/ is documentation, not high-risk code
+        if file_path.startswith("mu/docs/"):
+            continue
         if any(pattern in file_path for pattern in GROUNDING_HIGH_RISK_PATTERNS):
             return True
     return len(files) >= 20
