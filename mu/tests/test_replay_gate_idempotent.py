@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+
+def _repo_root() -> Path:
+    # tests/ -> repo root
+    return Path(__file__).parents[1]
+
+
+def _git_diff_tracked_names(cwd: Path) -> str:
+    """
+    Return tracked diffs, excluding build/install byproducts that can be touched during CI.
+    """
+    r = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "--",
+            ".",
+            ":(exclude)rcx_pi_core.egg-info/PKG-INFO",
+            ":(exclude)rcx_pi_core.egg-info/SOURCES.txt",
+            # Exclude orbit artifacts touched by test_orbit_artifacts_idempotent
+            # (can change during parallel xdist execution)
+            ":(exclude)mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg",
+        ],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return (r.stdout or "").strip()
+
+
+def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
+    )
+
+
+def test_replay_is_idempotent_for_tracked_files(tmp_path: Path) -> None:
+    """
+    Determinism gate (v1):
+    Running replay on each fixture must not change any tracked files.
+    Output is allowed only to explicit --out (typically untracked temp paths).
+    """
+    root = _repo_root()
+    fixtures_dir = root / "tests" / "fixtures" / "traces"
+    fixtures = sorted(fixtures_dir.glob("*.v1.jsonl"))
+    assert fixtures, f"No fixtures found in {fixtures_dir}"
+
+    before = _git_diff_tracked_names(root)
+    assert before == "", f"Repo already has tracked diffs before test:\n{before}"
+
+    for trace in fixtures:
+        out = tmp_path / f"{trace.stem}.canon.jsonl"
+        r = _run(
+            [
+                "python3",
+                "-m",
+                "rcx_pi.rcx_cli",
+                "replay",
+                "--trace",
+                str(trace),
+                "--out",
+                str(out),
+            ],
+            root,
+        )
+        assert r.returncode == 0, f"Fixture {trace.name} failed:\n{r.stdout or ''}\n{r.stderr or ''}"
+
+        after = _git_diff_tracked_names(root)
+        assert after == "", f"Replay of {trace.name} changed tracked files (forbidden):\n{after}"

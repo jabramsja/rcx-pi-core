@@ -2,6 +2,20 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-15
+
+### Round 24D: Convergence Execution (tools/scripts/tests -> mu/)
+
+- **Physical move**: `tools/`, `scripts/`, `tests/` moved under `mu/` via `git mv` (~340 files)
+- **Root symlinks**: `tools -> mu/tools`, `scripts -> mu/scripts`, `tests -> mu/tests` for backward compat (removal planned for 24E)
+- **Shell scripts**: 8 scripts converted from `dirname`-based repo root to `git rev-parse --show-toplevel`
+- **Python paths**: `.resolve()` removed from 25 REPO_ROOT computations (prevents symlink resolution from breaking parent chains)
+- **Git-path configs updated**: `enforce_tracker_sync.sh`, `pre-commit-doc-check`, `docs_registry.json`, `run_review.py`, `run_ci_review.py` — all now use `mu/` prefix for git-reported paths
+- **Root layout guard**: Made index-aware (reads staging area, not just HEAD); `tests`/`tools`/`scripts` removed from ALLOWED_ROOT_DIRS
+- **Symlink `..` traversal**: Fixed `os.path.join` + `..` patterns that break with symlinks (normalize before use)
+- **Tracker sync exclusions**: `mu/tools/`, `mu/scripts/`, `mu/tests/` excluded from core-change detection
+- No phase/debt/runtime change
+
 ## 2026-02-14
 
 ### Documentation Drift Sync (Governance + Schemas)
