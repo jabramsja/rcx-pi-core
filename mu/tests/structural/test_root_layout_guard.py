@@ -20,28 +20,49 @@ import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 
-# Allowlisted root directories (tracked by git).
+# Allowlisted root directories and symlinks (tracked by git).
 # Add new entries here ONLY with a governance reason.
 ALLOWED_ROOT_DIRS: frozenset[str] = frozenset({
     # Infrastructure
     ".claude",
     ".githooks",
     ".github",
-    # Active code
+    # Active code (canonical)
     "mu",
-    "rcx_pi",
+    # Backward-compat symlinks (→ mu/)
+    "rcx_pi",   # → mu/host/python/rcx_pi
+    "tests",    # → mu/tests
+    "tools",    # → mu/tools
+    "scripts",  # → mu/scripts
     # Archive + legacy
     "archive",
     ".rcx_library",
 })
 
 
+def _parse_dirs_and_symlinks(ls_tree_output: str) -> set[str]:
+    """Parse git ls-tree output, returning names of directories and symlinks.
+
+    Modes: 040000 = tree (directory), 120000 = symlink blob.
+    """
+    entries = set()
+    for line in ls_tree_output.strip().splitlines():
+        parts = line.split(None, 3)
+        if len(parts) >= 4 and parts[0] in ("040000", "120000"):
+            entries.add(parts[3])
+    return entries
+
+
 def _get_tracked_root_dirs() -> set[str]:
-    """Get root-level tracked directories from the index (or HEAD as fallback).
+    """Get root-level tracked directories AND symlinks from git.
 
     Prefers the staging index (``git write-tree`` + ``git ls-tree``) so the
     test reflects staged moves even before they are committed.  Falls back
     to HEAD when nothing is staged.
+
+    Detects both directories (mode 040000) and symlinks (mode 120000) so
+    that backward-compat symlinks like rcx_pi/, tests/, tools/, scripts/
+    are properly guarded after symlink inversions.
     """
     # Try index first (handles uncommitted git-mv)
     tree = subprocess.run(
@@ -50,17 +71,17 @@ def _get_tracked_root_dirs() -> set[str]:
     )
     if tree.returncode == 0 and tree.stdout.strip():
         result = subprocess.run(
-            ["git", "ls-tree", "--name-only", tree.stdout.strip(), "-d"],
+            ["git", "ls-tree", tree.stdout.strip()],
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
         if result.returncode == 0 and result.stdout.strip():
-            return set(result.stdout.strip().splitlines())
+            return _parse_dirs_and_symlinks(result.stdout)
     # Fallback to HEAD
     result = subprocess.run(
-        ["git", "ls-tree", "--name-only", "HEAD", "-d"],
+        ["git", "ls-tree", "HEAD"],
         capture_output=True, text=True, cwd=REPO_ROOT,
     )
-    return set(result.stdout.strip().splitlines())
+    return _parse_dirs_and_symlinks(result.stdout)
 
 
 class TestRootLayoutGuard:

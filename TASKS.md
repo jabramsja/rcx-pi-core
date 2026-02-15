@@ -49,7 +49,7 @@ If a task is not listed here, it is NOT to be implemented.
 - Do not leave broken files/tests behind and add replacements.
 - Minimize file creation. Prefer editing existing files.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
-- **L3 Parity Rule**: Changes to `rcx_pi/selfhost/` or `mu/` MUST be mirrored in `mu/host/js/eval_step.js`.
+- **L3 Parity Rule**: Changes to `mu/host/python/rcx_pi/selfhost/` (or via symlink `rcx_pi/selfhost/`) or `mu/` MUST be mirrored in `mu/host/js/eval_step.js`.
   - Run `node mu/host/js/eval_step.js` to verify all JS tests pass
   - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
   - Run `./tools/contraband_js.sh` to verify no forbidden patterns (determinism, purity)

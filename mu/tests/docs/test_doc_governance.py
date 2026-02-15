@@ -53,7 +53,8 @@ GOVERNED_FOLDERS = get_governed_folders_as_strings()
 
 # EXEMPT - truly no governance required (generated, archived, separate projects)
 EXEMPT_PATTERNS = [
-    r"^\.pytest_cache/",           # pytest generated
+    r"^\.pytest_cache/",           # pytest generated (root)
+    r"/\.pytest_cache/",           # pytest generated (nested)
     r"^\.github/",                 # GitHub templates
     r"^\.rcx_library/",            # Library files
     r"/archive/",                  # Any archive folder (historical, read-only)

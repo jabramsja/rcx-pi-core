@@ -1,7 +1,7 @@
 """
 Rule Motifs v0 - Observability-only rule representations.
 
-This module provides static rule motif definitions for all rules in rules_pure.py.
+This module provides static rule motif definitions for all rule IDs defined in this module.
 It emits rule.loaded v2 trace events. No execution semantics, no matching, no application.
 
 See mu/docs/execution/RuleAsMotif.v0.md for the design specification.
@@ -14,7 +14,7 @@ import sys
 from typing import Any, Dict, List, Set
 
 
-# Canonical list of all rule IDs from rules_pure.py.
+# Canonical list of all rule IDs defined by rule_motifs_v0().
 # This MUST be kept in sync with the actual rules.
 # Tests verify this list matches emitted rule motifs.
 RULE_IDS: tuple[str, ...] = (
@@ -31,7 +31,7 @@ RULE_IDS: tuple[str, ...] = (
 
 def rule_motifs_v0() -> List[Dict[str, Any]]:
     """
-    Return the complete list of rule motifs for all rules in rules_pure.py.
+    Return the complete list of rule motifs for all rules defined in this module.
 
     This is a pure function with no side effects. Output is deterministic
     under PYTHONHASHSEED=0.

@@ -18,7 +18,8 @@
     "mu/docs/cli",
     "mu/docs/schemas",
     "mu/docs/reviews",
-    "mu/tools/agents"
+    "mu/tools/agents",
+    "mu/host/python/rcx_pi"
   ],
   "docs_registered_subfolders": [
     "core",

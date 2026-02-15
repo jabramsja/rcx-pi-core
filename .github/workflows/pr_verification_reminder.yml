@@ -8,9 +8,13 @@ on:
   pull_request:
     types: [opened, synchronize]
     paths:
+      # Dual-path: old (symlink) + new (canonical) for transition safety
       - 'rcx_pi/selfhost/kernel.py'
       - 'rcx_pi/selfhost/eval_seed.py'
       - 'rcx_pi/selfhost/mu_type.py'
+      - 'mu/host/python/rcx_pi/selfhost/kernel.py'
+      - 'mu/host/python/rcx_pi/selfhost/eval_seed.py'
+      - 'mu/host/python/rcx_pi/selfhost/mu_type.py'
 
 jobs:
   remind:
@@ -31,13 +35,14 @@ jobs:
           EVAL_SEED_CHANGED=false
           MU_TYPE_CHANGED=false
 
-          if echo "$CHANGED" | grep -q "rcx_pi/selfhost/kernel.py"; then
+          # Dual-path: check old (symlink) + new (canonical) for transition safety
+          if echo "$CHANGED" | grep -q -E "(rcx_pi|mu/host/python/rcx_pi)/selfhost/kernel.py"; then
             KERNEL_CHANGED=true
           fi
-          if echo "$CHANGED" | grep -q "rcx_pi/selfhost/eval_seed.py"; then
+          if echo "$CHANGED" | grep -q -E "(rcx_pi|mu/host/python/rcx_pi)/selfhost/eval_seed.py"; then
             EVAL_SEED_CHANGED=true
           fi
-          if echo "$CHANGED" | grep -q "rcx_pi/selfhost/mu_type.py"; then
+          if echo "$CHANGED" | grep -q -E "(rcx_pi|mu/host/python/rcx_pi)/selfhost/mu_type.py"; then
             MU_TYPE_CHANGED=true
           fi
 
@@ -57,9 +62,9 @@ jobs:
             const muTypeChanged = '${{ steps.check.outputs.mu_type }}' === 'true';
 
             let files = [];
-            if (kernelChanged) files.push('`rcx_pi/selfhost/kernel.py`');
-            if (evalSeedChanged) files.push('`rcx_pi/selfhost/eval_seed.py`');
-            if (muTypeChanged) files.push('`rcx_pi/selfhost/mu_type.py`');
+            if (kernelChanged) files.push('`mu/host/python/rcx_pi/selfhost/kernel.py`');
+            if (evalSeedChanged) files.push('`mu/host/python/rcx_pi/selfhost/eval_seed.py`');
+            if (muTypeChanged) files.push('`mu/host/python/rcx_pi/selfhost/mu_type.py`');
 
             const body = `## 🔍 Verification Agents Recommended
 

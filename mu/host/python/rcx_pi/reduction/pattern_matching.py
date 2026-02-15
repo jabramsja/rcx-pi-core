@@ -19,7 +19,7 @@ ACTIVATION = μ(μ(μ(μ(μ(μ())))))  # 5-deep marker
 
 # 7-deep marker = pattern variable
 VAR = μ(μ(μ(μ(μ(μ(μ(μ())))))))  # internal name
-PATTERN_VAR_MARKER = VAR  # exported name used by rules_pure
+PATTERN_VAR_MARKER = VAR  # exported name (historically from rules_pure, now archived)
 
 
 def is_var(m):

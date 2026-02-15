@@ -917,7 +917,7 @@ echo "Checking for Python files in rcx_pi/ not covered by audits..."
 AUDITED_FILES="eval_seed.py kernel.py mu_type.py"
 
 # Find all .py files in rcx_pi/ (excluding __pycache__)
-ALL_PY_FILES=$(find rcx_pi -maxdepth 1 -name "*.py" -type f 2>/dev/null | xargs -I{} basename {} | sort)
+ALL_PY_FILES=$(find -H rcx_pi -maxdepth 1 -name "*.py" -type f 2>/dev/null | xargs -I{} basename {} | sort)
 
 UNAUDITED=""
 for f in $ALL_PY_FILES; do
