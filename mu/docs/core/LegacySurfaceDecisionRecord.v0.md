@@ -119,7 +119,7 @@ Bridge format for RCX rule sets (Mu pattern to action routing). Contains `rcx_co
 
 ### Dependencies
 
-- `rcx_pi/worlds_json.py`: Utility module for JSON/Mu format conversion (boundary code, not selfhost)
+- `archive/rcx_pi_legacy/worlds_json.py`: Utility module for JSON/Mu format conversion (archived Round 24E — zero active importers)
 - `test_worlds_paradox_1over0.py`: Active test using `paradox_1over0.json`
 - `rcx_pi_rust/examples/`: Rust examples load these files
 
