@@ -132,7 +132,10 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 | File | Title |
 |------|-------|
+| [Gate0_Baseline_2026-02-04.md](archive/Gate0_Baseline_2026-02-04.md) | Gate 0 Baseline Freeze (2026-02-04) |
+| [Gate3_ArchitecturalDecision.md](archive/Gate3_ArchitecturalDecision.md) | Gate 3 Architectural Decision: Dict Key Ordering Strategy |
 | [MinimalNativeExecutionPrimitive.v0.md](archive/MinimalNativeExecutionPrimitive.v0.md) | Minimal Native Execution Primitive (v0) |
+| [NormalizationDecisionMemo.md](archive/NormalizationDecisionMemo.md) | Normalization Strategy Decision Memo (v0) |
 | [RCX_OMEGA_CONTRACTS.md](archive/RCX_OMEGA_CONTRACTS.md) | RCX-Ω Contracts (Frozen) |
 | [RCX_OMEGA_GOVERNANCE.md](archive/RCX_OMEGA_GOVERNANCE.md) | RCX-Ω Governance & Rails |
 | [RCX_PI_KERNEL.md](archive/RCX_PI_KERNEL.md) | RCX-π Kernel Overview |
@@ -159,7 +162,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 *LaTeX source files (paper)*
 
-*13 files (non-markdown)*
+*12 files (non-markdown)*
 
 ## reviews
 
