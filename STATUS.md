@@ -385,7 +385,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 ## Key Files
 
 - Design doc: `mu/docs/core/MetaCircularKernel.v0.md`
-- Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
+- Self-hosting: `mu/host/python/rcx_pi/selfhost/` (match_mu, subst_mu, step_mu) — `rcx_pi/` is backward-compat symlink
 - **mu/ folder (new organized structure):**
   - Substrate: `mu/substrate/` (kernel.v1, match.v2, subst.v2)
   - Closures: `mu/closures/` (recurrence.v1, recurrence.v2, exhaustion.v1)
@@ -618,7 +618,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-14 (GAP-10-LOOP CLOSED: EngineNew 10/10 structural, 0 gaps. Trampoline via `_config` carry-through, 10→11 projections, zero host code changes. Boot1 sunset policy in effect.)
+**Last updated:** 2026-02-15 (24E-R2d: rcx_pi ownership flip — canonical location now mu/host/python/rcx_pi/, root rcx_pi/ is backward-compat symlink. 6 dead files archived.)
 **Next milestone:** See TASKS.md VECTOR for next promotion candidates
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
@@ -659,7 +659,7 @@ New organized structure makes architecture visible:
 - `mu/programs/` - Applications: rcx_engine.v1 (orchestrates recurrence + exhaustion)
 - `mu/utilities/` - Helpers: classify.v1, eval.v1
 - `mu/host/js/` - JavaScript bootstrap: eval_step.js
-- `mu/host/python/selfhost` - Python bootstrap (symlink to rcx_pi/selfhost)
+- `mu/host/python/rcx_pi/` - Python bootstrap (canonical; `rcx_pi/` is backward-compat symlink)
 
 **Architectural Gap Discovery (2026-02-02):**
 9-agent review of Step 6 revealed: match.v2.json is "linear only" but enginenews.v1 and exhaust.v1 require non-linear patterns. These seeds work via bootstrap (eval_seed) but CANNOT run through the meta-circular kernel. This was documented but not caught because tests passed.

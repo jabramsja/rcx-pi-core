@@ -274,7 +274,7 @@ Do NOT update individual agent files - they read STATUS.md.
 | `TASKS.md` | Work items (source of truth) |
 | `mu/docs/core/` | Design specs |
 | `mu/docs/agents/AgentRig.v0.md` | Agent rig docs |
-| `rcx_pi/selfhost/` | Core implementation |
+| `mu/host/python/rcx_pi/selfhost/` | Core implementation (canonical; `rcx_pi/` is backward-compat symlink) |
 | `mu/` | Mu projections: substrate/, closures/, bridge/, programs/, utilities/, host/ |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
 | `seeds/*.json` | Seed files (legacy location, mu/ preferred) |
