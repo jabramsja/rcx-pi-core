@@ -49,6 +49,9 @@ docs/latex/build/
 # RCX tooling sandboxes
 sandbox_runs/
 
+# Agent review reports (local output, not tracked docs)
+reports/
+
 # Archive-path generated artifacts (recurrence protection after Round 23A)
 archive/rcx_pi_rust/mu_programs/__sandbox_run_*.mu
 archive/rcx_pi_rust/mu_programs/__smoke_*.mu
