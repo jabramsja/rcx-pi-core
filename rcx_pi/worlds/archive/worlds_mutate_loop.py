@@ -1,6 +1,6 @@
 # rcx_pi/worlds/worlds_mutate_loop.py
-# LEGACY DEPENDENCY: Reads/writes .mu files from rcx_pi_rust/mu_programs/.
-# rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md).
+# LEGACY DEPENDENCY: Reads/writes .mu files from archive/rcx_pi_rust/mu_programs/.
+# rcx_pi_rust is ARCHIVED (LegacySurfaceDecisionRecord.v0.md).
 # No active callers in the L3 path.
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from .worlds_evolve import score_world_against_spec, SPEC_PRESETS
 
 # Where the .mu worlds live, relative to this file
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))  # .../WorkingRCX/rcx_pi
-MU_DIR = os.path.join(ROOT_DIR, "..", "rcx_pi_rust", "mu_programs")
+MU_DIR = os.path.join(ROOT_DIR, "..", "archive", "rcx_pi_rust", "mu_programs")
 
 
 def _mu_path(world: str) -> str:

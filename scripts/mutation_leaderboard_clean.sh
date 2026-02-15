@@ -89,6 +89,7 @@ fi
 EFFECTIVE_RUNNER="$RUNNER"
 if [ "$RUNNER" = "auto" ]; then
   if [ "$is_motif" -eq 1 ]; then
+    # rcx_omega archived (Round 23A) — CLI detection falls through to "none"
     if python3 -m rcx_omega.cli.omega_cli --help >/dev/null 2>&1; then
       EFFECTIVE_RUNNER="omega-cli"
     elif python3 -m rcx_omega.cli.trace_cli --help >/dev/null 2>&1; then

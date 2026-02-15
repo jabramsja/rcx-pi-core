@@ -57,7 +57,7 @@ These gates MUST be passed before meta-circular work begins. Each gate is binary
 | Replay CLI exists | `python -m rcx_pi.rcx_cli replay` | PASS |
 | Replay gate enforces diff-empty | `tests/test_replay_gate_idempotent.py` | PASS |
 | Golden fixtures exist | `tests/fixtures/traces/*.v1.jsonl` | PASS |
-| Rust acceleration bit-for-bit compatible | `rcx_pi_rust/src/replay_cli.rs` | PASS |
+| Rust acceleration bit-for-bit compatible | `archive/rcx_pi_rust/src/replay_cli.rs` | PASS |
 
 ### Gate 3: Entropy Sealing
 

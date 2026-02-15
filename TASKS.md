@@ -438,6 +438,6 @@ Current Exhaustion Layer: META_CIRCULAR
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
-- `rcx_pi_rust/` — ARCHIVE (incompatible with L3; owner: founder)
-- `rcx_omega/` — ARCHIVE (detached from selfhost; owner: founder)
+- `rcx_pi_rust/` — ARCHIVED Round 23A (moved to `archive/rcx_pi_rust/`)
+- `rcx_omega/` — ARCHIVED Round 23A (moved to `archive/rcx_omega/`)
 - `worlds_json/` — MAINTAIN as test fixtures; `rcx_core_mut4.json` removed Round 22J (was byte-identical to mut3)

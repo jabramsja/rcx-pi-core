@@ -133,7 +133,7 @@ Minimal. Duplicate `mut4` removed (Round 22J). Remaining files are distinct muta
 
 | Surface | Decision | Owner | Timeline | Exit Criteria |
 |---------|----------|-------|----------|---------------|
-| **rcx_pi_rust** | ARCHIVE | Founder | No active work | Move to `archive/` on confirmation |
-| **rcx_omega** | ARCHIVE | Founder | No active work | Move to `archive/` on confirmation |
+| **rcx_pi_rust** | ARCHIVED | — | Round 23A | Moved to `archive/rcx_pi_rust/` |
+| **rcx_omega** | ARCHIVED | — | Round 23A | Moved to `archive/rcx_omega/` |
 | **worlds_json** | MAINTAIN | Automated | Indefinite | N/A (test fixtures) |
 | **worlds_json/mut4** | REMOVED | — | Round 22J | Byte-identical to mut3; deleted |

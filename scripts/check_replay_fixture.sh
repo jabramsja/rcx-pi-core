@@ -26,10 +26,10 @@ TMP="$(mktemp -t rcx_engine_run_from_snapshot.XXXXXX.json)"
 trap 'rm -f "$TMP"' EXIT
 
 echo "== build examples =="
-( cd rcx_pi_rust && cargo build --examples >/dev/null )
+( cd archive/rcx_pi_rust && cargo build --examples >/dev/null )
 
 echo "== replay snapshot -> engine_run json =="
-( cd rcx_pi_rust && cargo run --quiet --example replay_snapshot_cli -- "../$SNAPSHOT_FIXTURE" rcx_core > "$TMP" )
+( cd archive/rcx_pi_rust && cargo run --quiet --example replay_snapshot_cli -- "../../$SNAPSHOT_FIXTURE" rcx_core > "$TMP" )
 
 if command -v jq >/dev/null 2>&1; then
   jq . "$TMP" >/dev/null

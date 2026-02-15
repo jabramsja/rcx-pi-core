@@ -144,6 +144,18 @@ FORBIDDEN_PATTERNS = [
         "Use rcx_core_mut3.json instead",
         exceptions=["LegacySurfaceDecisionRecord.v0.md"],
     ),
+    ForbiddenPattern(
+        r'(?<![/a-z])rcx_omega/',
+        "rcx_omega/ archived to archive/rcx_omega/ (Round 23A)",
+        "Use archive/rcx_omega/ or remove reference",
+        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+    ),
+    ForbiddenPattern(
+        r'(?<![/a-z])rcx_pi_rust/',
+        "rcx_pi_rust/ archived to archive/rcx_pi_rust/ (Round 23A)",
+        "Use archive/rcx_pi_rust/ or remove reference",
+        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 

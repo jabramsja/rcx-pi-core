@@ -1,11 +1,11 @@
 """
 Bridge from Python (rcx_pi) to the Rust RCX-π engine.
 
-LEGACY DEPENDENCY: This module requires rcx_pi_rust/ with a working Cargo
-toolchain. rcx_pi_rust is ARCHIVE-bound (LegacySurfaceDecisionRecord.v0.md)
+LEGACY DEPENDENCY: This module requires archive/rcx_pi_rust/ with a working Cargo
+toolchain. rcx_pi_rust is ARCHIVED (LegacySurfaceDecisionRecord.v0.md)
 and architecturally incompatible with L3. No active callers in the L3 path.
 
-This module shells out to the Rust examples in rcx_pi_rust/ so that
+This module shells out to the Rust examples in archive/rcx_pi_rust/ so that
 Python code can:
 
   - classify Mu terms under a given world
@@ -22,14 +22,14 @@ from typing import Any, Dict, List, Optional, Tuple
 def _run_rust_example(args: List[str]) -> Tuple[int, str]:
     """
     Internal helper: run `cargo run --example <...> -- <args...>`
-    inside rcx_pi_rust/, return (exit_code, stdout+stderr text).
+    inside archive/rcx_pi_rust/, return (exit_code, stdout+stderr text).
     """
     cmd = ["cargo", "run", "--example"] + args
     proc = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
-        cwd="rcx_pi_rust",
+        cwd="archive/rcx_pi_rust",
     )
     return proc.returncode, proc.stdout + proc.stderr
 
