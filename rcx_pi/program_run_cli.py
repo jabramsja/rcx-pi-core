@@ -11,7 +11,7 @@ from rcx_pi.program_registry import list_program_names
 
 from rcx_pi.cli_schema import print_schema_triplet
 
-SCHEMA_JSON = "docs/schemas/program_run_schema.json"
+SCHEMA_JSON = "mu/docs/schemas/program_run_schema.json"
 
 
 def _read_input(args: argparse.Namespace) -> List[int]:
@@ -59,7 +59,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if args.schema:
         print_schema_triplet(
-            "rcx-program-run.v1", "docs/schemas/program_run_schema.md", SCHEMA_JSON
+            "rcx-program-run.v1", "mu/docs/schemas/program_run_schema.md", SCHEMA_JSON
         )
         return 0
 

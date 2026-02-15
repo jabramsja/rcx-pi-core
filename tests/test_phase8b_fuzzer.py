@@ -14,7 +14,7 @@ Phase 8b Changes:
 - Kernel terminal detection: is_kernel_terminal(), extract_kernel_result()
 - Simplified loop: no semantic decisions inside for-loop
 
-See docs/core/BootstrapPrimitives.v0.md for Phase 8 design.
+See mu/docs/core/BootstrapPrimitives.v0.md for Phase 8 design.
 
 This file was created based on fuzzer agent recommendations during 9-agent review.
 """

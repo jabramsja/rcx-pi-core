@@ -16,7 +16,7 @@ Exempt paths (no governance required):
 - tests/golden/, tests/archive/ - test fixtures
 - rcx_pi_rust/, rcx_omega/, rcx_python_examples/ - all archived
 
-See docs/core/DocGovernance.v0.md for full policy.
+See mu/docs/core/DocGovernance.v0.md for full policy.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/docs/test_doc_governance.py -v
@@ -59,12 +59,10 @@ EXEMPT_PATTERNS = [
     r"/archive/",                  # Any archive folder (historical, read-only)
     r"tools/agents/.*_prompt\.md$", # Agent prompt templates (not docs)
     r"\.auto\.md$",                # Auto-generated docs
-    r"^archive/rcx_pi_rust/",       # Rust subproject (archived Round 23A)
-    r"^archive/rcx_omega/",         # Omega subproject (archived Round 23A)
-    r"^archive/rcx_python_examples/",  # Examples subproject (archived)
+    r"^archive/",                    # All archived content (docs, roadmap, subprojects)
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files
-    r"^docs/TESTING_PERFORMANCE_ISSUE\.md$",  # Historical context (resolved issue)
+    r"^mu/docs/TESTING_PERFORMANCE_ISSUE\.md$",  # Historical context (resolved issue)
 ]
 
 # Root files that are exempt (they ARE the source of truth)
@@ -158,8 +156,8 @@ def is_governed(doc_path: Path) -> bool:
     if re.match(r"^[^/]+/README\.md$", rel_path):
         return True
 
-    # docs/README.md is governed
-    if rel_path == "docs/README.md":
+    # mu/docs/README.md is governed
+    if rel_path == "mu/docs/README.md":
         return True
 
     return False
@@ -488,9 +486,9 @@ class TestDocStructure:
     """Verify doc folder structure."""
 
     def test_no_ungoverned_docs_in_docs_folder(self):
-        """All docs in docs/ should be in a governed subfolder or archive."""
+        """All docs in mu/docs/ should be in a governed subfolder or roadmap."""
         ungoverned = []
-        docs_folder = REPO_ROOT / "docs"
+        docs_folder = REPO_ROOT / "mu" / "docs"
 
         if not docs_folder.exists():
             return
@@ -507,24 +505,24 @@ class TestDocStructure:
             if is_exempt(doc_path):
                 continue
 
-            # docs/README.md is allowed at root level
-            if rel_str == "docs/README.md":
+            # mu/docs/README.md is allowed at root level
+            if rel_str == "mu/docs/README.md":
                 continue
 
-            # Check if it's in a governed folder
+            # Check if it's in a governed folder or roadmap (special folder)
             in_governed_folder = any(
                 rel_str.startswith(f + "/")
-                for f in GOVERNED_FOLDERS + ["docs/archive"]
+                for f in GOVERNED_FOLDERS + ["mu/docs/roadmap"]
             )
 
             if not in_governed_folder:
                 ungoverned.append(str(rel_path))
 
         if ungoverned:
-            msg = f"\nDocs in docs/ not in a governed subfolder:\n"
+            msg = f"\nDocs in mu/docs/ not in a governed subfolder:\n"
             for doc in sorted(ungoverned):
                 msg += f"  - {doc}\n"
-            msg += "\nMove to docs/core/, docs/archive/, or add folder to GOVERNED_FOLDERS\n"
+            msg += "\nMove to mu/docs/core/, archive/docs/, or add folder to GOVERNED_FOLDERS\n"
             pytest.fail(msg)
 
 
@@ -563,12 +561,12 @@ class TestGovernanceMeta:
 
     def test_governance_doc_exists(self):
         """The governance doc must exist."""
-        gov_path = REPO_ROOT / "docs" / "core" / "DocGovernance.v0.md"
+        gov_path = REPO_ROOT / "mu" / "docs" / "core" / "DocGovernance.v0.md"
         assert gov_path.exists(), "DocGovernance.v0.md must exist"
 
     def test_governance_doc_has_valid_header(self):
         """The governance doc must have a valid header."""
-        gov_path = REPO_ROOT / "docs" / "core" / "DocGovernance.v0.md"
+        gov_path = REPO_ROOT / "mu" / "docs" / "core" / "DocGovernance.v0.md"
         if gov_path.exists():
             content = gov_path.read_text()
             header = parse_doc_header(content)

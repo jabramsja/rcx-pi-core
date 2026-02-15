@@ -3,7 +3,7 @@
         "version": "1.1.0",
         "name": "FIX_SEED",
         "description": "Structural Fix routine for GAP-04-FIX (Rule 0.6): minimal perturbation of stalled state",
-        "doc": "docs/core/EngineNewFixContract.v0.md",
+        "doc": "mu/docs/core/EngineNewFixContract.v0.md",
         "spec_ref": "RCXEngineNew.pdf Rule 0.6",
         "execution_layer": "APPLICATION",
         "requires_patterns": ["linear"],

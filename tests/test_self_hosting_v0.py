@@ -6,7 +6,7 @@ Success = identical traces from Python and Mu evaluation paths.
 
 This is THE test that proves RCX emergence is structural, not host-dependent.
 
-See docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/SelfHosting.v0.md for design.
 """
 
 import pytest

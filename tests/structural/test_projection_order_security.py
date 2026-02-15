@@ -5,7 +5,7 @@ These tests verify that projection order enforcement works correctly.
 Projection order is SECURITY-CRITICAL: kernel projections MUST run before
 domain projections to prevent domain data from forging kernel state.
 
-See docs/core/MetaCircularKernel.v0.md for design.
+See mu/docs/core/MetaCircularKernel.v0.md for design.
 """
 
 import pytest

@@ -12,7 +12,7 @@ def _repo_root() -> Path:
 
 def _load_schema() -> dict:
     root = _repo_root()
-    p = root / "docs" / "schemas" / "rcx-trace-event.v1.json"
+    p = root / "mu" / "docs" / "schemas" / "rcx-trace-event.v1.json"
     assert p.exists(), f"Missing schema file: {p}"
     return json.loads(p.read_text(encoding="utf-8"))
 

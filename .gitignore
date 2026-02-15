@@ -39,7 +39,7 @@ docs/rcx-pi-paper.pdf
 # =========================
 # RCX generated swarm artifacts (do not commit)
 # =========================
-docs/latex/build/
+archive/docs/latex/build/
 *.bbl
 *.blg
 

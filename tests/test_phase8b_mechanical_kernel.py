@@ -6,7 +6,7 @@ These tests verify that:
 2. extract_kernel_result() unpacks results without semantic decisions
 3. The simplified step_kernel_mu loop still works correctly
 
-See docs/core/BootstrapPrimitives.v0.md for the honest boundary design.
+See mu/docs/core/BootstrapPrimitives.v0.md for the honest boundary design.
 """
 
 import pytest

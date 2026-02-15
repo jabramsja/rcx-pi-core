@@ -8,8 +8,8 @@ All building blocks already exist; this test wires them together.
 
 See: mu/programs/paxos_demo.v1.json (6 projections)
      mu/closures/recurrence.v2.json (9 projections)
-     docs/core/recurrence_v2_design.md
-     roadmap/ContentAddressedMu.md
+     mu/docs/core/recurrence_v2_design.md
+     mu/docs/roadmap/ContentAddressedMu.md
 """
 from __future__ import annotations
 

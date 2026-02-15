@@ -7,7 +7,7 @@ bridge, programs, utilities) on load:
 2. Structure validation (expected keys present)
 3. Projection ID ordering verification (first-match-wins security)
 
-See docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/SelfHosting.v0.md for design.
 """
 
 from __future__ import annotations
@@ -28,53 +28,53 @@ from typing import Any
 SEED_CHECKSUMS: dict[str, str] = {
     # Updated v1.1.0: added match.typed.descend for type-tagged head/tail structures
     # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
-    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> docs/core/SelfHosting.v0.md)
-    "match.v1.json": "9614ec7e802005dc3322dc7af474abf4f137a506efc57f52781157210e76e190",
+    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> mu/docs/core/SelfHosting.v0.md)
+    "match.v1.json": "33c7bc60d2c4468f224d85c7d0e6c385a898f61585001370b6511c30307f2c9c",
     # Updated v1.2.0: added subst.typed.* projections for type-tagged structures (Phase 6c)
     # Updated: Added execution_layer: META_CIRCULAR
-    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> docs/core/SelfHosting.v0.md)
-    "subst.v1.json": "d8626f8ffddda711124205a761dd64d6781ebec53567e74a11f2ce8cf0ce75df",
+    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> mu/docs/core/SelfHosting.v0.md)
+    "subst.v1.json": "929db9a6d60b28d53c5e184da7db8c7c668d2f9a65068e8cb0e2629083ffd51f",
     # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
     # Updated: Added execution_layer: META_CIRCULAR
-    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> docs/core/SelfHosting.v0.md)
-    "classify.v1.json": "2008556c09105d0dc46f19e38382870a60ced7d88549dbd989f5d613d5db1968",
+    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> mu/docs/core/SelfHosting.v0.md)
+    "classify.v1.json": "8ecd4fccca243c49129c0d65c8fef5797f19a36499e17038625fca3051108b79",
     # Phase 7a: meta-circular kernel projections (v1.0.1 - entry format output)
     # Updated: Added execution_layer: META_CIRCULAR
-    "kernel.v1.json": "813cae10f2a7f19bd494e56e5c8cf2feaf92f32ae6988d626bca21ee01811daa",
+    "kernel.v1.json": "8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f",
     # Phase 7b: match with kernel context passthrough + match.fail (fixed var names)
     # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
-    "match.v2.json": "55a6b58a6c8fe31d4c3a8c704603d453fc04c1a757a45fcf7f6570afa1fe27b1",
+    "match.v2.json": "cd89ce2bef9668b2e0bb190ad8a615a53bd699d4a0ad3ff9d6c1429db5e3594d",
     # Phase 7b: subst with kernel context passthrough
     # Updated: Added execution_layer: META_CIRCULAR
-    "subst.v2.json": "e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621",
+    "subst.v2.json": "0b735c52da437a6eae1478dc4c992269bff8978c7e9084d15ffcba6c06e3037f",
     # mu/ folder reorganization: renamed from enginenews.v1/exhaust.v1 to recurrence.v1/exhaustion.v1
     # Legacy names (enginenews.v1, exhaust.v1) removed - mu/ is now canonical
     # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
     # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
     # v1.2.0 + PROOF_OF_CONCEPT marker (superseded by recurrence.v2.json)
-    "recurrence.v1.json": "b916f17b2b21b1c194567e515dce535f1acd84a91f32cfd8a11f3cc01aa7fe41",
+    "recurrence.v1.json": "ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0",
     # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
     # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
     # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
-    "exhaustion.v1.json": "3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c",
+    "exhaustion.v1.json": "2497881e19015db553a834c9d1f287c7774c2607effc224ed460b4b8051dffe0",
     # RCX Engine: structural specification for pipeline orchestration (7 projections)
     # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
-    "rcx_engine.v1.json": "6024e9be1113d0288c06cb5073f573bd9a33e8aa9589c1d74fc55bf835ec37c7",
+    "rcx_engine.v1.json": "1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
-    "bootstrap_structural.v1.json": "edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db",
+    "bootstrap_structural.v1.json": "dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
-    # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> docs/core/EVAL_SEED.v0.md)
-    "eval.v1.json": "22232b172f883271845d013d8e39b1b75555bd94899deb8276548c5f0d10f53e",
+    # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> mu/docs/core/EVAL_SEED.v0.md)
+    "eval.v1.json": "4c88e312002601f56fa5c3604f7938bc3651cf2718f1e672274a454b14e8bd78",
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
-    "hemispheres.v1.json": "fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8",
+    "hemispheres.v1.json": "e7f4735c36450f58fdebf137ba2933695b31eac813d1eb4a8e84db3380438ab5",
     # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
     "paxos_demo.v1.json": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
     # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)
-    "recurrence.v2.json": "664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b",
+    "recurrence.v2.json": "f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9",
     # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6, APPLICATION)
-    "fix.v1.json": "00e92921fef19da5f5133ef115d3264ed84dace9612d0cd9d933bae670883efa",
+    "fix.v1.json": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
 }
 
 # Expected projection IDs for each seed.
@@ -420,7 +420,7 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
 # This is the irreducible seed bootstrap primitive.
 # Cannot be structural because projections must come from somewhere (JSON files).
 # JSON parsing and schema validation are Python's job, not expressible as projections.
-# See docs/core/BootstrapPrimitives.v0.md for full justification.
+# See mu/docs/core/BootstrapPrimitives.v0.md for full justification.
 def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
     """
     BOOTSTRAP PRIMITIVE: Load a seed file with integrity verification.
@@ -440,7 +440,7 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
         FileNotFoundError: If seed file doesn't exist.
         ValueError: If integrity check fails.
 
-    See: docs/core/BootstrapPrimitives.v0.md
+    See: mu/docs/core/BootstrapPrimitives.v0.md
     """
     seed_name = seed_path.name
 

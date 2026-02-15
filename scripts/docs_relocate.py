@@ -9,7 +9,7 @@ Usage:
 moves.json format:
   {
     "moves": [
-      {"from": "roadmap/MuHemispheresDesign.md", "to": "docs/core/MuHemispheresDesign.md"},
+      {"from": "mu/docs/roadmap/MuHemispheresDesign.md", "to": "mu/docs/core/MuHemispheresDesign.md"},
       ...
     ]
   }

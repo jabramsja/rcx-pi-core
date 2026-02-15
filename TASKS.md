@@ -59,16 +59,16 @@ If a task is not listed here, it is NOT to be implemented.
   - New seeds must be loaded in both Python and JavaScript
   - Parity vectors must pass on both substrates before merge
 - **Pre-commit doc review**: Before committing changes to `rcx_pi/` or `mu/`:
-  1. Read relevant docs in `docs/` (e.g., EVAL_SEED.v0.md, DeepStep.v0.md)
+  1. Read relevant docs in `mu/docs/` (e.g., EVAL_SEED.v0.md, DeepStep.v0.md)
   2. Update docs if implementation differs from spec
   3. Update TASKS.md status if completing/progressing items
   4. Verify JS parity if projection behavior changed
-- **Agent runbook**: Agent usage follows `docs/agents/AgentRunbook.v0.md` (trigger map, gate rules, and evidence requirements)
-- **Roadmap rule**: Documents in `roadmap/` define SEQUENCE and DESIGN only.
+- **Agent runbook**: Agent usage follows `mu/docs/agents/AgentRunbook.v0.md` (trigger map, gate rules, and evidence requirements)
+- **Roadmap rule**: Documents in `mu/docs/roadmap/` define SEQUENCE and DESIGN only.
   - Current state lives in STATUS.md; authorization lives in TASKS.md
   - Gate completion updates TASKS.md (Ra/NEXT/VECTOR), not roadmap docs
-  - Draft specs live in `roadmap/`; approved specs migrate to `docs/core/`
-  - See `roadmap/MANIFEST.md` for reading order and linking rules
+  - Draft specs live in `mu/docs/roadmap/`; approved specs migrate to `mu/docs/core/`
+  - See `mu/docs/roadmap/MANIFEST.md` for reading order and linking rules
 
 ## Collaboration Protocol (Default Working Mode)
 
@@ -108,10 +108,11 @@ Items here are implemented and verified under current invariants. Changes requir
 - HF2 maxSteps guard (2026-02-10): `guardMaxSteps()` enforces type (integer), range (>=0), and cap (<=10000) on all 8 maxSteps-accepting JSON API endpoints. Closes HF2 Mode-B DoS vector. Manifest: 14/18 actions now `requires_error_edges=true`. 169 parity/coverage tests green.
 - N1b typed-error parity (2026-02-13): 14 JS boundary throw sites converted from untyped `Error`/`TypeError` to `RcxError` with stable `error_code` (normalize, step/run/runStructural, validateNoKernelReservedFields, validateAlgorithmRuntimeFields, runHemisphereRouting, runEngineWithRouting). Manifest ratchet: all 18 actions declare `requires_error_edges`; 10 with error edges, 8 with `success_only_reason`. 22 error_code parity tests + 8 ratchet invariant tests. No phase/debt change.
 - Mu Hemispheres v0 — Engine integration COMPLETE (2026-02-11): `run_engine_with_routing()` chains `run_engine_pipeline()` → `run_hemisphere_routing()` with fail-closed input/output validation. `hash_trace_for_recurrence` cycle guard added (visited set + 10000 iteration cap). 10 integration tests (8 fast + 2 slow). Paxos livelock → closure → r_a proven end-to-end.
+- Tracker sync note (2026-02-14, Round 24C): Root Noise Collapse — `docs/` and `roadmap/` directories fully emptied, contents moved to `mu/docs/` (96 active files) and `archive/docs/` + `archive/roadmap/` (41 archived files). 231 path rewrites across 161 files. All 14 seed checksums updated (meta.doc path changes). `enforce_tracker_sync.sh` updated to exclude `mu/docs/` from core-change detection. No phase/debt/runtime change.
 - Hemisphere hardening Phases 1–4 CLOSED (2026-02-13, no runtime changes): P1 routing priority confirmed correct across all 4 layers (seed, Python, JS, tests — 130 hemisphere + 28 JS parity tests); P4 JS falsy-default `??` already correct for all 14 numeric caps, regression lock added (`TestNoOrBarBarNumericDefaults`); P2a `import ast` confirmed absent from `rcx_pi/`, structural guard added (`test_ast_import_guard.py`); P3a hemisphere output validation already exact-keyset + typed RcxError + cross-substrate parity. Commits: `d2a7cac` (PR #245 GAP-04-FIX contract), `c73d68b` (PR #246 test hardening). No phase/debt change.
 - Hemisphere hardening Phase 6 already complete (2026-02-13): Parity manifest (`tests/fixtures/js_api_parity_manifest.json`, 18 actions, 10 error codes, 3 types), `RcxError` + `classifyError()` in JS (16 catch sites), `list_actions` API action, `classify_python_error()` in test layer, `TestActionSetSync`/`TestParityCoverageGate`/`TestManifestEdgeCaseParity` test classes, `@pytest.mark.slow` tier split. 169 parity tests pass. Hemisphere hardening stream CLOSED (all 6 phases).
 - Tracker sync note (2026-02-13, Round 15I): GAP-04-FIX E1–E5 execution CLOSED. E1: gap proven pre-integration in Round 15D (`TestImplicitFixFailure`, since renamed to `TestFixIntegrationEvidence` after E4 closed the gap). E2: `mu/closures/fix.v1.json` v1.1.0 (6 projections, idempotence guards). E3: 19 invariant tests (`tests/test_fix_invariants.py`, I1–I5). E4: `mu/programs/rcx_engine.v1.json` v1.2.0 (10 projections, 3 fix-dispatch). E5: TASKS closure + contract update. Cross-substrate parity locked (4 fix-path tests). EngineNew tally: 9/10 structural, 1/10 gap (GAP-10-LOOP only). No phase/debt change.
-- Tracker sync note (2026-02-14, Round 17A): Boot1 Recursive Loop Contract design doc created (`docs/core/Boot1LoopContract.v0.md`). 7 sections: purpose/non-goals, ABI compatibility (`{_run_engine: ...}` envelope preserved), recursive/tail-call semantics (Option A: structural `_tail_call` preferred), 7 safety invariants (S1–S7), parity plan (6 test categories), cutover mapping (6 gates + 3-merge rule), open questions (4). Still VECTOR — awaiting founder review before any VECTOR → NEXT promotion. No phase/debt/runtime change.
+- Tracker sync note (2026-02-14, Round 17A): Boot1 Recursive Loop Contract design doc created (`mu/docs/core/Boot1LoopContract.v0.md`). 7 sections: purpose/non-goals, ABI compatibility (`{_run_engine: ...}` envelope preserved), recursive/tail-call semantics (Option A: structural `_tail_call` preferred), 7 safety invariants (S1–S7), parity plan (6 test categories), cutover mapping (6 gates + 3-merge rule), open questions (4). Still VECTOR — awaiting founder review before any VECTOR → NEXT promotion. No phase/debt/runtime change.
 - Tracker sync note (2026-02-14, Round 17B): Boot1 contract adversary review — **R1: keep in VECTOR** (not promotable yet). Findings: (a) `_tail_call` classification AMBIGUOUS — `eval_step` primitive unchanged, but host loop gains new branch; contract corrected to accurately attribute structural inspection to `run_engine_pipeline` not `eval_step`. (b) Engine-specific scope CONFIRMED — general-purpose `_tail_call` enables projection set injection. (c) Security verdict REQUIRES_HARDENING — 3 prerequisites: P1 (JS boundary result validation gap at `eval_step.js:1954`, existing parity gap), P2 (`_run_engine` not in KERNEL_RESERVED_FIELDS, existing gap), P3 (`_tail_call` must be reserved from day one). Contract doc updated with all corrections. No phase/debt/runtime change.
 - Tracker sync note (2026-02-14, Round 17D): P1 parity hardening — JS `runEnginePipeline` boundary result validation added (`validateNoKernelReservedFields` before injection, parity with Python). 2 regression lock tests. No phase/debt change.
 - Tracker sync note (2026-02-14, Round 17P): Unicode key-order parity fix — JS `muHash`, `muHashCached`, and `normalize` now use `compareMuStringKeysByCodepoint()` (full code-point comparison) instead of default UTF-16 sort. Fixes divergence for mixed BMP/non-BMP keys (e.g. U+F900 vs U+10000). Regression test added. Boot1 P2 wording updated (stale P1-unfixed reference removed). No phase/debt change.
@@ -139,9 +140,9 @@ Items here are implemented and verified under current invariants. Changes requir
   - `--print-exec-summary` CLI flag + `execution_summary_v2()` pure helper
   - `test_cli_print_exec_summary_end_to_end` (subprocess CLI test)
   - `tools/audit_exec_summary.sh` (non-test reality anchor)
-- Trace Reading Primer (`docs/TraceReadingPrimer.v0.md`)
+- Trace Reading Primer (`mu/docs/execution/TraceReadingPrimer.v0.md`)
 - Record→Replay Gate (`test_record_replay_gate_end_to_end`)
-- Flag Discipline Contract (`docs/Flags.md`)
+- Flag Discipline Contract (`mu/docs/cli/Flags.md`)
 - Consume execution.fix from trace (true cycle replay)
 - Closure-as-termination fixture family (`stall_at_end.v2.jsonl`, `stall_then_fix_then_end.v2.jsonl`)
 - IndependentEncounter pathological fixtures + tests
@@ -156,14 +157,14 @@ Items here are implemented and verified under current invariants. Changes requir
 - Recurrence Spec v0 (stress test harness, 18 tests in `test_recurrence_spec_v0.py`, 4 fixtures)
 - Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
   - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
-  - Docs: `docs/archive/bytecode/` (archived)
-- Mu Type v0 (`rcx_pi/mu_type.py`, `docs/core/MuType.v0.md`, 58 tests)
-- Structural Purity Guardrails v0 (`docs/StructuralPurity.v0.md`, 32 additional tests):
+  - Docs: `archive/archive/docs/bytecode/` (archived)
+- Mu Type v0 (`rcx_pi/mu_type.py`, `mu/docs/core/MuType.v0.md`, 58 tests)
+- Structural Purity Guardrails v0 (`mu/docs/core/StructuralPurity.v0.md`, 32 additional tests):
   - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
   - `assert_handler_pure()`, `validate_kernel_boundary()`
   - `tools/audit_semantic_purity.sh` extended with checks 9-11
-- RCX Kernel Phase 1 (`rcx_pi/kernel.py`, `docs/RCXKernel.v0.md`, 47 tests)
-- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `docs/core/EVAL_SEED.v0.md`, 125 tests):
+- RCX Kernel Phase 1 (`rcx_pi/kernel.py`, `mu/docs/core/RCXKernel.v0.md`, 47 tests)
+- EVAL_SEED v0 (`rcx_pi/eval_seed.py`, `mu/docs/core/EVAL_SEED.v0.md`, 125 tests):
   - Core operations: `match`, `substitute`, `apply_projection`, `step`
   - Only special form: `{"var": "x"}` (variable binding)
   - Kernel handlers: step, stall, init
@@ -229,7 +230,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Removed 2 `@host_builtin` decorators from match_mu.py (is_kv_pair_linked, is_dict_linked_list)
   - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
   - 26 new tests in `tests/test_classify_mu.py`
-- Boot0 Architecture v0.4 (`docs/core/Boot0Architecture.v0.md`) - 9-agent reviewed 2026-01-31:
+- Boot0 Architecture v0.4 (`mu/docs/core/Boot0Architecture.v0.md`) - 9-agent reviewed 2026-01-31:
   - Hex0-inspired staged bootstrap design: Boot0 → Boot1 → Boot2
   - 4 irreducible bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal eliminated via Level 1 Content-Addressed Mu)
   - Boot0=structural, Boot1=none, Boot2=kernel validation boundaries
@@ -343,7 +344,7 @@ such that a structural program can cause new structure to emerge only via
 Stall → Fix → Trace → Closure, and in no other way?
 
 **Answer:** The Structural Reduction Loop (MATCH → REDUCE/STALL → TRACE → NORMAL_FORM).
-See `docs/archive/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
+See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-goals.
 
 ---
 
@@ -382,12 +383,12 @@ Current Exhaustion Layer: META_CIRCULAR
 
 
 **Active designs:**
-- Boot1 Recursive Loop Contract (`docs/core/Boot1LoopContract.v0.md`) — Design the recursive kernel loop primitive that replaces the trampoline path for GAP-10-LOOP. Parallel to trampoline implementation (NEXT). **Opened by founder directive** (2026-02-14, Round 16D). **Design doc drafted** (2026-02-14, Round 17A). **Adversary reviewed** (2026-02-14, Round 17B): R1 keep in VECTOR. Scope: recursive self-re-entry semantics, migration ABI from trampoline `{_run_engine: ...}` envelope, proper tail-call/tail-recursion contract (cf. R7RS §3.5, Clojure trampoline), parity plan (Boot1 loop == trampoline on canonical vectors). **Security prerequisites (Round 17B):** ~~P1 JS boundary result validation gap~~ (RESOLVED, Round 17D — `validateNoKernelReservedFields` added before injection), ~~P2 `_run_engine` not in KERNEL_RESERVED_FIELDS~~ (RESOLVED, Round 20B), ~~P3 `_tail_call` must be reserved from day one~~ (RESOLVED, Round 20C). **Promotion criteria (all required for VECTOR → NEXT):** (1) Boot1LoopContract design doc approved, (2) ABI compatibility with EngineNewLoopContract demonstrated (shared re-entry envelope), (3) parity test plan drafted (freeze/non-freeze/stall/fix paths, both substrates), (4) security review: no new bypass paths or primitive count increase, (5) security prerequisites P1–P3 remain green, (6) explicit VECTOR → NEXT promotion in this file with rationale.
+- Boot1 Recursive Loop Contract (`mu/docs/core/Boot1LoopContract.v0.md`) — Design the recursive kernel loop primitive that replaces the trampoline path for GAP-10-LOOP. Parallel to trampoline implementation (NEXT). **Opened by founder directive** (2026-02-14, Round 16D). **Design doc drafted** (2026-02-14, Round 17A). **Adversary reviewed** (2026-02-14, Round 17B): R1 keep in VECTOR. Scope: recursive self-re-entry semantics, migration ABI from trampoline `{_run_engine: ...}` envelope, proper tail-call/tail-recursion contract (cf. R7RS §3.5, Clojure trampoline), parity plan (Boot1 loop == trampoline on canonical vectors). **Security prerequisites (Round 17B):** ~~P1 JS boundary result validation gap~~ (RESOLVED, Round 17D — `validateNoKernelReservedFields` added before injection), ~~P2 `_run_engine` not in KERNEL_RESERVED_FIELDS~~ (RESOLVED, Round 20B), ~~P3 `_tail_call` must be reserved from day one~~ (RESOLVED, Round 20C). **Promotion criteria (all required for VECTOR → NEXT):** (1) Boot1LoopContract design doc approved, (2) ABI compatibility with EngineNewLoopContract demonstrated (shared re-entry envelope), (3) parity test plan drafted (freeze/non-freeze/stall/fix paths, both substrates), (4) security review: no new bypass paths or primitive count increase, (5) security prerequisites P1–P3 remain green, (6) explicit VECTOR → NEXT promotion in this file with rationale.
 - Checkpoint/Resume Contract (bounded continuation semantics) — Explicit pause/resume semantics when engine or algorithm limits are hit. **Opened** (2026-02-14, Round 16E). **Invariants**: (1) Limit hit is explicit (no silent truncation), (2) Hash verifies state integrity; hash alone is not resumable state, (3) Resume token carries full continuation state (or validated pointer), state_hash, seed/version checksums, and budget metadata, (4) Resume path preserves Python/JS parity, (5) Resume path reuses existing validation/security guards, (6) No bootstrap primitive count increase without explicit approval. **Promotion criteria (all required for VECTOR → NEXT):** (1) Contract doc drafted and approved, (2) Canonical token schema defined, (3) Cross-substrate parity test plan defined, (4) Security review complete, (5) Explicit VECTOR → NEXT promotion in this file with rationale.
-- Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
-- Debt Categories v0 (`docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
+- Content-Addressed Mu (`mu/docs/roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
+- Debt Categories v0 (`mu/docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 - Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
-- Hemisphere Metabolization Contract (`roadmap/MuHemispheresDesign.md` § "FUTURE_TARGET: Hemisphere Metabolization Contract") - Sink re-expression cycle: sink → (r_inf | r_null) metabolization → (lobes | r_a) storage → residual → sink. Stall recovery: lobes-first, then sink. 6 projection IDs designed (pattern/body sketches). Engine exception policy dependency documented (Option A active, Option B deferred). **Promotion criteria (all required for VECTOR → NEXT):**
+- Hemisphere Metabolization Contract (`mu/docs/roadmap/MuHemispheresDesign.md` § "FUTURE_TARGET: Hemisphere Metabolization Contract") - Sink re-expression cycle: sink → (r_inf | r_null) metabolization → (lobes | r_a) storage → residual → sink. Stall recovery: lobes-first, then sink. 6 projection IDs designed (pattern/body sketches). Engine exception policy dependency documented (Option A active, Option B deferred). **Promotion criteria (all required for VECTOR → NEXT):**
   - Re-expression trigger model decided (automatic + manual/debug, per founder directive) ✓ designed
   - At least 4 metabolization projection specs drafted with pattern/body ✓ 6 designed
   - Extended truth-table coverage criteria defined (≥8 metabolization transitions)
@@ -399,33 +400,33 @@ Current Exhaustion Layer: META_CIRCULAR
 - ~~GAP-10-LOOP~~ — **CLOSED** (2026-02-14, Round 16E). E1–E4 complete. Trampoline makes loop-back decision structural (11 projections). 10/10 EngineNew steps structural. Boot1 Recursive Loop Contract remains open as parallel VECTOR item for L4 path.
 
 **Reference:**
-- Corpus Status Registry (`docs/corpus_registry.csv`) - 18-artifact classification with taxonomy labels, confidence scores, and evidence refs. Ontology-to-runtime mapping reference for VECTOR design work.
+- Corpus Status Registry (`mu/docs/corpus_registry.csv`) - 18-artifact classification with taxonomy labels, confidence scores, and evidence refs. Ontology-to-runtime mapping reference for VECTOR design work.
 
 **Promoted to NEXT:**
-- ~~Mu Hemispheres v0~~ (`roadmap/MuHemispheresDesign.md`) - **PROMOTED TO NEXT** (2026-02-09, Gate 5 blocker resolved)
+- ~~Mu Hemispheres v0~~ (`mu/docs/roadmap/MuHemispheresDesign.md`) - **PROMOTED TO NEXT** (2026-02-09, Gate 5 blocker resolved)
 
 **Completed (moved to Ra):**
-- ~~Operator Exhaustion v0~~ (`docs/core/OperatorExhaustion.v0.md`) - **MOVED TO Ra** (IMPLEMENTED 2026-02-02)
+- ~~Operator Exhaustion v0~~ (`mu/docs/core/OperatorExhaustion.v0.md`) - **MOVED TO Ra** (IMPLEMENTED 2026-02-02)
   - Step 6 complete: 11 projections in `mu/closures/exhaustion.v1.json`
   - 27 tests (17 parity + 10 fuzzer), cross-substrate parity verified
 
 **Historical promotion (completed):**
-- Meta-Circular Kernel v0 (`docs/core/MetaCircularKernel.v0.md`) - promoted 2026-01-27, implemented and archived in `Ra`
+- Meta-Circular Kernel v0 (`mu/docs/core/MetaCircularKernel.v0.md`) - promoted 2026-01-27, implemented and archived in `Ra`
 
 **Completed designs (now in Ra):**
-- RCX Kernel v0 (`docs/core/RCXKernel.v0.md`)
-- Structural Purity v0 (`docs/core/StructuralPurity.v0.md`)
-- Self-Hosting v0 (`docs/core/SelfHosting.v0.md`)
-- EVAL_SEED v0 (`docs/core/EVAL_SEED.v0.md`)
-- EngineNews Structural v0 (`docs/core/EngineNewsStructural.v0.md`) - Step 5 closure detection
-- Operator Exhaustion v0 (`docs/core/OperatorExhaustion.v0.md`) - Step 6 operator freeze
-- Second Independent Encounter (`docs/execution/IndependentEncounter.v0.md`)
-- Enginenews Spec Mapping (`docs/execution/EnginenewsSpecMapping.v0.md`)
-- Closure Evidence Events (`docs/execution/ClosureEvidence.v0.md`)
-- Rule-as-Motif (`docs/execution/RuleAsMotif.v0.md`)
+- RCX Kernel v0 (`mu/docs/core/RCXKernel.v0.md`)
+- Structural Purity v0 (`mu/docs/core/StructuralPurity.v0.md`)
+- Self-Hosting v0 (`mu/docs/core/SelfHosting.v0.md`)
+- EVAL_SEED v0 (`mu/docs/core/EVAL_SEED.v0.md`)
+- EngineNews Structural v0 (`mu/docs/core/EngineNewsStructural.v0.md`) - Step 5 closure detection
+- Operator Exhaustion v0 (`mu/docs/core/OperatorExhaustion.v0.md`) - Step 6 operator freeze
+- Second Independent Encounter (`mu/docs/execution/IndependentEncounter.v0.md`)
+- Enginenews Spec Mapping (`mu/docs/execution/EnginenewsSpecMapping.v0.md`)
+- Closure Evidence Events (`mu/docs/execution/ClosureEvidence.v0.md`)
+- Rule-as-Motif (`mu/docs/execution/RuleAsMotif.v0.md`)
 
 **Archived (superseded):**
-- Bytecode VM v0/v1 → `docs/archive/bytecode/`
+- Bytecode VM v0/v1 → `archive/archive/docs/bytecode/`
 
 ---
 
@@ -437,7 +438,7 @@ Current Exhaustion Layer: META_CIRCULAR
 - Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
-Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
+Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `rcx_pi_rust/` — ARCHIVED Round 23A (moved to `archive/rcx_pi_rust/`)
 - `rcx_omega/` — ARCHIVED Round 23A (moved to `archive/rcx_omega/`)
 - `mu/worlds_json/` — MAINTAIN as test fixtures (moved from root Round 23B); `rcx_core_mut4.json` removed Round 22J (was byte-identical to mut3)
@@ -446,6 +447,7 @@ Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `rcx_start.py` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
 - `.rcx_manifest.json` — UNTRACKED Round 23F (generated artifact, stays on disk)
 - `archive/rcx_pi_rust/sanity_test/target/` — UNTRACKED Round 23F (23 Rust build artifacts)
-- `docs/latex/rcx-pi-paper.pdf` — UNTRACKED Round 23F (gitignored by `*.pdf`)
-- Round 24A: Deleted 5 dead archive files (corpus/, normalized_prototype/, prototypes/); archived 6 deprecated scripts to `archive/scripts_deprecated/`; archived 3 stale roadmap gate docs to `docs/archive/`
-- Round 24B: Recursive subfolder sweep — fixed DeepStep.v0.md stale refs; deleted moves_22b_specs.json (stale); deleted archive/scripts_deprecated/ (6 files); deleted 31 agent archive files (tools/, docs/, .claude/); deleted 16 zero-ref docs/archive/ files; cleaned governance exclusion patterns
+- `archive/docs/latex/rcx-pi-paper.pdf` — UNTRACKED Round 23F (gitignored by `*.pdf`)
+- Round 24A: Deleted 5 dead archive files (corpus/, normalized_prototype/, prototypes/); archived 6 deprecated scripts to `archive/scripts_deprecated/`; archived 3 stale roadmap gate docs to `archive/docs/`
+- Round 24B: Recursive subfolder sweep — fixed DeepStep.v0.md stale refs; deleted moves_22b_specs.json (stale); deleted archive/scripts_deprecated/ (6 files); deleted 31 agent archive files (tools/, docs/, .claude/); deleted 16 zero-ref archive/docs/ files; cleaned governance exclusion patterns
+- Round 24C: docs/ + roadmap/ → mu/docs/ convergence — 96 active files moved to `mu/docs/` (core, agents, cli, schemas, fixtures, execution, audit, reviews, roadmap), 41 files archived to `archive/docs/` + `archive/roadmap/`. Both `docs/` and `roadmap/` directories fully emptied. 231 path rewrites across 161 files. All 14 seed checksums updated (Python + JS). `enforce_tracker_sync.sh` updated to exclude `mu/docs/` from core-change detection. 5 test files with hardcoded `docs/` Path() references fixed. Reclassification guard enforced: zero-ref proof required for every ARCHIVE candidate

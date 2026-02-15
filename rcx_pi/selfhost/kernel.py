@@ -7,7 +7,7 @@ The step budget prevents resource exhaustion from nested/cascading match_mu/subs
 STRUCTURAL KERNEL:
   The structural kernel is in mu/substrate/kernel.v1.json (7 Mu projections).
   It is executed by step_kernel_mu() in step_mu.py.
-  See docs/core/MetaCircularKernel.v0.md for details.
+  See mu/docs/core/MetaCircularKernel.v0.md for details.
 
 DELETED (2026-01-29):
   The legacy Kernel class, create_kernel(), compute_identity(), detect_stall(),

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_DIR="$ROOT/docs/latex/src"
-BUILD_DIR="$ROOT/docs/latex/build"
+SRC_DIR="$ROOT/archive/docs/latex/src"
+BUILD_DIR="$ROOT/archive/docs/latex/build"
 
 mkdir -p "$BUILD_DIR"
 

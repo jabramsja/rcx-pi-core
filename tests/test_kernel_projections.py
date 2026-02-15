@@ -5,7 +5,7 @@ These tests verify the 7 kernel projections work correctly by manually
 tracing through state transitions. The kernel projections are tested
 in isolation (without match/subst integration) to validate the design.
 
-See docs/core/MetaCircularKernel.v0.md for the design specification.
+See mu/docs/core/MetaCircularKernel.v0.md for the design specification.
 """
 
 from __future__ import annotations

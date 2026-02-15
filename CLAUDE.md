@@ -13,13 +13,13 @@ This file is read by Claude Code at session start.
 | `STATUS.md` | **Current state** | Phase, debt counts, testing tiers, fuzzer config |
 | `TASKS.md` | **Work items** | Ra (done), NEXT (active), VECTOR (design), SINK (parked) |
 
-**Everything else is reference material.** Docs in `docs/` are specs and historical context - they should NOT contain operational state that drifts.
+**Everything else is reference material.** Docs in `mu/docs/` are specs and historical context - they should NOT contain operational state that drifts.
 
 **At session START:**
 1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
 2. Read `TASKS.md` - know what's in progress, what's next
 3. Run `./tools/check_agent_review_needed.sh` - check for uncommitted core changes needing agent review
-4. Read `docs/agents/AgentRunbook.v0.md` before running agents
+4. Read `mu/docs/agents/AgentRunbook.v0.md` before running agents
 
 **At session END (before signing off):**
 1. Did phase or debt change? → Update `STATUS.md`
@@ -71,9 +71,9 @@ These are the only two files that track current state. Do not duplicate status i
 **Why agents exist:** We don't trust any single reviewer. We trust the *fight* between specialized agents that check each other's blind spots.
 
 **Canonical docs:**
-- `docs/agents/AgentRunbook.v0.md` - **Start here** - Tool overview, which tool when, commands, depth levels
-- `docs/agents/AgentRig.v0.md` - Architecture and trust model
-- `docs/agents/AgentGuardrails.v0.md` - Output format requirements
+- `mu/docs/agents/AgentRunbook.v0.md` - **Start here** - Tool overview, which tool when, commands, depth levels
+- `mu/docs/agents/AgentRig.v0.md` - Architecture and trust model
+- `mu/docs/agents/AgentGuardrails.v0.md` - Output format requirements
 
 **Quick start:** `./tools/agents.sh`
 
@@ -113,7 +113,7 @@ python tools/run_interactive.py verifier rcx_pi/selfhost/
 python tools/run_deep_analysis.py
 ```
 
-See `docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mode details, agent memory, and CI integration.
+See `mu/docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mode details, agent memory, and CI integration.
 
 ---
 
@@ -272,8 +272,8 @@ Do NOT update individual agent files - they read STATUS.md.
 |------|---------|
 | `STATUS.md` | Current phase/debt (source of truth) |
 | `TASKS.md` | Work items (source of truth) |
-| `docs/core/` | Design specs |
-| `docs/agents/AgentRig.v0.md` | Agent rig docs |
+| `mu/docs/core/` | Design specs |
+| `mu/docs/agents/AgentRig.v0.md` | Agent rig docs |
 | `rcx_pi/selfhost/` | Core implementation |
 | `mu/` | Mu projections: substrate/, closures/, bridge/, programs/, utilities/, host/ |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
@@ -283,7 +283,7 @@ Do NOT update individual agent files - they read STATUS.md.
 
 ## Documentation Governance (IMPORTANT)
 
-**Full policy:** `docs/core/DocGovernance.v0.md`
+**Full policy:** `mu/docs/core/DocGovernance.v0.md`
 
 **The Three Laws:**
 1. Two files own current state (STATUS.md, TASKS.md only)

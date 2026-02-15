@@ -33,10 +33,10 @@ See `STATUS.md` for full details.
 
 - `STATUS.md` - Current phase, debt counts, testing tiers (source of truth)
 - `TASKS.md` - Canonical task tracker
-- `docs/core/MetaCircularKernel.v0.md` - Kernel architecture
-- `docs/core/BootstrapPrimitives.v0.md` - 4 bootstrap primitives (mu_equal eliminated)
-- `docs/core/EngineNewsStructural.v0.md` - EngineNews closure detection spec
-- `roadmap/ContentAddressedMu.md` - Content-Addressed Mu (Level 0+1 IMPLEMENTED, mu_equal eliminated)
+- `mu/docs/core/MetaCircularKernel.v0.md` - Kernel architecture
+- `mu/docs/core/BootstrapPrimitives.v0.md` - 4 bootstrap primitives (mu_equal eliminated)
+- `mu/docs/core/EngineNewsStructural.v0.md` - EngineNews closure detection spec
+- `mu/docs/roadmap/ContentAddressedMu.md` - Content-Addressed Mu (Level 0+1 IMPLEMENTED, mu_equal eliminated)
 
 
 ## CI (Green Gate)
@@ -119,7 +119,7 @@ Security tools have grounding tests in `tests/tools/` that verify the tools actu
 | Module | Status |
 |--------|--------|
 | `rcx_pi/bytecode_vm.py` | ARCHIVED - superseded by kernel + seeds |
-| `docs/archive/bytecode/` | ARCHIVED |
+| `archive/archive/docs/bytecode/` | ARCHIVED |
 | `tests/archive/` | Legacy tests for deleted code |
 
 Run `PYTHONHASHSEED=0 pytest` to verify health.
@@ -189,7 +189,7 @@ Examples:
   - `scripts/rule_precedence.sh mu/mu_programs/rcx_core.mu --json`
 
 ## CLI Quickstart
-See `docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
+See `mu/docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
 
 ---
 

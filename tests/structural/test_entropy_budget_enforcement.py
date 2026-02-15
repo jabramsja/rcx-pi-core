@@ -6,7 +6,7 @@ Verifies that EntropyBudget.md FORBIDDEN rules are actually enforced in code.
 These tests prevent non-deterministic constructs from entering the deterministic
 kernel/selfhost paths. This is critical for cross-substrate reproducibility.
 
-See docs/core/EntropyBudget.md for the specification.
+See mu/docs/core/EntropyBudget.md for the specification.
 """
 
 import inspect

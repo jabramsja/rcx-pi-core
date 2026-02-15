@@ -26,7 +26,7 @@ GOVERNED_FOLDERS = get_governed_folders_as_paths()
 
 # Specific standalone files that need headers
 GOVERNED_FILES = [
-    REPO_ROOT / "docs" / "README.md",
+    REPO_ROOT / "mu" / "docs" / "README.md",
     REPO_ROOT / "rcx_pi" / "README.md",
 ]
 
@@ -61,7 +61,6 @@ DOC_TYPES = {
 
     # docs/audit - REFERENCE (audit reports are frozen records)
     "CI_POLICY.md": "REFERENCE",
-    "GuardrailsAudit.v0.md": "REFERENCE",
     "MetaCircularReadiness.v1.md": "REFERENCE",
 
     # docs/execution - REFERENCE (execution specs)
@@ -73,7 +72,6 @@ DOC_TYPES = {
     "IndependentEncounter.v0.md": "REFERENCE",
     "RuleAsMotif.v0.md": "REFERENCE",
     "StallFixExecution.v0.md": "REFERENCE",
-    "StallFixObservability.v0.md": "REFERENCE",
     "TraceReadingPrimer.v0.md": "REFERENCE",
 
     # docs/cli - REFERENCE (CLI documentation)
@@ -88,9 +86,6 @@ DOC_TYPES = {
     "program_run_schema.md": "REFERENCE",
     "snapshot_json_schema.md": "REFERENCE",
     "world_trace_json_schema.md": "REFERENCE",
-
-    # docs/reviews - REFERENCE (code review records)
-    "mu_equal_fix_summary.md": "REFERENCE",
 
     # tools/agents - REFERENCE (agent prompt configurations)
     "adversary_prompt.md": "REFERENCE",

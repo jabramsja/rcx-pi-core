@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RCX Orbit Artifacts (v1)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    .meta { color: #444; margin-bottom: 16px; }
+    .box { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }
+    .links a { margin-right: 12px; }
+    .layout { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
+    .panel { border: 1px solid #ddd; border-radius: 10px; padding: 12px; background: #fff; }
+    .panel h2 { font-size: 1rem; margin: 0 0 10px 0; }
+    .panel .status { color: #555; font-size: 0.92rem; margin: 8px 0 0 0; }
+    .filter { width: 100%; padding: 10px 10px; border: 1px solid #ccc; border-radius: 10px; }
+    .list { margin-top: 10px; max-height: 520px; overflow: auto; border: 1px solid #eee; border-radius: 10px; background: #fafafa; padding: 8px; }
+    .nodebtn { display: block; width: 100%; text-align: left; border: 0; padding: 8px 10px; margin: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+    .nodebtn:hover { background: #eaeaea; }
+    .svgwrap { overflow: auto; border: 1px solid #eee; border-radius: 10px; padding: 10px; background: #fafafa; }
+    .hint { color: #666; font-size: 0.95rem; margin-top: 8px; }
+    code { background: #f2f2f2; padding: 2px 6px; border-radius: 6px; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .list { max-height: 260px; }
+    }
+  </style>
+</head>
+<body>
+  <div style="margin:0 0 14px 0; padding:12px; border:1px solid #eee; border-radius:12px; background:#fafafa;">
+    <strong>How to view these fixtures locally</strong><br/>
+    Run: <code>./scripts/open_fixtures.sh</code> (serves <code>mu/docs/fixtures/</code> + opens <code>index.html</code>)<br/>
+    Tip: the explorer loads <code>orbit_provenance_v1.json</code> via <code>fetch()</code>, so using a local server avoids browser restrictions.
+  </div>
+
+  <h1>RCX Orbit Artifacts (v1)</h1>
+  <div class="meta">
+    Deterministic chain: <code>engine_run.v1</code> → <code>orbit.dot</code> → <code>orbit.svg</code><br/>
+    Explorer: <code>orbit_explorer_v1.html</code> (states + provenance drilldown)
+  </div>
+
+  <div class="box links">
+    <strong>Fixtures</strong><br/>
+    <a href="engine_run_from_snapshot_rcx_core_v1.json">engine_run_from_snapshot_rcx_core_v1.json</a>
+    <a href="orbit_from_engine_run_rcx_core_v1.dot">orbit_from_engine_run_rcx_core_v1.dot</a>
+    <a href="orbit_from_engine_run_rcx_core_v1.svg">orbit_from_engine_run_rcx_core_v1.svg</a>
+    <a href="orbit_drilldown_v1.js">orbit_drilldown_v1.js</a>
+    <a href="orbit_explorer_v1.html">orbit_explorer_v1.html</a>
+  </div>
+
+  <div class="box">
+    <strong>How to open locally</strong>
+    <div class="hint">Because this page fetches JSON, open it via a local web server (not <code>file://</code>).</div>
+    <pre><code>cd docs/fixtures
+python3 -m http.server 8000</code></pre>
+    <div class="hint">Then open <code>http://localhost:8000/index.html</code> (or <code>orbit_explorer_v1.html</code> directly).</div>
+  </div>
+
+  <div class="layout">
+    <aside class="panel">
+      <h2>Orbit drilldown</h2>
+      <input id="nodeFilter" class="filter" placeholder="Filter nodes (label or id)..." />
+      <div id="nodeList" class="list" aria-label="Orbit node list"></div>
+      <div id="statusLine" class="status">Loading…</div>
+      <div class="hint">Click a node to highlight it in the SVG (best effort across Graphviz versions).</div>
+    </aside>
+
+    <section class="panel">
+      <h2>Orbit (SVG)</h2>
+      <div class="hint">If this looks huge, zoom your browser or open the SVG directly.</div>
+      <div class="svgwrap">
+        <object id="orbitSvgObj" type="image/svg+xml" data="orbit_from_engine_run_rcx_core_v1.svg" width="100%" height="650"></object>
+      </div>
+    </section>
+  </div>
+
+  <div class="box">
+    <strong>Build</strong>
+    <div class="hint">From repo root:</div>
+    <pre><code>./scripts/build_orbit_artifacts.sh</code></pre>
+  </div>
+
+  <script src="orbit_drilldown_v1.js"></script>
+</body>
+</html>

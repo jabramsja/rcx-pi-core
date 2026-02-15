@@ -16,7 +16,7 @@ KNOWN LIMITATIONS due to normalization/denormalization:
 - Existing head/tail structures denormalize to Python lists
 These are acceptable because RCX projections work on normalized structures.
 
-See docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/SelfHosting.v0.md for design.
 """
 
 import pytest

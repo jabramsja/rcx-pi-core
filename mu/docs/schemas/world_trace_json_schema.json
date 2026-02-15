@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rcx-world-trace.v1",
+  "title": "RCX World Trace",
+  "type": "object",
+  "required": [
+    "max_steps",
+    "orbit",
+    "schema",
+    "schema_doc",
+    "seed",
+    "trace",
+    "world"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "rcx-world-trace.v1"
+    },
+    "schema_doc": {
+      "type": "string",
+      "const": "mu/docs/schemas/world_trace_json_schema.md"
+    },
+    "world": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": "string",
+      "minLength": 1
+    },
+    "max_steps": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "orbit": {
+      "type": "object",
+      "required": [
+        "kind",
+        "period",
+        "states"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "invariants": {
+          "type": [
+            "array",
+            "object",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "step",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "raw_output": {
+      "type": "string"
+    },
+    "classification_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "trace_len": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "orbit_len": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_states": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "has_cycle": {
+          "type": "boolean"
+        },
+        "period": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "determinism": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "inputs_hash": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

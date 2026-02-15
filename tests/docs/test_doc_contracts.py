@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-DOCS_CORE = REPO_ROOT / "docs" / "core"
+DOCS_CORE = REPO_ROOT / "mu" / "docs" / "core"
 
 
 # =============================================================================
@@ -238,7 +238,7 @@ class TestDocHeaders:
     """Verify all docs have DOC_STATUS headers."""
 
     def test_all_core_docs_have_headers(self):
-        """Every doc in docs/core/ must have a DOC_STATUS header."""
+        """Every doc in mu/docs/core/ must have a DOC_STATUS header."""
         missing = []
         for doc_path in sorted(DOCS_CORE.glob("*.md")):
             content = doc_path.read_text()

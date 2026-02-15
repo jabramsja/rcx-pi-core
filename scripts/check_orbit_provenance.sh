@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-PROV="docs/fixtures/orbit_provenance_v1.json"
+PROV="mu/docs/fixtures/orbit_provenance_v1.json"
 
 [[ -f "$PROV" ]] || { echo "missing provenance fixture: $PROV" >&2; exit 1; }
 
@@ -17,7 +17,7 @@ data = json.loads(p.read_text(encoding="utf-8"))
 
 schema = data.get("schema")
 
-# Canonical schema is rcx.orbit.v1 (matches docs/schemas/rcx.orbit.v1.schema.json)
+# Canonical schema is rcx.orbit.v1 (matches mu/docs/schemas/rcx.orbit.v1.schema.json)
 # Accept legacy alias too, if it ever shows up.
 if schema not in ("rcx.orbit.v1", "rcx.orbit.provenance.v1"):
     raise SystemExit(f"FAIL: unexpected schema: {schema!r}")

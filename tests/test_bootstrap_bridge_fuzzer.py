@@ -8,7 +8,7 @@ Properties tested:
 3. DETERMINISM: Same input → same output
 4. NO_CRASH: Valid Mu inputs never crash
 
-See: docs/core/BootstrapStructuralBridge.v0.md
+See: mu/docs/core/BootstrapStructuralBridge.v0.md
 """
 
 from __future__ import annotations

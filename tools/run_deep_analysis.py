@@ -51,11 +51,11 @@ ANALYSIS_PROMPTS = {
 **Scope:**
 - Core code: rcx_pi/selfhost/*.py
 - Seeds: mu/**/*.json
-- Docs: STATUS.md, TASKS.md, docs/core/*.md
+- Docs: STATUS.md, TASKS.md, mu/docs/core/*.md
 
 **Your task:**
 1. Read STATUS.md to understand current phase (L1/L2/L3) and claimed invariants
-2. Read key docs in docs/core/ for architectural claims
+2. Read key docs in mu/docs/core/ for architectural claims
 3. Sample core code in rcx_pi/selfhost/
 4. Check: Do the docs match the implementation?
 
@@ -107,12 +107,12 @@ Focus on architectural security, not code style.""",
     "grounding": """You are checking that ALL claims in RCX docs have corresponding tests.
 
 **Scope:**
-- Claims: STATUS.md, TASKS.md, docs/core/*.md
+- Claims: STATUS.md, TASKS.md, mu/docs/core/*.md
 - Tests: tests/**/*.py
 
 **Your task:**
 1. Extract claims from STATUS.md (phase claims, invariant claims)
-2. Extract claims from docs/core/ (architectural claims)
+2. Extract claims from mu/docs/core/ (architectural claims)
 3. For each claim, find the grounding test
 4. Report claims WITHOUT test coverage
 

@@ -281,7 +281,7 @@ class TestUnderscoreKeyAudit:
     def test_underscore_prefix_documented(self):
         """The underscore prefix convention must be documented."""
         # Check MetaCircularKernel.v0.md
-        doc1 = REPO_ROOT / "docs" / "core" / "MetaCircularKernel.v0.md"
+        doc1 = REPO_ROOT / "mu" / "docs" / "core" / "MetaCircularKernel.v0.md"
         if doc1.exists():
             content1 = doc1.read_text()
             assert "_mode" in content1 or "underscore" in content1.lower(), (
@@ -289,7 +289,7 @@ class TestUnderscoreKeyAudit:
             )
 
         # Check RecurrenceStructural.v0.md
-        doc2 = REPO_ROOT / "docs" / "core" / "RecurrenceStructural.v0.md"
+        doc2 = REPO_ROOT / "mu" / "docs" / "core" / "RecurrenceStructural.v0.md"
         if doc2.exists():
             content2 = doc2.read_text()
             assert "_mode" in content2 or "underscore" in content2.lower(), (

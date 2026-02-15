@@ -2,7 +2,7 @@
 
 **This is the single source of truth for project phase. Agents MUST read this file.**
 
-> **Document Architecture**: See [`roadmap/MANIFEST.md`](roadmap/MANIFEST.md) for reading order and linking rules across STATUS.md, TASKS.md, and roadmap docs.
+> **Document Architecture**: See [`mu/docs/roadmap/MANIFEST.md`](mu/docs/roadmap/MANIFEST.md) for reading order and linking rules across STATUS.md, TASKS.md, and roadmap docs.
 
 ---
 
@@ -247,7 +247,7 @@ Tier 5: CI Weekly     weekly_deep_fuzz.yml          ~60 min  Deep fuzz (500 exam
 HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # ~30 seconds
 ```
 
-See `docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
+See `mu/docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
 
 ## Debt Status
 
@@ -286,7 +286,7 @@ These cannot be eliminated because:
 - Circular dependency: eliminating them would require eval_step to not exist
 
 The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths are documented:
-- **Boot0 Architecture v0.4** (`docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
+- **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
 
@@ -384,7 +384,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 ## Key Files
 
-- Design doc: `docs/core/MetaCircularKernel.v0.md`
+- Design doc: `mu/docs/core/MetaCircularKernel.v0.md`
 - Self-hosting: `rcx_pi/selfhost/` (match_mu, subst_mu, step_mu)
 - **mu/ folder (new organized structure):**
   - Substrate: `mu/substrate/` (kernel.v1, match.v2, subst.v2)
@@ -392,7 +392,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
   - Programs: `mu/programs/` (rcx_engine.v1, hemispheres.v1)
   - Host: `mu/host/js/eval_step.js`, `mu/host/python/selfhost`
 - Task list: `TASKS.md`
-- **Documentation governance:** `docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
+- **Documentation governance:** `mu/docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
 - **Doc tests:** `tests/docs/` (118 tests: contracts, freshness, governance, root files)
 - Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
@@ -490,7 +490,7 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Single source of truth: THRESHOLD and INFRA_CEILING read from STATUS.md
 
 **Agent Guardrails (Anti-Hallucination, 2026-02-01):**
-- Created `docs/agents/AgentGuardrails.v0.md` - requires FILE:LINE + code evidence
+- Created `mu/docs/agents/AgentGuardrails.v0.md` - requires FILE:LINE + code evidence
 - Created `tools/validate_agent_compliance.py` - validates agent output format
 - Created `tests/tools/test_validate_agent_compliance.py` (43 tests)
 - Created `.claude/hooks/validate-agent-compliance.sh` - automatic SubagentStop hook
@@ -565,7 +565,7 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 - `tests/structural/test_bootstrap_primitives.py` (36 tests)
 - `tests/test_bootstrap_fuzzer.py` (18 property-based tests)
 
-**See `docs/core/BootstrapPrimitives.v0.md`** for full specification.
+**See `mu/docs/core/BootstrapPrimitives.v0.md`** for full specification.
 
 **Phase 8b IMPLEMENTED (2026-01-28):**
 
@@ -623,7 +623,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
 - rcx_pi_rust → ARCHIVED, rcx_omega → ARCHIVED, worlds_json → MAINTAIN (at `mu/worlds_json/`)
-- Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
+- Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
 - No code changes; governance-only round
 
 **Hemisphere Hardening (2026-02-10):**
@@ -646,7 +646,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR
 
-**Known Architectural Constraints:** See "Known Architectural Constraints" section in [`roadmap/MetaCircular_Boot0_GatePlan.md`](roadmap/MetaCircular_Boot0_GatePlan.md) for authoritative documentation of:
+**Known Architectural Constraints:** See "Known Architectural Constraints" section in [`archive/roadmap/MetaCircular_Boot0_GatePlan.md`](archive/roadmap/MetaCircular_Boot0_GatePlan.md) for authoritative documentation of:
 - Why kernel reserved fields block algorithm entry
 - Why kernel-internal bypass exists for hybrid execution
 - Historical trace matcher split and its Gate 5 parity resolution
@@ -694,7 +694,7 @@ New organized structure makes architecture visible:
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**
 - Location: `mu/bridge/bootstrap_structural.v1.json` (5 projections)
-- Design doc: `docs/core/BootstrapStructuralBridge.v0.md`
+- Design doc: `mu/docs/core/BootstrapStructuralBridge.v0.md`
 - Execution path verified: bridge projections DO fire for non-linear patterns
 - **Path 1: match_mu direct** (2026-02-09) — `match_mu()` loads match.v2 + bridge projections via `projection_runner`. Provides non-linear pattern conflict detection for `apply_mu()` without kernel overhead.
 - **Path 2: kernel bridge mode** — `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge")` for recurrence/exhaustion.

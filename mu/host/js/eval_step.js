@@ -1538,16 +1538,16 @@ const crypto = require('crypto');
 // Seed integrity verification — parity with Python's seed_integrity.py
 // SHA256 checksums must match Python's SEED_CHECKSUMS exactly
 const SEED_CHECKSUMS = {
-  'kernel.v1.json': '813cae10f2a7f19bd494e56e5c8cf2feaf92f32ae6988d626bca21ee01811daa',
-  'match.v2.json': '55a6b58a6c8fe31d4c3a8c704603d453fc04c1a757a45fcf7f6570afa1fe27b1',
-  'subst.v2.json': 'e64695b966c497b22d710779ad7c1c9a2a5158734392714c10dffb77f6c39621',
-  'recurrence.v1.json': 'b916f17b2b21b1c194567e515dce535f1acd84a91f32cfd8a11f3cc01aa7fe41',
-  'recurrence.v2.json': '664000e2082e981a2a2ab385022d57749e9dab7124c62448ccb1ab8778abb89b',
-  'exhaustion.v1.json': '3f8261ef8d3cfe100708af0ce4c67a4e266c6ef160d3d61343c3e2dc66d9e80c',
-  'bootstrap_structural.v1.json': 'edb9908eeaee4518b49f72bb17274aa490388555cebe9e363f5785d7e44014db',
-  'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
-  'rcx_engine.v1.json': '6024e9be1113d0288c06cb5073f573bd9a33e8aa9589c1d74fc55bf835ec37c7',
-  'fix.v1.json': '00e92921fef19da5f5133ef115d3264ed84dace9612d0cd9d933bae670883efa',
+  'kernel.v1.json': '8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f',
+  'match.v2.json': 'cd89ce2bef9668b2e0bb190ad8a615a53bd699d4a0ad3ff9d6c1429db5e3594d',
+  'subst.v2.json': '0b735c52da437a6eae1478dc4c992269bff8978c7e9084d15ffcba6c06e3037f',
+  'recurrence.v1.json': 'ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0',
+  'recurrence.v2.json': 'f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9',
+  'exhaustion.v1.json': '2497881e19015db553a834c9d1f287c7774c2607effc224ed460b4b8051dffe0',
+  'bootstrap_structural.v1.json': 'dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964',
+  'hemispheres.v1.json': 'e7f4735c36450f58fdebf137ba2933695b31eac813d1eb4a8e84db3380438ab5',
+  'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
+  'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)

@@ -5,7 +5,7 @@ Verifies step_mu() produces identical results to step() for all cases.
 This is the foundation for self-hosting - if step_mu == step, then
 Mu projections can replace Python functions.
 
-See docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/SelfHosting.v0.md for design.
 """
 
 import pytest

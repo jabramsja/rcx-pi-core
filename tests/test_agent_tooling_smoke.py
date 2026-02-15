@@ -385,7 +385,7 @@ class TestOrchestratorIntegration:
         run_review = import_from_path("run_review", TOOLS_DIR / "run_review.py")
 
         low_risk = run_review.ReviewOrchestrator(
-            files=["docs/agents/AgentRunbook.v0.md"],
+            files=["mu/docs/agents/AgentRunbook.v0.md"],
             depth="full",
             use_memory=False,
         )
@@ -401,7 +401,7 @@ class TestOrchestratorIntegration:
         assert "grounding" in high_risk.agents_to_run
 
         forced = run_review.ReviewOrchestrator(
-            files=["docs/agents/AgentRunbook.v0.md"],
+            files=["mu/docs/agents/AgentRunbook.v0.md"],
             depth="full",
             use_memory=False,
             force_grounding=True,

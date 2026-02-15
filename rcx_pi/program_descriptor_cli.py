@@ -10,7 +10,7 @@ from rcx_pi.program_descriptor_lib import SCHEMA, SCHEMA_DOC, describe_program_j
 
 from rcx_pi.cli_schema import print_schema_triplet
 
-SCHEMA_JSON = "docs/schemas/program_descriptor_schema.json"
+SCHEMA_JSON = "mu/docs/schemas/program_descriptor_schema.json"
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -35,7 +35,7 @@ def main(argv: List[str] | None = None) -> int:
     if args.schema:
         print_schema_triplet(
             "rcx-program-descriptor.v1",
-            "docs/schemas/program_descriptor_schema.md",
+            "mu/docs/schemas/program_descriptor_schema.md",
             SCHEMA_JSON,
         )
         return 0

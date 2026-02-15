@@ -56,7 +56,7 @@ def main() -> None:
         Bucket(
             "Schemas",
             "Canonical schema sources (docs/schemas) + legacy schema docs in docs/.",
-            lambda p: p.startswith("docs/schemas/")
+            lambda p: p.startswith("mu/docs/schemas/")
             or ("schema" in p and p.startswith("docs/")),
         ),
         Bucket(

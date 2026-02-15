@@ -15,7 +15,7 @@ EVIDENCE TYPES:
 2. Unique output - assert output only possible from specific projection
 3. Structural marker - projection leaves marker no other projection produces
 
-See: docs/agents/AgentGuardrails.v0.md (Execution Path Verification section)
+See: mu/docs/agents/AgentGuardrails.v0.md (Execution Path Verification section)
 """
 
 from __future__ import annotations

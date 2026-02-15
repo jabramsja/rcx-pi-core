@@ -4,7 +4,7 @@ Property-based fuzzer tests for exhaustion.v1.json (Rule 3.1 Operator Exhaustion
 Uses Hypothesis to generate random traces and verify exhaustion detection
 behaves correctly across edge cases.
 
-See: docs/core/OperatorExhaustion.v0.md
+See: mu/docs/core/OperatorExhaustion.v0.md
 """
 
 from __future__ import annotations

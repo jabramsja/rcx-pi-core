@@ -463,7 +463,7 @@ class TestFixIntegrationEvidence:
     engine.hash_done_fix → fix.v1.json → engine.fix_done_applied/none.
     These tests now prove the gap is CLOSED.
 
-    Contract ref: docs/core/EngineNewFixContract.v0.md
+    Contract ref: mu/docs/core/EngineNewFixContract.v0.md
     """
 
     # A structured graph that deterministically stalls under identity projection.

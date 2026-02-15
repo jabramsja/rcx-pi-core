@@ -9,8 +9,8 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-SNAPSHOT_FIXTURE="docs/fixtures/snapshot_rcx_core_v1.json"
-ENGINE_RUN_FIXTURE="docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
+SNAPSHOT_FIXTURE="mu/docs/fixtures/snapshot_rcx_core_v1.json"
+ENGINE_RUN_FIXTURE="mu/docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
 
 if [[ ! -f "$SNAPSHOT_FIXTURE" ]]; then
   echo "missing snapshot fixture: $SNAPSHOT_FIXTURE" >&2

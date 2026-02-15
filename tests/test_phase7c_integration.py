@@ -11,7 +11,7 @@ Test coverage:
 4. Match.fail catch-all correctness
 5. Security: domain data cannot forge kernel state
 
-See docs/core/MetaCircularKernel.v0.md for design.
+See mu/docs/core/MetaCircularKernel.v0.md for design.
 """
 
 import pytest

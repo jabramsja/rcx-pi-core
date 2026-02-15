@@ -13,7 +13,7 @@ def _state_mu(s):
 
 
 def test_orbit_provenance_semantics():
-    p = Path("docs/fixtures/orbit_provenance_v1.json")
+    p = Path("mu/docs/fixtures/orbit_provenance_v1.json")
     assert p.exists(), "orbit_provenance_v1.json missing"
 
     data = json.loads(p.read_text(encoding="utf-8"))

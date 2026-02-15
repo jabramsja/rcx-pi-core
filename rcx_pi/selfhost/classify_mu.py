@@ -5,7 +5,7 @@ This module implements linked list classification using Mu projections.
 It determines whether a head/tail linked list encodes a dict (all elements
 are kv-pairs) or a list (general elements).
 
-See docs/core/SelfHosting.v0.md for design.
+See mu/docs/core/SelfHosting.v0.md for design.
 
 Pre-condition: Dict keys are strings (JSON constraint). The classification
 patterns check structural shape but cannot verify Python types.
@@ -99,7 +99,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         # KNOWN LIMITATION: A list like [[s, x]] normalizes identically to {s: x}
         # We cannot distinguish them after normalization. We favor dict interpretation
         # because dicts with None values are more common than lists of 2-element sublists.
-        # See docs/core/DebtCategories.v0.md for documentation of this design decision.
+        # See mu/docs/core/DebtCategories.v0.md for documentation of this design decision.
         head = current.get("head")
         if isinstance(head, dict):
             # Gate 3: Type-tagged structures are NOT kv-pairs

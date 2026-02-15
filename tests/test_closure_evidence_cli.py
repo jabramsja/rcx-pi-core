@@ -4,7 +4,7 @@ Closure Evidence CLI Tests.
 Tests the --print-closure-evidence CLI flag using subprocess calls only.
 All assertions are based on PUBLIC interface output, no engine internals.
 
-See docs/execution/ClosureEvidence.v0.md and docs/execution/IndependentEncounter.v0.md for spec.
+See mu/docs/execution/ClosureEvidence.v0.md and mu/docs/execution/IndependentEncounter.v0.md for spec.
 """
 from __future__ import annotations
 

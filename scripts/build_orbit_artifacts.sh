@@ -4,10 +4,10 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-ENGINE_RUN_FIXTURE="docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
-DOT_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
-SVG_FIXTURE="docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
-INDEX_HTML="docs/fixtures/index.html"
+ENGINE_RUN_FIXTURE="mu/docs/fixtures/engine_run_from_snapshot_rcx_core_v1.json"
+DOT_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
+SVG_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
+INDEX_HTML="mu/docs/fixtures/index.html"
 
 GEN_DOT="./scripts/orbit_engine_run_to_dot.py"
 
@@ -26,10 +26,10 @@ fi
 dot -Tsvg "$DOT_FIXTURE" > "$SVG_FIXTURE"
 
 # Normalize SVG bytes (Graphviz may emit version-specific metadata)
-python3 scripts/normalize_graphviz_svg.py "docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
+python3 scripts/normalize_graphviz_svg.py "mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
 echo "OK: wrote $SVG_FIXTURE"
 
-echo "== 3/4) write docs/fixtures/index.html =="
+echo "== 3/4) write mu/docs/fixtures/index.html =="
 python3 - "$ENGINE_RUN_FIXTURE" "$DOT_FIXTURE" "$SVG_FIXTURE" "$INDEX_HTML" <<'PY'
 import sys
 from pathlib import Path
@@ -67,7 +67,7 @@ html = f"""<!doctype html>
 <body>
   <div style="margin:0 0 14px 0; padding:12px; border:1px solid #eee; border-radius:12px; background:#fafafa;">
     <strong>How to view these fixtures locally</strong><br/>
-    Run: <code>./scripts/open_fixtures.sh</code> (serves <code>docs/fixtures/</code> + opens <code>index.html</code>)<br/>
+    Run: <code>./scripts/open_fixtures.sh</code> (serves <code>mu/docs/fixtures/</code> + opens <code>index.html</code>)<br/>
     Tip: the explorer loads <code>orbit_provenance_v1.json</code> via <code>fetch()</code>, so using a local server avoids browser restrictions.
   </div>
 

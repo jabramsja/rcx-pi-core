@@ -4,8 +4,8 @@ from rcx_pi.cli_schema import schema_triplet
 
 
 def test_schema_triplet_is_space_delimited_triplet():
-    out = schema_triplet("tag.v1", "docs/a.md", "docs/schemas/a.json")
-    assert out == "tag.v1 docs/a.md docs/schemas/a.json"
+    out = schema_triplet("tag.v1", "docs/a.md", "mu/docs/schemas/a.json")
+    assert out == "tag.v1 docs/a.md mu/docs/schemas/a.json"
     assert out.count(" ") == 2
 
 

@@ -31,7 +31,7 @@ class TestTrackerSyncEnforcement:
         )
 
     def test_no_core_changes_passes(self):
-        result = self.run_script("docs/core/BootstrapPrimitives.v0.md")
+        result = self.run_script("mu/docs/core/BootstrapPrimitives.v0.md")
         assert result.returncode == 0
         assert "no core changes detected" in result.stdout.lower()
 
@@ -53,7 +53,7 @@ class TestTrackerSyncEnforcement:
         assert "tasks.md" in result.stdout.lower()
 
     def test_core_plus_other_docs_still_fails(self):
-        result = self.run_script("mu/closures/exhaustion.v1.json", "README.md", "docs/core/RCXKernel.v0.md")
+        result = self.run_script("mu/closures/exhaustion.v1.json", "README.md", "mu/docs/core/RCXKernel.v0.md")
         assert result.returncode == 1
         assert "tracker sync violation" in result.stdout.lower()
 

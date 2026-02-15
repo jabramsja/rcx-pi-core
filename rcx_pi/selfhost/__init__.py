@@ -11,5 +11,5 @@ This subpackage contains the core self-hosting implementation:
 - seed_integrity: Seed file integrity verification (checksums, structure)
 
 Architecture: Kernel (4 primitives) + Seeds (Mu projections)
-See docs/core/RCXKernel.v0.md and docs/core/SelfHosting.v0.md
+See mu/docs/core/RCXKernel.v0.md and mu/docs/core/SelfHosting.v0.md
 """

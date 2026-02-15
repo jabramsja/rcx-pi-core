@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate docs/README.md index automatically.
+Generate mu/docs/README.md index automatically.
 
 Scans docs/ subdirectories and creates a navigable index.
 Run manually or as part of pre-commit to keep index fresh.
@@ -18,28 +18,26 @@ from pathlib import Path
 # Directory descriptions (customize as needed)
 DIR_DESCRIPTIONS = {
     "core": "Core specifications - read these first",
-    "bytecode": "Bytecode VM documentation",
     "execution": "Execution semantics and traces",
     "schemas": "JSON schema definitions",
     "cli": "CLI tools and commands",
     "agents": "AI agent rig documentation",
     "audit": "Audit, governance, and compliance",
-    "archive": "Historical/archived documentation",
-    "latex": "LaTeX source files (paper)",
     "fixtures": "Test fixtures",
+    "reviews": "Design reviews and summaries",
+    "roadmap": "Roadmap specs and gate plans",
 }
 
 # Priority order for directories (higher = listed first)
 DIR_PRIORITY = {
     "core": 100,
     "execution": 90,
-    "bytecode": 80,
     "schemas": 70,
     "cli": 60,
     "agents": 50,
     "audit": 40,
-    "archive": 10,
-    "latex": 5,
+    "roadmap": 30,
+    "reviews": 20,
     "fixtures": 5,
 }
 
@@ -62,7 +60,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 
 def extract_existing_header(readme_path: Path) -> str:
-    """Extract existing DOC_STATUS block from docs/README.md, if present."""
+    """Extract existing DOC_STATUS block from mu/docs/README.md, if present."""
     if not readme_path.exists():
         return DOC_HEADER_TEMPLATE
     content = readme_path.read_text(encoding="utf-8")
@@ -163,13 +161,13 @@ def generate_index(docs_dir: Path) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate docs/README.md index")
+    parser = argparse.ArgumentParser(description="Generate mu/docs/README.md index")
     parser.add_argument("--check", action="store_true", help="Check if index is up-to-date")
     args = parser.parse_args()
 
     # Find docs directory
     script_dir = Path(__file__).parent
-    docs_dir = script_dir.parent / "docs"
+    docs_dir = script_dir.parent / "mu" / "docs"
 
     if not docs_dir.exists():
         print(f"Error: docs directory not found at {docs_dir}")
@@ -183,14 +181,14 @@ def main():
         if readme_path.exists():
             current_content = readme_path.read_text(encoding="utf-8")
             if current_content.strip() == new_content.strip():
-                print("docs/README.md is up-to-date")
+                print("mu/docs/README.md is up-to-date")
                 sys.exit(0)
             else:
-                print("docs/README.md is OUT OF DATE")
+                print("mu/docs/README.md is OUT OF DATE")
                 print("Run: python tools/generate_docs_index.py")
                 sys.exit(1)
         else:
-            print("docs/README.md does not exist")
+            print("mu/docs/README.md does not exist")
             print("Run: python tools/generate_docs_index.py")
             sys.exit(1)
     else:
