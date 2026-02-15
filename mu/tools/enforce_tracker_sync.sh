@@ -75,7 +75,7 @@ case "$MODE" in
         ;;
 esac
 
-CORE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)"
+CORE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^mu/' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)"
 if [[ -z "$CORE_CHANGED" ]]; then
     echo "Tracker sync OK: no core changes detected."
     exit 0

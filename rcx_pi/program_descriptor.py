@@ -17,7 +17,7 @@ def _find_repo_root(start: Path) -> Optional[Path]:
 
 def _module_repo_root() -> Path:
     # rcx_pi/program_descriptor.py -> rcx_pi -> repo_root guess
-    here = Path(__file__).resolve()
+    here = Path(__file__)
     guess = here.parents[1]
     rr = _find_repo_root(guess)
     return rr if rr is not None else guess

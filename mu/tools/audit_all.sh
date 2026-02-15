@@ -226,7 +226,7 @@ DEBT_THRESHOLD=$(grep -E '^THRESHOLD:' STATUS.md 2>/dev/null | grep -oE '[0-9]+'
 
 # Get seed counts
 SEED_COUNT=$(find mu -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')
-SELFHOST_COUNT=$(find rcx_pi/selfhost -name '*.py' -type f 2>/dev/null | wc -l | tr -d ' ')
+SELFHOST_COUNT=$(find -H rcx_pi/selfhost -name '*.py' -type f 2>/dev/null | wc -l | tr -d ' ')
 
 # Get current phase from STATUS.md
 CURRENT_PHASE=$(grep -E '^PHASE:' STATUS.md 2>/dev/null | sed 's/PHASE: *//' || echo "?")
