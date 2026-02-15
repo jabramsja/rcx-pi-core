@@ -3,8 +3,10 @@ World-related tools for RCX-π (Python side).
 
 This package contains:
 - worlds_probe: fingerprinting and probing of worlds
-- orbit_ascii_demo: ASCII visualization of ω-orbits
+- worlds_composite, worlds_diff, worlds_evolve, worlds_mutate_engine
+- world_trace_cli: CLI for world tracing
+- archive/worlds_bridge: bridge (still imported by worlds_probe, world_trace_cli)
 
-Note: worlds_bridge, worlds_mutate_demo, worlds_mutate_loop were archived
-in Round 21D (Rust-dependent, no L3 callers).
+Archived in 24E-R2d: worlds_score_demo, worlds_compare_demo, orbit_ascii_demo,
+worlds_mutate_demo, worlds_mutate_loop (0 active imports).
 """
