@@ -45,8 +45,7 @@ jobs:
         with:
           node-version: "20"
 
-      # Note: Rust setup removed - python-only mode doesn't need it
-      # Run rust_examples.yml manually or scripts/green_gate.sh rust-only locally
+      # Note: Rust setup removed - rcx_pi_rust archived
 
       - name: Install system deps
         shell: bash

@@ -13,7 +13,7 @@ while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   case "$f" in
     TASKS.md|README.md|CI_POLICY.md|docs/*) touches_docs=true ;;
-    rcx_pi_rust/*|tests/*|rcx_pi_*|core/*|engine/*|scripts/*|src/*) touches_code=true ;;
+    tests/*|rcx_pi_*|core/*|engine/*|scripts/*|src/*) touches_code=true ;;
   esac
 done <<< "$changed"
 

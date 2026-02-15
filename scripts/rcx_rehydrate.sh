@@ -4,11 +4,11 @@ export HISTTIMEFORMAT="${HISTTIMEFORMAT-}"
 
 cd "$(git rev-parse --show-toplevel)"
 
-MODE="${1:-fast}"   # fast | full | python | rust | help
+MODE="${1:-fast}"   # fast | full | python | help
 
 usage() {
   cat <<'USAGE'
-usage: scripts/rcx_rehydrate.sh [fast|full|python|rust|help]
+usage: scripts/rcx_rehydrate.sh [fast|full|python|help]
 
 Purpose:
 - Generate a single paste block for a NEW ChatGPT session that:
@@ -16,13 +16,12 @@ Purpose:
   - pins repo identity (remote/branch/head)
   - shows where to look (entry points + dirs)
   - shows the task taxonomy anchors (OPTIONAL/DEFERRED/OUT OF SCOPE)
-  - optionally runs truth gates (full/python/rust)
+  - optionally runs truth gates (full/python)
 
 Modes:
 - fast   (default): NO tests. Quick + paste-friendly.
 - full   : runs scripts/green_gate.sh all
 - python : runs scripts/green_gate.sh python-only
-- rust   : runs scripts/green_gate.sh rust-only
 - help   : show this message
 USAGE
 }
@@ -77,7 +76,7 @@ done
 echo
 
 echo "-- Key dirs (repo root) --"
-for d in archive/rcx_omega rcx_pi archive/rcx_pi_rust archive/rcx_python_examples scripts tests docs schemas mu/worlds_json .rcx_library; do
+for d in archive/rcx_omega rcx_pi archive/rcx_pi_rust archive/rcx_python_examples scripts tests mu/docs mu/worlds_json .rcx_library; do
   if [ -d "$d" ]; then echo "present: $d/"; else echo "missing: $d/"; fi
 done
 echo
@@ -121,7 +120,6 @@ case "$MODE" in
   fast)   : ;;
   full)   run_gate "all" ;;
   python) run_gate "python-only" ;;
-  rust)   run_gate "rust-only" ;;
   *)
     echo "ERROR: unknown mode: $MODE"
     echo

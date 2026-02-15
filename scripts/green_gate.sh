@@ -8,7 +8,7 @@ export PYTHONHASHSEED=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-MODE="${1:-all}"   # all | python-only | rust-only
+MODE="${1:-all}"   # all | python-only
 
 # Check if pytest-xdist is available for parallel execution (2-3x speedup)
 # Using --dist worksteal for better load balancing (idle workers steal from busy)
@@ -45,9 +45,9 @@ run_python() {
   echo
 
   echo "[PY 5/10] Anti-cheat scans (test integrity)"
-  # No private attr access in tests/ or archive/prototypes/
-  echo "-- no private attr access in tests/ or archive/prototypes/"
-  if grep -RInE '\._[a-zA-Z0-9]+' tests/ archive/prototypes/ 2>/dev/null | \
+  # No private attr access in tests/
+  echo "-- no private attr access in tests/"
+  if grep -RInE '\._[a-zA-Z0-9]+' tests/ 2>/dev/null | \
       grep -v 'self\._' | \
       grep -v '_getframe.*CONTRABAND_OK' | \
       grep -v '# ANTICHEAT_OK' | \
@@ -59,18 +59,18 @@ run_python() {
   fi
   echo "OK"
 
-  # No underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)
-  echo "-- no underscored imports from rcx_pi in tests/ or archive/prototypes/ (AST-based)"
+  # No underscored imports from rcx_pi in tests/ (AST-based)
+  echo "-- no underscored imports from rcx_pi in tests/ (AST-based)"
   python3 tools/check_underscore_imports.py || exit 1
   echo "OK"
 
-  # No underscore-prefixed keys in prototype JSON
-  echo "-- no underscore-prefixed keys in prototype JSON (non-standard Mu)"
+  # No underscore-prefixed keys in JSON
+  echo "-- no underscore-prefixed keys in JSON (non-standard Mu)"
   # Note: kernel/match/subst seeds use underscore-prefixed fields for state (_mode, _phase, etc.)
   # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
   # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
   # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
-  if grep -RInE --include='*.json' '"_[a-zA-Z]+":' archive/prototypes/ mu/ 2>/dev/null | \
+  if grep -RInE --include='*.json' '"_[a-zA-Z]+":' mu/ 2>/dev/null | \
       grep -v '"_marker":' | \
       grep -v '"_type":' | \
       grep -v 'kernel.v1.json' | \
@@ -150,47 +150,14 @@ run_python() {
   echo
 }
 
-run_rust() {
-  echo "[RUST 1/2] Rust examples suite (no cargo test)"
-  if [ -x scripts/green_examples.sh ]; then
-    bash scripts/green_examples.sh
-  else
-    echo "Not found: scripts/green_examples.sh"
-    exit 2
-  fi
-  echo
-
-  echo "[RUST 2/2] Snapshot integrity (sha256 locked)"
-
-echo
-echo "[PY] Ensure pytest for Rust snapshot integrity"
-python3 -c "import pytest" >/dev/null 2>&1 || {
-  # Make pip available (best-effort), then install pytest into user site so it works even on system python.
-  python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
-  python3 -m pip install --user -U pip >/dev/null 2>&1 || true
-  python3 -m pip install --user -U pytest >/dev/null
-}
-  python3 -m pytest -q tests/test_snapshot_integrity.py
-  echo
-}
-
 case "$MODE" in
-  all)
-    run_python
-    run_rust
-    echo "✅ ALL GREEN"
-    ;;
-  python-only)
+  all|python-only)
     run_python
     echo "✅ PY GREEN"
     ;;
-  rust-only)
-    run_rust
-    echo "✅ RUST GREEN"
-    ;;
   *)
     echo "ERROR: unknown mode: $MODE"
-    echo "usage: scripts/green_gate.sh [all|python-only|rust-only]"
+    echo "usage: scripts/green_gate.sh [all|python-only]"
     exit 2
     ;;
 esac
