@@ -2,7 +2,8 @@
 Tests for tools/enforce_tracker_sync.sh.
 
 These tests validate the fail-closed policy:
-- If rcx_pi/selfhost/ or mu/ changes, STATUS.md or TASKS.md must also change.
+- If mu/ core code changes, STATUS.md or TASKS.md must also change.
+- Core = mu/ minus mu/docs/, mu/tools/, mu/scripts/, mu/tests/
 """
 
 from __future__ import annotations
@@ -36,7 +37,8 @@ class TestTrackerSyncEnforcement:
         assert "no core changes detected" in result.stdout.lower()
 
     def test_core_with_status_passes(self):
-        result = self.run_script("rcx_pi/selfhost/step_mu.py", "STATUS.md")
+        # Canonical path after ownership flip (rcx_pi/ is now symlink)
+        result = self.run_script("mu/host/python/rcx_pi/selfhost/step_mu.py", "STATUS.md")
         assert result.returncode == 0
         assert "tracker sync ok" in result.stdout.lower()
 
@@ -46,7 +48,8 @@ class TestTrackerSyncEnforcement:
         assert "tracker sync ok" in result.stdout.lower()
 
     def test_core_without_trackers_fails(self):
-        result = self.run_script("rcx_pi/selfhost/step_mu.py")
+        # Canonical path after ownership flip
+        result = self.run_script("mu/host/python/rcx_pi/selfhost/step_mu.py")
         assert result.returncode == 1
         assert "tracker sync violation" in result.stdout.lower()
         assert "status.md" in result.stdout.lower()
