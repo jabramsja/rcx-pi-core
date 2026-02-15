@@ -1,9 +1,0 @@
-{
-  "description": "Phase 22B: Move roadmap design specs to docs/core/",
-  "moves": [
-    {"from": "roadmap/MuHemispheresDesign.md", "to": "docs/core/MuHemispheresDesign.md"},
-    {"from": "roadmap/AlgorithmNormalizationSpec.v0.md", "to": "docs/core/AlgorithmNormalizationSpec.v0.md"},
-    {"from": "roadmap/ContentAddressedMu.md", "to": "docs/core/ContentAddressedMu.md"},
-    {"from": "roadmap/NormalizationDecisionMemo.md", "to": "docs/core/NormalizationDecisionMemo.md"}
-  ]
-}

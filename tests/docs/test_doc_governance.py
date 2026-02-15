@@ -57,7 +57,6 @@ EXEMPT_PATTERNS = [
     r"^\.github/",                 # GitHub templates
     r"^\.rcx_library/",            # Library files
     r"/archive/",                  # Any archive folder (historical, read-only)
-    r"/archive_pre_guardrails/",   # Old agent archives
     r"tools/agents/.*_prompt\.md$", # Agent prompt templates (not docs)
     r"\.auto\.md$",                # Auto-generated docs
     r"^archive/rcx_pi_rust/",       # Rust subproject (archived Round 23A)

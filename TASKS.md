@@ -448,3 +448,4 @@ Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `archive/rcx_pi_rust/sanity_test/target/` — UNTRACKED Round 23F (23 Rust build artifacts)
 - `docs/latex/rcx-pi-paper.pdf` — UNTRACKED Round 23F (gitignored by `*.pdf`)
 - Round 24A: Deleted 5 dead archive files (corpus/, normalized_prototype/, prototypes/); archived 6 deprecated scripts to `archive/scripts_deprecated/`; archived 3 stale roadmap gate docs to `docs/archive/`
+- Round 24B: Recursive subfolder sweep — fixed DeepStep.v0.md stale refs; deleted moves_22b_specs.json (stale); deleted archive/scripts_deprecated/ (6 files); deleted 31 agent archive files (tools/, docs/, .claude/); deleted 16 zero-ref docs/archive/ files; cleaned governance exclusion patterns

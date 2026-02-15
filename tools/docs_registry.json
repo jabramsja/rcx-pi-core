@@ -36,7 +36,6 @@
     "^\\.github/",
     "^\\.rcx_library/",
     "/archive/",
-    "/archive_pre_guardrails/",
     "tools/agents/.*_prompt\\.md$",
     "\\.auto\\.md$",
     "^archive/rcx_pi_rust/",

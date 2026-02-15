@@ -137,19 +137,9 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [MinimalNativeExecutionPrimitive.v0.md](archive/MinimalNativeExecutionPrimitive.v0.md) | Minimal Native Execution Primitive (v0) |
 | [NormalizationDecisionMemo.md](archive/NormalizationDecisionMemo.md) | Normalization Strategy Decision Memo (v0) |
 | [RCX_OMEGA_CONTRACTS.md](archive/RCX_OMEGA_CONTRACTS.md) | RCX-Ω Contracts (Frozen) |
-| [RCX_OMEGA_GOVERNANCE.md](archive/RCX_OMEGA_GOVERNANCE.md) | RCX-Ω Governance & Rails |
-| [RCX_PI_KERNEL.md](archive/RCX_PI_KERNEL.md) | RCX-π Kernel Overview |
 | [RCX_REWRITE_TERMINATION_CONTRACTS.md](archive/RCX_REWRITE_TERMINATION_CONTRACTS.md) | RCX Rewrite Termination Contracts (Frozen) |
-| [RCX_SESSION_BOOT.md](archive/RCX_SESSION_BOOT.md) | RCX Session Boot (paste into a new chat) |
-| [RCX_TEX_CANON.md](archive/RCX_TEX_CANON.md) | RCX TeX Canon Contract (Machine-Ingestible Spec) |
 | [README_BOOTSTRAP.md](archive/README_BOOTSTRAP.md) | BOOTSTRAP COMPLETE (Historical) |
-| [SNAPSHOT_STATUS.md](archive/SNAPSHOT_STATUS.md) | Snapshot / Serialization Status (Ra-for-now) |
-| [SNAPSHOT_V1.md](archive/SNAPSHOT_V1.md) | Snapshot v1 (RCX-π) — Canonical State Serialization |
-| [STABLE_BASELINE_RELEASE.md](archive/STABLE_BASELINE_RELEASE.md) | RCX-Ω Stable Baseline: Release/Tag Checklist |
 | [STAGING_TO_STABLE.md](archive/STAGING_TO_STABLE.md) | Staging → Stable Promotion (RCX-Ω) |
-| [archive_move_plan_21b.md](archive/archive_move_plan_21b.md) | Archive Move Plan — Round 21B/21C |
-| [deprecated_audit_matrix_22a.md](archive/deprecated_audit_matrix_22a.md) | Deprecated Docs/Test Audit Refresh Matrix — Round 22A |
-| [docs_migration_plan_22a.md](archive/docs_migration_plan_22a.md) | Docs Migration Plan — Round 22A |
 | [verification_checklist_v0.md](archive/verification_checklist_v0.md) | RCX Verification Agent Checklist |
 
 ## fixtures
