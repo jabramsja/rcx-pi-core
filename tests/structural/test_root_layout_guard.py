@@ -37,8 +37,6 @@ ALLOWED_ROOT_DIRS: frozenset[str] = frozenset({
     # Archive + legacy
     "archive",
     ".rcx_library",
-    # Reports (agent review output)
-    "reports",
 })
 
 
