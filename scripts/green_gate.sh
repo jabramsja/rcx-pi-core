@@ -33,7 +33,8 @@ run_python() {
   echo
 
   echo "[PY 2/11] Python syntax check"
-  python3 -m py_compile rcx_start.py
+  # rcx_start.py archived to archive/root_legacy/ (Round 23E)
+  echo "  (rcx_start.py archived — syntax check removed)"
   echo
 
   echo "[PY 3/11] Contraband check (grep-based lint)"

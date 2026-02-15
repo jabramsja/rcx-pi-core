@@ -67,7 +67,7 @@ git show -s --format='head_msg: %ci %s' HEAD || true
 echo
 
 echo "-- Key entry points (repo root) --"
-for f in rcx_start.py rcx_runtime.py TASKS.md README_BOOTSTRAP.MD README.md .rcx_manifest.json; do
+for f in TASKS.md README_BOOTSTRAP.MD README.md .rcx_manifest.json archive/root_legacy/rcx_start.py archive/root_legacy/rcx_runtime.py; do
   if [ -f "$f" ]; then echo "present: $f"; else echo "missing: $f"; fi
 done
 echo
