@@ -67,8 +67,12 @@ git show -s --format='head_msg: %ci %s' HEAD || true
 echo
 
 echo "-- Key entry points (repo root) --"
-for f in TASKS.md README_BOOTSTRAP.MD README.md .rcx_manifest.json archive/root_legacy/rcx_start.py archive/root_legacy/rcx_runtime.py; do
+for f in TASKS.md README.md STATUS.md CLAUDE.md archive/root_legacy/rcx_start.py archive/root_legacy/rcx_runtime.py; do
   if [ -f "$f" ]; then echo "present: $f"; else echo "missing: $f"; fi
+done
+# Generated manifests (optional — not tracked, may or may not exist on disk)
+for f in .rcx_manifest.json RCX_MINIMAL_SPINE_MANIFEST.json; do
+  if [ -f "$f" ]; then echo "present (generated): $f"; else echo "absent (generated, ok): $f"; fi
 done
 echo
 

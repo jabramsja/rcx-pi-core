@@ -444,3 +444,6 @@ Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `Makefile` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
 - `rcx_runtime.py` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
 - `rcx_start.py` — ARCHIVED Round 23E (moved to `archive/root_legacy/`)
+- `.rcx_manifest.json` — UNTRACKED Round 23F (generated artifact, stays on disk)
+- `archive/rcx_pi_rust/sanity_test/target/` — UNTRACKED Round 23F (23 Rust build artifacts)
+- `docs/latex/rcx-pi-paper.pdf` — UNTRACKED Round 23F (gitignored by `*.pdf`)
