@@ -12,8 +12,8 @@ touches_code=false
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   case "$f" in
-    TASKS.md|README.md|CI_POLICY.md|docs/*) touches_docs=true ;;
-    tests/*|rcx_pi_*|core/*|engine/*|scripts/*|src/*) touches_code=true ;;
+    TASKS.md|README.md|CI_POLICY.md|mu/docs/*) touches_docs=true ;;
+    mu/tests/*|rcx_pi_*|core/*|engine/*|mu/scripts/*|src/*) touches_code=true ;;
   esac
 done <<< "$changed"
 

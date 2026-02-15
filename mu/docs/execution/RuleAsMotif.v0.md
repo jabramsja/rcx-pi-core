@@ -195,7 +195,7 @@ All gates passed for observability implementation:
 
 1. **Representation locked**: ✅ The JSON structure for rule motifs is finalized.
 
-2. **Examples validated**: ✅ All 8 rules from rules_pure.py translated to rule motifs (add.zero, add.succ, mult.zero, mult.succ, pred.zero, pred.succ, activation, classify).
+2. **Examples validated**: ✅ All 8 rules from rule_motifs_v0.py translated to rule motifs (add.zero, add.succ, mult.zero, mult.succ, pred.zero, pred.succ, activation, classify).
 
 3. **value_hash tested**: ✅ Rule motifs produce deterministic output under PYTHONHASHSEED=0 (verified by 11 + 16 CLI tests).
 

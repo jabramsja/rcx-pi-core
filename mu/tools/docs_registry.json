@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "root_canonical_files": [
+    "STATUS.md",
+    "TASKS.md",
+    "README.md",
+    "CLAUDE.md",
+    "CHANGELOG.md"
+  ],
+  "special_folders": [
+    "mu/docs/roadmap"
+  ],
+  "governed_folders": [
+    "mu/docs/core",
+    "mu/docs/agents",
+    "mu/docs/audit",
+    "mu/docs/execution",
+    "mu/docs/cli",
+    "mu/docs/schemas",
+    "mu/docs/reviews",
+    "mu/tools/agents"
+  ],
+  "docs_registered_subfolders": [
+    "core",
+    "agents",
+    "audit",
+    "execution",
+    "cli",
+    "schemas",
+    "reviews",
+    "roadmap"
+  ],
+  "exempt_patterns": [
+    "^\\.pytest_cache/",
+    "/\\.pytest_cache/",
+    "^\\.github/",
+    "^\\.rcx_library/",
+    "/archive/",
+    "mu/tools/agents/.*_prompt\\.md$",
+    "\\.auto\\.md$",
+    "^archive/",
+    "^rcx_pi/specs/",
+    "^mu/tests/archive/",
+    "^mu/tests/golden/",
+    "^mu/docs/TESTING_PERFORMANCE_ISSUE\\.md$",
+    "^reports/",
+    "^AGENT_BRIDGE\\.md$",
+    "^mu/mu_programs/"
+  ]
+}
