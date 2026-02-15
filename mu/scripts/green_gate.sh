@@ -70,6 +70,7 @@ run_python() {
   # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
   # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
   # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
+  # Note: mu/tests/fixtures/ test vectors intentionally use underscore keys for kernel-internal state
   if grep -RInE --include='*.json' '"_[a-zA-Z]+":' mu/ 2>/dev/null | \
       grep -v '"_marker":' | \
       grep -v '"_type":' | \
@@ -81,7 +82,8 @@ run_python() {
       grep -v 'rcx_engine.v1.json' | \
       grep -v 'enginenews.v1.json' | \
       grep -v 'exhaust.v1.json' | \
-      grep -v 'bootstrap_structural.v1.json'; then
+      grep -v 'bootstrap_structural.v1.json' | \
+      grep -v 'mu/tests/fixtures/'; then
     echo "ERROR: Found non-standard underscore keys in JSON"
     exit 1
   fi
