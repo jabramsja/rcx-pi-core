@@ -47,7 +47,7 @@
 3. **Gate completion updates TASKS.md** - When a gate completes, update TASKS.md (Ra section). The gate plan itself remains stable.
 
 4. **Spec migration path**:
-   - Draft specs live in `roadmap/`
+   - Draft specs live in `mu/docs/roadmap/`
    - Approved specs migrate to `mu/docs/core/`
    - Migration requires explicit review
 
