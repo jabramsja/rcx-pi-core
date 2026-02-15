@@ -156,6 +156,12 @@ FORBIDDEN_PATTERNS = [
         "Use archive/rcx_pi_rust/ or remove reference",
         exceptions=["LegacySurfaceDecisionRecord.v0.md"],
     ),
+    ForbiddenPattern(
+        r'(?<![/a-z])worlds_json/',
+        "worlds_json/ moved to mu/worlds_json/ (Round 23B)",
+        "Use mu/worlds_json/ or remove reference",
+        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+    ),
     # Note: trace_canon.py still exists and is actively used for trace canonicalization
     # No forbidden pattern needed - it's a valid reference
 

@@ -73,7 +73,7 @@ done
 echo
 
 echo "-- Key dirs (repo root) --"
-for d in archive/rcx_omega rcx_pi archive/rcx_pi_rust archive/rcx_python_examples scripts tests docs schemas worlds_json .rcx_library; do
+for d in archive/rcx_omega rcx_pi archive/rcx_pi_rust archive/rcx_python_examples scripts tests docs schemas mu/worlds_json .rcx_library; do
   if [ -d "$d" ]; then echo "present: $d/"; else echo "missing: $d/"; fi
 done
 echo

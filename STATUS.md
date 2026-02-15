@@ -622,7 +622,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 **Next milestone:** See TASKS.md VECTOR for next promotion candidates
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
-- rcx_pi_rust → ARCHIVE, rcx_omega → ARCHIVE, worlds_json → MAINTAIN
+- rcx_pi_rust → ARCHIVED, rcx_omega → ARCHIVED, worlds_json → MAINTAIN (at `mu/worlds_json/`)
 - Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - No code changes; governance-only round
 
