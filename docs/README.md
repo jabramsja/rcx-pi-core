@@ -144,6 +144,9 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [SNAPSHOT_V1.md](archive/SNAPSHOT_V1.md) | Snapshot v1 (RCX-π) — Canonical State Serialization |
 | [STABLE_BASELINE_RELEASE.md](archive/STABLE_BASELINE_RELEASE.md) | RCX-Ω Stable Baseline: Release/Tag Checklist |
 | [STAGING_TO_STABLE.md](archive/STAGING_TO_STABLE.md) | Staging → Stable Promotion (RCX-Ω) |
+| [archive_move_plan_21b.md](archive/archive_move_plan_21b.md) | Archive Move Plan — Round 21B/21C |
+| [deprecated_audit_matrix_22a.md](archive/deprecated_audit_matrix_22a.md) | Deprecated Docs/Test Audit Refresh Matrix — Round 22A |
+| [docs_migration_plan_22a.md](archive/docs_migration_plan_22a.md) | Docs Migration Plan — Round 22A |
 | [verification_checklist_v0.md](archive/verification_checklist_v0.md) | RCX Verification Agent Checklist |
 
 ## fixtures
