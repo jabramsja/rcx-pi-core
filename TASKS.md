@@ -440,4 +440,4 @@ Current Exhaustion Layer: META_CIRCULAR
 Decision record: `docs/core/LegacySurfaceDecisionRecord.v0.md`
 - `rcx_pi_rust/` — ARCHIVED Round 23A (moved to `archive/rcx_pi_rust/`)
 - `rcx_omega/` — ARCHIVED Round 23A (moved to `archive/rcx_omega/`)
-- `worlds_json/` — MAINTAIN as test fixtures; `rcx_core_mut4.json` removed Round 22J (was byte-identical to mut3)
+- `mu/worlds_json/` — MAINTAIN as test fixtures (moved from root Round 23B); `rcx_core_mut4.json` removed Round 22J (was byte-identical to mut3)

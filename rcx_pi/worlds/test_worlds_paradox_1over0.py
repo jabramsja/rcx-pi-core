@@ -6,10 +6,10 @@ Tests for the paradox_1over0 world.
 
 These tests assume:
 
-    - worlds_json/paradox_1over0.json exists
+    - mu/worlds_json/paradox_1over0.json exists
     - you have run:
           python3 -m rcx_pi.worlds_json to-mu \
-              worlds_json/paradox_1over0.json \
+              mu/worlds_json/paradox_1over0.json \
               mu/mu_programs/paradox_1over0.mu
 
     - probe_world(world_name, seeds, max_steps) returns a fingerprint dict:

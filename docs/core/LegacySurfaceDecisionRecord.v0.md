@@ -98,8 +98,8 @@ If observability is needed, create unified observers in `mu/observables/` using 
 
 | Field | Value |
 |-------|-------|
-| **Location** | `worlds_json/` |
-| **Size** | 6 JSON files, ~5 KB total |
+| **Location** | `mu/worlds_json/` (moved from root Round 23B) |
+| **Size** | 5 JSON files, ~5 KB total |
 | **Decision** | **MAINTAIN (minimal)** |
 | **Owner** | Automated (generated artifacts) |
 | **Time horizon** | Keep indefinitely as test fixtures |
@@ -135,5 +135,5 @@ Minimal. Duplicate `mut4` removed (Round 22J). Remaining files are distinct muta
 |---------|----------|-------|----------|---------------|
 | **rcx_pi_rust** | ARCHIVED | — | Round 23A | Moved to `archive/rcx_pi_rust/` |
 | **rcx_omega** | ARCHIVED | — | Round 23A | Moved to `archive/rcx_omega/` |
-| **worlds_json** | MAINTAIN | Automated | Indefinite | N/A (test fixtures) |
+| **worlds_json** | MAINTAIN (at `mu/worlds_json/`) | Automated | Indefinite | N/A (test fixtures) |
 | **worlds_json/mut4** | REMOVED | — | Round 22J | Byte-identical to mut3; deleted |

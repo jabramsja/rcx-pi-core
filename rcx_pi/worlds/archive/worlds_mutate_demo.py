@@ -43,7 +43,7 @@ def _pattern_head(pattern_str: str) -> str:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORLDS_JSON_DIR = REPO_ROOT / "worlds_json"
+WORLDS_JSON_DIR = REPO_ROOT / "mu" / "worlds_json"
 MU_PROGRAMS_DIR = REPO_ROOT / "archive" / "rcx_pi_rust" / "mu_programs"
 
 
