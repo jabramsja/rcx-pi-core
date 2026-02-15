@@ -51,7 +51,7 @@ STAGED_PY=$(echo "$STAGED_FILES" | grep -E '\.py$' || true)
 STAGED_RCX_PY=$(echo "$STAGED_PY" | grep '^rcx_pi/' || true)
 STAGED_SEEDS=$(echo "$STAGED_FILES" | grep -E '^mu/.*\.json$' || true)
 
-DOCS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(docs/|roadmap/|tools/agents/|README\.md|STATUS\.md|TASKS\.md|CLAUDE\.md|CHANGELOG\.md)' || true)
+DOCS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(mu/docs/|tools/agents/|README\.md|STATUS\.md|TASKS\.md|CLAUDE\.md|CHANGELOG\.md)' || true)
 
 # === 3b. Run doc tests if docs changed (BLOCKING, ~2s) ===
 if [ -n "$DOCS_CHANGED" ]; then
