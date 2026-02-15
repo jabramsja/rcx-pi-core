@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AST-based checker for underscored imports from rcx_pi in tests/ and archive/prototypes/.
+"""AST-based checker for underscored imports from rcx_pi in tests/.
 
 Replaces the grep-based check which could be bypassed by multiline imports:
     from rcx_pi.selfhost.step_mu import (
@@ -21,7 +21,7 @@ FILE_ALLOWLIST = frozenset({
     "test_type_tag_security.py",
 })
 
-SCAN_DIRS = ["tests", "archive/prototypes"]
+SCAN_DIRS = ["tests"]
 
 
 def check_file(filepath: Path) -> list[str]:

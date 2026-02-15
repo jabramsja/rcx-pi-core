@@ -37,8 +37,6 @@ if [ "$JSON_OUTPUT" = true ]; then
     BOOTSTRAP=$(count_markers "^[[:space:]]*@bootstrap_only" "rcx_pi/")
     AST_OK_BOOTSTRAP=$(count_markers "# AST_OK:[[:space:]]*bootstrap" "rcx_pi/")
     AST_OK_INFRA=$(count_markers "# AST_OK:[[:space:]]*infra" "rcx_pi/")
-    PROTO_BUILTIN=$(count_markers "host_builtin" "archive/prototypes/")
-    PROTO_ITERATION=$(count_markers "host_iteration" "archive/prototypes/")
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
 
@@ -62,8 +60,6 @@ if [ "$JSON_OUTPUT" = true ]; then
     "ast_ok_bootstrap": $AST_OK_BOOTSTRAP,
     "ast_ok_infra": $AST_OK_INFRA,
     "ast_ok_infra_ceiling": $INFRA_CEILING,
-    "prototype_builtin": $PROTO_BUILTIN,
-    "prototype_iteration": $PROTO_ITERATION,
     "total_tracked": $TOTAL_TRACKED,
     "total_semantic": $TOTAL_SEMANTIC,
     "js_iteration": $JS_ITERATION,
@@ -120,22 +116,6 @@ else
         echo "WARNING: AST_OK:infra ($AST_OK_INFRA) exceeds ceiling ($INFRA_CEILING)"
         echo "         Review and reduce scaffolding markers before adding more."
     fi
-    echo ""
-
-    echo "Prototype Debt (archive/prototypes/) - Acceptable during development"
-    echo "----------------------------------------------"
-
-    PROTO_BUILTIN=$(count_markers "host_builtin" "archive/prototypes/")
-    PROTO_ITERATION=$(count_markers "host_iteration" "archive/prototypes/")
-    PROTO_RECURSION=$(count_markers "host_recursion" "archive/prototypes/")
-
-    printf "  host_builtin:     %3d\n" "$PROTO_BUILTIN"
-    printf "  host_iteration:   %3d\n" "$PROTO_ITERATION"
-    printf "  host_recursion:   %3d\n" "$PROTO_RECURSION"
-
-    PROTO_TOTAL=$((PROTO_BUILTIN + PROTO_ITERATION + PROTO_RECURSION))
-    echo "----------------------------------------------"
-    printf "  Total Prototype:  %3d (not blocking)\n" "$PROTO_TOTAL"
     echo ""
 
     echo "JavaScript Guardrails (L3 Parity Enforcement)"

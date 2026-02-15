@@ -72,8 +72,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests can have unused imports for fixtures
 "tests/**" = ["F401"]
-# Prototypes are experimental (archived)
-"archive/prototypes/**" = ["E", "F", "W"]
 
 [tool.ruff.format]
 quote-style = "double"
