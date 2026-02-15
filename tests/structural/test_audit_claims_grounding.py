@@ -112,7 +112,7 @@ class TestAuditScriptStructure:
         )
 
     def test_green_gate_check_order(self):
-        """green_gate.sh must run checks in correct order (syntax, contraband, AST, tests)."""
+        """green_gate.sh must run checks in correct order (contraband, AST, tests)."""
         script = REPO_ROOT / "scripts" / "green_gate.sh"
         content = script.read_text()
 
@@ -125,20 +125,16 @@ class TestAuditScriptStructure:
         run_python_func = content[run_python_start:run_python_end]
 
         # Find positions within run_python function
-        syntax_pos = run_python_func.find("py_compile")
+        # Note: py_compile step removed in Round 23E (rcx_start.py archived)
         contraband_pos = run_python_func.find("contraband")
         ast_pos = run_python_func.find("ast_police")
         pytest_pos = run_python_func.find("-m pytest")
 
-        assert syntax_pos != -1, "py_compile check missing from run_python"
         assert contraband_pos != -1, "contraband check missing from run_python"
         assert ast_pos != -1, "ast_police check missing from run_python"
         assert pytest_pos != -1, "pytest missing from run_python"
 
         # Verify order within run_python
-        assert syntax_pos < contraband_pos, (
-            "Syntax check must come before contraband"
-        )
         assert contraband_pos < ast_pos, (
             "Contraband must come before AST police"
         )

@@ -23,7 +23,7 @@ echo "mode: $MODE"
 echo
 
 run_python() {
-  echo "[PY 1/11] Repo clean check"
+  echo "[PY 1/10] Repo clean check"
   if [ -n "$(git status --porcelain)" ]; then
     echo "ERROR: Repo not clean"
     git status --porcelain
@@ -32,24 +32,19 @@ run_python() {
   echo "OK: Repo is clean"
   echo
 
-  echo "[PY 2/11] Python syntax check"
-  # rcx_start.py archived to archive/root_legacy/ (Round 23E)
-  echo "  (rcx_start.py archived — syntax check removed)"
-  echo
-
-  echo "[PY 3/11] Contraband check (grep-based lint)"
+  echo "[PY 2/10] Contraband check (grep-based lint)"
   ./tools/contraband.sh rcx_pi
   echo
 
-  echo "[PY 4/11] Test theater check (assert True)"
+  echo "[PY 3/10] Test theater check (assert True)"
   ./tools/check_test_theater.sh tests
   echo
 
-  echo "[PY 5/11] AST police (catches what grep misses)"
+  echo "[PY 4/10] AST police (catches what grep misses)"
   python3 tools/ast_police.py
   echo
 
-  echo "[PY 6/11] Anti-cheat scans (test integrity)"
+  echo "[PY 5/10] Anti-cheat scans (test integrity)"
   # No private attr access in tests/ or archive/prototypes/
   echo "-- no private attr access in tests/ or archive/prototypes/"
   if grep -RInE '\._[a-zA-Z0-9]+' tests/ archive/prototypes/ 2>/dev/null | \
@@ -93,17 +88,17 @@ run_python() {
   echo "OK"
   echo
 
-  echo "[PY 7/11] Semantic purity audit (host debt, smuggling detection)"
+  echo "[PY 6/10] Semantic purity audit (host debt, smuggling detection)"
   ./tools/audit_semantic_purity.sh
   echo
 
   # Nightly (ci_full) runs ALL tests including fuzzers, slow, and JS parity;
   # push/PR excludes fuzzers and slow (JS parity verified via node run in step 11)
   if [ "${HYPOTHESIS_PROFILE:-}" = "ci_full" ]; then
-    echo "[PY 8/11] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
+    echo "[PY 7/10] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
     python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --timeout=300
   else
-    echo "[PY 8/11] Python test suite (excludes stress, slow, fuzzer, and JS parity tests)"
+    echo "[PY 7/10] Python test suite (excludes stress, slow, fuzzer, and JS parity tests)"
     # Fuzzer tests run 50+ hypothesis examples each, consuming ~22 min on CI
     # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
     # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
@@ -112,7 +107,7 @@ run_python() {
   fi
   echo
 
-  echo "[PY 9/11] Fixture v2 validation"
+  echo "[PY 8/10] Fixture v2 validation"
   FIXTURE_COUNT=0
   EMPTY_COUNT=0
   for f in $(find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 2>/dev/null | sort); do
@@ -135,11 +130,11 @@ run_python() {
   echo "OK"
   echo
 
-  echo "[PY 10/11] CLI smoke (end-to-end entrypoints)"
+  echo "[PY 9/10] CLI smoke (end-to-end entrypoints)"
   python3 scripts/cli_smoke.py
   echo
 
-  echo "[PY 11/11] JavaScript L3 parity (same projections, same semantics)"
+  echo "[PY 10/10] JavaScript L3 parity (same projections, same semantics)"
   ./tools/check_js_debt.sh
   ./tools/contraband_js.sh
   ./tools/ast_police_js.sh
