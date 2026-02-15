@@ -118,7 +118,7 @@ Security tools have grounding tests in `tests/tools/` that verify the tools actu
 
 | Module | Status |
 |--------|--------|
-| `rcx_pi/bytecode_vm.py` | ARCHIVED - superseded by kernel + seeds |
+| `archive/mu_legacy/host/python/rcx_pi/bytecode_vm.py` | ARCHIVED - superseded by kernel + seeds |
 | `archive/archive/docs/bytecode/` | ARCHIVED |
 | `tests/archive/` | Legacy tests for deleted code |
 

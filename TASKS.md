@@ -158,7 +158,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Closure Evidence Events v0 (design complete, `--print-closure-evidence` CLI, `closure_evidence_v2()` helper)
 - Recurrence Spec v0 (stress test harness, 18 tests in `test_recurrence_spec_v0.py`, 4 fixtures)
 - Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
-  - Code: `rcx_pi/bytecode_vm.py` (legacy, not maintained)
+  - Code: `archive/mu_legacy/host/python/rcx_pi/bytecode_vm.py` (archived)
   - Docs: `archive/archive/docs/bytecode/` (archived)
 - Mu Type v0 (`rcx_pi/mu_type.py`, `mu/docs/core/MuType.v0.md`, 58 tests)
 - Structural Purity Guardrails v0 (`mu/docs/core/StructuralPurity.v0.md`, 32 additional tests):

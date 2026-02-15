@@ -258,7 +258,7 @@ The following are explicitly forbidden in meta-circular v1:
 **Superseded:**
 - Gates 4 and 5 (bytecode) are superseded by kernel + seeds
 - Bytecode docs moved to `archive/archive/docs/bytecode/`
-- `rcx_pi/bytecode_vm.py` is legacy code
+- `archive/mu_legacy/host/python/rcx_pi/bytecode_vm.py` is legacy code (archived)
 
 See `mu/docs/core/RCXKernel.v0.md`, `mu/docs/core/SelfHosting.v0.md`, and `mu/docs/core/StructuralPurity.v0.md`.
 
