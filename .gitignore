@@ -37,20 +37,8 @@ target/
 docs/rcx-pi-paper.pdf
 
 # =========================
-# RCX outputs
-# =========================
-# DO NOT ignore these if you want them committed:
-# - rcx_pi_rust/ra (marker file)
-# - rcx_pi_rust/snapshots (dir)
-# - rcx_pi_rust/mu_programs/rcx_core_mut*.mu
-#
-# If later you decide snapshots should NOT be committed, uncomment:
-# rcx_pi_rust/snapshots/
-
-# =========================
 # RCX generated swarm artifacts (do not commit)
 # =========================
-rcx_pi_rust/mu_programs/vars_demo__g*.muomega.json
 docs/latex/build/
 *.bbl
 *.blg
@@ -66,8 +54,6 @@ sandbox_runs/
 .quarantine_untracked_*
 
 # --- RCX generated artifacts (auto-added) ---
-rcx_pi_rust/mu_programs/__sandbox_run_*.mu
-rcx_pi_rust/mu_programs/__smoke_*.mu
 *.bak.*
 **/*.bak.*
 .bak_rcx_fixes_*/

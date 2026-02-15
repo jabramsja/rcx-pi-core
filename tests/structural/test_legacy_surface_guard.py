@@ -27,8 +27,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # archived to tests/archive/legacy/.
 GRANDFATHERED_RCX_OMEGA_IMPORTS: frozenset[str] = frozenset()
 
-# No test files should reference rcx_pi_rust after Round 21C repointing.
-GRANDFATHERED_RCX_PI_RUST_PATHS: frozenset[str] = frozenset()
+# Round 23A: Guardrail infrastructure files reference rcx_pi_rust/ as regex
+# patterns to prevent re-coupling — these are not hard path dependencies.
+GRANDFATHERED_RCX_PI_RUST_PATHS: frozenset[str] = frozenset({
+    "tests/docs/test_doc_freshness.py",   # ForbiddenPattern regex
+    "tests/docs/test_doc_governance.py",   # EXEMPT_PATTERNS regex
+})
 
 # Patterns that indicate coupling to legacy surfaces
 RCX_OMEGA_IMPORT = re.compile(
