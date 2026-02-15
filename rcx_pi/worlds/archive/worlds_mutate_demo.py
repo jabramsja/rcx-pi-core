@@ -2,8 +2,8 @@
 """
 Tiny evolution demo for RCX-π worlds.
 
-LEGACY DEPENDENCY: Writes .mu files to rcx_pi_rust/mu_programs/ and probes
-via the Rust engine. rcx_pi_rust is ARCHIVE-bound
+LEGACY DEPENDENCY: Writes .mu files to archive/rcx_pi_rust/mu_programs/ and probes
+via the Rust engine. rcx_pi_rust is ARCHIVED
 (LegacySurfaceDecisionRecord.v0.md). No active callers in the L3 path.
 
 - Start from a base world (e.g. rcx_core).
@@ -44,7 +44,7 @@ def _pattern_head(pattern_str: str) -> str:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORLDS_JSON_DIR = REPO_ROOT / "worlds_json"
-MU_PROGRAMS_DIR = REPO_ROOT / "rcx_pi_rust" / "mu_programs"
+MU_PROGRAMS_DIR = REPO_ROOT / "archive" / "rcx_pi_rust" / "mu_programs"
 
 
 def load_world_json(name: str) -> Dict:
