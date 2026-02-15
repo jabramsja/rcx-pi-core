@@ -91,21 +91,31 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
         if value_id in _seen:
             # Circular reference detected - not valid Mu
             return False
-        _seen = _seen | {value_id}  # Create new set to avoid mutation issues
+        # Backtracking: add on entry, remove on exit.
+        # O(1) per node (vs O(depth) for set copy).
+        # Detects true cycles (ancestor→descendant) while accepting
+        # DAGs (shared structure from match substitution).
+        _seen.add(value_id)
 
     if value_type is list:
         # Width limit check (prevents resource exhaustion attacks)
         if len(value) > MAX_MU_WIDTH:
+            _seen.discard(value_id)
             return False
-        return all(is_mu(item, _seen, _depth + 1) for item in value)
+        result = all(is_mu(item, _seen, _depth + 1) for item in value)
+        _seen.discard(value_id)
+        return result
     if value_type is dict:
         # Width limit check (prevents resource exhaustion attacks)
         if len(value) > MAX_MU_WIDTH:
+            _seen.discard(value_id)
             return False
-        return (
+        result = (
             all(type(k) is str for k in value.keys()) and
             all(is_mu(v, _seen, _depth + 1) for v in value.values())
         )
+        _seen.discard(value_id)
+        return result
     # Anything else (function, class, object, bytes, set, tuple, subclasses, etc.) is not a Mu
     return False
 
