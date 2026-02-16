@@ -77,7 +77,7 @@ Boot0 is the Hex0 equivalent - the minimal trusted base that must be implemented
 
 **Important distinction:**
 
-- The 5 primitives above have STABLE SEMANTICS - their behavior is fixed, but their implementation may migrate to smaller substrates over time (Python → C/Rust → minimal VM → verified VM). This is the Hex0 precedent: the trusted base shrinks, it doesn't stay "Python forever"
+- The 4 primitives above have STABLE SEMANTICS - their behavior is fixed, but their implementation may migrate to smaller substrates over time (Python → C/Rust → minimal VM → verified VM). This is the Hex0 precedent: the trusted base shrinks, it doesn't stay "Python forever"
 - `eval_step` internally uses `match()` and `substitute()` functions
 - These match/subst functions are BOOTSTRAP CODE - temporary Python implementations
 - Boot1 REPLACES bootstrap match/subst with projection-based implementations
@@ -168,7 +168,7 @@ def assert_not_lambda_calculus(value: Mu) -> None:
     """
 ```
 
-**Total Boot0 LOC:** ~150-200 lines (5 primitives + bootstrap match/subst + guardrails)
+**Total Boot0 LOC:** ~150-200 lines (4 primitives + bootstrap match/subst + guardrails)
 
 ### What Boot0 Does NOT Include
 
@@ -338,7 +338,7 @@ Boot2.eval(projections, value) =
 ### Migration Steps
 
 1. **Create Boot0 module** (`rcx_pi/selfhost/boot0.py`)
-   - Extract 5 primitives with clean interfaces
+   - Extract 4 primitives with clean interfaces
    - ~100 LOC total
    - Full test coverage
 
@@ -452,7 +452,7 @@ The bootstrap `match()` and `substitute()` functions are NOT exposed to external
 
 ## Success Criteria
 
-1. **Boot0 isolated:** 5 primitives + bootstrap code in single module, <250 LOC
+1. **Boot0 isolated:** 4 primitives + bootstrap code in single module, <250 LOC
 2. **Boot1 parity:** All match/subst parity tests pass
 3. **Boot2 parity:** All kernel/enginenews tests pass
 4. **JS parity maintained:** Both substrates run same boot sequence
@@ -494,7 +494,7 @@ The bootstrap `match()` and `substitute()` functions are NOT exposed to external
 
 This document is CONSISTENT with `BootstrapPrimitives.v0.md`:
 
-- BootstrapPrimitives lists 5 primitives - Boot0 has the same 5
+- BootstrapPrimitives lists 4 primitives (mu_equal eliminated) - Boot0 has the same 4
 - BootstrapPrimitives notes match/subst are "bootstrap code" - Boot0 makes this explicit
 - Boot0 formalizes the staged replacement that BootstrapPrimitives describes
 

@@ -19,7 +19,7 @@ Read first:
 See `TASKS.md` NOW section for active items.
 
 **Next**
-No active items — see `TASKS.md` NEXT.
+1. Boot1 Recursive Loop Contract — Shadow-merge recursive kernel loop alongside trampoline. See `TASKS.md` NEXT.
 
 **Vector (Design Only)**
 1. Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) — Hash-identity as substrate property. Levels 2-3 design only.

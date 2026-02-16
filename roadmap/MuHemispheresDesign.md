@@ -164,6 +164,92 @@ All must be met before any implementation begins:
 4. Engine exception policy Option B designed with sink-safety invariants.
 5. Explicit VECTOR → NEXT promotion in `TASKS.md` with rationale.
 
+### Criterion 3: Metabolization Truth-Table (>=8 transitions)
+
+The following truth-table defines the complete set of metabolization transitions covering all 5 buckets. Each row specifies a source bucket, an input condition, a route target, and expected outcome. Transitions T1-T6 correspond to the 6 designed projection IDs. Transitions T7-T10 are adversarial/edge-case transitions that validate sink-safety.
+
+| ID | Source Bucket | Input Condition | Projection / Rule | Route Target | Expected Outcome |
+|----|---------------|-----------------|-------------------|--------------|------------------|
+| T1 | sink | `sink_entry.state` matches unbounded predicate (non-null, non-void structural form) | `hemisphere.metabolize.sink_to_r_inf` | r_inf | Entry removed from sink, prepended to r_inf. Remaining sink entries unchanged. |
+| T2 | sink | `sink_entry.state` is null (void/zero-structure) | `hemisphere.metabolize.sink_to_r_null` | r_null | Entry removed from sink, prepended to r_null. Remaining sink entries unchanged. |
+| T3 | (stalled entry) | Stalled entry + lobes is non-null (lobes can accept) | `hemisphere.recover.stall_to_lobes` | lobes | Stalled entry routed to lobes for recovery attempt. |
+| T4 | (stalled entry) | Stalled entry + lobes is null (lobes cannot accept) | `hemisphere.recover.stall_to_sink` | sink | Stalled entry routed to sink as fallback. |
+| T5 | lobes | `lobes_entry.closure_flag` is true (closure evidence present) | `hemisphere.promote.lobes_to_r_a` | r_a | Entry removed from lobes, prepended to r_a. Remaining lobes entries unchanged. |
+| T6 | r_inf, r_null, or lobes | Entry is unresolvable after metabolization/recovery attempt | `hemisphere.recycle.residual_to_sink` | sink | Unresolvable entry recycled back to sink for future re-expression. |
+| T7 | sink | **ADVERSARIAL:** Forged closure in exhaustion result — `sink_entry` has `closure_flag: true` but was routed to sink via `hemisphere.classify.exhaustion` (exhaustion_detected dominates closure) | No metabolization projection matches | sink (remains) | Entry stays in sink. Forged closure_flag does NOT cause promotion to r_a. Sink-safety preserved. |
+| T8 | sink | Sink entry with `state: null` AND `closure_flag: true` — exhaustion victim with null state and forged closure | `hemisphere.metabolize.sink_to_r_null` (null state matches void predicate) | r_null | Entry moves to r_null based on state predicate, NOT closure_flag. No path from r_null to r_a exists. Sink-safety preserved. |
+| T9 | sink | Sink entry with non-null, non-void state that does NOT match unbounded predicate | `hemisphere.recycle.residual_to_sink` | sink (recycled) | Entry recycled back to sink unchanged. Material preserved for future re-expression cycles. |
+| T10 | lobes | `lobes_entry.closure_flag` is false (no closure evidence) | No promotion projection matches | lobes (remains) | Entry stays in lobes. Promotion requires explicit closure evidence. No implicit promotion. |
+
+**Coverage verification:**
+- **r_null**: Target of T2, T8. Source: none (terminal).
+- **r_inf**: Target of T1. Source: none (terminal).
+- **r_a**: Target of T5. Source: none (promotion is one-way).
+- **lobes**: Target of T3. Source of T5, T10 (promotion or retention).
+- **sink**: Target of T4, T6, T7, T9. Source of T1, T2, T8 (metabolization out) and T9 (recycle in).
+- **Adversarial**: T7 (forged closure in exhaustion victim), T8 (null+closure compound forgery), T9 (unmetabolizable residual).
+
+**Structural predicate note (Open Question #4 dependency):**
+The unbounded-vs-void distinction in T1/T2 depends on Open Question #4. The truth-table uses `state: null` as the void predicate and "non-null structural form" as the unbounded predicate. The final predicate design must be structural (not host-derived) and must be locked before VECTOR → NEXT promotion.
+
+### Criterion 4: Engine Exception Policy Option B Design
+
+> **Status:** Design only. No implementation. Enable ONLY when metabolization projections exist and sink-safety invariants are tested.
+
+#### Synthesized engine_result Shape
+
+When the engine pipeline encounters an exception (non-terminal stall or iteration exhaustion), Option B catches the exception and synthesizes a terminal engine_result instead of raising RuntimeError/RcxError. The synthesized result has the standard 8-field terminal shape:
+
+```json
+{
+  "value": "<last engine state or null if unavailable>",
+  "closure_detected": false,
+  "tau_step": 0,
+  "exhaustion_detected": true,
+  "operator_frozen": null,
+  "frozen_set": null,
+  "action": "exception_sink",
+  "stall": "<true if stall-originated, false if iteration-exhaustion>"
+}
+```
+
+**Field rationale:**
+- `closure_detected: false` — MANDATORY. Synthesized results NEVER claim closure.
+- `tau_step: 0` — No meaningful recurrence step occurred.
+- `exhaustion_detected: true` — MANDATORY. Ensures `hemisphere.classify.exhaustion` fires first.
+- `action: "exception_sink"` — Unique action value distinguishing synthesized exceptions from `"done"` or `"freeze"`. Must NOT be `"freeze"` (triggers trampoline re-entry).
+- `stall` — Preserves causal distinction: `true` for stall exceptions, `false` for exhaustion exceptions.
+
+**Two synthesis sites (per substrate):**
+
+| Exception Type | Python Location | JS Location | `stall` field |
+|----------------|-----------------|-------------|---------------|
+| Non-terminal stall | `step_mu.py` (~line 1502) | `eval_step.js` (~line 1936) | `true` |
+| Iteration exhaustion | `step_mu.py` (~line 1563) | `eval_step.js` (~line 2002) | `false` |
+
+#### Sink-Safety Invariants (S1-S5)
+
+| ID | Invariant | Rationale |
+|----|-----------|-----------|
+| S1 | Synthesized engine_result MUST have `exhaustion_detected: true` | Ensures `hemisphere.classify.exhaustion` fires first (exhaustion > all other classify projections). |
+| S2 | Synthesized engine_result MUST have `closure_detected: false` | Prevents false closure claims. |
+| S3 | Synthesized engine_result MUST NOT have `action: "freeze"` | `action: "freeze"` triggers trampoline re-entry. Exceptions must terminate. |
+| S4 | Both substrates MUST produce identical synthesized results for same exception | L3 parity requirement. |
+| S5 | `_is_engine_terminal()` / `isEngineTerminal()` MUST return true for synthesized results | Synthesized result must pass standard terminal shape check. |
+
+#### Adversarial Test Specs (Design Only)
+
+| Test ID | Description | Expected Behavior |
+|---------|-------------|-------------------|
+| ADV-B1 | Forged closure in synthesized result | Routes to **sink** (not r_a). Exhaustion dominates closure. |
+| ADV-B2 | Forged action=freeze in synthesized result | `engine.exhaustion_done_freeze` MUST NOT match (synthesized results bypass engine projections). |
+| ADV-B3 | Null value in synthesized result | Routes to **sink** (not r_null). `exhaustion_detected: true` fires before `hemisphere.classify.null`. |
+| ADV-B4 | Cross-substrate divergence | Field-by-field identical (S4). |
+| ADV-B5 | Synthesized result shape validation | Terminal check passes (S5). Hemisphere routing completes. Entry in sink. |
+| ADV-B6 | Double-exception guard | Metabolization of synthesized sink entry stalls → residual recycles to sink (T6/T9). No infinite loop. |
+
+**Enablement guard:** Option B disabled by default. Requires: (1) metabolization projections exist in seed file, (2) S1-S5 tests pass, (3) ADV-B1 through ADV-B6 pass on both substrates, (4) T1-T10 test coverage.
+
 ## Open Questions
 1. Minimum entry schema for each hemisphere.
 2. ~~Whether re-expression from `sink` is automatic or requires explicit triggers.~~ Answered: both modes (automatic + manual/debug step). See Trigger Semantics above.

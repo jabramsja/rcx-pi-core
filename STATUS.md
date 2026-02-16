@@ -619,7 +619,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Last updated:** 2026-02-15 (24E-R2d: rcx_pi ownership flip — canonical location now mu/host/python/rcx_pi/, root rcx_pi/ is backward-compat symlink. 6 dead files archived.)
-**Next milestone:** See TASKS.md VECTOR for next promotion candidates
+**Next milestone:** Boot1 Recursive Loop Contract (NEXT — shadow-merge implementation). See TASKS.md NEXT.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
 - rcx_pi_rust → ARCHIVED, rcx_omega → ARCHIVED, worlds_json → MAINTAIN (at `mu/worlds_json/`)

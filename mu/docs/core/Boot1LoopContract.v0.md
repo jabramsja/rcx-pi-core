@@ -18,7 +18,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 # Boot1 Recursive Loop Contract v0
 
 **Version:** 0.1
-**Status:** DESIGN SPEC (VECTOR — no implementation authorized)
+**Status:** DESIGN SPEC (NEXT — shadow-merge implementation authorized, founder D1=YES 2026-02-16)
 **Date:** 2026-02-14
 **VECTOR item:** Boot1 Recursive Loop Contract (TASKS.md)
 **Parallel to:** GAP-10-LOOP trampoline (CLOSED, `rcx_engine.v1.json` v1.3.0)
