@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-02-16
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -106,20 +106,18 @@ It is part of the claim.
 
 6. Implementation Status
 
-**See STATUS.md for authoritative current state.**
+**See `STATUS.md` for current phase, L-level, and debt counts.**
 
-**Summary (may drift - check STATUS.md):**
-- **L1 (Algorithmic):** COMPLETE - match, subst, step expressed as Mu projections
-- **L2 (Operational):** COMPLETE - kernel.v1 state machine (7 projections), recurrence.v1 closure detection (9 projections)
-- **L3 (Substrate Portability):** COMPLETE - Python and JavaScript run identical seeds with verified parity
+**L-level summary (see STATUS.md for details):**
+- **L1 (Algorithmic):** COMPLETE — match, subst, step expressed as Mu projections
+- **L2 (Operational):** COMPLETE — kernel.v1 state machine, recurrence/exhaustion detection
+- **L3 (Substrate Portability):** COMPLETE — Python and JavaScript run identical seeds with verified parity
+- **L4 (True Self-Hosting):** NOT STARTED — bootstrap primitives remain host-dependent; design in SINK
 
-**Key Achievements:**
-- 4 bootstrap primitives identified and documented (mu_equal eliminated, see BootstrapPrimitives.v0.md)
-- Comprehensive test coverage with hypothesis fuzzer (see STATUS.md for counts)
-- Debt floor reached (12 irreducible markers - host scaffolding, not smuggled semantics)
-- Full seed suite: kernel.v1 (~7), match.v2 (~8), subst.v2 (~12), recurrence.v1 (~9), exhaustion.v1 (~11)
-
-**Current Phase:** Phase 8b complete. L4 (True Self-Hosting) is in SINK status - design captured, not immediate priority.
+**Execution architecture:**
+- **Structural kernel bridge** is the active default for algorithm execution (`step_kernel_mu(..., kernel_mode="bridge")`)
+- **PureEvaluator** (`rcx_pi.engine.evaluator_pure`) is a legacy host-closure evaluator — used by CLI program-run surface, NOT the selfhost projection path
+- **world_trace_cli** depends on archived `worlds_bridge` (Rust bridge); graceful degradation if unavailable
 
 ⸻
 
