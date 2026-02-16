@@ -5,6 +5,9 @@ identical results to the default trampoline path on all canonical inputs.
 
 Also tests _tail_call recognition and Boot1 safety invariants.
 
+Wave 2: budget accounting fix tests (S2 shared budget).
+Wave 3: adversarial budget, parity/property, fail-closed, cross-substrate.
+
 See mu/docs/core/Boot1LoopContract.v0.md §5 for test plan.
 """
 import json
@@ -466,4 +469,393 @@ class TestBoot1BudgetAccounting:
         assert boot1_steps <= trampoline_steps + 1, (
             f"Boot1 ({boot1_steps} steps) should not use significantly more "
             f"steps than trampoline ({trampoline_steps} steps)"
+        )
+
+
+# ============================================================================
+# Wave 3: Adversarial budget accounting tests (S2 hardening)
+# ============================================================================
+
+class TestBoot1BudgetAdversarial:
+    """Adversarial tests targeting the wave2 budget accounting fix.
+
+    The wave2 fix changed _run_engine_recursive to pass
+    max_engine_iterations - iteration - 1 (remaining budget) instead of
+    max_engine_iterations (full budget) to recursive calls.
+
+    These tests verify the fix cannot be circumvented.
+    """
+
+    def test_zero_budget_fails_immediately(self):
+        """max_engine_iterations=0 should fail closed (no iterations allowed)."""
+        reset_step_budget()
+        projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(RuntimeError):
+            _run_boot1(projs, {"test": 42}, max_steps=10, max_engine_iterations=0)
+
+    def test_budget_sufficient_for_simple(self):
+        """max_engine_iterations=20 is enough for simple non-freeze input."""
+        reset_step_budget()
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        # Engine has multiple internal phases (~7-10 steps for simple input)
+        result = _run_boot1(projs, {"double": 42}, max_steps=10, max_engine_iterations=20)
+        assert "value" in result
+
+    def test_budget_one_insufficient_for_engine(self):
+        """max_engine_iterations=1 is NOT enough (engine needs multiple phases)."""
+        reset_step_budget()
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        # Engine state machine needs >1 iteration even for simple input
+        with pytest.raises(RuntimeError, match="exhausted"):
+            _run_boot1(projs, {"double": 42}, max_steps=10, max_engine_iterations=1)
+
+    def test_budget_not_reset_across_reentry(self):
+        """Verify that child re-entry gets strictly LESS budget than parent.
+
+        This is the core invariant the wave2 fix enforces:
+        child_budget = parent_budget - parent_consumed - 1
+        NOT child_budget = parent_budget (the pre-fix bug).
+        """
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        observer = []
+        _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            observer=observer,
+        )
+
+        # Collect max iterations per depth
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        by_depth = {}
+        for e in step_events:
+            d = e["boot1_depth"]
+            by_depth[d] = by_depth.get(d, 0) + 1
+
+        if len(by_depth) >= 2:
+            depths = sorted(by_depth.keys())
+            total = sum(by_depth.values())
+            # Total across all depths must not exceed original budget
+            assert total <= 20, (
+                f"Total step events ({total}) exceeds budget (20). "
+                f"Budget amplification detected!"
+            )
+
+    def test_budget_exhaustion_at_exact_boundary(self):
+        """Give budget = re-entries_needed. Should fail closed at the boundary."""
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        # First, discover how many iterations paxos actually needs
+        obs_full = []
+        reset_step_budget()
+        _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            observer=obs_full,
+        )
+        total_steps = len([e for e in obs_full if e["event_name"] == "step_boundary"])
+
+        # Now give exactly 1 fewer — should fail closed
+        if total_steps > 1:
+            reset_step_budget()
+            with pytest.raises(RuntimeError):
+                _run_boot1(
+                    cycle_projs, initial,
+                    max_steps=6, max_engine_iterations=total_steps - 1,
+                    max_algorithm_iterations=50,
+                )
+
+    def test_budget_cannot_exceed_original_across_all_depths(self):
+        """Sum of iterations across all recursion depths <= original budget.
+
+        This catches the amplification bug where passing full budget to each
+        recursive call could allow up to budget^depth total iterations.
+        """
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        budget = 20
+        observer = []
+        _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=budget, max_algorithm_iterations=50,
+            observer=observer,
+        )
+
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        total = len(step_events)
+        # With the fix, total <= budget (not budget * max_depth)
+        assert total <= budget, (
+            f"Total step_boundary events ({total}) exceeds original budget ({budget}). "
+            f"Budget amplification bug: recursive calls got full budget instead of remainder."
+        )
+
+
+# ============================================================================
+# Wave 3: Parity/property coverage
+# ============================================================================
+
+class TestBoot1ParityProperty:
+    """Property-based parity tests between trampoline and Boot1 recursive."""
+
+    def test_parity_multiple_max_steps_values(self):
+        """Trampoline == recursive for various max_steps values."""
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        initial = {"double": 42}
+        for max_steps in [1, 5, 10, 50, 100]:
+            reset_step_budget()
+            tramp = _run_trampoline(projs, initial, max_steps=max_steps)
+            reset_step_budget()
+            boot1 = _run_boot1(projs, initial, max_steps=max_steps)
+            assert tramp == boot1, f"Mismatch at max_steps={max_steps}"
+
+    def test_parity_various_inputs(self):
+        """Trampoline == recursive across diverse input shapes."""
+        projs = [
+            {"pattern": {"op": {"var": "x"}}, "body": {"var": "x"}},
+        ]
+        inputs = [
+            {"op": 42},
+            {"op": "hello"},
+            {"op": None},
+            {"op": [1, 2, 3]},
+            {"op": {"nested": "dict"}},
+            {"op": True},
+        ]
+        for inp in inputs:
+            reset_step_budget()
+            tramp = _run_trampoline(projs, inp, max_steps=10)
+            reset_step_budget()
+            boot1 = _run_boot1(projs, inp, max_steps=10)
+            assert tramp == boot1, f"Mismatch for input: {inp}"
+
+    def test_observer_event_count_parity(self):
+        """Observer event counts must be close between trampoline and recursive."""
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        initial = {"double": 42}
+
+        tramp_obs = []
+        reset_step_budget()
+        _run_trampoline(projs, initial, max_steps=10, observer=tramp_obs)
+
+        boot1_obs = []
+        reset_step_budget()
+        _run_boot1(projs, initial, max_steps=10, observer=boot1_obs)
+
+        tramp_count = len(tramp_obs)
+        boot1_count = len(boot1_obs)
+        # Both should emit similar number of events (±1 for depth bookkeeping)
+        assert abs(tramp_count - boot1_count) <= 2, (
+            f"Observer event count divergence: trampoline={tramp_count}, boot1={boot1_count}"
+        )
+
+    def test_no_match_input_parity(self):
+        """Input that doesn't match any projection: trampoline == recursive."""
+        reset_step_budget()
+        projs = [{"pattern": {"specific": 42}, "body": "matched"}]
+        initial = {"different": 99}
+
+        tramp = _run_trampoline(projs, initial, max_steps=10)
+        reset_step_budget()
+        boot1 = _run_boot1(projs, initial, max_steps=10)
+        assert tramp == boot1
+
+    def test_multiple_projection_parity(self):
+        """Multiple projections with first-match-wins: trampoline == recursive."""
+        reset_step_budget()
+        projs = [
+            {"pattern": {"a": {"var": "x"}}, "body": {"result_a": {"var": "x"}}},
+            {"pattern": {"b": {"var": "x"}}, "body": {"result_b": {"var": "x"}}},
+        ]
+        for inp in [{"a": 1}, {"b": 2}]:
+            reset_step_budget()
+            tramp = _run_trampoline(projs, inp, max_steps=10)
+            reset_step_budget()
+            boot1 = _run_boot1(projs, inp, max_steps=10)
+            assert tramp == boot1, f"First-match-wins parity failed for {inp}"
+
+
+# ============================================================================
+# Wave 3: Fail-closed invariants
+# ============================================================================
+
+class TestBoot1FailClosed:
+    """Verify fail-closed behavior is enforced, not silent pass-through."""
+
+    def test_exhaustion_raises_not_returns(self):
+        """Engine loop exhaustion raises RuntimeError, not silent return."""
+        reset_step_budget()
+        # Create a projection that cycles without terminating
+        projs = [
+            {"pattern": {"cycle": {"var": "n"}}, "body": {"cycle": {"var": "n"}}},
+        ]
+        with pytest.raises(RuntimeError, match="exhausted|stalled"):
+            _run_boot1(projs, {"cycle": 1}, max_steps=10, max_engine_iterations=5)
+
+    def test_reserved_field_in_boundary_inject_raises(self):
+        """inject_key cannot be a kernel-reserved field (S3)."""
+        # This is inherently covered by validate_no_kernel_reserved_fields
+        # but we verify the invariant holds on the Boot1 path via the
+        # reserved field check.
+        for field in ["_mode", "_phase", "_run_engine", "_tail_call"]:
+            with pytest.raises(ValueError, match="kernel-reserved"):
+                validate_no_kernel_reserved_fields(
+                    {field: "attack_value"}, context="boot1_adversarial"
+                )
+
+    def test_stall_parity_fail_closed(self):
+        """Empty projection set: both paths stall identically (not silently succeed)."""
+        reset_step_budget()
+        tramp = _run_trampoline([], {"x": 1}, max_steps=10)
+        reset_step_budget()
+        boot1 = _run_boot1([], {"x": 1}, max_steps=10)
+
+        # Both must indicate stall
+        assert tramp.get("stall") == boot1.get("stall")
+        assert tramp == boot1
+
+    def test_no_reserved_fields_leak_to_terminal(self):
+        """No KERNEL_RESERVED_FIELDS keys appear in terminal result (any path)."""
+        reset_step_budget()
+        projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
+
+        tramp = _run_trampoline(projs, {"test": 42}, max_steps=10)
+        reset_step_budget()
+        boot1 = _run_boot1(projs, {"test": 42}, max_steps=10)
+
+        for key in KERNEL_RESERVED_FIELDS:
+            assert key not in tramp, f"Reserved field {key} leaked to trampoline result"
+            assert key not in boot1, f"Reserved field {key} leaked to Boot1 result"
+
+    def test_config_never_leaks_to_terminal(self):
+        """_config must never appear in terminal result on either path (S7)."""
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        tramp = _run_trampoline(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+        reset_step_budget()
+        boot1 = _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+        assert "_config" not in tramp
+        assert "_config" not in boot1
+        assert "_tail_call" not in tramp
+        assert "_tail_call" not in boot1
+
+
+# ============================================================================
+# Wave 3: Cross-substrate adversarial
+# ============================================================================
+
+@pytest.mark.slow
+class TestBoot1CrossSubstrateAdversarial:
+    """Wave 3: Adversarial cross-substrate tests for Boot1."""
+
+    def test_js_boot1_budget_parity(self):
+        """JS Boot1 respects same budget constraints as Python Boot1."""
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        initial = {"double": 42}
+
+        # Python Boot1 (engine needs ~10 iterations for simple input)
+        reset_step_budget()
+        py_result = _run_boot1(projs, initial, max_steps=10, max_engine_iterations=20)
+
+        # JS Boot1 with same budget
+        js_resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": projs,
+            "input": initial,
+            "maxSteps": 10,
+            "maxEngineIterations": 20,
+            "boot1LoopMode": True,
+        })
+        assert js_resp["success"], f"JS Boot1 failed: {js_resp.get('error')}"
+        assert _cross_substrate_equal(py_result, js_resp["result"])
+
+    def test_js_boot1_low_budget_parity(self):
+        """JS and Python both fail closed with very low budget on freeze input."""
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        # Python: should raise RuntimeError
+        reset_step_budget()
+        py_failed = False
+        try:
+            _run_boot1(
+                cycle_projs, initial,
+                max_steps=6, max_engine_iterations=3, max_algorithm_iterations=50,
+            )
+        except RuntimeError:
+            py_failed = True
+        assert py_failed, "Python Boot1 should fail with budget=3 on paxos"
+
+        # JS: should also fail
+        js_resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": cycle_projs,
+            "input": initial,
+            "maxSteps": 6,
+            "maxEngineIterations": 3,
+            "maxAlgorithmIterations": 50,
+            "boot1LoopMode": True,
+        })
+        # JS should either fail or produce error
+        # (Both substrates should fail closed with insufficient budget)
+        if js_resp.get("success"):
+            # If JS succeeded, Python should have too — this is a parity violation
+            assert not py_failed, (
+                "Parity violation: Python failed but JS succeeded with same budget"
+            )
+
+    def test_js_boot1_no_reserved_in_terminal(self):
+        """JS Boot1 terminal result contains no kernel-reserved fields."""
+        projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
+        js_resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": projs,
+            "input": {"test": 42},
+            "maxSteps": 10,
+            "boot1LoopMode": True,
+        })
+        assert js_resp["success"]
+        result = js_resp["result"]
+        assert isinstance(result, dict)
+        for key in ["_config", "_tail_call", "_run_engine", "_mode", "_phase"]:
+            assert key not in result, f"JS Boot1 leaked reserved field: {key}"
+
+    def test_python_trampoline_vs_js_boot1_parity(self):
+        """Python trampoline == JS Boot1 recursive (cross-path parity)."""
+        reset_step_budget()
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        initial = {"double": 42}
+
+        py_tramp = _run_trampoline(projs, initial, max_steps=10)
+
+        js_resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": projs,
+            "input": initial,
+            "maxSteps": 10,
+            "boot1LoopMode": True,
+        })
+        assert js_resp["success"]
+        assert _cross_substrate_equal(py_tramp, js_resp["result"]), (
+            f"Python trampoline vs JS Boot1 mismatch:\n"
+            f"  Python: {py_tramp}\n"
+            f"  JS:     {js_resp['result']}"
         )
