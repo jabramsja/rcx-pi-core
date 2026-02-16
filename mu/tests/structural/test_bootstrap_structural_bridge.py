@@ -16,8 +16,8 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed
 
 
 # Load seeds
-BRIDGE_SEED_PATH = Path(__file__).parent.parent / "mu" / "bridge" / "bootstrap_structural.v1.json"
-MATCH_V2_PATH = Path(__file__).parent.parent / "mu" / "substrate" / "match.v2.json"
+BRIDGE_SEED_PATH = Path(__file__).parents[2] / "mu" / "bridge" / "bootstrap_structural.v1.json"
+MATCH_V2_PATH = Path(__file__).parents[2] / "mu" / "substrate" / "match.v2.json"
 
 
 def load_bridge_projections():

@@ -25,7 +25,7 @@ import subprocess
 null = None
 
 # Root directory of the project
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parents[2]
 
 
 # =============================================================================
@@ -43,7 +43,7 @@ def exhaust_projections() -> list:
 @pytest.fixture
 def exhaustion_vectors() -> list:
     """Load test vectors from JSON fixture."""
-    vectors_path = Path(__file__).parent / "fixtures" / "exhaustion_vectors.json"
+    vectors_path = Path(__file__).parents[1] / "fixtures" / "exhaustion_vectors.json"
     with open(vectors_path) as f:
         data = json.load(f)
     return data["vectors"]

@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/clean_print.sh --summary <path> --work <path> -- <command...>
+  scripts/utils/clean_print.sh --summary <path> --work <path> -- <command...>
 
 Behavior:
   - Runs <command...> with stdout+stderr redirected to --work

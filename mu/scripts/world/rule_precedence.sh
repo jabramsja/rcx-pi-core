@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/rule_precedence.sh <world.mu> [--json] [--top N]
+  scripts/world/rule_precedence.sh <world.mu> [--json] [--top N]
 
 Outputs:
   - Default: human-readable precedence order based on textual rule appearance.

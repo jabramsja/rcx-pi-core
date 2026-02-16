@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/mutation_leaderboard_clean.sh
+  scripts/mutation/mutation_leaderboard_clean.sh
     [--world PATH]
     [--seeds N]
     [--mutations K]
@@ -47,8 +47,8 @@ done
 
 cd "$(git rev-parse --show-toplevel)"
 
-test -f scripts/mutation_sandbox.sh || { echo "Not found: scripts/mutation_sandbox.sh" >&2; exit 2; }
-test -f scripts/clean_print.sh || { echo "Not found: scripts/clean_print.sh" >&2; exit 2; }
+test -f scripts/mutation/mutation_sandbox.sh || { echo "Not found: scripts/mutation/mutation_sandbox.sh" >&2; exit 2; }
+test -f scripts/utils/clean_print.sh || { echo "Not found: scripts/utils/clean_print.sh" >&2; exit 2; }
 mkdir -p "$OUT_DIR"
 
 # Pick deterministic default world if not specified (exclude .git + sandbox_runs)
@@ -126,7 +126,7 @@ fi
 WORK_LOG="${TMPDIR:-/tmp}/rcx_mutation_leaderboard_work.log"
 SUMMARY="${TMPDIR:-/tmp}/rcx_mutation_leaderboard_summary.txt"
 
-bash scripts/clean_print.sh --work "$WORK_LOG" --summary "$SUMMARY" -- \
+bash scripts/utils/clean_print.sh --work "$WORK_LOG" --summary "$SUMMARY" -- \
   python3 - "$WORLD" "$N" "$MUTS" "$APPLY" "$RUNNER" "$EFFECTIVE_RUNNER" "$OUT_DIR" "$SUMMARY" "$is_motif" "$is_world_like" "$ORBIT_SEED" <<'PY'
 from __future__ import annotations
 import json, subprocess, sys
@@ -146,7 +146,7 @@ orbit_seed = sys.argv[11]
 
 def run_seed(seed: int) -> dict:
     cmd = [
-        "bash", "scripts/mutation_sandbox.sh", world,
+        "bash", "scripts/mutation/mutation_sandbox.sh", world,
         "--seed", str(seed),
         "--mutations", str(muts),
         "--apply", str(apply),

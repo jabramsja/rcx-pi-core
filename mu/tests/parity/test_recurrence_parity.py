@@ -23,7 +23,7 @@ pytestmark = [pytest.mark.slow]
 
 def get_fixtures_dir() -> Path:
     """Get path to test fixtures directory."""
-    return Path(__file__).parent / "fixtures"
+    return Path(__file__).parents[1] / "fixtures"
 
 
 def load_recurrence_projections():

@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/world_doc.sh <world.mu> [--json] [--top N]
+  scripts/world/world_doc.sh <world.mu> [--json] [--top N]
 
 Emits:
   - Default: deterministic Markdown "world card" (counts + histogram + top-N rule-like lines in textual order).

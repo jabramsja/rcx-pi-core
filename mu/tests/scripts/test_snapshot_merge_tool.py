@@ -27,7 +27,7 @@ def test_snapshot_merge_rejects_mismatched_program_rules(tmp_path: Path):
     out = tmp_path / "out.json"
     r = subprocess.run(
         [
-            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(ROOT / "scripts" / "snapshot" / "snapshot_merge.py"),
             str(ap),
             str(bp),
             "--out",
@@ -48,7 +48,7 @@ def test_snapshot_merge_deterministic_union_same_inputs(tmp_path: Path):
 
     subprocess.check_call(
         [
-            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(ROOT / "scripts" / "snapshot" / "snapshot_merge.py"),
             str(a),
             str(b),
             "--out",
@@ -57,7 +57,7 @@ def test_snapshot_merge_deterministic_union_same_inputs(tmp_path: Path):
     )
     subprocess.check_call(
         [
-            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(ROOT / "scripts" / "snapshot" / "snapshot_merge.py"),
             str(a),
             str(b),
             "--out",
@@ -81,7 +81,7 @@ def test_snapshot_merge_union_semantics_baseline_plus_variant(tmp_path: Path):
     out = tmp_path / "merged.json"
 
     subprocess.check_call(
-        [str(ROOT / "scripts" / "snapshot_merge.py"), str(a), str(b), "--out", str(out)]
+        [str(ROOT / "scripts" / "snapshot" / "snapshot_merge.py"), str(a), str(b), "--out", str(out)]
     )
     m = _load(out)
 

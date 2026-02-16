@@ -105,7 +105,7 @@ run_python() {
     # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
     # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
     # JS parity tests spawn node subprocesses — nightly only; fast path has step 11
-    python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py
+    python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" --ignore=tests/stress/ --ignore=tests/parity/test_js_parity_automated.py
   fi
   echo
 
@@ -133,7 +133,7 @@ run_python() {
   echo
 
   echo "[PY 9/10] CLI smoke (end-to-end entrypoints)"
-  python3 scripts/cli_smoke.py
+  python3 scripts/utils/cli_smoke.py
   echo
 
   echo "[PY 10/10] JavaScript L3 parity (same projections, same semantics)"

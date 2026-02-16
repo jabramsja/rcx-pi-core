@@ -14,7 +14,7 @@ def test_snapshot_ok_default_only_result(tmp_path: Path):
     b = tmp_path / "b.json"
     a.write_text(json.dumps({"result": {"x": 1}, "kind": "A"}), encoding="utf-8")
     b.write_text(json.dumps({"result": {"x": 1}, "kind": "B"}), encoding="utf-8")
-    p = _run(["bash", "scripts/snapshot_integrity_check.sh", str(a), str(b)])
+    p = _run(["bash", "scripts/snapshot/snapshot_integrity_check.sh", str(a), str(b)])
     assert p.returncode == 0
     assert "OK: JSON equal" in (p.stdout + p.stderr)
 
@@ -24,7 +24,7 @@ def test_snapshot_mismatch_fails(tmp_path: Path):
     b = tmp_path / "b.json"
     a.write_text(json.dumps({"result": {"x": 1}}), encoding="utf-8")
     b.write_text(json.dumps({"result": {"x": 2}}), encoding="utf-8")
-    p = _run(["bash", "scripts/snapshot_integrity_check.sh", str(a), str(b), "--json"])
+    p = _run(["bash", "scripts/snapshot/snapshot_integrity_check.sh", str(a), str(b), "--json"])
     assert p.returncode == 1
     obj = json.loads(p.stdout)
     assert obj["ok"] is False
@@ -38,7 +38,7 @@ def test_snapshot_custom_only(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/snapshot_integrity_check.sh",
+            "scripts/snapshot/snapshot_integrity_check.sh",
             str(a),
             str(b),
             "--only",
@@ -53,7 +53,7 @@ def test_snapshot_json_shape(tmp_path: Path):
     b = tmp_path / "b.json"
     a.write_text(json.dumps({"result": 1, "schema_version": 1}), encoding="utf-8")
     b.write_text(json.dumps({"result": 1, "schema_version": 2}), encoding="utf-8")
-    p = _run(["bash", "scripts/snapshot_integrity_check.sh", str(a), str(b), "--json"])
+    p = _run(["bash", "scripts/snapshot/snapshot_integrity_check.sh", str(a), str(b), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["only"] == "result"

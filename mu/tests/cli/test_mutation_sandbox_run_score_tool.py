@@ -17,7 +17,7 @@ def test_mutation_sandbox_run_none_creates_outputs(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--seed",
             "1",
@@ -51,7 +51,7 @@ def test_mutation_sandbox_score_without_json_is_graceful(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--seed",
             "2",
@@ -82,7 +82,7 @@ def test_mutation_sandbox_max_steps_violation_can_trigger_rc1(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--seed",
             "3",

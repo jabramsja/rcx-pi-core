@@ -100,8 +100,9 @@ class TestSubtreeTaxonomyGuard:
 
 # Ratchet ceiling: root-level test_*.py count can only decrease.
 # Wave1 baseline: 74. Wave2 moved 50 → ceiling 24. Wave3 moved 6 → ceiling 18.
+# Wave4 moved 17 → ceiling 1 (only test_agent_tooling_smoke.py blocked).
 # New test files MUST go into subdirectories.
-ROOT_LEVEL_TEST_FILE_CEILING = 18
+ROOT_LEVEL_TEST_FILE_CEILING = 1
 
 
 def _count_root_level_tests(repo_root: Path) -> list[str]:
@@ -132,4 +133,39 @@ class TestRootLevelTestOrganization:
             "Available: fuzz/, structural/, scripts/, docs/, engine/, "
             "parity/, integration/, cli/, stress/\n"
             f"Files at root:\n" + "\n".join(sorted(root_tests))
+        )
+
+
+# Ratchet ceiling: root-level script files can only decrease.
+# Wave4 organized 20 scripts → orbit/, mutation/, world/, snapshot/, utils/.
+# Only __init__.py and green_gate.sh should remain at root.
+ROOT_LEVEL_SCRIPT_FILE_CEILING = 2
+
+
+def _count_root_level_scripts(repo_root: Path) -> list[str]:
+    """Return root-level .sh/.py files under mu/scripts/ (excl subdirs)."""
+    result = subprocess.run(
+        ["git", "ls-files", "mu/scripts/"],
+        capture_output=True, text=True, cwd=repo_root,
+    )
+    return [
+        path for path in result.stdout.strip().splitlines()
+        if path
+        and len(path.split("/")) == 3
+        and not path.endswith("__pycache__")
+    ]
+
+
+class TestRootLevelScriptOrganization:
+    """Prevent root-level script file sprawl via ratchet ceiling."""
+
+    def test_root_level_script_count_cap(self):
+        """Root-level script file count must not exceed the ratchet ceiling."""
+        root_scripts = _count_root_level_scripts(REPO_ROOT)
+        assert len(root_scripts) <= ROOT_LEVEL_SCRIPT_FILE_CEILING, (
+            f"Root-level script file count increased: {len(root_scripts)} > "
+            f"{ROOT_LEVEL_SCRIPT_FILE_CEILING}\n"
+            "New scripts must be added to mu/scripts/<subdirectory>/.\n"
+            "Available: orbit/, mutation/, world/, snapshot/, utils/\n"
+            f"Files at root:\n" + "\n".join(sorted(root_scripts))
         )

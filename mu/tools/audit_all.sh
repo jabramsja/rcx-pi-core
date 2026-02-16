@@ -62,7 +62,7 @@ echo "== 1a) Core + Fuzzer tests (hash-seeded, excludes slow) =="
 # Slow tests (meta-circular recurrence, paxos e2e) run in 1c below
 # Stress tests are for edge case validation, not CI blocking
 # Also exclude test_js_parity_automated.py - JS parity verified via node run below
-TEST_OUTPUT=$(pytest $PARALLEL_FLAG -q -m "not slow" --ignore=tests/stress/ --ignore=tests/test_js_parity_automated.py 2>&1) || { echo "$TEST_OUTPUT"; exit 1; }
+TEST_OUTPUT=$(pytest $PARALLEL_FLAG -q -m "not slow" --ignore=tests/stress/ --ignore=tests/parity/test_js_parity_automated.py 2>&1) || { echo "$TEST_OUTPUT"; exit 1; }
 echo "$TEST_OUTPUT"
 # Parse test counts (format: "X passed, Y skipped in Zs" or "X passed in Zs")
 if echo "$TEST_OUTPUT" | grep -qE '[0-9]+ passed'; then

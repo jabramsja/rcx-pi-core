@@ -16,7 +16,7 @@ def test_clean_print_requires_summary_file(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/clean_print.sh",
+            "scripts/utils/clean_print.sh",
             "--summary",
             str(summary),
             "--work",

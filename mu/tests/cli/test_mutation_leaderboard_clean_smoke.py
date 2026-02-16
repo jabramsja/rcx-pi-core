@@ -12,7 +12,7 @@ def test_mutation_leaderboard_clean_script_runs():
     p = _run(
         [
             "bash",
-            "scripts/mutation_leaderboard_clean.sh",
+            "scripts/mutation/mutation_leaderboard_clean.sh",
             "--seeds",
             "2",
             "--runner",

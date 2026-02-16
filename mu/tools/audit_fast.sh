@@ -148,7 +148,7 @@ pytest $PARALLEL_FLAG -q \
     tests/engine/test_mu_type.py \
     tests/engine/test_seed_integrity.py \
     tests/engine/test_classify_mu.py \
-    tests/test_parity_python.py \
+    tests/parity/test_parity_python.py \
     tests/engine/test_structural_trace.py \
     tests/fuzz/test_kernel_security_fuzzer.py \
     tests/engine/test_normalization_roundtrip.py \
@@ -156,12 +156,12 @@ pytest $PARALLEL_FLAG -q \
     tests/parity/test_eval_seed_adversary.py \
     tests/integration/test_self_hosting_v0.py \
     tests/engine/test_phase8b_grounding_gaps.py \
-    tests/test_recurrence_parity.py \
-    tests/test_exhaustion_parity.py \
-    tests/test_bootstrap_structural_bridge.py \
+    tests/parity/test_recurrence_parity.py \
+    tests/parity/test_exhaustion_parity.py \
+    tests/structural/test_bootstrap_structural_bridge.py \
     tests/integration/test_meta_circular_gate6.py \
-    tests/test_execution_path_verification.py \
-    tests/test_js_parity_automated.py
+    tests/structural/test_execution_path_verification.py \
+    tests/parity/test_js_parity_automated.py
 
 echo ""
 echo "== 5) JavaScript L3 parity check =="

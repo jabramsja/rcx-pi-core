@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/snapshot_integrity_check.sh <baseline.json> <current.json> [--only PATH] [--ignore k1,k2,...] [--json]
+  scripts/snapshot/snapshot_integrity_check.sh <baseline.json> <current.json> [--only PATH] [--ignore k1,k2,...] [--json]
 
 Purpose:
   A tiny "snapshot integrity" tool for CI/tooling that checks whether two JSON snapshots are semantically equal
@@ -15,7 +15,7 @@ Defaults:
   --ignore kind,schema_version
 
 Options:
-  --only PATH        Compare only a top-level key (default: result). (Matches scripts/json_diff.sh semantics.)
+  --only PATH        Compare only a top-level key (default: result). (Matches scripts/snapshot/json_diff.sh semantics.)
   --ignore CSV       Ignore top-level keys (default: kind,schema_version).
   --json             Emit a stable JSON summary (still uses exit codes).
 
@@ -45,10 +45,10 @@ done
 
 test -f "$BASE" || { echo "ERROR: baseline not found: $BASE" >&2; exit 2; }
 test -f "$CURR" || { echo "ERROR: current not found: $CURR" >&2; exit 2; }
-test -x scripts/json_diff.sh || { echo "ERROR: missing executable scripts/json_diff.sh" >&2; exit 2; }
+test -x scripts/snapshot/json_diff.sh || { echo "ERROR: missing executable scripts/snapshot/json_diff.sh" >&2; exit 2; }
 
 set +e
-OUT="$(bash scripts/json_diff.sh "$BASE" "$CURR" --only "$ONLY" --ignore "$IGNORE" 2>&1)"
+OUT="$(bash scripts/snapshot/json_diff.sh "$BASE" "$CURR" --only "$ONLY" --ignore "$IGNORE" 2>&1)"
 RC=$?
 set -e
 

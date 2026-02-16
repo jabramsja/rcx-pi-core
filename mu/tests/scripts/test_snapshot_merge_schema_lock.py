@@ -16,7 +16,7 @@ def test_snapshot_merge_output_validates_against_schema(tmp_path: Path):
 
     subprocess.check_call(
         [
-            str(ROOT / "scripts" / "snapshot_merge.py"),
+            str(ROOT / "scripts" / "snapshot" / "snapshot_merge.py"),
             str(FIX / "snapshot_rcx_core_v1.json"),
             str(FIX / "snapshot_rcx_core_v1_variant.json"),
             "--out",

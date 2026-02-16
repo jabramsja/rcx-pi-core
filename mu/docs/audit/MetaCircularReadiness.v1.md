@@ -48,14 +48,14 @@ These gates MUST be passed before meta-circular work begins. Each gate is binary
 |-----------|----------|--------|
 | Canonical trace schema exists (v1) | `mu/docs/schemas/rcx-trace-event.v1.json` | PASS |
 | Trace canonicalization helper exists | `rcx_pi/trace_canon.py` | PASS |
-| Unit tests validate canonicalization | `tests/test_replay_gate_idempotent.py` | PASS |
+| Unit tests validate canonicalization | `tests/integration/test_replay_gate_idempotent.py` | PASS |
 
 ### Gate 2: Replay Determinism
 
 | Criterion | Evidence | Status |
 |-----------|----------|--------|
 | Replay CLI exists | `python -m rcx_pi.rcx_cli replay` | PASS |
-| Replay gate enforces diff-empty | `tests/test_replay_gate_idempotent.py` | PASS |
+| Replay gate enforces diff-empty | `tests/integration/test_replay_gate_idempotent.py` | PASS |
 | Golden fixtures exist | `tests/fixtures/traces/*.v1.jsonl` | PASS |
 | Rust acceleration bit-for-bit compatible | `archive/rcx_pi_rust/src/replay_cli.rs` | PASS |
 
@@ -173,7 +173,7 @@ To unblock Gate 5 and proceed to meta-circular implementation:
 
 1. ✅ **Add stall trace event type** — `reduction.stall` in v2 schema
 2. ✅ **Add fix trace event type** — `reduction.applied` in v2 schema
-3. ✅ **v2 fixtures and gate** — `tests/fixtures/traces_v2/`, `tests/test_replay_gate_v2.py`
+3. ✅ **v2 fixtures and gate** — `tests/fixtures/traces_v2/`, `tests/integration/test_replay_gate_v2.py`
 
 ### Completed (Execution Semantics v0)
 

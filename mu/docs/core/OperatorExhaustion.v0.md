@@ -274,12 +274,12 @@ This uses non-linear pattern matching (same var `op_id` twice) to detect equalit
 
 ### 3. Cross-Substrate Parity
 - [x] Same projections produce same results on Python and JS
-- [x] Parity tests in `tests/test_exhaustion_parity.py`
+- [x] Parity tests in `tests/parity/test_exhaustion_parity.py`
 - [x] JS loads exhaustion.v1.json in `mu/host/js/eval_step.js`
 - **Note:** JS uses its own bootstrap match/substitute implementation. Cross-substrate parity tests verify identical results.
 
 ### 4. Integration Tests
-Validated integration scenarios (see `tests/test_exhaustion_parity.py` and `tests/fixtures/exhaustion_vectors.json`):
+Validated integration scenarios (see `tests/parity/test_exhaustion_parity.py` and `tests/fixtures/exhaustion_vectors.json`):
 1. Single operator exhaustion detected and frozen.
 2. Multiple operators frozen still allow unfrozen operator progression/freeze.
 3. All operators frozen leads to global stall.
@@ -398,7 +398,7 @@ def validate_frozen_list(frozen: Mu) -> None:
 3. **Create `mu/closures/exhaustion.v1.json`** with ~6 projections (Expert simplification)
 4. **Add frozen list validation** in step_mu.py (V3 fix)
 5. **Create parity vectors** in `tests/fixtures/exhaustion_vectors.json`
-6. **Create Python tests** in `tests/test_exhaustion_parity.py`
+6. **Create Python tests** in `tests/parity/test_exhaustion_parity.py`
 7. **Port to JS** and verify same results
 8. **Demo script** showing exhaustion detection
 
@@ -564,7 +564,7 @@ is safe. We can relax later without breaking correctness.
   - Created `mu/closures/exhaustion.v1.json` with 11 projections (more than estimated due to three-phase state machine)
   - Non-linear patterns for equality detection (step, operator, frozen membership)
   - First-match-wins ordering for scan_same before scan_different
-  - 17 parity tests in `tests/test_exhaustion_parity.py`
+  - 17 parity tests in `tests/parity/test_exhaustion_parity.py`
   - 10 fuzzer tests in `tests/fuzz/test_exhaustion_fuzzer.py`
   - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
   - Cross-substrate parity: Python and JavaScript produce identical results

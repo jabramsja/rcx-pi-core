@@ -14,7 +14,7 @@ import os
 
 
 def _repo_root() -> Path:
-    return Path(__file__).parent.parent
+    return Path(__file__).parents[2]
 
 
 def test_v2_fixtures_are_canonical() -> None:
@@ -437,7 +437,7 @@ def test_record_mode_fixture_matches_generated_trace() -> None:
     generated = "".join(canon_event_json(ev) + "\n" for ev in events)
 
     # Load fixture
-    fixture_path = Path(__file__).parent / "fixtures" / "traces_v2" / "record_mode.v2.jsonl"
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "traces_v2" / "record_mode.v2.jsonl"
     expected = fixture_path.read_text(encoding="utf-8")
 
     assert generated == expected, f"Generated trace differs from fixture:\nGenerated:\n{generated}\nExpected:\n{expected}"

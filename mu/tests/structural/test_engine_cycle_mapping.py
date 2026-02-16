@@ -375,7 +375,7 @@ class TestGapRegistry:
 class TestGapContractDocs:
     """Verify gap entries with contract docs have complete design contracts."""
 
-    ROOT = Path(__file__).parent.parent
+    ROOT = Path(__file__).parents[2]
 
     # GAP-04-FIX tests removed: gap resolved via engine integration (E4).
     # Contract doc retained at mu/docs/core/EngineNewFixContract.v0.md.
