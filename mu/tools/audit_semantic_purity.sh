@@ -939,7 +939,7 @@ for f in $ALL_PY_FILES; do
         # Utilities and CLI tools
         api.py|bench.py|cli_schema*.py|higher.py|listutils.py|meta.py|pretty.py)
             ;;
-        program_*.py|projection.py|self_host.py|test_worlds_probe.py|worlds_json.py|worlds_bridge.py|worlds_probe.py)
+        program_*.py|projection.py|self_host.py|worlds_json.py|worlds_bridge.py|worlds_probe.py)
             ;;
         *)
             # New file - needs review

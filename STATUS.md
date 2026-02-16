@@ -247,7 +247,7 @@ Tier 5: CI Weekly     weekly_deep_fuzz.yml          ~60 min  Deep fuzz (500 exam
 HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # ~30 seconds
 ```
 
-See `mu/docs/TESTING_PERFORMANCE_ISSUE.md` for full context on testing strategy.
+See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 
 ## Debt Status
 

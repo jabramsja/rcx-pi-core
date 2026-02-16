@@ -30,7 +30,6 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [cli/](#cli) | CLI tools and commands |
 | [agents/](#agents) | AI agent rig documentation |
 | [audit/](#audit) | Audit, governance, and compliance |
-| [reviews/](#reviews) | Design reviews and summaries |
 | [fixtures/](#fixtures) | Test fixtures |
 | [latex/](#latex) |  |
 
@@ -122,14 +121,6 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 |------|-------|
 | [CI_POLICY.md](audit/CI_POLICY.md) | RCX CI Policy (Green Gate) |
 | [MetaCircularReadiness.v1.md](audit/MetaCircularReadiness.v1.md) | RCX Meta-Circular Readiness Definition (v1) |
-
-## reviews
-
-*Design reviews and summaries*
-
-| File | Title |
-|------|-------|
-| [tooling_improvement_designs.md](reviews/tooling_improvement_designs.md) | Tooling Improvement Designs |
 
 ## fixtures
 

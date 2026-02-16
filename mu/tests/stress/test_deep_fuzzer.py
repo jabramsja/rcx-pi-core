@@ -15,7 +15,7 @@ They ARE included in:
 - audit_all.sh (full validation)
 - CI deep test job (if configured)
 
-See mu/docs/TESTING_PERFORMANCE_ISSUE.md for context.
+See mu/docs/audit/CI_POLICY.md for testing strategy context.
 """
 
 import pytest
