@@ -18,8 +18,8 @@ from pathlib import Path
 from hypothesis import given, settings, HealthCheck
 from hypothesis import strategies as st
 
-# Root directory of the project
-ROOT = Path(__file__).parents[2]
+# Root directory of the project (symlink-safe — see tests/repo_root.py)
+from tests.repo_root import REPO_ROOT as ROOT
 
 
 class TestJSTestSuitePasses:
