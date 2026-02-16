@@ -2140,7 +2140,7 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
         {
           maxSteps: payload.max_steps ?? maxSteps,
           frozen: payload.frozen ?? null,
-          maxEngineIterations,
+          maxEngineIterations: maxEngineIterations - iteration - 1,
           maxAlgorithmIterations,
           observer,
         },
@@ -2157,7 +2157,7 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
         {
           maxSteps: payload.max_steps ?? maxSteps,
           frozen: payload.frozen ?? null,
-          maxEngineIterations,
+          maxEngineIterations: maxEngineIterations - iteration - 1,
           maxAlgorithmIterations,
           observer,
         },
