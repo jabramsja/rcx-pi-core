@@ -14,7 +14,18 @@ from pathlib import Path
 
 # Ensure repo root is at position 0 in sys.path for 'tools' imports
 # pytest adds tests/ to sys.path which can shadow repo root's tools package
-REPO_ROOT = Path(__file__).parent.parent
+# Inline upward search (not parent counting) to be symlink-safe.
+# Cannot import from tests.repo_root here because conftest runs before
+# sys.path is fully configured. See tests/repo_root.py for the shared helper.
+def _find_repo_root() -> Path:
+    d = Path(__file__).parent
+    for _ in range(10):
+        if (d / "pyproject.toml").exists():
+            return d
+        d = d.parent
+    raise RuntimeError("Cannot find repo root")
+
+REPO_ROOT = _find_repo_root()
 _repo_root_str = str(REPO_ROOT)
 if sys.path[0] != _repo_root_str:
     if _repo_root_str in sys.path:

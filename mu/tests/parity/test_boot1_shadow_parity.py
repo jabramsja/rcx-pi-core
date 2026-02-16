@@ -25,16 +25,9 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.kernel import reset_step_budget
 
-def _find_repo_root():
-    """Find repo root by searching upward for pyproject.toml (symlink-safe)."""
-    d = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(10):
-        if os.path.isfile(os.path.join(d, "pyproject.toml")):
-            return d
-        d = os.path.dirname(d)
-    raise RuntimeError("Cannot find repo root (no pyproject.toml)")
-
-ROOT = _find_repo_root()
+# Root directory of the project (symlink-safe — see tests/repo_root.py)
+from tests.repo_root import REPO_ROOT
+ROOT = str(REPO_ROOT)
 
 
 # ============================================================================
