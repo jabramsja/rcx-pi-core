@@ -24,6 +24,6 @@ This is a thin, deterministic rendering step:
 
 Generate (requires Graphviz):
 
-    ./scripts/render_orbit_dot_to_svg.sh
+    dot -Tsvg mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot -o mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg
 
-The SVG is a stable “viewable artifact” derived from the DOT, which is derived deterministically from `rcx.engine_run.v1`.
+The SVG is a stable "viewable artifact" derived from the DOT, which is derived deterministically from `rcx.engine_run.v1`.

@@ -18,7 +18,6 @@
     "mu/docs/execution",
     "mu/docs/cli",
     "mu/docs/schemas",
-    "mu/docs/reviews",
     "mu/tools/agents",
     "mu/host/python/rcx_pi"
   ],
@@ -28,8 +27,7 @@
     "audit",
     "execution",
     "cli",
-    "schemas",
-    "reviews"
+    "schemas"
   ],
   "exempt_patterns": [
     "^\\.pytest_cache/",
@@ -43,7 +41,6 @@
     "^rcx_pi/specs/",
     "^mu/tests/archive/",
     "^mu/tests/golden/",
-    "^mu/docs/TESTING_PERFORMANCE_ISSUE\\.md$",
     "^reports/",
     "^AGENT_BRIDGE\\.md$",
     "^mu/mu_programs/"

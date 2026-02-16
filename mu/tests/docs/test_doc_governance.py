@@ -63,7 +63,6 @@ EXEMPT_PATTERNS = [
     r"^archive/",                    # All archived content (docs, roadmap, subprojects)
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files
-    r"^mu/docs/TESTING_PERFORMANCE_ISSUE\.md$",  # Historical context (resolved issue)
 ]
 
 # Root files that are exempt (they ARE the source of truth)

@@ -122,7 +122,6 @@ WorkingRCX/
 
 **Exempt Paths** (no governance required):
 - `archive/docs/` - Historical, read-only, frozen in time
-- `mu/docs/TESTING_PERFORMANCE_ISSUE.md` - Historical context (resolved issue)
 - Generated files, archived subprojects (`archive/rcx_pi_rust/`, etc.)
 
 **Special Folder: `roadmap/`** (separate lightweight governance):
