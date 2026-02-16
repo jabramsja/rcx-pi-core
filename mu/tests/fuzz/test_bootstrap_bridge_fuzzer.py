@@ -33,8 +33,8 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 @pytest.fixture(scope="module")
 def match_with_bridge_projections():
     """Load match.v2 + bootstrap_structural projections (combined at runtime)."""
-    match_path = Path(__file__).parent.parent / "mu" / "substrate" / "match.v2.json"
-    bridge_path = Path(__file__).parent.parent / "mu" / "bridge" / "bootstrap_structural.v1.json"
+    match_path = Path(__file__).parent.parent.parent / "mu" / "substrate" / "match.v2.json"
+    bridge_path = Path(__file__).parent.parent.parent / "mu" / "bridge" / "bootstrap_structural.v1.json"
 
     with open(match_path) as f:
         match_seed = json.load(f)
@@ -53,7 +53,7 @@ def match_with_bridge_projections():
 @pytest.fixture(scope="module")
 def match_v2_projections():
     """Load match.v2 projections (baseline for linear parity)."""
-    path = Path(__file__).parent.parent / "mu" / "substrate" / "match.v2.json"
+    path = Path(__file__).parent.parent.parent / "mu" / "substrate" / "match.v2.json"
     with open(path) as f:
         seed = json.load(f)
     return seed["projections"]

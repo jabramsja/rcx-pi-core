@@ -344,7 +344,7 @@ Grounding tests fail if seed files change. This prevents doc drift.
 ### Phase 4d: Integration Testing ✅ COMPLETE
 - Integration tests in `tests/test_apply_mu_integration.py`
 - Structural tests in `tests/structural/test_apply_mu_grounding.py`
-- Fuzzer tests in `tests/test_apply_mu_fuzzer.py`
+- Fuzzer tests in `tests/fuzz/test_apply_mu_fuzzer.py`
 
 ### Phase 5: Self-Hosting ✅ COMPLETE
 - `rcx_pi/step_mu.py`: `apply_mu()`, `step_mu()`, `run_mu()`
@@ -368,7 +368,7 @@ Grounding tests fail if seed files change. This prevents doc drift.
 - `normalize_for_match()` and `denormalize_from_match()` are now iterative
 - Type tags (`_type: "list"` / `_type: "dict"`) resolve list/dict ambiguity
 - `VALID_TYPE_TAGS` whitelist for security
-- Fuzzer tests in `tests/test_type_tags_fuzzer.py`
+- Fuzzer tests in `tests/fuzz/test_type_tags_fuzzer.py`
 
 ## Resolved Questions
 
@@ -407,7 +407,7 @@ Additional attack vectors addressed in security hardening pass:
 | Hostile unicode edge cases | Tested with emoji, RTL, zero-width, homoglyphs |
 
 **Test Coverage:**
-- `tests/test_selfhost_fuzzer.py`: 53 tests, 10,000+ random examples
+- `tests/fuzz/test_selfhost_fuzzer.py`: 53 tests, 10,000+ random examples
 - `TestMatchMuParity`: match_mu == eval_seed.match (1,000 examples)
 - `TestSubstMuParity`: subst_mu == eval_seed.substitute (1,200 examples)
 - `TestNearLimitStress`: boundary testing at depth 190-200, width 900-1000
@@ -424,7 +424,7 @@ Phase 4a-4d complete:
 5. [x] Integration tests: match_mu + subst_mu work together (67 tests total)
    - 28 parity tests (`test_apply_mu_integration.py`)
    - 27 structural grounding tests (`test_apply_mu_grounding.py`)
-   - 12 property-based fuzzer tests (`test_apply_mu_fuzzer.py`)
+   - 12 property-based fuzzer tests (`fuzz/test_apply_mu_fuzzer.py`)
 
 Phase 5 complete:
 

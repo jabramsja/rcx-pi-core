@@ -144,7 +144,7 @@ Step 5 is COMPLETE:
 ### 3. Cross-Substrate Parity ✅
 - [x] Same projections produce same results on Python
 - [x] Parity tests in `tests/test_recurrence_parity.py` (24 tests)
-- [x] Fuzzer tests in `tests/test_recurrence_fuzzer.py`
+- [x] Fuzzer tests in `tests/fuzz/test_recurrence_fuzzer.py`
 - [x] JS tests in `mu/host/js/eval_step.js` (v5, with Recurrence support)
 - [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
 
