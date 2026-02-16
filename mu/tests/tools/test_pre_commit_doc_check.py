@@ -1,8 +1,9 @@
 """Regression tests for tools/pre-commit-doc-check docs-change detection.
 
-After Round 24C moved docs/ and roadmap/ into mu/docs/, the DOCS_CHANGED
-pattern must recognise mu/docs/ paths so that doc governance tests trigger
-on staged doc changes.
+DOCS_CHANGED must recognize governed docs across:
+- mu/docs/
+- root roadmap folder (roadmap/)
+- root canonical tracker files
 """
 
 from __future__ import annotations
@@ -35,11 +36,18 @@ class TestPreCommitDocDetection:
             f"Pattern {pattern!r} does not match mu/docs/core/ paths"
         )
 
-    def test_mu_docs_roadmap_detected(self):
-        """mu/docs/roadmap/ changes must trigger doc tests."""
+    def test_root_roadmap_folder_detected(self):
+        """roadmap/ changes must trigger doc tests."""
         pattern = _extract_docs_pattern()
-        assert re.search(pattern, "mu/docs/roadmap/ROADMAP.md"), (
-            f"Pattern {pattern!r} does not match mu/docs/roadmap/ paths"
+        assert re.search(pattern, "roadmap/MANIFEST.md"), (
+            f"Pattern {pattern!r} does not match roadmap/ paths"
+        )
+
+    def test_root_roadmap_file_detected(self):
+        """ROADMAP.md at repo root must trigger doc tests."""
+        pattern = _extract_docs_pattern()
+        assert re.search(pattern, "ROADMAP.md"), (
+            f"Pattern {pattern!r} does not match ROADMAP.md"
         )
 
     def test_mu_docs_agents_detected(self):
@@ -78,9 +86,9 @@ class TestPreCommitDocDetection:
             f"Pattern {pattern!r} still matches bare docs/ — should only match mu/docs/"
         )
 
-    def test_old_roadmap_path_not_detected(self):
-        """Legacy roadmap/ (now moved) should NOT trigger."""
+    def test_old_mu_docs_roadmap_path_not_detected(self):
+        """Pattern should not carry a special-case mu/docs/roadmap entry."""
         pattern = _extract_docs_pattern()
-        assert not re.search(pattern, "roadmap/ROADMAP.md"), (
-            f"Pattern {pattern!r} still matches bare roadmap/ — should only match mu/docs/roadmap/"
+        assert "mu/docs/roadmap/" not in pattern, (
+            f"Pattern {pattern!r} still includes legacy mu/docs/roadmap/ special-case"
         )

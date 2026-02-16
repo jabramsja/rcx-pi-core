@@ -38,7 +38,7 @@ Older modules kept for compatibility:
 
 | Module | Status |
 |--------|--------|
-| `bytecode_vm.py` | ARCHIVED - superseded by kernel + seeds |
+| `bytecode_vm.py` | ARCHIVED - moved to `archive/mu_legacy/host/python/rcx_pi/` |
 | `deep_eval.py` | Deep evaluation machinery |
 | `programs.py` | Legacy program definitions |
 

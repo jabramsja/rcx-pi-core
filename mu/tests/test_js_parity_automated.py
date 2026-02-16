@@ -354,7 +354,7 @@ class TestCrossSubstrateParity:
         If domain data legitimately uses "head"/"tail" keys, it will be classified as
         linked-list format. This is a known design decision, not a bug.
 
-        See mu/docs/roadmap/ToolingDelta.md for policy rationale.
+        See roadmap/ToolingDelta.md for policy rationale.
         """
         from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
 

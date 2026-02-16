@@ -1,7 +1,7 @@
 # RCX Roadmap (Working Draft)
 
-> **Current State**: See [`STATUS.md`](../../../STATUS.md)
-> **Authorization**: See [`TASKS.md`](../../../TASKS.md)
+> **Current State**: See [`STATUS.md`](STATUS.md)
+> **Authorization**: See [`TASKS.md`](TASKS.md)
 > **Scope**: This document defines SEQUENCE only. It does not track current state.
 
 Purpose: provide a clean sequencing view across normalization, meta-circular execution, and hemispheres. This file is a planning layer only. Canonical state remains `STATUS.md` and `TASKS.md`.
@@ -9,11 +9,11 @@ Purpose: provide a clean sequencing view across normalization, meta-circular exe
 Read first:
 1. `STATUS.md`
 2. `TASKS.md`
-3. `archive/docs/NormalizationDecisionMemo.md` (archived — decision final)
-4. `archive/roadmap/AlgorithmNormalizationSpec.v0.md`
-5. `archive/roadmap/MetaCircular_Boot0_GatePlan.md`
-6. `mu/docs/roadmap/MuHemispheresDesign.md`
-7. `mu/docs/roadmap/Hex0_Boot0_Checklist.md`
+3. `roadmap/MANIFEST.md`
+4. `roadmap/Hex0_Boot0_Checklist.md`
+5. `roadmap/ContentAddressedMu.md`
+6. `roadmap/MuHemispheresDesign.md`
+7. `archive/roadmap/MetaCircular_Boot0_GatePlan.md` (archived reference for boot-gate constraints)
 
 **Now**
 See `TASKS.md` NOW section for active items.
@@ -22,7 +22,7 @@ See `TASKS.md` NOW section for active items.
 No active items — see `TASKS.md` NEXT.
 
 **Vector (Design Only)**
-1. Content-Addressed Mu (`mu/docs/roadmap/ContentAddressedMu.md`) — Hash-identity as substrate property. Levels 2-3 design only.
+1. Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) — Hash-identity as substrate property. Levels 2-3 design only.
 2. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
 
 **Sink (Parked)**

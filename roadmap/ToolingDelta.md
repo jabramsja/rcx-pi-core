@@ -1,7 +1,7 @@
 # Tooling Delta Checklist (8 → 9+)
 
-> **Current State**: See [`STATUS.md`](../../../STATUS.md)
-> **Authorization**: See [`TASKS.md`](../../../TASKS.md)
+> **Current State**: See [`STATUS.md`](../STATUS.md)
+> **Authorization**: See [`TASKS.md`](../TASKS.md)
 > **Scope**: This document tracks tooling improvements only. Does not define gates or milestones.
 
 Track tooling improvements to move quality score from ~8 to 9+.

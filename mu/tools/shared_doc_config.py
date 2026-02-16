@@ -91,7 +91,7 @@ def classify_md_path(doc_path: Path) -> str:
     if doc_path.parent == REPO_ROOT and doc_path.name in ROOT_CANONICAL_FILES:
         return "root_canonical"
 
-    if rel_path.startswith("mu/docs/roadmap/"):
+    if rel_path.startswith("roadmap/"):
         return "roadmap"
 
     for folder in GOVERNED_FOLDER_NAMES:

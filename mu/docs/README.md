@@ -30,7 +30,6 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [cli/](#cli) | CLI tools and commands |
 | [agents/](#agents) | AI agent rig documentation |
 | [audit/](#audit) | Audit, governance, and compliance |
-| [roadmap/](#roadmap) | Roadmap specs and gate plans |
 | [reviews/](#reviews) | Design reviews and summaries |
 | [fixtures/](#fixtures) | Test fixtures |
 | [latex/](#latex) |  |
@@ -124,19 +123,6 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [CI_POLICY.md](audit/CI_POLICY.md) | RCX CI Policy (Green Gate) |
 | [MetaCircularReadiness.v1.md](audit/MetaCircularReadiness.v1.md) | RCX Meta-Circular Readiness Definition (v1) |
 
-## roadmap
-
-*Roadmap specs and gate plans*
-
-| File | Title |
-|------|-------|
-| [ContentAddressedMu.md](roadmap/ContentAddressedMu.md) | Content-Addressed Mu: Hash-Identity as Substrate Property |
-| [Hex0_Boot0_Checklist.md](roadmap/Hex0_Boot0_Checklist.md) | Hex0/Boot0 Checklist (One Page) |
-| [MANIFEST.md](roadmap/MANIFEST.md) | Roadmap Document Manifest |
-| [MuHemispheresDesign.md](roadmap/MuHemispheresDesign.md) | Mu-Only Hemispheres Design Outline (Draft) |
-| [ROADMAP.md](roadmap/ROADMAP.md) | RCX Roadmap (Working Draft) |
-| [ToolingDelta.md](roadmap/ToolingDelta.md) | Tooling Delta Checklist (8 → 9+) |
-
 ## reviews
 
 *Design reviews and summaries*
@@ -149,7 +135,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 *Test fixtures*
 
-*12 files (non-markdown)*
+*11 files (non-markdown)*
 
 ## latex
 

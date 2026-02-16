@@ -38,6 +38,11 @@ ROOT_FILES = {
         "must_contain": ["## North Star", "## Ra", "## NEXT", "## VECTOR"],
         "must_link_to": ["STATUS.md"],
     },
+    "ROADMAP.md": {
+        "required": True,
+        "must_contain": ["STATUS.md", "TASKS.md"],
+        "must_link_to": ["STATUS.md", "TASKS.md"],
+    },
     "README.md": {
         "required": True,
         "must_contain": ["RCX", "STATUS.md"],
@@ -570,7 +575,7 @@ class TestMarkdownSyntax:
                 if not found and ref_path.startswith('docs/'):
                     # docs/Foo.md might be mu/docs/core/Foo.md, mu/docs/cli/Foo.md, etc.
                     basename = ref_path.replace('docs/', '')
-                    for subdir in ['core', 'cli', 'audit', 'execution', 'schemas', 'reviews', 'roadmap']:
+                    for subdir in ['core', 'cli', 'audit', 'execution', 'schemas', 'reviews']:
                         if (REPO_ROOT / 'mu' / 'docs' / subdir / basename).exists():
                             found = True
                             break

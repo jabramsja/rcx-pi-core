@@ -332,8 +332,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 44 (46 pre-24E minus 2 archived: higher.py, worlds_json.py)
-    assert infra_count == 44, (
-        f"Expected 44 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 41 (44 pre-audit minus 3 archived: bytecode_vm.py had 3 infra markers)
+    assert infra_count == 41, (
+        f"Expected 41 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

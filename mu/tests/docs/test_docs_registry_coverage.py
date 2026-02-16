@@ -51,6 +51,6 @@ class TestDocsRegistryCoverage:
             pytest.fail(msg)
 
     def test_no_registry_regression_for_root_canonical_files(self):
-        expected = {"STATUS.md", "TASKS.md", "README.md", "CLAUDE.md", "CHANGELOG.md"}
+        expected = {"STATUS.md", "TASKS.md", "ROADMAP.md", "README.md", "CLAUDE.md", "CHANGELOG.md"}
         missing = [name for name in expected if not (REPO_ROOT / name).exists()]
         assert not missing, f"Missing root canonical files: {missing}"

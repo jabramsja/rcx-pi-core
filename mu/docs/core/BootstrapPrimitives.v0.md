@@ -104,7 +104,7 @@ def eval_step(projections: list[Projection], value: Mu) -> Mu:
 
 `mu_equal` is now derivable from `mu_hash_cached`: `mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)`. Production code uses `mu_hash_cached` directly for stall detection and binding conflict. The `mu_equal` function remains as a convenience wrapper for test code.
 
-**How it was eliminated:** Content-Addressed Mu (`mu/docs/roadmap/ContentAddressedMu.md`) Level 1: hash-identity at construction. All 8 production call sites replaced with `mu_hash_cached()` comparisons. Bootstrap primitives reduced from 5 to 4.
+**How it was eliminated:** Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) Level 1: hash-identity at construction. All 8 production call sites replaced with `mu_hash_cached()` comparisons. Bootstrap primitives reduced from 5 to 4.
 
 **Historical role:** Stall detection (comparing "before" and "after" structurally).
 

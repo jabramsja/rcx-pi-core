@@ -3,7 +3,7 @@
     "version": "1.1.0",
     "name": "HEMISPHERES",
     "description": "Native structural routing: routes engine_result to hemispheres (r_null, r_inf, r_a, lobes, sink)",
-    "doc": "mu/docs/roadmap/MuHemispheresDesign.md",
+    "doc": "roadmap/MuHemispheresDesign.md",
     "spec_ref": "North Star #7: Buckets are native routing states, not metaphors",
     "status": "testable",
     "execution_layer": "APPLICATION",

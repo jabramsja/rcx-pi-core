@@ -4,9 +4,9 @@
 
 ## Reading Order
 
-1. [`STATUS.md`](../../../STATUS.md) - Current state (L1-L4, phase, debt) - **ALWAYS READ FIRST**
-2. [`TASKS.md`](../../../TASKS.md) - Authorized work, North Star invariants, governance
-3. [`ROADMAP.md`](./ROADMAP.md) - Sequence overview (what order, not current state)
+1. [`STATUS.md`](../STATUS.md) - Current state (L1-L4, phase, debt) - **ALWAYS READ FIRST**
+2. [`TASKS.md`](../TASKS.md) - Authorized work, North Star invariants, governance
+3. [`ROADMAP.md`](../ROADMAP.md) - Sequence overview (what order, not current state)
 4. [`Hex0_Boot0_Checklist.md`](./Hex0_Boot0_Checklist.md) - Operational CI and merge gates (`C1-C8`)
 5. Gate/spec docs as needed for specific work
 
@@ -47,7 +47,7 @@
 3. **Gate completion updates TASKS.md** - When a gate completes, update TASKS.md (Ra section). The gate plan itself remains stable.
 
 4. **Spec migration path**:
-   - Draft specs live in `mu/docs/roadmap/`
+   - Draft specs live in `roadmap/`
    - Approved specs migrate to `mu/docs/core/`
    - Migration requires explicit review
 

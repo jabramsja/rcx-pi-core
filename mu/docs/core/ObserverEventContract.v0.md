@@ -93,12 +93,12 @@ This ensures `sha256(canonical_json(event))` produces identical hashes on both s
 
 1. **No semantic changes** to the engine or hemisphere routing. Observer events are read-only telemetry.
 2. **No adaptive routing.** Events do not influence execution flow.
-3. **No metabolization logic.** Metabolization is a separate VECTOR concern (see `mu/docs/roadmap/MuHemispheresDesign.md`).
+3. **No metabolization logic.** Metabolization is a separate VECTOR concern (see `roadmap/MuHemispheresDesign.md`).
 4. **No wall-clock timestamps.** Logical ordering only — wall-clock breaks determinism.
 5. **No event persistence.** Storage and replay are out of scope for v0.
 
 ## Related Documents
 
 - `mu/docs/core/RCXEngine.v0.md` — Engine pipeline that emits events
-- `mu/docs/roadmap/MuHemispheresDesign.md` — Hemisphere routing (events observe, never influence)
+- `roadmap/MuHemispheresDesign.md` — Hemisphere routing (events observe, never influence)
 - `TASKS.md` — Authorization and promotion tracking
