@@ -20,7 +20,7 @@ elif git show-ref --verify --quiet refs/remotes/origin/dev; then
 fi
 
 if [ -n "$RANGE" ]; then
-    if ! "$REPO_ROOT/tools/enforce_tracker_sync.sh" --range "$RANGE"; then
+    if ! "$REPO_ROOT/tools/checks/enforce_tracker_sync.sh" --range "$RANGE"; then
         echo ""
         echo "❌ Pre-push tracker sync check failed."
         echo "   Add STATUS.md or TASKS.md updates for core structural changes."

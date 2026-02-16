@@ -41,7 +41,7 @@ from typing import NamedTuple
 
 import pytest
 
-from tools.shared_doc_config import REPO_ROOT, get_governed_folders_as_strings
+from tools.docs.shared_doc_config import REPO_ROOT, get_governed_folders_as_strings
 
 # =============================================================================
 # Strict Governance Configuration (per DocGovernance.v0.md)
@@ -254,7 +254,7 @@ class TestLaw2DocLifecycle:
             msg = f"\nGoverned docs missing DOC_STATUS header ({len(missing)} total):\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
-            msg += "\nRun: python tools/add_doc_headers.py\n"
+            msg += "\nRun: python tools/docs/add_doc_headers.py\n"
             msg += "Per DocGovernance.v0.md: 'A doc without DOC_STATUS fails CI.'\n"
             pytest.fail(msg)
 

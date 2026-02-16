@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-SCRIPT = REPO_ROOT / "tools" / "check_test_theater_js.sh"
+SCRIPT = REPO_ROOT / "tools" / "checks" / "check_test_theater_js.sh"
 
 
 def run_theater_check_on_code(code: str) -> subprocess.CompletedProcess:

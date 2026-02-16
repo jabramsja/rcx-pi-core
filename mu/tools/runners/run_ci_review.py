@@ -34,8 +34,8 @@ from dataclasses import dataclass
 
 # Ensure tools directory is importable when run directly
 _tools_dir = Path(__file__).resolve().parent
-if str(_tools_dir.parent) not in sys.path:
-    sys.path.insert(0, str(_tools_dir.parent))
+if str(_tools_dir.parent.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent.parent))
 
 from tools.agent_runner_common import run_agent_prompt, sanitize_files
 

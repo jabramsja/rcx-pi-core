@@ -18,7 +18,7 @@ This file is read by Claude Code at session start.
 **At session START:**
 1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
 2. Read `TASKS.md` - know what's in progress, what's next
-3. Run `./tools/check_agent_review_needed.sh` - check for uncommitted core changes needing agent review
+3. Run `./tools/checks/check_agent_review_needed.sh` - check for uncommitted core changes needing agent review
 4. Read `mu/docs/agents/AgentRunbook.v0.md` before running agents
 
 **At session END (before signing off):**
@@ -26,7 +26,7 @@ This file is read by Claude Code at session start.
 2. Did tasks complete or promote? → Update `TASKS.md`
 3. Were notable changes made? → Update `CHANGELOG.md`
 
-**If unsure:** Run `./tools/check_docs_consistency.sh` to validate STATUS.md matches reality.
+**If unsure:** Run `./tools/checks/check_docs_consistency.sh` to validate STATUS.md matches reality.
 
 ---
 
@@ -83,11 +83,11 @@ These are the only two files that track current state. Do not duplicate status i
 
 | Tier | Command | When | Time |
 |------|---------|------|------|
-| **Quick** | `python tools/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
-| **Full** | `python tools/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
-| **Rigorous** | `python tools/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
-| **Release** | `python tools/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
-| **Health** | `python tools/run_deep_analysis.py` | Monthly / pre-release | ~5-10 min |
+| **Quick** | `python tools/runners/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
+| **Full** | `python tools/runners/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
+| **Rigorous** | `python tools/runners/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
+| **Release** | `python tools/runners/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+| **Health** | `python tools/runners/run_deep_analysis.py` | Monthly / pre-release | ~5-10 min |
 
 **Practical rules:**
 1. Default habit: `quick` for iteration, then `full` once before merge
@@ -98,19 +98,19 @@ These are the only two files that track current state. Do not duplicate status i
 
 ```bash
 # Quick feedback (4 agents)
-python tools/run_review.py --pr --depth quick
+python tools/runners/run_review.py --pr --depth quick
 
 # Full review (5-6 agents, pre-merge gate)
-python tools/run_review.py --pr --depth full
+python tools/runners/run_review.py --pr --depth full
 
 # Rigorous mode (all 9 agents + skeptic challenge)
-python tools/run_review.py --pr --rigorous
+python tools/runners/run_review.py --pr --rigorous
 
 # Interactive session
-python tools/run_interactive.py verifier rcx_pi/selfhost/
+python tools/runners/run_interactive.py verifier rcx_pi/selfhost/
 
 # Full-stack health analysis (monthly/pre-release)
-python tools/run_deep_analysis.py
+python tools/runners/run_deep_analysis.py
 ```
 
 See `mu/docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous mode details, agent memory, and CI integration.
@@ -222,11 +222,11 @@ pytest --collect-only -m "fuzzer" tests/your_test.py -q                   # Shou
 pytest --collect-only -m "not slow and not fuzzer" --ignore=tests/stress/ -q 2>&1 | tail -3
 ```
 
-**Enforcement:** `tools/check_test_speed.sh` statically catches test files that import slow kernel functions without `@pytest.mark.slow`. Runs automatically in the pre-commit hook on staged test files. Whitelist with `# SPEED_OK: reason` if a file imports but doesn't actually call them.
+**Enforcement:** `tools/checks/check_test_speed.sh` statically catches test files that import slow kernel functions without `@pytest.mark.slow`. Runs automatically in the pre-commit hook on staged test files. Whitelist with `# SPEED_OK: reason` if a file imports but doesn't actually call them.
 
 ```bash
-bash tools/check_test_speed.sh          # Scan all tests/
-bash tools/check_test_speed.sh tests/foo.py  # Scan specific file
+bash tools/checks/check_test_speed.sh          # Scan all tests/
+bash tools/checks/check_test_speed.sh tests/foo.py  # Scan specific file
 ```
 
 **Git hooks:**
@@ -237,7 +237,7 @@ bash tools/check_test_speed.sh tests/foo.py  # Scan specific file
 | `tools/pre-push-fast` | Fast audit (audit_fast.sh) | Auto on `git push` (~2-3 min) |
 
 **Consistency tools:**
-- `./tools/check_docs_consistency.sh` - Validate STATUS.md matches reality
+- `./tools/checks/check_docs_consistency.sh` - Validate STATUS.md matches reality
 - `./tools/debt_dashboard.sh` - Show current debt counts and locations
 - Verifier agent (Section F) - Checks doc consistency as part of verification
 - `./tools/pre-commit-doc-check` - Canonical local commit gate (manual or via git hook)
@@ -313,7 +313,7 @@ Do NOT update individual agent files - they read STATUS.md.
 **Verification:**
 ```bash
 pytest tests/docs/test_doc_contracts.py -v  # Verify all doc claims
-python tools/add_doc_headers.py --check     # Verify all docs have headers
+python tools/docs/add_doc_headers.py --check     # Verify all docs have headers
 ```
 
 **DO NOT:**

@@ -18,7 +18,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from tools.shared_doc_config import REPO_ROOT, get_governed_folders_as_paths
+from tools.docs.shared_doc_config import REPO_ROOT, get_governed_folders_as_paths
 
 # All folders under governance (require headers)
 # Single source of truth: tools/shared_doc_config.py

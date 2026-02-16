@@ -16,7 +16,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).parents[2]
-SCRIPT = REPO_ROOT / "tools" / "enforce_tracker_sync.sh"
+SCRIPT = REPO_ROOT / "tools" / "checks" / "enforce_tracker_sync.sh"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bash script test")

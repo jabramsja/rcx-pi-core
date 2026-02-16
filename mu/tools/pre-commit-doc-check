@@ -17,12 +17,12 @@ cd "$(git rev-parse --show-toplevel)"
 FAILED=0
 
 # === 1. Run doc consistency validation (BLOCKING) ===
-if [ -f "./tools/check_docs_consistency.sh" ]; then
+if [ -f "./tools/checks/check_docs_consistency.sh" ]; then
     echo "Running doc consistency check..."
-    if ! ./tools/check_docs_consistency.sh 2>/dev/null; then
+    if ! ./tools/checks/check_docs_consistency.sh 2>/dev/null; then
         echo ""
         echo "❌ Doc consistency check FAILED"
-        echo "   Run ./tools/check_docs_consistency.sh to see details"
+        echo "   Run ./tools/checks/check_docs_consistency.sh to see details"
         echo "   Fix inconsistencies before committing"
         echo ""
         FAILED=1
@@ -88,7 +88,7 @@ if [ -n "$STAGED_RCX_PY" ]; then
     done
 
     echo "Running AST police on staged rcx_pi files..."
-    if ! python3 tools/ast_police.py $STAGED_RCX_PY 2>/dev/null; then
+    if ! python3 tools/checks/ast_police.py $STAGED_RCX_PY 2>/dev/null; then
         echo ""
         echo "❌ AST police check failed for staged rcx_pi files"
         FAILED=1
@@ -97,7 +97,7 @@ fi
 
 if [ -n "$STAGED_SEEDS" ]; then
     echo "Running seed police (staged mu/*.json detected)..."
-    if ! ./tools/seed_police.sh 2>/dev/null; then
+    if ! ./tools/checks/seed_police.sh 2>/dev/null; then
         echo ""
         echo "❌ Seed police check failed"
         FAILED=1
@@ -111,8 +111,8 @@ if [ -n "$STAGED_TESTS" ]; then
     echo "Running speed enforcer on staged test files..."
     for f in $STAGED_TESTS; do
         if [ -f "$f" ]; then
-            if ! bash tools/check_test_speed.sh "$f" 2>/dev/null | grep -q "No speed violations"; then
-                bash tools/check_test_speed.sh "$f"
+            if ! bash tools/checks/check_test_speed.sh "$f" 2>/dev/null | grep -q "No speed violations"; then
+                bash tools/checks/check_test_speed.sh "$f"
                 FAILED=1
             fi
         fi
@@ -120,8 +120,8 @@ if [ -n "$STAGED_TESTS" ]; then
 fi
 
 # === 5. Enforce tracker sync for core changes (BLOCKING) ===
-if [ -f "./tools/enforce_tracker_sync.sh" ]; then
-    if ! ./tools/enforce_tracker_sync.sh --staged; then
+if [ -f "./tools/checks/enforce_tracker_sync.sh" ]; then
+    if ! ./tools/checks/enforce_tracker_sync.sh --staged; then
         FAILED=1
     fi
 fi

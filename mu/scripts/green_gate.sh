@@ -33,15 +33,15 @@ run_python() {
   echo
 
   echo "[PY 2/10] Contraband check (grep-based lint)"
-  ./tools/contraband.sh rcx_pi
+  ./tools/checks/contraband.sh rcx_pi
   echo
 
   echo "[PY 3/10] Test theater check (assert True)"
-  ./tools/check_test_theater.sh tests
+  ./tools/checks/check_test_theater.sh tests
   echo
 
   echo "[PY 4/10] AST police (catches what grep misses)"
-  python3 tools/ast_police.py
+  python3 tools/checks/ast_police.py
   echo
 
   echo "[PY 5/10] Anti-cheat scans (test integrity)"
@@ -61,7 +61,7 @@ run_python() {
 
   # No underscored imports from rcx_pi in tests/ (AST-based)
   echo "-- no underscored imports from rcx_pi in tests/ (AST-based)"
-  python3 tools/check_underscore_imports.py || exit 1
+  python3 tools/checks/check_underscore_imports.py || exit 1
   echo "OK"
 
   # No underscore-prefixed keys in JSON
@@ -137,11 +137,11 @@ run_python() {
   echo
 
   echo "[PY 10/10] JavaScript L3 parity (same projections, same semantics)"
-  ./tools/check_js_debt.sh
-  ./tools/contraband_js.sh
-  ./tools/ast_police_js.sh
-  ./tools/check_test_theater_js.sh
-  ./tools/seed_police.sh
+  ./tools/checks/check_js_debt.sh
+  ./tools/checks/contraband_js.sh
+  ./tools/checks/ast_police_js.sh
+  ./tools/checks/check_test_theater_js.sh
+  ./tools/checks/seed_police.sh
   if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS parity tests pass"
   else

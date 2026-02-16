@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tools/check_docs_consistency.sh
+          tools/checks/check_docs_consistency.sh
 
       - name: Enforce tracker sync for core changes
         shell: bash
@@ -58,7 +58,7 @@ jobs:
           else
             RANGE="${{ github.event.before }}...${{ github.sha }}"
           fi
-          tools/enforce_tracker_sync.sh --range "$RANGE"
+          tools/checks/enforce_tracker_sync.sh --range "$RANGE"
 
       - name: Green gate (authoritative, python-only)
         shell: bash

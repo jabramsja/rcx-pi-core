@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.shared_doc_config import REPO_ROOT, classify_md_path
+from tools.docs.shared_doc_config import REPO_ROOT, classify_md_path
 
 
 def iter_all_markdown_files() -> list[Path]:

@@ -247,7 +247,7 @@ class TestDocHeaders:
 
         assert not missing, (
             f"Docs missing DOC_STATUS header: {missing}\n"
-            f"Run: python tools/add_doc_headers.py"
+            f"Run: python tools/docs/add_doc_headers.py"
         )
 
     @pytest.mark.parametrize("doc_name", list(DOC_CONTRACTS.keys()))

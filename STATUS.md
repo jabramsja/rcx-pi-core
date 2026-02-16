@@ -89,7 +89,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - **Utility seeds** (classify.v1, eval.v1) are Python-only for now
 - Parity vectors in `tests/fixtures/` are shared by both implementations
 - Run `node mu/host/js/eval_step.js` after Python changes to verify JS parity
-- Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
+- Run `./tools/checks/check_js_debt.sh` to verify JS debt markers match Python
 - Violation of parity breaks L3 and must be fixed before merge
 
 **L3 Seed Categories:**
@@ -105,8 +105,8 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - JS file has DEBT SUMMARY header with counts
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE`
-- `tools/check_js_debt.sh` validates markers are present
-- `tools/contraband_js.sh` validates no forbidden patterns (determinism, purity)
+- `tools/checks/check_js_debt.sh` validates markers are present
+- `tools/checks/contraband_js.sh` validates no forbidden patterns (determinism, purity)
 - Both audit scripts (fast/all) run JS debt check and contraband check
 - All semantics are in the projections (data), not the host (code)
 - The host provides only mechanical execution (the 4 bootstrap primitives)
@@ -194,7 +194,7 @@ Cross-substrate parity tests verify L3 (substrate portability):
 **Before committing, run:**
 ```bash
 ./tools/pre-commit-doc-check      # Canonical commit gate (docs, debt, tracker, staged checks)
-./tools/check_docs_consistency.sh # Verify STATUS.md matches reality
+./tools/checks/check_docs_consistency.sh # Verify STATUS.md matches reality
 ./tools/debt_dashboard.sh         # Check debt doesn't exceed ceiling
 ```
 

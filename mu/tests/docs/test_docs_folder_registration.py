@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.shared_doc_config import REPO_ROOT, get_registered_docs_subfolders
+from tools.docs.shared_doc_config import REPO_ROOT, get_registered_docs_subfolders
 
 
 DOCS_ROOT = REPO_ROOT / "mu" / "docs"

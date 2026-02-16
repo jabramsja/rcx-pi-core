@@ -15,7 +15,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-CONTRABAND_SCRIPT = REPO_ROOT / "tools" / "contraband.sh"
+CONTRABAND_SCRIPT = REPO_ROOT / "tools" / "checks" / "contraband.sh"
 
 
 def run_contraband_on_code(code: str) -> subprocess.CompletedProcess:

@@ -18,7 +18,7 @@ import json
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).parent.parent.parent
 REGISTRY_PATH = REPO_ROOT / "tools" / "docs_registry.json"
 
 

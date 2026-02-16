@@ -47,7 +47,7 @@ with mock.patch.dict(sys.modules, {
     for mod_name in list(sys.modules):
         if "run_skeptic" in mod_name or "agent_runner_common" in mod_name:
             del sys.modules[mod_name]
-    from tools.run_skeptic import (
+    from tools.runners.run_skeptic import (
         _extract_per_agent_verdicts,
         _extract_global_concerns,
         _extract_verdict,
@@ -279,7 +279,7 @@ class TestSingleSkepticInvocation:
         """Verify run_review calls run_consolidated_skeptic exactly once,
         not run_skeptic N times + convergence check."""
 
-        review_path = Path(__file__).parent.parent.parent / "tools" / "run_review.py"
+        review_path = Path(__file__).parent.parent.parent / "tools" / "runners" / "run_review.py"
         tree = ast.parse(review_path.read_text())
 
         # Find the rigorous block start dynamically by locating the

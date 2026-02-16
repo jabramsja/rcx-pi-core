@@ -17,11 +17,11 @@ import sys
 from pathlib import Path
 
 # Ensure repo root is at position 0 for imports
-_repo_root = str(Path(__file__).parents[1])
+_repo_root = str(Path(__file__).parents[2])
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from tools.shared_doc_config import (
+from tools.docs.shared_doc_config import (
     REPO_ROOT,
     classify_md_path,
     get_registered_docs_subfolders,

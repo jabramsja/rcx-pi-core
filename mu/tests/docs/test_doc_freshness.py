@@ -33,7 +33,7 @@ from typing import NamedTuple
 
 import pytest
 
-from tools.shared_doc_config import REPO_ROOT, get_governed_folders_as_paths
+from tools.docs.shared_doc_config import REPO_ROOT, get_governed_folders_as_paths
 
 # All governed folders - single source of truth: tools/shared_doc_config.py
 GOVERNED_FOLDERS = get_governed_folders_as_paths()
@@ -536,7 +536,7 @@ def scan_for_drift() -> dict:
     """
     Scan all governed docs and return a drift report.
 
-    This can be called from tools/check_docs_consistency.sh or as a standalone script.
+    This can be called from tools/checks/check_docs_consistency.sh or as a standalone script.
     Returns a dict with:
     - forbidden_violations: list of (doc, pattern, matches)
     - missing_required: list of (doc, pattern)

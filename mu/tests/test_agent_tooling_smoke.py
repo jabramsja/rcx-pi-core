@@ -45,11 +45,11 @@ class TestAgentToolingSmoke:
     """Smoke tests to verify agent tools are importable and runnable."""
 
     @pytest.mark.parametrize("script", [
-        "check_agent_runtime.py",
-        "run_review.py",
-        "run_ci_review.py",
-        "run_interactive.py",
-        "run_skeptic.py",
+        "checks/check_agent_runtime.py",
+        "runners/run_review.py",
+        "runners/run_ci_review.py",
+        "runners/run_interactive.py",
+        "runners/run_skeptic.py",
         "validate_agent_compliance.py",
         "validate_agent_reasoning.py",
         "agent_memory.py",
@@ -85,7 +85,7 @@ class TestAgentToolingSmoke:
         """run_review.py should import without PYTHONPATH set."""
         # This specifically tests the sys.path fix
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -256,7 +256,7 @@ class TestOrchestratorIntegration:
         """Orchestrator should use documented exit codes."""
         # Exit codes: 0=pass, 1=hard gate fail, 2=soft fail, 3=compliance fail, 4=infra preflight fail
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -267,7 +267,7 @@ class TestOrchestratorIntegration:
     def test_verbose_flag_exists(self):
         """Orchestrator should support --verbose flag."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -278,7 +278,7 @@ class TestOrchestratorIntegration:
     def test_rigorous_flag_exists(self):
         """Orchestrator should support --rigorous flag."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -289,7 +289,7 @@ class TestOrchestratorIntegration:
     def test_show_warnings_flag_exists(self):
         """Orchestrator should support --show-warnings flag for progressive disclosure."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -300,7 +300,7 @@ class TestOrchestratorIntegration:
     def test_continue_on_hard_gate_flag_removed(self):
         """Orchestrator should not expose redundant --continue-on-hard-gate flag."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -311,7 +311,7 @@ class TestOrchestratorIntegration:
     def test_fail_fast_hard_gate_flag_exists(self):
         """Orchestrator should support --fail-fast-hard-gate legacy behavior."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -322,7 +322,7 @@ class TestOrchestratorIntegration:
     def test_skip_preflight_flag_exists(self):
         """Orchestrator should expose --skip-preflight for debugging only."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -333,7 +333,7 @@ class TestOrchestratorIntegration:
     def test_preflight_timeout_flag_exists(self):
         """Orchestrator should expose --preflight-timeout control."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -344,7 +344,7 @@ class TestOrchestratorIntegration:
     def test_force_grounding_flag_exists(self):
         """Orchestrator should expose --force-grounding override."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -355,7 +355,7 @@ class TestOrchestratorIntegration:
     def test_model_flag_exists(self):
         """Orchestrator should expose --model override."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "run_review.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "run_review.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -364,10 +364,10 @@ class TestOrchestratorIntegration:
         assert "--model" in result.stdout
 
     @pytest.mark.parametrize("script", [
-        "run_ci_review.py",
-        "run_interactive.py",
-        "run_deep_analysis.py",
-        "run_skeptic.py",
+        "runners/run_ci_review.py",
+        "runners/run_interactive.py",
+        "runners/run_deep_analysis.py",
+        "runners/run_skeptic.py",
     ])
     def test_model_flag_exists_in_other_orchestrators(self, script: str):
         """Other orchestrators should expose --model for model governance."""
@@ -382,7 +382,7 @@ class TestOrchestratorIntegration:
 
     def test_full_depth_keeps_fuzzer_and_risk_triggers_grounding(self):
         """Full depth should always include fuzzer; grounding should be risk-triggered."""
-        run_review = import_from_path("run_review", TOOLS_DIR / "run_review.py")
+        run_review = import_from_path("run_review", TOOLS_DIR / "runners" / "run_review.py")
 
         low_risk = run_review.ReviewOrchestrator(
             files=["mu/docs/agents/AgentRunbook.v0.md"],
@@ -415,8 +415,8 @@ class TestOrchestratorIntegration:
         result = subprocess.run(
             [
                 sys.executable,
-                str(TOOLS_DIR / "run_review.py"),
-                "tools/run_review.py",
+                str(TOOLS_DIR / "runners" / "run_review.py"),
+                "tools/runners/run_review.py",
                 "--depth",
                 "quick",
                 "--rigorous",
@@ -436,7 +436,7 @@ class TestOrchestratorIntegration:
 
     def test_global_high_fail_closed_helper_blocks_hard_gate(self):
         """Global HIGH concerns should fail-closed and mark hard gates as blocking."""
-        run_review = import_from_path("run_review", TOOLS_DIR / "run_review.py")
+        run_review = import_from_path("run_review", TOOLS_DIR / "runners" / "run_review.py")
         hard_gate = run_review.AgentResult(
             name="verifier",
             output="",

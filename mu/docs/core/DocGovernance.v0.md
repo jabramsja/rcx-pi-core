@@ -139,7 +139,7 @@ WorkingRCX/
 **Registry rule (fail-closed):**
 - `tools/docs_registry.json` is the central registry for markdown governance classification.
 - New markdown files/folders must be registered there or tests fail.
-- Run `python3 tools/docs_sync_report.py --check` to validate registry coverage and placement rules.
+- Run `python3 tools/docs/docs_sync_report.py --check` to validate registry coverage and placement rules.
 
 ---
 

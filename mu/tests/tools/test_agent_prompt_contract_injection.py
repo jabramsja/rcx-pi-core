@@ -56,7 +56,7 @@ def test_runners_use_shared_contract_loader():
     ]
 
     for name in runner_files:
-        content = (TOOLS_DIR / name).read_text()
+        content = (TOOLS_DIR / "runners" / name).read_text()
         assert "load_agent_prompt_with_contract" in content, (
             f"{name} does not use shared contract loader"
         )
