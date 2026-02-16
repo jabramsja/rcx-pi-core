@@ -244,7 +244,7 @@ Tier 5: CI Weekly     weekly_deep_fuzz.yml          ~60 min  Deep fuzz (500 exam
 
 **For fast local iteration:**
 ```bash
-HYPOTHESIS_PROFILE=dev pytest tests/test_bootstrap_fuzzer.py  # ~30 seconds
+HYPOTHESIS_PROFILE=dev pytest tests/fuzz/test_bootstrap_fuzzer.py  # ~30 seconds
 ```
 
 See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
@@ -343,7 +343,7 @@ Use this to determine what standards apply NOW vs LATER:
 These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-01-27):
 
 **Fuzzer agent (Phase 7 readiness VERIFIED):**
-- [x] Create `tests/test_phase7_readiness_fuzzer.py` (32 tests, ~700 lines):
+- [x] Create `tests/fuzz/test_phase7_readiness_fuzzer.py` (32 tests, ~700 lines):
   - [x] Seed projection coverage (no unintended stalls)
   - [x] Kernel trace integrity (traces are replay-complete)
   - [x] Kernel state injection resistance (domain data can't forge `_mode`/`_phase`)
@@ -371,8 +371,8 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 **Additional tests (2026-01-28):**
 - [x] `tests/structural/test_projection_loader.py` - Factory loader tests (13 tests)
 - [x] `tests/structural/test_projection_runner.py` - Factory runner tests (33 tests)
-- [x] `tests/test_kernel_loop_fuzzer.py` - L2 kernel iteration fuzz tests (16 tests)
-- [x] `tests/test_context_passthrough_fuzzer.py` - Context preservation fuzz tests (12 tests)
+- [x] `tests/fuzz/test_kernel_loop_fuzzer.py` - L2 kernel iteration fuzz tests (16 tests)
+- [x] `tests/fuzz/test_context_passthrough_fuzzer.py` - Context preservation fuzz tests (12 tests)
 - [x] `tests/structural/test_step_mu_kernel_integration.py` - Kernel integration tests (30 tests)
 
 **Security fix (2026-01-28 - Adversary review):**
@@ -416,13 +416,13 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Non-linear pattern enforcement provided by eval_seed.match() binding conflict detection
 - 24 parity tests in `tests/test_recurrence_parity.py`
 - 22 parity vectors in `tests/fixtures/recurrence_vectors.json`
-- Property-based fuzzer tests in `tests/test_recurrence_fuzzer.py`
+- Property-based fuzzer tests in `tests/fuzz/test_recurrence_fuzzer.py`
 - 7-agent review: All agents APPROVE (adversary concern RESOLVED)
 
 **Test files (must be tracked in git):**
 - `tests/test_parity_python.py` - 20 parity + 3 security tests
 - `tests/test_structural_trace.py` - 14 structural trace tests
-- `tests/test_structural_trace_fuzzer.py` - 23 property-based fuzzer tests (7-agent critical gap closed)
+- `tests/fuzz/test_structural_trace_fuzzer.py` - 23 property-based fuzzer tests (7-agent critical gap closed)
 - `tests/fixtures/parity_vectors.json` - 23 shared test vectors
 
 **Critical Bug Fix (2026-01-30 - Adversarial Review):**
@@ -453,7 +453,7 @@ Addressed findings from comprehensive 7-agent adversarial peer review:
 | Advisor | ON_TRACK | Step 5 needs concrete criteria |
 
 **Fuzzer Gap Resolution (2026-01-30):**
-- Gap 1 (CRITICAL) CLOSED: `tests/test_structural_trace_fuzzer.py` (23 property-based tests)
+- Gap 1 (CRITICAL) CLOSED: `tests/fuzz/test_structural_trace_fuzzer.py` (23 property-based tests)
 - Tests run_mu_structural() for: termination, structure validity, trace format, stall detection, determinism, oscillation detection
 - Added to CRITICAL_TEST_FILES (cannot be silently skipped)
 
@@ -516,9 +516,9 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 - Note: `MAX_PROJECTION_STEPS=50000` (kernel.py) is NOT used by step_kernel_mu which uses `max_steps=10000`
 
 **Security Fuzzers (2026-01-29):**
-- Created `tests/test_security_boundary_fuzzer.py` (24 tests) - validate_no_kernel_reserved_fields
+- Created `tests/fuzz/test_security_boundary_fuzzer.py` (24 tests) - validate_no_kernel_reserved_fields
   - Tests depth guards, nested smuggling, unicode homoglyphs, list traversal
-- Created `tests/test_seed_integrity_fuzzer.py` (21 tests) - seed validation functions
+- Created `tests/fuzz/test_seed_integrity_fuzzer.py` (21 tests) - seed validation functions
   - Tests checksum tampering, structure validation, projection order security, injection attacks
 
 **L2 Grounding & Boundary Validation (2026-01-29):**
@@ -528,11 +528,11 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
   - Verifies `_remaining` is structural (head/tail), not arithmetic index
   - Tests kernel.wrap creates _remaining from _projs linked list
   - Tests kernel.try consumes head, kernel.match_fail advances to tail
-- Created `tests/test_boundary_validation_fuzzer.py` (27 tests) - boundary guards:
+- Created `tests/fuzz/test_boundary_validation_fuzzer.py` (27 tests) - boundary guards:
   - Tests assert_seed_pure with valid/invalid inputs (lambdas, functions, builtins)
   - Tests validate_type_tag whitelist enforcement (list/dict only)
   - Tests get_var_name validation (empty names, non-var sites)
-- Created `tests/test_kernel_bridge_fuzzer.py` (26 tests) - kernel bridge functions:
+- Created `tests/fuzz/test_kernel_bridge_fuzzer.py` (26 tests) - kernel bridge functions:
   - Tests list_to_linked (preserves length, order, produces valid Mu)
   - Tests normalize_projection (pattern/body normalization)
   - Integration tests for projection list conversion
@@ -563,7 +563,7 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 
 **Tests created:**
 - `tests/structural/test_bootstrap_primitives.py` (36 tests)
-- `tests/test_bootstrap_fuzzer.py` (18 property-based tests)
+- `tests/fuzz/test_bootstrap_fuzzer.py` (18 property-based tests)
 
 **See `mu/docs/core/BootstrapPrimitives.v0.md`** for full specification.
 
