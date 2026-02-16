@@ -7,6 +7,10 @@ themselves.
 
 This guard prevents future drift back to pre-governance state where
 22 test files accumulated under mu/scripts/tests/.
+
+Wave2 addition: root-level test file ratchet prevents new test files
+from accumulating at mu/tests/ root. New tests go into subdirectories:
+fuzz/, structural/, scripts/, docs/, engine/, parity/, integration/, cli/.
 """
 
 from __future__ import annotations
@@ -91,4 +95,41 @@ class TestSubtreeTaxonomyGuard:
             "Fuzzer test files found at mu/tests/ root level.\n"
             "Move *_fuzzer.py files to mu/tests/fuzz/ for organization.\n"
             f"Violations: {violations}"
+        )
+
+
+# Ratchet ceiling: root-level test_*.py count can only decrease.
+# Wave1 baseline: 74. Wave2 moved 50 → ceiling 24.
+# New test files MUST go into subdirectories.
+ROOT_LEVEL_TEST_FILE_CEILING = 24
+
+
+def _count_root_level_tests(repo_root: Path) -> list[str]:
+    """Return root-level test_*.py files under mu/tests/."""
+    result = subprocess.run(
+        ["git", "ls-files", "mu/tests/"],
+        capture_output=True, text=True, cwd=repo_root,
+    )
+    return [
+        path for path in result.stdout.strip().splitlines()
+        if path
+        and len(path.split("/")) == 3
+        and path.split("/")[2].startswith("test_")
+        and path.split("/")[2].endswith(".py")
+    ]
+
+
+class TestRootLevelTestOrganization:
+    """Prevent root-level test file sprawl via ratchet ceiling."""
+
+    def test_root_level_file_count_cap(self):
+        """Root-level test file count must not exceed the ratchet ceiling."""
+        root_tests = _count_root_level_tests(REPO_ROOT)
+        assert len(root_tests) <= ROOT_LEVEL_TEST_FILE_CEILING, (
+            f"Root-level test file count increased: {len(root_tests)} > "
+            f"{ROOT_LEVEL_TEST_FILE_CEILING}\n"
+            "New test files must be added to mu/tests/<subdirectory>/.\n"
+            "Available: fuzz/, structural/, scripts/, docs/, engine/, "
+            "parity/, integration/, cli/, stress/\n"
+            f"Files at root:\n" + "\n".join(sorted(root_tests))
         )
