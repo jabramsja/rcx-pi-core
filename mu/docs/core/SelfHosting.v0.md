@@ -511,7 +511,7 @@ Phase 5 complete:
 
 **EngineNews Structural Closure Detection (IMPLEMENTED 2026-01-30)**
 
-EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.json` (proof-of-concept, 9 projections) and `mu/closures/recurrence.v2.json` (hash-accelerated production version, 9 projections). See `mu/docs/core/recurrence_v2_design.md` for the v2 design and `mu/docs/roadmap/ContentAddressedMu.md` for the broader Content-Addressed Mu direction.
+EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.json` (proof-of-concept, 9 projections) and `mu/closures/recurrence.v2.json` (hash-accelerated production version, 9 projections). See `mu/docs/core/recurrence_v2_design.md` for the v2 design and `roadmap/ContentAddressedMu.md` for the broader Content-Addressed Mu direction.
 
 1. **Why this matters:** If EngineNews runs via Python loops/logic, emergence might be a Python artifact. For structural honesty, closure detection must be pattern matching on traces.
 

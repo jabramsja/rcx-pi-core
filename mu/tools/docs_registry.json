@@ -3,12 +3,13 @@
   "root_canonical_files": [
     "STATUS.md",
     "TASKS.md",
+    "ROADMAP.md",
     "README.md",
     "CLAUDE.md",
     "CHANGELOG.md"
   ],
   "special_folders": [
-    "mu/docs/roadmap"
+    "roadmap"
   ],
   "governed_folders": [
     "mu/docs/core",
@@ -28,8 +29,7 @@
     "execution",
     "cli",
     "schemas",
-    "reviews",
-    "roadmap"
+    "reviews"
   ],
   "exempt_patterns": [
     "^\\.pytest_cache/",

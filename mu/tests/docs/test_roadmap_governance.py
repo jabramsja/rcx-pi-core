@@ -9,7 +9,7 @@ The roadmap/ folder follows DIFFERENT rules than mu/docs/core/ and other governe
 This is enforced separately from the main doc governance per the exception
 documented in DocGovernance.v0.md.
 
-See mu/docs/roadmap/MANIFEST.md for the full linking rules.
+See roadmap/MANIFEST.md for the full linking rules.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/docs/test_roadmap_governance.py -v
@@ -23,7 +23,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-ROADMAP_FOLDER = REPO_ROOT / "mu" / "docs" / "roadmap"
+ROADMAP_FOLDER = REPO_ROOT / "roadmap"
+ROOT_ROADMAP = REPO_ROOT / "ROADMAP.md"
 
 
 # =============================================================================
@@ -31,10 +32,13 @@ ROADMAP_FOLDER = REPO_ROOT / "mu" / "docs" / "roadmap"
 # =============================================================================
 
 def get_roadmap_docs() -> list[Path]:
-    """Get all .md files in roadmap/."""
-    if not ROADMAP_FOLDER.exists():
-        return []
-    return sorted(ROADMAP_FOLDER.glob("*.md"))
+    """Get all roadmap markdown docs (root ROADMAP + roadmap/ folder docs)."""
+    docs: list[Path] = []
+    if ROOT_ROADMAP.exists():
+        docs.append(ROOT_ROADMAP)
+    if ROADMAP_FOLDER.exists():
+        docs.extend(sorted(ROADMAP_FOLDER.glob("*.md")))
+    return docs
 
 
 # =============================================================================
@@ -57,7 +61,11 @@ class TestRoadmapReferenceHeaders:
     def test_manifest_exists(self):
         """MANIFEST.md must exist to define reading order."""
         manifest = ROADMAP_FOLDER / "MANIFEST.md"
-        assert manifest.exists(), "mu/docs/roadmap/MANIFEST.md missing - required for linking rules"
+        assert manifest.exists(), "roadmap/MANIFEST.md missing - required for linking rules"
+
+    def test_root_roadmap_exists(self):
+        """ROADMAP.md must exist at repo root."""
+        assert ROOT_ROADMAP.exists(), "ROADMAP.md missing at repo root"
 
     def test_all_docs_have_status_reference(self):
         """All roadmap docs must reference STATUS.md."""
@@ -74,8 +82,8 @@ class TestRoadmapReferenceHeaders:
             msg = "\nRoadmap docs missing STATUS.md reference:\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
-            msg += "\nFix: Add reference header per mu/docs/roadmap/MANIFEST.md linking rules:\n"
-            msg += '  > **Current State**: See [`STATUS.md`](../STATUS.md)\n'
+            msg += "\nFix: Add reference header per roadmap/MANIFEST.md linking rules:\n"
+            msg += '  > **Current State**: See [`STATUS.md`](../STATUS.md) or [`STATUS.md`](STATUS.md)\n'
             pytest.fail(msg)
 
     def test_all_docs_have_tasks_reference(self):
@@ -93,8 +101,8 @@ class TestRoadmapReferenceHeaders:
             msg = "\nRoadmap docs missing TASKS.md reference:\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
-            msg += "\nFix: Add reference header per mu/docs/roadmap/MANIFEST.md linking rules:\n"
-            msg += '  > **Authorization**: See [`TASKS.md`](../TASKS.md)\n'
+            msg += "\nFix: Add reference header per roadmap/MANIFEST.md linking rules:\n"
+            msg += '  > **Authorization**: See [`TASKS.md`](../TASKS.md) or [`TASKS.md`](TASKS.md)\n'
             pytest.fail(msg)
 
 
@@ -245,15 +253,21 @@ class TestRoadmapCoverage:
 
     def test_required_docs_exist(self):
         """Required roadmap docs must exist."""
-        required = ["MANIFEST.md", "ROADMAP.md"]
+        required = ["MANIFEST.md"]
         missing = []
 
         for doc_name in required:
             if not (ROADMAP_FOLDER / doc_name).exists():
                 missing.append(doc_name)
 
+        if not ROOT_ROADMAP.exists():
+            missing.append("../ROADMAP.md")
+
         if missing:
             msg = "\nRequired roadmap docs missing:\n"
             for doc in missing:
-                msg += f"  - roadmap/{doc}\n"
+                if doc == "../ROADMAP.md":
+                    msg += "  - ROADMAP.md\n"
+                else:
+                    msg += f"  - roadmap/{doc}\n"
             pytest.fail(msg)

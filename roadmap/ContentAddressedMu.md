@@ -7,8 +7,8 @@ FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 -->
 # Content-Addressed Mu: Hash-Identity as Substrate Property
 
-> **Current State**: See [`STATUS.md`](../../../STATUS.md)
-> **Authorization**: See [`TASKS.md`](../../../TASKS.md)
+> **Current State**: See [`STATUS.md`](../STATUS.md)
+> **Authorization**: See [`TASKS.md`](../TASKS.md)
 > **Scope**: Levels 0-2 IMPLEMENTED. Level 3 (trie) DEFERRED — not beneficial for production traces.
 
 ## Problem Statement

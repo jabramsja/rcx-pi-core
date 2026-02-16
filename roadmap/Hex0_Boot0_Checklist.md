@@ -1,7 +1,7 @@
 # Hex0/Boot0 Checklist (One Page)
 
-> **Current State**: See [`STATUS.md`](../../../STATUS.md)  
-> **Authorization**: See [`TASKS.md`](../../../TASKS.md)  
+> **Current State**: See [`STATUS.md`](../STATUS.md)  
+> **Authorization**: See [`TASKS.md`](../TASKS.md)  
 > **Scope**: This document defines SEQUENCE and EXIT CRITERIA for operational merge gates only; canonical status remains in `STATUS.md` and `TASKS.md`.
 > **Purpose**: Define merge gates and acceptance criteria for a tiny self-hosting kernel path.
 

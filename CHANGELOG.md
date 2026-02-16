@@ -2,6 +2,20 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-16
+
+### Roadmap Relocation (Visibility + Governance Sync)
+
+- Moved `ROADMAP.md` from `roadmap/ROADMAP.md` to repo root `ROADMAP.md`
+- Moved roadmap spec folder from `roadmap/` to root `roadmap/`
+- Updated roadmap links across canonical docs (`STATUS.md`, `TASKS.md`, `README.md`) and active specs/tests
+- Updated doc governance config:
+  - `ROADMAP.md` added to root canonical docs
+  - roadmap special-folder path changed to `roadmap/`
+  - `docs_registered_subfolders` no longer lists `roadmap`
+- Updated pre-commit docs-change detection to include `roadmap/` and `ROADMAP.md`
+- Fixed stale archived bytecode doc path references (`archive/archive/docs/bytecode` → `archive/docs/bytecode`)
+
 ## 2026-02-15
 
 ### Round 24D: Convergence Execution (tools/scripts/tests -> mu/)
@@ -90,7 +104,7 @@ All notable changes to RCX are documented in this file.
 
 ### Content-Addressed Mu Design + Recurrence v2 Hash Acceleration
 
-- **Created `mu/docs/roadmap/ContentAddressedMu.md`** — Design doc for Content-Addressed Mu values (hash-identity as substrate property)
+- **Created `roadmap/ContentAddressedMu.md`** — Design doc for Content-Addressed Mu values (hash-identity as substrate property)
 - **Key insight: mu_equal elimination (5→4 bootstrap primitives)** — With content-addressing, `mu_equal` is subsumed by non-linear pattern matching on hash strings. `mu_hash` moves from runtime infrastructure to boundary scaffolding (like JSON parsing)
 - **Created `mu/closures/recurrence.v2.json`** — 9 hash-accelerated projections for closure detection
   - Pre-computes SHA-256 hashes at boundary; compares 64-char hash strings (O(1)) instead of deep structural match (O(depth))

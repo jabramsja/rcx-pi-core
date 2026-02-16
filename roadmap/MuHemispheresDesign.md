@@ -1,7 +1,7 @@
 # Mu-Only Hemispheres Design Outline (Draft)
 
-> **Current State**: See [`STATUS.md`](../../../STATUS.md)
-> **Authorization**: See [`TASKS.md`](../../../TASKS.md)
+> **Current State**: See [`STATUS.md`](../STATUS.md)
+> **Authorization**: See [`TASKS.md`](../TASKS.md)
 > **Scope**: This document defines DESIGN only. V0 core + engine integration IMPLEMENTED.
 
 Status: v0 core + engine integration IMPLEMENTED (2026-02-11). See `TASKS.md` for current work items and `STATUS.md` for hemisphere parity status.

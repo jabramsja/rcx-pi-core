@@ -29,6 +29,8 @@ ALLOWED_ROOT_DIRS: frozenset[str] = frozenset({
     ".github",
     # Active code (canonical)
     "mu",
+    # Active docs (visible roadmap set)
+    "roadmap",
     # Backward-compat symlinks (→ mu/)
     "rcx_pi",   # → mu/host/python/rcx_pi
     "tests",    # → mu/tests
@@ -54,29 +56,31 @@ def _parse_dirs_and_symlinks(ls_tree_output: str) -> set[str]:
 
 
 def _get_tracked_root_dirs() -> set[str]:
-    """Get root-level tracked directories AND symlinks from git.
+    """Get root-level tracked directories and symlinks from git.
 
-    Prefers the staging index (``git write-tree`` + ``git ls-tree``) so the
-    test reflects staged moves even before they are committed.  Falls back
-    to HEAD when nothing is staged.
-
-    Detects both directories (mode 040000) and symlinks (mode 120000) so
-    that backward-compat symlinks like rcx_pi/, tests/, tools/, scripts/
-    are properly guarded after symlink inversions.
+    Prefers the index via ``git ls-files -s`` (lock-free read), which includes
+    staged renames/moves without requiring ``git write-tree`` index locks.
+    Falls back to HEAD tree parsing when index read fails.
     """
-    # Try index first (handles uncommitted git-mv)
-    tree = subprocess.run(
-        ["git", "write-tree"],
+    index = subprocess.run(
+        ["git", "ls-files", "-s"],
         capture_output=True, text=True, cwd=REPO_ROOT,
     )
-    if tree.returncode == 0 and tree.stdout.strip():
-        result = subprocess.run(
-            ["git", "ls-tree", tree.stdout.strip()],
-            capture_output=True, text=True, cwd=REPO_ROOT,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return _parse_dirs_and_symlinks(result.stdout)
-    # Fallback to HEAD
+    if index.returncode == 0 and index.stdout.strip():
+        entries: set[str] = set()
+        for line in index.stdout.strip().splitlines():
+            parts = line.split(None, 3)
+            if len(parts) < 4:
+                continue
+            mode, path = parts[0], parts[3]
+            if "/" in path:
+                entries.add(path.split("/", 1)[0])
+            elif mode == "120000":
+                entries.add(path)
+        if entries:
+            return entries
+
+    # Fallback to HEAD tree entries
     result = subprocess.run(
         ["git", "ls-tree", "HEAD"],
         capture_output=True, text=True, cwd=REPO_ROOT,

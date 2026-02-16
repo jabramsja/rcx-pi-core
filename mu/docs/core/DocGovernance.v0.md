@@ -129,7 +129,7 @@ WorkingRCX/
 - Roadmap docs define SEQUENCE and DESIGN only, not current state
 - They follow different rules: link UP to STATUS.md/TASKS.md, no DOC_STATUS headers
 - Enforced by `tests/docs/test_roadmap_governance.py` (not test_doc_governance.py)
-- See `mu/docs/roadmap/MANIFEST.md` for linking rules and reading order
+- See `roadmap/MANIFEST.md` for linking rules and reading order
 
 **Rules:**
 1. `mu/docs/core/` = Active specs only (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)

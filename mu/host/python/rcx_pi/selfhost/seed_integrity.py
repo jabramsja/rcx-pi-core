@@ -68,7 +68,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> mu/docs/core/EVAL_SEED.v0.md)
     "eval.v1.json": "4c88e312002601f56fa5c3604f7938bc3651cf2718f1e672274a454b14e8bd78",
     # Hemispheres v1: native structural routing (APPLICATION execution layer)
-    "hemispheres.v1.json": "e7f4735c36450f58fdebf137ba2933695b31eac813d1eb4a8e84db3380438ab5",
+    "hemispheres.v1.json": "fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8",
     # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
     "paxos_demo.v1.json": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
     # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)

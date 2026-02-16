@@ -70,6 +70,7 @@ EXEMPT_PATTERNS = [
 EXEMPT_ROOT_FILES = {
     "STATUS.md",
     "TASKS.md",
+    "ROADMAP.md",
     "README.md",
     "CLAUDE.md",
     "CHANGELOG.md",
@@ -487,7 +488,7 @@ class TestDocStructure:
     """Verify doc folder structure."""
 
     def test_no_ungoverned_docs_in_docs_folder(self):
-        """All docs in mu/docs/ should be in a governed subfolder or roadmap."""
+        """All docs in mu/docs/ should be in a governed subfolder."""
         ungoverned = []
         docs_folder = REPO_ROOT / "mu" / "docs"
 
@@ -510,10 +511,10 @@ class TestDocStructure:
             if rel_str == "mu/docs/README.md":
                 continue
 
-            # Check if it's in a governed folder or roadmap (special folder)
+            # Check if it's in a governed folder
             in_governed_folder = any(
                 rel_str.startswith(f + "/")
-                for f in GOVERNED_FOLDERS + ["mu/docs/roadmap"]
+                for f in GOVERNED_FOLDERS
             )
 
             if not in_governed_folder:
