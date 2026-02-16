@@ -76,7 +76,7 @@ CYCLE_MAPPING: tuple[CycleStep, ...] = (
             "(init + edge_add_guard/edge_add + vertex_add_guard/vertex_add + pass_through). "
             "engine.fix_done_applied routes fixed result to recurrence (stall=false). "
             "engine.fix_done_none routes original result to recurrence (stall persists). "
-            "Invariants I1-I5 verified by tests/test_fix_invariants.py (19 tests)."
+            "Invariants I1-I5 verified by tests/structural/test_fix_invariants.py (19 tests)."
         ),
     ),
     CycleStep(
@@ -379,7 +379,7 @@ class TestGapContractDocs:
 
     # GAP-04-FIX tests removed: gap resolved via engine integration (E4).
     # Contract doc retained at mu/docs/core/EngineNewFixContract.v0.md.
-    # Invariants verified by tests/test_fix_invariants.py (19 tests).
+    # Invariants verified by tests/structural/test_fix_invariants.py (19 tests).
 
     def test_gaps_without_contract_doc_have_empty_invariants(self):
         """Gaps with no contract doc should have empty invariants (nothing to check yet)."""
