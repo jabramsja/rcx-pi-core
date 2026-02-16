@@ -29,7 +29,7 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   @host_iteration: 8
+ *   @host_iteration: 9
  *     - step()                    - for loop over projections
  *     - run()                     - for loop until stall
  *     - runStructural()           - for loop until stall (Gate 5: routes through stepKernel)
@@ -38,6 +38,7 @@
  *     - listToLinked()            - for loop for conversion
  *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
  *     - runEnginePipeline()       - engine state machine effect handler loop
+ *     - runEnginePipelineRecursive() - Boot1 shadow recursive engine loop
  *
  *   @host_recursion: 4
  *     - match()             - recursive pattern matching
@@ -50,7 +51,7 @@
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 15 (8 iteration + 4 recursion + 3 builtin)
+ * TOTAL DEBT: 16 (9 iteration + 4 recursion + 3 builtin)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
  * exist in Python. Both substrates have identical bootstrap footprint.
@@ -1985,6 +1986,15 @@ function runEnginePipeline(projections, inputValue, options) {
       continue;
     }
 
+    // Boot1: _tail_call recognition (shadow merge — seed doesn't produce this yet).
+    // See Boot1LoopContract.v0.md §3 Option A.
+    if (typeof nextState === 'object' && nextState !== null
+        && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
+      const tailPayload = nextState._tail_call;
+      state = { _run_engine: tailPayload };
+      continue;
+    }
+
     // Check if engine produced terminal result
     if (isEngineTerminal(nextState)) {
       if (typeof nextState === 'object' && nextState !== null) {
@@ -2002,6 +2012,175 @@ function runEnginePipeline(projections, inputValue, options) {
   throw new RcxError('engine.exhausted',
     `Engine pipeline exhausted ${maxEngineIterations} iterations without terminal result. ` +
     `State keys: ${typeof state === 'object' && state !== null ? JSON.stringify(Object.keys(state).sort()) : typeof state}`
+  );
+}
+
+/**
+ * Boot1 shadow: recursive engine pipeline for parity testing.
+ * Mirrors Python _run_engine_recursive() — handles engine re-entry via
+ * explicit recursion instead of for-loop iteration.
+ * Also recognizes {_tail_call: ...} as Boot1 native re-entry signal.
+ * @host_iteration: for loop per re-entry pass (Boot1 shadow)
+ * AST_OK: infra — Boot1 shadow recursive engine loop
+ */
+const BOOT1_MAX_REENTRY_DEPTH = 20;
+
+function runEnginePipelineRecursive(projections, inputValue, options, recursionDepth) {
+  const {
+    maxSteps = 100,
+    frozen = null,
+    maxEngineIterations = 20,
+    maxAlgorithmIterations = 50,
+    observer = null,
+  } = options ?? {};
+
+  recursionDepth = recursionDepth ?? 0;
+
+  if (recursionDepth >= BOOT1_MAX_REENTRY_DEPTH) {
+    throw new RcxError('engine.boot1_depth_exceeded',
+      `Boot1 recursive re-entry depth ${recursionDepth} exceeds limit ${BOOT1_MAX_REENTRY_DEPTH}.`
+    );
+  }
+
+  // Observer event helper
+  let obsTs = 0;
+  function emit(eventName, stepNum, stateVal, errorCode) {
+    if (observer === null) return;
+    let stateHash = null;
+    try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
+    observer.push({
+      event_name: eventName,
+      step: stepNum,
+      state_hash: stateHash,
+      error_code: errorCode ?? null,
+      substrate: 'js',
+      timestamp: obsTs,
+      boot1_depth: recursionDepth,
+    });
+    obsTs++;
+  }
+
+  // Feed engine its initial input
+  let state = {
+    _run_engine: {
+      projections: projections,
+      input: inputValue,
+      max_steps: maxSteps,
+      frozen: frozen,
+    }
+  };
+
+  // Engine stepping loop (per re-entry pass)
+  for (let iteration = 0; iteration < maxEngineIterations; iteration++) {
+    const nextState = step(engineProjections, state);
+
+    emit('step_boundary', iteration, state);
+
+    // Engine stalled
+    if (nextState === state) {
+      if (isEngineTerminal(state)) {
+        if (typeof state === 'object' && state !== null) {
+          if (state.closure_detected) emit('closure_detected', iteration, state);
+          if (state.stall) emit('stall_detected', iteration, state);
+        }
+        return state;
+      }
+      emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
+      throw new RcxError('engine.stalled_non_terminal',
+        `Boot1 engine stalled at iteration ${iteration} (depth ${recursionDepth}) without terminal result.`
+      );
+    }
+
+    // Boundary effect request
+    if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
+      const request = nextState._boundary_request;
+      const operation = request.operation;
+      const reqInput = request.input;
+      const context = Object.assign({}, request.context);
+      const injectKey = request.inject_key;
+
+      if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
+        emit('fail_closed', iteration, state, 'input.reserved_field');
+        throw new RcxError('input.reserved_field',
+          `SECURITY: inject_key '${injectKey}' is a kernel-reserved field.`
+        );
+      }
+
+      let result;
+      if (operation === 'run_trace') {
+        const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
+        result = { result: raw.result, trace: raw.trace, stall: raw.stall };
+      } else if (operation === 'hash_trace') {
+        result = hashTraceForRecurrence(reqInput);
+      } else if (operation === 'run_algorithm') {
+        const algoName = request.algorithm;
+        const algoProjs = seedProjectionMap[algoName];
+        if (!algoProjs) {
+          throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
+        }
+        result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
+      } else {
+        emit('fail_closed', iteration, state, 'api.bad_request');
+        throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
+      }
+
+      validateNoKernelReservedFields(result, `boundary_result(${operation})`);
+
+      context[injectKey] = result;
+      state = context;
+      continue;
+    }
+
+    // Boot1: detect re-entry envelope — recurse instead of continuing loop
+    if (typeof nextState === 'object' && nextState !== null
+        && '_run_engine' in nextState && Object.keys(nextState).length === 1) {
+      const payload = nextState._run_engine;
+      return runEnginePipelineRecursive(
+        payload.projections, payload.input,
+        {
+          maxSteps: payload.max_steps ?? maxSteps,
+          frozen: payload.frozen ?? null,
+          maxEngineIterations,
+          maxAlgorithmIterations,
+          observer,
+        },
+        recursionDepth + 1,
+      );
+    }
+
+    // Boot1: _tail_call recognition — recurse with payload
+    if (typeof nextState === 'object' && nextState !== null
+        && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
+      const payload = nextState._tail_call;
+      return runEnginePipelineRecursive(
+        payload.projections, payload.input,
+        {
+          maxSteps: payload.max_steps ?? maxSteps,
+          frozen: payload.frozen ?? null,
+          maxEngineIterations,
+          maxAlgorithmIterations,
+          observer,
+        },
+        recursionDepth + 1,
+      );
+    }
+
+    // Terminal result
+    if (isEngineTerminal(nextState)) {
+      if (typeof nextState === 'object' && nextState !== null) {
+        if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
+        if (nextState.stall) emit('stall_detected', iteration, nextState);
+      }
+      return nextState;
+    }
+
+    // Engine advanced internally
+    state = nextState;
+  }
+
+  emit('fail_closed', maxEngineIterations - 1, state, 'engine.exhausted');
+  throw new RcxError('engine.exhausted',
+    `Boot1 engine pipeline exhausted ${maxEngineIterations} iterations (depth ${recursionDepth}).`
   );
 }
 
@@ -3080,16 +3259,20 @@ if (process.argv.includes('--json-api')) {
     } else if (request.action === 'run_engine_pipeline') {
       // Run engine pipeline (APPLICATION level, algebraic effects pattern)
       const { projections: userProjs, input, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
+      const boot1Mode = request.boot1LoopMode ?? false;
       const observerEvents = request.observer ? [] : null;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
-        const result = runEnginePipeline(userProjs ?? [], input, {
+        const opts = {
           maxSteps: maxSteps ?? 100,
           frozen: frozen ?? null,
           maxEngineIterations: maxEngineIterations ?? 20,
           maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
           observer: observerEvents,
-        });
+        };
+        const result = boot1Mode
+          ? runEnginePipelineRecursive(userProjs ?? [], input, opts)
+          : runEnginePipeline(userProjs ?? [], input, opts);
         response = { success: true, result };
         if (observerEvents) response.observer_events = observerEvents;
       } catch (e) {
