@@ -25,7 +25,16 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.kernel import reset_step_budget
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def _find_repo_root():
+    """Find repo root by searching upward for pyproject.toml (symlink-safe)."""
+    d = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(10):
+        if os.path.isfile(os.path.join(d, "pyproject.toml")):
+            return d
+        d = os.path.dirname(d)
+    raise RuntimeError("Cannot find repo root (no pyproject.toml)")
+
+ROOT = _find_repo_root()
 
 
 # ============================================================================
@@ -41,7 +50,12 @@ def _run_js_json_api(request_dict: dict) -> dict:
     for line in result.stdout.split('\n'):
         if line.startswith('JSON_API_RESPONSE:'):
             return json.loads(line[len('JSON_API_RESPONSE:'):])
-    raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+    raise RuntimeError(
+        f"No JSON_API_RESPONSE in stdout.\n"
+        f"returncode: {result.returncode}\n"
+        f"stdout: {result.stdout[:500]}\n"
+        f"stderr: {result.stderr[:500]}"
+    )
 
 
 def _cross_substrate_equal(a, b):
