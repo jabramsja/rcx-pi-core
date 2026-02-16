@@ -167,7 +167,7 @@ FORBIDDEN_PATTERNS = [
     ForbiddenPattern(
         r'(?<![/a-z_])rcx_runtime\.py',
         "rcx_runtime.py archived to archive/root_legacy/ (Round 23E)",
-        "Use archive/root_legacy/rcx_runtime.py or scripts/world_trace.sh",
+        "Use archive/root_legacy/rcx_runtime.py or scripts/world/world_trace.sh",
         exceptions=["LegacySurfaceDecisionRecord.v0.md"],
     ),
     ForbiddenPattern(

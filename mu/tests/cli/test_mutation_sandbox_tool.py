@@ -31,7 +31,7 @@ def test_mutation_sandbox_writes_only_under_out_dir(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--seed",
             "7",
@@ -59,7 +59,7 @@ def test_mutation_sandbox_flip_produces_events_on_flippable_lines(tmp_path: Path
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--seed",
             "1",
@@ -84,7 +84,7 @@ def test_mutation_sandbox_shuffle_changes_order_of_rule_like_lines(tmp_path: Pat
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--seed",
             "3",
@@ -117,7 +117,7 @@ def test_mutation_sandbox_smoke_on_repo_world():
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(world),
             "--seed",
             "2",

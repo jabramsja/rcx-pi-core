@@ -393,13 +393,13 @@ New fields for bootstrap_structural (must be added to KERNEL_RESERVED_FIELDS bef
 4. [x] Non-linear tests: bridge correctly detects binding conflicts (8 tests)
 5. [x] `load_combined_kernel_with_bridge_projections()` wires bridge correctly (2026-02-03)
 6. [x] Execution path verification tests: verify bridge projections are actually executed (2026-02-03)
-7. [x] Cross-substrate parity: Python and JS bridge produce identical results (2026-02-04, tests/test_js_parity_automated.py)
+7. [x] Cross-substrate parity: Python and JS bridge produce identical results (2026-02-04, tests/parity/test_js_parity_automated.py)
 
 **Note on "runs through step_kernel_mu":** The seeds recurrence.v1 and exhaustion.v1 can run through either:
 - Bootstrap path: `eval_seed.step()` - Python provides binding conflict detection
 - Meta-circular path: `step_kernel_mu()` with bridge projections - structural binding conflict detection
 
-Both paths produce identical results. The execution path verification tests (`tests/test_execution_path_verification.py`) prove bridge projections fire when used.
+Both paths produce identical results. The execution path verification tests (`tests/structural/test_execution_path_verification.py`) prove bridge projections fire when used.
 
 ---
 
@@ -500,7 +500,7 @@ Both paths produce identical results. The execution path verification tests (`te
   - Path to true meta-circular algorithm execution required structural format standardization
   - Fixed subst entry format bug: changed `template` to `body` key in step_mu.py
 - **v0.4 (2026-02-03):** Execution path verification added
-  - Created `tests/test_execution_path_verification.py` with 9 tests
+  - Created `tests/structural/test_execution_path_verification.py` with 9 tests
   - Tests prove bridge projections actually fire (not just correct behavior)
   - Fixed wiring: bridge projections come BEFORE match.v2 in combined kernel
   - Added Execution Path Verification section to AgentGuardrails.v0.md

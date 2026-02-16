@@ -504,7 +504,7 @@ Phase 5 complete:
 - [x] JS POC exists (`mu/host/js/eval_step.js`, ~1300 LOC core + ~900 LOC inline tests)
 - [x] Same projections run on Python AND JavaScript
 - [x] Step 1: Fix JS security gaps (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair)
-- [x] Step 2: Cross-substrate parity tests (`tests/test_parity_python.py`, 20 vectors)
+- [x] Step 2: Cross-substrate parity tests (`tests/parity/test_parity_python.py`, 20 vectors)
 - [x] Step 3: Phase 8d trace model in Python (`tests/engine/test_structural_trace.py`, 14 tests)
 - [x] Step 4: Port trace to JS POC (`runStructural()`, 5 tests)
 - [x] Step 5: EngineNews demo on both substrates (structural, 2026-01-30)
@@ -543,7 +543,7 @@ EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.j
    - Both Python and JS substrates handle binding conflicts identically
 
 **Test files:**
-- `tests/test_parity_python.py` - 20 parity + 3 security tests
+- `tests/parity/test_parity_python.py` - 20 parity + 3 security tests
 - `tests/engine/test_structural_trace.py` - 14 structural trace tests
 - `tests/fixtures/parity_vectors.json` - 23 shared test vectors
 

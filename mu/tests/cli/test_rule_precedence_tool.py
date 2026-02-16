@@ -25,7 +25,7 @@ def test_rule_precedence_json_shape(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    p = _run(["bash", "scripts/rule_precedence.sh", str(w), "--json"])
+    p = _run(["bash", "scripts/world/rule_precedence.sh", str(w), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["precedence_basis"] == "textual order (earlier rules first)"
@@ -37,7 +37,7 @@ def test_rule_precedence_json_shape(tmp_path: Path):
 def test_rule_precedence_top(tmp_path: Path):
     w = tmp_path / "w.mu"
     w.write_text("rule a: x\nrule b: y\nrule c: z\n", encoding="utf-8")
-    p = _run(["bash", "scripts/rule_precedence.sh", str(w), "--json", "--top", "2"])
+    p = _run(["bash", "scripts/world/rule_precedence.sh", str(w), "--json", "--top", "2"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["rule_count_detected"] == 2
@@ -50,7 +50,7 @@ def test_rule_precedence_top(tmp_path: Path):
 def test_rule_precedence_detects_real_world():
     # Ensure detector matches RCX-π real .mu syntax (route/rewrite lines like "[x] -> ra").
     world = Path("mu/mu_programs/rcx_core.mu")
-    p = _run(["bash", "scripts/rule_precedence.sh", str(world), "--json"])
+    p = _run(["bash", "scripts/world/rule_precedence.sh", str(world), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["rule_count_detected"] > 0

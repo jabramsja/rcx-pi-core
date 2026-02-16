@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/rewrite_termination_check.sh <trace.json> [--json] [--loop] [--max-steps N]
+  scripts/world/rewrite_termination_check.sh <trace.json> [--json] [--loop] [--max-steps N]
 
 What it does:
   - Inspects trace-shaped JSON and emits a termination summary.

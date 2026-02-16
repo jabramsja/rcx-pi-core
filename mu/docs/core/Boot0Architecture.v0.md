@@ -388,7 +388,7 @@ Boot2.eval(projections, value) =
 - → Identical final value
 - → Identical trace format (including stall behavior and step counts)
 
-This contract is verified by `tests/test_js_parity_automated.py` which runs the same 20 parity vectors through both Python and JavaScript substrates and compares actual outputs.
+This contract is verified by `tests/parity/test_js_parity_automated.py` which runs the same 20 parity vectors through both Python and JavaScript substrates and compares actual outputs.
 
 ## Mapping to Current Code
 

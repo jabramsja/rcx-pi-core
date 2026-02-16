@@ -23,7 +23,7 @@ jobs:
       - name: Orbit DOT fixture gate
         env:
           PYTHONHASHSEED: "0"
-        run: ./scripts/check_orbit_dot_fixture.sh
+        run: ./scripts/orbit/check_orbit_dot_fixture.sh
 
   orbit-provenance:
     runs-on: ubuntu-latest
@@ -35,7 +35,7 @@ jobs:
       - name: Orbit provenance fixture gate
         env:
           PYTHONHASHSEED: "0"
-        run: ./scripts/check_orbit_provenance.sh
+        run: ./scripts/orbit/check_orbit_provenance.sh
 
   engine-run-schema:
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
       - name: Engine run schema gate
         env:
           PYTHONHASHSEED: "0"
-        run: ./scripts/check_engine_run_schema.sh
+        run: ./scripts/orbit/check_engine_run_schema.sh
 
   # Graphviz-dependent gates (share install step pattern)
   orbit-svg:
@@ -61,7 +61,7 @@ jobs:
       - name: Orbit SVG fixture gate
         env:
           PYTHONHASHSEED: "0"
-        run: ./scripts/check_orbit_svg_fixture.sh
+        run: ./scripts/orbit/check_orbit_svg_fixture.sh
 
   orbit-index:
     runs-on: ubuntu-latest
@@ -72,8 +72,8 @@ jobs:
       - name: Build artifacts
         env:
           PYTHONHASHSEED: "0"
-        run: ./scripts/build_orbit_artifacts.sh
+        run: ./scripts/orbit/build_orbit_artifacts.sh
       - name: Index semantic gate
         env:
           PYTHONHASHSEED: "0"
-        run: ./scripts/check_orbit_index_fixture.sh
+        run: ./scripts/orbit/check_orbit_index_fixture.sh

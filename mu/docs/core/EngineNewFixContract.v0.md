@@ -4,7 +4,7 @@ TYPE: IMPLEMENTATION
 LAST_VERIFIED: 2026-02-13
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: tests/test_engine_cycle_mapping.py
+GROUNDING_TESTS: tests/structural/test_engine_cycle_mapping.py
 
 This header enables automated doc drift detection.
 - REFERENCE: Stable definitions, rarely changes
@@ -23,7 +23,7 @@ Define the structural contract for GAP-04-FIX (EngineNew step 4, Rule 0.6): the 
 
 **Status:** IMPLEMENTED (2026-02-13, Rounds 15D–15I). All 5 invariants (I1–I5) verified by `tests/structural/test_fix_invariants.py`. Engine integration via 3 dispatch projections in `rcx_engine.v1.json`. Cross-substrate parity locked.
 
-**Gap ID:** `GAP-04-FIX` — **CLOSED** (removed from `tests/test_engine_cycle_mapping.py::TestGapRegistry`)
+**Gap ID:** `GAP-04-FIX` — **CLOSED** (removed from `tests/structural/test_engine_cycle_mapping.py::TestGapRegistry`)
 
 ## Background
 
@@ -123,7 +123,7 @@ All of the following must be satisfied before GAP-04-FIX can be promoted from VE
 ## Related Documents
 
 - `mu/docs/core/RCXEngine.v0.md` — Engine cycle (step 4 is now structural)
-- `tests/test_engine_cycle_mapping.py` — Step 4 mapped as structural; gap registry tracks remaining gaps (GAP-10-LOOP only)
+- `tests/structural/test_engine_cycle_mapping.py` — Step 4 mapped as structural; gap registry tracks remaining gaps (GAP-10-LOOP only)
 - `tests/structural/test_fix_invariants.py` — 19 invariant tests (I1–I5)
-- `tests/test_js_parity_automated.py::TestEngineFixPathParity` — Cross-substrate parity lock (4 tests)
+- `tests/parity/test_js_parity_automated.py::TestEngineFixPathParity` — Cross-substrate parity lock (4 tests)
 - `TASKS.md` — GAP-04-FIX closed in Ra

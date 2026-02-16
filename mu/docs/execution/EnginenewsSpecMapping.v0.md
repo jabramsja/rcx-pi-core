@@ -21,7 +21,7 @@ Status: COMPLETE (design + stress test harness)
 
 **Implementation status:**
 - ✅ Design doc complete (`mu/docs/execution/EnginenewsSpecMapping.v0.md`)
-- ✅ Stress test harness: `tests/test_recurrence_spec_v0.py` (18 tests)
+- ✅ Stress test harness: `tests/integration/test_recurrence_spec_v0.py` (18 tests)
 - ✅ Fixtures: progressive_refinement, stall_pressure, multi_cycle, idempotent_cycle
 - ✅ Metrics: stall_density, fix_efficacy, closure_evidence_count
 - ✅ CLI contract verified: `--check-canon`, `--print-exec-summary`

@@ -25,7 +25,7 @@ def test_world_doc_json_shape(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    p = _run(["bash", "scripts/world_doc.sh", str(w), "--json", "--top", "10"])
+    p = _run(["bash", "scripts/world/world_doc.sh", str(w), "--json", "--top", "10"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["precedence_basis"] == "textual order (earlier lines first)"
@@ -39,7 +39,7 @@ def test_world_doc_json_shape(tmp_path: Path):
 def test_world_doc_markdown_emits_header(tmp_path: Path):
     w = tmp_path / "w.mu"
     w.write_text("[x] -> sink\n", encoding="utf-8")
-    p = _run(["bash", "scripts/world_doc.sh", str(w), "--top", "5"])
+    p = _run(["bash", "scripts/world/world_doc.sh", str(w), "--top", "5"])
     assert p.returncode == 0
     assert "# World auto-doc:" in p.stdout
     assert "Action histogram" in p.stdout
@@ -52,7 +52,7 @@ def test_world_doc_markdown_emits_header(tmp_path: Path):
 def test_world_doc_detects_real_world_file():
     # Ensure this works on an actual repo world (active fixture home)
     world = Path("mu/mu_programs/rcx_core.mu")
-    p = _run(["bash", "scripts/world_doc.sh", str(world), "--json", "--top", "5"])
+    p = _run(["bash", "scripts/world/world_doc.sh", str(world), "--json", "--top", "5"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["rule_like_count"] > 0

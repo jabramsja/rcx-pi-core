@@ -39,7 +39,7 @@ def engine_projections() -> list:
 @pytest.fixture
 def engine_vectors() -> list:
     """Load test vectors from JSON fixture."""
-    vectors_path = Path(__file__).parent / "fixtures" / "rcx_engine_vectors.json"
+    vectors_path = Path(__file__).parents[1] / "fixtures" / "rcx_engine_vectors.json"
     with open(vectors_path) as f:
         data = json.load(f)
     return data["vectors"]

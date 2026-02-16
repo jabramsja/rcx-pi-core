@@ -19,7 +19,7 @@ def test_mutation_sandbox_does_not_crash_when_world_score_returns_rc1(tmp_path: 
 
     # Confirm world_score can return rc=1 with max-steps=3
     p = _run(
-        ["bash", "scripts/world_score.sh", str(trace), "--json", "--max-steps", "3"]
+        ["bash", "scripts/world/world_score.sh", str(trace), "--json", "--max-steps", "3"]
     )
     assert p.returncode == 1
 
@@ -32,7 +32,7 @@ def test_mutation_sandbox_does_not_crash_when_world_score_returns_rc1(tmp_path: 
     p2 = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--out-dir",
             str(out),

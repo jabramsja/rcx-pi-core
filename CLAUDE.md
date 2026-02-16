@@ -46,7 +46,7 @@ If Python provides the control flow, emergence might be a Python artifact. True 
 - Any change to projection behavior in Python MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Run `node mu/host/js/eval_step.js` to verify JS parity after Python changes
-- **ACTUAL verification:** `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison` runs same inputs through BOTH substrates
+- **ACTUAL verification:** `tests/parity/test_js_parity_automated.py::test_actual_cross_substrate_comparison` runs same inputs through BOTH substrates
 
 ---
 

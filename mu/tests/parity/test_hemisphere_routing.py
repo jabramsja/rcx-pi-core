@@ -28,7 +28,7 @@ from tests.hemisphere_helpers import (
 )
 
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 
 

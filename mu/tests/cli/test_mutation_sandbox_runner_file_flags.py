@@ -18,7 +18,7 @@ def test_mutation_sandbox_runner_none_still_works(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--out-dir",
             str(out),
@@ -44,7 +44,7 @@ def test_mutation_sandbox_runner_trace_cli_does_not_crash(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--out-dir",
             str(out),

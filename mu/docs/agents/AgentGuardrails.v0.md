@@ -325,7 +325,7 @@ When reviewing any code change:
 FINDING: Cross-substrate parity
 PYTHON_FILE: /path/to/python_impl.py
 JS_FILE: mu/host/js/eval_step.js
-PARITY_TEST: tests/test_js_parity_automated.py::[TestClass]::[test_name]
+PARITY_TEST: tests/parity/test_js_parity_automated.py::[TestClass]::[test_name]
 VERIFIED: Yes/No
 ```
 

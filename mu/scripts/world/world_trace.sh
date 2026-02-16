@@ -6,6 +6,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # Stable invocation surface:
-#   scripts/world_trace.sh --help
-#   scripts/world_trace.sh --max-steps 50 --json --pretty < world.json
+#   scripts/world/world_trace.sh --help
+#   scripts/world/world_trace.sh --max-steps 50 --json --pretty < world.json
 exec python3 -m rcx_pi.worlds.world_trace_cli "$@"

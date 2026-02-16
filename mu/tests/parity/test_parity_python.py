@@ -27,7 +27,7 @@ from tests.conftest import run_until_done  # Use shared implementation (Expert f
 
 
 # Load test vectors
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+FIXTURES_DIR = Path(__file__).parents[1] / "fixtures"
 VECTORS_FILE = FIXTURES_DIR / "parity_vectors.json"
 
 

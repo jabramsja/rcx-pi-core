@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 FIXTURE = (
     ROOT / "tests" / "fixtures" / "world_trace" / "pingpong.world_trace.v1.canon.json"
 )
