@@ -222,7 +222,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - SHA256 checksum verification for seed files (match.v1.json, subst.v1.json)
   - Structure validation (meta, projections keys, required fields)
   - Projection ID verification (expected IDs present, wrap is last)
-  - 27 tests in `tests/test_seed_integrity.py`
+  - 27 tests in `tests/engine/test_seed_integrity.py`
   - Security foundation: seeds now verified on load (adversary finding closed)
 - Phase 6a: Lookup as Mu Projections (PR #158):
   - Added `subst.lookup.found` and `subst.lookup.next` projections to subst.v1.json
@@ -236,7 +236,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Handles edge cases: nested dicts in key position, circular references, primitives
   - Removed 2 `@host_builtin` decorators from match_mu.py (is_kv_pair_linked, is_dict_linked_list)
   - DEBT_THRESHOLD: 21 → 19 (ratchet tightened)
-  - 26 new tests in `tests/test_classify_mu.py`
+  - 26 new tests in `tests/engine/test_classify_mu.py`
 - Boot0 Architecture v0.4 (`mu/docs/core/Boot0Architecture.v0.md`) - 9-agent reviewed 2026-01-31:
   - Hex0-inspired staged bootstrap design: Boot0 → Boot1 → Boot2
   - 4 irreducible bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal eliminated via Level 1 Content-Addressed Mu)
@@ -248,7 +248,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all 8 production call sites (eval_seed 2, step_mu 5, projection_runner 1)
   - Bootstrap primitives: 5 → 4. `mu_equal` retained as convenience wrapper only.
   - JS parity: `muHashCached()` added, `muEqual()` delegates. 6 JS call sites updated.
-  - Paxos e2e pipeline test: `tests/test_paxos_end_to_end.py` (6 tests) validates deadlock metabolization
+  - Paxos e2e pipeline test: `tests/integration/test_paxos_end_to_end.py` (6 tests) validates deadlock metabolization
   - Historical: 9-agent consensus (2026-01-31) confirmed json.dumps IS structural equality for JSON data
   - Parity fuzzer: `tests/fuzz/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
 - Testing Tier System (2026-01-28):

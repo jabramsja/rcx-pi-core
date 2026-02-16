@@ -330,27 +330,27 @@ Grounding tests fail if seed files change. This prevents doc drift.
 ### Phase 4a: Match as Mu ✅ COMPLETE
 - Match projections in `mu/substrate/match.v1.json`
 - Implementation: `rcx_pi/match_mu.py`
-- Parity tests in `tests/test_match_parity.py`
+- Parity tests in `tests/parity/test_match_parity.py`
 
 ### Phase 4b: Substitute as Mu ✅ COMPLETE
 - Substitute projections in `mu/substrate/subst.v1.json`
 - Implementation: `rcx_pi/subst_mu.py`
-- Parity tests in `tests/test_subst_parity.py`
+- Parity tests in `tests/parity/test_subst_parity.py`
 
 ### Phase 4c: Binding Lookup ✅ COMPLETE
 - Integrated into substitute projections (no separate seed needed)
 - Lookup done via linked list traversal in subst projections
 
 ### Phase 4d: Integration Testing ✅ COMPLETE
-- Integration tests in `tests/test_apply_mu_integration.py`
+- Integration tests in `tests/integration/test_apply_mu_integration.py`
 - Structural tests in `tests/structural/test_apply_mu_grounding.py`
 - Fuzzer tests in `tests/fuzz/test_apply_mu_fuzzer.py`
 
 ### Phase 5: Self-Hosting ✅ COMPLETE
 - `rcx_pi/step_mu.py`: `apply_mu()`, `step_mu()`, `run_mu()`
 - step_mu uses match_mu + subst_mu (Mu projections, not Python recursion)
-- Parity tests in `tests/test_step_mu_parity.py`
-- Self-hosting tests in `tests/test_self_hosting_v0.py`
+- Parity tests in `tests/parity/test_step_mu_parity.py`
+- Self-hosting tests in `tests/integration/test_self_hosting_v0.py`
 - Note: Operations (match/subst) are self-hosted; kernel loop is still Python (see STATUS.md L1/L2)
 
 ### Phase 6a: Lookup as Mu Projections ✅ COMPLETE
@@ -362,7 +362,7 @@ Grounding tests fail if seed files change. This prevents doc drift.
 - Created `mu/utilities/classify.v1.json` for linked list classification
 - Created `rcx_pi/selfhost/classify_mu.py`
 - Classification distinguishes dict-encoding from list-encoding
-- Tests in `tests/test_classify_mu.py`
+- Tests in `tests/engine/test_classify_mu.py`
 
 ### Phase 6c: Type Tags and Iterative Normalization ✅ COMPLETE
 - `normalize_for_match()` and `denormalize_from_match()` are now iterative
@@ -505,7 +505,7 @@ Phase 5 complete:
 - [x] Same projections run on Python AND JavaScript
 - [x] Step 1: Fix JS security gaps (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair)
 - [x] Step 2: Cross-substrate parity tests (`tests/test_parity_python.py`, 20 vectors)
-- [x] Step 3: Phase 8d trace model in Python (`tests/test_structural_trace.py`, 14 tests)
+- [x] Step 3: Phase 8d trace model in Python (`tests/engine/test_structural_trace.py`, 14 tests)
 - [x] Step 4: Port trace to JS POC (`runStructural()`, 5 tests)
 - [x] Step 5: EngineNews demo on both substrates (structural, 2026-01-30)
 
@@ -544,7 +544,7 @@ EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.j
 
 **Test files:**
 - `tests/test_parity_python.py` - 20 parity + 3 security tests
-- `tests/test_structural_trace.py` - 14 structural trace tests
+- `tests/engine/test_structural_trace.py` - 14 structural trace tests
 - `tests/fixtures/parity_vectors.json` - 23 shared test vectors
 
 **What L3 proves:** All meaning is in projections. The host (Python or JS) provides only mechanical execution via the 4 bootstrap primitives. Emergence is structural, not a Python artifact. This is the Hex0/Forth precedent.
