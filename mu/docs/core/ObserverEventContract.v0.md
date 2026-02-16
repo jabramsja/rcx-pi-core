@@ -87,7 +87,7 @@ This ensures `sha256(canonical_json(event))` produces identical hashes on both s
 ## Parity Intent
 
 - **N6a** (this document): Defines the event schema, field invariants, ordering rules, and canonical serialization contract. Grounding tests validate schema shape and canonicalization determinism using test-local fixtures only.
-- **N6b** (IMPLEMENTED): Cross-substrate isomorphic stream comparison. `run_engine_pipeline` in both `step_mu.py` and `eval_step.js` accepts an optional `observer` parameter (list/array). When provided, events are appended at each mandatory event point. JS JSON API exposes `observer: true` on `run_engine_pipeline` and `run_engine_with_routing` actions, returning `observer_events` in the response. Tests in `tests/test_js_parity_automated.py::TestObserverIsomorphism` verify pairwise equality of normalized event streams.
+- **N6b** (IMPLEMENTED): Cross-substrate isomorphic stream comparison. `run_engine_pipeline` in both `step_mu.py` and `eval_step.js` accepts an optional `observer` parameter (list/array). When provided, events are appended at each mandatory event point. JS JSON API exposes `observer: true` on `run_engine_pipeline` and `run_engine_with_routing` actions, returning `observer_events` in the response. Tests in `tests/parity/test_js_parity_automated.py::TestObserverIsomorphism` verify pairwise equality of normalized event streams.
 
 ## Non-Goals
 

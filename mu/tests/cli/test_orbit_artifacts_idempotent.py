@@ -29,8 +29,8 @@ def test_build_orbit_artifacts_is_idempotent_for_tracked_files():
     )
 
     # Run twice to catch churn
-    _run(["bash", "scripts/build_orbit_artifacts.sh"])
-    _run(["bash", "scripts/build_orbit_artifacts.sh"])
+    _run(["bash", "scripts/orbit/build_orbit_artifacts.sh"])
+    _run(["bash", "scripts/orbit/build_orbit_artifacts.sh"])
 
     # Tracked-only cleanliness must match baseline
     after_status = _git_status_tracked_only()

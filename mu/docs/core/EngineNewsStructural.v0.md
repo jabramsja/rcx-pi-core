@@ -143,7 +143,7 @@ Step 5 is COMPLETE:
 
 ### 3. Cross-Substrate Parity ✅
 - [x] Same projections produce same results on Python
-- [x] Parity tests in `tests/test_recurrence_parity.py` (24 tests)
+- [x] Parity tests in `tests/parity/test_recurrence_parity.py` (24 tests)
 - [x] Fuzzer tests in `tests/fuzz/test_recurrence_fuzzer.py`
 - [x] JS tests in `mu/host/js/eval_step.js` (v5, with Recurrence support)
 - [x] ACTUAL cross-substrate comparison via JSON API (2026-01-31)
@@ -234,7 +234,7 @@ Minimum parity tests for Step 5:
 | `engine.max_steps` | Infinite cycle | `stall: false, steps: max` | Termination |
 
 These vectors MUST pass on:
-- Python: `tests/test_recurrence_parity.py`
+- Python: `tests/parity/test_recurrence_parity.py`
 - JavaScript: `mu/host/js/eval_step.js`
 
 ---
@@ -243,7 +243,7 @@ These vectors MUST pass on:
 
 1. **Create `mu/closures/recurrence.v1.json`** with 4 initial projections
 2. **Create parity vectors** in `tests/fixtures/recurrence_vectors.json`
-3. **Create Python tests** in `tests/test_recurrence_parity.py`
+3. **Create Python tests** in `tests/parity/test_recurrence_parity.py`
 4. **Verify kernel execution** (no Python control flow in closure path)
 5. **Port to JS** and verify same results
 6. **Demo script** showing closure detection on both substrates
@@ -254,7 +254,7 @@ These vectors MUST pass on:
 
 ```bash
 # Run Recurrence parity tests
-pytest tests/test_recurrence_parity.py -v
+pytest tests/parity/test_recurrence_parity.py -v
 
 # Verify structural execution (no Python loops in closure path)
 grep -n "for.*in.*trace\|if.*in.*seen" rcx_pi/selfhost/ --include="*.py"

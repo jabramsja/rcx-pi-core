@@ -156,7 +156,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Consume execution.fix from trace (true cycle replay)
 - Closure-as-termination fixture family (`stall_at_end.v2.jsonl`, `stall_then_fix_then_end.v2.jsonl`)
 - IndependentEncounter pathological fixtures + tests
-- Recurrence spec stress-test harness (`tests/test_recurrence_spec_v0.py`)
+- Recurrence spec stress-test harness (`tests/integration/test_recurrence_spec_v0.py`)
 - CI audit gate (`tools/audit_all.sh` + `.github/workflows/audit_all.yml`)
 - Closure Evidence reporting flag + CLI test (`--print-closure-evidence`, `closure_evidence_v2()`)
 - Rule Motif Observability v0 (`rcx_pi/rule_motifs_v0.py`, `rules --print-rule-motifs`, 11 CLI tests)
@@ -304,7 +304,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Closes fuzzer gap identified by agents before Phase 7
 - rcx_engine.v1.json Test Coverage (2026-02-03):
   - Created `tests/fixtures/rcx_engine_vectors.json` - 7 test vectors
-  - Created `tests/test_rcx_engine_parity.py` - 15 tests
+  - Created `tests/parity/test_rcx_engine_parity.py` - 15 tests
   - All 6 engine projections now tested (grounding agent finding addressed)
   - Note (historical, superseded by Round 16E): at this stage rcx_engine was `design_only`; engine projections are now in production via `run_engine_pipeline()`.
 - 9-Agent Rigorous Tooling Hardening (2026-02-08, PR #219):
@@ -404,7 +404,7 @@ Current Exhaustion Layer: META_CIRCULAR
   - Engine exception policy Option B (synthesized routable terminal → sink) designed with sink-safety invariants ✓ 8-field synthesized shape, 5 sink-safety invariants (S1-S5), 6 adversarial test specs (ADV-B1 to ADV-B6), 4 code touchpoints verified, enablement guard defined
   - Explicit VECTOR → NEXT promotion in this file with rationale before any implementation
 
-**EngineNew gap contracts** (locked by `tests/test_engine_cycle_mapping.py::TestGapRegistry`):
+**EngineNew gap contracts** (locked by `tests/structural/test_engine_cycle_mapping.py::TestGapRegistry`):
 - ~~GAP-04-FIX~~ — **CLOSED** (2026-02-13, Round 15I). E1–E5 complete. `fix.v1.json` (6 projections) + `rcx_engine.v1.json` (10 projections, 3 fix-dispatch). 19 invariant tests, 4 cross-substrate parity tests. EngineNew 9/10 structural.
 - ~~GAP-10-LOOP~~ — **CLOSED** (2026-02-14, Round 16E). E1–E4 complete. Trampoline makes loop-back decision structural (11 projections). 10/10 EngineNew steps structural. Boot1 Recursive Loop Contract remains open as parallel VECTOR item for L4 path.
 

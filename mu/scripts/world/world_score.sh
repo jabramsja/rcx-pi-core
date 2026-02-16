@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/world_score.sh <trace.json|-> [--json] [--max-steps N] [--loop]
+  scripts/world/world_score.sh <trace.json|-> [--json] [--max-steps N] [--loop]
 
 Purpose:
   Compute simple, deterministic "world scoring" metrics from trace-shaped JSON emitted by RCX tooling.

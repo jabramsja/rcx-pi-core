@@ -14,7 +14,7 @@ def test_python_entrypoints_schema_triplets_are_parseable():
         run_schema_triplet(
             [
                 "python3",
-                "scripts/snapshot_merge.py",
+                "scripts/snapshot/snapshot_merge.py",
                 "--schema",
                 "A",
                 "B",

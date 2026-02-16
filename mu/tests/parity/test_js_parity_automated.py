@@ -19,7 +19,7 @@ from hypothesis import given, settings, HealthCheck
 from hypothesis import strategies as st
 
 # Root directory of the project
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parents[2]
 
 
 class TestJSTestSuitePasses:

@@ -134,7 +134,7 @@ The following capabilities are **stable, deterministic, and enforced by gate**.
 All are implemented **outside the frozen kernel** as tools, fixtures, or validation layers.
 
 - **Deterministic orbit artifact generation**
-  - `scripts/build_orbit_artifacts.sh` is idempotent for tracked files
+  - `scripts/orbit/build_orbit_artifacts.sh` is idempotent for tracked files
   - Re-running does not dirty the working tree
 
 - **Orbit provenance semantics**
@@ -162,24 +162,24 @@ If `scripts/green_gate.sh` finishes without errors, RCX-π Core is healthy.
 
 ## JSON diff / inspection
 
-Use `scripts/json_diff.sh` to compare JSON outputs semantically (object key order ignored; arrays remain order-sensitive).
+Use `scripts/snapshot/json_diff.sh` to compare JSON outputs semantically (object key order ignored; arrays remain order-sensitive).
 
 Examples:
 - Compare full docs (ignoring optional schema metadata):
-  - `scripts/json_diff.sh a.json b.json --ignore kind,schema_version`
+  - `scripts/snapshot/json_diff.sh a.json b.json --ignore kind,schema_version`
 - Compare only the frozen minimum field:
-  - `scripts/json_diff.sh a.json b.json --only result`
+  - `scripts/snapshot/json_diff.sh a.json b.json --only result`
 
 ## Rule precedence visualization
 
-Use `scripts/rule_precedence.sh` to inspect a `.mu` world file and list rule-like lines in **textual order** (earlier lines first).
+Use `scripts/world/rule_precedence.sh` to inspect a `.mu` world file and list rule-like lines in **textual order** (earlier lines first).
 This is a tooling inspector only; it does not change runtime semantics.
 
 Examples:
 - Show the first 25 rules detected:
-  - `scripts/rule_precedence.sh mu/mu_programs/rcx_core.mu --top 25`
+  - `scripts/world/rule_precedence.sh mu/mu_programs/rcx_core.mu --top 25`
 - Emit a stable JSON summary:
-  - `scripts/rule_precedence.sh mu/mu_programs/rcx_core.mu --json`
+  - `scripts/world/rule_precedence.sh mu/mu_programs/rcx_core.mu --json`
 
 ## CLI Quickstart
 See `mu/docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.

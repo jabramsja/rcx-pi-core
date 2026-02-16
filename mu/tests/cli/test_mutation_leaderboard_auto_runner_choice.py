@@ -16,7 +16,7 @@ def test_leaderboard_auto_uses_none_for_world_like_mu(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_leaderboard_clean.sh",
+            "scripts/mutation/mutation_leaderboard_clean.sh",
             "--world",
             str(w),
             "--seeds",

@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/mutation_sandbox.sh <world.mu>
+  scripts/mutation/mutation_sandbox.sh <world.mu>
     [--seed N]
     [--mutations K]
     [--out-dir DIR]
@@ -20,7 +20,7 @@ Notes:
   - This script’s "trace-cli" runner treats input as a WORLD (.mu rules).
   - It stages baseline/mutated into mu/mu_programs and calls:
         python -m rcx_pi.worlds.world_trace_cli <WORLD_NAME> <SEEDTERM> --json
-  - Scoring is done via scripts/world_score.sh reading trace JSON from stdin.
+  - Scoring is done via scripts/world/world_score.sh reading trace JSON from stdin.
 USAGE
 }
 
@@ -142,7 +142,7 @@ def run_trace_and_score(world_name: str, label: str) -> dict:
     (run_dir / f"trace_{label}.stderr.txt").write_text((p.stderr or "") + "\n", encoding="utf-8")
 
     sp = subprocess.run(
-        ["scripts/world_score.sh", "-", "--json"],
+        ["scripts/world/world_score.sh", "-", "--json"],
         input=trace_payload,
         capture_output=True,
         text=True,

@@ -9,7 +9,7 @@ DOT_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.dot"
 SVG_FIXTURE="mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
 INDEX_HTML="mu/docs/fixtures/index.html"
 
-GEN_DOT="./scripts/orbit_engine_run_to_dot.py"
+GEN_DOT="./scripts/orbit/orbit_engine_run_to_dot.py"
 
 [[ -f "$ENGINE_RUN_FIXTURE" ]] || { echo "missing engine-run fixture: $ENGINE_RUN_FIXTURE" >&2; exit 1; }
 [[ -x "$GEN_DOT" ]] || { echo "missing generator (not executable): $GEN_DOT" >&2; exit 1; }
@@ -26,7 +26,7 @@ fi
 dot -Tsvg "$DOT_FIXTURE" > "$SVG_FIXTURE"
 
 # Normalize SVG bytes (Graphviz may emit version-specific metadata)
-python3 scripts/normalize_graphviz_svg.py "mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
+python3 scripts/orbit/normalize_graphviz_svg.py "mu/docs/fixtures/orbit_from_engine_run_rcx_core_v1.svg"
 echo "OK: wrote $SVG_FIXTURE"
 
 echo "== 3/4) write mu/docs/fixtures/index.html =="
@@ -115,7 +115,7 @@ python3 -m http.server 8000</code></pre>
   <div class="box">
     <strong>Build</strong>
     <div class="hint">From repo root:</div>
-    <pre><code>./scripts/build_orbit_artifacts.sh</code></pre>
+    <pre><code>./scripts/orbit/build_orbit_artifacts.sh</code></pre>
   </div>
 
   <script src="orbit_drilldown_v1.js"></script>

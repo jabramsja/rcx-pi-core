@@ -7,7 +7,7 @@ import pytest
 
 
 def _repo_root() -> Path:
-    return Path(__file__).parents[1]
+    return Path(__file__).parents[2]
 
 
 def _load_schema() -> dict:

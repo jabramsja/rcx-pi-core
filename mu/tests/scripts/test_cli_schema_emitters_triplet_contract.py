@@ -54,7 +54,7 @@ def test_schema_emitters_are_strict_triplets():
         _run(
             [
                 "python3",
-                "scripts/snapshot_merge.py",
+                "scripts/snapshot/snapshot_merge.py",
                 "--schema",
                 "A",
                 "B",

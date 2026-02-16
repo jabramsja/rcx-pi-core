@@ -27,8 +27,8 @@ import pytest
 from rcx_pi.selfhost.mu_type import mu_hash
 
 
-VECTORS_PATH = Path(__file__).parent / "fixtures" / "hashing_vectors.json"
-JS_HASH_SCRIPT = Path(__file__).parent.parent / "mu" / "host" / "js" / "hash_vectors.js"
+VECTORS_PATH = Path(__file__).parents[1] / "fixtures" / "hashing_vectors.json"
+JS_HASH_SCRIPT = Path(__file__).parents[2] / "mu" / "host" / "js" / "hash_vectors.js"
 
 
 def load_vectors():

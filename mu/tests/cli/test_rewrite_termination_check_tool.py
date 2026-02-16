@@ -14,7 +14,7 @@ def test_term_check_list_trace_infers_steps(tmp_path: Path):
     t.write_text(
         json.dumps([{"state": "a"}, {"state": "b"}, {"state": "c"}]), encoding="utf-8"
     )
-    p = _run(["bash", "scripts/rewrite_termination_check.sh", str(t), "--json"])
+    p = _run(["bash", "scripts/world/rewrite_termination_check.sh", str(t), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["steps_inferred"] == 3
@@ -26,7 +26,7 @@ def test_term_check_embedded_steps(tmp_path: Path):
         json.dumps({"trace": [{"x": 1}, {"x": 2}], "halt_reason": "completed"}),
         encoding="utf-8",
     )
-    p = _run(["bash", "scripts/rewrite_termination_check.sh", str(t), "--json"])
+    p = _run(["bash", "scripts/world/rewrite_termination_check.sh", str(t), "--json"])
     assert p.returncode == 0
     obj = json.loads(p.stdout)
     assert obj["steps_inferred"] == 2
@@ -39,7 +39,7 @@ def test_term_check_max_steps_violation(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/rewrite_termination_check.sh",
+            "scripts/world/rewrite_termination_check.sh",
             str(t),
             "--json",
             "--max-steps",
@@ -57,7 +57,7 @@ def test_term_check_loop_detection(tmp_path: Path):
         json.dumps([{"state": "a"}, {"state": "b"}, {"state": "a"}]), encoding="utf-8"
     )
     p = _run(
-        ["bash", "scripts/rewrite_termination_check.sh", str(t), "--json", "--loop"]
+        ["bash", "scripts/world/rewrite_termination_check.sh", str(t), "--json", "--loop"]
     )
     assert p.returncode == 0
     obj = json.loads(p.stdout)

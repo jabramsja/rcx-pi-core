@@ -18,7 +18,7 @@ def test_runner_omega_cli_is_skipped_for_world_like_mu_file(tmp_path: Path):
     p = _run(
         [
             "bash",
-            "scripts/mutation_sandbox.sh",
+            "scripts/mutation/mutation_sandbox.sh",
             str(w),
             "--out-dir",
             str(out),
