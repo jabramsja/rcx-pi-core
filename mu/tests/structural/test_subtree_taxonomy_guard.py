@@ -99,9 +99,9 @@ class TestSubtreeTaxonomyGuard:
 
 
 # Ratchet ceiling: root-level test_*.py count can only decrease.
-# Wave1 baseline: 74. Wave2 moved 50 → ceiling 24.
+# Wave1 baseline: 74. Wave2 moved 50 → ceiling 24. Wave3 moved 6 → ceiling 18.
 # New test files MUST go into subdirectories.
-ROOT_LEVEL_TEST_FILE_CEILING = 24
+ROOT_LEVEL_TEST_FILE_CEILING = 18
 
 
 def _count_root_level_tests(repo_root: Path) -> list[str]:

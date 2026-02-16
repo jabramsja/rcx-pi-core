@@ -152,7 +152,7 @@ pytest $PARALLEL_FLAG -q \
     tests/engine/test_structural_trace.py \
     tests/fuzz/test_kernel_security_fuzzer.py \
     tests/engine/test_normalization_roundtrip.py \
-    tests/test_debt_enforcement.py \
+    tests/tools/test_debt_enforcement.py \
     tests/parity/test_eval_seed_adversary.py \
     tests/integration/test_self_hosting_v0.py \
     tests/engine/test_phase8b_grounding_gaps.py \

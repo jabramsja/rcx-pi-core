@@ -22,7 +22,7 @@ from rcx_pi.selfhost.step_mu import (
     run_algorithm_meta_circular,
 )
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parents[2]
 
 
 # ---------------------------------------------------------------------------
