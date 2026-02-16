@@ -10,6 +10,7 @@ The allowlist count can only stay the same or decrease (ratchet rule).
 This test fails CI when:
 1. A new file appears at subtree root that is not allowlisted.
 2. The allowlist count exceeds the ratchet ceiling.
+3. Any backup/temp artifact (*.bak, *.orig, *.rej, *~) is tracked anywhere in mu/.
 """
 
 from __future__ import annotations
@@ -179,4 +180,62 @@ class TestRatchetMeta:
             f"SCRIPTS_RATCHET_CEILING ({SCRIPTS_RATCHET_CEILING}) must equal "
             f"SCRIPTS_ROOT_ALLOWED size ({len(SCRIPTS_ROOT_ALLOWED)}). "
             f"Update ceiling when allowlist changes."
+        )
+
+
+# ============================================================================
+# Anti-slop: reject backup/temp artifacts tracked in mu/ subtrees
+# ============================================================================
+
+# Patterns that must NEVER be committed in mu/tools/, mu/tests/, mu/scripts/
+BACKUP_PATTERNS = (".bak", ".orig", ".rej", ".swp", ".swo")
+
+GUARDED_SUBTREES = ("tools", "tests", "scripts")
+
+
+def _get_all_tracked_files(subtree: str) -> list[str]:
+    """Get ALL git-tracked files (including subdirs) in a mu/ subtree."""
+    result = subprocess.run(
+        ["git", "ls-files", f"mu/{subtree}/"],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.strip().splitlines() if line]
+
+
+class TestAntiSlopGuard:
+    """Reject tracked backup/temp artifacts in governed subtrees."""
+
+    def test_no_backup_files_in_tools(self):
+        files = _get_all_tracked_files("tools")
+        violations = [f for f in files
+                      if any(f.endswith(p) for p in BACKUP_PATTERNS)
+                      or f.endswith("~")]
+        assert not violations, (
+            f"Backup/temp files tracked in mu/tools/:\n"
+            + "\n".join(f"  - {f}" for f in violations)
+            + "\n\nRemove with: git rm <file>"
+        )
+
+    def test_no_backup_files_in_tests(self):
+        files = _get_all_tracked_files("tests")
+        violations = [f for f in files
+                      if any(f.endswith(p) for p in BACKUP_PATTERNS)
+                      or f.endswith("~")]
+        assert not violations, (
+            f"Backup/temp files tracked in mu/tests/:\n"
+            + "\n".join(f"  - {f}" for f in violations)
+            + "\n\nRemove with: git rm <file>"
+        )
+
+    def test_no_backup_files_in_scripts(self):
+        files = _get_all_tracked_files("scripts")
+        violations = [f for f in files
+                      if any(f.endswith(p) for p in BACKUP_PATTERNS)
+                      or f.endswith("~")]
+        assert not violations, (
+            f"Backup/temp files tracked in mu/scripts/:\n"
+            + "\n".join(f"  - {f}" for f in violations)
+            + "\n\nRemove with: git rm <file>"
         )
