@@ -69,3 +69,26 @@ class TestSubtreeTaxonomyGuard:
             "Tests belong under mu/tests/ (organized by domain).\n"
             f"Violations: {violations}"
         )
+
+    def test_no_root_level_fuzzers(self):
+        """Fuzzer test files (test_*_fuzzer.py) must not be at mu/tests/ root level."""
+        result = subprocess.run(
+            ["git", "ls-files", "mu/tests/"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        violations = []
+        for path in result.stdout.strip().splitlines():
+            if not path:
+                continue
+            # Only check root-level files (no subdirectory)
+            parts = path.split("/")
+            if len(parts) != 3:  # mu/tests/filename.py = 3 parts
+                continue
+            name = parts[2]
+            if name.endswith("_fuzzer.py") and name.startswith("test_"):
+                violations.append(path)
+        assert not violations, (
+            "Fuzzer test files found at mu/tests/ root level.\n"
+            "Move *_fuzzer.py files to mu/tests/fuzz/ for organization.\n"
+            f"Violations: {violations}"
+        )
