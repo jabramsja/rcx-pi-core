@@ -28,7 +28,8 @@ from tests.hemisphere_helpers import (
 )
 
 
-ROOT = Path(__file__).parents[2]
+# Root directory of the project (symlink-safe — see tests/repo_root.py)
+from tests.repo_root import REPO_ROOT as ROOT
 FIXTURES = ROOT / "tests" / "fixtures"
 
 
