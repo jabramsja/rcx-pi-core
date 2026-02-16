@@ -52,10 +52,10 @@ If a task is not listed here, it is NOT to be implemented.
 - **L3 Parity Rule**: Changes to `mu/host/python/rcx_pi/selfhost/` (or via symlink `rcx_pi/selfhost/`) or `mu/` MUST be mirrored in `mu/host/js/eval_step.js`.
   - Run `node mu/host/js/eval_step.js` to verify all JS tests pass
   - Run `./tools/checks/check_js_debt.sh` to verify JS debt markers match Python
-  - Run `./tools/checks/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
-  - Run `./tools/checks/ast_police_js.sh` to catch JS patterns that bypass grep
+  - Run `./tools/checks/linters/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
+  - Run `./tools/checks/linters/ast_police_js.sh` to catch JS patterns that bypass grep
   - Run `./tools/checks/check_test_theater_js.sh` to catch vacuous JS assertions
-  - Run `./tools/checks/seed_police.sh` to verify seed integrity and no host leakage
+  - Run `./tools/checks/linters/seed_police.sh` to verify seed integrity and no host leakage
   - New seeds must be loaded in both Python and JavaScript
   - Parity vectors must pass on both substrates before merge
 - **Pre-commit doc review**: Before committing changes to `rcx_pi/` or `mu/`:
@@ -219,8 +219,8 @@ Items here are implemented and verified under current invariants. Changes requir
   - Debt dashboard (`tools/debt_dashboard.sh`)
   - Canonical pre-commit local gate (`tools/pre-commit-doc-check`)
   - Projection test coverage (`rcx_pi/projection_coverage.py`)
-  - Agent memory across sessions (`tools/agent_memory.py`)
-  - Trace visualization (`tools/trace_viewer.py`)
+  - Agent memory across sessions (`tools/runners/agent_memory.py`)
+  - Trace visualization (`tools/analysis/trace_viewer.py`)
 - Seed Integrity Verification (PR #157):
   - SHA256 checksum verification for seed files (match.v1.json, subst.v1.json)
   - Structure validation (meta, projections keys, required fields)

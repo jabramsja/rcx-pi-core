@@ -10,7 +10,7 @@ _tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent.parent))
 
-from tools.agent_runner_common import (
+from tools.runners.agent_runner_common import (
     StandardFileRunnerConfig,
     exit_with_code,
     finalize_standard_result,
@@ -19,7 +19,7 @@ from tools.agent_runner_common import (
     print_standard_runner_header,
     run_standard_file_agent,
 )
-from tools.shared_agent_utils import (
+from tools.runners.shared_agent_utils import (
     load_agent_prompt_with_contract,
 )
 

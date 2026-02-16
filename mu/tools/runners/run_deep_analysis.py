@@ -30,7 +30,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from tools.shared_agent_utils import (
+from tools.runners.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
     GOOD_VERDICTS,
     build_sdk_options,

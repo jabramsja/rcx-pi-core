@@ -9,9 +9,9 @@ Given a file (or file:line), shows:
 4. Downstream impact chain
 
 Usage:
-    python tools/impact.py rcx_pi/selfhost/step_mu.py
-    python tools/impact.py rcx_pi/selfhost/step_mu.py:50
-    python tools/impact.py --full  # Full dependency graph
+    python tools/docs/impact.py rcx_pi/selfhost/step_mu.py
+    python tools/docs/impact.py rcx_pi/selfhost/step_mu.py:50
+    python tools/docs/impact.py --full  # Full dependency graph
 """
 
 import argparse
@@ -309,7 +309,7 @@ def format_impact_report(impact: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(
         description="RCX Impact Analyzer",
-        epilog="Example: python tools/impact.py rcx_pi/selfhost/step_mu.py:50"
+        epilog="Example: python tools/docs/impact.py rcx_pi/selfhost/step_mu.py:50"
     )
     parser.add_argument(
         "target",

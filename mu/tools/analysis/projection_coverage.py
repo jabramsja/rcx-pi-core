@@ -9,7 +9,7 @@ Usage:
     PYTHONHASHSEED=0 RCX_PROJECTION_COVERAGE=1 pytest -q
 
     # Then view the report
-    python tools/projection_coverage.py
+    python tools/analysis/projection_coverage.py
 
 Or use as a pytest plugin:
     pytest --projection-coverage

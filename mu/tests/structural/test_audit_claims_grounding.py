@@ -228,7 +228,7 @@ class TestUnderscoreKeyAudit:
 
     def test_audit_all_excludes_kernel_seeds(self):
         """audit_all.sh must exclude kernel/engine seeds from underscore check."""
-        script = REPO_ROOT / "tools" / "audit_all.sh"
+        script = REPO_ROOT / "tools" / "audits" / "audit_all.sh"
         content = script.read_text()
 
         for seed in self.KERNEL_ENGINE_SEEDS:
@@ -239,13 +239,13 @@ class TestUnderscoreKeyAudit:
 
     def test_precommit_uses_seed_police_for_mu_json(self):
         """Active pre-commit hook must run seed police for staged mu/*.json files."""
-        script = REPO_ROOT / "tools" / "pre-commit-doc-check"
+        script = REPO_ROOT / "tools" / "hooks" / "pre-commit-doc-check"
         content = script.read_text()
 
         assert "STAGED_SEEDS=$(echo \"$STAGED_FILES\" | grep -E '^mu/.*\\.json$' || true)" in content, (
             "pre-commit-doc-check must detect staged mu/*.json files"
         )
-        assert "./tools/checks/seed_police.sh" in content, (
+        assert "./tools/checks/linters/seed_police.sh" in content, (
             "pre-commit-doc-check must run seed_police.sh when mu seeds are staged"
         )
 

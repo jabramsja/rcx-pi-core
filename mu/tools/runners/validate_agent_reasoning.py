@@ -11,9 +11,9 @@ Enforcement:
 3. Evidence Density - Claims must have proportional evidence
 
 Usage:
-    python tools/validate_agent_reasoning.py < agent_output.txt
-    python tools/validate_agent_reasoning.py --file output.txt
-    python tools/validate_agent_reasoning.py --json  # Machine-readable
+    python tools/runners/validate_agent_reasoning.py < agent_output.txt
+    python tools/runners/validate_agent_reasoning.py --file output.txt
+    python tools/runners/validate_agent_reasoning.py --json  # Machine-readable
 
 Created: 2026-02-04
 """
@@ -26,9 +26,9 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 
 try:
-    from tools.shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, APPROVAL_VERDICTS, extract_verdict_secure
+    from tools.runners.shared_agent_utils import AGENT_PASS_VERDICTS, AGENT_VERDICTS, APPROVAL_VERDICTS, extract_verdict_secure
 except ModuleNotFoundError:
-    # Allow direct execution: python tools/validate_agent_reasoning.py
+    # Allow direct execution: python tools/runners/validate_agent_reasoning.py
     _tools_dir = Path(__file__).resolve().parent
     if str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))

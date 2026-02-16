@@ -50,9 +50,9 @@ class TestAgentToolingSmoke:
         "runners/run_ci_review.py",
         "runners/run_interactive.py",
         "runners/run_skeptic.py",
-        "validate_agent_compliance.py",
-        "validate_agent_reasoning.py",
-        "agent_memory.py",
+        "runners/validate_agent_compliance.py",
+        "runners/validate_agent_reasoning.py",
+        "runners/agent_memory.py",
     ])
     def test_tool_help_works(self, script: str):
         """Core tools should show help without crashing.
@@ -105,7 +105,7 @@ class TestAgentToolingSmoke:
     def test_agent_memory_functions_exist(self):
         """agent_memory.py should export expected functions."""
         # Import from explicit path to avoid tests/tools/ shadowing
-        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "agent_memory.py")
+        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "runners" / "agent_memory.py")
 
         # Check key functions exist
         assert hasattr(agent_memory, 'store_finding')
@@ -119,7 +119,7 @@ class TestAgentToolingSmoke:
         # Import from explicit path to avoid tests/tools/ shadowing
         validate_agent_compliance = import_from_path(
             "validate_agent_compliance",
-            TOOLS_DIR / "validate_agent_compliance.py"
+            TOOLS_DIR / "runners" / "validate_agent_compliance.py"
         )
 
         assert hasattr(validate_agent_compliance, 'extract_finding_blocks')
@@ -153,7 +153,7 @@ class TestAgentMemory:
 
     def test_memory_context_includes_info_severity(self):
         """Memory should include context for files with info-severity findings."""
-        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "agent_memory.py")
+        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "runners" / "agent_memory.py")
 
         # Info severity should have weight > 0
         severity_weights = {"critical": 5, "high": 3, "medium": 2, "low": 1, "info": 0.5}
@@ -161,7 +161,7 @@ class TestAgentMemory:
 
     def test_risk_score_calculation(self):
         """Risk score function should exist and be callable."""
-        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "agent_memory.py")
+        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "runners" / "agent_memory.py")
 
         assert hasattr(agent_memory, 'get_file_risk_score')
         # Should not crash on a unique nonexistent file
@@ -171,7 +171,7 @@ class TestAgentMemory:
 
     def test_sanitize_for_prompt_exists(self):
         """Prompt sanitization function should exist."""
-        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "agent_memory.py")
+        agent_memory = import_from_path("agent_memory", TOOLS_DIR / "runners" / "agent_memory.py")
 
         assert hasattr(agent_memory, '_sanitize_for_prompt')
 
@@ -182,7 +182,7 @@ class TestAgentCompliance:
     def test_compliance_validator_runs(self):
         """Compliance validator should run without crashing."""
         result = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "validate_agent_compliance.py"), "--help"],
+            [sys.executable, str(TOOLS_DIR / "runners" / "validate_agent_compliance.py"), "--help"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -194,7 +194,7 @@ class TestAgentCompliance:
         """Compliance should detect approval without FINDING blocks."""
         validator = import_from_path(
             "validate_agent_compliance",
-            TOOLS_DIR / "validate_agent_compliance.py"
+            TOOLS_DIR / "runners" / "validate_agent_compliance.py"
         )
 
         # Approval verdict without any FINDING blocks should fail strict mode
@@ -215,7 +215,7 @@ class TestModelPolicy:
     def test_shared_model_policy_defaults_exist(self):
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         defaults = shared_agent_utils.AGENT_DEFAULT_MODELS
         assert defaults["verifier"] == "opus"
@@ -225,7 +225,7 @@ class TestModelPolicy:
     def test_resolve_agent_model_allows_override_and_rejects_typos(self):
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         resolve_agent_model = shared_agent_utils.resolve_agent_model
         assert resolve_agent_model("verifier") == "opus"
@@ -472,7 +472,7 @@ class TestVerdictExtraction:
         """Verdict should only be extracted from explicit VERDICT: markers."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -485,7 +485,7 @@ class TestVerdictExtraction:
         """Verdict should be extracted from explicit VERDICT: markers."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -502,7 +502,7 @@ class TestVerdictExtraction:
         """Substring-based verdict spoofing should be blocked."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -519,7 +519,7 @@ class TestVerdictExtraction:
         """Verdict should be extracted from bullet markdown format."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -534,7 +534,7 @@ class TestVerdictExtraction:
         """Verdict should be extracted when marker and value are on separate lines."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -549,7 +549,7 @@ class TestVerdictExtraction:
         """Verdict in bracket format [TOKEN / ...] should be extracted."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -566,7 +566,7 @@ class TestVerdictExtraction:
         """Bracket format with non-first token selected should still match first."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -584,7 +584,7 @@ Options were: [APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION]
         """Bare verdict token on a standalone line should be caught by last resort."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -603,7 +603,7 @@ SECURE
         """Deep analysis Verdict: **ALIGNED** format should be extracted."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -620,7 +620,7 @@ All claims verified.
         """Token embedded in prose near Verdict header should be extracted."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -636,7 +636,7 @@ All L1/L2/L3 claims in STATUS.md are structurally **VALID** against the actual i
         """Emoji between colon and token should not break extraction."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -652,7 +652,7 @@ All L1/L2/L3 claims verified.
         """'L3 Verdict:' and 'Final Verdict:' should be parsed."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -666,7 +666,7 @@ All L1/L2/L3 claims verified.
         """Token with trailing commentary should be caught by last resort."""
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         extract_verdict_secure = shared_agent_utils.extract_verdict_secure
 
@@ -685,7 +685,7 @@ class TestAdversaryEvidenceGate:
     def test_adversary_evidence_gate_accepts_full_proof_block(self):
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         has_proof = shared_agent_utils.adversary_has_machine_verifiable_evidence
 
@@ -707,7 +707,7 @@ VERIFIED: Yes
     def test_adversary_evidence_gate_rejects_missing_call_path(self):
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         has_proof = shared_agent_utils.adversary_has_machine_verifiable_evidence
 
@@ -726,7 +726,7 @@ VERIFIED: Yes
     def test_adversary_blocks_merge_requires_compliance_and_proof(self):
         shared_agent_utils = import_from_path(
             "shared_agent_utils",
-            TOOLS_DIR / "shared_agent_utils.py"
+            TOOLS_DIR / "runners" / "shared_agent_utils.py"
         )
         blocks_merge = shared_agent_utils.adversary_blocks_merge
 

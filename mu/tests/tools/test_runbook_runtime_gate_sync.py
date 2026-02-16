@@ -3,8 +3,8 @@
 from pathlib import Path
 import importlib.util
 
-PROJECT_ROOT = Path(__file__).parents[2]
-RUNBOOK_PATH = PROJECT_ROOT / "mu" / "docs" / "agents" / "AgentRunbook.v0.md"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RUNBOOK_PATH = PROJECT_ROOT / "docs" / "agents" / "AgentRunbook.v0.md"
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 
@@ -16,7 +16,7 @@ def _load_module(name: str, path: Path):
     return module
 
 
-shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "shared_agent_utils.py")
+shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "runners" / "shared_agent_utils.py")
 HARD_GATE_AGENTS = shared_agent_utils.HARD_GATE_AGENTS
 
 

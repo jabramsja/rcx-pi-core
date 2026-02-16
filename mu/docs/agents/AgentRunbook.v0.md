@@ -100,7 +100,7 @@ python tools/runners/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 - `--model` - Override model for all orchestrated agents (`opus`, `sonnet`, `haiku`)
 
 **Model governance:**
-- Canonical defaults live in `tools/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
+- Canonical defaults live in `tools/runners/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
 - `run_review.py`, `run_ci_review.py`, `run_interactive.py`, `run_deep_analysis.py`, and direct runners all resolve model from that shared policy
 - Preflight fails closed if SDK cannot honor explicit `model=...` wiring
 
@@ -189,7 +189,7 @@ python tools/runners/run_review.py rcx_pi/selfhost/ --rigorous
 | visualizer | Soft | Red flags detected |
 | advisor | None | Advisory only |
 
-Runtime source of truth: `tools/shared_agent_utils.py` (`HARD_GATE_AGENTS`).
+Runtime source of truth: `tools/runners/shared_agent_utils.py` (`HARD_GATE_AGENTS`).
 
 ## Exit Codes
 
@@ -302,19 +302,19 @@ Findings are automatically stored for regression tracking.
 
 ```bash
 # View recent findings
-python tools/agent_memory.py list
+python tools/runners/agent_memory.py list
 
 # View findings for a file
-python tools/agent_memory.py list --file step_mu.py
+python tools/runners/agent_memory.py list --file step_mu.py
 
 # Check for regressions
-python tools/agent_memory.py check-regressions
+python tools/runners/agent_memory.py check-regressions
 
 # Mark finding as fixed
-python tools/agent_memory.py fix 42
+python tools/runners/agent_memory.py fix 42
 
 # Clear old findings
-python tools/agent_memory.py clear --days 30
+python tools/runners/agent_memory.py clear --days 30
 ```
 
 **Memory is enabled by default.** The orchestrator:

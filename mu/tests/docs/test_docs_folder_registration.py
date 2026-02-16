@@ -2,7 +2,7 @@
 Docs folder registration tests.
 
 Goal: if a new docs/<subfolder>/ appears with markdown files, it must be
-explicitly registered in tools/docs_registry.json.
+explicitly registered in tools/docs/docs_registry.json.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ class TestDocsFolderRegistration:
             msg = "\nUnregistered docs/ subfolders containing markdown:\n"
             for folder in unregistered:
                 msg += f"  - docs/{folder}/\n"
-            msg += "\nUpdate tools/docs_registry.json -> docs_registered_subfolders.\n"
+            msg += "\nUpdate tools/docs/docs_registry.json -> docs_registered_subfolders.\n"
             pytest.fail(msg)
 
     def test_registry_subfolders_are_nonempty_or_removed(self):
@@ -57,5 +57,5 @@ class TestDocsFolderRegistration:
             msg = "\nRegistered docs/ subfolders with no markdown files:\n"
             for folder in stale:
                 msg += f"  - docs/{folder}/\n"
-            msg += "\nRemove stale entries from tools/docs_registry.json if intentional.\n"
+            msg += "\nRemove stale entries from tools/docs/docs_registry.json if intentional.\n"
             pytest.fail(msg)
