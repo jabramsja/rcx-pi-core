@@ -14,7 +14,7 @@ import ast
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 
 # Files allowed to import underscored names from rcx_pi
 FILE_ALLOWLIST = frozenset({
