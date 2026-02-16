@@ -67,7 +67,7 @@ html = f"""<!doctype html>
 <body>
   <div style="margin:0 0 14px 0; padding:12px; border:1px solid #eee; border-radius:12px; background:#fafafa;">
     <strong>How to view these fixtures locally</strong><br/>
-    Run: <code>./scripts/open_fixtures.sh</code> (serves <code>mu/docs/fixtures/</code> + opens <code>index.html</code>)<br/>
+    Serve <code>mu/docs/fixtures/</code> locally (e.g. <code>python3 -m http.server -d mu/docs/fixtures/</code>) and open <code>index.html</code>.<br/>
     Tip: the explorer loads <code>orbit_provenance_v1.json</code> via <code>fetch()</code>, so using a local server avoids browser restrictions.
   </div>
 
