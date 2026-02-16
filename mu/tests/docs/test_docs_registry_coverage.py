@@ -45,7 +45,7 @@ class TestDocsRegistryCoverage:
                 unknown.append(str(doc.relative_to(REPO_ROOT)))
 
         if unknown:
-            msg = "\nUnclassified markdown files (update tools/docs_registry.json):\n"
+            msg = "\nUnclassified markdown files (update tools/docs/docs_registry.json):\n"
             for path in unknown:
                 msg += f"  - {path}\n"
             pytest.fail(msg)

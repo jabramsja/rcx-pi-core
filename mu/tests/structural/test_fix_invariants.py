@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.slow]
+
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.mu_type import is_mu, mu_hash
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
@@ -166,7 +168,7 @@ class TestI2StructuralPurity:
     def test_seed_passes_seed_police(self):
         """fix.v1.json passes seed_police structural checks."""
         result = subprocess.run(
-            ["bash", "tools/checks/seed_police.sh"],
+            ["bash", "tools/checks/linters/seed_police.sh"],
             capture_output=True, text=True, cwd=str(ROOT),
         )
         assert result.returncode == 0, (

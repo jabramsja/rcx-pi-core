@@ -15,9 +15,10 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).parents[2]
-DEBT_DASHBOARD = ROOT / "tools" / "debt_dashboard.sh"
-AUDIT_SCRIPT = ROOT / "tools" / "audit_semantic_purity.sh"
+ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = ROOT.parent  # mu/ → repo root (for STATUS.md etc.)
+DEBT_DASHBOARD = ROOT / "tools" / "util" / "debt_dashboard.sh"
+AUDIT_SCRIPT = ROOT / "tools" / "audits" / "audit_semantic_purity.sh"
 
 
 def _run(args: list[str], cwd: Path | None = None, timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -175,7 +176,7 @@ def test_audit_semantic_purity_threshold_matches_status_md():
     - AST_OK bootstrap: 2 (eval_seed comprehensions)
     """
     # Verify STATUS.md has the threshold line
-    status_md = ROOT / "STATUS.md"
+    status_md = REPO_ROOT / "STATUS.md"
     status_content = status_md.read_text(encoding="utf-8")
 
     status_threshold = None
@@ -291,7 +292,7 @@ def test_debt_dashboard_json_includes_infra_count():
     assert "ast_ok_infra_ceiling" in data["debt"], "JSON should include ast_ok_infra_ceiling"
 
     # Verify ceiling matches STATUS.md (single source of truth)
-    status_md = ROOT / "STATUS.md"
+    status_md = REPO_ROOT / "STATUS.md"
     status_content = status_md.read_text(encoding="utf-8")
     status_ceiling = None
     for line in status_content.split("\n"):

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
-SCRIPT = REPO_ROOT / "tools" / "checks" / "contraband_js.sh"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SCRIPT = REPO_ROOT / "tools" / "checks" / "linters" / "contraband_js.sh"
 
 
 def run_contraband_on_js(code: str) -> subprocess.CompletedProcess:

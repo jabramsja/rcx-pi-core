@@ -95,13 +95,13 @@ Agents read STATUS.md to determine current level and apply standards accordingly
 
 ## Agents
 
-### 1. Contraband Linter (`tools/checks/contraband.sh`)
+### 1. Contraband Linter (`tools/checks/linters/contraband.sh`)
 - **Type:** Bash script (no AI)
 - **Purpose:** Block obviously dangerous patterns before waking up AI
 - **Blocks:** `eval()`, `exec()`, `globals()`, `locals()`, `pickle`, metaclass dunders
 - **Run:** Before any AI agent
 
-### 1b. AST Police (`tools/checks/ast_police.py`)
+### 1b. AST Police (`tools/checks/linters/ast_police.py`)
 - **Type:** Python AST parser (no AI)
 - **Purpose:** Catch what grep misses (set literals, multiline tricks, aliasing)
 - **Blocks:** Set comprehensions, walrus operator, yield, async, dangerous builtins via alias
@@ -205,7 +205,7 @@ All 9 review agents follow `AgentGuardrails.v0.md` which requires:
 - **Model distribution (2026-02-01):**
   - **Opus:** verifier, adversary, expert, advisor (core reasoning agents)
   - **Sonnet:** structural-proof, grounding, fuzzer, translator, visualizer (implementation agents)
-- **Source of truth:** `tools/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
+- **Source of truth:** `tools/runners/shared_agent_utils.py` (`AGENT_DEFAULT_MODELS`)
 - **Override path:** `--model` flag on orchestrators/runners; fail-closed if SDK cannot apply explicit model wiring
 
 ### Trust Model
@@ -287,8 +287,8 @@ Each agent has standards that apply at different self-hosting levels (L1/L2/L3).
 
 ```bash
 # 1. Run linters first (free, fast)
-./tools/checks/contraband.sh rcx_pi
-python3 tools/checks/ast_police.py
+./tools/checks/linters/contraband.sh rcx_pi
+python3 tools/checks/linters/ast_police.py
 
 # 2. Run ALL mandatory agents in PARALLEL via Claude Code
 # (In a single message with multiple Task tool calls)
@@ -348,8 +348,8 @@ When Agent Review runs in GitHub Actions, the run artifact `agent-review-report`
 | `tools/agents/fuzzer_prompt.md` | Chaos monkey / property-based testing |
 | `tools/agents/visualizer_prompt.md` | Mermaid diagram generator |
 | `tools/agents/advisor_prompt.md` | Strategic advisor (when stuck) |
-| `tools/checks/contraband.sh` | Dumb regex linter (no AI) |
-| `tools/checks/ast_police.py` | AST-based linter (catches what grep misses) |
+| `tools/checks/linters/contraband.sh` | Dumb regex linter (no AI) |
+| `tools/checks/linters/ast_police.py` | AST-based linter (catches what grep misses) |
 
 ## History
 

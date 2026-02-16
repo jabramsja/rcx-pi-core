@@ -11,8 +11,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent.parent
-HOOK_PATH = REPO_ROOT / "tools" / "pre-commit-doc-check"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+HOOK_PATH = REPO_ROOT / "tools" / "hooks" / "pre-commit-doc-check"
 
 
 def _extract_docs_pattern() -> str:

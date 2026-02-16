@@ -31,8 +31,8 @@ if str(_tools_dir.parent.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
-from tools.agent_runner_common import sanitize_files
-from tools.shared_agent_utils import (
+from tools.runners.agent_runner_common import sanitize_files
+from tools.runners.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
     build_sdk_options,
     extract_text_from_message,

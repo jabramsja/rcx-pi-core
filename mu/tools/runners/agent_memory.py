@@ -14,29 +14,29 @@ Features:
 
 Usage:
     # Store a finding
-    python tools/agent_memory.py store verifier "Missing @host_* markers" --file eval_seed.py --severity high
+    python tools/runners/agent_memory.py store verifier "Missing @host_* markers" --file eval_seed.py --severity high
 
     # List all findings
-    python tools/agent_memory.py list
+    python tools/runners/agent_memory.py list
 
     # Confirm a finding was accurate
-    python tools/agent_memory.py confirm 42
+    python tools/runners/agent_memory.py confirm 42
 
     # Mark a finding as false positive
-    python tools/agent_memory.py false-positive 42
+    python tools/runners/agent_memory.py false-positive 42
 
     # Show accuracy scores per agent
-    python tools/agent_memory.py accuracy
+    python tools/runners/agent_memory.py accuracy
 
     # Show risk score for a file
-    python tools/agent_memory.py risk rcx_pi/selfhost/step_mu.py
+    python tools/runners/agent_memory.py risk rcx_pi/selfhost/step_mu.py
 
     # Get context for agent prompt injection
-    python tools/agent_memory.py context rcx_pi/selfhost/step_mu.py
+    python tools/runners/agent_memory.py context rcx_pi/selfhost/step_mu.py
 
     # Pattern library
-    python tools/agent_memory.py pattern add "unmarked isinstance" --always-real
-    python tools/agent_memory.py pattern list
+    python tools/runners/agent_memory.py pattern add "unmarked isinstance" --always-real
+    python tools/runners/agent_memory.py pattern list
 """
 
 import argparse
@@ -55,7 +55,7 @@ else:
 
 # Import shared sanitization (single source of truth)
 try:
-    from tools.shared_agent_utils import sanitize_for_prompt as _shared_sanitize
+    from tools.runners.shared_agent_utils import sanitize_for_prompt as _shared_sanitize
 except ModuleNotFoundError:
     _tools_dir = Path(__file__).resolve().parent
     if str(_tools_dir) not in sys.path:

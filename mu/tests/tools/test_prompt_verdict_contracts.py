@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import importlib.util
 
-PROJECT_ROOT = Path(__file__).parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = PROJECT_ROOT / "tools" / "agents"
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
@@ -17,7 +17,7 @@ def _load_module(name: str, path: Path):
     return module
 
 
-shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "shared_agent_utils.py")
+shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "runners" / "shared_agent_utils.py")
 AGENT_VERDICTS = shared_agent_utils.AGENT_VERDICTS
 
 

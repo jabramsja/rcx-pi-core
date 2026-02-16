@@ -3,7 +3,7 @@
 from pathlib import Path
 import importlib.util
 
-PROJECT_ROOT = Path(__file__).parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 
@@ -15,8 +15,8 @@ def _load_module(name: str, path: Path):
     return module
 
 
-shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "shared_agent_utils.py")
-validate_agent_reasoning = _load_module("validate_agent_reasoning", TOOLS_DIR / "validate_agent_reasoning.py")
+shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "runners" / "shared_agent_utils.py")
+validate_agent_reasoning = _load_module("validate_agent_reasoning", TOOLS_DIR / "runners" / "validate_agent_reasoning.py")
 
 AGENT_PASS_VERDICTS = shared_agent_utils.AGENT_PASS_VERDICTS
 AGENT_VERDICTS = shared_agent_utils.AGENT_VERDICTS

@@ -5,9 +5,9 @@ Simple Trace Viewer for RCX
 Visualizes trace files in a readable format showing state transitions.
 
 Usage:
-    python tools/trace_viewer.py <trace.jsonl>
-    python tools/trace_viewer.py <trace.jsonl> --compact
-    python tools/trace_viewer.py <trace.jsonl> --filter step
+    python tools/analysis/trace_viewer.py <trace.jsonl>
+    python tools/analysis/trace_viewer.py <trace.jsonl> --compact
+    python tools/analysis/trace_viewer.py <trace.jsonl> --filter step
 """
 
 import argparse

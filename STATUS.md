@@ -106,7 +106,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE`
 - `tools/checks/check_js_debt.sh` validates markers are present
-- `tools/checks/contraband_js.sh` validates no forbidden patterns (determinism, purity)
+- `tools/checks/linters/contraband_js.sh` validates no forbidden patterns (determinism, purity)
 - Both audit scripts (fast/all) run JS debt check and contraband check
 - All semantics are in the projections (data), not the host (code)
 - The host provides only mechanical execution (the 4 bootstrap primitives)
@@ -491,7 +491,7 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 
 **Agent Guardrails (Anti-Hallucination, 2026-02-01):**
 - Created `mu/docs/agents/AgentGuardrails.v0.md` - requires FILE:LINE + code evidence
-- Created `tools/validate_agent_compliance.py` - validates agent output format
+- Created `tools/runners/validate_agent_compliance.py` - validates agent output format
 - Created `tests/tools/test_validate_agent_compliance.py` (43 tests)
 - Created `.claude/hooks/validate-agent-compliance.sh` - automatic SubagentStop hook
 - Updated all 9 agent prompts with MANDATORY verification protocol
@@ -717,7 +717,7 @@ New organized structure makes architecture visible:
    - **Option C:** Accept Python match/substitute as bootstrap primitive for algorithms
 
 **Agent Validator Enhancement (2026-02-03):**
-- `tools/validate_agent_compliance.py` now verifies CODE matches FILE:LINE
+- `tools/runners/validate_agent_compliance.py` now verifies CODE matches FILE:LINE
 - `--strict` mode (used by hook) catches fabricated citations
 - All 9 agent prompts updated with fabrication warning
 

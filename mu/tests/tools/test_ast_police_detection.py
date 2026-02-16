@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 
-REPO_ROOT = Path(__file__).parent.parent.parent
-AST_POLICE_SCRIPT = REPO_ROOT / "tools" / "checks" / "ast_police.py"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+AST_POLICE_SCRIPT = REPO_ROOT / "tools" / "checks" / "linters" / "ast_police.py"
 
 
 def run_ast_police_on_code(code: str) -> subprocess.CompletedProcess:

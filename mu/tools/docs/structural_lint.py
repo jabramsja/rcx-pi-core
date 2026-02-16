@@ -10,10 +10,10 @@ Checks for:
 - isinstance() calls in structural code
 
 Usage:
-    python tools/structural_lint.py                    # Check all files
-    python tools/structural_lint.py rcx_pi/selfhost/  # Check specific path
-    python tools/structural_lint.py --watch           # Watch mode (continuous)
-    python tools/structural_lint.py --fix-hints       # Show suggested fixes
+    python tools/docs/structural_lint.py                    # Check all files
+    python tools/docs/structural_lint.py rcx_pi/selfhost/  # Check specific path
+    python tools/docs/structural_lint.py --watch           # Watch mode (continuous)
+    python tools/docs/structural_lint.py --fix-hints       # Show suggested fixes
 """
 
 import argparse

@@ -5,7 +5,7 @@ import importlib.util
 import re
 
 
-PROJECT_ROOT = Path(__file__).parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 
@@ -18,7 +18,7 @@ def _load_module(name: str, path: Path):
 
 
 def test_contract_injected_for_all_runtime_agents():
-    shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "shared_agent_utils.py")
+    shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "runners" / "shared_agent_utils.py")
     load_prompt = shared_agent_utils.load_agent_prompt_with_contract
 
     agents = [

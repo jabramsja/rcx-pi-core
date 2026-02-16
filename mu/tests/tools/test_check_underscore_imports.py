@@ -13,10 +13,10 @@ import pytest
 # Import the checker module
 import importlib.util
 
-ROOT = Path(__file__).parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 spec = importlib.util.spec_from_file_location(
     "check_underscore_imports",
-    ROOT / "tools" / "checks" / "check_underscore_imports.py",
+    ROOT / "tools" / "checks" / "linters" / "check_underscore_imports.py",
 )
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)

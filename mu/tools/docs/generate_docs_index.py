@@ -166,8 +166,8 @@ def main():
     args = parser.parse_args()
 
     # Find docs directory
-    script_dir = Path(__file__).parent
-    docs_dir = script_dir.parent.parent / "mu" / "docs"
+    script_dir = Path(__file__).resolve().parent
+    docs_dir = script_dir.parent.parent / "docs"
 
     if not docs_dir.exists():
         print(f"Error: docs directory not found at {docs_dir}")

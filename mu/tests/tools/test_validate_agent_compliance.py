@@ -10,7 +10,7 @@ import sys
 import os
 
 # Add tools to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'tools'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..', 'tools', 'runners'))
 from validate_agent_compliance import (
     count_pattern,
     check_compliance,
@@ -767,7 +767,7 @@ class TestHookIntegration:
         """Get path to hook script."""
         import os
         return os.path.normpath(os.path.join(
-            os.path.dirname(__file__), '..', '..',
+            os.path.dirname(os.path.realpath(__file__)), '..', '..', '..',
             '.claude', 'hooks', 'validate-agent-compliance.sh'
         ))
 
@@ -776,8 +776,8 @@ class TestHookIntegration:
         """Get path to validator script."""
         import os
         return os.path.normpath(os.path.join(
-            os.path.dirname(__file__), '..', '..',
-            'tools', 'validate_agent_compliance.py'
+            os.path.dirname(os.path.realpath(__file__)), '..', '..',
+            'tools', 'runners', 'validate_agent_compliance.py'
         ))
 
     def test_hook_script_exists(self, hook_path):

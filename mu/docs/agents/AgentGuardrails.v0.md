@@ -166,7 +166,7 @@ Agent outputs are checked for:
 - Catches "rubber stamp" verdicts
 
 **Enforcement:**
-- `tools/validate_agent_reasoning.py` checks for CHECKED/NOT_CHECKED sections
+- `tools/runners/validate_agent_reasoning.py` checks for CHECKED/NOT_CHECKED sections
 - `run_review.py --rigorous` challenges approvals missing these sections
 - Approval without NOT_CHECKED = overconfident = challenged by skeptic
 

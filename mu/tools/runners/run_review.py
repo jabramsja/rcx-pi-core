@@ -71,7 +71,7 @@ except Exception as _sdk_import_error:
 
 # Import agent memory for persistent finding storage
 try:
-    from tools.agent_memory import (
+    from tools.runners.agent_memory import (
         store_finding,
         load_findings,
         get_context_for_files,
@@ -96,9 +96,9 @@ except Exception as _agent_memory_error:
         return ""
 
 # Import shared FINDING extraction (single source of truth)
-from tools.validate_agent_compliance import extract_finding_blocks
-from tools.agent_runner_common import sanitize_files
-from tools.shared_agent_utils import (
+from tools.runners.validate_agent_compliance import extract_finding_blocks
+from tools.runners.agent_runner_common import sanitize_files
+from tools.runners.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
     AGENT_PASS_VERDICTS,
     GOOD_VERDICTS,
@@ -1190,7 +1190,7 @@ Examples:
 
         print("\n📋 Validating reasoning quality...")
         try:
-            from tools.validate_agent_reasoning import validate_reasoning
+            from tools.runners.validate_agent_reasoning import validate_reasoning
         except ModuleNotFoundError:
             from validate_agent_reasoning import validate_reasoning
 

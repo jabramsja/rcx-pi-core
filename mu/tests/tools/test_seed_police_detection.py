@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
-SCRIPT = REPO_ROOT / "tools" / "checks" / "seed_police.sh"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SCRIPT = REPO_ROOT / "tools" / "checks" / "linters" / "seed_police.sh"
 
 
 def run_seed_police_on_seed(seed_data: dict, filename: str = "test.v1.json") -> subprocess.CompletedProcess:

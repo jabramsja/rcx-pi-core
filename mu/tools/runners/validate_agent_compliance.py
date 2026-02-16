@@ -9,9 +9,9 @@ This validator checks TRUTH, not just FORMAT:
 - Verifies line numbers are accurate
 
 Usage:
-    python tools/validate_agent_compliance.py < agent_output.txt
-    python tools/validate_agent_compliance.py --file agent_output.txt
-    python tools/validate_agent_compliance.py --strict  # Fail on any mismatch
+    python tools/runners/validate_agent_compliance.py < agent_output.txt
+    python tools/runners/validate_agent_compliance.py --file agent_output.txt
+    python tools/runners/validate_agent_compliance.py --strict  # Fail on any mismatch
 
 Created: 2026-02-01 (9-agent review recommendation)
 Updated: 2026-02-01 (9-agent self-review fixes: line endings, tabs, hallucination words)
@@ -31,9 +31,9 @@ from typing import NamedTuple
 from difflib import SequenceMatcher
 
 try:
-    from tools.shared_agent_utils import APPROVAL_VERDICTS, FINDING_BLOCK_PATTERN
+    from tools.runners.shared_agent_utils import APPROVAL_VERDICTS, FINDING_BLOCK_PATTERN
 except ModuleNotFoundError:
-    # Allow direct execution: python tools/validate_agent_compliance.py
+    # Allow direct execution: python tools/runners/validate_agent_compliance.py
     _tools_dir = Path(__file__).resolve().parent
     if str(_tools_dir) not in sys.path:
         sys.path.insert(0, str(_tools_dir))
