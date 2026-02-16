@@ -22,7 +22,7 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.kernel import reset_step_budget
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ============================================================================
@@ -349,3 +349,121 @@ class TestBoot1CrossSubstrateParity:
         assert trampoline_resp["success"] == recursive_resp["success"]
         if trampoline_resp["success"]:
             assert _cross_substrate_equal(trampoline_resp["result"], recursive_resp["result"])
+
+
+# ============================================================================
+# Python: S2 Budget accounting across re-entries
+# ============================================================================
+
+class TestBoot1BudgetAccounting:
+    """S2: max_engine_iterations is shared across re-entries, not reset."""
+
+    def test_budget_shared_across_reentry(self):
+        """Observer events across all depths must total <= max_engine_iterations."""
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        observer = []
+        _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            observer=observer,
+        )
+
+        # Count total step_boundary events across all depths
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        total_steps = len(step_events)
+        assert total_steps <= 20, (
+            f"S2 violated: total step_boundary events ({total_steps}) exceeds "
+            f"max_engine_iterations (20). Budget must be shared across re-entries."
+        )
+
+    def test_budget_monotonically_decreasing(self):
+        """Each recursive depth gets strictly less budget than its parent."""
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        observer = []
+        _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            observer=observer,
+        )
+
+        # Group step_boundary events by depth
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        if not step_events:
+            return  # No re-entry, nothing to verify
+
+        by_depth = {}
+        for e in step_events:
+            d = e["boot1_depth"]
+            by_depth[d] = by_depth.get(d, 0) + 1
+
+        depths = sorted(by_depth.keys())
+        if len(depths) < 2:
+            return  # No re-entry, nothing to verify
+
+        # Each deeper level must have strictly fewer iterations available
+        for i in range(len(depths) - 1):
+            parent_count = by_depth[depths[i]]
+            child_count = by_depth[depths[i + 1]]
+            # Child budget = parent_budget - parent_consumed - 1
+            # So child_count must be < parent_budget - parent_consumed
+            assert child_count <= 20 - parent_count - 1, (
+                f"Child depth {depths[i+1]} used {child_count} iterations, "
+                f"but parent depth {depths[i]} consumed {parent_count}. "
+                f"Budget should be decreasing."
+            )
+
+    def test_low_budget_exhaustion_fail_closed(self):
+        """With budget=2, re-entry that needs more should fail closed."""
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        # Give very low budget — should either complete (if no re-entry)
+        # or raise RuntimeError (budget exhausted at re-entry depth)
+        with pytest.raises(RuntimeError, match="exhausted"):
+            _run_boot1(
+                cycle_projs, initial,
+                max_steps=6, max_engine_iterations=3, max_algorithm_iterations=50,
+            )
+
+    def test_trampoline_budget_equivalent(self):
+        """Trampoline and recursive use same total budget for same input."""
+        reset_step_budget()
+        paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
+        cycle_projs = paxos_seed["projections"][:4]
+        initial = {"paxos_trigger": "start_paxos"}
+
+        trampoline_obs = []
+        trampoline_result = _run_trampoline(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            observer=trampoline_obs,
+        )
+
+        reset_step_budget()
+        boot1_obs = []
+        boot1_result = _run_boot1(
+            cycle_projs, initial,
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            observer=boot1_obs,
+        )
+
+        # Both should produce identical results
+        assert trampoline_result == boot1_result
+
+        # Both should use similar total steps (trampoline all at depth 0)
+        trampoline_steps = len([e for e in trampoline_obs if e["event_name"] == "step_boundary"])
+        boot1_steps = len([e for e in boot1_obs if e["event_name"] == "step_boundary"])
+        assert boot1_steps <= trampoline_steps + 1, (
+            f"Boot1 ({boot1_steps} steps) should not use significantly more "
+            f"steps than trampoline ({trampoline_steps} steps)"
+        )
