@@ -4,7 +4,7 @@ TYPE: DESIGN_SPEC
 LAST_VERIFIED: 2026-02-04
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: tests/test_rcx_engine_integration.py
+GROUNDING_TESTS: tests/integration/test_rcx_engine_integration.py
 
 This header enables automated doc drift detection.
 - REFERENCE: Stable definitions, rarely changes
@@ -92,9 +92,9 @@ The engine tests whether ZFC axioms emerge from structural pressure:
 - Runtime path now defaults to structural kernel bridge execution via `run_algorithm_meta_circular()`
   (`step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")`)
 - Bootstrap algorithm execution remains explicit fallback only (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
-- Integration tests verify full engine pipeline execution (trace, hash, recurrence, exhaustion). See `tests/test_engine_pipeline_verification.py` and `tests/test_engine_orchestration.py`
+- Integration tests verify full engine pipeline execution (trace, hash, recurrence, exhaustion). See `tests/engine/test_engine_pipeline_verification.py` and `tests/integration/test_engine_orchestration.py`
 
-**Test coverage:** See `tests/test_rcx_engine_integration.py` for current integration tests.
+**Test coverage:** See `tests/integration/test_rcx_engine_integration.py` for current integration tests.
 
 ## Trace Tokens and Closures
 

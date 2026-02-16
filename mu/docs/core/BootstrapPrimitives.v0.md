@@ -358,7 +358,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 **Cross-substrate parity tests (completed 2026-01-30):**
 - `tests/test_parity_python.py` - 20 parity + 3 security vectors
-- `tests/test_structural_trace.py` - 14 trace model tests
+- `tests/engine/test_structural_trace.py` - 14 trace model tests
 - `tests/fixtures/parity_vectors.json` - shared test vectors (23 total)
 
 **Role clarification:**

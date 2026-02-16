@@ -224,8 +224,8 @@ Last updated: 2026-01-25
 Status: IMPLEMENTED (observability + validation)
 Implementation:
 - `rcx_pi/rule_motifs_v0.py` (RULE_IDS, rule_motifs_v0, validate_rule_motifs_v0)
-- `tests/test_rule_motifs_cli.py` (11 tests)
-- `tests/test_rule_motif_validation_cli.py` (16 tests)
+- `tests/cli/test_rule_motifs_cli.py` (11 tests)
+- `tests/cli/test_rule_motif_validation_cli.py` (16 tests)
 Dependencies:
 - `archive/docs/MinimalNativeExecutionPrimitive.v0.md`
 - `archive/docs/bytecode/BytecodeMapping.v1.md` (archived)

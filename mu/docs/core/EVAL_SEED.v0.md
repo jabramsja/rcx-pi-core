@@ -305,5 +305,5 @@ This works. Pure structural, no arithmetic.
 **Verification:**
 - Parity tests ensure Python bootstrap and Mu projections produce identical results
 - Fuzzer tests with hypothesis profiles verify robustness
-- See `tests/test_match_v2_parity.py` and `tests/test_subst_v2_parity.py`
+- See `tests/parity/test_match_v2_parity.py` and `tests/parity/test_subst_v2_parity.py`
 - See STATUS.md for current test counts

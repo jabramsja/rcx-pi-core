@@ -136,30 +136,30 @@ echo "== 4) Core structural tests (parallel if available) =="
 pytest $PARALLEL_FLAG -q \
     tests/structural/ \
     tests/tools/ \
-    tests/test_match_parity.py \
-    tests/test_match_v2_parity.py \
-    tests/test_subst_parity.py \
-    tests/test_subst_v2_parity.py \
-    tests/test_step_mu_parity.py \
-    tests/test_kernel_projections.py \
-    tests/test_phase7c_integration.py \
-    tests/test_eval_seed_v0.py \
-    tests/test_eval_seed_parity.py \
-    tests/test_mu_type.py \
-    tests/test_seed_integrity.py \
-    tests/test_classify_mu.py \
+    tests/parity/test_match_parity.py \
+    tests/parity/test_match_v2_parity.py \
+    tests/parity/test_subst_parity.py \
+    tests/parity/test_subst_v2_parity.py \
+    tests/parity/test_step_mu_parity.py \
+    tests/engine/test_kernel_projections.py \
+    tests/integration/test_phase7c_integration.py \
+    tests/engine/test_eval_seed_v0.py \
+    tests/parity/test_eval_seed_parity.py \
+    tests/engine/test_mu_type.py \
+    tests/engine/test_seed_integrity.py \
+    tests/engine/test_classify_mu.py \
     tests/test_parity_python.py \
-    tests/test_structural_trace.py \
+    tests/engine/test_structural_trace.py \
     tests/fuzz/test_kernel_security_fuzzer.py \
-    tests/test_normalization_roundtrip.py \
+    tests/engine/test_normalization_roundtrip.py \
     tests/test_debt_enforcement.py \
-    tests/test_eval_seed_adversary.py \
-    tests/test_self_hosting_v0.py \
-    tests/test_phase8b_grounding_gaps.py \
+    tests/parity/test_eval_seed_adversary.py \
+    tests/integration/test_self_hosting_v0.py \
+    tests/engine/test_phase8b_grounding_gaps.py \
     tests/test_recurrence_parity.py \
     tests/test_exhaustion_parity.py \
     tests/test_bootstrap_structural_bridge.py \
-    tests/test_meta_circular_gate6.py \
+    tests/integration/test_meta_circular_gate6.py \
     tests/test_execution_path_verification.py \
     tests/test_js_parity_automated.py
 

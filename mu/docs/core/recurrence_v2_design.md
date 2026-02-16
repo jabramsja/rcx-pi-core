@@ -4,7 +4,7 @@ TYPE: IMPLEMENTATION
 LAST_VERIFIED: 2026-02-10
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: tests/test_recurrence_production.py
+GROUNDING_TESTS: tests/parity/test_recurrence_production.py
 -->
 # Recurrence v2 Design — Hash-Accelerated Closure Detection
 
@@ -77,4 +77,4 @@ See `tests/structural/test_seed_counts.py` for count (9 projections).
 | `rcx_pi/selfhost/step_mu.py` | `hash_trace_for_recurrence()`, allowed fields |
 | `rcx_pi/selfhost/seed_integrity.py` | Checksum + registration |
 | `mu/host/js/eval_step.js` | `muHash()` for JS parity |
-| `tests/test_recurrence_production.py` | 8 production tests (all pass) |
+| `tests/parity/test_recurrence_production.py` | 8 production tests (all pass) |
