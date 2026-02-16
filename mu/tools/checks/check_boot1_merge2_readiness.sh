@@ -72,8 +72,11 @@ G2_OUTPUT=$(PYTHONHASHSEED=0 pytest mu/tests/parity/test_boot1_shadow_parity.py 
 G2_PASSED=$(echo "$G2_OUTPUT" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")
 G2_FAILED=$(echo "$G2_OUTPUT" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo "0")
 
-if [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -gt "0" ]; then
-    gate_pass 2 "Parity: $G2_PASSED passed, 0 failed"
+G2_MIN_EXPECTED=45  # Ratchet: fast test count can only increase (58 total, 45 non-slow)
+if [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -ge "$G2_MIN_EXPECTED" ]; then
+    gate_pass 2 "Parity: $G2_PASSED passed (>=$G2_MIN_EXPECTED), 0 failed"
+elif [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -gt "0" ]; then
+    gate_fail 2 "Parity test count regressed: $G2_PASSED passed (expected >=$G2_MIN_EXPECTED)"
 else
     gate_fail 2 "Parity tests: $G2_PASSED passed, $G2_FAILED failed"
 fi
@@ -103,14 +106,12 @@ fi
 echo ""
 
 # ── G5: CI Stability ──────────────────────────────────────────
-# Need 3 consecutive green merges to main with Boot1 shadow tests
-echo "Gate 5: CI Stability"
-# Check if Boot1 tests are in CI critical test list
-if grep -q "test_boot1" mu/tools/audits/audit_fast.sh 2>/dev/null || \
-   grep -q "test_boot1" mu/tests/conftest.py 2>/dev/null; then
-    gate_pass 5 "Boot1 tests included in CI gate"
+# Boot1 tests MUST be in CRITICAL_TEST_FILES (prevents silent CI skip)
+echo "Gate 5: CI Stability (CRITICAL_TEST_FILES membership)"
+if grep -q '"test_boot1_shadow_parity.py"' tests/conftest.py 2>/dev/null; then
+    gate_pass 5 "test_boot1_shadow_parity.py in CRITICAL_TEST_FILES"
 else
-    gate_skip 5 "CI inclusion" "verify Boot1 tests run in green_gate CI"
+    gate_fail 5 "test_boot1_shadow_parity.py NOT in CRITICAL_TEST_FILES (CI vulnerability)"
 fi
 echo ""
 
@@ -137,8 +138,15 @@ if ! grep -q "BOOT1_MAX_REENTRY_DEPTH" mu/host/js/eval_step.js 2>/dev/null; then
     gate_fail 6 "BOOT1_MAX_REENTRY_DEPTH constant missing from JS"
     G6_PASS=false
 fi
+# Check depth cap VALUES match between substrates
+PY_DEPTH=$(grep '_BOOT1_MAX_REENTRY_DEPTH = ' rcx_pi/selfhost/step_mu.py 2>/dev/null | sed 's/.*= \([0-9]*\).*/\1/' | head -1)
+JS_DEPTH=$(grep 'BOOT1_MAX_REENTRY_DEPTH = ' mu/host/js/eval_step.js 2>/dev/null | sed 's/.*= \([0-9]*\).*/\1/' | head -1)
+if [ "$PY_DEPTH" != "$JS_DEPTH" ] || [ "$PY_DEPTH" = "0" ]; then
+    gate_fail 6 "Depth cap mismatch or missing: Python=$PY_DEPTH, JS=$JS_DEPTH"
+    G6_PASS=false
+fi
 if $G6_PASS; then
-    gate_pass 6 "Contract artifacts present in both substrates"
+    gate_pass 6 "Contract artifacts present, depth cap=$PY_DEPTH in both substrates"
 fi
 echo ""
 
