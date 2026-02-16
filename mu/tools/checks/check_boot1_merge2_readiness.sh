@@ -72,7 +72,7 @@ G2_OUTPUT=$(PYTHONHASHSEED=0 pytest mu/tests/parity/test_boot1_shadow_parity.py 
 G2_PASSED=$(echo "$G2_OUTPUT" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")
 G2_FAILED=$(echo "$G2_OUTPUT" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo "0")
 
-G2_MIN_EXPECTED=45  # Ratchet: fast test count can only increase (58 total, 45 non-slow)
+G2_MIN_EXPECTED=52  # Ratchet: fast test count can only increase (65 total, 52 non-slow)
 if [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -ge "$G2_MIN_EXPECTED" ]; then
     gate_pass 2 "Parity: $G2_PASSED passed (>=$G2_MIN_EXPECTED), 0 failed"
 elif [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -gt "0" ]; then
@@ -98,10 +98,28 @@ echo ""
 # ── G4: Bootstrap Discipline ───────────────────────────────────
 # No contradiction with Boot0 v0.4
 echo "Gate 4: Bootstrap Discipline (Boot0 compatibility)"
-if [ -f "mu/docs/core/Boot0Architecture.v0.md" ]; then
-    gate_pass 4 "Boot0Architecture.v0.md exists (compatibility reference)"
-else
+G4_PASS=true
+if [ ! -f "mu/docs/core/Boot0Architecture.v0.md" ]; then
     gate_fail 4 "Boot0Architecture.v0.md missing"
+    G4_PASS=false
+else
+    # Verify doc contains required sections (not just existence)
+    if ! grep -q "eval_step" "mu/docs/core/Boot0Architecture.v0.md" 2>/dev/null; then
+        gate_fail 4 "Boot0Architecture.v0.md missing eval_step section"
+        G4_PASS=false
+    fi
+    if ! grep -q "Boot1" "mu/docs/core/Boot0Architecture.v0.md" 2>/dev/null; then
+        gate_fail 4 "Boot0Architecture.v0.md missing Boot1 reference"
+        G4_PASS=false
+    fi
+fi
+# Also verify Boot1 contract doc exists
+if [ ! -f "mu/docs/core/Boot1LoopContract.v0.md" ]; then
+    gate_fail 4 "Boot1LoopContract.v0.md missing"
+    G4_PASS=false
+fi
+if $G4_PASS; then
+    gate_pass 4 "Boot0/Boot1 architecture docs present with required content"
 fi
 echo ""
 
