@@ -28,6 +28,16 @@ if [ -n "$RANGE" ]; then
     fi
 fi
 
+# Check for untracked backup/temp artifacts (WARNING, non-blocking)
+if [ -f "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh" ]; then
+    if ! "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh" --quiet 2>/dev/null; then
+        echo ""
+        echo "⚠️  Untracked backup/temp artifacts in mu/ subtrees"
+        echo "   Run: ./tools/checks/check_untracked_artifacts.sh"
+        echo ""
+    fi
+fi
+
 # Run fast audit (not --full, which is redundant with CI)
 if ! "$REPO_ROOT/dev.sh"; then
     echo ""
