@@ -552,7 +552,7 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 - Bootstrap primitive count: 5 → 4 (eval_step, max_steps, stack_guard, projection_loader)
 - JS parity: `muHashCached()` added, `muEqual()` delegates to hash comparison
 - **Paxos e2e pipeline test**: `tests/test_paxos_end_to_end.py` (6 tests) validates full deadlock metabolization
-- **Parity fuzzer**: `tests/test_mu_equal_parity_fuzzer.py` proves equivalence (13 tests, 500+ inputs)
+- **Parity fuzzer**: `tests/fuzz/test_mu_equal_parity_fuzzer.py` proves equivalence (13 tests, 500+ inputs)
 - **Historical context (2026-01-31):** 9-agent consensus confirmed json.dumps IS structural equality for JSON data
 
 **Document updated with:**

@@ -146,7 +146,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Anti-theater guardrails:
   - `--print-exec-summary` CLI flag + `execution_summary_v2()` pure helper
   - `test_cli_print_exec_summary_end_to_end` (subprocess CLI test)
-  - `tools/audit_exec_summary.sh` (non-test reality anchor)
+  - `tools/audits/audit_exec_summary.sh` (non-test reality anchor)
 - Trace Reading Primer (`mu/docs/execution/TraceReadingPrimer.v0.md`)
 - Record→Replay Gate (`test_record_replay_gate_end_to_end`)
 - Flag Discipline Contract (`mu/docs/cli/Flags.md`)
@@ -188,13 +188,13 @@ Items here are implemented and verified under current invariants. Changes requir
   - Phase 4d: Integration tests (67 total: 28 parity + 27 grounding + 12 fuzzer)
   - Phase 5: `step_mu()` uses match_mu + subst_mu (33 tests: 22 parity + 11 self-hosting)
   - `tests/structural/test_apply_mu_grounding.py` - direct `step()` execution tests
-  - `tests/test_apply_mu_fuzzer.py` - Hypothesis property-based tests
+  - `tests/fuzz/test_apply_mu_fuzzer.py` - Hypothesis property-based tests
 - Self-Hosting Security Hardening (PR #149):
   - Thread-safe step budget: `threading.local()` for concurrent execution safety
   - Cycle detection in `normalize_for_match()` and `denormalize_from_match()`
   - Global projection step budget: `_ProjectionStepBudget` class (50,000 step limit)
   - Resource exhaustion guardrails: MAX_MU_DEPTH=300, MAX_MU_WIDTH=1000
-  - Comprehensive fuzzer tests (`tests/test_selfhost_fuzzer.py`, 53 tests, 10,000+ examples):
+  - Comprehensive fuzzer tests (`tests/fuzz/test_selfhost_fuzzer.py`, 53 tests, 10,000+ examples):
     - `TestMatchMuParity`: match_mu == eval_seed.match (1,000 examples)
     - `TestSubstMuParity`: subst_mu == eval_seed.substitute (1,200 examples)
     - `TestHostileUnicodeHandling`: emoji, RTL, zero-width, homoglyphs
@@ -250,7 +250,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - JS parity: `muHashCached()` added, `muEqual()` delegates. 6 JS call sites updated.
   - Paxos e2e pipeline test: `tests/test_paxos_end_to_end.py` (6 tests) validates deadlock metabolization
   - Historical: 9-agent consensus (2026-01-31) confirmed json.dumps IS structural equality for JSON data
-  - Parity fuzzer: `tests/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
+  - Parity fuzzer: `tests/fuzz/test_mu_equal_parity_fuzzer.py` (13 tests, 500+ inputs)
 - Testing Tier System (2026-01-28):
   - 9-agent review resolved fuzzer hang issue (rejected circuit breaker, chose Option B)
   - Tier 1: `audit_fast.sh` (~3 min) - Core tests for local iteration
