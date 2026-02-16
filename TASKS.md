@@ -159,7 +159,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Recurrence Spec v0 (stress test harness, 18 tests in `test_recurrence_spec_v0.py`, 4 fixtures)
 - Bytecode VM v0/v1a/v1b — **ARCHIVED** (superseded by kernel + seeds approach)
   - Code: `archive/mu_legacy/host/python/rcx_pi/bytecode_vm.py` (archived)
-  - Docs: `archive/archive/docs/bytecode/` (archived)
+  - Docs: `archive/docs/bytecode/` (archived)
 - Mu Type v0 (`rcx_pi/mu_type.py`, `mu/docs/core/MuType.v0.md`, 58 tests)
 - Structural Purity Guardrails v0 (`mu/docs/core/StructuralPurity.v0.md`, 32 additional tests):
   - `has_callable()`, `assert_no_callables()`, `assert_seed_pure()`
@@ -428,7 +428,7 @@ Current Exhaustion Layer: META_CIRCULAR
 - Rule-as-Motif (`mu/docs/execution/RuleAsMotif.v0.md`)
 
 **Archived (superseded):**
-- Bytecode VM v0/v1 → `archive/archive/docs/bytecode/`
+- Bytecode VM v0/v1 → `archive/docs/bytecode/`
 
 ---
 

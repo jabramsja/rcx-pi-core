@@ -168,5 +168,5 @@ Document version: v0
 Last updated: 2026-01-24
 Dependencies:
 - `mu/docs/execution/IndependentEncounter.v0.md` (closure evidence semantics)
-- `archive/archive/docs/bytecode/BytecodeMapping.v1.md` (execution event definitions, archived)
+- `archive/docs/bytecode/BytecodeMapping.v1.md` (execution event definitions, archived)
 - `rcx_pi.replay_cli` (public CLI interface)

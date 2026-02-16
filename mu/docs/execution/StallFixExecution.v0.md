@@ -409,7 +409,7 @@ This specification is complete when:
 Document version: v0
 Last updated: 2026-01-24
 Dependencies:
-- `archive/archive/docs/bytecode/BytecodeMapping.v0.md` (archived)
+- `archive/docs/bytecode/BytecodeMapping.v0.md` (archived)
 - `mu/docs/execution/StallFixObservability.v0.md`
 - `mu/docs/schemas/rcx-trace-event.v2.json`
 - `EntropyBudget.md`

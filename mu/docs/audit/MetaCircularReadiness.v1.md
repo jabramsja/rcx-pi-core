@@ -72,10 +72,10 @@ These gates MUST be passed before meta-circular work begins. Each gate is binary
 
 | Criterion | Evidence | Status |
 |-----------|----------|--------|
-| Trace event → op mapping defined | `archive/archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
-| Minimal VM state model defined | `archive/archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
-| Reserved ops documented (stall/fix/closure) | `archive/archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
-| Fail-loud policy defined | `archive/archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Trace event → op mapping defined | `archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Minimal VM state model defined | `archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Reserved ops documented (stall/fix/closure) | `archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
+| Fail-loud policy defined | `archive/docs/bytecode/BytecodeMapping.v0.md` | ARCHIVED |
 
 **Note**: Bytecode approach has been superseded by kernel + seeds architecture. See Section 9.
 
@@ -257,7 +257,7 @@ The following are explicitly forbidden in meta-circular v1:
 
 **Superseded:**
 - Gates 4 and 5 (bytecode) are superseded by kernel + seeds
-- Bytecode docs moved to `archive/archive/docs/bytecode/`
+- Bytecode docs moved to `archive/docs/bytecode/`
 - `archive/mu_legacy/host/python/rcx_pi/bytecode_vm.py` is legacy code (archived)
 
 See `mu/docs/core/RCXKernel.v0.md`, `mu/docs/core/SelfHosting.v0.md`, and `mu/docs/core/StructuralPurity.v0.md`.
@@ -271,7 +271,7 @@ Last updated: 2026-01-27
 Dependencies:
 - `mu/docs/schemas/rcx-trace-event.v1.json` (replay, frozen)
 - `mu/docs/schemas/rcx-trace-event.v2.json` (observability)
-- `archive/archive/docs/bytecode/BytecodeMapping.v0.md` (archived)
+- `archive/docs/bytecode/BytecodeMapping.v0.md` (archived)
 - `mu/docs/execution/StallFixObservability.v0.md`
 - `mu/docs/core/RCXKernel.v0.md` (kernel architecture)
 - `mu/docs/core/SelfHosting.v0.md` (self-hosting design)
