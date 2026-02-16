@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).parents[1]
+REPO_ROOT = Path(__file__).parents[2]
 
 
 @dataclass
@@ -82,7 +82,7 @@ def _shared_object_arch(path: str | None) -> dict[str, Any]:
 def _check_runner_with_python(python_exe: str) -> dict[str, Any]:
     env = os.environ.copy()
     env["PYTHONPATH"] = "."
-    check = _run([python_exe, "tools/run_review.py", "--help"], timeout=30, env=env)
+    check = _run([python_exe, "tools/runners/run_review.py", "--help"], timeout=30, env=env)
     return {
         "python": python_exe,
         "ok": check.returncode == 0,
