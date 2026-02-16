@@ -204,6 +204,51 @@ def _get_all_tracked_files(subtree: str) -> list[str]:
     return [line for line in result.stdout.strip().splitlines() if line]
 
 
+class TestUntrackedArtifactChecker:
+    """Verify the untracked artifact checker script exists and works."""
+
+    def test_checker_script_exists(self):
+        checker = REPO_ROOT / "mu" / "tools" / "checks" / "check_untracked_artifacts.sh"
+        assert checker.exists(), (
+            f"check_untracked_artifacts.sh missing at {checker}\n"
+            "This script detects untracked backup/temp files in mu/ subtrees."
+        )
+
+    def test_checker_script_executable(self):
+        import os
+        checker = REPO_ROOT / "mu" / "tools" / "checks" / "check_untracked_artifacts.sh"
+        if checker.exists():
+            assert os.access(checker, os.X_OK), (
+                f"check_untracked_artifacts.sh is not executable: {checker}"
+            )
+
+    def test_checker_passes_on_clean_tree(self):
+        """When no .bak/.orig/.rej files exist, checker should exit 0."""
+        result = subprocess.run(
+            ["bash", "tools/checks/check_untracked_artifacts.sh", "--quiet"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0, (
+            f"Untracked artifact checker failed on clean tree:\n{result.stdout}\n{result.stderr}"
+        )
+
+    def test_checker_wired_into_audit_fast(self):
+        """audit_fast.sh must call check_untracked_artifacts.sh."""
+        audit = REPO_ROOT / "mu" / "tools" / "audits" / "audit_fast.sh"
+        content = audit.read_text()
+        assert "check_untracked_artifacts" in content, (
+            "check_untracked_artifacts.sh not wired into audit_fast.sh"
+        )
+
+    def test_checker_wired_into_pre_commit(self):
+        """pre-commit-doc-check must call check_untracked_artifacts.sh."""
+        hook = REPO_ROOT / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
+        content = hook.read_text()
+        assert "check_untracked_artifacts" in content, (
+            "check_untracked_artifacts.sh not wired into pre-commit-doc-check"
+        )
+
+
 class TestAntiSlopGuard:
     """Reject tracked backup/temp artifacts in governed subtrees."""
 

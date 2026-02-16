@@ -60,12 +60,15 @@ archive/rcx_pi_rust/mu_programs/__smoke_*.mu
 scripts/.rcx_manifest.json
 
 
-
-.quarantine_untracked_*
-
-# --- RCX generated artifacts (auto-added) ---
+# --- Backup/temp artifacts (must never be committed) ---
+*.bak
 *.bak.*
 **/*.bak.*
+*.orig
+*.rej
+*.swp
+*.swo
+*~
 .bak_rcx_fixes_*/
 .quarantine_untracked_*
 --world
@@ -76,7 +79,6 @@ echo
 rg
 sed
 set
-.DS_Store
 # --- /RCX generated artifacts ---
 rcx_pack_minimal.txt
 rcx_pack_extended.txt

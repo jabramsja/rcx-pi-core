@@ -126,6 +126,17 @@ if [ -f "./tools/checks/enforce_tracker_sync.sh" ]; then
     fi
 fi
 
+# === 5b. Check for untracked backup/temp artifacts (WARNING, non-blocking) ===
+if [ -f "./tools/checks/check_untracked_artifacts.sh" ]; then
+    if ! ./tools/checks/check_untracked_artifacts.sh --quiet 2>/dev/null; then
+        echo ""
+        echo "⚠️  Untracked backup/temp artifacts detected in mu/ subtrees"
+        echo "   Run: ./tools/checks/check_untracked_artifacts.sh"
+        echo "   (Non-blocking — clean up when convenient)"
+        echo ""
+    fi
+fi
+
 # === 6. Check if agents were run on staged core files (WARNING) ===
 CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)
 if [ -n "$CORE_FILES_CHANGED" ]; then
