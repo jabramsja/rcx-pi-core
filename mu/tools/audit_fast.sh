@@ -150,7 +150,7 @@ pytest $PARALLEL_FLAG -q \
     tests/test_classify_mu.py \
     tests/test_parity_python.py \
     tests/test_structural_trace.py \
-    tests/test_kernel_security_fuzzer.py \
+    tests/fuzz/test_kernel_security_fuzzer.py \
     tests/test_normalization_roundtrip.py \
     tests/test_debt_enforcement.py \
     tests/test_eval_seed_adversary.py \

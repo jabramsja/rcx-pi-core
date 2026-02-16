@@ -565,7 +565,7 @@ is safe. We can relax later without breaking correctness.
   - Non-linear patterns for equality detection (step, operator, frozen membership)
   - First-match-wins ordering for scan_same before scan_different
   - 17 parity tests in `tests/test_exhaustion_parity.py`
-  - 10 fuzzer tests in `tests/test_exhaustion_fuzzer.py`
+  - 10 fuzzer tests in `tests/fuzz/test_exhaustion_fuzzer.py`
   - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
   - Cross-substrate parity: Python and JavaScript produce identical results
   - JS loads exhaustion.v1.json (47 total projections across all seeds)
