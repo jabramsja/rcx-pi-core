@@ -200,6 +200,8 @@ CRITICAL_TEST_FILES = frozenset({
     "test_nonlinear_bridge_fuzzer.py",
     "test_normalized_injection_fuzzer.py",
     "test_trace_malformation_fuzzer.py",
+    # Boot1 recursive loop parity tests — shadow merge (Wave 5/6, 2026-02-16)
+    "test_boot1_shadow_parity.py",
 })
 
 
