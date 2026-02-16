@@ -31,7 +31,7 @@ needles = [
     'id="orbitSvgObj"',
     'data="' + svg.name + '"',
     'src="' + js.name + '"',
-    "./scripts/build_orbit_artifacts.sh",
+    "./scripts/orbit/build_orbit_artifacts.sh",
 ]
 missing = [n for n in needles if n not in txt]
 if missing:

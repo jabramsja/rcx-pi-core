@@ -1,4 +1,14 @@
-from scripts.normalize_graphviz_svg import normalize_svg
+import importlib.util
+from pathlib import Path
+
+# Path-based import to avoid pytest `tests/scripts/` shadowing the top-level `scripts/` package
+_spec = importlib.util.spec_from_file_location(
+    "normalize_graphviz_svg",
+    Path(__file__).resolve().parents[3] / "scripts" / "orbit" / "normalize_graphviz_svg.py",
+)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+normalize_svg = _mod.normalize_svg
 
 
 def test_normalize_strips_graphviz_generator_comment():

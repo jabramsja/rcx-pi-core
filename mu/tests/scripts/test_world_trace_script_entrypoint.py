@@ -7,7 +7,7 @@ from pathlib import Path
 
 def test_world_trace_script_entrypoint_help_smoke():
     repo_root = Path(__file__).resolve().parents[3]
-    script = repo_root / "scripts" / "world_trace.sh"
+    script = repo_root / "scripts" / "world" / "world_trace.sh"
 
     r = subprocess.run(
         ["bash", str(script), "--help"],

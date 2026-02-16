@@ -18,7 +18,7 @@ def _run(
 
 def test_world_trace_json_contract_minimal_world():
     repo_root = Path(__file__).resolve().parents[3]
-    script = repo_root / "scripts" / "world_trace.sh"
+    script = repo_root / "scripts" / "world" / "world_trace.sh"
     assert script.exists(), f"missing: {script}"
 
     # Seed motif strings seen elsewhere in RCX logs/tests
