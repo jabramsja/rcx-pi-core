@@ -9,8 +9,8 @@ def test_schema_files_live_in_docs_schemas():
       - JSON schema artifacts must live under mu/docs/schemas/
       - docs/ root should not accumulate *schema*.json files (keeps docs tidy + predictable)
     """
-    root = Path(__file__).resolve().parents[2]
-    docs = root / "docs"
+    root = Path(__file__).resolve().parents[3]
+    docs = root / "mu" / "docs"
     schemas = docs / "schemas"
 
     assert schemas.is_dir(), "docs/schemas must exist"

@@ -13,9 +13,9 @@ import pytest
     reason="check-jsonschema not installed; schema smoke test is optional",
 )
 def test_world_trace_output_validates_against_jsonschema():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     cli = repo_root / "rcx_pi" / "worlds" / "world_trace_cli.py"
-    schema = repo_root / "docs" / "schemas" / "world_trace_json_schema.json"
+    schema = repo_root / "mu" / "docs" / "schemas" / "world_trace_json_schema.json"
 
     assert cli.exists(), f"missing: {cli}"
     assert schema.exists(), f"missing: {schema}"

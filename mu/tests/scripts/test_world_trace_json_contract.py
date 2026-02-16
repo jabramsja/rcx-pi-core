@@ -17,7 +17,7 @@ def _run(
 
 
 def test_world_trace_json_contract_minimal_world():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     script = repo_root / "scripts" / "world_trace.sh"
     assert script.exists(), f"missing: {script}"
 

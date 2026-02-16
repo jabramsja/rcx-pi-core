@@ -13,7 +13,7 @@ def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_rcx_cli_help_smoke():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     r = _run(["--help"], repo_root)
     assert r.returncode == 0, r.stderr
     out = (r.stdout or "") + (r.stderr or "")
@@ -24,7 +24,7 @@ def test_rcx_cli_help_smoke():
 
 
 def test_rcx_cli_program_run_routes_and_emits_json():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     r = _run(["program", "run", "succ-list", "[1,2,3]"], repo_root)
     assert r.returncode == 0, r.stderr
     data = json.loads(r.stdout)
@@ -36,7 +36,7 @@ def test_rcx_cli_program_run_routes_and_emits_json():
 
 
 def test_rcx_cli_trace_alias_routes_and_emits_json():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     r = _run(["trace", "pingpong", "ping", "--max-steps", "6"], repo_root)
     assert r.returncode == 0, r.stderr
     data = json.loads(r.stdout)

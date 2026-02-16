@@ -6,7 +6,7 @@ from rcx_pi.cli_schema_run import parse_schema_triplet_stdout, run_schema_triple
 
 
 def test_program_run_schema_flag():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     cli = repo_root / "rcx_pi" / "program_run_cli.py"
     assert cli.exists(), f"missing: {cli}"
 

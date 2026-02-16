@@ -18,8 +18,8 @@ def _run(args, cwd: Path):
 
 
 def test_program_run_jsonschema_smoke():
-    repo_root = Path(__file__).resolve().parents[2]
-    schema_path = repo_root / "docs" / "schemas" / "program_run_schema.json"
+    repo_root = Path(__file__).resolve().parents[3]
+    schema_path = repo_root / "mu" / "docs" / "schemas" / "program_run_schema.json"
     assert schema_path.exists(), f"missing schema: {schema_path}"
     schema = json.loads(schema_path.read_text())
 
