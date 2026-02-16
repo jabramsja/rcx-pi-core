@@ -150,15 +150,6 @@ All are implemented **outside the frozen kernel** as tools, fixtures, or validat
   - Orbit, replay, and snapshot fixtures are schema-locked
   - Rust and Python paths agree on emitted structure
 
-### Maintainer workflow helper (optional)
-
-For repositories where auto-merge is disabled, a helper script is available:
-
-    scripts/merge_pr_clean.sh <PR_NUMBER>
-
-This performs a clean base sync, head rebase, gate verification, manual merge,
-and post-merge sync. Repository policy remains unchanged.
-
 ## 🔒 Green Gate (Canonical Health Check)
 
 The **only supported correctness gate** for this repository is:
