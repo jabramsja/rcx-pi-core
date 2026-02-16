@@ -4,10 +4,11 @@
 # Scans mu/tools/, mu/tests/, mu/scripts/ for untracked files matching
 # backup/temp patterns (*.bak*, *.orig, *.rej, *.swp, *.swo, *~).
 #
-# These files are gitignored (won't be committed) but still clutter the
-# working tree and indicate sloppy editing habits.
+# Supports an allowlist file (.untracked_artifact_allowlist) for rare exceptions.
+# Each line in the allowlist is a path relative to repo root (blank lines and
+# lines starting with # are ignored).
 #
-# Exit 0 = clean, Exit 1 = clutter found.
+# Exit 0 = clean (or all violations allowlisted), Exit 1 = clutter found.
 #
 # Usage: ./tools/checks/check_untracked_artifacts.sh
 #        ./tools/checks/check_untracked_artifacts.sh --quiet  (exit code only)
@@ -27,7 +28,6 @@ fi
 SUBTREES=("mu/tools" "mu/tests" "mu/scripts")
 
 # Backup/temp patterns to reject
-# Note: find -name patterns, one per entry
 PATTERNS=(
     "*.bak"
     "*.bak.*"
@@ -37,6 +37,25 @@ PATTERNS=(
     "*.swo"
     "*~"
 )
+
+# Load allowlist (file-based, reviewed exceptions)
+ALLOWLIST_FILE="$REPO_ROOT/.untracked_artifact_allowlist"
+_is_allowlisted() {
+    local file="$1"
+    if [ ! -f "$ALLOWLIST_FILE" ]; then
+        return 1
+    fi
+    while IFS= read -r line; do
+        # Strip comments and whitespace
+        line="${line%%#*}"
+        line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        [ -z "$line" ] && continue
+        if [ "$line" = "$file" ]; then
+            return 0
+        fi
+    done < "$ALLOWLIST_FILE"
+    return 1
+}
 
 # Build find -name arguments: ( -name "*.bak" -o -name "*.orig" ... )
 FIND_ARGS=()
@@ -51,27 +70,48 @@ for p in "${PATTERNS[@]}"; do
 done
 FIND_ARGS+=(")")
 
-VIOLATIONS=()
+RAW_VIOLATIONS=()
 for subtree in "${SUBTREES[@]}"; do
     if [ -d "$subtree" ]; then
         while IFS= read -r file; do
-            [ -n "$file" ] && VIOLATIONS+=("$file")
+            [ -n "$file" ] && RAW_VIOLATIONS+=("$file")
         done < <(find "$subtree" "${FIND_ARGS[@]}" -type f 2>/dev/null)
     fi
 done
 
+# Filter out allowlisted files
+VIOLATIONS=()
+ALLOWLISTED_COUNT=0
+if [ ${#RAW_VIOLATIONS[@]} -gt 0 ]; then
+    for v in "${RAW_VIOLATIONS[@]}"; do
+        if _is_allowlisted "$v"; then
+            ALLOWLISTED_COUNT=$((ALLOWLISTED_COUNT + 1))
+        else
+            VIOLATIONS+=("$v")
+        fi
+    done
+fi
+
 if [ ${#VIOLATIONS[@]} -eq 0 ]; then
     if ! $QUIET; then
-        echo "OK: No untracked backup/temp artifacts in governed subtrees"
+        if [ "$ALLOWLISTED_COUNT" -gt 0 ]; then
+            echo "OK: $ALLOWLISTED_COUNT artifact(s) allowlisted, 0 violations"
+        else
+            echo "OK: No untracked backup/temp artifacts in governed subtrees"
+        fi
     fi
     exit 0
 else
     if ! $QUIET; then
-        echo "WARNING: ${#VIOLATIONS[@]} untracked backup/temp artifact(s) found:"
+        echo "FAIL: ${#VIOLATIONS[@]} untracked backup/temp artifact(s) found:"
         echo ""
         for v in "${VIOLATIONS[@]}"; do
             echo "  - $v"
         done
+        if [ "$ALLOWLISTED_COUNT" -gt 0 ]; then
+            echo ""
+            echo "  ($ALLOWLISTED_COUNT additional file(s) allowlisted)"
+        fi
         echo ""
         echo "Remediation: rm these files (they are gitignored, not tracked):"
         echo ""
@@ -79,6 +119,8 @@ else
         echo ""
         echo "Or delete all at once:"
         echo "  find mu/tools mu/tests mu/scripts ${FIND_ARGS[*]} -type f -delete"
+        echo ""
+        echo "If a file must be kept, add to .untracked_artifact_allowlist with rationale."
     fi
     exit 1
 fi

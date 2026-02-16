@@ -69,13 +69,8 @@ else
     echo ""
 fi
 
-echo "== 0b) Untracked artifact check =="
-if ./tools/checks/check_untracked_artifacts.sh; then
-    echo ""
-else
-    echo "(Warning only - continuing with audit)"
-    echo ""
-fi
+echo "== 0b) Untracked artifact check (BLOCKING) =="
+./tools/checks/check_untracked_artifacts.sh
 
 echo "== 1a) Contraband check =="
 ./tools/checks/linters/contraband.sh rcx_pi

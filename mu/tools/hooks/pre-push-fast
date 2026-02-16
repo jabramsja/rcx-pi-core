@@ -28,13 +28,13 @@ if [ -n "$RANGE" ]; then
     fi
 fi
 
-# Check for untracked backup/temp artifacts (WARNING, non-blocking)
+# Check for untracked backup/temp artifacts (BLOCKING)
 if [ -f "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh" ]; then
-    if ! "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh" --quiet 2>/dev/null; then
+    if ! "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh"; then
         echo ""
-        echo "⚠️  Untracked backup/temp artifacts in mu/ subtrees"
-        echo "   Run: ./tools/checks/check_untracked_artifacts.sh"
-        echo ""
+        echo "❌ Untracked backup/temp artifacts in mu/ subtrees."
+        echo "   Clean up before pushing, or add to .untracked_artifact_allowlist."
+        exit 1
     fi
 fi
 

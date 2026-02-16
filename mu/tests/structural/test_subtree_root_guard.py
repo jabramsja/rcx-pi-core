@@ -205,7 +205,7 @@ def _get_all_tracked_files(subtree: str) -> list[str]:
 
 
 class TestUntrackedArtifactChecker:
-    """Verify the untracked artifact checker script exists and works."""
+    """Verify the untracked artifact checker script exists, works, and is enforced."""
 
     def test_checker_script_exists(self):
         checker = REPO_ROOT / "mu" / "tools" / "checks" / "check_untracked_artifacts.sh"
@@ -232,12 +232,62 @@ class TestUntrackedArtifactChecker:
             f"Untracked artifact checker failed on clean tree:\n{result.stdout}\n{result.stderr}"
         )
 
+    def test_checker_fails_on_violation(self):
+        """When a .bak file exists, checker should exit 1."""
+        sentinel = REPO_ROOT / "mu" / "scripts" / "__test_sentinel.bak"
+        try:
+            sentinel.touch()
+            result = subprocess.run(
+                ["bash", "tools/checks/check_untracked_artifacts.sh", "--quiet"],
+                capture_output=True, text=True, cwd=REPO_ROOT,
+            )
+            assert result.returncode == 1, (
+                "Checker should exit 1 when backup files exist"
+            )
+        finally:
+            sentinel.unlink(missing_ok=True)
+
+    def test_checker_allowlist_mechanism(self):
+        """Files in .untracked_artifact_allowlist should be exempted."""
+        sentinel = REPO_ROOT / "mu" / "scripts" / "__test_sentinel.bak"
+        allowlist = REPO_ROOT / ".untracked_artifact_allowlist"
+        try:
+            sentinel.touch()
+            allowlist.write_text("mu/scripts/__test_sentinel.bak  # test exception\n")
+            result = subprocess.run(
+                ["bash", "tools/checks/check_untracked_artifacts.sh", "--quiet"],
+                capture_output=True, text=True, cwd=REPO_ROOT,
+            )
+            assert result.returncode == 0, (
+                "Checker should pass when violation is allowlisted"
+            )
+        finally:
+            sentinel.unlink(missing_ok=True)
+            allowlist.unlink(missing_ok=True)
+
     def test_checker_wired_into_audit_fast(self):
-        """audit_fast.sh must call check_untracked_artifacts.sh."""
+        """audit_fast.sh must call check_untracked_artifacts.sh as BLOCKING."""
         audit = REPO_ROOT / "mu" / "tools" / "audits" / "audit_fast.sh"
         content = audit.read_text()
         assert "check_untracked_artifacts" in content, (
             "check_untracked_artifacts.sh not wired into audit_fast.sh"
+        )
+        # Must be blocking (no "Warning only" / "continuing with audit")
+        idx = content.index("check_untracked_artifacts")
+        context = content[max(0, idx - 100):idx + 200]
+        assert "BLOCKING" in context or "Warning only" not in context, (
+            "audit_fast.sh must enforce check_untracked_artifacts as BLOCKING"
+        )
+
+    def test_checker_wired_into_pre_push(self):
+        """pre-push-fast must call check_untracked_artifacts.sh as BLOCKING."""
+        hook = REPO_ROOT / "mu" / "tools" / "hooks" / "pre-push-fast"
+        content = hook.read_text()
+        assert "check_untracked_artifacts" in content, (
+            "check_untracked_artifacts.sh not wired into pre-push-fast"
+        )
+        assert "exit 1" in content[content.index("check_untracked_artifacts"):], (
+            "pre-push-fast must exit 1 on untracked artifact failure"
         )
 
     def test_checker_wired_into_pre_commit(self):
