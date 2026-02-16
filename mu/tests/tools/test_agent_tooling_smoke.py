@@ -18,7 +18,7 @@ import importlib.util
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 # Ensure repo root is in sys.path for 'tools' imports
@@ -27,6 +27,13 @@ _repo_root = str(PROJECT_ROOT)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+# Clear stale 'tools' module if it was loaded from tests/tools/ (shadowing mu/tools/)
+if "tools" in sys.modules:
+    _tools_mod = sys.modules["tools"]
+    _mod_path = str(next(iter(getattr(_tools_mod, "__path__", [])), ""))
+    if "tests/tools" in _mod_path:
+        del sys.modules["tools"]
+
 
 def import_from_path(module_name: str, file_path: Path):
     """Import a module from an explicit file path, avoiding shadowing."""
@@ -34,6 +41,15 @@ def import_from_path(module_name: str, file_path: Path):
     project_root = str(PROJECT_ROOT)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
+
+    # Clear stale 'tools' module if shadowed by tests/tools/
+    for mod_name in list(sys.modules):
+        if mod_name == "tools" or mod_name.startswith("tools."):
+            mod = sys.modules[mod_name]
+            mod_path = str(next(iter(getattr(mod, "__path__", [])), ""))
+            mod_file = str(getattr(mod, "__file__", "") or "")
+            if "tests/tools" in mod_path or "tests/tools" in mod_file:
+                del sys.modules[mod_name]
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     module = importlib.util.module_from_spec(spec)
