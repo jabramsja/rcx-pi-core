@@ -21,7 +21,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 Define the structural contract for GAP-04-FIX (EngineNew step 4, Rule 0.6): the Fix routine that applies a minimal structural perturbation to a stalled state.
 
-**Status:** IMPLEMENTED (2026-02-13, Rounds 15D–15I). All 5 invariants (I1–I5) verified by `tests/test_fix_invariants.py`. Engine integration via 3 dispatch projections in `rcx_engine.v1.json`. Cross-substrate parity locked.
+**Status:** IMPLEMENTED (2026-02-13, Rounds 15D–15I). All 5 invariants (I1–I5) verified by `tests/structural/test_fix_invariants.py`. Engine integration via 3 dispatch projections in `rcx_engine.v1.json`. Cross-substrate parity locked.
 
 **Gap ID:** `GAP-04-FIX` — **CLOSED** (removed from `tests/test_engine_cycle_mapping.py::TestGapRegistry`)
 
@@ -116,7 +116,7 @@ All of the following must be satisfied before GAP-04-FIX can be promoted from VE
 
 - [x] **E1: Stall-recovery failure test** — Pre-integration gap proof established in Round 15D (`TestImplicitFixFailure`: identity+graph stalls with value unchanged, proving no fix mechanism existed). After E4 integration, tests renamed to `TestFixIntegrationEvidence` and updated to verify fix now works (stall=false, value perturbed).
 - [x] **E2: Fix seed draft** — `mu/closures/fix.v1.json` v1.1.0, 6 projections (init, edge_add_guard, edge_add, vertex_add_guard, vertex_add, pass_through). Registered in seed_integrity.py + eval_step.js. Rounds 15D–15E.
-- [x] **E3: Invariant test suite** — `tests/test_fix_invariants.py`, 19 tests across I1–I5 (6 minimality, 2 purity, 3 idempotence, 3 stall-breaking, 5 no-drift). All green. Round 15F.
+- [x] **E3: Invariant test suite** — `tests/structural/test_fix_invariants.py`, 19 tests across I1–I5 (6 minimality, 2 purity, 3 idempotence, 3 stall-breaking, 5 no-drift). All green. Round 15F.
 - [x] **E4: Engine integration** — `engine.hash_done_fix` dispatches to fix.v1.json on stall=true. `engine.fix_done_applied` / `engine.fix_done_none` route fixed/original state to recurrence. 10 engine projections total. Cross-substrate parity locked (4 tests). Rounds 15G–15H.
 - [x] **E5: Closure bookkeeping** — TASKS.md updated: GAP-04-FIX closed in NEXT→Ra. Contract status updated. EngineNew 9/10 structural. Round 15I.
 
@@ -124,6 +124,6 @@ All of the following must be satisfied before GAP-04-FIX can be promoted from VE
 
 - `mu/docs/core/RCXEngine.v0.md` — Engine cycle (step 4 is now structural)
 - `tests/test_engine_cycle_mapping.py` — Step 4 mapped as structural; gap registry tracks remaining gaps (GAP-10-LOOP only)
-- `tests/test_fix_invariants.py` — 19 invariant tests (I1–I5)
+- `tests/structural/test_fix_invariants.py` — 19 invariant tests (I1–I5)
 - `tests/test_js_parity_automated.py::TestEngineFixPathParity` — Cross-substrate parity lock (4 tests)
 - `TASKS.md` — GAP-04-FIX closed in Ra

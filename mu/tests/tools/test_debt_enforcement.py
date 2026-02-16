@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 DEBT_DASHBOARD = ROOT / "tools" / "debt_dashboard.sh"
 AUDIT_SCRIPT = ROOT / "tools" / "audit_semantic_purity.sh"
 
