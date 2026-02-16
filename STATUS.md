@@ -175,7 +175,7 @@ Cross-substrate parity tests verify L3 (substrate portability):
 - [x] Shared JSON test vectors: `tests/fixtures/parity_vectors.json` (20 parity + 3 security = 23 vectors)
 - [x] Python tests: `tests/test_parity_python.py` (20 parity tests + 3 security tests)
 - [x] JS tests: `mu/host/js/eval_step.js` (20 parity tests pass)
-- [x] Structural trace tests: `tests/test_structural_trace.py` (14 tests)
+- [x] Structural trace tests: `tests/engine/test_structural_trace.py` (14 tests)
 - [x] **ACTUAL cross-substrate comparison** (9-agent Round 3 fix, 2026-01-31):
   - `tests/test_js_parity_automated.py::test_actual_cross_substrate_comparison`
   - Runs SAME 20 vectors through BOTH Python and JS kernels via JSON API
@@ -421,7 +421,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 **Test files (must be tracked in git):**
 - `tests/test_parity_python.py` - 20 parity + 3 security tests
-- `tests/test_structural_trace.py` - 14 structural trace tests
+- `tests/engine/test_structural_trace.py` - 14 structural trace tests
 - `tests/fuzz/test_structural_trace_fuzzer.py` - 23 property-based fuzzer tests (7-agent critical gap closed)
 - `tests/fixtures/parity_vectors.json` - 23 shared test vectors
 
@@ -437,7 +437,7 @@ Addressed findings from comprehensive 7-agent adversarial peer review:
 - **Grounding finding (closed):** Added `TestDictKvPairFormat` - exact kv-pair structure regression tests
 - **Fuzzer finding (closed):** Added `TestMalformedLinkedListEdgeCases` - edge case handling tests
 - **Adversary finding (closed):** Added defensive cache copy to projection_loader.py and step_mu.py
-- **Tests added:** 13 new tests in `tests/test_normalization_roundtrip.py`, 1 new cache mutation test
+- **Tests added:** 13 new tests in `tests/engine/test_normalization_roundtrip.py`, 1 new cache mutation test
 - **Test updates:** `test_phase7c_integration.py` and `test_parity_python.py` now use shared `run_until_done()`
 - **Test updates:** `test_projection_loader.py` and `test_classify_mu.py` updated for defensive copy behavior
 
@@ -551,7 +551,7 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 - `mu_equal` retained as convenience wrapper delegating to `mu_hash_cached(a) == mu_hash_cached(b)`
 - Bootstrap primitive count: 5 → 4 (eval_step, max_steps, stack_guard, projection_loader)
 - JS parity: `muHashCached()` added, `muEqual()` delegates to hash comparison
-- **Paxos e2e pipeline test**: `tests/test_paxos_end_to_end.py` (6 tests) validates full deadlock metabolization
+- **Paxos e2e pipeline test**: `tests/integration/test_paxos_end_to_end.py` (6 tests) validates full deadlock metabolization
 - **Parity fuzzer**: `tests/fuzz/test_mu_equal_parity_fuzzer.py` proves equivalence (13 tests, 500+ inputs)
 - **Historical context (2026-01-31):** 9-agent consensus confirmed json.dumps IS structural equality for JSON data
 
@@ -582,8 +582,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 6. All 2,846 tests pass
 
 **Tests created:**
-- `tests/test_phase8b_mechanical_kernel.py` (31 tests)
-- `tests/test_phase8b_grounding_gaps.py` (12 tests)
+- `tests/engine/test_phase8b_mechanical_kernel.py` (31 tests)
+- `tests/engine/test_phase8b_grounding_gaps.py` (12 tests)
 
 **Debt:** 12 (10 tracked decorators + 2 AST_OK bootstrap = L2 floor)
 
@@ -674,7 +674,7 @@ New organized structure makes architecture visible:
 **Completed (Steps 1-6):**
 1. ✅ Fixed JS security gaps (KERNEL_RESERVED_FIELDS, type tag validation, dict kv-pair fix)
 2. ✅ Cross-substrate parity tests (20 vectors, tests/test_parity_python.py)
-3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/test_structural_trace.py)
+3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/engine/test_structural_trace.py)
 4. ✅ Ported trace to JS (runStructural in mu/host/js/eval_step.js)
 5. ✅ Recurrence structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
 6. ✅ Operator Exhaustion (mu/closures/exhaustion.v1.json, 11 projections)

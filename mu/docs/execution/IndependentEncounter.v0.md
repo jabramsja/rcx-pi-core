@@ -24,7 +24,7 @@ Status: IMPLEMENTED
 - ✅ Closure signal detection (`_check_second_independent_encounter()`)
 - ✅ Memory clearing on `execution.fixed` (`_clear_stall_memory_for_value()`)
 - ✅ Public API: `closure_evidence`, `has_closure` properties
-- ✅ All 8 pathological scenarios tested (`tests/test_second_independent_encounter.py`)
+- ✅ All 8 pathological scenarios tested (`tests/integration/test_second_independent_encounter.py`)
 
 This document defines the "second independent encounter" rule and how it is tracked using existing RCX-π v2 execution/trace concepts.
 
@@ -244,7 +244,7 @@ Status: IMPLEMENTED
 
 Implementation:
 - `rcx_pi/trace_canon.py` (ExecutionEngine with stall memory tracking)
-- `tests/test_second_independent_encounter.py` (15 tests covering all 8 scenarios)
+- `tests/integration/test_second_independent_encounter.py` (15 tests covering all 8 scenarios)
 
 Key methods:
 - `_stall_memory`: Dict mapping pattern_id → value_hash
