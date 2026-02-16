@@ -57,8 +57,8 @@ from typing import Any
 
 # Ensure tools directory is importable when run directly
 _tools_dir = Path(__file__).resolve().parent
-if str(_tools_dir.parent) not in sys.path:
-    sys.path.insert(0, str(_tools_dir.parent))
+if str(_tools_dir.parent.parent) not in sys.path:
+    sys.path.insert(0, str(_tools_dir.parent.parent))
 
 SDK_IMPORT_ERROR: Exception | None = None
 try:
@@ -1236,7 +1236,7 @@ Examples:
     if args.rigorous and approvals_to_challenge:
         print(f"\n🔍 RIGOROUS: Consolidated skeptic challenging {len(approvals_to_challenge)} approval(s)...")
         try:
-            from tools.run_skeptic import run_consolidated_skeptic
+            from tools.runners.run_skeptic import run_consolidated_skeptic
         except ModuleNotFoundError:
             from run_skeptic import run_consolidated_skeptic
 

@@ -60,7 +60,7 @@ fi
 echo ""
 
 echo "== 0) Agent review check =="
-if ./tools/check_agent_review_needed.sh; then
+if ./tools/checks/check_agent_review_needed.sh; then
     echo ""
 else
     echo "(This is a reminder - continuing with audit)"
@@ -68,22 +68,22 @@ else
 fi
 
 echo "== 1a) Contraband check =="
-./tools/contraband.sh rcx_pi
+./tools/checks/contraband.sh rcx_pi
 
 echo "== 1b) Test theater check =="
-./tools/check_test_theater.sh tests
+./tools/checks/check_test_theater.sh tests
 
 echo "== 1c) JS contraband check =="
-./tools/contraband_js.sh
+./tools/checks/contraband_js.sh
 
 echo "== 1d) JS AST police =="
-./tools/ast_police_js.sh
+./tools/checks/ast_police_js.sh
 
 echo "== 1e) JS test theater check =="
-./tools/check_test_theater_js.sh
+./tools/checks/check_test_theater_js.sh
 
 echo "== 1f) Seed police =="
-./tools/seed_police.sh
+./tools/checks/seed_police.sh
 
 echo "== 1g) Anti-cheat scans =="
 # No private attr access in tests/
@@ -102,7 +102,7 @@ echo "OK"
 
 # No underscored imports from rcx_pi in tests/ (AST-based)
 echo "-- no underscored imports from rcx_pi in tests/ (AST-based)"
-python3 tools/check_underscore_imports.py || exit 1
+python3 tools/checks/check_underscore_imports.py || exit 1
 echo "OK"
 
 echo "== 1h) Doc contract verification =="
@@ -121,10 +121,10 @@ echo "== 1l) Roadmap governance check =="
 pytest tests/docs/test_roadmap_governance.py -q
 
 echo "== 2a) Structural lint (projection validity) =="
-python3 tools/structural_lint.py mu/
+python3 tools/docs/structural_lint.py mu/
 
 echo "== 2b) AST police (Python) =="
-python3 tools/ast_police.py
+python3 tools/checks/ast_police.py
 
 echo "== 3) Debt dashboard =="
 ./tools/debt_dashboard.sh | tail -5
@@ -165,7 +165,7 @@ pytest $PARALLEL_FLAG -q \
 
 echo ""
 echo "== 5) JavaScript L3 parity check =="
-./tools/check_js_debt.sh
+./tools/checks/check_js_debt.sh
 if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else

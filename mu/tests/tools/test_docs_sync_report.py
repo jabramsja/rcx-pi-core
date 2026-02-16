@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).parents[2]
-SCRIPT = REPO_ROOT / "tools" / "docs_sync_report.py"
+SCRIPT = REPO_ROOT / "tools" / "docs" / "docs_sync_report.py"
 
 
 def test_docs_sync_report_json_output_has_expected_keys():

@@ -245,7 +245,7 @@ class TestUnderscoreKeyAudit:
         assert "STAGED_SEEDS=$(echo \"$STAGED_FILES\" | grep -E '^mu/.*\\.json$' || true)" in content, (
             "pre-commit-doc-check must detect staged mu/*.json files"
         )
-        assert "./tools/seed_police.sh" in content, (
+        assert "./tools/checks/seed_police.sh" in content, (
             "pre-commit-doc-check must run seed_police.sh when mu seeds are staged"
         )
 

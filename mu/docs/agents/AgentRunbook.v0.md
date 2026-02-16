@@ -42,10 +42,10 @@ Which tool to use and when:
 
 | Tier | Command | When | Time |
 |------|---------|------|------|
-| **Quick** | `python tools/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
-| **Full** | `python tools/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
-| **Rigorous** | `python tools/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
-| **Release** | `python tools/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+| **Quick** | `python tools/runners/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
+| **Full** | `python tools/runners/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
+| **Rigorous** | `python tools/runners/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
+| **Release** | `python tools/runners/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
 
 Times assume healthy SDK/runtime infrastructure (auth, Claude SDK, Bun compatibility). Infra failures can fail fast before review starts.
 
@@ -59,16 +59,16 @@ Times assume healthy SDK/runtime infrastructure (auth, Claude SDK, Bun compatibi
 
 ```bash
 # Full parallel review (recommended)
-python tools/run_review.py rcx_pi/selfhost/ --depth full
+python tools/runners/run_review.py rcx_pi/selfhost/ --depth full
 
 # Quick review (4 agents)
-python tools/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
+python tools/runners/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
 
 # PR review (auto-selects depth from diff)
-python tools/run_review.py --pr
+python tools/runners/run_review.py --pr
 
 # Interactive session with follow-up
-python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
+python tools/runners/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 ```
 
 ## What is run_review.py?
@@ -123,15 +123,15 @@ python tools/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 All 9 agents have dedicated SDK runners with built-in compliance validation:
 
 ```bash
-python tools/run_verifier.py <files> [--model opus|sonnet|haiku]           # North Star compliance
-python tools/run_adversary.py <files> [--model opus|sonnet|haiku]          # Security/attack vectors
-python tools/run_expert.py <files> [--model opus|sonnet|haiku]             # Complexity review
-python tools/run_structural_proof.py "claim" [--model opus|sonnet|haiku]   # Verify structural claims
-python tools/run_grounding.py <files> [--model opus|sonnet|haiku]          # Test coverage
-python tools/run_fuzzer.py <files> [--model opus|sonnet|haiku]             # Property-based testing
-python tools/run_translator.py <files> [--model opus|sonnet|haiku]         # Plain English
-python tools/run_visualizer.py <files> [--model opus|sonnet|haiku]         # Mermaid diagrams
-python tools/run_advisor.py "problem" [--model opus|sonnet|haiku]          # Strategic advice
+python tools/runners/run_verifier.py <files> [--model opus|sonnet|haiku]           # North Star compliance
+python tools/runners/run_adversary.py <files> [--model opus|sonnet|haiku]          # Security/attack vectors
+python tools/runners/run_expert.py <files> [--model opus|sonnet|haiku]             # Complexity review
+python tools/runners/run_structural_proof.py "claim" [--model opus|sonnet|haiku]   # Verify structural claims
+python tools/runners/run_grounding.py <files> [--model opus|sonnet|haiku]          # Test coverage
+python tools/runners/run_fuzzer.py <files> [--model opus|sonnet|haiku]             # Property-based testing
+python tools/runners/run_translator.py <files> [--model opus|sonnet|haiku]         # Plain English
+python tools/runners/run_visualizer.py <files> [--model opus|sonnet|haiku]         # Mermaid diagrams
+python tools/runners/run_advisor.py "problem" [--model opus|sonnet|haiku]          # Strategic advice
 ```
 
 ## Trigger Map (Which Agents to Run)
@@ -160,7 +160,7 @@ via `load_agent_prompt_with_contract()` before agent-specific lens prompts.
 For high-stakes changes, add `--rigorous` to challenge approvals:
 
 ```bash
-python tools/run_review.py rcx_pi/selfhost/ --rigorous
+python tools/runners/run_review.py rcx_pi/selfhost/ --rigorous
 ```
 
 **What it does:**
@@ -205,7 +205,7 @@ Runtime source of truth: `tools/shared_agent_utils.py` (`HARD_GATE_AGENTS`).
 
 ```bash
 # Start session
-python tools/run_interactive.py verifier rcx_pi/selfhost/
+python tools/runners/run_interactive.py verifier rcx_pi/selfhost/
 
 # Commands during session
 /switch adversary    # Switch agent (keeps context)
@@ -215,8 +215,8 @@ python tools/run_interactive.py verifier rcx_pi/selfhost/
 /exit                # End session
 
 # Resume later
-python tools/run_interactive.py --list
-python tools/run_interactive.py --resume <session_id>
+python tools/runners/run_interactive.py --list
+python tools/runners/run_interactive.py --resume <session_id>
 ```
 
 ## Deep Analysis (Full-Stack)
@@ -224,9 +224,9 @@ python tools/run_interactive.py --resume <session_id>
 For comprehensive codebase health analysis (monthly or before major releases):
 
 ```bash
-python tools/run_deep_analysis.py                    # All 5 agents
-python tools/run_deep_analysis.py --agents verifier,adversary  # Subset
-python tools/run_deep_analysis.py --verbose          # Show full output
+python tools/runners/run_deep_analysis.py                    # All 5 agents
+python tools/runners/run_deep_analysis.py --agents verifier,adversary  # Subset
+python tools/runners/run_deep_analysis.py --verbose          # Show full output
 ```
 
 **What it does:** Sends the full codebase (docs, tests, core code) to agents for DYNAMIC
@@ -245,12 +245,12 @@ analysis - finding issues that static tests miss:
 
 ```bash
 # Manual trigger via workflow_dispatch (always available)
-python tools/run_ci_review.py --pr-number 123 --post-comment
+python tools/runners/run_ci_review.py --pr-number 123 --post-comment
 
 # NOTE: PR auto-trigger is DISABLED — agent review uses Anthropic API
 # (pay-per-token), not the Max subscription. Use manual dispatch when
 # API cost is justified, or run locally with:
-#   python tools/run_review.py <files> --depth quick
+#   python tools/runners/run_review.py <files> --depth quick
 ```
 
 **Where outputs are stored (always):**
@@ -287,7 +287,7 @@ python tools/run_ci_review.py --pr-number 123 --post-comment
 
 Before running agents:
 ```bash
-PYTHONHASHSEED=0 python3 tools/check_agent_runtime.py
+PYTHONHASHSEED=0 python3 tools/checks/check_agent_runtime.py
 PYTHONHASHSEED=0 ./tools/audit_fast.sh
 ```
 

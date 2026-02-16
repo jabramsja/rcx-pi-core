@@ -167,7 +167,7 @@ def main():
 
     # Find docs directory
     script_dir = Path(__file__).parent
-    docs_dir = script_dir.parent / "mu" / "docs"
+    docs_dir = script_dir.parent.parent / "mu" / "docs"
 
     if not docs_dir.exists():
         print(f"Error: docs directory not found at {docs_dir}")

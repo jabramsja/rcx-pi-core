@@ -204,7 +204,7 @@ class TestToolsExist:
 
     @pytest.mark.parametrize("tool", [
         "tools/debt_dashboard.sh",
-        "tools/check_docs_consistency.sh",
+        "tools/checks/check_docs_consistency.sh",
         "tools/pre-commit-doc-check",
         "tools/audit_semantic_purity.sh",
     ])

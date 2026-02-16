@@ -35,16 +35,16 @@ on:
 
   # Auto-trigger disabled — agent review uses Anthropic API (pay-per-token),
   # not the Max subscription. Use manual workflow_dispatch when API cost is
-  # justified, or run locally with: python tools/run_review.py --pr
+  # justified, or run locally with: python tools/runners/run_review.py --pr
   #
   # pull_request:
   #   types: [opened, synchronize, reopened, ready_for_review]
   #   paths:
   #     - 'rcx_pi/**'
   #     - 'mu/**'
-  #     - 'tools/run_review.py'
-  #     - 'tools/run_ci_review.py'
-  #     - 'tools/run_skeptic.py'
+  #     - 'tools/runners/run_review.py'
+  #     - 'tools/runners/run_ci_review.py'
+  #     - 'tools/runners/run_skeptic.py'
   #     - 'tools/shared_agent_utils.py'
   #     - 'tools/validate_agent_compliance.py'
   #     - 'tools/validate_agent_reasoning.py'
@@ -106,7 +106,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
         run: |
-          python tools/run_ci_review.py \
+          python tools/runners/run_ci_review.py \
             --pr-number $PR_NUMBER \
             ${{ github.event.inputs.post_comment == 'true' && '--post-comment' || '' }} \
             --output review-report.md \

@@ -68,7 +68,7 @@ case "${1:-help}" in
         ;;
     list)
         echo "Available agent runners:"
-        ls -1 tools/run_*.py | xargs -I{} basename {} .py | sed 's/run_/  /'
+        ls -1 tools/runners/run_*.py | xargs -I{} basename {} .py | sed 's/run_/  /'
         ;;
     *)
         show_help

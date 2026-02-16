@@ -27,7 +27,7 @@ from pathlib import Path
 from datetime import datetime
 
 # Ensure we can import from project root
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from claude_agent_sdk import query, ClaudeAgentOptions
 from tools.shared_agent_utils import (

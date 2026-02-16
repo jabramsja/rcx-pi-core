@@ -166,7 +166,7 @@ class TestI2StructuralPurity:
     def test_seed_passes_seed_police(self):
         """fix.v1.json passes seed_police structural checks."""
         result = subprocess.run(
-            ["bash", "tools/seed_police.sh"],
+            ["bash", "tools/checks/seed_police.sh"],
             capture_output=True, text=True, cwd=str(ROOT),
         )
         assert result.returncode == 0, (

@@ -53,7 +53,7 @@ echo "== 0a) Repo clean =="
 test -z "$(git status --porcelain)" || { echo "Repo not clean"; git status --porcelain; exit 1; }
 
 echo "== 0b) Doc consistency check =="
-./tools/check_docs_consistency.sh
+./tools/checks/check_docs_consistency.sh
 TIME_STRUCTURAL=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS
@@ -94,28 +94,28 @@ echo "== 2) Semantic purity audit (self-hosting readiness) =="
 ./tools/audit_semantic_purity.sh
 
 echo "== 3) Contraband check (grep-based) =="
-./tools/contraband.sh rcx_pi
+./tools/checks/contraband.sh rcx_pi
 
 echo "== 3b) Test theater check (assert True) =="
-./tools/check_test_theater.sh tests
+./tools/checks/check_test_theater.sh tests
 
 echo "== 3c) JS contraband check (L3 parity) =="
-./tools/contraband_js.sh
+./tools/checks/contraband_js.sh
 
 echo "== 3d) JS AST police (catches what grep misses in JS) =="
-./tools/ast_police_js.sh
+./tools/checks/ast_police_js.sh
 
 echo "== 3e) JS test theater check =="
-./tools/check_test_theater_js.sh
+./tools/checks/check_test_theater_js.sh
 
 echo "== 3f) Seed police (structure, theater, host leakage) =="
-./tools/seed_police.sh
+./tools/checks/seed_police.sh
 
 echo "== 4a) Structural lint (projection validity) =="
-python3 tools/structural_lint.py mu/
+python3 tools/docs/structural_lint.py mu/
 
 echo "== 4b) AST police (catches what grep misses in Python) =="
-python3 tools/ast_police.py
+python3 tools/checks/ast_police.py
 TIME_SECURITY=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS
@@ -134,7 +134,7 @@ echo "-- no private attr access in tests/"
     grep -v '__pycache__' || { echo "Found private attr access"; exit 1; }
 
 echo "-- no underscored imports from rcx_pi in tests/ (AST-based)"
-python3 tools/check_underscore_imports.py || exit 1
+python3 tools/checks/check_underscore_imports.py || exit 1
 
 echo "-- no underscore-prefixed keys in JSON (non-standard Mu)"
 # Note: _marker is allowed - it's a security feature for done-wrapper spoofing prevention
@@ -203,7 +203,7 @@ TIME_CLI=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS
 echo "== 8) JavaScript L3 parity check =="
-./tools/check_js_debt.sh
+./tools/checks/check_js_debt.sh
 if node mu/host/js/eval_step.js 2>&1 | grep -q "All tests passed: true"; then
     echo "OK: JS tests pass"
 else

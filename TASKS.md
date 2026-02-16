@@ -51,11 +51,11 @@ If a task is not listed here, it is NOT to be implemented.
 - v1 replay semantics are frozen. Any new observability must be v2 and gated.
 - **L3 Parity Rule**: Changes to `mu/host/python/rcx_pi/selfhost/` (or via symlink `rcx_pi/selfhost/`) or `mu/` MUST be mirrored in `mu/host/js/eval_step.js`.
   - Run `node mu/host/js/eval_step.js` to verify all JS tests pass
-  - Run `./tools/check_js_debt.sh` to verify JS debt markers match Python
-  - Run `./tools/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
-  - Run `./tools/ast_police_js.sh` to catch JS patterns that bypass grep
-  - Run `./tools/check_test_theater_js.sh` to catch vacuous JS assertions
-  - Run `./tools/seed_police.sh` to verify seed integrity and no host leakage
+  - Run `./tools/checks/check_js_debt.sh` to verify JS debt markers match Python
+  - Run `./tools/checks/contraband_js.sh` to verify no forbidden patterns (determinism, purity)
+  - Run `./tools/checks/ast_police_js.sh` to catch JS patterns that bypass grep
+  - Run `./tools/checks/check_test_theater_js.sh` to catch vacuous JS assertions
+  - Run `./tools/checks/seed_police.sh` to verify seed integrity and no host leakage
   - New seeds must be loaded in both Python and JavaScript
   - Parity vectors must pass on both substrates before merge
 - **Pre-commit doc review**: Before committing changes to `rcx_pi/` or `mu/`:
@@ -103,7 +103,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-02-15): `is_mu()` cycle detection changed from set-copy O(depth²) to backtracking O(depth); fuzzer max_steps reduced 100→20 for non-convergent eval.v1 inputs. Fixes 5 weekly deep fuzz timeouts. No phase/debt/task change.
 - Tracker sync note (2026-02-11): Stall-detection hash caching — cache `current_hash` across loop iterations in 6 Python sites (step_kernel_mu, run_mu, run_mu_structural, _run_sub_algorithm, _resolve_trace_projection_id, projection_runner) + 4 JS sites (L3 parity). Halves hash calls per iteration. green_gate.yml: ci_fast on push (was ci_full), timeout 20→30m. 5 additional tests marked slow (3 engine pipeline, 1 hemisphere adversarial, 1 structural trace fuzzer). No phase/debt/task change.
 - Tracker sync note (2026-02-11): CI green gate 28 min → 2 min — hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` (452 tests deselected), 168 slow tests moved out of gate, `pytest-timeout` added to test extras, fragile grounding test fixed. Green gate runs ~2,500 core tests in ~50s CI. Nightly (ci_full) still runs everything. No phase/debt change.
-- Tracker sync note (2026-02-11): Static speed enforcer — `tools/check_test_speed.sh` grep-based detection of test files importing slow kernel functions without `@pytest.mark.slow`. Integrated into `tools/pre-commit-doc-check` (section 4b). 7 existing violations fixed. No phase/debt change.
+- Tracker sync note (2026-02-11): Static speed enforcer — `tools/checks/check_test_speed.sh` grep-based detection of test files importing slow kernel functions without `@pytest.mark.slow`. Integrated into `tools/pre-commit-doc-check` (section 4b). 7 existing violations fixed. No phase/debt change.
 - Tracker sync note (2026-02-16, Round 24H-boot1-wave2): Boot1 budget accounting fix — `_run_engine_recursive` (Python + JS) was passing full `max_engine_iterations` to recursive calls instead of remaining budget. Contract §3/S2 violation: total budget could reach 20*20=400 iterations. Fix: pass `max_engine_iterations - iteration - 1` (remaining budget after current step). Also fixed pre-existing ROOT path bug in `test_boot1_shadow_parity.py` (2 dirnames → 3, unblocking 4 cross-substrate tests). 4 new budget accounting tests (S2 shared budget, monotonically decreasing, low-budget fail-closed, trampoline equivalence). 24/24 Boot1 tests pass. No phase/debt change.
 - Tracker sync note (2026-02-12): JS engine-hemisphere parity — `runEnginePipeline`, `hashTraceForRecurrence`, `runHemisphereRouting`, `runEngineWithRouting` added to `eval_step.js`. rcx_engine.v1.json + recurrence.v2.json now loaded in JS. 4 JSON API actions, 6 inline tests, 6 cross-substrate parity tests (36 total pass). `_state_hash`/`_check_hash` added to JS ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS (pre-existing parity gap). JS debt: 13→15. No phase change.
 - Hemisphere hardening (2026-02-12, PR #239): caller-trust model (`_step_trusted`/`_apply_projection_trusted`), JS parity (substitute throw, isKernelIntermediate, inject_key guard, `||`→`??` numeric defaults, hard-cap 100k parity, RcxError at boundaries), boundary result validation in engine pipeline, `_walk_and_validate` shared traversal, dead code removal (eval_seed.py), test dedup (`hemisphere_helpers.py`, `EXPECTED_PROJECTION_IDS`, DummyBudget consolidation). 3 rounds of 9-agent rigorous review. No phase/debt change.

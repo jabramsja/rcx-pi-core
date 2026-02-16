@@ -68,7 +68,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tools/check_docs_consistency.sh
+          tools/checks/check_docs_consistency.sh
 
       - name: Enforce tracker sync for core changes
         shell: bash
@@ -82,7 +82,7 @@ jobs:
             echo "Skipping tracker sync check for event: ${{ github.event_name }}"
             exit 0
           fi
-          tools/enforce_tracker_sync.sh --range "$RANGE"
+          tools/checks/enforce_tracker_sync.sh --range "$RANGE"
 
       - name: Run green gate
         shell: bash
