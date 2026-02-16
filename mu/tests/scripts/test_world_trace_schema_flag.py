@@ -4,7 +4,7 @@ from rcx_pi.cli_schema_run import parse_schema_triplet_stdout, run_schema_triple
 
 
 def test_world_trace_schema_flag():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     cli = repo_root / "rcx_pi" / "worlds" / "world_trace_cli.py"
 
     r = subprocess.run(
@@ -15,4 +15,4 @@ def test_world_trace_schema_flag():
 
     assert r.returncode == 0
     assert "rcx-world-trace.v1" in r.stdout
-    assert "docs/world_trace_json_schema.md" in r.stdout
+    assert "mu/docs/schemas/world_trace_json_schema.md" in r.stdout

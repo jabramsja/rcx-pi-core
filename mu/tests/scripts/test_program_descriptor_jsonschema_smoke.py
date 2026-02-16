@@ -5,8 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import jsonschema
 
-def run(args: list[str], repo_root: Path) -> subprocess.CompletedProcess[str]:
+
+def _run(args: list[str], repo_root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "rcx_pi.program_descriptor_cli", *args],
         cwd=str(repo_root),
@@ -46,29 +48,24 @@ def _discover_candidates(repo_root: Path) -> list[str]:
     return out
 
 
-def test_program_descriptor_json_contract():
-    repo_root = Path(__file__).resolve().parents[2]
+def test_program_descriptor_jsonschema_smoke():
+    repo_root = Path(__file__).resolve().parents[3]
+    schema_path = repo_root / "mu" / "docs" / "schemas" / "program_descriptor_schema.json"
+    assert schema_path.exists(), f"missing schema: {schema_path}"
+    schema = json.loads(schema_path.read_text())
+
     candidates = _discover_candidates(repo_root)
 
     last = None
     for c in candidates:
-        r = run([c, "--json"], repo_root)
+        r = _run([c, "--json"], repo_root)
         if r.returncode == 0 and r.stdout.strip():
             last = r
             break
 
     assert last is not None, (
-        f"Could not resolve any candidate program for contract. Tried: {candidates[:30]}"
+        f"Could not resolve any candidate program for --json. Tried: {candidates[:30]}"
     )
 
     data = json.loads(last.stdout)
-
-    required = {"schema", "schema_doc", "program", "descriptor"}
-    missing = required - set(data.keys())
-    assert not missing, (
-        f"missing keys: {sorted(missing)}; got keys={sorted(data.keys())}"
-    )
-
-    allowed = required | {"ok", "warnings", "meta"}
-    extra = set(data.keys()) - allowed
-    assert not extra, f"unexpected keys: {sorted(extra)}; allowed={sorted(allowed)}"
+    jsonschema.validate(instance=data, schema=schema)

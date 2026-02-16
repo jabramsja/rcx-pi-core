@@ -53,7 +53,7 @@ def _discover_candidates(repo_root: Path) -> list[str]:
 
 
 def test_program_descriptor_resolves_some_known_program():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     candidates = _discover_candidates(repo_root)
 
     last = None

@@ -6,9 +6,9 @@ from pathlib import Path
 
 from jsonschema import Draft7Validator
 
-ROOT = Path(__file__).resolve().parents[2]
-FIX = ROOT / "docs" / "fixtures"
-SCHEMA_PATH = ROOT / "docs" / "schemas" / "rcx.snapshot.v1.schema.json"
+ROOT = Path(__file__).resolve().parents[3]
+FIX = ROOT / "mu" / "docs" / "fixtures"
+SCHEMA_PATH = ROOT / "mu" / "docs" / "schemas" / "rcx.snapshot.v1.schema.json"
 
 
 def test_snapshot_merge_output_validates_against_schema(tmp_path: Path):

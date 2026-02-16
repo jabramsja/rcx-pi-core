@@ -5,8 +5,8 @@ import subprocess
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
-FIX = ROOT / "docs" / "fixtures"
+ROOT = Path(__file__).resolve().parents[3]
+FIX = ROOT / "mu" / "docs" / "fixtures"
 
 
 def _load(p: Path):

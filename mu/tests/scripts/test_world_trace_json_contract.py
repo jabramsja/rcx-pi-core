@@ -17,7 +17,7 @@ def _run(
 
 
 def test_world_trace_json_contract_minimal_world():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     script = repo_root / "scripts" / "world_trace.sh"
     assert script.exists(), f"missing: {script}"
 
@@ -99,7 +99,7 @@ def test_world_trace_json_contract_minimal_world():
     )
 
     assert isinstance(data["schema_doc"], str) and data["schema_doc"]
-    assert data["schema_doc"].endswith("docs/world_trace_json_schema.md")
+    assert data["schema_doc"].endswith("mu/docs/schemas/world_trace_json_schema.md")
 
     assert isinstance(data["world"], str) and data["world"]
     assert isinstance(data["seed"], str) and data["seed"]

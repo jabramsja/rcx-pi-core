@@ -6,7 +6,7 @@ from rcx_pi.cli_schema_run import parse_schema_triplet_stdout, run_schema_triple
 
 
 def test_snapshot_schema_flag():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     tool = repo_root / "scripts" / "snapshot_merge.py"
     assert tool.exists(), f"missing: {tool}"
 

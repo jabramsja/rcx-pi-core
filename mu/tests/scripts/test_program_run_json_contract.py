@@ -16,9 +16,9 @@ def _run(args, cwd: Path):
 
 
 def test_program_run_json_contract():
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
 
-    # succ-list is guaranteed by rcx_pi.program_registry._ensure_defaults()
+    # succ-list is a built-in default program (always registered)
     program = "succ-list"
     inp = "[1,2,3]"
 
