@@ -34,7 +34,9 @@ def _assert_triplet(s: str) -> None:
     assert "." in tag, f"tag should look versioned (contain '.'): {tag!r}"
 
     # Doc path conventions
-    assert doc.startswith("docs/"), f"doc path should be under docs/: {doc!r}"
+    assert doc.startswith("docs/") or doc.startswith("mu/docs/"), (
+        f"doc path should be under docs/ or mu/docs/: {doc!r}"
+    )
     assert doc.endswith(".md"), f"doc path should be a markdown file: {doc!r}"
 
     # Schema path conventions

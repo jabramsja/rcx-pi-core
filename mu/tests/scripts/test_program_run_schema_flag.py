@@ -19,5 +19,5 @@ def test_program_run_schema_flag():
     out = r.stdout.strip()
     assert (
         out
-        == "rcx-program-run.v1 docs/program_run_schema.md mu/docs/schemas/program_run_schema.json"
+        == "rcx-program-run.v1 mu/docs/schemas/program_run_schema.md mu/docs/schemas/program_run_schema.json"
     )

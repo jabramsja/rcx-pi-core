@@ -19,5 +19,5 @@ def test_program_descriptor_schema_flag():
     out = r.stdout.strip()
     assert (
         out
-        == "rcx-program-descriptor.v1 docs/program_descriptor_schema.md mu/docs/schemas/program_descriptor_schema.json"
+        == "rcx-program-descriptor.v1 mu/docs/schemas/program_descriptor_schema.md mu/docs/schemas/program_descriptor_schema.json"
     )

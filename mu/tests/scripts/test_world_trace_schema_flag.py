@@ -15,4 +15,4 @@ def test_world_trace_schema_flag():
 
     assert r.returncode == 0
     assert "rcx-world-trace.v1" in r.stdout
-    assert "docs/world_trace_json_schema.md" in r.stdout
+    assert "mu/docs/schemas/world_trace_json_schema.md" in r.stdout

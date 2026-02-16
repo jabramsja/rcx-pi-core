@@ -27,7 +27,7 @@ def test_python_entrypoints_schema_triplets_are_parseable():
     for res in results:
         trip = res.trip
         assert trip.tag.endswith(".v1")
-        assert trip.doc_md.startswith("docs/") and trip.doc_md.endswith(".md")
+        assert (trip.doc_md.startswith("docs/") or trip.doc_md.startswith("mu/docs/")) and trip.doc_md.endswith(".md")
         assert trip.schema_json.startswith(
             "mu/docs/schemas/"
         ) and trip.schema_json.endswith(".json")
