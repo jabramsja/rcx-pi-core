@@ -107,51 +107,7 @@ if [ $FAILED -eq 0 ]; then
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
-# 3. Bytecode Portability: No Python builtins in opcode definitions
-# -----------------------------------------------------------------------------
-echo "== 3. Bytecode Portability: Opcode Definitions =="
-
-# Gate: Skip if bytecode_vm.py doesn't exist (not all builds have bytecode)
-if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
-    echo "  (bytecode_vm.py not found - skipping bytecode checks)"
-else
-echo "Scanning bytecode VM for Python-specific builtins in opcodes..."
-
-# Opcodes should not directly reference Python builtins that wouldn't exist
-# in other languages
-PYTHON_BUILTIN_PATTERNS=(
-    'eval('              # Dynamic eval
-    'exec('              # Dynamic exec
-    'compile('           # Python compile
-    '__import__'         # Dynamic import
-    'globals()'          # Python globals
-    'locals()'           # Python locals
-    'vars()'             # Python vars
-    'type('              # Python type() for dynamic typing
-    'isinstance.*str'    # Type check against Python str (OK for validation)
-)
-
-# Only flag eval/exec/compile/__import__ as errors (truly non-portable)
-HARD_ERRORS=(
-    'eval('
-    'exec('
-    'compile('
-    '__import__'
-)
-
-for pattern in "${HARD_ERRORS[@]}"; do
-    if grep -n "$pattern" rcx_pi/bytecode_vm.py 2>/dev/null | grep -v "#"; then
-        echo "ERROR: Bytecode VM uses non-portable Python builtin: $pattern"
-        FAILED=1
-    fi
-done
-
-if [ $FAILED -eq 0 ]; then
-    echo "  ✓ No non-portable Python builtins in bytecode VM"
-fi
-fi  # End bytecode_vm.py gate
-echo ""
+# (Section 3 removed: bytecode_vm.py archived in Round 24H)
 
 # -----------------------------------------------------------------------------
 # 4. Trace Portability: No host-specific serialization
@@ -186,29 +142,7 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
-# 5. Opcode Enum Portability
-# -----------------------------------------------------------------------------
-echo "== 5. Opcode Enum: Language-Agnostic Definitions =="
-
-# Gate: Skip if bytecode_vm.py doesn't exist
-if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
-    echo "  (bytecode_vm.py not found - skipping opcode enum checks)"
-else
-echo "Verifying opcodes are defined as language-agnostic constants..."
-    # Check that opcodes are simple enum values, not complex Python objects
-    OPCODE_COUNT=$(grep -c "= auto()" rcx_pi/bytecode_vm.py 2>/dev/null || echo "0")
-    echo "  Found $OPCODE_COUNT opcode definitions"
-
-    # Opcodes should be simple identifiers (UPPER_CASE)
-    if grep -E "class Opcode" rcx_pi/bytecode_vm.py >/dev/null 2>&1; then
-        echo "  ✓ Opcodes defined as enum (portable)"
-    else
-        echo "  WARNING: Opcode definition structure unclear"
-        WARNINGS=$((WARNINGS + 1))
-    fi
-fi  # End bytecode_vm.py gate
-echo ""
+# (Section 5 removed: bytecode_vm.py archived in Round 24H)
 
 # -----------------------------------------------------------------------------
 # 6. Value Hash Portability
@@ -235,55 +169,7 @@ if [ -f "rcx_pi/trace_canon.py" ]; then
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
-# 7. Reserved Opcode Discipline
-# -----------------------------------------------------------------------------
-echo "== 7. Reserved Opcode Discipline =="
-
-# Gate: Skip if bytecode_vm.py doesn't exist
-if [ ! -f "rcx_pi/bytecode_vm.py" ]; then
-    echo "  (bytecode_vm.py not found - skipping reserved opcode checks)"
-else
-echo "Verifying reserved opcodes remain unimplemented..."
-
-# Note: STALL implemented in v1a, FIX/FIXED in v1b, ROUTE/CLOSE remain blocked
-RESERVED_OPS="ROUTE CLOSE"
-for op in $RESERVED_OPS; do
-    op_lower=$(echo "$op" | tr '[:upper:]' '[:lower:]')
-    if grep -n "def op_${op_lower}" rcx_pi/bytecode_vm.py 2>/dev/null | grep -v "Reserved"; then
-        echo "  ERROR: Reserved opcode $op has implementation (should be blocked until promoted)"
-        FAILED=1
-    fi
-done
-
-# Verify STALL is implemented (v1a)
-if grep -q "def op_stall" rcx_pi/bytecode_vm.py 2>/dev/null; then
-    echo "  ✓ STALL opcode implemented (v1a)"
-else
-    echo "  ERROR: STALL opcode should be implemented (v1a)"
-    FAILED=1
-fi
-
-# Verify FIX/FIXED are implemented (v1b)
-if grep -q "def op_fix" rcx_pi/bytecode_vm.py 2>/dev/null; then
-    echo "  ✓ FIX opcode implemented (v1b)"
-else
-    echo "  ERROR: FIX opcode should be implemented (v1b)"
-    FAILED=1
-fi
-
-if grep -q "def op_fixed" rcx_pi/bytecode_vm.py 2>/dev/null; then
-    echo "  ✓ FIXED opcode implemented (v1b)"
-else
-    echo "  ERROR: FIXED opcode should be implemented (v1b)"
-    FAILED=1
-fi
-
-if [ $FAILED -eq 0 ]; then
-    echo "  ✓ Reserved opcodes (ROUTE/CLOSE) remain unimplemented"
-fi
-fi  # End bytecode_vm.py gate
-echo ""
+# (Section 7 removed: bytecode_vm.py archived in Round 24H)
 
 # -----------------------------------------------------------------------------
 # 8. Mu Type Guardrails
@@ -925,20 +811,21 @@ for f in $ALL_PY_FILES; do
         continue
     fi
 
-    # Check if it's in our audited list or is legacy/infrastructure
+    # Check if it's in our audited list or known infrastructure
     case "$f" in
         # Explicitly audited (self-hosting critical)
         eval_seed.py|kernel.py|mu_type.py)
             ;;
-        # Legacy/infrastructure - not self-hosting critical
-        bytecode_vm.py|programs.py|rcx_cli.py)
+        # Selfhost re-export shims
+        match_mu.py|step_mu.py|subst_mu.py)
             ;;
-        trace_*.py|rule_motifs*.py|replay*.py|execution*.py)
+        # CLI tools and observability
+        rcx_cli.py|cli_schema*.py|replay*.py)
             ;;
-        # Utilities and CLI tools
-        api.py|bench.py|cli_schema*.py|higher.py|listutils.py|meta.py|pretty.py)
+        trace_*.py|rule_motifs*.py)
             ;;
-        program_*.py|projection.py|self_host.py|worlds_json.py|worlds_bridge.py|worlds_probe.py)
+        # Active modules
+        deep_eval.py|projection_coverage.py|worlds_probe.py)
             ;;
         *)
             # New file - needs review
@@ -996,11 +883,9 @@ echo ""
 echo "Checks completed:"
 echo "  1. Trace fixtures: No Python-specific types"
 echo "  2. Rule motifs: No host closures"
-echo "  3. Bytecode VM: No non-portable builtins"
+echo "  3,5,7. (bytecode_vm sections removed — archived Round 24H)"
 echo "  4. Trace serialization: JSON-portable types"
-echo "  5. Opcodes: Language-agnostic enum"
 echo "  6. Value hash: Deterministic SHA-256"
-echo "  7. Reserved opcodes: ROUTE/CLOSE blocked, STALL/FIX/FIXED implemented (v1b)"
 echo "  8. Mu type: Basic validation guardrails"
 echo "  9. Structural purity: Programming IN RCX guardrails"
 echo "  10. Kernel purity: No host logic (when kernel.py exists)"

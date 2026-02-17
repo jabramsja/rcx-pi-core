@@ -18,8 +18,6 @@ Umbrella CLI router for RCX-π tools.
 This file is intentionally thin and does not re-implement leaf flags.
 It only routes:
 
-  rcx program describe <...>   -> rcx_pi.program_descriptor_cli.main(<...>)
-  rcx program run <...>        -> rcx_pi.program_run_cli.main(<...>)
   rcx world trace <...>        -> rcx_pi.worlds.world_trace_cli.main(<...>)
 
 Convenience alias:
@@ -44,24 +42,21 @@ from typing import List
 
 
 HELP = """\
-usage: rcx <program|world|trace|rules> ...
+usage: rcx <world|trace|rules|replay> ...
 
-RCX umbrella CLI (routes to program descriptor, program run, and world trace tools).
+RCX umbrella CLI (routes to world trace, rules, and replay tools).
 
 commands:
-  program describe   Delegate to: python -m rcx_pi.program_descriptor_cli ...
-  program run        Delegate to: python -m rcx_pi.program_run_cli ...
   world trace        Delegate to: python -m rcx_pi.worlds.world_trace_cli ...
   trace              Alias for:   world trace
   rules              Rule motif observability (--print-rule-motifs)
+  replay             Replay execution traces
 
 examples:
-  python3 -m rcx_pi.rcx_cli program describe --schema
-  python3 -m rcx_pi.rcx_cli program describe rcx_core --json
-  python3 -m rcx_pi.rcx_cli program run succ-list "[1,2,3]" --pretty
   python3 -m rcx_pi.rcx_cli world trace pingpong ping --max-steps 12 --pretty
   python3 -m rcx_pi.rcx_cli trace pingpong ping --max-steps 6 --pretty
   python3 -m rcx_pi.rcx_cli rules --print-rule-motifs
+  python3 -m rcx_pi.rcx_cli replay <trace-file>
 """
 
 
@@ -86,26 +81,15 @@ def main(argv: List[str] | None = None) -> int:
         argv = ["world", "trace"] + argv[1:]
 
     if len(argv) < 2:
+        # Single-arg commands
+        if argv[0] == "rules":
+            from rcx_pi.rule_motifs_v0 import rules_main
+
+            return int(rules_main([]))
+
         return _help(2)
 
     top = argv[0]
-
-    if top == "program":
-        sub = argv[1]
-        rest = argv[2:]
-
-        if sub == "describe":
-            from rcx_pi.program_descriptor_cli import main as program_descriptor_main
-
-            return int(program_descriptor_main(rest))
-
-        if sub == "run":
-            from rcx_pi.program_run_cli import main as program_run_main
-
-            return int(program_run_main(rest))
-
-        print(f"rcx: unknown program subcommand: {sub!r}", file=sys.stderr)
-        return _help(2)
 
     if top == "world":
         sub = argv[1]
@@ -124,6 +108,9 @@ def main(argv: List[str] | None = None) -> int:
         from rcx_pi.rule_motifs_v0 import rules_main
 
         return int(rules_main(rest))
+
+    if top == "replay":
+        return _cmd_replay(argv[1:])
 
     print(f"rcx: unknown command: {top!r}", file=sys.stderr)
     return _help(2)

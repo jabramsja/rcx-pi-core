@@ -6,8 +6,6 @@ from rcx_pi.cli_schema_run import run_schema_triplet
 def test_python_entrypoints_schema_triplets_are_parseable():
     # These are intentionally python-only entrypoints (CI/python-only gate).
     results = [
-        run_schema_triplet(["python3", "rcx_pi/program_descriptor_cli.py", "--schema"]),
-        run_schema_triplet(["python3", "rcx_pi/program_run_cli.py", "--schema"]),
         run_schema_triplet(
             ["python3", "-m", "rcx_pi.worlds.world_trace_cli", "--schema"]
         ),

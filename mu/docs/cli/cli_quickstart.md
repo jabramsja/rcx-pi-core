@@ -56,15 +56,11 @@ rcx rules --check-rule-motifs-from FILE  # Validate rule motifs from JSON file
 
 ## Direct tools
 
-rcx-program-descriptor --schema
-rcx-program-run --schema
 rcx-world-trace --schema
 
 ## JSON schemas
 
-- Program descriptor: mu/docs/schemas/program_descriptor_schema.json (tag: rcx-program-descriptor.v1)
-- Program run:        mu/docs/schemas/program_run_schema.json (tag: rcx-program-run.v1)
-- World trace:        mu/docs/schemas/world_trace_json_schema.md (tag: rcx-world-trace.v1)
+- World trace: mu/docs/schemas/world_trace_json_schema.md (tag: rcx-world-trace.v1)
 
 
 ## Umbrella command (non-conflicting)
@@ -72,6 +68,4 @@ rcx-world-trace --schema
 If you already use `rcx` as a shell alias, use `rcx-cli` as the umbrella dispatcher:
 
 - `rcx-cli --help`
-- `rcx-cli program describe --schema`
-- `rcx-cli program run succ-list "[1,2,3]" --pretty`
 - `rcx-cli trace pingpong ping --max-steps 6 --pretty`

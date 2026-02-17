@@ -12,14 +12,11 @@ dependencies = []
 
 [project.scripts]
 rcx-cli = "rcx_pi.rcx_cli:main"
-
 rcx = "rcx_pi.rcx_cli:main"
-rcx-program-descriptor = "rcx_pi.program_descriptor_cli:main"
-rcx-program-run = "rcx_pi.program_run_cli:main"
 rcx-world-trace = "rcx_pi.worlds.world_trace_cli:main"
 
 [tool.setuptools]
-packages = ["rcx_pi", "rcx_pi.core", "rcx_pi.engine", "rcx_pi.reduction", "rcx_pi.specs", "rcx_pi.utils", "rcx_pi.worlds"]
+packages = ["rcx_pi", "rcx_pi.selfhost", "rcx_pi.specs", "rcx_pi.worlds"]
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-xdist", "pytest-cov", "pytest-timeout", "jsonschema", "hypothesis", "pytest-testmon"]

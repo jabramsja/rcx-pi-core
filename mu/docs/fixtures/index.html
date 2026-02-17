@@ -29,7 +29,7 @@
 <body>
   <div style="margin:0 0 14px 0; padding:12px; border:1px solid #eee; border-radius:12px; background:#fafafa;">
     <strong>How to view these fixtures locally</strong><br/>
-    Run: <code>./scripts/open_fixtures.sh</code> (serves <code>mu/docs/fixtures/</code> + opens <code>index.html</code>)<br/>
+    Serve <code>mu/docs/fixtures/</code> locally (e.g. <code>python3 -m http.server -d mu/docs/fixtures/</code>) and open <code>index.html</code>.<br/>
     Tip: the explorer loads <code>orbit_provenance_v1.json</code> via <code>fetch()</code>, so using a local server avoids browser restrictions.
   </div>
 
@@ -51,7 +51,7 @@
   <div class="box">
     <strong>How to open locally</strong>
     <div class="hint">Because this page fetches JSON, open it via a local web server (not <code>file://</code>).</div>
-    <pre><code>cd docs/fixtures
+    <pre><code>cd mu/docs/fixtures
 python3 -m http.server 8000</code></pre>
     <div class="hint">Then open <code>http://localhost:8000/index.html</code> (or <code>orbit_explorer_v1.html</code> directly).</div>
   </div>

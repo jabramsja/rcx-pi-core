@@ -52,11 +52,7 @@ Top-level:
 
 - mu/docs/fixtures/snapshot_rcx_core_v1.json
 
-Regenerate (from repo root):
+Regeneration (historical — rcx_pi_rust archived in Round 23A):
 
-    (cd rcx_pi_rust && cargo build --examples)
-    (cd rcx_pi_rust && cargo run --example snapshot_json_cli -- rcx_core "[null,a]" "[inf,a]" "[paradox,a]" "[omega,[a,b]]" > ../mu/docs/fixtures/snapshot_rcx_core_v1.json)
-
-Roundtrip proof (write -> wipe -> restore -> same behavior):
-
-    (cd rcx_pi_rust && cargo run --example snapshot_roundtrip_cli)
+The golden fixture is stable. Original generation used `archive/rcx_pi_rust/` Rust examples.
+See `archive/rcx_pi_rust/` for historical tooling if regeneration is ever needed.

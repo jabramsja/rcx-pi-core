@@ -17,22 +17,9 @@ def test_rcx_cli_help_smoke():
     r = _run(["--help"], repo_root)
     assert r.returncode == 0, r.stderr
     out = (r.stdout or "") + (r.stderr or "")
-    assert "program describe" in out
-    assert "program run" in out
     assert "world trace" in out
     assert "trace" in out  # alias
-
-
-def test_rcx_cli_program_run_routes_and_emits_json():
-    repo_root = Path(__file__).resolve().parents[3]
-    r = _run(["program", "run", "succ-list", "[1,2,3]"], repo_root)
-    assert r.returncode == 0, r.stderr
-    data = json.loads(r.stdout)
-    assert data["schema"] == "rcx-program-run.v1"
-    assert data["program"] == "succ-list"
-    assert data["input"] == [1, 2, 3]
-    assert data["output"] == [2, 3, 4]
-    assert data.get("ok") is True
+    assert "rules" in out
 
 
 def test_rcx_cli_trace_alias_routes_and_emits_json():
