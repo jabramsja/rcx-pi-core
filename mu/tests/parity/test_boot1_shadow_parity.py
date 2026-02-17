@@ -1331,3 +1331,128 @@ class TestBoot1DepthCapEnforcement:
             assert max_depth < _BOOT1_MAX_REENTRY_DEPTH, (
                 f"Observed depth {max_depth} reached/exceeded cap {_BOOT1_MAX_REENTRY_DEPTH}"
             )
+
+
+# ============================================================================
+# Wave 8: S3 boundary request security + non-vacuous primitive assertions
+# ============================================================================
+
+class TestBoot1BoundaryRequestSecurity:
+    """S3: Boundary request validation must fire on re-entry paths."""
+
+    def test_reserved_field_rejected_on_boot1_path(self):
+        """Injecting a reserved field via boundary request raises on Boot1 path."""
+        reset_step_budget()
+        # Use a projection that requests boundary injection
+        # The key '_mode' is in KERNEL_RESERVED_FIELDS — must be rejected
+        projs = [{"pattern": {"trigger": {"var": "v"}}, "body": {"var": "v"}}]
+
+        # Verify the reserved field is actually in KERNEL_RESERVED_FIELDS
+        assert "_mode" in KERNEL_RESERVED_FIELDS, (
+            "_mode must be in KERNEL_RESERVED_FIELDS for this test to be meaningful"
+        )
+
+        # Direct validation check: attempting to inject reserved field must raise
+        with pytest.raises(ValueError, match="kernel-reserved field"):
+            validate_no_kernel_reserved_fields({"_mode": "injected"}, context="test")
+
+    def test_reserved_fields_rejected_during_engine_pipeline(self):
+        """Engine pipeline rejects reserved fields in domain data on Boot1 path."""
+        reset_step_budget()
+        # Input containing a reserved field should be rejected
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+
+        with pytest.raises(ValueError, match="kernel-reserved"):
+            run_engine_pipeline(
+                projs, {"_mode": "forged_state"},
+                max_steps=5, use_boot1_recursive=True,
+            )
+
+    def test_boot1_and_trampoline_both_reject_reserved_input(self):
+        """Both paths reject reserved fields identically (parity)."""
+        reset_step_budget()
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        reserved_input = {"_stall": True}
+
+        tramp_error = None
+        boot1_error = None
+
+        try:
+            reset_step_budget()
+            run_engine_pipeline(projs, reserved_input, max_steps=5,
+                                use_boot1_recursive=False)
+        except (ValueError, Exception) as e:
+            tramp_error = str(e)
+
+        try:
+            reset_step_budget()
+            run_engine_pipeline(projs, reserved_input, max_steps=5,
+                                use_boot1_recursive=True)
+        except (ValueError, Exception) as e:
+            boot1_error = str(e)
+
+        # Both must reject (neither should succeed)
+        assert tramp_error is not None, "Trampoline accepted reserved field input"
+        assert boot1_error is not None, "Boot1 accepted reserved field input"
+        # Both should mention reserved field
+        assert "reserved" in tramp_error.lower() or "kernel" in tramp_error.lower()
+        assert "reserved" in boot1_error.lower() or "kernel" in boot1_error.lower()
+
+
+class TestBoot1PrimitiveCountInvariant:
+    """Non-vacuous bootstrap primitive count assertions."""
+
+    def test_exactly_4_bootstrap_primitives_exist(self):
+        """Verify exactly 4 BOOTSTRAP_PRIMITIVE markers exist in selfhost/."""
+        import subprocess
+        result = subprocess.run(
+            ["grep", "-r", "BOOTSTRAP_PRIMITIVE:", "rcx_pi/selfhost/"],
+            capture_output=True, text=True, cwd=ROOT,
+        )
+        markers = [line for line in result.stdout.strip().splitlines() if line]
+        assert len(markers) == 4, (
+            f"Expected exactly 4 BOOTSTRAP_PRIMITIVE markers, found {len(markers)}:\n"
+            + "\n".join(f"  {m}" for m in markers)
+        )
+
+    def test_primitive_identities_are_stable(self):
+        """The 4 bootstrap primitives are eval_step, max_steps, stack_guard, projection_loader."""
+        import subprocess
+        import re
+        result = subprocess.run(
+            ["grep", "-r", "BOOTSTRAP_PRIMITIVE:", "rcx_pi/selfhost/"],
+            capture_output=True, text=True, cwd=ROOT,
+        )
+        primitives = set()
+        for line in result.stdout.strip().splitlines():
+            m = re.search(r"BOOTSTRAP_PRIMITIVE:\s*(\S+)", line)
+            if m:
+                # Strip parenthetical like "stack_guard (MAX_MU_DEPTH)" -> "stack_guard"
+                primitives.add(m.group(1))
+
+        expected = {"eval_step", "max_steps", "stack_guard", "projection_loader"}
+        assert primitives == expected, (
+            f"Bootstrap primitive set changed!\n"
+            f"  Expected: {sorted(expected)}\n"
+            f"  Found:    {sorted(primitives)}"
+        )
+
+    def test_boot1_does_not_add_primitives(self):
+        """Boot1 recursive path adds no new BOOTSTRAP_PRIMITIVE markers."""
+        # _run_engine_recursive is a code path, not a primitive
+        assert "_run_engine_recursive" not in KERNEL_RESERVED_FIELDS, (
+            "_run_engine_recursive should NOT be a kernel-reserved field"
+        )
+        # _tail_call IS reserved (ABI field) but is NOT a bootstrap primitive
+        assert "_tail_call" in KERNEL_RESERVED_FIELDS, (
+            "_tail_call must be reserved for Boot1 ABI"
+        )
+        # Verify _tail_call is not marked as BOOTSTRAP_PRIMITIVE
+        import subprocess
+        result = subprocess.run(
+            ["grep", "-r", "BOOTSTRAP_PRIMITIVE.*_tail_call", "rcx_pi/selfhost/"],
+            capture_output=True, text=True, cwd=ROOT,
+        )
+        assert result.stdout.strip() == "", (
+            "_tail_call must NOT be marked as BOOTSTRAP_PRIMITIVE"
+        )

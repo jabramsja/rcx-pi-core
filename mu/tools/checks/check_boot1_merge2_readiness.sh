@@ -40,27 +40,31 @@ echo "════════════════════════�
 echo ""
 
 # ── G1: ABI Compatibility ──────────────────────────────────────
-# _run_engine and _tail_call must be in KERNEL_RESERVED_FIELDS
+# _run_engine and _tail_call must be IN KERNEL_RESERVED_FIELDS (not just anywhere in file)
 echo "Gate 1: ABI Compatibility"
 G1_PASS=true
-if ! grep -q '"_run_engine"' rcx_pi/selfhost/step_mu.py 2>/dev/null; then
-    gate_fail 1 "_run_engine not found in KERNEL_RESERVED_FIELDS (Python)"
+# Python: verify fields are inside the KERNEL_RESERVED_FIELDS frozenset definition
+PY_KRF_BLOCK=$(sed -n '/^KERNEL_RESERVED_FIELDS = frozenset/,/^})/p' rcx_pi/selfhost/step_mu.py 2>/dev/null)
+if ! echo "$PY_KRF_BLOCK" | grep -q '"_run_engine"'; then
+    gate_fail 1 "_run_engine not in KERNEL_RESERVED_FIELDS definition (Python)"
     G1_PASS=false
 fi
-if ! grep -q '"_tail_call"' rcx_pi/selfhost/step_mu.py 2>/dev/null; then
-    gate_fail 1 "_tail_call not found in KERNEL_RESERVED_FIELDS (Python)"
+if ! echo "$PY_KRF_BLOCK" | grep -q '"_tail_call"'; then
+    gate_fail 1 "_tail_call not in KERNEL_RESERVED_FIELDS definition (Python)"
     G1_PASS=false
 fi
-if ! grep -q "'_run_engine'" mu/host/js/eval_step.js 2>/dev/null; then
-    gate_fail 1 "_run_engine not found in KERNEL_RESERVED_FIELDS (JS)"
+# JS: verify fields are inside the KERNEL_RESERVED_FIELDS Set definition
+JS_KRF_BLOCK=$(sed -n '/^const KERNEL_RESERVED_FIELDS = new Set/,/^]/p' mu/host/js/eval_step.js 2>/dev/null)
+if ! echo "$JS_KRF_BLOCK" | grep -q "'_run_engine'"; then
+    gate_fail 1 "_run_engine not in KERNEL_RESERVED_FIELDS definition (JS)"
     G1_PASS=false
 fi
-if ! grep -q "'_tail_call'" mu/host/js/eval_step.js 2>/dev/null; then
-    gate_fail 1 "_tail_call not found in KERNEL_RESERVED_FIELDS (JS)"
+if ! echo "$JS_KRF_BLOCK" | grep -q "'_tail_call'"; then
+    gate_fail 1 "_tail_call not in KERNEL_RESERVED_FIELDS definition (JS)"
     G1_PASS=false
 fi
 if $G1_PASS; then
-    gate_pass 1 "ABI fields reserved in both substrates"
+    gate_pass 1 "ABI fields in KERNEL_RESERVED_FIELDS definition (both substrates)"
 fi
 echo ""
 
@@ -72,7 +76,7 @@ G2_OUTPUT=$(PYTHONHASHSEED=0 pytest mu/tests/parity/test_boot1_shadow_parity.py 
 G2_PASSED=$(echo "$G2_OUTPUT" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")
 G2_FAILED=$(echo "$G2_OUTPUT" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo "0")
 
-G2_MIN_EXPECTED=52  # Ratchet: fast test count can only increase (65 total, 52 non-slow)
+G2_MIN_EXPECTED=58  # Ratchet: fast test count can only increase (71 total, 58 non-slow)
 if [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -ge "$G2_MIN_EXPECTED" ]; then
     gate_pass 2 "Parity: $G2_PASSED passed (>=$G2_MIN_EXPECTED), 0 failed"
 elif [ "$G2_FAILED" = "0" ] && [ "$G2_PASSED" -gt "0" ]; then
@@ -85,13 +89,40 @@ echo ""
 # ── G3: Security ───────────────────────────────────────────────
 # No new bootstrap primitives, safety invariants S1-S7
 echo "Gate 3: Security (no primitive increase)"
-# Count BOOTSTRAP_PRIMITIVE markers across selfhost files
-BP_COUNT=$(grep -r "BOOTSTRAP_PRIMITIVE" rcx_pi/selfhost/ 2>/dev/null | wc -l | tr -d ' ')
-# Boot1 must not add primitives beyond the existing count (~4-8 markers)
-if [ "$BP_COUNT" -le "8" ]; then
-    gate_pass 3 "Bootstrap primitive markers stable ($BP_COUNT markers)"
+# Verify exactly 4 bootstrap primitives by identity, not just count
+G3_PASS=true
+BP_EXPECTED=("eval_step" "max_steps" "stack_guard" "projection_loader")
+BP_FOUND=()
+while IFS= read -r line; do
+    # Extract primitive name from "# BOOTSTRAP_PRIMITIVE: <name>"
+    prim=$(echo "$line" | sed 's/.*BOOTSTRAP_PRIMITIVE: *//' | sed 's/ .*//')
+    if [ -n "$prim" ]; then
+        BP_FOUND+=("$prim")
+    fi
+done < <(grep -r "BOOTSTRAP_PRIMITIVE:" rcx_pi/selfhost/ 2>/dev/null)
+
+BP_FOUND_COUNT=${#BP_FOUND[@]}
+if [ "$BP_FOUND_COUNT" -ne "4" ]; then
+    gate_fail 3 "Expected 4 bootstrap primitives, found $BP_FOUND_COUNT: ${BP_FOUND[*]}"
+    G3_PASS=false
 else
-    gate_fail 3 "Bootstrap primitive count increased ($BP_COUNT markers)"
+    # Verify each expected primitive is present
+    for expected in "${BP_EXPECTED[@]}"; do
+        found=false
+        for actual in "${BP_FOUND[@]}"; do
+            if [ "$actual" = "$expected" ]; then
+                found=true
+                break
+            fi
+        done
+        if ! $found; then
+            gate_fail 3 "Missing bootstrap primitive: $expected"
+            G3_PASS=false
+        fi
+    done
+fi
+if $G3_PASS; then
+    gate_pass 3 "Exactly 4 bootstrap primitives verified: ${BP_EXPECTED[*]}"
 fi
 echo ""
 
@@ -126,7 +157,18 @@ echo ""
 # ── G5: CI Stability ──────────────────────────────────────────
 # Boot1 tests MUST be in CRITICAL_TEST_FILES (prevents silent CI skip)
 echo "Gate 5: CI Stability (CRITICAL_TEST_FILES membership)"
-if grep -q '"test_boot1_shadow_parity.py"' tests/conftest.py 2>/dev/null; then
+G5_PASS=false
+# Check both canonical (mu/tests/) and symlink (tests/) paths
+for conftest_path in mu/tests/conftest.py tests/conftest.py; do
+    if [ -f "$conftest_path" ]; then
+        # Extract the CRITICAL_TEST_FILES block and check for the test file
+        if sed -n '/^CRITICAL_TEST_FILES/,/^}/p' "$conftest_path" 2>/dev/null | grep -q '"test_boot1_shadow_parity.py"'; then
+            G5_PASS=true
+            break
+        fi
+    fi
+done
+if $G5_PASS; then
     gate_pass 5 "test_boot1_shadow_parity.py in CRITICAL_TEST_FILES"
 else
     gate_fail 5 "test_boot1_shadow_parity.py NOT in CRITICAL_TEST_FILES (CI vulnerability)"
@@ -156,9 +198,19 @@ if ! grep -q "BOOT1_MAX_REENTRY_DEPTH" mu/host/js/eval_step.js 2>/dev/null; then
     gate_fail 6 "BOOT1_MAX_REENTRY_DEPTH constant missing from JS"
     G6_PASS=false
 fi
-# Check depth cap VALUES match between substrates
-PY_DEPTH=$(grep '_BOOT1_MAX_REENTRY_DEPTH = ' rcx_pi/selfhost/step_mu.py 2>/dev/null | sed 's/.*= \([0-9]*\).*/\1/' | head -1)
-JS_DEPTH=$(grep 'BOOT1_MAX_REENTRY_DEPTH = ' mu/host/js/eval_step.js 2>/dev/null | sed 's/.*= \([0-9]*\).*/\1/' | head -1)
+# Check depth cap VALUES match between substrates (robust extraction)
+PY_DEPTH=$(python3 -c "
+import re, sys
+text = open('rcx_pi/selfhost/step_mu.py').read()
+m = re.search(r'_BOOT1_MAX_REENTRY_DEPTH\s*=\s*(\d+)', text)
+print(m.group(1) if m else '0')
+" 2>/dev/null)
+JS_DEPTH=$(python3 -c "
+import re, sys
+text = open('mu/host/js/eval_step.js').read()
+m = re.search(r'BOOT1_MAX_REENTRY_DEPTH\s*=\s*(\d+)', text)
+print(m.group(1) if m else '0')
+" 2>/dev/null)
 if [ "$PY_DEPTH" != "$JS_DEPTH" ] || [ "$PY_DEPTH" = "0" ]; then
     gate_fail 6 "Depth cap mismatch or missing: Python=$PY_DEPTH, JS=$JS_DEPTH"
     G6_PASS=false

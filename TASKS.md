@@ -95,6 +95,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-16): Boot1 Wave 8 readiness hardening — G1 now verifies actual `KERNEL_RESERVED_FIELDS` definition membership (not string grep). G3 verifies exact 4 bootstrap primitives by identity. G5 checks both canonical and symlink conftest paths. G6 uses Python regex instead of brittle sed. 6 new tests: S3 boundary request security (3), primitive count invariant (3). Ratchet 52→58 fast tests, 65→71 total. No phase/debt/runtime change.
 - Deterministic trace core (v1) complete
 - Tracker sync note (2026-02-07): `match_mu` var-name scan cycle guard was corrected to allow shared substructures (DAG reuse) while still rejecting true active-path cycles; no phase/task promotion.
 - Tracker sync note (2026-02-10): `match_mu` bridge cache defensive copy + `seed_integrity` MU_SEED_LOCATIONS moved to module level; agent verdict extraction hardened across all 9 prompts; no phase/debt/task change.
