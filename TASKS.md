@@ -155,7 +155,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Anti-theater guardrails:
   - `--print-exec-summary` CLI flag + `execution_summary_v2()` pure helper
   - `test_cli_print_exec_summary_end_to_end` (subprocess CLI test)
-  - `tools/audits/audit_exec_summary.sh` (non-test reality anchor)
+  - audit_exec_summary.sh (removed — dead code; subprocess CLI test is the reality anchor)
 - Trace Reading Primer (`mu/docs/execution/TraceReadingPrimer.v0.md`)
 - Record→Replay Gate (`test_record_replay_gate_end_to_end`)
 - Flag Discipline Contract (`mu/docs/cli/Flags.md`)
@@ -226,7 +226,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - Canonical pre-commit local gate (`tools/pre-commit-doc-check`)
   - Projection test coverage (`rcx_pi/projection_coverage.py`)
   - Agent memory across sessions (`tools/runners/agent_memory.py`)
-  - Trace visualization (`tools/analysis/trace_viewer.py`)
+  - Trace visualization (removed — dead code; no callers)
 - Seed Integrity Verification (PR #157):
   - SHA256 checksum verification for seed files (match.v1.json, subst.v1.json)
   - Structure validation (meta, projections keys, required fields)
