@@ -89,7 +89,7 @@ html = f"""<!doctype html>
   <div class="box">
     <strong>How to open locally</strong>
     <div class="hint">Because this page fetches JSON, open it via a local web server (not <code>file://</code>).</div>
-    <pre><code>cd docs/fixtures
+    <pre><code>cd mu/docs/fixtures
 python3 -m http.server 8000</code></pre>
     <div class="hint">Then open <code>http://localhost:8000/index.html</code> (or <code>orbit_explorer_v1.html</code> directly).</div>
   </div>
