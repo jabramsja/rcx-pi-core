@@ -241,8 +241,8 @@ def get_var_name(mu: Mu) -> str:
 
 @host_recursion(
     "Recursive tree traversal for pattern matching. "
-    "BOOTSTRAP: match_mu.py implements this as Mu projections (Phase 4a). "
-    "This function remains as the reference implementation for parity testing."
+    "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
+    "match_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
 @host_builtin(
     "len() for size, zip() for pairing, set() for key comparison, "
@@ -375,8 +375,8 @@ def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 
 @host_recursion(
     "Recursive tree traversal for variable substitution. "
-    "BOOTSTRAP: subst_mu.py implements this as Mu projections (Phase 4b). "
-    "This function remains as the reference implementation for parity testing."
+    "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
+    "subst_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
 def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """

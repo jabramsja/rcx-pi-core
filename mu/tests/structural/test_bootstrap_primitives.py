@@ -137,9 +137,9 @@ class TestMuEqualPrimitive:
         assert "def mu_equal(a:" in content, (
             "mu_equal primitive not found"
         )
-        # Verify it's marked as ELIMINATED PRIMITIVE (Content-Addressed Mu Level 1)
-        assert "ELIMINATED PRIMITIVE: mu_equal" in content, (
-            "mu_equal should be marked as eliminated primitive (replaced by mu_hash_cached)"
+        # Verify it's marked as DEMOTED PRIMITIVE (Content-Addressed Mu Level 1)
+        assert "DEMOTED PRIMITIVE: mu_equal" in content, (
+            "mu_equal should be marked as demoted primitive (replaced by mu_hash_cached)"
         )
 
     def test_mu_equal_uses_content_comparison(self):

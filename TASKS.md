@@ -21,7 +21,7 @@ If a task is not listed here, it is NOT to be implemented.
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
     - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 11 engine + 6 fix)
-    - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
+    - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
 14. **Seeds must declare their execution layer.** Every seed is either:
@@ -253,7 +253,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - v0.4: Added "stable semantics, shrinking substrate", JSON as Phase 0 format, explicit handshake ABI, security invariants, L3 parity contract
   - Design COMPLETE, implementation DEFERRED per 9-agent Advisor recommendation
   - L3 is complete; Boot0 extraction can wait until L4 research drives it
-- mu_equal ELIMINATED as Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):
+- mu_equal DEMOTED from Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):
   - **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all 8 production call sites (eval_seed 2, step_mu 5, projection_runner 1)
   - Bootstrap primitives: 5 → 4. `mu_equal` retained as convenience wrapper only.
   - JS parity: `muHashCached()` added, `muEqual()` delegates. 6 JS call sites updated.

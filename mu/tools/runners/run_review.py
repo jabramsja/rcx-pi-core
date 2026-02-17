@@ -210,11 +210,11 @@ PARALLEL_GROUPS = [
 # 25 turns handles full-codebase reviews; agents hit turn limits at lower values
 # on large scopes. Use --max-turns to override if needed.
 AGENT_MAX_TURNS = {
-    "verifier": 25,
+    "verifier": 30,
     "adversary": 25,
-    "expert": 20,
+    "expert": 25,
     "structural-proof": 20,
-    "grounding": 18,
+    "grounding": 25,
     "fuzzer": 20,
     "translator": 20,
     "visualizer": 15,
@@ -534,6 +534,13 @@ Please address these issues in your response. Ensure you:
 Now review these files: {file_list}
 
 Produce a report following the format in your instructions.
+
+CRITICAL FORMAT REMINDER: Your final output MUST contain these sections:
+1. ### CHECKED — bullet list of what you verified
+2. ### NOT_CHECKED — bullet list of what you could not verify
+3. ### Verdict — a single line: VERDICT: <TOKEN>
+Valid tokens: PASS, NEEDS_HARDENING, FAIL, UNKNOWN
+Do NOT end with raw exploration text. Summarize your findings into the required format.
 """
 
         result_text = ""
@@ -650,13 +657,29 @@ Produce a report following the format in your instructions.
         )
 
     async def run_agent_group(self, agents: list[str]) -> list[AgentResult]:
-        """Run a group of agents in parallel."""
+        """Run a group of agents in parallel, with format compliance retry."""
         agents_in_scope = [a for a in agents if a in self.agents_to_run]
         if not agents_in_scope:
             return []
 
         tasks = [self.run_single_agent(agent) for agent in agents_in_scope]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+
+        # Retry agents that failed format compliance (1 retry attempt)
+        retry_results = []
+        for result in results:
+            if not result.is_compliant and result.compliance_error and result.output:
+                if self.verbose:
+                    print(f"  ↻ Retrying {result.name} (format compliance failure)")
+                retry = await self.run_single_agent(
+                    result.name,
+                    retry_feedback=result.compliance_error,
+                )
+                retry_results.append(retry)
+            else:
+                retry_results.append(result)
+
+        return retry_results
 
     def check_for_regressions(self) -> list[dict]:
         """Check if any files being reviewed have previously-fixed issues.

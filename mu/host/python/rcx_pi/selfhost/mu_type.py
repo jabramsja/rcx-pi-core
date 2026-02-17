@@ -336,6 +336,10 @@ def assert_handler_pure(handler: Any, name: str) -> Any:
     This is a BOOTSTRAP guardrail. During Phase 1, handlers are Python
     functions. This wrapper ensures they respect Mu boundaries.
 
+    WHY KEPT (0 production callers): Ready-to-wire guardrail for handler
+    registration. Will be wired when handler dispatch is formalized (L4+).
+    Tested in test_mu_type.py to prevent API drift until wired.
+
     Args:
         handler: The handler function to wrap.
         name: Name for error messages.
@@ -374,6 +378,11 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
     - All Mu inputs are valid Mu
     - Output is valid Mu (if applicable)
 
+    WHY KEPT (0 production callers): Ready-to-wire guardrail for kernel
+    primitive boundary enforcement. Will be wired when kernel primitives
+    are audited for Mu boundary compliance (L4+). Tested in test_mu_type.py
+    to prevent API drift until wired.
+
     Args:
         func_name: Name of the kernel primitive.
         inputs: Dict of input name -> value for Mu inputs.
@@ -396,11 +405,15 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
 # =============================================================================
 
 
-# ELIMINATED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
-# Previously a bootstrap primitive for fixed-point detection.
-# Now derivable from mu_hash_cached: mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)
-# Production code uses mu_hash_cached directly. This wrapper remains for test convenience.
-# Bootstrap primitives reduced from 5 to 4. See mu/docs/core/BootstrapPrimitives.v0.md.
+# DEMOTED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1, 2026-02-10)
+# Previously bootstrap primitive #5 for fixed-point detection.
+# Now derivable: mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)
+# Bootstrap primitives reduced from 5 to 4.
+#
+# WHY KEPT (not archived): ~30 call sites in tests + JS parity (muEqual).
+# Tests use mu_equal for readability; all PRODUCTION code uses mu_hash_cached directly.
+# Archiving would touch 30+ files for zero functional/security benefit.
+# See mu/docs/core/BootstrapPrimitives.v0.md.
 def mu_equal(a: Any, b: Any) -> bool:
     """
     Convenience wrapper: compare two Mu values for structural equality.
@@ -431,7 +444,13 @@ _mu_hash_cache: OrderedDict[str, str] = OrderedDict()
 
 
 def mu_hash_cache_clear() -> None:
-    """Clear the mu_hash cache. Useful for testing and memory management."""
+    """Clear the mu_hash cache. Useful for testing and memory management.
+
+    WHY KEPT (0 production callers): Cache management primitive for
+    test isolation and long-running evaluation memory control. Tests
+    may need this to prevent cross-test cache pollution. Removing would
+    leave no way to reset cache state without restarting the process.
+    """
     _mu_hash_cache.clear()
 
 

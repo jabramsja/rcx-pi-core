@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from rcx_pi.eval_seed import step, NO_MATCH, host_builtin, host_mutation
-from rcx_pi.mu_type import Mu, assert_mu, mu_equal
+from rcx_pi.mu_type import Mu, assert_mu, mu_hash_cached
 
 
 # =============================================================================
@@ -396,7 +396,7 @@ def run_deep_eval(
             history.append({"step": i + 1, "before": current, "after": next_val})
 
         if debug:
-            if mu_equal(current, next_val):
+            if mu_hash_cached(current) == mu_hash_cached(next_val):
                 print("STALL")
             else:
                 print(f"Result: {json.dumps(next_val, indent=2)}")
@@ -409,7 +409,7 @@ def run_deep_eval(
                 print("DONE!")
             return next_val["result"], history
 
-        if mu_equal(current, next_val):
+        if mu_hash_cached(current) == mu_hash_cached(next_val):
             break
         current = next_val
 
