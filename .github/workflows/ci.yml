@@ -76,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           # Report branch coverage for critical modules (not gating yet)
-          python -m pytest tests/test_spec_ground_truth.py \
+          python -m pytest tests/engine/test_spec_ground_truth.py \
             --cov=rcx_pi.selfhost \
             --cov-report=term-missing \
             --cov-branch \

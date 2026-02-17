@@ -89,6 +89,5 @@ jobs:
         run: |
           set -euo pipefail
           export PAGER=cat GIT_PAGER=cat LESS='-FRSX'
-          # Run python-only mode - Rust tests run via rust_examples.yml (manual)
-          # Rust hasn't changed frequently; saves ~3-5 min CI time
+          # Run python-only mode (Rust substrate archived in Round 24C)
           scripts/green_gate.sh python-only
