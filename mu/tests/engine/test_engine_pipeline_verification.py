@@ -35,10 +35,11 @@ def test_engine_orchestrates_paxos_closure():
     # 4. Run exhaustion (via boundary request)
     # 5. Unwrap result
     result = run_engine_pipeline(
-        projections, 
-        initial, 
+        projections,
+        initial,
         max_steps=6,  # Sufficient for 2 cycles
-        max_iterations=50 # Sufficient for recurrence/exhaustion convergence
+        max_iterations=50, # Sufficient for recurrence/exhaustion convergence
+        use_boot1_recursive=False,
     )
     
     print("\nEngine Result:", result)
@@ -76,6 +77,7 @@ def test_engine_output_composes_with_healer():
         max_steps=6,
         max_engine_iterations=20,
         max_algorithm_iterations=50,
+        use_boot1_recursive=False,
     )
 
     assert engine_result.get("closure_detected") is True, "Precondition: closure detected"
@@ -103,6 +105,7 @@ def test_engine_exhaustion_without_terminal_raises():
             {"unrelated": True},
             max_steps=5,
             max_engine_iterations=3,
+            use_boot1_recursive=False,
         )
 
 
@@ -133,6 +136,7 @@ def test_budget_persists_across_sub_algorithm_iterations():
             max_steps=6,
             max_engine_iterations=20,
             max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         # Budget should have consumed steps from all phases

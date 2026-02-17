@@ -1881,7 +1881,9 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
             extra = sorted(actual - _HEMISPHERE_KEYS, key=str)
             raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
 
-    engine_result = run_engine_pipeline(projections, input_value, **engine_kwargs)
+    engine_result = run_engine_pipeline(
+        projections, input_value, use_boot1_recursive=False, **engine_kwargs
+    )
     updated_hemispheres = run_hemisphere_routing(engine_result, hemispheres)
 
     # Fail-closed: validate output shape before returning

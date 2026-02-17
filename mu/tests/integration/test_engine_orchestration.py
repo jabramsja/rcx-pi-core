@@ -57,7 +57,7 @@ class TestEngineOrchestration:
 
     def test_simple_pipeline_completes(self, simple_projs):
         """Pipeline with simple A→B should complete without error."""
-        result = run_engine_pipeline(simple_projs, "A", max_steps=5)
+        result = run_engine_pipeline(simple_projs, "A", max_steps=5, use_boot1_recursive=False)
 
         assert isinstance(result, dict), f"Expected dict, got {type(result)}"
         assert result["stall"] is True, "A→B then stall"
@@ -65,14 +65,14 @@ class TestEngineOrchestration:
 
     def test_stalling_pipeline(self, stalling_projs):
         """Pipeline with no matching projections should stall."""
-        result = run_engine_pipeline(stalling_projs, {"unmatchable": True}, max_steps=5)
+        result = run_engine_pipeline(stalling_projs, {"unmatchable": True}, max_steps=5, use_boot1_recursive=False)
 
         assert isinstance(result, dict), f"Expected dict, got {type(result)}"
         assert result["stall"] is True, "No projections should cause stall"
 
     def test_result_has_all_fields(self, simple_projs):
         """Engine result should have all fields from the engine spec."""
-        result = run_engine_pipeline(simple_projs, "A", max_steps=5)
+        result = run_engine_pipeline(simple_projs, "A", max_steps=5, use_boot1_recursive=False)
 
         expected_fields = [
             "value", "closure_detected", "tau_step",
@@ -84,7 +84,7 @@ class TestEngineOrchestration:
 
     def test_stall_is_closure(self, simple_projs):
         """A→B then stall (B→B) IS closure — the state repeats."""
-        result = run_engine_pipeline(simple_projs, "A", max_steps=5)
+        result = run_engine_pipeline(simple_projs, "A", max_steps=5, use_boot1_recursive=False)
 
         # Stall means the state doesn't change → same hash appears twice → closure
         assert result["closure_detected"] is True, (
@@ -94,14 +94,14 @@ class TestEngineOrchestration:
     def test_frozen_set_passed_through(self, simple_projs):
         """Initial frozen set should appear in result."""
         frozen = {"head": "pre_frozen_op", "tail": None}
-        result = run_engine_pipeline(simple_projs, "A", max_steps=5, frozen=frozen)
+        result = run_engine_pipeline(simple_projs, "A", max_steps=5, frozen=frozen, use_boot1_recursive=False)
 
         # Frozen set should be present in result
         assert "frozen_set" in result
 
     def test_max_steps_respected(self, simple_projs):
         """Pipeline should respect max_steps parameter."""
-        result = run_engine_pipeline(simple_projs, "A", max_steps=1)
+        result = run_engine_pipeline(simple_projs, "A", max_steps=1, use_boot1_recursive=False)
         assert isinstance(result, dict)
 
 

@@ -491,6 +491,7 @@ class TestFixIntegrationEvidence:
             self.IDENTITY_PROJS,
             self.STALL_INPUT,
             max_steps=5,
+            use_boot1_recursive=False,
         )
 
         # Fix broke the stall — stall is now False
@@ -523,6 +524,7 @@ class TestFixIntegrationEvidence:
             self.IDENTITY_PROJS,
             self.STALL_INPUT,
             max_steps=5,
+            use_boot1_recursive=False,
         )
 
         # All standard engine_result fields present
@@ -621,6 +623,7 @@ class TestEngineFixIntegration:
         reset_step_budget()
         result = run_engine_pipeline(
             self.IDENTITY_PROJS, graph_input, max_steps=5,
+            use_boot1_recursive=False,
         )
         # Fix broke the stall — engine.fix_done_applied sets _stall: false
         assert result["stall"] is False, (
@@ -642,6 +645,7 @@ class TestEngineFixIntegration:
         reset_step_budget()
         result = run_engine_pipeline(
             self.IDENTITY_PROJS, scalar_input, max_steps=5,
+            use_boot1_recursive=False,
         )
         assert result["stall"] is True
         # Non-graph: fix.pass_through returns value unchanged
@@ -657,7 +661,7 @@ class TestEngineFixIntegration:
              "body": {"result": {"var": "n"}, "doubled": {"var": "n"}}},
         ]
         reset_step_budget()
-        result = run_engine_pipeline(projs, {"op": "double", "value": 42}, max_steps=10)
+        result = run_engine_pipeline(projs, {"op": "double", "value": 42}, max_steps=10, use_boot1_recursive=False)
         assert result["stall"] is True  # stalls after one transform
         assert result["value"] == {"result": 42, "doubled": 42}
 
@@ -906,6 +910,7 @@ class TestLoopPipelineLevel:
             {"value": 42},
             max_steps=10,
             max_engine_iterations=20,
+            use_boot1_recursive=False,
         )
         # Must produce terminal result (8 keys)
         expected_keys = {

@@ -1404,7 +1404,8 @@ class TestEnginePipelineCrossSubstrateParity:
 
         py_result = run_engine_pipeline(
             cycle_projs, initial,
-            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50
+            max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         js_response = self._run_js_json_api({
@@ -1520,6 +1521,7 @@ class TestEngineFixPathParity:
         py_result = run_engine_pipeline(
             self.IDENTITY_PROJS, graph_input,
             max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         js_response = self._run_js_json_api({
@@ -1560,6 +1562,7 @@ class TestEngineFixPathParity:
         py_result = run_engine_pipeline(
             self.IDENTITY_PROJS, scalar_input,
             max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         js_response = self._run_js_json_api({
@@ -1707,6 +1710,7 @@ class TestEngineLoopPathParity:
         py_result = run_engine_pipeline(
             self.IDENTITY_PROJS, test_input,
             max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         js_response = self._run_js_json_api({
@@ -1757,6 +1761,7 @@ class TestEngineLoopPathParity:
         py_result = run_engine_pipeline(
             transform_projs, test_input,
             max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         js_response = self._run_js_json_api({
@@ -1793,6 +1798,7 @@ class TestEngineLoopPathParity:
         py_result = run_engine_pipeline(
             self.IDENTITY_PROJS, test_input,
             max_steps=5, max_engine_iterations=20, max_algorithm_iterations=50,
+            use_boot1_recursive=False,
         )
 
         js_response = self._run_js_json_api({
@@ -2368,6 +2374,7 @@ def _run_python_edge_case(action_name, args):
                 max_steps=args.get('maxSteps', 6),
                 max_engine_iterations=args.get('maxEngineIterations', 20),
                 max_algorithm_iterations=args.get('maxAlgorithmIterations', 50),
+                use_boot1_recursive=False,
             )
             return True, None
         elif action_name == 'run_hemisphere_routing':
@@ -2540,7 +2547,8 @@ class TestObserverIsomorphism:
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         observer = []
         result = run_engine_pipeline(
-            projections, input_value, observer=observer, **kwargs
+            projections, input_value, observer=observer,
+            use_boot1_recursive=False, **kwargs
         )
         return result, observer
 
@@ -2568,7 +2576,7 @@ class TestObserverIsomorphism:
         # The engine with no user projections will init → trace (empty) → hash → recurrence → exhaustion → terminal
         py_observer = []
         try:
-            py_result = run_engine_pipeline([], "test_value", observer=py_observer)
+            py_result = run_engine_pipeline([], "test_value", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
             pass  # May stall — that's fine, we still get events
 
@@ -2605,7 +2613,7 @@ class TestObserverIsomorphism:
         py_observer = []
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         try:
-            run_engine_pipeline([], "obs_test", observer=py_observer)
+            run_engine_pipeline([], "obs_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
             pass
 
@@ -2628,7 +2636,7 @@ class TestObserverIsomorphism:
         py_observer = []
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         try:
-            run_engine_pipeline([], "schema_test", observer=py_observer)
+            run_engine_pipeline([], "schema_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
             pass
 
@@ -2658,7 +2666,7 @@ class TestObserverIsomorphism:
         py_observer = []
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         try:
-            run_engine_pipeline([], "mono_test", observer=py_observer)
+            run_engine_pipeline([], "mono_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
             pass
 
@@ -2689,7 +2697,7 @@ class TestObserverIsomorphism:
         py_observer = []
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         try:
-            run_engine_pipeline([], "hash_parity", observer=py_observer)
+            run_engine_pipeline([], "hash_parity", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
             pass
 
@@ -2719,7 +2727,7 @@ class TestObserverIsomorphism:
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         # No observer parameter — should work exactly as before
         try:
-            run_engine_pipeline([], "default_test")
+            run_engine_pipeline([], "default_test", use_boot1_recursive=False)
         except RuntimeError:
             pass  # May stall — that's fine
 
@@ -2737,7 +2745,7 @@ class TestObserverIsomorphism:
         py_observer = []
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         try:
-            run_engine_pipeline([], "canon_test", observer=py_observer)
+            run_engine_pipeline([], "canon_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
             pass
 
@@ -3376,6 +3384,7 @@ def _run_python_r3(action, request):
                 max_steps=request.get('maxSteps', 6),
                 max_engine_iterations=request.get('maxEngineIterations', 20),
                 max_algorithm_iterations=request.get('maxAlgorithmIterations', 50),
+                use_boot1_recursive=False,
             )
             return True, result, None
         elif action == 'run_engine_with_routing':

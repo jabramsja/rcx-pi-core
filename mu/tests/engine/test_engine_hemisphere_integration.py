@@ -51,9 +51,9 @@ class TestWiringContract:
                 ["proj1"], "input_val", max_steps=5
             )
 
-            # Pipeline called with projections, input, and kwargs
+            # Pipeline called with projections, input, explicit trampoline, and kwargs
             mock_pipeline.assert_called_once_with(
-                ["proj1"], "input_val", max_steps=5
+                ["proj1"], "input_val", use_boot1_recursive=False, max_steps=5
             )
             # Routing called with engine result + default hemispheres
             mock_routing.assert_called_once()
@@ -225,7 +225,7 @@ def test_wrapper_equivalent_to_manual_chain():
     engine_kwargs = dict(max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50)
 
     # Manual chain
-    engine_result = run_engine_pipeline(cycle_projs, initial, **engine_kwargs)
+    engine_result = run_engine_pipeline(cycle_projs, initial, use_boot1_recursive=False, **engine_kwargs)
     hemispheres = _local_default_hemispheres()
     manual_hemispheres = run_hemisphere_routing(engine_result, hemispheres)
 
