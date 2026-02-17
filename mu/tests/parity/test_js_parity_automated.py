@@ -373,6 +373,14 @@ class TestCrossSubstrateParity:
 
             # Mixed: dict containing head/tail keys (WILL be classified as linked-list)
             # This documents the policy - these get treated as linked-lists
+
+            # NOTE: Malformed inner node {"head": 1, "tail": {"head": 2}} is NOT tested
+            # here because this test compares denormalize-only (Python) vs
+            # normalize+denormalize roundtrip (JS JSON API). For malformed inputs,
+            # normalize changes the structure before denormalize sees it, producing
+            # divergent results that aren't real parity violations.
+            # See test_normalization_roundtrip.py::test_denormalize_inner_node_missing_tail_*
+            # for Python-only crash regression tests.
         ]
 
         for case in test_cases:

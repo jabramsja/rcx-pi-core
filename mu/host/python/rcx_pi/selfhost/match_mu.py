@@ -696,7 +696,7 @@ def denormalize_from_match(value: Mu) -> Mu:
                             key = kv["head"]
                             val_to_process = kv["tail"]["head"]
                             kv_pairs.append((key, val_to_process))
-                            current = current["tail"]
+                            current = current.get("tail")
 
                         # Push processing in reverse order (last kv pushed first)
                         for key, val_to_process in reversed(kv_pairs):
@@ -723,7 +723,7 @@ def denormalize_from_match(value: Mu) -> Mu:
                                 raise ValueError("Circular reference in linked list during denormalization")
                             visited.add(node_id)
                             elements.append(current["head"])
-                            current = current["tail"]
+                            current = current.get("tail")
 
                         # Push processing in reverse order (last element pushed first)
                         for elem in reversed(elements):

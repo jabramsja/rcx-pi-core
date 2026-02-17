@@ -615,6 +615,37 @@ class TestMalformedLinkedListEdgeCases:
         denormalized = denormalize_from_match(normalized)
         assert denormalized == {"head": 42}
 
+    def test_denormalize_inner_node_missing_tail_legacy_list(self):
+        """Legacy linked list where inner node has head but no tail must not crash.
+
+        Red-team finding: denormalize_from_match legacy list path used
+        current["tail"] which raises KeyError if an inner node is {"head": X}
+        without a "tail" key. Fixed to use .get("tail") matching the
+        type-tagged path. JS handles this gracefully (node.tail → undefined).
+        """
+        # Outer node has {head, tail} → enters legacy linked list path
+        # Inner node has only {head} → should terminate loop, not KeyError
+        malformed = {"head": 1, "tail": {"head": 2}}
+        result = denormalize_from_match(malformed)
+        # Should truncate at the missing tail, returning [1, 2]
+        assert result == [1, 2]
+
+    def test_denormalize_inner_node_missing_tail_classified_as_list(self):
+        """Malformed dict-like linked list with inner node missing tail.
+
+        Even when kv-pairs are valid, a missing "tail" on the outer node
+        causes classify to break early → "list" classification. The legacy
+        dict path (also fixed with .get("tail")) is protected by classify,
+        but the defensive fix is still correct. This test verifies that
+        the structure is handled without crash regardless of classification.
+        """
+        kv = {"head": "k", "tail": {"head": "v", "tail": None}}
+        # Outer node valid, inner node missing "tail" → classify returns "list"
+        malformed = {"head": kv, "tail": {"head": kv}}
+        result = denormalize_from_match(malformed)
+        # Classified as list, so kv-pairs are denormalized as list elements
+        assert result == [["k", "v"], ["k", "v"]]
+
     def test_denormalize_tail_only_dict(self):
         """Dict with only 'tail' key is treated as regular dict."""
         malformed = {"tail": None}
