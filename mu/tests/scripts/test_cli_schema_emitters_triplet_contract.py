@@ -48,8 +48,6 @@ def _assert_triplet(s: str) -> None:
 
 def test_schema_emitters_are_strict_triplets():
     outs = [
-        _run(["python3", "rcx_pi/program_descriptor_cli.py", "--schema"]),
-        _run(["python3", "rcx_pi/program_run_cli.py", "--schema"]),
         _run(["python3", "-m", "rcx_pi.worlds.world_trace_cli", "--schema"]),
         _run(
             [

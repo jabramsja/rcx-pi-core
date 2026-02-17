@@ -86,8 +86,6 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | File | Title |
 |------|-------|
 | [README.md](schemas/README.md) | RCX JSON Schemas |
-| [program_descriptor_schema.md](schemas/program_descriptor_schema.md) | ProgramDescriptor Schema (v1) |
-| [program_run_schema.md](schemas/program_run_schema.md) | RCX Program Run JSON Contract (v1) |
 | [snapshot_json_schema.md](schemas/snapshot_json_schema.md) | rcx.snapshot.v1 (JSON schema) |
 | [world_trace_json_schema.md](schemas/world_trace_json_schema.md) | world_trace JSON schema (stable surface) |
 

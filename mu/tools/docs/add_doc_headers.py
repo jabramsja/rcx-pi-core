@@ -82,8 +82,6 @@ DOC_TYPES = {
     "orbit_viz_svg.md": "REFERENCE",
 
     # docs/schemas - REFERENCE (schema documentation)
-    "program_descriptor_schema.md": "REFERENCE",
-    "program_run_schema.md": "REFERENCE",
     "snapshot_json_schema.md": "REFERENCE",
     "world_trace_json_schema.md": "REFERENCE",
 

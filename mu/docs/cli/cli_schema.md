@@ -25,7 +25,7 @@ Several RCX CLI entrypoints support `--schema`. When invoked, they must print ex
 
 Example:
 
-    rcx-program-run.v1 mu/docs/schemas/program_run_schema.md mu/docs/schemas/program_run_schema.json
+    rcx-world-trace.v1 mu/docs/schemas/world_trace_json_schema.md mu/docs/schemas/world_trace_json_schema.json
 
 ### Canonical helper
 
@@ -55,7 +55,5 @@ This contract is intentionally strict (tests enforce it):
 
 Currently covered by this contract:
 
-- rcx_pi/program_descriptor_cli.py --schema
-- rcx_pi/program_run_cli.py --schema
 - python -m rcx_pi.worlds.world_trace_cli --schema
 - scripts/snapshot_merge.py --schema

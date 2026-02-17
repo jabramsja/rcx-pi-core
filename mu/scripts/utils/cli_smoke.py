@@ -51,55 +51,7 @@ def main() -> int:
     repo_root = "."
     failures: List[str] = []
 
-    # 1) program descriptor: schema
-    cmd_desc_schema = _best_cmd(
-        ["rcx-program-descriptor", "--schema"],
-        _py_m("rcx_pi.program_descriptor_cli", "--schema"),
-    )
-    try:
-        run_schema_triplet(
-            cmd_desc_schema, cwd=repo_root, expected_tag="rcx-program-descriptor.v1"
-        )
-    except AssertionError as e:
-        failures.append(
-            f"program-descriptor --schema failed strict parse/tag check: {e}"
-        )
-    # 2) program run: schema + sample run
-    cmd_run_schema = _best_cmd(
-        ["rcx-program-run", "--schema"],
-        _py_m("rcx_pi.program_run_cli", "--schema"),
-    )
-    try:
-        run_schema_triplet(
-            cmd_run_schema, cwd=repo_root, expected_tag="rcx-program-run.v1"
-        )
-    except AssertionError as e:
-        failures.append(f"program-run --schema failed strict parse/tag check: {e}")
-    cmd_run = _best_cmd(
-        ["rcx-program-run", "succ-list", "[1,2,3]"],
-        _py_m("rcx_pi.program_run_cli", "succ-list", "[1,2,3]"),
-    )
-    r = _run(cmd_run, cwd=repo_root)
-    if r.returncode != 0:
-        failures.append(f"program-run succ-list failed:\n{r.stderr.strip()}")
-    else:
-        data = _require_json(r.stdout)
-        for k in ["schema", "schema_doc", "program", "input", "output", "ok"]:
-            if k not in data:
-                failures.append(
-                    f"program-run JSON missing key {k!r}; keys={sorted(data.keys())}"
-                )
-                break
-        if data.get("schema") != "rcx-program-run.v1":
-            failures.append(f"program-run schema mismatch: {data.get('schema')!r}")
-        if data.get("program") != "succ-list":
-            failures.append(f"program-run program mismatch: {data.get('program')!r}")
-        if data.get("output") != [2, 3, 4]:
-            failures.append(f"program-run output mismatch: {data.get('output')!r}")
-        if data.get("ok") is not True:
-            failures.append(f"program-run ok not true: {data.get('ok')!r}")
-
-    # 3) world trace: schema + sample trace
+    # 1) world trace: schema + sample trace
     cmd_trace_schema = _best_cmd(
         ["rcx-world-trace", "--schema"],
         _py_m("rcx_pi.worlds.world_trace_cli", "--schema"),
@@ -141,7 +93,7 @@ def main() -> int:
         if data.get("seed") != "ping":
             failures.append(f"world-trace seed mismatch: {data.get('seed')!r}")
 
-    # 4) umbrella rcx-cli (do NOT use `rcx` because you intentionally alias it)
+    # 2) umbrella rcx-cli (do NOT use `rcx` because you intentionally alias it)
     cmd_umb_help = _best_cmd(
         ["rcx-cli", "--help"],
         _py_m("rcx_pi.rcx_cli", "--help"),
