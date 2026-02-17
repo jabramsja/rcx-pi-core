@@ -270,19 +270,6 @@ function looksLikeNormalizedDictCandidate(value) {
 }
 
 /**
- * Validate that a type tag is allowed.
- * Prevents type injection attacks.
- */
-function validateTypeTag(tag, context = '') {
-  if (!VALID_TYPE_TAGS.has(tag)) {
-    throw new Error(
-      `Invalid type tag '${tag}'${context ? ` in ${context}` : ''}. ` +
-      `Allowed: ${[...VALID_TYPE_TAGS].join(', ')}`
-    );
-  }
-}
-
-/**
  * Validate that a value does not contain kernel-reserved fields.
  * Deep recursive check with depth guard (fail closed).
  * Matches Python step_mu.py:validate_no_kernel_reserved_fields()
@@ -538,7 +525,6 @@ function muHash(value) {
  */
 const MAX_MU_HASH_CACHE = 10000;
 const _muHashCache = new Map();
-function muHashCacheClear() { _muHashCache.clear(); }
 function muHashCached(value) {
   // Deterministic cache key: sorted-key JSON (JS-local, not cross-substrate)
   const key = JSON.stringify(value, (_, v) => {
@@ -2735,19 +2721,6 @@ function runRecurrence(traceResult) {
   const { result } = run(recurrenceProjections, recurrenceInput, 1000);
 
   return result;
-}
-
-/**
- * Detect closure directly from input (wrapper for convenience).
- * Combines runStructural() + runRecurrence() for end-to-end closure detection.
- * Python equivalent: run_mu_structural() + run_recurrence_algorithm().
- */
-function detectClosureStructural(projections, input, maxSteps = 100) {
-  // First run the projections to get a structural trace
-  const traceResult = runStructural(projections, input, maxSteps);
-
-  // Then run Recurrence to detect closure
-  return runRecurrence(traceResult);
 }
 
 // Load Recurrence parity vectors
