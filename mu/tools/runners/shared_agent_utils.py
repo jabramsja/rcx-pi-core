@@ -71,7 +71,7 @@ AGENT_DEFAULT_MODELS = {
 
 # Allowed short model aliases used in this repository.
 # Keep this constrained to avoid silent typos in CLI overrides.
-SUPPORTED_AGENT_MODELS = {"opus", "sonnet", "haiku"}
+SUPPORTED_AGENT_MODELS = {"opus", "sonnet"}
 
 AGENT_PASS_VERDICTS = {
     "verifier": {"APPROVE"},

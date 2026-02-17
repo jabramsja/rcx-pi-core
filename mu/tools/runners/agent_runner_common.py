@@ -50,13 +50,21 @@ class StandardFileRunnerConfig:
 def sanitize_files(files: list[str], *, max_len: int = 200, max_count: int = 20) -> list[str]:
     """Security: sanitize file paths before prompt injection.
 
+    Delegates core sanitization (Unicode normalization, zero-width stripping,
+    instruction pattern removal) to sanitize_for_prompt(), then applies
+    file-path-specific newline/backtick replacement.
+
     Exported for reuse across all runners (run_ci_review, run_interactive,
     run_skeptic, run_review, etc.) to eliminate inline copies.
     """
-    return [
-        f.replace("\n", "_").replace("\r", "_").replace("\u2028", "_").replace("\u2029", "_").replace("`", "_")[:max_len]
-        for f in files[:max_count]
-    ]
+    result = []
+    for f in files[:max_count]:
+        # Core prompt injection defense (Unicode NFKC, zero-width, instruction patterns)
+        s = sanitize_for_prompt(f, max_len=max_len)
+        # File-path-specific: replace line separators and backticks with underscore
+        s = s.replace("\n", "_").replace("\r", "_").replace("\u2028", "_").replace("\u2029", "_").replace("`", "_")
+        result.append(s)
+    return result
 
 
 async def run_agent_prompt(
