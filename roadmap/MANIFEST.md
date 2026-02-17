@@ -1,14 +1,21 @@
 # Roadmap Document Manifest
 
-> This manifest defines reading order, document roles, and linking rules for the roadmap folder.
+> **This is the canonical reading-order source for the RCX repository.**
+> It defines reading order, document roles, and linking rules.
 
-## Reading Order
+## Canonical Reading Order
 
 1. [`STATUS.md`](../STATUS.md) - Current state (L1-L4, phase, debt) - **ALWAYS READ FIRST**
 2. [`TASKS.md`](../TASKS.md) - Authorized work, North Star invariants, governance
-3. [`ROADMAP.md`](../ROADMAP.md) - Sequence overview (what order, not current state)
-4. [`Hex0_Boot0_Checklist.md`](./Hex0_Boot0_Checklist.md) - Operational CI and merge gates (`C1-C8`)
-5. Gate/spec docs as needed for specific work
+3. [`roadmap/MANIFEST.md`](./MANIFEST.md) - This file (reading order and linking rules)
+4. [`ROADMAP.md`](../ROADMAP.md) - Sequence overview (what order, not current state)
+5. [`mu/docs/core/Boot0Architecture.v0.md`](../mu/docs/core/Boot0Architecture.v0.md) - Staged bootstrap architecture
+6. [`mu/docs/core/BootstrapPrimitives.v0.md`](../mu/docs/core/BootstrapPrimitives.v0.md) - 4 bootstrap primitives
+7. [`mu/docs/core/SelfHosting.v0.md`](../mu/docs/core/SelfHosting.v0.md) - Self-hosting specification
+8. [`mu/docs/core/Boot1LoopContract.v0.md`](../mu/docs/core/Boot1LoopContract.v0.md) - Boot1 recursive loop contract
+9. [`roadmap/ContentAddressedMu.md`](./ContentAddressedMu.md) - Content-addressed Mu (Levels 0-1 implemented)
+10. [`mu/docs/audit/MetaCircularReadiness.v1.md`](../mu/docs/audit/MetaCircularReadiness.v1.md) - Meta-circular readiness definition
+11. [`mu/docs/core/UniversalEval.v0.md`](../mu/docs/core/UniversalEval.v0.md) - Universal eval (SINK/research, not deprecated)
 
 ## Document Roles
 

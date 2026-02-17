@@ -6,14 +6,18 @@
 
 Purpose: provide a clean sequencing view across normalization, meta-circular execution, and hemispheres. This file is a planning layer only. Canonical state remains `STATUS.md` and `TASKS.md`.
 
-Read first:
+Read first (canonical order defined in `roadmap/MANIFEST.md`):
 1. `STATUS.md`
 2. `TASKS.md`
 3. `roadmap/MANIFEST.md`
-4. `roadmap/Hex0_Boot0_Checklist.md`
-5. `roadmap/ContentAddressedMu.md`
-6. `roadmap/MuHemispheresDesign.md`
-7. `archive/roadmap/MetaCircular_Boot0_GatePlan.md` (archived reference for boot-gate constraints)
+4. `ROADMAP.md` (this file)
+5. `mu/docs/core/Boot0Architecture.v0.md`
+6. `mu/docs/core/BootstrapPrimitives.v0.md`
+7. `mu/docs/core/SelfHosting.v0.md`
+8. `mu/docs/core/Boot1LoopContract.v0.md`
+9. `roadmap/ContentAddressedMu.md`
+10. `mu/docs/audit/MetaCircularReadiness.v1.md`
+11. `mu/docs/core/UniversalEval.v0.md` (SINK/research)
 
 **Now**
 See `TASKS.md` NOW section for active items.
