@@ -124,7 +124,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 *Test fixtures*
 
-*11 files (non-markdown)*
+*10 files (non-markdown)*
 
 ## latex
 
