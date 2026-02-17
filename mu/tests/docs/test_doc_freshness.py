@@ -90,7 +90,7 @@ FORBIDDEN_PATTERNS = [
         "Doc paths must include subdirectory (core/, execution/, etc.)",
         "Use mu/docs/execution/StallFixExecution.v0.md, mu/docs/core/RuleAsMotif.v0.md, etc.",
     ),
-    # Note: bytecode_vm.py still exists but is legacy code
+    # Note: bytecode_vm.py was archived (Round 24H) to archive/mu_legacy/
     # References are OK in historical context (audit docs, archive docs)
     ForbiddenPattern(
         r'BytecodeVM',

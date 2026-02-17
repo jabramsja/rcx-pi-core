@@ -116,7 +116,7 @@ It is part of the claim.
 
 **Execution architecture:**
 - **Structural kernel bridge** is the active default for algorithm execution (`step_kernel_mu(..., kernel_mode="bridge")`)
-- **PureEvaluator** (`rcx_pi.engine.evaluator_pure`) is a legacy host-closure evaluator — used by CLI program-run surface, NOT the selfhost projection path
+- **PureEvaluator** was a legacy host-closure evaluator (archived to `archive/rcx_pi_legacy/engine/evaluator_pure.py` in Round 24H)
 - **world_trace_cli** depends on archived `worlds_bridge` (Rust bridge); graceful degradation if unavailable
 
 ⸻

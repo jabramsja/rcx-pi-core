@@ -21,7 +21,7 @@ These surfaces are NOT on the L3 self-hosting critical path.
 
 | Field | Value |
 |-------|-------|
-| **Location** | `rcx_pi_rust/` |
+| **Location** | `archive/rcx_pi_rust/` |
 | **Size** | ~2,700 LOC Rust, 18 examples, 3 tests |
 | **Decision** | **ARCHIVE** |
 | **Owner** | Founder (manual decision on Rust substrate revival) |
@@ -58,7 +58,7 @@ Low. No production dependencies. CI cost is zero (manual trigger). Risk is confu
 
 | Field | Value |
 |-------|-------|
-| **Location** | `rcx_omega/` |
+| **Location** | `archive/rcx_omega/` |
 | **Size** | ~1,800 LOC Python, 41 files, 17 test files |
 | **Decision** | **ARCHIVE** |
 | **Owner** | Founder (decision on observability architecture) |

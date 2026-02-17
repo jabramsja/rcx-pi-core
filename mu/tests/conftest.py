@@ -3,7 +3,7 @@ Pytest configuration for RCX tests.
 
 Provides:
 - Projection coverage tracking (enable with RCX_PROJECTION_COVERAGE=1)
-- Skips tests that require optional modules (rcx_omega, scripts)
+- Skips tests that require optional modules (scripts)
 - Shared test utilities (run_until_done, run_until_stable)
 - Hypothesis configuration for deterministic fuzzing
 """

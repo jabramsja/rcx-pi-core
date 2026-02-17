@@ -89,14 +89,8 @@ fi
 EFFECTIVE_RUNNER="$RUNNER"
 if [ "$RUNNER" = "auto" ]; then
   if [ "$is_motif" -eq 1 ]; then
-    # rcx_omega archived (Round 23A) — CLI detection falls through to "none"
-    if python3 -m rcx_omega.cli.omega_cli --help >/dev/null 2>&1; then
-      EFFECTIVE_RUNNER="omega-cli"
-    elif python3 -m rcx_omega.cli.trace_cli --help >/dev/null 2>&1; then
-      EFFECTIVE_RUNNER="trace-cli"
-    else
-      EFFECTIVE_RUNNER="none"
-    fi
+    # rcx_omega archived (Round 23A) — no CLI available for motif-shaped input
+    EFFECTIVE_RUNNER="none"
   else
     # CONTRACT: world-like auto must choose none (not trace-cli)
     if [ "$is_world_like" -eq 1 ]; then

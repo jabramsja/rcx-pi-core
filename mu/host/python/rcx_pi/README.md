@@ -32,24 +32,35 @@ The kernel + seeds architecture for self-hosting:
 
 See `mu/docs/core/RCXKernel.v0.md` and `mu/docs/core/SelfHosting.v0.md`.
 
-## Legacy (top-level)
-
-Older modules kept for compatibility:
-
-| Module | Status |
-|--------|--------|
-| `bytecode_vm.py` | ARCHIVED - moved to `archive/mu_legacy/host/python/rcx_pi/` |
-| `deep_eval.py` | Deep evaluation machinery |
-| `programs.py` | Legacy program definitions |
-
-## Utilities
+## Active Modules (top-level)
 
 | Module | Purpose |
 |--------|---------|
-| `cli_*.py` | CLI tools |
-| `program_*.py` | Program descriptors |
-| `replay_cli.py` | Trace replay |
+| `deep_eval.py` | Deep evaluation machinery |
+| `trace_canon.py` | Trace canonicalization |
 | `projection_coverage.py` | Coverage analysis |
+| `rule_motifs_v0.py` | Rule motif observability |
+
+## CLI Tools
+
+| Module | Purpose |
+|--------|---------|
+| `rcx_cli.py` | Umbrella CLI router |
+| `cli_schema.py` | Schema triplet parsing |
+| `cli_schema_run.py` | Schema triplet runner |
+| `replay_cli.py` | Trace replay |
+
+## Re-export Shims
+
+| Module | Delegates to |
+|--------|-------------|
+| `eval_seed.py` | `selfhost.eval_seed` |
+| `kernel.py` | `selfhost.kernel` |
+| `match_mu.py` | `selfhost.match_mu` |
+| `mu_type.py` | `selfhost.mu_type` |
+| `step_mu.py` | `selfhost.step_mu` |
+| `subst_mu.py` | `selfhost.subst_mu` |
+| `worlds_probe.py` | `worlds.worlds_probe` |
 
 ## Spec Architecture
 
