@@ -71,7 +71,7 @@ AGENT_DEFAULT_MODELS = {
 
 # Allowed short model aliases used in this repository.
 # Keep this constrained to avoid silent typos in CLI overrides.
-SUPPORTED_AGENT_MODELS = {"opus", "sonnet", "haiku"}
+SUPPORTED_AGENT_MODELS = {"opus", "sonnet"}
 
 AGENT_PASS_VERDICTS = {
     "verifier": {"APPROVE"},
@@ -310,7 +310,7 @@ def validate_compliance(
         Tuple of (is_compliant, error_message, metrics_dict)
     """
     try:
-        cmd = [sys.executable, "tools/validate_agent_compliance.py"]
+        cmd = [sys.executable, "tools/runners/validate_agent_compliance.py"]
         if strict:
             cmd.append("--strict")
         if verify_files:

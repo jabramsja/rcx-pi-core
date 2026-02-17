@@ -163,7 +163,7 @@ class RcxError extends Error {
  */
 function classifyError(e) {
   if (e && e.error_code) return e.error_code;
-  const msg = (e && e.message || '').toLowerCase();
+  const msg = (e?.message ?? '').toLowerCase();
   if (msg.includes('cyclic linked list')) return 'trace.cycle_detected';
   if (msg.includes('exceeds') && msg.includes('entries')) return 'trace.overcap';
   if (msg.includes('engine pipeline exhausted')) return 'engine.exhausted';
@@ -1203,7 +1203,7 @@ function run(projections, input, maxSteps = 10000) {
     let matchedId = null;
     for (const proj of projections) {
       if (match(proj.pattern, current) !== NO_MATCH) {
-        matchedId = proj.id || 'unknown';
+        matchedId = proj.id ?? 'unknown';
         break;
       }
     }
@@ -1399,7 +1399,7 @@ function resolveTraceProjectionId(projections, current, nextValue) {
     });
     if (candidate.stall) continue;
     if (muHashCached(candidate.output) === nextValueHash) {
-      return proj.id || null;
+      return proj.id ?? null;
     }
   }
   return null;
