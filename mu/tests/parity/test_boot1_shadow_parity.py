@@ -73,8 +73,8 @@ def _run_boot1(projs, initial, **kwargs):
 
 
 def _run_trampoline(projs, initial, **kwargs):
-    """Run engine pipeline with default trampoline."""
-    return run_engine_pipeline(projs, initial, **kwargs)
+    """Run engine pipeline with explicit trampoline (not Boot1 recursive)."""
+    return run_engine_pipeline(projs, initial, use_boot1_recursive=False, **kwargs)
 
 
 # ============================================================================
