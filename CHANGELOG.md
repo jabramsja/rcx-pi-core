@@ -2,6 +2,23 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-02-17
+
+### Denormalization KeyError Hardening (PR #315)
+
+- Fixed legacy linked-list denormalization paths in `match_mu.py` that used `current["tail"]` (crashes with KeyError on malformed inner nodes missing "tail" key)
+- Changed to `.get("tail")` matching the type-tagged paths and JS behavior (2 lines, lines 699 and 726)
+- Added 2 regression tests in `test_normalization_roundtrip.py`
+- Red-team finding; classify_mu already protects the dict path, but the list path was directly exploitable
+
+### Canonical Docs Drift Sync
+
+- STATUS.md: INFRA_CURRENT 45→42 (reduced by PR #314 archival work)
+- STATUS.md: Infra ceiling line corrected (was "38 (current 38)", now "48 (current 42)")
+- STATUS.md + README.md: Test count 3,235→3,690
+- README.md: Test files 90+→180+
+- CHANGELOG.md: Added missing PR #315 entry
+
 ## 2026-02-16
 
 ### Roadmap Relocation (Visibility + Governance Sync)

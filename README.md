@@ -12,7 +12,7 @@ A projection-based computational substrate where **structure is the primitive**.
 | **Gates 1-5** | Meta-circular parity (structural default) | ✅ COMPLETE |
 | **Hemispheres v0** | Native structural routing (12 projections) | ✅ DONE |
 
-- **3,235+ tests** across 90+ test files
+- **3,690+ tests** across 180+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
 - **43 CRITICAL_TEST_FILES** protected from silent skipping
 - **47 core projections** across 5 L3-complete seeds + 12 hemisphere projections
