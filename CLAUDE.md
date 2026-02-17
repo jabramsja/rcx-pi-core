@@ -42,7 +42,7 @@ If Python provides the control flow, emergence might be a Python artifact. True 
 
 **L3 Parity Requirement (MANDATORY):**
 - Python (`rcx_pi/selfhost/`) and JavaScript (`mu/host/js/eval_step.js`) must remain in parity
-- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`, `recurrence.v2.json`, `exhaustion.v1.json`, `hemispheres.v1.json`
+- Both substrates load the SAME seed files: `kernel.v1.json`, `match.v2.json`, `subst.v2.json`, `recurrence.v1.json`, `recurrence.v2.json`, `exhaustion.v1.json`, `fix.v1.json`, `bootstrap_structural.v1.json`, `hemispheres.v1.json`, `rcx_engine.v1.json`
 - Any change to projection behavior in Python MUST be mirrored in JavaScript
 - Any new seed file MUST be loaded and tested in BOTH substrates
 - Run `node mu/host/js/eval_step.js` to verify JS parity after Python changes
@@ -128,7 +128,8 @@ See `mu/docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous 
 | 1 | `./tools/audit_fast.sh` | ~3 min | Core tests only | Local iteration |
 | 2 | `./tools/audit_all.sh` | ~5-8 min | Core + Fuzzer + Slow | Before push |
 | 3 | CI green gate | ~2 min | Core only (no fuzzer, no slow) | Push/PR to dev |
-| 4 | CI nightly | ~30 min | Everything (all tests, ci_full) | Nightly schedule |
+| 4 | CI nightly | ~45 min | Everything (200 examples, ci_full) | Nightly schedule |
+| 5 | CI weekly deep fuzz | ~60 min | Deep fuzz (500 examples) | Weekly schedule |
 
 Both audit scripts use parallel execution if `pytest-xdist` is installed: `pip install pytest-xdist`
 
@@ -277,7 +278,7 @@ Do NOT update individual agent files - they read STATUS.md.
 | `mu/host/python/rcx_pi/selfhost/` | Core implementation (canonical; `rcx_pi/` is backward-compat symlink) |
 | `mu/` | Mu projections: substrate/, closures/, bridge/, programs/, utilities/, host/ |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
-| `seeds/*.json` | Seed files (legacy location, mu/ preferred) |
+| `mu/substrate/`, `mu/closures/`, `mu/programs/` | Seed files (JSON projections) |
 
 ---
 

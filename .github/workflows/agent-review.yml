@@ -91,12 +91,12 @@ jobs:
         if: steps.preconditions.outputs.enabled == 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Install dependencies
         if: steps.preconditions.outputs.enabled == 'true'
         run: |
-          pip install claude-agent-sdk
+          pip install anthropic
           pip install hypothesis pytest  # For fuzzer tests
 
       - name: Run CI Review

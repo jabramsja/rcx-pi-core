@@ -4,7 +4,9 @@
 # CI / workflows: explicitly owned
 .github/workflows/ @jabramsja
 
-# RCX core areas (adjust as you like)
+# RCX core areas
+# Note: scripts/ and rcx_pi/ are symlinks to mu/scripts/ and mu/host/python/rcx_pi/
+# The mu/ rule covers canonical paths; symlink rules kept for direct edits
 scripts/ @jabramsja
 rcx_pi/ @jabramsja
 mu/ @jabramsja
