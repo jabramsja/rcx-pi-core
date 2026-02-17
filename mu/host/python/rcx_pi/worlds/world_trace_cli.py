@@ -22,6 +22,9 @@ from typing import Any, Dict, List
 try:
     from rcx_pi.worlds.archive.worlds_bridge import orbit_with_world_parsed
 except ImportError:
+    # DEPRECATED: orbit_with_world_parsed requires the archived Rust substrate
+    # (rcx_pi_rust). Archived in Round 21D. The orbit trace path (lines 136-148)
+    # is non-functional without the Rust backend. Only --schema mode works.
     orbit_with_world_parsed = None  # type: ignore[assignment]
 
 

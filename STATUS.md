@@ -73,7 +73,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
-| **Python Substrate** | ~2000 LOC, 3,235 tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~2000 LOC, 3,690 tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~1970 LOC core + ~1010 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
@@ -256,7 +256,7 @@ THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
 INFRA_CEILING: 48
-INFRA_CURRENT: 45
+INFRA_CURRENT: 42
 ```
 
 **Debt breakdown:**
@@ -295,7 +295,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:148 - constant definition (AST_OK: infra)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 38 (current 38)
+- AST_OK:infra ceiling: 48 (current 42)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -618,7 +618,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-15 (24E-R2d: rcx_pi ownership flip — canonical location now mu/host/python/rcx_pi/, root rcx_pi/ is backward-compat symlink. 6 dead files archived.)
+**Last updated:** 2026-02-17 (doc drift sync: infra count 45→42, test count 3235→3690, infra ceiling line corrected)
 **Next milestone:** Boot1 Recursive Loop Contract (NEXT — shadow-merge implementation). See TASKS.md NEXT.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
