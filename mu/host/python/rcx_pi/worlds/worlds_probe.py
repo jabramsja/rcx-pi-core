@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Tuple
 try:
     from .archive.worlds_bridge import classify_with_world
 except ImportError:
-    # worlds_bridge archived (Round 21D) — Rust bridge unavailable.
+    # DEPRECATED: worlds_bridge requires the archived Rust substrate (rcx_pi_rust).
+    # Archived in Round 21D. The Rust-backed world probing path (lines 168-184)
+    # is non-functional. Only synthetic worlds (godel_liar, rcx_triad_router) work.
     classify_with_world = None  # type: ignore[assignment]
 from .worlds_composite import probe_triad_router
 
@@ -165,7 +167,8 @@ def probe_world(world: str, seeds: List[str], max_steps: int = 20) -> Dict[str, 
     if world == "rcx_triad_router":
         return _probe_rcx_triad_router(seeds, max_steps)
 
-    # Normal path: delegate to Rust classify CLI via worlds_bridge
+    # DEPRECATED path: delegate to Rust classify CLI via worlds_bridge.
+    # This path is non-functional since rcx_pi_rust was archived (Round 21D).
     if classify_with_world is None:
         raise RuntimeError(
             f"Cannot probe world {world!r}: Rust bridge unavailable "

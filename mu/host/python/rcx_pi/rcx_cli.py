@@ -24,6 +24,11 @@ Convenience alias:
   rcx trace <...>              -> rcx world trace <...>
 
 All remaining arguments are forwarded verbatim.
+
+DEPRECATED subcommands (archived in Round 24H, PR #314):
+  - `rcx program` (program_descriptor_cli, program_run_cli) — removed.
+    These depended on the archived Rust substrate (rcx_pi_rust).
+    Archived to archive/rcx_pi_legacy/.
 """
 
 # Allow running this file directly without requiring PYTHONPATH.
@@ -120,10 +125,3 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-def _rcx_dispatch(argv: list[str]) -> int:
-    if not argv:
-        return 2
-    cmd, rest = argv[0], argv[1:]
-    if cmd == "replay":
-        return _cmd_replay(rest)
-    return 2
