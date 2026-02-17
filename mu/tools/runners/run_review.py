@@ -227,9 +227,9 @@ GROUNDING_HIGH_RISK_PATTERNS = (
     "mu/tests/structural/",
     "mu/tests/fuzz/",
     "mu/tests/test_js_parity_automated.py",
-    "mu/tools/run_review.py",
-    "mu/tools/validate_agent_compliance.py",
-    "mu/tools/validate_agent_reasoning.py",
+    "mu/tools/runners/run_review.py",
+    "mu/tools/runners/validate_agent_compliance.py",
+    "mu/tools/runners/validate_agent_reasoning.py",
 )
 
 

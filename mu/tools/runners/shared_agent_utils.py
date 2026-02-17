@@ -310,7 +310,7 @@ def validate_compliance(
         Tuple of (is_compliant, error_message, metrics_dict)
     """
     try:
-        cmd = [sys.executable, "tools/validate_agent_compliance.py"]
+        cmd = [sys.executable, "tools/runners/validate_agent_compliance.py"]
         if strict:
             cmd.append("--strict")
         if verify_files:
