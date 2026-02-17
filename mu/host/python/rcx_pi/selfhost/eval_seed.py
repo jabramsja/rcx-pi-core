@@ -283,7 +283,12 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 
 
 def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
-    """Internal recursive matcher — no validation (already done at match() entry)."""
+    """Internal recursive matcher — no validation (already done at match() entry).
+
+    Host debt (isinstance for type dispatch) is tracked on match() which is the
+    only public caller. 14 isinstance calls implement Python type dispatch for
+    pattern matching — this is the core @host_builtin debt documented on match().
+    """
     # Variable site - matches anything
     if is_var(pattern):
         name = get_var_name(pattern)
@@ -417,6 +422,7 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     raise TypeError(f"Invalid body type: {type(body)}")
 
 
+@host_builtin("isinstance() for projection type validation and body normalization detection")
 def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     """
     Apply a projection to an input value.
@@ -495,7 +501,8 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
         coverage.record_step()
 
     for proj in projections:
-        # Get projection ID for coverage tracking
+        # Get projection ID for coverage tracking (isinstance here is cosmetic —
+        # apply_projection validates proj is dict; this just extracts a label)
         proj_id = proj.get("id", "<anonymous>") if isinstance(proj, dict) else "<invalid>"
 
         result = apply_projection(proj, input_value)
@@ -528,6 +535,8 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 
     ONLY for use by kernel loops that have already validated at the boundary.
     Callers: _step_trusted, step_kernel_mu (via _step_trusted).
+
+    Host debt (isinstance) tracked on apply_projection's @host_builtin decorator.
     """
     if not isinstance(projection, dict):
         raise TypeError(f"Projection must be dict, got {type(projection)}")
@@ -560,6 +569,9 @@ def _step_trusted(projections: list[Mu], input_value: Mu) -> Mu:
 
     ONLY for use by kernel loops that have already validated at the boundary.
     Callers: step_kernel_mu, run_engine_pipeline, projection_runner.run.
+
+    Host debt (isinstance for coverage ID, for-loop) tracked on step() and
+    apply_projection's decorators. For-loop is bootstrap primitive (not debt).
     """
     from rcx_pi.projection_coverage import coverage
 

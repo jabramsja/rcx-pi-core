@@ -253,16 +253,16 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 12
-CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
-L2 FLOOR: 12 (see explanation below)
+THRESHOLD: 13
+CURRENT: 13 (11 tracked decorators + 2 AST_OK bootstrap)
+L2 FLOOR: 13 (see explanation below)
 INFRA_CEILING: 48
 INFRA_CURRENT: 42
 ```
 
 **Debt breakdown:**
 - @host_recursion: 2 (eval_seed match/substitute - BOOTSTRAP)
-- @host_builtin: 3 (eval_seed, deep_eval)
+- @host_builtin: 4 (eval_seed match/apply_projection, deep_eval x2)
 - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
 - @host_mutation: 2 (eval_seed, deep_eval)
 - AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
@@ -272,7 +272,7 @@ INFRA_CURRENT: 42
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 12 is the L2 floor (not a target for reduction):**
+**Why 13 is the L2 floor (not a target for reduction):**
 The `match()` and `substitute()` in eval_seed.py are NOT "reference implementations" - they ARE the bootstrap primitives that `eval_step()` uses to apply ANY projection. The production path is:
 1. `step_kernel_mu()` → `eval_step()` (on kernel.v1 + match.v2 + subst.v2)
 2. `eval_step()` → `apply_projection()` → `match()` + `substitute()` (eval_seed.py)
@@ -286,7 +286,7 @@ These cannot be eliminated because:
 - run_algorithm_meta_circular runs trusted internal algorithms through eval_step
 - Circular dependency: eliminating them would require eval_step to not exist
 
-The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths are documented:
+The debt of 13 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)

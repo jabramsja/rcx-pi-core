@@ -210,7 +210,9 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
     if callable(value):
         return True
 
-    # For compound types, check for circular references
+    # For compound types, check for circular references.
+    # Uses isinstance (not type()) intentionally — catches callables hidden in
+    # list/dict subclasses too. Wider safety net than is_mu's type() check.
     if isinstance(value, (list, dict)):
         if _seen is None:
             _seen = set()
@@ -218,12 +220,16 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
         if value_id in _seen:
             # Already visited - no callable found on this path
             return False
-        _seen = _seen | {value_id}
+        # Backtracking: add on entry, remove on exit.
+        # O(1) per node (vs O(depth) for set copy).
+        _seen.add(value_id)
+        if isinstance(value, list):
+            result = any(has_callable(item, _seen) for item in value)
+        else:
+            result = any(has_callable(v, _seen) for v in value.values())
+        _seen.discard(value_id)
+        return result
 
-    if isinstance(value, list):
-        return any(has_callable(item, _seen) for item in value)
-    if isinstance(value, dict):
-        return any(has_callable(v, _seen) for v in value.values())
     return False
 
 
@@ -245,25 +251,31 @@ def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None
     if callable(value):
         return path or "(root)"
 
-    # For compound types, check for circular references
+    # For compound types, check for circular references.
+    # Uses isinstance (not type()) — same rationale as has_callable.
     if isinstance(value, (list, dict)):
         if _seen is None:
             _seen = set()
         value_id = id(value)
         if value_id in _seen:
             return None
-        _seen = _seen | {value_id}
+        # Backtracking: add on entry, remove on exit.
+        # O(1) per node (vs O(depth) for set copy).
+        _seen.add(value_id)
+        found = None
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                found = find_callable_path(item, f"{path}[{i}]", _seen)
+                if found:
+                    break
+        else:
+            for k, v in value.items():
+                found = find_callable_path(v, f"{path}.{k}" if path else k, _seen)
+                if found:
+                    break
+        _seen.discard(value_id)
+        return found
 
-    if isinstance(value, list):
-        for i, item in enumerate(value):
-            result = find_callable_path(item, f"{path}[{i}]", _seen)
-            if result:
-                return result
-    if isinstance(value, dict):
-        for k, v in value.items():
-            result = find_callable_path(v, f"{path}.{k}" if path else k, _seen)
-            if result:
-                return result
     return None
 
 
@@ -454,6 +466,11 @@ def mu_hash_cache_clear() -> None:
     _mu_hash_cache.clear()
 
 
+def _compute_mu_hash(canonical: str) -> str:
+    """SHA-256 of canonical JSON string. Single hash algorithm definition."""
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
 def mu_hash_cached(value: Any) -> str:
     """
     Compute deterministic hash of a Mu value with caching.
@@ -480,7 +497,7 @@ def mu_hash_cached(value: Any) -> str:
         # Move to end (most recently used)
         _mu_hash_cache.move_to_end(canonical)
         return cached
-    h = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    h = _compute_mu_hash(canonical)
     _mu_hash_cache[canonical] = h
     # Evict oldest if over limit
     if len(_mu_hash_cache) > MAX_MU_HASH_CACHE:
@@ -505,7 +522,7 @@ def mu_hash(value: Any) -> str:
     """
     assert_mu(value, "mu_hash")
     canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    return _compute_mu_hash(canonical)
 
 
 # =============================================================================

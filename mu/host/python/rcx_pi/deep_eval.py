@@ -12,7 +12,7 @@ provides the iteration.
 See mu/docs/execution/DeepStep.v0.md for the design.
 
 HOST DEBT INVENTORY:
-  - @host_builtin: run_deep_eval (range for iteration loop)
+  - @host_builtin: run_deep_eval (range for iteration loop, isinstance for done-wrapper)
   - @host_builtin: validate_deep_eval_state (isinstance, set operations)
   Total: 2 host dependencies (runner scaffolding, not projection logic)
 
@@ -340,7 +340,7 @@ def validate_deep_eval_state(state: Mu) -> tuple[bool, str | None]:
 # Deep Eval Runner
 # =============================================================================
 
-@host_builtin("range() for iteration loop")
+@host_builtin("range() for iteration loop, isinstance() for done-wrapper type checks")
 @host_mutation("history.append() to record steps")
 def run_deep_eval(
     projections: list[Mu],
