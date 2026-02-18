@@ -63,6 +63,24 @@ if str(_tools_dir.parent.parent) not in sys.path:
 SDK_IMPORT_ERROR: Exception | None = None
 try:
     from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
+    # Patch SDK to handle rate_limit_event (CLI v2.1.45+ sends this but SDK
+    # v0.1.37 doesn't recognize it, crashing all agents with MessageParseError).
+    try:
+        import claude_agent_sdk._internal.message_parser as _msg_parser
+        import claude_agent_sdk._internal.client as _int_client
+        from claude_agent_sdk.types import SystemMessage as _SystemMessage
+        _original_parse = _msg_parser.parse_message
+
+        def _patched_parse_message(data):
+            if isinstance(data, dict) and data.get("type") == "rate_limit_event":
+                # Silently skip — rate limit events are informational
+                return _SystemMessage(subtype="rate_limit_event", data=data)
+            return _original_parse(data)
+
+        _msg_parser.parse_message = _patched_parse_message
+        _int_client.parse_message = _patched_parse_message
+    except Exception:
+        pass  # If patching fails, fall through to original behavior
 except Exception as _sdk_import_error:
     SDK_IMPORT_ERROR = _sdk_import_error
     query = None  # type: ignore[assignment]
