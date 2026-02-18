@@ -577,3 +577,26 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     text = text[:max_len]
 
     return text
+
+
+# =============================================================================
+# Git Utilities
+# =============================================================================
+
+def get_base_branch() -> str:
+    """Detect the default branch (dev, main, master, etc.).
+
+    Shared across run_review.py and run_ci_review.py.
+    Raises FileNotFoundError if git is not installed (callers handle this).
+    """
+    for candidate in ["dev", "main", "master"]:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", candidate],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return candidate
+        except subprocess.TimeoutExpired:
+            continue
+    return "dev"  # fallback

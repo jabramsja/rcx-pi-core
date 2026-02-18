@@ -334,42 +334,24 @@ class TestProjectionLoaderPrimitive:
         assert len(seed["projections"]) > 0
 
     def test_loader_rejects_tampered_seed(self):
-        """Loader rejects seeds with invalid checksum (GROUNDING - negative test)."""
-        import json
-        import tempfile
-        from pathlib import Path
+        """Loader rejects seeds with invalid checksum (GROUNDING - negative test).
 
-        # Load a valid seed from mu/ canonical location
+        Tests verify_checksum directly — no temp files or renames needed.
+        """
+        import json
+        from rcx_pi.selfhost.seed_integrity import verify_checksum
+
+        # Load a valid seed
         valid_seed = load_verified_seed(get_seed_path("match.v1.json"), verify=False)
 
-        # Tamper with it - change a projection body
+        # Tamper with it
         tampered = json.loads(json.dumps(valid_seed))  # Deep copy
         tampered["projections"][0]["body"] = {"TAMPERED": True}
+        tampered_bytes = json.dumps(tampered).encode("utf-8")
 
-        # Write to temp file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(tampered, f)
-            tampered_path = Path(f.name)
-
-        try:
-            # Attempt to load tampered seed with verification - should FAIL
-            with pytest.raises(ValueError, match="checksum|integrity"):
-                # Need to rename to match.v1.json for checksum lookup
-                load_verified_seed(tampered_path.rename(tampered_path.parent / "match.v1.json"), verify=True)
-        except FileNotFoundError:
-            # If rename fails, try alternate approach - verify content mismatch
-            from rcx_pi.selfhost.seed_integrity import compute_checksum, SEED_CHECKSUMS
-            tampered_bytes = tampered_path.read_bytes()
-            actual_checksum = compute_checksum(tampered_bytes)
-            expected_checksum = SEED_CHECKSUMS["match.v1.json"]
-            assert actual_checksum != expected_checksum, "Tampered content should have different checksum"
-        finally:
-            # Cleanup
-            try:
-                tampered_path.unlink(missing_ok=True)
-                (tampered_path.parent / "match.v1.json").unlink(missing_ok=True)
-            except Exception:
-                pass
+        # verify_checksum must raise on tampered content
+        with pytest.raises(ValueError, match="integrity check failed"):
+            verify_checksum("match.v1.json", tampered_bytes)
 
     def test_loader_produces_mu_projections(self):
         """Loaded projections are valid Mu."""

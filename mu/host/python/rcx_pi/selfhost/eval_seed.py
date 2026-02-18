@@ -44,93 +44,65 @@ from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 # =============================================================================
 
 
-def host_recursion(reason: str):
+def _apply_host_debt(func, category: str, reason: str):
+    """Shared implementation for all host-debt decorators.
+
+    Sets _host_{category} and _host_{category}_reason attributes, then
+    registers with mark_bootstrap. Each public decorator preserves its
+    own name for grep-based audit counting (audit_semantic_purity.sh,
+    debt_dashboard.sh, check_js_debt.sh).
     """
-    Mark a function as using host recursion (Python call stack).
+    setattr(func, f"_host_{category}", True)
+    setattr(func, f"_host_{category}_reason", reason)
+    mark_bootstrap(f"host_{category}:{func.__name__}", f"Host {category}: {reason}")
+    return func
 
-    This is a debt marker. The function works, but it's doing computation
-    that should eventually be done by RCX kernel iteration.
 
-    Args:
-        reason: Why this host recursion exists and how it will be eliminated.
+def host_recursion(reason: str):
+    """Mark a function as using host recursion (Python call stack).
+
+    Debt marker. The function works, but computation should eventually
+    be done by RCX kernel iteration.
 
     Usage::
 
-        >>> # Example: marking a function that uses Python recursion
         >>> @host_recursion("reason why recursion exists")  # noqa: debt-example
         ... def my_function(args):
         ...     pass
     """
     def decorator(func):
-        func._host_recursion = True
-        func._host_recursion_reason = reason
-        mark_bootstrap(
-            f"host_recursion:{func.__name__}",
-            f"Host recursion: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "recursion", reason)
     return decorator
 
 
 def host_builtin(reason: str):
-    """
-    Mark code as using host builtins (len, sorted, sum, max, min, etc.).
+    """Mark code as using host builtins (len, sorted, sum, max, min, etc.).
 
-    This is a debt marker. These operations should be structural in pure RCX.
-
-    Args:
-        reason: Why this host builtin exists and how it will be eliminated.
+    Debt marker. These operations should be structural in pure RCX.
     """
     def decorator(func):
-        func._host_builtin = True
-        func._host_builtin_reason = reason
-        mark_bootstrap(
-            f"host_builtin:{func.__name__}",
-            f"Host builtin: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "builtin", reason)
     return decorator
 
 
 def host_mutation(reason: str):
-    """
-    Mark code as using host mutation (.append, .pop, del, []=).
+    """Mark code as using host mutation (.append, .pop, del, []=).
 
-    This is a debt marker. RCX is immutable - each step produces new structure.
-
-    Args:
-        reason: Why this host mutation exists and how it will be eliminated.
+    Debt marker. RCX is immutable - each step produces new structure.
     """
     def decorator(func):
-        func._host_mutation = True
-        func._host_mutation_reason = reason
-        mark_bootstrap(
-            f"host_mutation:{func.__name__}",
-            f"Host mutation: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "mutation", reason)
     return decorator
 
 
 def host_iteration(reason: str):
-    """
-    Mark code as using host iteration (Python for-loops).
+    """Mark code as using host iteration (Python for-loops).
 
-    This is a debt marker. The kernel loop should be structural projections,
-    not Python iteration. Phase 7 eliminates this by making the kernel
-    meta-circular (projections selecting projections).
-
-    Args:
-        reason: Why this host iteration exists and how it will be eliminated.
+    Debt marker. The kernel loop should be structural projections,
+    not Python iteration.
     """
     def decorator(func):
-        func._host_iteration = True
-        func._host_iteration_reason = reason
-        mark_bootstrap(
-            f"host_iteration:{func.__name__}",
-            f"Host iteration: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "iteration", reason)
     return decorator
 
 

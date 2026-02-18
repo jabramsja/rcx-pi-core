@@ -44,6 +44,7 @@ from tools.runners.shared_agent_utils import (
     HARD_GATE_AGENTS,
     agent_passed,
     extract_verdict_secure,
+    get_base_branch,
     load_agent_prompt_with_contract,
     validate_compliance,
 )
@@ -105,24 +106,6 @@ class DiffAnalysis:
     summary: str
 
 
-def _get_base_branch() -> str:
-    """Detect the default branch (dev, main, master, etc.).
-
-    Raises FileNotFoundError if git is not installed (callers handle this).
-    """
-    for candidate in ["dev", "main", "master"]:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", candidate],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return candidate
-        except subprocess.TimeoutExpired:
-            continue
-    return "dev"  # fallback
-
-
 def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
     """Analyze the diff to determine review scope."""
 
@@ -130,7 +113,7 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
     if pr_number:
         cmd = ["gh", "pr", "diff", str(pr_number), "--name-only"]
     else:
-        base = _get_base_branch()
+        base = get_base_branch()
         cmd = ["git", "diff", "--name-only", f"{base}...HEAD"]
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)

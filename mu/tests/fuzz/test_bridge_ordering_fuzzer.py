@@ -166,10 +166,11 @@ class TestBridgeOrderingMutationFuzzer:
     @settings(max_examples=50, deadline=5000,
               suppress_health_check=[HealthCheck.too_slow])
     def test_removal_of_any_bridge_projection(self, data):
-        """Removing any bridge projection is detected by the validator.
+        """Removing any bridge projection is detected by the validators.
 
-        Note: _validate_match_bridge_ordering only checks bridge.var.check_existing
-        presence. The combined kernel validator checks all 5.
+        Tests both validators:
+        - _validate_match_bridge_ordering: checks bridge.var.check_existing
+        - _validate_combined_bridge_ordering: checks all 5 bridge projections
         """
         projs, removed = data
         removed_id = removed.get("id", "")
@@ -177,6 +178,11 @@ class TestBridgeOrderingMutationFuzzer:
         if removed_id == "bridge.var.check_existing":
             with pytest.raises(ValueError, match="INVARIANT VIOLATION"):
                 _validate_match_bridge_ordering(projs)
+
+        # Combined validator checks ALL 5 bridge projections
+        if removed_id.startswith("bridge."):
+            with pytest.raises(ValueError, match="SECURITY.*missing"):
+                _validate_combined_bridge_ordering(projs)
 
 
 # =============================================================================

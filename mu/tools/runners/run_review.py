@@ -130,6 +130,7 @@ from tools.runners.shared_agent_utils import (
     load_agent_prompt_with_contract,
     resolve_agent_model,
     sanitize_for_prompt,
+    get_base_branch,
     validate_compliance as shared_validate_compliance,
 )
 
@@ -1000,24 +1001,6 @@ def enforce_global_high_fail_closed(results: list[AgentResult], global_high: int
 # Git Integration
 # =============================================================================
 
-def _get_base_branch() -> str:
-    """Detect the default branch (dev, main, master, etc.).
-
-    Raises FileNotFoundError if git is not installed (callers handle this).
-    """
-    for candidate in ["dev", "main", "master"]:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", candidate],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return candidate
-        except subprocess.TimeoutExpired:
-            continue
-    return "dev"  # fallback
-
-
 def get_changed_files() -> list[str]:
     """Get files changed in current branch vs base branch.
 
@@ -1025,7 +1008,7 @@ def get_changed_files() -> list[str]:
         RuntimeError: If git command fails (don't fail silently)
     """
     try:
-        base = _get_base_branch()
+        base = get_base_branch()
         result = subprocess.run(
             ["git", "diff", "--name-only", f"{base}...HEAD"],
             capture_output=True,
