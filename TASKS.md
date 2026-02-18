@@ -95,6 +95,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-18, l4-checklist-wave1): Created L4ExitChecklist.v0.md with 8 measurable gates (L4-G1 through L4-G8), pass/fail conditions, proof commands, stop conditions. Linked from TASKS.md SINK. G1-G7 PASS, G8 UNPROVEN. No phase/debt/task change.
 - Tracker sync note (2026-02-18, redteam-runtime-wave1): Fix P1 kwarg collision in run_engine_with_routing — use_boot1_recursive hardcoded AND forwarded via **engine_kwargs caused TypeError. Pop from kwargs with default False. 3 regression tests added. No phase/debt/task change.
 - Tracker sync note (2026-02-18, redteam-docs-tooling-wave1): Docs/tooling hardening — stale generate_docs_index.py path refs fixed, DocGovernance tree updated to mu/docs/, jsonschema test imports hardened (importorskip, health checks), world_trace_cli.py unreachable branch removed, check_boot1_merge2_readiness.sh stale symlink ref removed, trace event schema path bug fixed. No phase/debt/task change.
 - Tracker sync note (2026-02-18, rigorous-review-findings-5): CONTRABAND_OK added to _apply_host_debt setattr calls (CI contraband gate failure). No phase/debt/task change.
@@ -459,6 +460,7 @@ Current Exhaustion Layer: META_CIRCULAR
 - Performance-first optimizations
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
 - Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
+- L4 True Self-Hosting — measurable exit checklist with 8 gates (L4-G1 through L4-G8). See `mu/docs/core/L4ExitChecklist.v0.md`. G1-G7 PASS, G8 UNPROVEN (circular dependency research question). Stop conditions documented.
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`

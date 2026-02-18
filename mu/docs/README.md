@@ -49,6 +49,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [EngineNewFixContract.v0.md](core/EngineNewFixContract.v0.md) | EngineNew Fix Contract v0 |
 | [EngineNewsStructural.v0.md](core/EngineNewsStructural.v0.md) | Recurrence Structural Specification v0 |
 | [EntropyBudget.md](core/EntropyBudget.md) | RCX Entropy Budget (Contract) |
+| [L4ExitChecklist.v0.md](core/L4ExitChecklist.v0.md) | L4 Exit Checklist v0 |
 | [LegacySurfaceDecisionRecord.v0.md](core/LegacySurfaceDecisionRecord.v0.md) | Legacy Surface Decision Record v0 |
 | [MetaCircularKernel.v0.md](core/MetaCircularKernel.v0.md) | Meta-Circular Kernel Specification v0 |
 | [MuType.v0.md](core/MuType.v0.md) | Mu Type Definition v0 |
