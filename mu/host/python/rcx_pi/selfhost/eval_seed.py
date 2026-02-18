@@ -422,10 +422,12 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     raise TypeError(f"Invalid body type: {type(body)}")
 
 
-@host_builtin("isinstance() for projection type validation and body normalization detection")
 def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     """
     Apply a projection to an input value.
+
+    Host debt (isinstance for type validation and normalization detection)
+    is part of the same debt surface tracked on match()'s @host_builtin.
 
     A projection is {"pattern": P, "body": B}.
     If P matches input, return B with substitutions.
