@@ -387,6 +387,10 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """
     Substitute variable sites in body with bound values.
 
+    Host debt: 3 isinstance calls (lines 410, 414, 418) for Python type
+    dispatch on body values. Tracked on match()'s @host_builtin decorator
+    (same debt surface as _match_inner).
+
     Args:
         body: The body with possible {"var": "x"} sites.
         bindings: Dict mapping variable names to values.
@@ -539,6 +543,10 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     Callers: _step_trusted, step_kernel_mu (via _step_trusted).
 
     Host debt (isinstance) tracked on match()'s @host_builtin decorator.
+
+    Note: Skips assert_not_lambda_calculus() by design. Kernel-internal
+    projections come from verified seeds (integrity-checked at load time).
+    The guardrail is only needed at the public apply_projection() boundary.
     """
     if not isinstance(projection, dict):
         raise TypeError(f"Projection must be dict, got {type(projection)}")

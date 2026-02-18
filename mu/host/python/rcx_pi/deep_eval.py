@@ -21,6 +21,7 @@ The projections themselves are pure structural - no host debt.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from rcx_pi.eval_seed import step, NO_MATCH, host_builtin, host_mutation
@@ -370,8 +371,6 @@ def run_deep_eval(
     Raises:
         ValueError: If state validation fails (when validate=True).
     """
-    import json
-
     # Validate input is Mu
     assert_mu(value)
 
@@ -384,6 +383,16 @@ def run_deep_eval(
             is_valid, error = validate_deep_eval_state(current)
             if not is_valid:
                 raise ValueError(f"Invalid deep_eval state at step {i+1}: {error}")
+        elif isinstance(current, dict) and "context" in current:
+            # Even with validate=False, enforce MAX_CONTEXT_DEPTH to prevent
+            # unbounded growth (defense-in-depth against Attack 7).
+            depth = 0
+            ctx = current.get("context")
+            while isinstance(ctx, dict) and "outer" in ctx:
+                depth += 1
+                if depth > MAX_CONTEXT_DEPTH:
+                    raise ValueError(f"Context depth exceeds max {MAX_CONTEXT_DEPTH}")
+                ctx = ctx["outer"]
 
         if debug:
             print(f"\n=== Step {i+1} ===")

@@ -408,12 +408,14 @@ End with OVERALL_VERDICT: CONFIRMED|CONCERNS|OVERRIDE.
 
     # Parse structured output
     overall_verdict = "UNKNOWN"
-    overall_match = re.search(
+    # Use findall + take last match — agents may mention OVERALL_VERDICT
+    # early in analysis before issuing the final verdict at the end.
+    overall_matches = re.findall(
         r'OVERALL_VERDICT\s*:\s*(CONFIRMED|CONCERNS|OVERRIDE)',
         result_text, re.IGNORECASE
     )
-    if overall_match:
-        overall_verdict = overall_match.group(1).upper()
+    if overall_matches:
+        overall_verdict = overall_matches[-1].upper()
     else:
         overall_verdict = _extract_verdict(result_text)
 

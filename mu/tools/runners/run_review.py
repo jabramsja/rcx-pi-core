@@ -60,11 +60,6 @@ _tools_dir = Path(__file__).resolve().parent
 if str(_tools_dir.parent.parent) not in sys.path:
     sys.path.insert(0, str(_tools_dir.parent.parent))
 
-# Strip CLAUDECODE from env so the SDK doesn't pass it to child claude
-# processes. When running from within Claude Code, CLAUDECODE=1 is set
-# which causes nested session blocking. Removing it lets agents run cleanly.
-os.environ.pop("CLAUDECODE", None)
-
 SDK_IMPORT_ERROR: Exception | None = None
 try:
     from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition

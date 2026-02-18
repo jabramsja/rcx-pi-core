@@ -255,7 +255,8 @@ def adversary_blocks_merge(verdict: str, output: str, is_compliant: bool) -> boo
 # Prompt Loading
 # =============================================================================
 
-AGENT_PROMPTS_DIR = Path("tools/agents")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+AGENT_PROMPTS_DIR = _REPO_ROOT / "tools" / "agents"
 REDTEAM_CONTRACT_PATH = AGENT_PROMPTS_DIR / "_contract_redteam.md"
 
 
@@ -316,7 +317,7 @@ def validate_compliance(
         Tuple of (is_compliant, error_message, metrics_dict)
     """
     try:
-        cmd = [sys.executable, "tools/runners/validate_agent_compliance.py"]
+        cmd = [sys.executable, str(_REPO_ROOT / "tools" / "runners" / "validate_agent_compliance.py")]
         if strict:
             cmd.append("--strict")
         if verify_files:
@@ -566,6 +567,8 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
         r'forget\s+everything',
         r'you\s+are\s+now',
         r'override\s+instructions',
+        r'VERDICT\s*:',
+        r'OVERALL_VERDICT\s*:',
     ]
     for pattern in patterns_to_redact:
         text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)

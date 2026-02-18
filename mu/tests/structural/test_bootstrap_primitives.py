@@ -71,12 +71,12 @@ class TestEvalStepPrimitive:
         # Order 1: proj1 first
         result1 = step([proj1, proj2], value)
         assert_mu(result1, "step result 1")
-        assert result1 == {"result": "first"}
+        assert mu_equal(result1, {"result": "first"})
 
         # Order 2: proj2 first
         result2 = step([proj2, proj1], value)
         assert_mu(result2, "step result 2")
-        assert result2 == {"result": "second"}
+        assert mu_equal(result2, {"result": "second"})
 
     def test_eval_step_stalls_on_no_match(self):
         """eval_step returns input unchanged on no match (mechanical stall)."""
@@ -98,7 +98,7 @@ class TestEvalStepPrimitive:
 
         for value in [0, 1, -1, 100, 3.14]:
             result = step(projections, value)
-            assert result == value  # No arithmetic performed
+            assert mu_equal(result, value)  # No arithmetic performed
 
     def test_eval_step_produces_mu_output(self):
         """eval_step output is always valid Mu."""
@@ -401,8 +401,8 @@ class TestPrimitiveBoundaries:
         result1 = step(projs, {"type": "add"})
         result2 = step(projs, {"type": "mul"})
 
-        assert result1 == {"result": "addition"}
-        assert result2 == {"result": "multiplication"}
+        assert mu_equal(result1, {"result": "addition"})
+        assert mu_equal(result2, {"result": "multiplication"})
 
     def test_no_arithmetic_in_mu_equal(self):
         """mu_equal does not normalize numbers."""
@@ -423,7 +423,7 @@ class TestPrimitiveBoundaries:
         for s in strings:
             result = step(projections, s)
             # String passes through unchanged - no case folding, trimming, etc.
-            assert result == s
+            assert mu_equal(result, s)
 
 
 # =============================================================================
@@ -561,7 +561,7 @@ class TestPrimitivesEnableStructural:
         body = {"result": {"var": "x"}}
 
         result = subst_mu(body, bindings)
-        assert result == {"result": 42}
+        assert mu_equal(result, {"result": 42})
 
     def test_primitives_enable_kernel_loop(self):
         """Primitives enable meta-circular kernel."""
@@ -575,4 +575,4 @@ class TestPrimitivesEnableStructural:
         ]
 
         result = step_mu(projections, {"x": 1})
-        assert result == {"y": 1}
+        assert mu_equal(result, {"y": 1})

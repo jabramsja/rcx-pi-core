@@ -259,13 +259,12 @@ async def run_analysis_agent(
     status_icon = "✅" if verdict in GOOD_VERDICTS else "⚠️"
     print(f"{status_icon} {verdict}")
 
-    # Optional compliance validation
+    # Always run compliance validation (verdict extraction depends on format)
     is_compliant = True
     compliance_error = ""
-    if verbose:  # Only run compliance check in verbose mode to save time
-        is_compliant, compliance_error, _ = validate_compliance(result_text, strict=False)
-        if not is_compliant:
-            print(f"    ⚠️ Compliance: {compliance_error[:50]}...")
+    is_compliant, compliance_error, _ = validate_compliance(result_text, strict=False)
+    if not is_compliant and verbose:
+        print(f"    ⚠️ Compliance: {compliance_error[:50]}...")
 
     return {
         "agent": agent_name,
