@@ -10,9 +10,9 @@ Run monthly or before major releases. This is NOT for every push - that's what
 audit_fast.sh and run_review.py are for.
 
 Usage:
-    python tools/run_deep_analysis.py
-    python tools/run_deep_analysis.py --agents verifier,adversary  # subset
-    python tools/run_deep_analysis.py --verbose  # show full agent output
+    python tools/runners/run_deep_analysis.py
+    python tools/runners/run_deep_analysis.py --agents verifier,adversary  # subset
+    python tools/runners/run_deep_analysis.py --verbose  # show full agent output
 
 Cost: FREE (runs locally via Claude Code Max subscription)
 Time: ~5-10 minutes (agents run in parallel)

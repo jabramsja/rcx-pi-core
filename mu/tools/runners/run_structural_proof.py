@@ -6,8 +6,8 @@ This agent demands CONCRETE PROOF that operations can be done structurally.
 Use this BEFORE approving any plan that claims pattern matching works.
 
 Usage:
-    python tools/run_structural_proof.py "linked list append can be done with finite projections"
-    python tools/run_structural_proof.py "match can be expressed as Mu projections"
+    python tools/runners/run_structural_proof.py "linked list append can be done with finite projections"
+    python tools/runners/run_structural_proof.py "match can be expressed as Mu projections"
 """
 
 import sys

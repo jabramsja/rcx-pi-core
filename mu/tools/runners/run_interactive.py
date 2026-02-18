@@ -13,16 +13,16 @@ Features:
 
 Usage:
     # Start interactive session with verifier
-    python tools/run_interactive.py verifier rcx_pi/selfhost/step_mu.py
+    python tools/runners/run_interactive.py verifier rcx_pi/selfhost/step_mu.py
 
     # Start with multiple files
-    python tools/run_interactive.py adversary rcx_pi/selfhost/
+    python tools/runners/run_interactive.py adversary rcx_pi/selfhost/
 
     # Resume a previous session
-    python tools/run_interactive.py --resume <session_id>
+    python tools/runners/run_interactive.py --resume <session_id>
 
     # List recent sessions
-    python tools/run_interactive.py --list
+    python tools/runners/run_interactive.py --list
 
 Commands during session:
     /switch <agent>  - Switch to different agent (keeps context)
@@ -336,7 +336,7 @@ async def run_repl(session: InteractiveSession):
             elif cmd == "save":
                 session_id = session.save()
                 print(f"\n✅ Session saved: {session_id}")
-                print(f"   Resume with: python tools/run_interactive.py --resume {session_id}\n")
+                print(f"   Resume with: python tools/runners/run_interactive.py --resume {session_id}\n")
 
             elif cmd == "files":
                 print(f"\nFiles in scope:")
@@ -378,10 +378,10 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python tools/run_interactive.py verifier rcx_pi/selfhost/step_mu.py
-  python tools/run_interactive.py adversary rcx_pi/selfhost/
-  python tools/run_interactive.py --resume 20240201_143052
-  python tools/run_interactive.py --list
+  python tools/runners/run_interactive.py verifier rcx_pi/selfhost/step_mu.py
+  python tools/runners/run_interactive.py adversary rcx_pi/selfhost/
+  python tools/runners/run_interactive.py --resume 20240201_143052
+  python tools/runners/run_interactive.py --list
 
 Available agents:
   verifier, adversary, expert, structural-proof, grounding,
@@ -413,7 +413,7 @@ Available agents:
                 msg_count = len(s.messages)
                 print(f"  {s.id}  {s.agent:15}  {msg_count} messages  {s.started[:16]}")
             print("-" * 60)
-            print(f"Resume with: python tools/run_interactive.py --resume <SESSION_ID>")
+            print(f"Resume with: python tools/runners/run_interactive.py --resume <SESSION_ID>")
         return
 
     # Resume session

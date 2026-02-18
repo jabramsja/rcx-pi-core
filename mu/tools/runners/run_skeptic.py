@@ -12,10 +12,10 @@ The skeptic is NOT adversarial for the sake of it. It asks:
 
 Usage:
     # Typically called by run_review.py --rigorous, not directly
-    python tools/run_skeptic.py --agent-output output.txt --files file1.py file2.py
+    python tools/runners/run_skeptic.py --agent-output output.txt --files file1.py file2.py
 
     # Or pipe agent output
-    cat agent_output.txt | python tools/run_skeptic.py --files file1.py
+    cat agent_output.txt | python tools/runners/run_skeptic.py --files file1.py
 """
 
 import re

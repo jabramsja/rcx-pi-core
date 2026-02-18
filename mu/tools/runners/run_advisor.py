@@ -8,9 +8,9 @@ trade-off analysis, and creative solutions.
 Now with WEB SEARCH: Can search for how other systems solve similar problems.
 
 Usage:
-    python tools/run_advisor.py "How should we represent bindings structurally?"
-    python tools/run_advisor.py "Multiple approaches exist for X, which should we choose?"
-    python tools/run_advisor.py "How do other interpreters handle meta-circularity?" --web
+    python tools/runners/run_advisor.py "How should we represent bindings structurally?"
+    python tools/runners/run_advisor.py "Multiple approaches exist for X, which should we choose?"
+    python tools/runners/run_advisor.py "How do other interpreters handle meta-circularity?" --web
 """
 
 import sys

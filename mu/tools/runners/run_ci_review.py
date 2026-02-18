@@ -10,10 +10,10 @@ This agent is designed to run in CI and:
 
 Usage:
     # In GitHub Actions workflow
-    python tools/run_ci_review.py --pr-number 123
+    python tools/runners/run_ci_review.py --pr-number 123
 
     # Local testing
-    python tools/run_ci_review.py --local
+    python tools/runners/run_ci_review.py --local
 
 Environment variables:
     GITHUB_TOKEN     - GitHub token for posting comments

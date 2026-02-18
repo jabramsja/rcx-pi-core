@@ -14,22 +14,22 @@ Features:
 
 Usage:
     # Full review (all 9 agents)
-    python tools/run_review.py rcx_pi/selfhost/
+    python tools/runners/run_review.py rcx_pi/selfhost/
 
     # Quick review (4 core agents only)
-    python tools/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
+    python tools/runners/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
 
     # PR review (analyzes git diff, auto-selects depth)
-    python tools/run_review.py --pr
+    python tools/runners/run_review.py --pr
 
     # Founder review (adds translator + visualizer)
-    python tools/run_review.py rcx_pi/selfhost/ --founder
+    python tools/runners/run_review.py rcx_pi/selfhost/ --founder
 
     # Disable memory (no finding storage)
-    python tools/run_review.py rcx_pi/selfhost/ --no-memory
+    python tools/runners/run_review.py rcx_pi/selfhost/ --no-memory
 
     # Associate findings with a PR
-    python tools/run_review.py --pr --pr-number 123
+    python tools/runners/run_review.py --pr --pr-number 123
 
 Depth levels:
     quick:  verifier, adversary, expert, structural-proof (4 agents)
@@ -123,6 +123,7 @@ from tools.runners.validate_agent_compliance import extract_finding_blocks
 from tools.runners.agent_runner_common import sanitize_files
 from tools.runners.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
+    AGENT_VERDICTS,
     AGENT_PASS_VERDICTS,
     GOOD_VERDICTS,
     HARD_GATE_AGENTS,
@@ -562,7 +563,7 @@ CRITICAL FORMAT REMINDER: Your final output MUST contain these sections:
 1. ### CHECKED — bullet list of what you verified
 2. ### NOT_CHECKED — bullet list of what you could not verify
 3. ### Verdict — a single line: VERDICT: <TOKEN>
-Valid tokens: PASS, NEEDS_HARDENING, FAIL, UNKNOWN
+Valid tokens: {', '.join(AGENT_VERDICTS.get(agent_name, ['UNKNOWN']))}
 Do NOT end with raw exploration text. Summarize your findings into the required format.
 """
 
@@ -1076,10 +1077,10 @@ Depth levels:
   all      8-9 agents: + advisor
 
 Examples:
-  python tools/run_review.py rcx_pi/selfhost/
-  python tools/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
-  python tools/run_review.py --pr --depth full
-  python tools/run_review.py rcx_pi/selfhost/ --founder --output report.md
+  python tools/runners/run_review.py rcx_pi/selfhost/
+  python tools/runners/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
+  python tools/runners/run_review.py --pr --depth full
+  python tools/runners/run_review.py rcx_pi/selfhost/ --founder --output report.md
 """
     )
 
@@ -1192,7 +1193,7 @@ Examples:
         if not preflight_ok:
             print("\n❌ AGENT PREFLIGHT FAILED")
             print(f"Reason: {preflight_error}")
-            print("Action: run `PYTHONHASHSEED=0 python3 tools/check_agent_runtime.py` and fix runtime.")
+            print("Action: run `PYTHONHASHSEED=0 python3 tools/checks/check_agent_runtime.py` and fix runtime.")
             sys.exit(INFRA_FAILURE_EXIT_CODE)
 
     # Determine depth
