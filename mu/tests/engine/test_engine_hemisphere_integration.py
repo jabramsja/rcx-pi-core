@@ -67,6 +67,77 @@ class TestWiringContract:
             assert result["hemispheres"] is fake_hemispheres
 
 
+class TestKwargCollisionRegression:
+    """Regression: use_boot1_recursive must not cause kwarg collision (P1 red-team)."""
+
+    def test_explicit_false_no_collision(self):
+        """Passing use_boot1_recursive=False explicitly must not raise TypeError."""
+        fake_engine_result = {
+            "value": "x", "closure_detected": False, "tau_step": 0,
+            "exhaustion_detected": False, "operator_frozen": False,
+            "frozen_set": None, "action": "continue", "stall": True,
+        }
+        fake_hemispheres = _local_default_hemispheres()
+
+        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+            mock_pipeline.return_value = fake_engine_result
+            mock_routing.return_value = fake_hemispheres
+
+            # This used to raise TypeError: got multiple values for 'use_boot1_recursive'
+            result = run_engine_with_routing(
+                ["proj1"], "input_val", use_boot1_recursive=False, max_steps=5
+            )
+
+            mock_pipeline.assert_called_once_with(
+                ["proj1"], "input_val", use_boot1_recursive=False, max_steps=5
+            )
+            assert "engine_result" in result
+
+    def test_explicit_true_no_collision(self):
+        """Passing use_boot1_recursive=True explicitly must not raise TypeError."""
+        fake_engine_result = {
+            "value": "x", "closure_detected": False, "tau_step": 0,
+            "exhaustion_detected": False, "operator_frozen": False,
+            "frozen_set": None, "action": "continue", "stall": True,
+        }
+        fake_hemispheres = _local_default_hemispheres()
+
+        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+            mock_pipeline.return_value = fake_engine_result
+            mock_routing.return_value = fake_hemispheres
+
+            result = run_engine_with_routing(
+                ["proj1"], "input_val", use_boot1_recursive=True, max_steps=5
+            )
+
+            mock_pipeline.assert_called_once_with(
+                ["proj1"], "input_val", use_boot1_recursive=True, max_steps=5
+            )
+            assert "engine_result" in result
+
+    def test_default_still_false(self):
+        """Without explicit kwarg, use_boot1_recursive defaults to False."""
+        fake_engine_result = {
+            "value": "x", "closure_detected": False, "tau_step": 0,
+            "exhaustion_detected": False, "operator_frozen": False,
+            "frozen_set": None, "action": "continue", "stall": True,
+        }
+        fake_hemispheres = _local_default_hemispheres()
+
+        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+            mock_pipeline.return_value = fake_engine_result
+            mock_routing.return_value = fake_hemispheres
+
+            run_engine_with_routing(["proj1"], "input_val")
+
+            mock_pipeline.assert_called_once_with(
+                ["proj1"], "input_val", use_boot1_recursive=False
+            )
+
+
 class TestInputValidation:
     """Fail-closed input validation on hemispheres arg."""
 
