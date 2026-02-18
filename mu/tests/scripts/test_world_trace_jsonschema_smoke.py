@@ -13,11 +13,11 @@ def _check_jsonschema_healthy() -> bool:
     if shutil.which("check-jsonschema") is None:
         return False
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["check-jsonschema", "--help"],
             capture_output=True, timeout=10,
         )
-        return True
+        return result.returncode == 0
     except (subprocess.SubprocessError, OSError):
         return False
 

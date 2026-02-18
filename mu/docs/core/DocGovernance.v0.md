@@ -138,7 +138,7 @@ WorkingRCX/
 
 ## Required Header Format
 
-Every doc in `docs/` must start with:
+Every doc in `mu/docs/` must start with:
 
 ```markdown
 <!--

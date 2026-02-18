@@ -12,7 +12,7 @@ SCHEMA_PATH = ROOT / "mu" / "docs" / "schemas" / "rcx.snapshot.v1.schema.json"
 
 
 def test_snapshot_merge_output_validates_against_schema(tmp_path: Path):
-    jsonschema = pytest.importorskip("jsonschema", reason="jsonschema not installed")
+    jsonschema = pytest.importorskip("jsonschema", exc_type=ImportError, reason="jsonschema not installed")
 
     out = tmp_path / "merged.json"
 
