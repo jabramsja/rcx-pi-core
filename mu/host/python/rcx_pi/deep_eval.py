@@ -35,8 +35,10 @@ from rcx_pi.mu_type import Mu, assert_mu, mu_hash_cached
 MAX_HISTORY = 500        # Cap history to prevent memory exhaustion (Attack 17)
 MAX_CONTEXT_DEPTH = 100  # Cap context depth to prevent stack-like overflow (Attack 7)
 
-# Internal marker for done wrapper - prevents spoofing by domain projections
-# This value is checked by the runner to verify authentic completion
+# Internal marker for done wrapper - guards against accidental collisions.
+# Not a security boundary: the marker is a public string, so codebase-aware
+# domain projections could forge it. Trusted because domain projections come
+# from the calling code (not untrusted input).
 DONE_MARKER = "__deep_eval_internal_done__"
 
 
@@ -92,7 +94,7 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
 
     # 2. ROOT_CHECK without changes -> UNWRAP (done!)
     # Return a "done" wrapper that no projection matches (causes stall)
-    # SECURITY: Include internal marker to prevent spoofing by domain projections
+    # Internal marker for done-detection (see DONE_MARKER comment above)
     projections.append({
         "id": "unwrap",
         "pattern": {

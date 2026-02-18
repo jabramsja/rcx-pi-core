@@ -529,7 +529,9 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
 
     Prevents prompt injection by:
     - Unicode normalization (NFKC) to prevent lookalike bypasses
-    - Zero-width character stripping
+    - Stripping zero-width and line-separator control chars (VT, FF, NEL,
+      U+200B-U+200D, U+2028-U+2029, U+2060, U+FEFF)
+    - Replacing newlines/carriage returns with spaces
     - Escaping triple backticks to prevent code block breakout
     - Removing instruction-like patterns (case-insensitive)
     - Truncation to max_len (AFTER sanitization to prevent smuggling past truncation)
@@ -553,7 +555,7 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     # Escape triple backticks to prevent code block breakout
     text = text.replace('```', '` ` `')
 
-    # Escape newlines to prevent context breakout
+    # Replace newlines/carriage returns (VT/FF/NEL handled by _ZERO_WIDTH_RE above)
     text = text.replace('\n', ' ').replace('\r', ' ')
 
     # Remove instruction-like patterns (case-insensitive, word-boundary aware)
