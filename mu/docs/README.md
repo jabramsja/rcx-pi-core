@@ -117,6 +117,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 | File | Title |
 |------|-------|
+| [AuditReliabilityPlan.v0.md](audit/AuditReliabilityPlan.v0.md) | Audit Reliability Plan v0 |
 | [CI_POLICY.md](audit/CI_POLICY.md) | RCX CI Policy (Green Gate) |
 | [MetaCircularReadiness.v1.md](audit/MetaCircularReadiness.v1.md) | RCX Meta-Circular Readiness Definition (v1) |
 
