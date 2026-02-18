@@ -26,7 +26,8 @@ Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 # See mu/docs/core/BootstrapPrimitives.v0.md for full justification.
 #
 # Phase 8b note: Increased from 200 to 300 to support deeper kernel states.
-# Kernel normalization converts dicts to linked-lists, multiplying depth by ~4x.
+# Kernel normalization converts dicts to linked-lists (head/tail chains),
+# increasing depth proportional to dict width (N keys → ~2N depth levels).
 # Must stay below ~400 to avoid Python's default recursion limit (~1000).
 # Stress tests with max_steps > ~60 may need kernel-internal bypass.
 MAX_MU_DEPTH = 300
@@ -59,7 +60,8 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
     Note:
         Circular references are detected and rejected (return False).
         Deep nesting beyond MAX_MU_DEPTH is rejected (return False).
-        This prevents infinite recursion/stack overflow attacks.
+        Wide structures beyond MAX_MU_WIDTH are rejected (return False).
+        This prevents infinite recursion/stack overflow and resource exhaustion attacks.
     """
     # Depth limit check (prevents RecursionError attacks)
     if _depth > MAX_MU_DEPTH:
@@ -491,7 +493,7 @@ def mu_hash_cached(value: Any) -> str:
         TypeError: If value is not a valid Mu.
     """
     assert_mu(value, "mu_hash_cached")
-    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
     cached = _mu_hash_cache.get(canonical)
     if cached is not None:
         # Move to end (most recently used)
@@ -521,7 +523,7 @@ def mu_hash(value: Any) -> str:
         TypeError: If value is not a valid Mu.
     """
     assert_mu(value, "mu_hash")
-    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
     return _compute_mu_hash(canonical)
 
 

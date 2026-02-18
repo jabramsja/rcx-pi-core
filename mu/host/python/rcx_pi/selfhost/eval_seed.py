@@ -14,7 +14,6 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
@@ -40,7 +39,8 @@ from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 # 3. Be eliminated before self-hosting is complete
 #
 # The audit (tools/audit_semantic_purity.sh) counts these sites.
-# Phase 3 goal: zero @host_recursion markers.
+# L2 floor: host_recursion sites have a stable floor (match, substitute,
+# step). These are bootstrap primitives — see STATUS.md for current level.
 # =============================================================================
 
 
@@ -257,9 +257,11 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """Internal recursive matcher — no validation (already done at match() entry).
 
-    Host debt (isinstance for type dispatch) is tracked on match() which is the
-    only public caller. 14 isinstance calls implement Python type dispatch for
-    pattern matching — this is the core @host_builtin debt documented on match().
+    Host debt (isinstance for type dispatch) is tracked on match()'s host_builtin
+    decorator. 13 isinstance calls in this function implement Python type dispatch
+    for pattern matching (plus 1 in match() for normalization gate = 14 total).
+    Callers: match() (public entry) and _apply_projection_trusted() (kernel-internal
+    fast path).
     """
     # Variable site - matches anything
     if is_var(pattern):

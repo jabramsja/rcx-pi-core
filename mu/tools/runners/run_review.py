@@ -233,7 +233,7 @@ AGENT_MAX_TURNS = {
     "verifier": 30,
     "adversary": 25,
     "expert": 25,
-    "structural-proof": 20,
+    "structural-proof": 30,
     "grounding": 25,
     "fuzzer": 20,
     "translator": 20,
