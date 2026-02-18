@@ -255,11 +255,11 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """Internal recursive matcher — no validation (already done at match() entry).
 
-    Host debt (isinstance for type dispatch) is tracked on match()'s host_builtin
-    decorator. 13 isinstance calls in this function implement Python type dispatch
-    for pattern matching (plus 1 in match() for normalization gate = 14 total).
-    Callers: match() (public entry) and _apply_projection_trusted() (kernel-internal
-    fast path).
+    This function contains 13 isinstance calls for Python type dispatch
+    (plus 1 in match() = 14 isinstance calls total). These are NOT 14
+    separate debt markers — they are all covered by the single host_builtin
+    decorator on match(). Callers: match() (public entry) and
+    _apply_projection_trusted() (kernel-internal fast path).
     """
     # Variable site - matches anything
     if is_var(pattern):
