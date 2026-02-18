@@ -559,7 +559,8 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     # Remove instruction-like patterns (case-insensitive, word-boundary aware)
     # Uses \b word boundaries to prevent partial-word false positives
     # and \s* between words to catch space-insertion bypass attempts
-    patterns_to_redact = [
+    # Word-bounded patterns (need \b on both sides to avoid partial matches)
+    word_patterns = [
         r'ignore\s+previous',
         r'disregard',
         r'new\s+instructions',
@@ -567,11 +568,17 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
         r'forget\s+everything',
         r'you\s+are\s+now',
         r'override\s+instructions',
+    ]
+    for pattern in word_patterns:
+        text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)
+
+    # Verdict patterns — leading \b only (trailing : is non-word, so \b after : fails)
+    verdict_patterns = [
         r'VERDICT\s*:',
         r'OVERALL_VERDICT\s*:',
     ]
-    for pattern in patterns_to_redact:
-        text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)
+    for pattern in verdict_patterns:
+        text = re.sub(r'\b' + pattern, '[REDACTED]', text, flags=re.IGNORECASE)
 
     # Truncate AFTER sanitization to prevent smuggling payloads past the truncation boundary
     text = text[:max_len]
