@@ -86,14 +86,10 @@ WorkingRCX/
 │       ├── verifier.md
 │       └── ...
 │
-├── docs/
+├── mu/docs/
 │   ├── core/              # ACTIVE specs (REFERENCE, DESIGN_SPEC, IMPLEMENTATION)
 │   │   ├── MuType.v0.md
 │   │   ├── BootstrapPrimitives.v0.md
-│   │   └── ...
-│   │
-│   ├── archive/           # EXEMPT - historical, read-only
-│   │   ├── BytecodeVM.v0.md
 │   │   └── ...
 │   │
 │   ├── agents/            # Agent-specific docs (GOVERNED)
@@ -106,9 +102,6 @@ WorkingRCX/
 │   │   └── cli_quickstart.md
 │   │
 │   ├── schemas/           # Schema documentation (GOVERNED)
-│   │   └── *.md
-│   │
-│   ├── reviews/           # Code review records (GOVERNED)
 │   │   └── *.md
 │   │
 │   └── execution/         # Execution specs (GOVERNED)

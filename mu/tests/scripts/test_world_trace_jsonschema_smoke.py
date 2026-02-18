@@ -8,9 +8,23 @@ from pathlib import Path
 import pytest
 
 
+def _check_jsonschema_healthy() -> bool:
+    """Return True if check-jsonschema is installed AND runs successfully."""
+    if shutil.which("check-jsonschema") is None:
+        return False
+    try:
+        subprocess.run(
+            ["check-jsonschema", "--help"],
+            capture_output=True, timeout=10,
+        )
+        return True
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
 @pytest.mark.skipif(
-    shutil.which("check-jsonschema") is None,
-    reason="check-jsonschema not installed; schema smoke test is optional",
+    not _check_jsonschema_healthy(),
+    reason="check-jsonschema not installed or not runnable; schema smoke test is optional",
 )
 def test_world_trace_output_validates_against_jsonschema():
     repo_root = Path(__file__).resolve().parents[3]
