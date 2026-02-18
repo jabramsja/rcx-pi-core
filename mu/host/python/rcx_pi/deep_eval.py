@@ -386,13 +386,15 @@ def run_deep_eval(
         elif isinstance(current, dict) and "context" in current:
             # Even with validate=False, enforce MAX_CONTEXT_DEPTH to prevent
             # unbounded growth (defense-in-depth against Attack 7).
+            # Context structure is [frame_dict, outer_list] (nested lists),
+            # not dicts with "outer" keys.
             depth = 0
             ctx = current.get("context")
-            while isinstance(ctx, dict) and "outer" in ctx:
+            while isinstance(ctx, list) and len(ctx) == 2:
                 depth += 1
                 if depth > MAX_CONTEXT_DEPTH:
                     raise ValueError(f"Context depth exceeds max {MAX_CONTEXT_DEPTH}")
-                ctx = ctx["outer"]
+                ctx = ctx[1]  # outer context is second element
 
         if debug:
             print(f"\n=== Step {i+1} ===")

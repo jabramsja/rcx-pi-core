@@ -532,7 +532,7 @@ class TestPrimitivesEnableStructural:
 
         result = match_mu({"var": "x"}, 42)
         assert result != NO_MATCH
-        assert result["x"] == 42
+        assert mu_equal(result["x"], 42)
 
     def test_primitives_enable_substitution(self):
         """Primitives enable subst.v1 projections to work."""

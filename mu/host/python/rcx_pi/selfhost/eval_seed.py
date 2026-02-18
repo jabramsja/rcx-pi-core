@@ -359,9 +359,9 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """
     Substitute variable sites in body with bound values.
 
-    Host debt: 3 isinstance calls (lines 410, 414, 418) for Python type
-    dispatch on body values. Tracked on match()'s @host_builtin decorator
-    (same debt surface as _match_inner).
+    Host debt: 3 isinstance calls for Python type dispatch on body values
+    (None/bool/int/float/str check, list check, dict check). Tracked on
+    match()'s @host_builtin decorator (same debt surface as _match_inner).
 
     Args:
         body: The body with possible {"var": "x"} sites.
