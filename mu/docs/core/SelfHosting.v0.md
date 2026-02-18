@@ -329,12 +329,12 @@ Grounding tests fail if seed files change. This prevents doc drift.
 
 ### Phase 4a: Match as Mu ✅ COMPLETE
 - Match projections in `mu/substrate/match.v1.json`
-- Implementation: `rcx_pi/match_mu.py`
+- Implementation: `rcx_pi/selfhost/match_mu.py`
 - Parity tests in `tests/parity/test_match_parity.py`
 
 ### Phase 4b: Substitute as Mu ✅ COMPLETE
 - Substitute projections in `mu/substrate/subst.v1.json`
-- Implementation: `rcx_pi/subst_mu.py`
+- Implementation: `rcx_pi/selfhost/subst_mu.py`
 - Parity tests in `tests/parity/test_subst_parity.py`
 
 ### Phase 4c: Binding Lookup ✅ COMPLETE
@@ -347,7 +347,7 @@ Grounding tests fail if seed files change. This prevents doc drift.
 - Fuzzer tests in `tests/fuzz/test_apply_mu_fuzzer.py`
 
 ### Phase 5: Self-Hosting ✅ COMPLETE
-- `rcx_pi/step_mu.py`: `apply_mu()`, `step_mu()`, `run_mu()`
+- `rcx_pi/selfhost/step_mu.py`: `apply_mu()`, `step_mu()`, `run_mu()`
 - step_mu uses match_mu + subst_mu (Mu projections, not Python recursion)
 - Parity tests in `tests/parity/test_step_mu_parity.py`
 - Self-hosting tests in `tests/integration/test_self_hosting_v0.py`
