@@ -164,6 +164,12 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **L4 Status:** Open research question in SINK. Not promised, not ruled out.
 
+**Boot1 Current Reality (truth-sync 2026-02-18):**
+Boot1 is a **host-side loop policy alternative**, not a seed-defined structural loop. Two host paths exist:
+- **Trampoline (default):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:1578`, `eval_step.js:runEnginePipeline`)
+- **Recursive shadow:** `_run_engine_recursive()` recursive call stack (`step_mu.py:1411`, `eval_step.js:runEnginePipelineRecursive:2014`)
+Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); default remains trampoline. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec.
+
 **Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~1300 LOC core in JS), we know exactly what would need to change.
 
 **The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~1300 LOC core is our current answer - auditable, portable, mechanical.

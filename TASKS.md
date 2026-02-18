@@ -95,6 +95,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-18, boot1-truth-sync-wave1): Boot1 truth-sync — added exact current-reality statement to STATUS.md L4 section with file:line refs (step_mu.py:1411, step_mu.py:1578, eval_step.js:2014). Boot1LoopContract.v0.md LAST_VERIFIED updated. No phase/debt/task change.
 - Tracker sync note (2026-02-18, redteam-runtime-wave1): Fix P1 kwarg collision in run_engine_with_routing — use_boot1_recursive hardcoded AND forwarded via **engine_kwargs caused TypeError. Pop from kwargs with default False. 3 regression tests added. No phase/debt/task change.
 - Tracker sync note (2026-02-18, redteam-docs-tooling-wave1): Docs/tooling hardening — stale generate_docs_index.py path refs fixed, DocGovernance tree updated to mu/docs/, jsonschema test imports hardened (importorskip, health checks), world_trace_cli.py unreachable branch removed, check_boot1_merge2_readiness.sh stale symlink ref removed, trace event schema path bug fixed. No phase/debt/task change.
 - Tracker sync note (2026-02-18, rigorous-review-findings-5): CONTRABAND_OK added to _apply_host_debt setattr calls (CI contraband gate failure). No phase/debt/task change.
