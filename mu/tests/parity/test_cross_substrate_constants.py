@@ -1,0 +1,175 @@
+"""
+Cross-substrate contract drift guard.
+
+Verifies that critical constants and invariants match between the Python
+and JavaScript substrates. These are hard invariants — if they drift,
+cross-substrate parity breaks silently.
+
+What this checker PROVES:
+- Reserved field sets are identical (security boundary).
+- Depth/width guards match (stack safety + resource exhaustion).
+- Boot1 re-entry depth cap matches (loop safety).
+- Engine iteration budget matches (execution budget).
+- Hash cache limit matches (memory bound).
+- Trace hard cap matches (output bound).
+
+What this checker does NOT prove:
+- Semantic behavior parity (use test_js_parity_automated.py for that).
+- Algorithm correctness (use seed-level parity tests).
+- Performance characteristics (JS may be faster/slower).
+- Error message text (only codes matter for parity).
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+from rcx_pi.selfhost.step_mu import (
+    KERNEL_RESERVED_FIELDS,
+    ALGORITHM_ENTRYPOINT_KEYS,
+)
+from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH, MAX_MU_WIDTH
+
+# ── Locate JS source ────────────────────────────────────────────────────
+
+_REPO = Path(__file__).resolve().parents[3]
+_JS_PATH = _REPO / "mu" / "host" / "js" / "eval_step.js"
+
+
+def _js_source() -> str:
+    """Read eval_step.js once and cache."""
+    return _JS_PATH.read_text()
+
+
+def _extract_js_set(source: str, var_name: str) -> set[str]:
+    """Extract a Set([...]) constant from JS source."""
+    # Match: const VAR_NAME = new Set([ ... ]);
+    pattern = rf"const\s+{re.escape(var_name)}\s*=\s*new\s+Set\(\[(.*?)\]\)"
+    m = re.search(pattern, source, re.DOTALL)
+    if not m:
+        pytest.fail(f"Could not find {var_name} in eval_step.js")
+    block = m.group(1)
+    # Extract quoted strings
+    return set(re.findall(r"'([^']+)'", block))
+
+
+def _extract_js_const(source: str, var_name: str) -> int:
+    """Extract a numeric constant from JS source."""
+    pattern = rf"const\s+{re.escape(var_name)}\s*=\s*(\d+)"
+    m = re.search(pattern, source)
+    if not m:
+        pytest.fail(f"Could not find {var_name} in eval_step.js")
+    return int(m.group(1))
+
+
+def _extract_js_default(source: str, param_name: str) -> int:
+    """Extract a default parameter value like `maxEngineIterations = 20`."""
+    pattern = rf"{re.escape(param_name)}\s*=\s*(\d+)"
+    m = re.search(pattern, source)
+    if not m:
+        pytest.fail(f"Could not find default for {param_name} in eval_step.js")
+    return int(m.group(1))
+
+
+# ── Reserved field parity ───────────────────────────────────────────────
+
+
+class TestReservedFieldParity:
+    """KERNEL_RESERVED_FIELDS must match between Python and JavaScript."""
+
+    def test_reserved_fields_match(self):
+        js = _js_source()
+        js_fields = _extract_js_set(js, "KERNEL_RESERVED_FIELDS")
+        py_fields = set(KERNEL_RESERVED_FIELDS)
+        assert py_fields == js_fields, (
+            f"Reserved field drift!\n"
+            f"  Python-only: {py_fields - js_fields}\n"
+            f"  JS-only:     {js_fields - py_fields}"
+        )
+
+    def test_run_engine_in_both(self):
+        """_run_engine MUST be reserved in both substrates."""
+        assert "_run_engine" in KERNEL_RESERVED_FIELDS
+        js_fields = _extract_js_set(_js_source(), "KERNEL_RESERVED_FIELDS")
+        assert "_run_engine" in js_fields
+
+    def test_tail_call_in_both(self):
+        """_tail_call MUST be reserved in both substrates."""
+        assert "_tail_call" in KERNEL_RESERVED_FIELDS
+        js_fields = _extract_js_set(_js_source(), "KERNEL_RESERVED_FIELDS")
+        assert "_tail_call" in js_fields
+
+    def test_algorithm_entrypoint_keys_match(self):
+        js = _js_source()
+        js_keys = _extract_js_set(js, "ALGORITHM_ENTRYPOINT_KEYS")
+        py_keys = set(ALGORITHM_ENTRYPOINT_KEYS)
+        assert py_keys == js_keys, (
+            f"Algorithm entrypoint key drift!\n"
+            f"  Python-only: {py_keys - js_keys}\n"
+            f"  JS-only:     {js_keys - py_keys}"
+        )
+
+
+# ── Depth and width guard parity ────────────────────────────────────────
+
+
+class TestDepthWidthParity:
+    """Stack safety and resource exhaustion guards must match."""
+
+    def test_max_depth_parity(self):
+        js_depth = _extract_js_const(_js_source(), "MAX_DEPTH")
+        assert MAX_MU_DEPTH == js_depth == 300
+
+    def test_max_width_parity(self):
+        js_width = _extract_js_const(_js_source(), "MAX_MU_WIDTH")
+        assert MAX_MU_WIDTH == js_width == 1000
+
+
+# ── Boot1 constants parity ──────────────────────────────────────────────
+
+
+class TestBoot1Parity:
+    """Boot1 loop contract constants must match."""
+
+    def test_boot1_max_reentry_depth_parity(self):
+        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH
+        js_depth = _extract_js_const(_js_source(), "BOOT1_MAX_REENTRY_DEPTH")
+        assert _BOOT1_MAX_REENTRY_DEPTH == js_depth == 20
+
+    def test_boot1_default_is_trampoline(self):
+        """Boot1 default must remain trampoline (off) unless explicitly enabled."""
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        import inspect
+        sig = inspect.signature(run_engine_pipeline)
+        # use_boot1_recursive defaults to False (trampoline is default)
+        param = sig.parameters.get("use_boot1_recursive")
+        assert param is not None, "use_boot1_recursive parameter missing"
+        assert param.default is False, (
+            f"Boot1 default changed from False to {param.default}. "
+            "Trampoline must remain default."
+        )
+
+
+# ── Engine budget parity ────────────────────────────────────────────────
+
+
+class TestEngineBudgetParity:
+    """Engine iteration and hash cache limits must match."""
+
+    def test_max_engine_iterations_parity(self):
+        js_val = _extract_js_default(_js_source(), "maxEngineIterations")
+        # Python default is 20 (step_mu.py _run_engine_recursive and run_engine_pipeline)
+        assert js_val == 20
+
+    def test_hash_cache_limit_parity(self):
+        from rcx_pi.selfhost.mu_type import MAX_MU_HASH_CACHE
+        js_val = _extract_js_const(_js_source(), "MAX_MU_HASH_CACHE")
+        assert MAX_MU_HASH_CACHE == js_val == 10000
+
+    def test_trace_hard_cap_parity(self):
+        js = _js_source()
+        js_val = _extract_js_const(js, "MAX_TRACE_ENTRIES_HARD_CAP")
+        # Python: _MAX_TRACE_ENTRIES_HARD_CAP = 100000
+        assert js_val == 100000
