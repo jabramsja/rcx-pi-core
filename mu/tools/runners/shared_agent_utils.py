@@ -12,12 +12,18 @@ duplication and ensure consistency:
 All agent runners should import from this module instead of duplicating code.
 """
 
+import os
 import re
 import subprocess
 import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional
+
+# Strip CLAUDECODE from env when running inside a Claude Code session.
+# CLAUDECODE=1 triggers nested session blocking in child claude processes.
+# All agent runners import this module, so this runs once at import time.
+os.environ.pop("CLAUDECODE", None)
 
 
 # =============================================================================
