@@ -50,8 +50,8 @@ def _apply_host_debt(func, category: str, reason: str):
     own name for grep-based audit counting (audit_semantic_purity.sh,
     debt_dashboard.sh, check_js_debt.sh).
     """
-    setattr(func, f"_host_{category}", True)
-    setattr(func, f"_host_{category}_reason", reason)
+    setattr(func, f"_host_{category}", True)  # CONTRABAND_OK: decorator metadata for debt tracking
+    setattr(func, f"_host_{category}_reason", reason)  # CONTRABAND_OK: decorator metadata for debt tracking
     mark_bootstrap(f"host_{category}:{func.__name__}", f"Host {category}: {reason}")
     return func
 
