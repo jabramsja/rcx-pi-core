@@ -12,6 +12,7 @@ duplication and ensure consistency:
 All agent runners should import from this module instead of duplicating code.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -339,7 +340,6 @@ def validate_compliance(
             return False, f"Validator crashed: {result.stderr}", {}
 
         if json_output and result.stdout:
-            import json
             try:
                 metrics = json.loads(result.stdout)
                 if not metrics.get("compliant", False):

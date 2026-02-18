@@ -244,12 +244,6 @@ AGENT_MAX_TURNS = {
 GROUNDING_HIGH_RISK_PATTERNS = (
     "rcx_pi/selfhost/",
     "mu/",
-    "mu/tests/structural/",
-    "mu/tests/fuzz/",
-    "mu/tests/test_js_parity_automated.py",
-    "mu/tools/runners/run_review.py",
-    "mu/tools/runners/validate_agent_compliance.py",
-    "mu/tools/runners/validate_agent_reasoning.py",
 )
 
 

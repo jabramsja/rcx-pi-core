@@ -53,10 +53,10 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
     - phase="ascending": going up the tree, DESCEND blocked
     - phase="root_check": at root, deciding restart vs unwrap
 
-    Returns 8 projections (plus N wrapped domain projections) in order:
+    Returns 7 fixed projections plus N wrapped domain projections, in order:
     1. Restart (root_check + changed → traverse again)
     2. Unwrap (root_check + !changed → done)
-    3. Reduce (N wrapped domain projections, traverse phase)
+    3. Reduce — N wrapped domain projections (traverse phase)
     4. Descend (into dict head, traverse phase only)
     5. Sibling (head done → move to tail, resets to traverse)
     6. Ascend to context (rebuild dict, set ascending)
