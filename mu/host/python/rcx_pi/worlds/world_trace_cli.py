@@ -154,14 +154,10 @@ def main(argv: List[str] | None = None) -> int:
     if args.raw:
         payload["raw_output"] = raw
 
-    if args.json or True:
-        if args.pretty:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
-        else:
-            print(json.dumps(payload, ensure_ascii=False))
-        return 0
-
-    # (unreachable; kept for future non-json modes)
+    if args.pretty:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 

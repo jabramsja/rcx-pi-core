@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from jsonschema import Draft7Validator
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 FIX = ROOT / "mu" / "docs" / "fixtures"
@@ -12,6 +12,8 @@ SCHEMA_PATH = ROOT / "mu" / "docs" / "schemas" / "rcx.snapshot.v1.schema.json"
 
 
 def test_snapshot_merge_output_validates_against_schema(tmp_path: Path):
+    jsonschema = pytest.importorskip("jsonschema", exc_type=ImportError, reason="jsonschema not installed")
+
     out = tmp_path / "merged.json"
 
     subprocess.check_call(
@@ -27,4 +29,4 @@ def test_snapshot_merge_output_validates_against_schema(tmp_path: Path):
     merged = json.loads(out.read_text(encoding="utf-8"))
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
-    Draft7Validator(schema).validate(merged)
+    jsonschema.Draft7Validator(schema).validate(merged)

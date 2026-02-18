@@ -5,8 +5,7 @@
 # Exit 0 = all gates pass (merge-2 authorized pending founder GO).
 # Exit 1 = one or more gates fail (merge-2 NOT authorized).
 #
-# Usage: ./tools/checks/check_boot1_merge2_readiness.sh
-#        (or via symlink: ./tools/check_boot1_merge2_readiness.sh)
+# Usage: ./mu/tools/checks/check_boot1_merge2_readiness.sh
 
 set -euo pipefail
 

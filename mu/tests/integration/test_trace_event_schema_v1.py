@@ -7,7 +7,7 @@ import pytest
 
 
 def _repo_root() -> Path:
-    return Path(__file__).parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _load_schema() -> dict:
@@ -18,7 +18,7 @@ def _load_schema() -> dict:
 
 
 def test_trace_event_schema_v1_accepts_canonical_event() -> None:
-    jsonschema = pytest.importorskip("jsonschema")
+    jsonschema = pytest.importorskip("jsonschema", exc_type=ImportError)
 
     from rcx_pi.trace_canon import canon_event
 
@@ -39,7 +39,7 @@ def test_trace_event_schema_v1_accepts_canonical_event() -> None:
 
 
 def test_trace_event_schema_v1_rejects_extra_top_level_keys() -> None:
-    jsonschema = pytest.importorskip("jsonschema")
+    jsonschema = pytest.importorskip("jsonschema", exc_type=ImportError)
 
     schema = _load_schema()
     bad = {"v": 1, "type": "trace.start", "i": 0, "extra": 123}
