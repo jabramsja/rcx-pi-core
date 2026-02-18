@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from rcx_pi.eval_seed import step, NO_MATCH, host_builtin, host_mutation
+from rcx_pi.eval_seed import step, host_builtin, host_mutation
 from rcx_pi.mu_type import Mu, assert_mu, mu_hash_cached
 
 
@@ -58,12 +58,12 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
     Returns 7 fixed projections plus N wrapped domain projections, in order:
     1. Restart (root_check + changed → traverse again)
     2. Unwrap (root_check + !changed → done)
-    3. Reduce — N wrapped domain projections (traverse phase)
-    4. Descend (into dict head, traverse phase only)
-    5. Sibling (head done → move to tail, resets to traverse)
-    6. Ascend to context (rebuild dict, set ascending)
-    7. Ascend to root (rebuild dict at root, set root_check)
-    8. Wrap (entry point, must be last)
+       + N Reduce projections (one per domain projection, traverse phase)
+    3. Descend (into dict head, traverse phase only)
+    4. Sibling (head done → move to tail, resets to traverse)
+    5. Ascend to context (rebuild dict, set ascending)
+    6. Ascend to root (rebuild dict at root, set root_check)
+    7. Wrap (entry point, must be last)
 
     Args:
         domain_projections: List of domain-specific projections (e.g., append).

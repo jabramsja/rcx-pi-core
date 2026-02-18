@@ -14,10 +14,10 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
+from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached
 
 
-    # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
+# _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
 # _KNOWN_KERNEL_MODES, _KERNEL_CONTEXT_KEYS) were removed from production code.
 # Zero production callers after caller-trust model replaced shape-based trust.
 # The function is preserved in tests/structural/test_type_tag_security.py as a
