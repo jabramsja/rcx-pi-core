@@ -97,6 +97,7 @@ Items here are implemented and verified under current invariants. Changes requir
 
 - Tracker sync note (2026-02-18, boot1-truth-sync-wave1): Boot1 truth-sync — added exact current-reality statement to STATUS.md L4 section with file:line refs (step_mu.py:1411, step_mu.py:1578, eval_step.js:2014). Boot1LoopContract.v0.md LAST_VERIFIED updated. No phase/debt/task change.
 - Tracker sync note (2026-02-18, audit-reliability-wave1): Created AuditReliabilityPlan.v0.md — root-cause writeup for jsonschema/rpds ABI fragility, 4-tier stabilization plan, preflight guidance. Tier 1 (importorskip) already applied. No phase/debt/task change.
+- Tracker sync note (2026-02-18, l4-checklist-wave1): Created L4ExitChecklist.v0.md with 8 measurable gates (L4-G1 through L4-G8), pass/fail conditions, proof commands, stop conditions. Linked from TASKS.md SINK. G1-G7 PASS, G8 UNPROVEN. No phase/debt/task change.
 - Tracker sync note (2026-02-18, redteam-runtime-wave1): Fix P1 kwarg collision in run_engine_with_routing — use_boot1_recursive hardcoded AND forwarded via **engine_kwargs caused TypeError. Pop from kwargs with default False. 3 regression tests added. No phase/debt/task change.
 - Tracker sync note (2026-02-18, redteam-docs-tooling-wave1): Docs/tooling hardening — stale generate_docs_index.py path refs fixed, DocGovernance tree updated to mu/docs/, jsonschema test imports hardened (importorskip, health checks), world_trace_cli.py unreachable branch removed, check_boot1_merge2_readiness.sh stale symlink ref removed, trace event schema path bug fixed. No phase/debt/task change.
 - Tracker sync note (2026-02-18, rigorous-review-findings-5): CONTRABAND_OK added to _apply_host_debt setattr calls (CI contraband gate failure). No phase/debt/task change.
@@ -461,6 +462,7 @@ Current Exhaustion Layer: META_CIRCULAR
 - Performance-first optimizations
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
 - Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
+- L4 True Self-Hosting — measurable exit checklist with 8 gates (L4-G1 through L4-G8). See `mu/docs/core/L4ExitChecklist.v0.md`. G1-G7 PASS, G8 UNPROVEN (circular dependency research question). Stop conditions documented.
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
