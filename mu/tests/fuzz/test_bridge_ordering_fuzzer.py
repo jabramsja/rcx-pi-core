@@ -52,9 +52,6 @@ MATCH_IDS = [
     "match.wrap",
 ]
 
-# The one valid ordering: bridge comes before match.var
-VALID_BRIDGE_BEFORE_MATCH_VAR = True
-
 
 # =============================================================================
 # Strategies

@@ -619,7 +619,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-17 (doc drift sync: infra count 45→42, test count 3235→3690, infra ceiling line corrected)
+**Last updated:** 2026-02-17 (agent review findings: O(depth²) backtracking fix, host debt comments, expert COULD_SIMPLIFY cleanup)
 **Next milestone:** Boot1 Recursive Loop Contract (NEXT — shadow-merge implementation). See TASKS.md NEXT.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**

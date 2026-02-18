@@ -974,7 +974,7 @@ def enforce_global_high_fail_closed(results: list[AgentResult], global_high: int
     for result in results:
         result.passed = False
         result.verdict = f"{result.verdict} (SKEPTIC_GLOBAL_HIGH:{global_high})"
-        result.blocks_merge = result.is_hard_gate and (not result.passed)
+        result.blocks_merge = result.is_hard_gate
 
 
 # =============================================================================

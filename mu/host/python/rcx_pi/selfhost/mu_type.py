@@ -560,7 +560,10 @@ def assert_no_bootstrap_in_production() -> None:
     """
     Assert that no bootstrap code is registered.
 
-    Call this in Phase 3+ to verify all Python matching is removed.
+    Currently unreachable in production: @host_* decorators always populate
+    BOOTSTRAP_REGISTRY on import, and L2 accepted these as irreducible.
+    Retained as a design checkpoint for L4+ if bootstrap elimination becomes
+    viable. Tests in test_mu_type.py validate both paths to prevent API drift.
 
     Raises:
         RuntimeError: If bootstrap code is still registered.
