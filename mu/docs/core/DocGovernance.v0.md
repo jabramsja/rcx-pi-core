@@ -313,6 +313,27 @@ See TASKS.md for current migration status. The phases are:
 
 ---
 
+## Growth Caps (Anti-Bloat Policy)
+
+**Problem:** Tooling, tests, and docs grow without bound. Each phase adds scripts, checks, and test files that accumulate as maintenance burden.
+
+**Policy:** Per-wave hard caps with mandatory consolidation.
+
+| Category | Cap per wave | Consolidation required |
+|----------|-------------|----------------------|
+| New test files | 40 core + 30 fuzzer | Delete or consolidate ≥1 obsolete test file per 10 added |
+| New tool scripts | 2 runners + 3 checks | Delete ≥1 scaffolding script per 2 added |
+| New agents | 0 (locked at 9) | N/A |
+| New docs | 5 core + 3 other | Archive ≥1 stale doc per 3 added |
+
+**Enforcement:** `tests/docs/test_growth_caps.py` tracks baseline counts and fails if a wave exceeds caps without documenting consolidation in its tracker sync note.
+
+**Exceptions:** Require founder sign-off with justification in the PR description under a `## GROWTH_EXCEPTION` heading.
+
+**Ratchet:** Baseline snapshot recorded at each phase boundary in STATUS.md. Caps tighten (never loosen) unless founder explicitly raises them.
+
+---
+
 ## FAQ
 
 **Q: What if I need to write temporary notes?**
