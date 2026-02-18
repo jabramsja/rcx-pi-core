@@ -14,8 +14,6 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from typing import Any
-
 from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 
 

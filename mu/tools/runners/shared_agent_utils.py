@@ -133,9 +133,9 @@ APPROVAL_VERDICTS = {
 FINDING_BLOCK_PATTERN = r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*'
 
 # Zero-width and line-breaking Unicode characters that could hide injection payloads.
-# Includes U+2028 (Line Separator) and U+2029 (Paragraph Separator) which act as
-# newlines in JavaScript and some contexts, bypassing \n/\r replacement.
-_ZERO_WIDTH_RE = re.compile(r'[\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
+# Includes U+2028 (Line Separator), U+2029 (Paragraph Separator), VT (U+000B),
+# FF (U+000C), and NEL (U+0085) which act as line separators in various contexts.
+_ZERO_WIDTH_RE = re.compile(r'[\u000b\u000c\u0085\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
 
 
 def agent_passed(agent_name: str, verdict: str) -> bool:
