@@ -61,12 +61,12 @@ This document describes a Hex0-inspired staged bootstrap architecture for RCX. L
 
 Boot0 is the Hex0 equivalent - the minimal trusted base that must be implemented in the host language. Everything else is built on top of it.
 
-### The 4 Bootstrap Primitives (+ 1 Eliminated)
+### The 4 Bootstrap Primitives (+ 1 Demoted)
 
 | Primitive | Purpose | Current Location |
 |-----------|---------|------------------|
 | `eval_step` | Single projection application | `eval_seed.py:step()` |
-| ~~`mu_equal`~~ | ~~Structural equality comparison~~ | **ELIMINATED** — replaced by `mu_hash_cached()` (Level 1 Content-Addressed Mu, 2026-02-10) |
+| ~~`mu_equal`~~ | ~~Structural equality comparison~~ | **DEMOTED** — replaced by `mu_hash_cached()` (Level 1 Content-Addressed Mu, 2026-02-10) |
 | `max_steps` | Termination guarantee | `step_mu.py:step_kernel_mu()` |
 | `stack_guard` | Recursion depth limit | `mu_type.py:MAX_MU_DEPTH` |
 | `projection_loader` | Load seeds from JSON | `seed_integrity.py:load_verified_seed()` |

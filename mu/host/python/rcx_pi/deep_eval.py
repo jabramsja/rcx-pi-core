@@ -12,7 +12,7 @@ provides the iteration.
 See mu/docs/execution/DeepStep.v0.md for the design.
 
 HOST DEBT INVENTORY:
-  - @host_builtin: run_deep_eval (range for iteration loop)
+  - @host_builtin: run_deep_eval (range for iteration loop, isinstance for done-wrapper)
   - @host_builtin: validate_deep_eval_state (isinstance, set operations)
   Total: 2 host dependencies (runner scaffolding, not projection logic)
 
@@ -21,10 +21,11 @@ The projections themselves are pure structural - no host debt.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from rcx_pi.eval_seed import step, NO_MATCH, host_builtin, host_mutation
-from rcx_pi.mu_type import Mu, assert_mu, mu_equal
+from rcx_pi.eval_seed import step, host_builtin, host_mutation
+from rcx_pi.mu_type import Mu, assert_mu, mu_hash_cached
 
 
 # =============================================================================
@@ -34,8 +35,10 @@ from rcx_pi.mu_type import Mu, assert_mu, mu_equal
 MAX_HISTORY = 500        # Cap history to prevent memory exhaustion (Attack 17)
 MAX_CONTEXT_DEPTH = 100  # Cap context depth to prevent stack-like overflow (Attack 7)
 
-# Internal marker for done wrapper - prevents spoofing by domain projections
-# This value is checked by the runner to verify authentic completion
+# Internal marker for done wrapper - guards against accidental collisions.
+# Not a security boundary: the marker is a public string, so codebase-aware
+# domain projections could forge it. Trusted because domain projections come
+# from the calling code (not untrusted input).
 DONE_MARKER = "__deep_eval_internal_done__"
 
 
@@ -52,13 +55,15 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
     - phase="ascending": going up the tree, DESCEND blocked
     - phase="root_check": at root, deciding restart vs unwrap
 
-    Returns projections in correct order:
-    1. Root check (restart or unwrap)
-    2. Reduce (wrapped domain projections)
-    3. Descend (phase=traverse only - prevents re-descent after ascend)
-    4. Sibling (any phase, sets phase=traverse for new subtree)
-    5. Ascend (any phase, sets phase=ascending to block re-descent)
-    6. Wrap (entry point, last)
+    Returns 7 fixed projections plus N wrapped domain projections, in order:
+    1. Restart (root_check + changed → traverse again)
+    2. Unwrap (root_check + !changed → done)
+       + N Reduce projections (one per domain projection, traverse phase)
+    3. Descend (into dict head, traverse phase only)
+    4. Sibling (head done → move to tail, resets to traverse)
+    5. Ascend to context (rebuild dict, set ascending)
+    6. Ascend to root (rebuild dict at root, set root_check)
+    7. Wrap (entry point, must be last)
 
     Args:
         domain_projections: List of domain-specific projections (e.g., append).
@@ -89,7 +94,7 @@ def make_deep_eval_projections(domain_projections: list[Mu]) -> list[Mu]:
 
     # 2. ROOT_CHECK without changes -> UNWRAP (done!)
     # Return a "done" wrapper that no projection matches (causes stall)
-    # SECURITY: Include internal marker to prevent spoofing by domain projections
+    # Internal marker for done-detection (see DONE_MARKER comment above)
     projections.append({
         "id": "unwrap",
         "pattern": {
@@ -340,7 +345,7 @@ def validate_deep_eval_state(state: Mu) -> tuple[bool, str | None]:
 # Deep Eval Runner
 # =============================================================================
 
-@host_builtin("range() for iteration loop")
+@host_builtin("range() for iteration loop, isinstance() for done-wrapper type checks")
 @host_mutation("history.append() to record steps")
 def run_deep_eval(
     projections: list[Mu],
@@ -370,8 +375,6 @@ def run_deep_eval(
     Raises:
         ValueError: If state validation fails (when validate=True).
     """
-    import json
-
     # Validate input is Mu
     assert_mu(value)
 
@@ -384,6 +387,18 @@ def run_deep_eval(
             is_valid, error = validate_deep_eval_state(current)
             if not is_valid:
                 raise ValueError(f"Invalid deep_eval state at step {i+1}: {error}")
+        elif isinstance(current, dict) and "context" in current:
+            # Even with validate=False, enforce MAX_CONTEXT_DEPTH to prevent
+            # unbounded growth (defense-in-depth against Attack 7).
+            # Context structure is [frame_dict, outer_list] (nested lists),
+            # not dicts with "outer" keys.
+            depth = 0
+            ctx = current.get("context")
+            while isinstance(ctx, list) and len(ctx) == 2:
+                depth += 1
+                if depth > MAX_CONTEXT_DEPTH:
+                    raise ValueError(f"Context depth exceeds max {MAX_CONTEXT_DEPTH}")
+                ctx = ctx[1]  # outer context is second element
 
         if debug:
             print(f"\n=== Step {i+1} ===")
@@ -396,7 +411,7 @@ def run_deep_eval(
             history.append({"step": i + 1, "before": current, "after": next_val})
 
         if debug:
-            if mu_equal(current, next_val):
+            if mu_hash_cached(current) == mu_hash_cached(next_val):
                 print("STALL")
             else:
                 print(f"Result: {json.dumps(next_val, indent=2)}")
@@ -409,7 +424,7 @@ def run_deep_eval(
                 print("DONE!")
             return next_val["result"], history
 
-        if mu_equal(current, next_val):
+        if mu_hash_cached(current) == mu_hash_cached(next_val):
             break
         current = next_val
 

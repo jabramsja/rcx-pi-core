@@ -21,7 +21,7 @@ If a task is not listed here, it is NOT to be implemented.
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
     - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1 (47+ core projections + 11 engine + 6 fix)
-    - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu)
+    - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
 14. **Seeds must declare their execution layer.** Every seed is either:
@@ -95,6 +95,11 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-18, rigorous-review-findings-5): CONTRABAND_OK added to _apply_host_debt setattr calls (CI contraband gate failure). No phase/debt/task change.
+- Tracker sync note (2026-02-18, rigorous-review-findings-4): Doc accuracy fixes from 4-phase agent review. eval_seed.py: removed stale Phase 3 goal comment, dead imports (json, Any, is_mu), fixed _match_inner isinstance count/caller claims, indentation anomaly. mu_type.py: fixed ungrounded ~4x multiplier, added MAX_MU_WIDTH to is_mu docstring, added allow_nan=False to mu_hash. deep_eval.py: fixed projection count (8→7+N), removed unused NO_MATCH import, honest DONE_MARKER security comment. shared_agent_utils.py: VT/FF/NEL sanitization, module-level json import, accurate docstring. run_review.py: structural-proof max_turns 20→30, removed 6 redundant GROUNDING_HIGH_RISK_PATTERNS. No phase/debt/task change.
+- Tracker sync note (2026-02-18, rigorous-review-findings-3): Agent review iteration. Fixed validate=False depth guard bug in deep_eval.py — was traversing dict-style context but context is list [frame, outer], guard was a no-op. Now walks ctx[1]. Last Python == on Mu in test_bootstrap_primitives fixed. Stale line refs in substitute() docstring removed. No phase/debt/task change.
+- Tracker sync note (2026-02-17, rigorous-review-findings-2): Design-level agent findings. Unified 4 host-debt decorators via _apply_host_debt() helper (~30 LOC reduction, all public names preserved). Deduplicated _get_base_branch() into shared_agent_utils. Bridge fuzzer now tests all 5 projections via _validate_combined_bridge_ordering. Tampered seed test rewritten: direct verify_checksum() call, no file rename fragility. No phase/debt/task change.
+- Tracker sync note (2026-02-17, rigorous-review-findings): Address 9-agent review findings. Core: substitute() host debt docstring, _apply_projection_trusted lambda calculus skip documented, deep_eval lazy import→module-level, MAX_CONTEXT_DEPTH enforced even with validate=False, test_bootstrap_primitives Python==→mu_equal (8 assertions). Agent infra: sanitize_for_prompt VERDICT: redaction, CWD-relative→absolute _REPO_ROOT paths, skeptic last-match, deep_analysis always-validate, format compliance dynamic AGENT_VERDICTS, stale runner path refs fixed, CLAUDECODE auto-strip, SDK rate_limit_event patch. No phase/debt/task change.
 - Tracker sync note (2026-02-17, denorm-keyerror-hardening): Red-team finding — legacy denormalization paths in match_mu.py used current["tail"] (KeyError crash on malformed inner nodes missing "tail" key). Fixed to .get("tail") matching type-tagged paths and JS behavior. 2 lines changed, 2 regression tests added. No phase/debt/runtime change.
 - Tracker sync note (2026-02-17, Round 24H-legacy-deep-clean): Deep-scan cleanup after archival. Archived 6 orphaned fixtures (3 golden traces, orbit_pingpong, observer.v2.jsonl, rcx-trace-stream schema) to archive/mu_legacy_fixtures/. Removed ~130 lines of dead bytecode_vm checks from audit_semantic_purity.sh. Removed dead rcx_omega CLI probes from mutation_leaderboard_clean.sh. Fixed stale refs in 6 files (README.md, 2 design docs, conftest.py, test_doc_freshness.py, index.html). Deleted 4 empty __pycache__ dirs (core/, engine/, reduction/, utils/). 2217 tests pass. No phase/debt/runtime change.
 - Tracker sync note (2026-02-16, Round 24H-legacy-archival): Archive entire pre-L3 Motif evaluator stack + legacy CLI chain (~2,500 LOC). 19 production modules, 4 schemas, 8 tests moved to archive/rcx_pi_legacy/. __init__.py now L3-only package marker. rcx_cli.py: removed program subcommand. pyproject.toml: removed 2 legacy CLI entry points. Updated 5 mixed test files, cli_smoke.py, 3 docs. infra count 44→42. 2733 tests pass, 0 new failures. No phase/debt/runtime change.
@@ -253,7 +258,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - v0.4: Added "stable semantics, shrinking substrate", JSON as Phase 0 format, explicit handshake ABI, security invariants, L3 parity contract
   - Design COMPLETE, implementation DEFERRED per 9-agent Advisor recommendation
   - L3 is complete; Boot0 extraction can wait until L4 research drives it
-- mu_equal ELIMINATED as Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):
+- mu_equal DEMOTED from Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):
   - **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all 8 production call sites (eval_seed 2, step_mu 5, projection_runner 1)
   - Bootstrap primitives: 5 → 4. `mu_equal` retained as convenience wrapper only.
   - JS parity: `muHashCached()` added, `muEqual()` delegates. 6 JS call sites updated.

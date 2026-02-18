@@ -215,7 +215,7 @@ These Python operations are ALLOWED (irreducible substrate):
 | `max_steps` | `step_mu.py:step_kernel_mu()` | Termination guarantee |
 | `stack_guard` | `mu_type.MAX_MU_DEPTH` | Resource limit |
 | `projection_loader` | `seed_integrity.load_verified_seed()` | Load JSON seeds |
-| ~~`mu_equal`~~ | ~~`mu_type.mu_equal()`~~ | **ELIMINATED** — replaced by `mu_hash_cached()` |
+| ~~`mu_equal`~~ | ~~`mu_type.mu_equal()`~~ | **DEMOTED** — replaced by `mu_hash_cached()` |
 
 All Recurrence logic must be **above** these primitives.
 

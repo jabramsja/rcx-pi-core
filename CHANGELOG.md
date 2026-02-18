@@ -113,7 +113,7 @@ All notable changes to RCX are documented in this file.
   - `step_mu.py`: 5 stall detection sites
   - `projection_runner.py`: 1 stall detection site
 - **JS parity: `muHashCached()` added to `eval_step.js`** — Map-based cache, 6 JS call sites updated, `muEqual()` delegates to hash comparison
-- **`mu_equal` retained as convenience wrapper** — Delegates to `mu_hash_cached(a) == mu_hash_cached(b)`. Marked ELIMINATED PRIMITIVE, not BOOTSTRAP_PRIMITIVE.
+- **`mu_equal` retained as convenience wrapper** — Delegates to `mu_hash_cached(a) == mu_hash_cached(b)`. Marked DEMOTED PRIMITIVE (kept for ~30 test call sites + JS parity).
 - **Bootstrap primitive count: 5 → 4** — eval_step, max_steps, stack_guard, projection_loader
 - **Paxos end-to-end pipeline test created** — `tests/test_paxos_end_to_end.py` (6 tests): paxos livelock → trace → hash → recurrence.v2 → healer → consensus
 - **Design docs updated**: BootstrapPrimitives.v0.md, ContentAddressedMu.md (Level 1 IMPLEMENTED), STATUS.md

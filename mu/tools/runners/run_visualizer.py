@@ -6,9 +6,9 @@ This agent draws Mu structures as Mermaid diagrams. Use this to visually verify
 structural claims - Python lists show as blobs, linked lists show as chains.
 
 Usage:
-    python tools/run_visualizer.py rcx_pi/selfhost/step_mu.py
-    python tools/run_visualizer.py mu/substrate/kernel.v1.json
-    python tools/run_visualizer.py --structure '{"head": 1, "tail": {"head": 2, "tail": null}}'
+    python tools/runners/run_visualizer.py rcx_pi/selfhost/step_mu.py
+    python tools/runners/run_visualizer.py mu/substrate/kernel.v1.json
+    python tools/runners/run_visualizer.py --structure '{"head": 1, "tail": {"head": 2, "tail": null}}'
 """
 
 import sys

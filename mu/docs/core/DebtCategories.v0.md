@@ -75,7 +75,7 @@ Code that **interprets Mu** or **determines what operations mean**.
 | `lookup_binding()` | Traverses linked list to find name | Part of lookup projection |
 | `is_dict_linked_list()` | Examines structure to classify | Classification projection |
 | `max_steps` parameter | Determines when stall occurs | Structural termination |
-| ~~`mu_equal()`~~ | ~~Defines equality semantics for stall detection~~ | **ELIMINATED** — replaced by `mu_hash_cached()` (no longer semantic debt) |
+| ~~`mu_equal()`~~ | ~~Defines equality semantics for stall detection~~ | **DEMOTED** — replaced by `mu_hash_cached()` (no longer semantic debt) |
 
 **Key insight:** Semantic debt directly affects emergence. If Python's `isinstance(value, list)` check behaves differently, match semantics change.
 

@@ -6,8 +6,8 @@ This agent explains code logic to the non-technical founder in plain English.
 Detects scope creep and host smuggling.
 
 Usage:
-    python tools/run_translator.py rcx_pi/selfhost/eval_seed.py
-    python tools/run_translator.py rcx_pi/selfhost/step_mu.py --request "Add kernel loop"
+    python tools/runners/run_translator.py rcx_pi/selfhost/eval_seed.py
+    python tools/runners/run_translator.py rcx_pi/selfhost/step_mu.py --request "Add kernel loop"
 """
 
 import sys

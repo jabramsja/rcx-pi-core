@@ -53,6 +53,6 @@ echo ""
 echo "No recent agent review detected."
 echo ""
 echo "Run before committing:"
-echo "  python tools/run_review.py <files> --depth full"
+echo "  python tools/runners/run_review.py <files> --depth full"
 echo ""
 exit 1

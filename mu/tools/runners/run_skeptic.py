@@ -12,10 +12,10 @@ The skeptic is NOT adversarial for the sake of it. It asks:
 
 Usage:
     # Typically called by run_review.py --rigorous, not directly
-    python tools/run_skeptic.py --agent-output output.txt --files file1.py file2.py
+    python tools/runners/run_skeptic.py --agent-output output.txt --files file1.py file2.py
 
     # Or pipe agent output
-    cat agent_output.txt | python tools/run_skeptic.py --files file1.py
+    cat agent_output.txt | python tools/runners/run_skeptic.py --files file1.py
 """
 
 import re
@@ -408,12 +408,14 @@ End with OVERALL_VERDICT: CONFIRMED|CONCERNS|OVERRIDE.
 
     # Parse structured output
     overall_verdict = "UNKNOWN"
-    overall_match = re.search(
+    # Use findall + take last match — agents may mention OVERALL_VERDICT
+    # early in analysis before issuing the final verdict at the end.
+    overall_matches = re.findall(
         r'OVERALL_VERDICT\s*:\s*(CONFIRMED|CONCERNS|OVERRIDE)',
         result_text, re.IGNORECASE
     )
-    if overall_match:
-        overall_verdict = overall_match.group(1).upper()
+    if overall_matches:
+        overall_verdict = overall_matches[-1].upper()
     else:
         overall_verdict = _extract_verdict(result_text)
 

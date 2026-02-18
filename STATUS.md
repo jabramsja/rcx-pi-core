@@ -75,7 +75,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
 | **Python Substrate** | ~2000 LOC, 3,690 tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~1970 LOC core + ~1010 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
-| **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal ELIMINATED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
+| **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
 **What L3 proves:**
 - The SAME projections (all 4 seed files) run on Python AND JavaScript
@@ -158,7 +158,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 | Primitive | L4 Question | Possible Path |
 |-----------|-------------|---------------|
 | `eval_step` | Can it be a projection? | Requires meta-level substrate |
-| `mu_equal` | ~~Can structural equality be structural?~~ | **ELIMINATED** (Level 1 Content-Addressed Mu). All call sites use `mu_hash_cached()`. Convenience wrapper retained in mu_type.py. |
+| `mu_equal` | ~~Can structural equality be structural?~~ | **DEMOTED** from bootstrap primitive (Level 1 Content-Addressed Mu). All production call sites use `mu_hash_cached()` directly. Convenience wrapper retained in mu_type.py for ~30 test call sites + JS parity. |
 | `stack_guard` | Can depth be Mu data? | Count in Mu, not Python |
 | `projection_loader` | Can Mu load Mu? | Possibly, with file I/O primitive |
 
@@ -545,10 +545,10 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 2. `max_steps` - `rcx_pi/selfhost/step_mu.py:241`
 3. `stack_guard` - `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH`
 4. `projection_loader` - `rcx_pi/selfhost/seed_integrity.py:load_verified_seed()`
-- ~~`mu_equal`~~ - ELIMINATED (Level 1 Content-Addressed Mu). All 8 production call sites replaced with `mu_hash_cached()`. Convenience wrapper retained.
+- ~~`mu_equal`~~ - DEMOTED from bootstrap primitive (Level 1 Content-Addressed Mu). All production call sites use `mu_hash_cached()` directly. Convenience wrapper retained for ~30 test call sites + JS parity.
 
-**mu_equal ELIMINATED as Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):**
-- **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all 8 production `mu_equal` call sites
+**mu_equal DEMOTED from Bootstrap Primitive (2026-02-10, Content-Addressed Mu Level 1):**
+- **Level 1 IMPLEMENTED**: `mu_hash_cached()` replaces all production `mu_equal` call sites
 - `mu_equal` retained as convenience wrapper delegating to `mu_hash_cached(a) == mu_hash_cached(b)`
 - Bootstrap primitive count: 5 → 4 (eval_step, max_steps, stack_guard, projection_loader)
 - JS parity: `muHashCached()` added, `muEqual()` delegates to hash comparison
@@ -619,7 +619,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-17 (doc drift sync: infra count 45→42, test count 3235→3690, infra ceiling line corrected)
+**Last updated:** 2026-02-17 (agent review findings: O(depth²) backtracking, host debt comments, SDK rate_limit_event patch)
 **Next milestone:** Boot1 Recursive Loop Contract (NEXT — shadow-merge implementation). See TASKS.md NEXT.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**

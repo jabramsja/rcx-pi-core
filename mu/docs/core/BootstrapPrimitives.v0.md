@@ -98,13 +98,13 @@ def eval_step(projections: list[Projection], value: Mu) -> Mu:
 
 ---
 
-### ~~2. `mu_equal` - Fixed-Point Detection~~ (ELIMINATED)
+### ~~2. `mu_equal` - Fixed-Point Detection~~ (DEMOTED)
 
-**Status:** ELIMINATED as bootstrap primitive (Content-Addressed Mu Level 1, 2026-02-10).
+**Status:** DEMOTED from bootstrap primitive (Content-Addressed Mu Level 1, 2026-02-10).
 
-`mu_equal` is now derivable from `mu_hash_cached`: `mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)`. Production code uses `mu_hash_cached` directly for stall detection and binding conflict. The `mu_equal` function remains as a convenience wrapper for test code.
+`mu_equal` is now derivable from `mu_hash_cached`: `mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)`. Production code uses `mu_hash_cached` directly for stall detection and binding conflict. The `mu_equal` function remains as a convenience wrapper (~30 test call sites + JS parity `muEqual()`).
 
-**How it was eliminated:** Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) Level 1: hash-identity at construction. All 8 production call sites replaced with `mu_hash_cached()` comparisons. Bootstrap primitives reduced from 5 to 4.
+**How it was demoted:** Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) Level 1: hash-identity at construction. All 8 production call sites replaced with `mu_hash_cached()` comparisons. Bootstrap primitives reduced from 5 to 4.
 
 **Historical role:** Stall detection (comparing "before" and "after" structurally).
 
@@ -263,7 +263,7 @@ If code needs any of these, it must be expressed as **projections**, not Python.
 │  └────────────┘ └────────────┘ └────────────┘              │
 │                                                             │
 │  ┌────────────┐                                            │
-│  │  loader    │  (mu_equal ELIMINATED — now derived from   │
+│  │  loader    │  (mu_equal DEMOTED — now derived from      │
 │  │ (bootstrap)│   mu_hash_cached, Content-Addressed Mu L1) │
 │  └────────────┘                                            │
 │                                                             │
@@ -394,7 +394,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 | Primitive | Current Location | Status |
 |-----------|------------------|--------|
 | `eval_step` | `rcx_pi/selfhost/eval_seed.py:step()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
-| `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | ELIMINATED - `# ELIMINATED PRIMITIVE` (now wrapper around mu_hash_cached) |
+| `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | DEMOTED - `# DEMOTED PRIMITIVE` (convenience wrapper around mu_hash_cached, ~30 test sites) |
 | `max_steps` | `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `stack_guard` | `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `projection_loader` | `rcx_pi/selfhost/seed_integrity.py` | MARKED - `# BOOTSTRAP_PRIMITIVE` |

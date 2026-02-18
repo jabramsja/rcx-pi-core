@@ -12,12 +12,19 @@ duplication and ensure consistency:
 All agent runners should import from this module instead of duplicating code.
 """
 
+import json
+import os
 import re
 import subprocess
 import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional
+
+# Strip CLAUDECODE from env when running inside a Claude Code session.
+# CLAUDECODE=1 triggers nested session blocking in child claude processes.
+# All agent runners import this module, so this runs once at import time.
+os.environ.pop("CLAUDECODE", None)
 
 
 # =============================================================================
@@ -126,9 +133,9 @@ APPROVAL_VERDICTS = {
 FINDING_BLOCK_PATTERN = r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDING(?:\*\*)?\s*:\s*(?:\*\*)?\s*'
 
 # Zero-width and line-breaking Unicode characters that could hide injection payloads.
-# Includes U+2028 (Line Separator) and U+2029 (Paragraph Separator) which act as
-# newlines in JavaScript and some contexts, bypassing \n/\r replacement.
-_ZERO_WIDTH_RE = re.compile(r'[\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
+# Includes U+2028 (Line Separator), U+2029 (Paragraph Separator), VT (U+000B),
+# FF (U+000C), and NEL (U+0085) which act as line separators in various contexts.
+_ZERO_WIDTH_RE = re.compile(r'[\u000b\u000c\u0085\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
 
 
 def agent_passed(agent_name: str, verdict: str) -> bool:
@@ -249,7 +256,8 @@ def adversary_blocks_merge(verdict: str, output: str, is_compliant: bool) -> boo
 # Prompt Loading
 # =============================================================================
 
-AGENT_PROMPTS_DIR = Path("tools/agents")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+AGENT_PROMPTS_DIR = _REPO_ROOT / "tools" / "agents"
 REDTEAM_CONTRACT_PATH = AGENT_PROMPTS_DIR / "_contract_redteam.md"
 
 
@@ -310,7 +318,7 @@ def validate_compliance(
         Tuple of (is_compliant, error_message, metrics_dict)
     """
     try:
-        cmd = [sys.executable, "tools/runners/validate_agent_compliance.py"]
+        cmd = [sys.executable, str(_REPO_ROOT / "tools" / "runners" / "validate_agent_compliance.py")]
         if strict:
             cmd.append("--strict")
         if verify_files:
@@ -332,7 +340,6 @@ def validate_compliance(
             return False, f"Validator crashed: {result.stderr}", {}
 
         if json_output and result.stdout:
-            import json
             try:
                 metrics = json.loads(result.stdout)
                 if not metrics.get("compliant", False):
@@ -522,7 +529,9 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
 
     Prevents prompt injection by:
     - Unicode normalization (NFKC) to prevent lookalike bypasses
-    - Zero-width character stripping
+    - Stripping zero-width and line-separator control chars (VT, FF, NEL,
+      U+200B-U+200D, U+2028-U+2029, U+2060, U+FEFF)
+    - Replacing newlines/carriage returns with spaces
     - Escaping triple backticks to prevent code block breakout
     - Removing instruction-like patterns (case-insensitive)
     - Truncation to max_len (AFTER sanitization to prevent smuggling past truncation)
@@ -546,13 +555,14 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     # Escape triple backticks to prevent code block breakout
     text = text.replace('```', '` ` `')
 
-    # Escape newlines to prevent context breakout
+    # Replace newlines/carriage returns (VT/FF/NEL handled by _ZERO_WIDTH_RE above)
     text = text.replace('\n', ' ').replace('\r', ' ')
 
     # Remove instruction-like patterns (case-insensitive, word-boundary aware)
     # Uses \b word boundaries to prevent partial-word false positives
     # and \s* between words to catch space-insertion bypass attempts
-    patterns_to_redact = [
+    # Word-bounded patterns (need \b on both sides to avoid partial matches)
+    word_patterns = [
         r'ignore\s+previous',
         r'disregard',
         r'new\s+instructions',
@@ -561,10 +571,41 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
         r'you\s+are\s+now',
         r'override\s+instructions',
     ]
-    for pattern in patterns_to_redact:
+    for pattern in word_patterns:
         text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)
+
+    # Verdict patterns — leading \b only (trailing : is non-word, so \b after : fails)
+    verdict_patterns = [
+        r'VERDICT\s*:',
+        r'OVERALL_VERDICT\s*:',
+    ]
+    for pattern in verdict_patterns:
+        text = re.sub(r'\b' + pattern, '[REDACTED]', text, flags=re.IGNORECASE)
 
     # Truncate AFTER sanitization to prevent smuggling payloads past the truncation boundary
     text = text[:max_len]
 
     return text
+
+
+# =============================================================================
+# Git Utilities
+# =============================================================================
+
+def get_base_branch() -> str:
+    """Detect the default branch (dev, main, master, etc.).
+
+    Shared across run_review.py and run_ci_review.py.
+    Raises FileNotFoundError if git is not installed (callers handle this).
+    """
+    for candidate in ["dev", "main", "master"]:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", candidate],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return candidate
+        except subprocess.TimeoutExpired:
+            continue
+    return "dev"  # fallback

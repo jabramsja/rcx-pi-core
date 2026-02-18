@@ -54,7 +54,7 @@ This is not a new idea. It is the same principle behind:
 - **Debt count**: Stays at 12 (irreducible L2 floor).
 - **L3 parity**: JS already has `muHash()`. Both substrates compute identical SHA-256.
 
-### What Could Be ELIMINATED
+### What Could Be DEMOTED
 
 **Key insight:** Content-Addressed Mu doesn't just add speed — it can **reduce bootstrap primitives from 5 to 4**.
 
@@ -75,7 +75,7 @@ String comparison is exactly what **non-linear pattern matching already does** �
 | Primitive | Current Role | With Content-Addressing |
 |-----------|-------------|------------------------|
 | `eval_step` | Apply projections | Unchanged |
-| `mu_equal` | Structural equality | **ELIMINATED** — subsumed by non-linear pattern matching on hash strings |
+| `mu_equal` | Structural equality | **DEMOTED** — subsumed by non-linear pattern matching on hash strings |
 | `max_steps` | Budget enforcement | Unchanged |
 | `stack_guard` | Depth limit | Unchanged |
 | `projection_loader` | Load seeds | Unchanged |

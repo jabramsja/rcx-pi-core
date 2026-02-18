@@ -26,7 +26,8 @@ Mu = Any  # Actually: None | bool | int | float | str | List[Mu] | Dict[str, Mu]
 # See mu/docs/core/BootstrapPrimitives.v0.md for full justification.
 #
 # Phase 8b note: Increased from 200 to 300 to support deeper kernel states.
-# Kernel normalization converts dicts to linked-lists, multiplying depth by ~4x.
+# Kernel normalization converts dicts to linked-lists (head/tail chains),
+# increasing depth proportional to dict width (N keys → ~2N depth levels).
 # Must stay below ~400 to avoid Python's default recursion limit (~1000).
 # Stress tests with max_steps > ~60 may need kernel-internal bypass.
 MAX_MU_DEPTH = 300
@@ -59,7 +60,8 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
     Note:
         Circular references are detected and rejected (return False).
         Deep nesting beyond MAX_MU_DEPTH is rejected (return False).
-        This prevents infinite recursion/stack overflow attacks.
+        Wide structures beyond MAX_MU_WIDTH are rejected (return False).
+        This prevents infinite recursion/stack overflow and resource exhaustion attacks.
     """
     # Depth limit check (prevents RecursionError attacks)
     if _depth > MAX_MU_DEPTH:
@@ -210,7 +212,9 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
     if callable(value):
         return True
 
-    # For compound types, check for circular references
+    # For compound types, check for circular references.
+    # Uses isinstance (not type()) intentionally — catches callables hidden in
+    # list/dict subclasses too. Wider safety net than is_mu's type() check.
     if isinstance(value, (list, dict)):
         if _seen is None:
             _seen = set()
@@ -218,12 +222,16 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
         if value_id in _seen:
             # Already visited - no callable found on this path
             return False
-        _seen = _seen | {value_id}
+        # Backtracking: add on entry, remove on exit.
+        # O(1) per node (vs O(depth) for set copy).
+        _seen.add(value_id)
+        if isinstance(value, list):
+            result = any(has_callable(item, _seen) for item in value)
+        else:
+            result = any(has_callable(v, _seen) for v in value.values())
+        _seen.discard(value_id)
+        return result
 
-    if isinstance(value, list):
-        return any(has_callable(item, _seen) for item in value)
-    if isinstance(value, dict):
-        return any(has_callable(v, _seen) for v in value.values())
     return False
 
 
@@ -245,25 +253,31 @@ def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None
     if callable(value):
         return path or "(root)"
 
-    # For compound types, check for circular references
+    # For compound types, check for circular references.
+    # Uses isinstance (not type()) — same rationale as has_callable.
     if isinstance(value, (list, dict)):
         if _seen is None:
             _seen = set()
         value_id = id(value)
         if value_id in _seen:
             return None
-        _seen = _seen | {value_id}
+        # Backtracking: add on entry, remove on exit.
+        # O(1) per node (vs O(depth) for set copy).
+        _seen.add(value_id)
+        found = None
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                found = find_callable_path(item, f"{path}[{i}]", _seen)
+                if found:
+                    break
+        else:
+            for k, v in value.items():
+                found = find_callable_path(v, f"{path}.{k}" if path else k, _seen)
+                if found:
+                    break
+        _seen.discard(value_id)
+        return found
 
-    if isinstance(value, list):
-        for i, item in enumerate(value):
-            result = find_callable_path(item, f"{path}[{i}]", _seen)
-            if result:
-                return result
-    if isinstance(value, dict):
-        for k, v in value.items():
-            result = find_callable_path(v, f"{path}.{k}" if path else k, _seen)
-            if result:
-                return result
     return None
 
 
@@ -336,6 +350,10 @@ def assert_handler_pure(handler: Any, name: str) -> Any:
     This is a BOOTSTRAP guardrail. During Phase 1, handlers are Python
     functions. This wrapper ensures they respect Mu boundaries.
 
+    WHY KEPT (0 production callers): Ready-to-wire guardrail for handler
+    registration. Will be wired when handler dispatch is formalized (L4+).
+    Tested in test_mu_type.py to prevent API drift until wired.
+
     Args:
         handler: The handler function to wrap.
         name: Name for error messages.
@@ -374,6 +392,11 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
     - All Mu inputs are valid Mu
     - Output is valid Mu (if applicable)
 
+    WHY KEPT (0 production callers): Ready-to-wire guardrail for kernel
+    primitive boundary enforcement. Will be wired when kernel primitives
+    are audited for Mu boundary compliance (L4+). Tested in test_mu_type.py
+    to prevent API drift until wired.
+
     Args:
         func_name: Name of the kernel primitive.
         inputs: Dict of input name -> value for Mu inputs.
@@ -396,11 +419,15 @@ def validate_kernel_boundary(func_name: str, inputs: dict[str, Any], output: Any
 # =============================================================================
 
 
-# ELIMINATED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
-# Previously a bootstrap primitive for fixed-point detection.
-# Now derivable from mu_hash_cached: mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)
-# Production code uses mu_hash_cached directly. This wrapper remains for test convenience.
-# Bootstrap primitives reduced from 5 to 4. See mu/docs/core/BootstrapPrimitives.v0.md.
+# DEMOTED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1, 2026-02-10)
+# Previously bootstrap primitive #5 for fixed-point detection.
+# Now derivable: mu_equal(a, b) ≡ mu_hash_cached(a) == mu_hash_cached(b)
+# Bootstrap primitives reduced from 5 to 4.
+#
+# WHY KEPT (not archived): ~30 call sites in tests + JS parity (muEqual).
+# Tests use mu_equal for readability; all PRODUCTION code uses mu_hash_cached directly.
+# Archiving would touch 30+ files for zero functional/security benefit.
+# See mu/docs/core/BootstrapPrimitives.v0.md.
 def mu_equal(a: Any, b: Any) -> bool:
     """
     Convenience wrapper: compare two Mu values for structural equality.
@@ -431,8 +458,19 @@ _mu_hash_cache: OrderedDict[str, str] = OrderedDict()
 
 
 def mu_hash_cache_clear() -> None:
-    """Clear the mu_hash cache. Useful for testing and memory management."""
+    """Clear the mu_hash cache. Useful for testing and memory management.
+
+    WHY KEPT (0 production callers): Cache management primitive for
+    test isolation and long-running evaluation memory control. Tests
+    may need this to prevent cross-test cache pollution. Removing would
+    leave no way to reset cache state without restarting the process.
+    """
     _mu_hash_cache.clear()
+
+
+def _compute_mu_hash(canonical: str) -> str:
+    """SHA-256 of canonical JSON string. Single hash algorithm definition."""
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
 def mu_hash_cached(value: Any) -> str:
@@ -455,13 +493,13 @@ def mu_hash_cached(value: Any) -> str:
         TypeError: If value is not a valid Mu.
     """
     assert_mu(value, "mu_hash_cached")
-    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
     cached = _mu_hash_cache.get(canonical)
     if cached is not None:
         # Move to end (most recently used)
         _mu_hash_cache.move_to_end(canonical)
         return cached
-    h = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    h = _compute_mu_hash(canonical)
     _mu_hash_cache[canonical] = h
     # Evict oldest if over limit
     if len(_mu_hash_cache) > MAX_MU_HASH_CACHE:
@@ -485,8 +523,8 @@ def mu_hash(value: Any) -> str:
         TypeError: If value is not a valid Mu.
     """
     assert_mu(value, "mu_hash")
-    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    return _compute_mu_hash(canonical)
 
 
 # =============================================================================
@@ -524,7 +562,10 @@ def assert_no_bootstrap_in_production() -> None:
     """
     Assert that no bootstrap code is registered.
 
-    Call this in Phase 3+ to verify all Python matching is removed.
+    Currently unreachable in production: @host_* decorators always populate
+    BOOTSTRAP_REGISTRY on import, and L2 accepted these as irreducible.
+    Retained as a design checkpoint for L4+ if bootstrap elimination becomes
+    viable. Tests in test_mu_type.py validate both paths to prevent API drift.
 
     Raises:
         RuntimeError: If bootstrap code is still registered.

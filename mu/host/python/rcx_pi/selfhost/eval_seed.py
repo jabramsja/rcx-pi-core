@@ -14,13 +14,10 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
+from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached
 
 
-    # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
+# _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
 # _KNOWN_KERNEL_MODES, _KERNEL_CONTEXT_KEYS) were removed from production code.
 # Zero production callers after caller-trust model replaced shape-based trust.
 # The function is preserved in tests/structural/test_type_tag_security.py as a
@@ -40,97 +37,70 @@ from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached
 # 3. Be eliminated before self-hosting is complete
 #
 # The audit (tools/audit_semantic_purity.sh) counts these sites.
-# Phase 3 goal: zero @host_recursion markers.
+# L2 floor: host_recursion sites have a stable floor (match, substitute,
+# step). These are bootstrap primitives — see STATUS.md for current level.
 # =============================================================================
 
 
-def host_recursion(reason: str):
+def _apply_host_debt(func, category: str, reason: str):
+    """Shared implementation for all host-debt decorators.
+
+    Sets _host_{category} and _host_{category}_reason attributes, then
+    registers with mark_bootstrap. Each public decorator preserves its
+    own name for grep-based audit counting (audit_semantic_purity.sh,
+    debt_dashboard.sh, check_js_debt.sh).
     """
-    Mark a function as using host recursion (Python call stack).
+    setattr(func, f"_host_{category}", True)  # CONTRABAND_OK: decorator metadata for debt tracking
+    setattr(func, f"_host_{category}_reason", reason)  # CONTRABAND_OK: decorator metadata for debt tracking
+    mark_bootstrap(f"host_{category}:{func.__name__}", f"Host {category}: {reason}")
+    return func
 
-    This is a debt marker. The function works, but it's doing computation
-    that should eventually be done by RCX kernel iteration.
 
-    Args:
-        reason: Why this host recursion exists and how it will be eliminated.
+def host_recursion(reason: str):
+    """Mark a function as using host recursion (Python call stack).
+
+    Debt marker. The function works, but computation should eventually
+    be done by RCX kernel iteration.
 
     Usage::
 
-        >>> # Example: marking a function that uses Python recursion
         >>> @host_recursion("reason why recursion exists")  # noqa: debt-example
         ... def my_function(args):
         ...     pass
     """
     def decorator(func):
-        func._host_recursion = True
-        func._host_recursion_reason = reason
-        mark_bootstrap(
-            f"host_recursion:{func.__name__}",
-            f"Host recursion: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "recursion", reason)
     return decorator
 
 
 def host_builtin(reason: str):
-    """
-    Mark code as using host builtins (len, sorted, sum, max, min, etc.).
+    """Mark code as using host builtins (len, sorted, sum, max, min, etc.).
 
-    This is a debt marker. These operations should be structural in pure RCX.
-
-    Args:
-        reason: Why this host builtin exists and how it will be eliminated.
+    Debt marker. These operations should be structural in pure RCX.
     """
     def decorator(func):
-        func._host_builtin = True
-        func._host_builtin_reason = reason
-        mark_bootstrap(
-            f"host_builtin:{func.__name__}",
-            f"Host builtin: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "builtin", reason)
     return decorator
 
 
 def host_mutation(reason: str):
-    """
-    Mark code as using host mutation (.append, .pop, del, []=).
+    """Mark code as using host mutation (.append, .pop, del, []=).
 
-    This is a debt marker. RCX is immutable - each step produces new structure.
-
-    Args:
-        reason: Why this host mutation exists and how it will be eliminated.
+    Debt marker. RCX is immutable - each step produces new structure.
     """
     def decorator(func):
-        func._host_mutation = True
-        func._host_mutation_reason = reason
-        mark_bootstrap(
-            f"host_mutation:{func.__name__}",
-            f"Host mutation: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "mutation", reason)
     return decorator
 
 
 def host_iteration(reason: str):
-    """
-    Mark code as using host iteration (Python for-loops).
+    """Mark code as using host iteration (Python for-loops).
 
-    This is a debt marker. The kernel loop should be structural projections,
-    not Python iteration. Phase 7 eliminates this by making the kernel
-    meta-circular (projections selecting projections).
-
-    Args:
-        reason: Why this host iteration exists and how it will be eliminated.
+    Debt marker. The kernel loop should be structural projections,
+    not Python iteration.
     """
     def decorator(func):
-        func._host_iteration = True
-        func._host_iteration_reason = reason
-        mark_bootstrap(
-            f"host_iteration:{func.__name__}",
-            f"Host iteration: {reason}"
-        )
-        return func
+        return _apply_host_debt(func, "iteration", reason)
     return decorator
 
 
@@ -241,8 +211,8 @@ def get_var_name(mu: Mu) -> str:
 
 @host_recursion(
     "Recursive tree traversal for pattern matching. "
-    "BOOTSTRAP: match_mu.py implements this as Mu projections (Phase 4a). "
-    "This function remains as the reference implementation for parity testing."
+    "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
+    "match_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
 @host_builtin(
     "len() for size, zip() for pairing, set() for key comparison, "
@@ -283,7 +253,14 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 
 
 def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
-    """Internal recursive matcher — no validation (already done at match() entry)."""
+    """Internal recursive matcher — no validation (already done at match() entry).
+
+    This function contains 13 isinstance calls for Python type dispatch
+    (plus 1 in match() = 14 isinstance calls total). These are NOT 14
+    separate debt markers — they are all covered by the single host_builtin
+    decorator on match(). Callers: match() (public entry) and
+    _apply_projection_trusted() (kernel-internal fast path).
+    """
     # Variable site - matches anything
     if is_var(pattern):
         name = get_var_name(pattern)
@@ -375,12 +352,16 @@ def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
 
 @host_recursion(
     "Recursive tree traversal for variable substitution. "
-    "BOOTSTRAP: subst_mu.py implements this as Mu projections (Phase 4b). "
-    "This function remains as the reference implementation for parity testing."
+    "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
+    "subst_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
 def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """
     Substitute variable sites in body with bound values.
+
+    Host debt: 3 isinstance calls for Python type dispatch on body values
+    (None/bool/int/float/str check, list check, dict check). Tracked on
+    match()'s @host_builtin decorator (same debt surface as _match_inner).
 
     Args:
         body: The body with possible {"var": "x"} sites.
@@ -420,6 +401,9 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
 def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     """
     Apply a projection to an input value.
+
+    Host debt (isinstance for type validation and normalization detection)
+    is part of the same debt surface tracked on match()'s @host_builtin.
 
     A projection is {"pattern": P, "body": B}.
     If P matches input, return B with substitutions.
@@ -495,7 +479,8 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
         coverage.record_step()
 
     for proj in projections:
-        # Get projection ID for coverage tracking
+        # Get projection ID for coverage tracking (isinstance here is cosmetic —
+        # apply_projection validates proj is dict; this just extracts a label)
         proj_id = proj.get("id", "<anonymous>") if isinstance(proj, dict) else "<invalid>"
 
         result = apply_projection(proj, input_value)
@@ -528,6 +513,12 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 
     ONLY for use by kernel loops that have already validated at the boundary.
     Callers: _step_trusted, step_kernel_mu (via _step_trusted).
+
+    Host debt (isinstance) tracked on match()'s @host_builtin decorator.
+
+    Note: Skips assert_not_lambda_calculus() by design. Kernel-internal
+    projections come from verified seeds (integrity-checked at load time).
+    The guardrail is only needed at the public apply_projection() boundary.
     """
     if not isinstance(projection, dict):
         raise TypeError(f"Projection must be dict, got {type(projection)}")
@@ -560,6 +551,9 @@ def _step_trusted(projections: list[Mu], input_value: Mu) -> Mu:
 
     ONLY for use by kernel loops that have already validated at the boundary.
     Callers: step_kernel_mu, run_engine_pipeline, projection_runner.run.
+
+    Host debt (isinstance for coverage ID, for-loop) tracked on the
+    host_builtin decorator on match(). For-loop is bootstrap primitive (not debt).
     """
     from rcx_pi.projection_coverage import coverage
 

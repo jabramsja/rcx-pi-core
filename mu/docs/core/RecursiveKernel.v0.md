@@ -88,12 +88,12 @@ The goal isn't "zero Python" - that's impossible. The goal is ensuring:
 
 ### What Python MUST Provide (Bootstrap Primitives)
 
-**See `mu/docs/core/BootstrapPrimitives.v0.md`** for the canonical documentation of these 4 irreducible primitives (+ 1 eliminated):
+**See `mu/docs/core/BootstrapPrimitives.v0.md`** for the canonical documentation of these 4 irreducible primitives (+ 1 demoted):
 
 | Primitive | Why Irreducible | Analogy |
 |-----------|-----------------|---------|
 | `eval_step()` first-match-wins | Projection application | Forth's NEXT |
-| ~~`mu_equal()`~~ | ~~Fixed-point detection~~ | **ELIMINATED** — replaced by `mu_hash_cached()` |
+| ~~`mu_equal()`~~ | ~~Fixed-point detection~~ | **DEMOTED** — replaced by `mu_hash_cached()` |
 | `max_steps` resource limit | Termination guarantee | Watchdog timer |
 | Stack depth protection | Prevent overflow | Memory protection |
 | Projection loader | Parse JSON, validate | ROM bootstrap |
@@ -129,7 +129,7 @@ These are the "hardware" that structural projections run on.
 │  - max_steps: resource exhaustion protection        │
 │  - stack guard: prevent overflow                    │
 │  - loader: parse seeds, validate schema             │
-│  (mu_equal ELIMINATED → mu_hash_cached)             │
+│  (mu_equal DEMOTED → mu_hash_cached)                │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -254,7 +254,7 @@ def eval_step(projections: list, value: Mu) -> Mu:
             return substitute(proj["body"], bindings)
     return value  # stall
 
-# mu_hash_cached: Hash-based fixed-point detection (ELIMINATED mu_equal as primitive)
+# mu_hash_cached: Hash-based fixed-point detection (DEMOTED mu_equal from primitive)
 # Structural comparison via cached content hash
 def mu_hash_cached(value: Mu) -> str:
     return cached_sha256(canonical_json(value))  # boundary scaffolding, not primitive

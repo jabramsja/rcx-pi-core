@@ -14,22 +14,22 @@ Features:
 
 Usage:
     # Full review (all 9 agents)
-    python tools/run_review.py rcx_pi/selfhost/
+    python tools/runners/run_review.py rcx_pi/selfhost/
 
     # Quick review (4 core agents only)
-    python tools/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
+    python tools/runners/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
 
     # PR review (analyzes git diff, auto-selects depth)
-    python tools/run_review.py --pr
+    python tools/runners/run_review.py --pr
 
     # Founder review (adds translator + visualizer)
-    python tools/run_review.py rcx_pi/selfhost/ --founder
+    python tools/runners/run_review.py rcx_pi/selfhost/ --founder
 
     # Disable memory (no finding storage)
-    python tools/run_review.py rcx_pi/selfhost/ --no-memory
+    python tools/runners/run_review.py rcx_pi/selfhost/ --no-memory
 
     # Associate findings with a PR
-    python tools/run_review.py --pr --pr-number 123
+    python tools/runners/run_review.py --pr --pr-number 123
 
 Depth levels:
     quick:  verifier, adversary, expert, structural-proof (4 agents)
@@ -63,6 +63,24 @@ if str(_tools_dir.parent.parent) not in sys.path:
 SDK_IMPORT_ERROR: Exception | None = None
 try:
     from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
+    # Patch SDK to handle rate_limit_event (CLI v2.1.45+ sends this but SDK
+    # v0.1.37 doesn't recognize it, crashing all agents with MessageParseError).
+    try:
+        import claude_agent_sdk._internal.message_parser as _msg_parser
+        import claude_agent_sdk._internal.client as _int_client
+        from claude_agent_sdk.types import SystemMessage as _SystemMessage
+        _original_parse = _msg_parser.parse_message
+
+        def _patched_parse_message(data):
+            if isinstance(data, dict) and data.get("type") == "rate_limit_event":
+                # Silently skip — rate limit events are informational
+                return _SystemMessage(subtype="rate_limit_event", data=data)
+            return _original_parse(data)
+
+        _msg_parser.parse_message = _patched_parse_message
+        _int_client.parse_message = _patched_parse_message
+    except Exception:
+        pass  # If patching fails, fall through to original behavior
 except Exception as _sdk_import_error:
     SDK_IMPORT_ERROR = _sdk_import_error
     query = None  # type: ignore[assignment]
@@ -100,6 +118,7 @@ from tools.runners.validate_agent_compliance import extract_finding_blocks
 from tools.runners.agent_runner_common import sanitize_files
 from tools.runners.shared_agent_utils import (
     SUPPORTED_AGENT_MODELS,
+    AGENT_VERDICTS,
     AGENT_PASS_VERDICTS,
     GOOD_VERDICTS,
     HARD_GATE_AGENTS,
@@ -111,6 +130,7 @@ from tools.runners.shared_agent_utils import (
     load_agent_prompt_with_contract,
     resolve_agent_model,
     sanitize_for_prompt,
+    get_base_branch,
     validate_compliance as shared_validate_compliance,
 )
 
@@ -210,11 +230,11 @@ PARALLEL_GROUPS = [
 # 25 turns handles full-codebase reviews; agents hit turn limits at lower values
 # on large scopes. Use --max-turns to override if needed.
 AGENT_MAX_TURNS = {
-    "verifier": 25,
+    "verifier": 30,
     "adversary": 25,
-    "expert": 20,
-    "structural-proof": 20,
-    "grounding": 18,
+    "expert": 25,
+    "structural-proof": 30,
+    "grounding": 25,
     "fuzzer": 20,
     "translator": 20,
     "visualizer": 15,
@@ -224,12 +244,6 @@ AGENT_MAX_TURNS = {
 GROUNDING_HIGH_RISK_PATTERNS = (
     "rcx_pi/selfhost/",
     "mu/",
-    "mu/tests/structural/",
-    "mu/tests/fuzz/",
-    "mu/tests/test_js_parity_automated.py",
-    "mu/tools/runners/run_review.py",
-    "mu/tools/runners/validate_agent_compliance.py",
-    "mu/tools/runners/validate_agent_reasoning.py",
 )
 
 
@@ -534,6 +548,13 @@ Please address these issues in your response. Ensure you:
 Now review these files: {file_list}
 
 Produce a report following the format in your instructions.
+
+CRITICAL FORMAT REMINDER: Your final output MUST contain these sections:
+1. ### CHECKED — bullet list of what you verified
+2. ### NOT_CHECKED — bullet list of what you could not verify
+3. ### Verdict — a single line: VERDICT: <TOKEN>
+Valid tokens: {', '.join(AGENT_VERDICTS.get(agent_name, ['UNKNOWN']))}
+Do NOT end with raw exploration text. Summarize your findings into the required format.
 """
 
         result_text = ""
@@ -650,13 +671,29 @@ Produce a report following the format in your instructions.
         )
 
     async def run_agent_group(self, agents: list[str]) -> list[AgentResult]:
-        """Run a group of agents in parallel."""
+        """Run a group of agents in parallel, with format compliance retry."""
         agents_in_scope = [a for a in agents if a in self.agents_to_run]
         if not agents_in_scope:
             return []
 
         tasks = [self.run_single_agent(agent) for agent in agents_in_scope]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+
+        # Retry agents that failed format compliance (1 retry attempt)
+        retry_results = []
+        for result in results:
+            if not result.is_compliant and result.compliance_error and result.output:
+                if self.verbose:
+                    print(f"  ↻ Retrying {result.name} (format compliance failure)")
+                retry = await self.run_single_agent(
+                    result.name,
+                    retry_feedback=result.compliance_error,
+                )
+                retry_results.append(retry)
+            else:
+                retry_results.append(result)
+
+        return retry_results
 
     def check_for_regressions(self) -> list[dict]:
         """Check if any files being reviewed have previously-fixed issues.
@@ -951,30 +988,12 @@ def enforce_global_high_fail_closed(results: list[AgentResult], global_high: int
     for result in results:
         result.passed = False
         result.verdict = f"{result.verdict} (SKEPTIC_GLOBAL_HIGH:{global_high})"
-        result.blocks_merge = result.is_hard_gate and (not result.passed)
+        result.blocks_merge = result.is_hard_gate
 
 
 # =============================================================================
 # Git Integration
 # =============================================================================
-
-def _get_base_branch() -> str:
-    """Detect the default branch (dev, main, master, etc.).
-
-    Raises FileNotFoundError if git is not installed (callers handle this).
-    """
-    for candidate in ["dev", "main", "master"]:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", candidate],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return candidate
-        except subprocess.TimeoutExpired:
-            continue
-    return "dev"  # fallback
-
 
 def get_changed_files() -> list[str]:
     """Get files changed in current branch vs base branch.
@@ -983,7 +1002,7 @@ def get_changed_files() -> list[str]:
         RuntimeError: If git command fails (don't fail silently)
     """
     try:
-        base = _get_base_branch()
+        base = get_base_branch()
         result = subprocess.run(
             ["git", "diff", "--name-only", f"{base}...HEAD"],
             capture_output=True,
@@ -1030,10 +1049,10 @@ Depth levels:
   all      8-9 agents: + advisor
 
 Examples:
-  python tools/run_review.py rcx_pi/selfhost/
-  python tools/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
-  python tools/run_review.py --pr --depth full
-  python tools/run_review.py rcx_pi/selfhost/ --founder --output report.md
+  python tools/runners/run_review.py rcx_pi/selfhost/
+  python tools/runners/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
+  python tools/runners/run_review.py --pr --depth full
+  python tools/runners/run_review.py rcx_pi/selfhost/ --founder --output report.md
 """
     )
 
@@ -1146,7 +1165,7 @@ Examples:
         if not preflight_ok:
             print("\n❌ AGENT PREFLIGHT FAILED")
             print(f"Reason: {preflight_error}")
-            print("Action: run `PYTHONHASHSEED=0 python3 tools/check_agent_runtime.py` and fix runtime.")
+            print("Action: run `PYTHONHASHSEED=0 python3 tools/checks/check_agent_runtime.py` and fix runtime.")
             sys.exit(INFRA_FAILURE_EXIT_CODE)
 
     # Determine depth

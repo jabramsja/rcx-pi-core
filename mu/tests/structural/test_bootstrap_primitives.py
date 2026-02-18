@@ -71,12 +71,12 @@ class TestEvalStepPrimitive:
         # Order 1: proj1 first
         result1 = step([proj1, proj2], value)
         assert_mu(result1, "step result 1")
-        assert result1 == {"result": "first"}
+        assert mu_equal(result1, {"result": "first"})
 
         # Order 2: proj2 first
         result2 = step([proj2, proj1], value)
         assert_mu(result2, "step result 2")
-        assert result2 == {"result": "second"}
+        assert mu_equal(result2, {"result": "second"})
 
     def test_eval_step_stalls_on_no_match(self):
         """eval_step returns input unchanged on no match (mechanical stall)."""
@@ -98,7 +98,7 @@ class TestEvalStepPrimitive:
 
         for value in [0, 1, -1, 100, 3.14]:
             result = step(projections, value)
-            assert result == value  # No arithmetic performed
+            assert mu_equal(result, value)  # No arithmetic performed
 
     def test_eval_step_produces_mu_output(self):
         """eval_step output is always valid Mu."""
@@ -137,9 +137,9 @@ class TestMuEqualPrimitive:
         assert "def mu_equal(a:" in content, (
             "mu_equal primitive not found"
         )
-        # Verify it's marked as ELIMINATED PRIMITIVE (Content-Addressed Mu Level 1)
-        assert "ELIMINATED PRIMITIVE: mu_equal" in content, (
-            "mu_equal should be marked as eliminated primitive (replaced by mu_hash_cached)"
+        # Verify it's marked as DEMOTED PRIMITIVE (Content-Addressed Mu Level 1)
+        assert "DEMOTED PRIMITIVE: mu_equal" in content, (
+            "mu_equal should be marked as demoted primitive (replaced by mu_hash_cached)"
         )
 
     def test_mu_equal_uses_content_comparison(self):
@@ -334,42 +334,24 @@ class TestProjectionLoaderPrimitive:
         assert len(seed["projections"]) > 0
 
     def test_loader_rejects_tampered_seed(self):
-        """Loader rejects seeds with invalid checksum (GROUNDING - negative test)."""
-        import json
-        import tempfile
-        from pathlib import Path
+        """Loader rejects seeds with invalid checksum (GROUNDING - negative test).
 
-        # Load a valid seed from mu/ canonical location
+        Tests verify_checksum directly — no temp files or renames needed.
+        """
+        import json
+        from rcx_pi.selfhost.seed_integrity import verify_checksum
+
+        # Load a valid seed
         valid_seed = load_verified_seed(get_seed_path("match.v1.json"), verify=False)
 
-        # Tamper with it - change a projection body
+        # Tamper with it
         tampered = json.loads(json.dumps(valid_seed))  # Deep copy
         tampered["projections"][0]["body"] = {"TAMPERED": True}
+        tampered_bytes = json.dumps(tampered).encode("utf-8")
 
-        # Write to temp file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(tampered, f)
-            tampered_path = Path(f.name)
-
-        try:
-            # Attempt to load tampered seed with verification - should FAIL
-            with pytest.raises(ValueError, match="checksum|integrity"):
-                # Need to rename to match.v1.json for checksum lookup
-                load_verified_seed(tampered_path.rename(tampered_path.parent / "match.v1.json"), verify=True)
-        except FileNotFoundError:
-            # If rename fails, try alternate approach - verify content mismatch
-            from rcx_pi.selfhost.seed_integrity import compute_checksum, SEED_CHECKSUMS
-            tampered_bytes = tampered_path.read_bytes()
-            actual_checksum = compute_checksum(tampered_bytes)
-            expected_checksum = SEED_CHECKSUMS["match.v1.json"]
-            assert actual_checksum != expected_checksum, "Tampered content should have different checksum"
-        finally:
-            # Cleanup
-            try:
-                tampered_path.unlink(missing_ok=True)
-                (tampered_path.parent / "match.v1.json").unlink(missing_ok=True)
-            except Exception:
-                pass
+        # verify_checksum must raise on tampered content
+        with pytest.raises(ValueError, match="integrity check failed"):
+            verify_checksum("match.v1.json", tampered_bytes)
 
     def test_loader_produces_mu_projections(self):
         """Loaded projections are valid Mu."""
@@ -401,8 +383,8 @@ class TestPrimitiveBoundaries:
         result1 = step(projs, {"type": "add"})
         result2 = step(projs, {"type": "mul"})
 
-        assert result1 == {"result": "addition"}
-        assert result2 == {"result": "multiplication"}
+        assert mu_equal(result1, {"result": "addition"})
+        assert mu_equal(result2, {"result": "multiplication"})
 
     def test_no_arithmetic_in_mu_equal(self):
         """mu_equal does not normalize numbers."""
@@ -423,7 +405,7 @@ class TestPrimitiveBoundaries:
         for s in strings:
             result = step(projections, s)
             # String passes through unchanged - no case folding, trimming, etc.
-            assert result == s
+            assert mu_equal(result, s)
 
 
 # =============================================================================
@@ -550,7 +532,7 @@ class TestPrimitivesEnableStructural:
 
         result = match_mu({"var": "x"}, 42)
         assert result != NO_MATCH
-        assert result["x"] == 42
+        assert mu_equal(result["x"], 42)
 
     def test_primitives_enable_substitution(self):
         """Primitives enable subst.v1 projections to work."""
@@ -561,7 +543,7 @@ class TestPrimitivesEnableStructural:
         body = {"result": {"var": "x"}}
 
         result = subst_mu(body, bindings)
-        assert result == {"result": 42}
+        assert mu_equal(result, {"result": 42})
 
     def test_primitives_enable_kernel_loop(self):
         """Primitives enable meta-circular kernel."""
@@ -575,4 +557,4 @@ class TestPrimitivesEnableStructural:
         ]
 
         result = step_mu(projections, {"x": 1})
-        assert result == {"y": 1}
+        assert mu_equal(result, {"y": 1})
