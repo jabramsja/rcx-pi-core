@@ -166,8 +166,8 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Boot1 Current Reality (truth-sync 2026-02-18):**
 Boot1 is a **host-side loop policy alternative**, not a seed-defined structural loop. Two host paths exist:
-- **Trampoline (default):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:1578`, `eval_step.js:runEnginePipeline`)
-- **Recursive shadow:** `_run_engine_recursive()` recursive call stack (`step_mu.py:1411`, `eval_step.js:runEnginePipelineRecursive:2014`)
+- **Trampoline (default):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:run_engine_pipeline()`, `eval_step.js:runEnginePipeline()`)
+- **Recursive shadow:** `_run_engine_recursive()` recursive call stack (`step_mu.py:_run_engine_recursive()`, `eval_step.js:runEnginePipelineRecursive()`)
 Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); default remains trampoline. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec.
 
 **Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~1300 LOC core in JS), we know exactly what would need to change.
@@ -298,8 +298,8 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
 
 **Reclassified as infrastructure (not debt):**
-- match_mu.py:708 - boundary conversion function (AST_OK: infra)
-- step_mu.py:148 - constant definition (AST_OK: infra)
+- match_mu.py:match() - boundary conversion function (AST_OK: infra)
+- step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
 - AST_OK:infra ceiling: 48 (current 42)
@@ -548,7 +548,7 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 
 4 bootstrap primitives marked with `# BOOTSTRAP_PRIMITIVE` (+ 1 eliminated):
 1. `eval_step` - `rcx_pi/selfhost/eval_seed.py:step()`
-2. `max_steps` - `rcx_pi/selfhost/step_mu.py:241`
+2. `max_steps` - `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` (see `BOOTSTRAP_PRIMITIVE: max_steps` comment)
 3. `stack_guard` - `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH`
 4. `projection_loader` - `rcx_pi/selfhost/seed_integrity.py:load_verified_seed()`
 - ~~`mu_equal`~~ - DEMOTED from bootstrap primitive (Level 1 Content-Addressed Mu). All production call sites use `mu_hash_cached()` directly. Convenience wrapper retained for ~30 test call sites + JS parity.
