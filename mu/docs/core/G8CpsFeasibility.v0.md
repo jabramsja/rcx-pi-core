@@ -266,17 +266,39 @@ Start: G8 UNPROVEN
 
 ---
 
-## Next Decision: D004 Production Pilot
+## Evidence Closure (D001-D007 Complete)
 
-H2 feasibility is established (D001-D003). The remaining question is **not** "can we build a staged bootstrap?" but "should we attempt a production pilot, and under what constraints?"
+All three hypotheses have been tested. The research evidence loop is closed.
 
-D004 (`mu/docs/core/L4DecisionCard.v0.md`) defines the GO/NO-GO/DEFER decision package:
-- Blast radius inventory and LOC budget
-- Invariants that must remain unchanged (primitive count, debt ceiling, L3 parity)
-- Stop conditions that would terminate a pilot immediately
-- Gate mapping (G8 is the primary target)
+**What this proves:**
+- The circular dependency (eval_step ↔ match/subst) IS breakable — a 52-LOC Stage 0 kernel can bootstrap match.v2 + subst.v2 projections (H2, D001-D003)
+- Fuel budget CAN be structural Mu data — eval_step contract preserved, G2/G7 intact (H1, D006)
+- The falsification discipline WORKS — H3 was designed to be false and was correctly falsified (D007)
+- eval_step is reclassifiable: IRREDUCIBLE → REDUCIBLE_WITH staged bootstrap
 
-**Important distinction:** "Feasible in research artifacts" (D001-D003) does NOT mean "production-ready." The research kernel (`tests/research/`) is isolated and never imported by `rcx_pi/`. A production pilot would require separate validation against the full test suite, L3 parity, and security invariants.
+**What this does NOT prove:**
+- Production safety — research artifacts (`tests/research/`) are isolated, never imported by `rcx_pi/`
+- L3 parity feasibility — no JS micro-matcher or staged bootstrap exists
+- That iteration can be eliminated — H1+H3 confirm iteration is irreducible in some form
+- That G8 should be resolved now — feasibility is not priority
+
+**G8 remains UNPROVEN** pending a production-pilot decision/outcome. The evidence supports feasibility but does not constitute a production proof. See D008 (`mu/docs/core/L4DecisionCard.v0.md`) for the founder decision packet.
+
+---
+
+## Next Decision: D008 Founder Decision Packet
+
+The research phase is complete (D001-D007). The remaining question is **not** "is the staged bootstrap feasible?" (it is) but "should we invest in a production pilot NOW, or defer?"
+
+D008 (`mu/docs/core/L4DecisionCard.v0.md`) consolidates all evidence and presents GO/DEFER/NO-GO options:
+- D001-D007 evidence summary
+- Boundary statement: what is proven vs. what is not
+- Recommendation: DEFER (evidence is durable; higher-priority items take precedence)
+- Re-evaluation trigger: Boot1 complete + Hemisphere Metabolization at NEXT
+
+D004 remains the production pilot scope definition (LOC budget, invariants, stop conditions) if a future GO decision is rendered.
+
+**Important distinction:** "Feasible in research artifacts" (D001-D007) does NOT mean "production-ready." The research kernel (`tests/research/`) is isolated and never imported by `rcx_pi/`. A production pilot would require separate validation against the full test suite, L3 parity, and security invariants.
 
 ---
 

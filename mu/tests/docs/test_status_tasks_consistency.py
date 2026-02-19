@@ -309,6 +309,95 @@ def test_l4_full_rewrite_remains_in_sink() -> None:
     )
 
 
+L4_DECISION_CARD_PATH = REPO_ROOT / "mu" / "docs" / "core" / "L4DecisionCard.v0.md"
+G8_FEASIBILITY_PATH = REPO_ROOT / "mu" / "docs" / "core" / "G8CpsFeasibility.v0.md"
+L4_EXIT_CHECKLIST_PATH = REPO_ROOT / "mu" / "docs" / "core" / "L4ExitChecklist.v0.md"
+
+
+def test_d008_decision_packet_exists_in_decision_card() -> None:
+    """
+    L4DecisionCard.v0.md must contain D008 with target_gate_id G8
+    and an explicit decision outcome line.
+    """
+    text = L4_DECISION_CARD_PATH.read_text(encoding="utf-8")
+    assert "Decision ID: D008" in text, (
+        "L4DecisionCard.v0.md is missing D008 decision card."
+    )
+    assert "target_gate_id: G8" in text.split("Decision ID: D008")[1], (
+        "D008 must target G8."
+    )
+
+
+def test_g8_feasibility_has_evidence_closure() -> None:
+    """
+    G8CpsFeasibility.v0.md must contain an Evidence Closure section
+    with boundary statements (what is proven / what is not).
+    """
+    text = G8_FEASIBILITY_PATH.read_text(encoding="utf-8")
+    assert "Evidence Closure" in text, (
+        "G8CpsFeasibility.v0.md is missing 'Evidence Closure' section."
+    )
+    assert "What this proves" in text or "PROVES" in text, (
+        "Evidence Closure must state what IS proven."
+    )
+    assert "What this does NOT prove" in text or "DOES NOT PROVE" in text, (
+        "Evidence Closure must state what is NOT proven."
+    )
+
+
+def test_l4_exit_checklist_g8_references_d008() -> None:
+    """
+    L4ExitChecklist.v0.md G8 status must reference D008 as the decision packet
+    and must remain UNPROVEN.
+    """
+    text = L4_EXIT_CHECKLIST_PATH.read_text(encoding="utf-8")
+    # Find the G8 section
+    g8_idx = text.find("### L4-G8")
+    assert g8_idx != -1, "L4ExitChecklist.v0.md missing G8 section."
+    g8_section = text[g8_idx:]
+    assert "D008" in g8_section, (
+        "L4ExitChecklist.v0.md G8 section must reference D008 decision packet."
+    )
+    assert "UNPROVEN" in g8_section, (
+        "G8 must remain UNPROVEN until production evidence exists."
+    )
+
+
+def test_heartbeat_tracker_wave7_done_wave8_d008() -> None:
+    """
+    TASKS.md heartbeat tracker must show wave7 DONE (D007) and
+    wave8 with D008 decision packet.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    sink_section = _extract_section(tasks_text, "SINK")
+    assert "wave7" in sink_section and "DONE" in sink_section, (
+        "TASKS.md heartbeat tracker must show wave7 as DONE."
+    )
+    assert "wave8" in sink_section and "D008" in sink_section, (
+        "TASKS.md heartbeat tracker wave8 must reference D008."
+    )
+
+
+def test_hypothesis_matrix_complete_across_docs() -> None:
+    """
+    G8CpsFeasibility.v0.md and L4DecisionCard.v0.md must both reflect
+    the complete hypothesis matrix: H1 PARTIALLY, H2 ALL MET, H3 FALSIFIED.
+    """
+    g8_text = G8_FEASIBILITY_PATH.read_text(encoding="utf-8")
+    dc_text = L4_DECISION_CARD_PATH.read_text(encoding="utf-8")
+
+    for label, text in (("G8CpsFeasibility", g8_text), ("L4DecisionCard", dc_text)):
+        assert "PARTIALLY CONFIRMED" in text, (
+            f"{label} must reference H1 PARTIALLY CONFIRMED."
+        )
+        assert "ALL 4 CRITERIA MET" in text, (
+            f"{label} must reference H2 ALL 4 CRITERIA MET."
+        )
+        assert "FALSIFIED" in text, (
+            f"{label} must reference H3 FALSIFIED."
+        )
+
+
 def test_vector_and_sink_have_ordered_priority_tags() -> None:
     """
     TASKS.md VECTOR and SINK active items must have priority tags

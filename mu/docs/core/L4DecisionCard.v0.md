@@ -574,6 +574,93 @@ Decision Deadline: 2026-03-12 (wave7 heartbeat)
    - H3: FALSIFIED (iteration is irreducible — methodology validated)
 ```
 
+### D008: G8 Evidence Closure — Founder Decision Packet
+
+```
+Decision ID: D008
+Date: 2026-02-19
+Owner: Founder (decision render); RCX Core Team (evidence assembly)
+Scope: GO/DEFER/NO-GO decision for D005 production pilot, based on D001-D007 evidence
+Decision Deadline: 2026-03-12 (wave8 heartbeat)
+
+1. Target L4 Gate(s)
+   target_gate_id: G8
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: All 3 hypotheses tested (D001-D007). Evidence loop is closed.
+   Founder decision required to advance or defer production pilot (D005).
+
+2. Evidence Summary (D001-D007)
+
+   | Decision | Hypothesis | Result | Evidence |
+   |----------|-----------|--------|----------|
+   | D001 | H2 C1: pattern enumeration | MET — 20 patterns, finite and closed | tests/research/ analysis |
+   | D002 | H2 C2: micro-matcher LOC | MET — 31 LOC (threshold 50) | tests/research/test_d002_micro_matcher.py |
+   | D003 | H2 C3-C4: Stage 0→1 + G2/G7 | MET — 52 LOC kernel, G2/G7 preserved | tests/research/test_d003_staged_bootstrap.py |
+   | D004 | Production pilot decision package | Assembled — scope boundaries defined | This doc (D004 section) |
+   | D006 | H1: structural fuel threading | PARTIALLY CONFIRMED — data=Mu, iteration=host | tests/research/test_d006_h1_fuel_threading.py |
+   | D007 | H3: negative control | FALSIFIED (expected) — iteration irreducible | tests/research/test_d007_h3_negative_control.py |
+
+   Hypothesis matrix (complete):
+   - H1 PARTIALLY CONFIRMED: fuel DATA can be structural Mu; fuel ITERATION remains host
+   - H2 ALL 4 CRITERIA MET: circular dependency IS breakable (52-LOC Stage 0 kernel)
+   - H3 FALSIFIED (expected): iteration is irreducible in some form (methodology validated)
+
+3. What This Proves / What It Does NOT Prove
+
+   PROVES:
+   - The circular dependency (eval_step ↔ match/subst) is breakable in principle
+   - A 52-LOC Stage 0 kernel can bootstrap match.v2 + subst.v2 projections
+   - eval_step is reclassifiable: IRREDUCIBLE → REDUCIBLE_WITH staged bootstrap
+   - max_steps budget can be structural Mu data (linked-list instead of integer)
+   - The falsification methodology works (H3 negative control succeeded)
+
+   DOES NOT PROVE:
+   - Production safety — research artifacts are isolated, never imported by rcx_pi/
+   - L3 parity feasibility — no JS micro-matcher or staged bootstrap has been built
+   - Performance — research artifacts are unoptimized; production would need profiling
+   - That iteration can be eliminated — H1+H3 confirm iteration is irreducible
+   - That G8 should be resolved now — this is a FEASIBILITY finding, not a priority judgment
+
+4. Decision Options
+
+   OPTION A — GO:
+   Authorize D005 production pilot under D004 constraints (≤100 LOC/substrate,
+   4 primitives invariant, zero regression tolerance, L3 parity required).
+   Pro: Resolves G8, reclassifies eval_step, strongest L4 evidence.
+   Con: Real risk (parity, regression, LOC budget), Boot1 (NEXT) has higher immediate value.
+
+   OPTION B — DEFER (recommended):
+   Preserve evidence, close research loop, defer production pilot.
+   Pro: Zero risk, evidence is durable, higher-priority work continues.
+   Con: G8 remains UNPROVEN (but not blocking any NEXT or VECTOR P1 item).
+   Trigger for re-evaluation: Boot1 complete + Hemisphere Metabolization at NEXT.
+
+   OPTION C — NO-GO:
+   Close production pilot path permanently.
+   Pro: Clarity — no future ambiguity about L4 production work.
+   Con: Forecloses option that evidence supports as feasible.
+
+5. Recommendation: DEFER
+
+   Rationale:
+   a) Evidence is complete and durable — D001-D007 will not expire.
+   b) Boot1 (NEXT) is higher priority and more immediately actionable.
+   c) Hemisphere Metabolization (VECTOR P1) is most design-complete VECTOR item.
+   d) G8 UNPROVEN is not blocking any current NEXT or VECTOR P1 work.
+   e) Production pilot has real risk for a gate that is not on the critical path.
+   f) DEFER preserves the option at zero cost.
+
+   Re-evaluation trigger: When Boot1 shadow-merge completes AND Hemisphere
+   Metabolization reaches NEXT, revisit D005 production pilot.
+
+6. Decision Outcome
+   Outcome: DEFER (recommended) — pending founder verdict
+   no_op_proof_ref: D001-D007 evidence is preserved in tests/research/ and
+   mu/docs/core/G8CpsFeasibility.v0.md. No production changes needed.
+   Rationale: Evidence loop closed. Higher-priority items take precedence.
+   Founder may override to GO or NO-GO with recorded rationale.
+```
+
 ---
 
 ## References
