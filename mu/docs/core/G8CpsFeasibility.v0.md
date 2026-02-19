@@ -134,9 +134,23 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 - 56 tests pass, no new primitives, no I/O, no globals
 - **Criterion 2 MET**
 
-**H2 status: CRITERIA 1-2 MET (of 4).** Pattern set is finite (D001). Micro-matcher is feasible at 31 LOC (D002). Criteria 3-4 (Stage 0→1 transition, G2/G7 preservation) remain UNTESTED and would require a staged bootstrap prototype.
+**D003 result (2026-02-19):** Criteria 3-4 tested via staged bootstrap prototype in `tests/research/test_d003_staged_bootstrap.py`. Evidence in `L4DecisionCard.v0.md` D003 §7.
 
-**Implication for G8:** The circular dependency is NOT inherently irreducible. A staged bootstrap is structurally possible — Stage 0 can handle a known, finite pattern set with a 31-LOC micro-matcher that is strictly simpler than the bootstrap it replaces. Whether the engineering cost of Stage 0→1 transition is justified is a separate question from whether it's possible.
+- micro_substitute: **14 LOC**, micro_step: **7 LOC**
+- Total Stage 0 kernel: **52 LOC** (micro_match 31 + micro_substitute 14 + micro_step 7)
+- All 5 test vectors produce correct terminal states (match success/failure, var binding, subst with structural traversal)
+- G2 preserved: AST check — no domain key references in micro_step
+- G7 preserved: AST check — no self-calls in micro_step or micro_run
+- No new BOOTSTRAP_PRIMITIVE markers (Python: 4, JS: 8 — unchanged)
+- **Criteria 3-4 MET**
+
+**H2 status: ALL 4 CRITERIA MET.** The staged bootstrap is fully feasible:
+1. Pattern set is finite and closed (D001)
+2. Micro-matcher handles it in 31 LOC (D002)
+3. Stage 0→1 transition produces correct results on all test vectors (D003)
+4. G2 (no domain branching) and G7 (non-recursive) are preserved (D003)
+
+**Implication for G8:** The circular dependency IS breakable. A 52-LOC Stage 0 kernel can bootstrap match.v2 and subst.v2 projections, breaking the cycle that made eval_step appear irreducible. The reclassification of eval_step from IRREDUCIBLE to REDUCIBLE_WITH staged bootstrap is now supported by concrete evidence. Whether to actually implement the staged bootstrap in production is a separate decision from whether it's possible.
 
 ---
 
@@ -172,7 +186,7 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 | ID | Claim | Type | Status | Success Path | Failure Path | Effort |
 |----|-------|------|--------|-------------|-------------|--------|
 | H1 | Structural fuel replaces host loop | Positive | UNTESTED | Fuel linked-list as Mu data | eval_step must branch on fuel (violates G2) | Medium (test harness) |
-| H2 | Staged bootstrap breaks circular dep | Positive | **CRITERIA 1-2 MET** (2/4) | Finite pattern set → micro-matcher (31 LOC) | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
+| H2 | Staged bootstrap breaks circular dep | Positive | **ALL 4 CRITERIA MET** | 52-LOC Stage 0 kernel bootstraps match.v2/subst.v2 | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
 | H3 | Loop elimination without any mechanism | Negative | UNTESTED | (Would invalidate methodology) | No non-isomorphic mechanism exists (expected) | Minimal (thought experiment) |
 
 ---
