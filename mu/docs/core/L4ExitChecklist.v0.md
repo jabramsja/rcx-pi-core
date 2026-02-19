@@ -27,7 +27,7 @@ If this doc's claims don't match reality, update the doc or fix the code.
 | Primitive | Location (Python) | Location (JS) | Role |
 |-----------|-------------------|---------------|------|
 | `eval_step` | `eval_seed.py:step()` | `eval_step.js:step()` | Apply first matching projection |
-| `max_steps` | `step_mu.py:241` | `eval_step.js` (maxSteps param) | Bound execution iterations |
+| `max_steps` | `step_mu.py:step_kernel_mu()` (see `BOOTSTRAP_PRIMITIVE: max_steps` comment) | `eval_step.js` (maxSteps param) | Bound execution iterations |
 | `stack_guard` | `mu_type.py:MAX_MU_DEPTH=300` | `eval_step.js:MAX_MU_DEPTH=300` | Depth limit for `is_mu()` |
 | `projection_loader` | `seed_integrity.py:load_verified_seed()` | `eval_step.js:loadSeedFile()` | Load + verify seed JSON |
 
