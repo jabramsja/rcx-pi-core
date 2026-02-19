@@ -377,6 +377,98 @@ Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
    | G1, G3-G6 | No | Already PASS; pilot must not regress them |
 ```
 
+### D006: H1 Structural Fuel Threading Experiment
+
+```
+Decision ID: D006
+Date: 2026-02-19
+Owner: RCX Core Team
+Scope: Test H1 — can max_steps host loop be replaced by structural fuel counter?
+Decision Deadline: 2026-02-26 (wave6 heartbeat)
+
+1. Target L4 Gate(s)
+   target_gate_id: G8
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: H2 is fully confirmed (D001-D003). H1 is the next untested
+   hypothesis. Fuel threading targets max_steps, currently classified as
+   REDUCIBLE_WITH fuel threading — test validates this classification.
+
+2. Proposed Change (Least-Lazy Path)
+   Write standalone fuel threading harness in tests/research/ (research
+   artifact only). Build Mu linked-list fuel, run through existing
+   step_mu unchanged. Validate against 5 canonical vectors. AST-verify
+   eval_step does not inspect fuel.
+
+3. Pass/Fail Evidence Commands
+   evidence_command: PYTHONHASHSEED=0 pytest tests/research/test_d006_h1_fuel_threading.py -v
+   Pass: All 5 vectors produce correct results, eval_step signature unchanged
+   Fail: eval_step must inspect fuel (G2 violation) OR new primitive required
+   evidence_delta_vs_previous: First H1 evidence (D001-D003 were all H2)
+
+4. Risks and Rollback Trigger
+   Risk: None (research artifact in tests/research/, not production import).
+   Rollback: Delete file if falsified.
+
+5. Not-in-Scope
+   - Production code changes
+   - H2 or H3 experiments
+   - Actual max_steps replacement in production
+   - Performance optimization
+
+6. Decision Outcome
+   Outcome: GO
+   Rationale: Zero risk, directly produces G8 evidence for H1. Completes
+   the hypothesis matrix coverage (H1 was the last UNTESTED positive hypothesis).
+
+7. Execution Result (2026-02-19)
+   Status: EXECUTED — H1 PARTIALLY CONFIRMED
+
+   Evidence command run:
+     PYTHONHASHSEED=0 pytest tests/research/test_d006_h1_fuel_threading.py -v
+     20 tests pass
+
+   Success criteria results:
+   - C1 (5 canonical vectors): MET
+     V1: identity stall — immediate stall, input unchanged ✓
+     V2: single match — one step then stall ✓
+     V3: multi-step convergence — 3 steps (a→b→c→done) then stall ✓
+     V4: fuel exhaustion — 3 fuel nodes, reaches n=3, exhausts before n=5 ✓
+     V5: nested structure — complex Mu data matches correctly ✓
+   - C2 (parity with run_mu): MET — 4 parametrized tests confirm
+     fuel_run produces identical results to run_mu on all converging vectors
+   - C3 (no new primitive): MET — fuel_step calls existing step_mu,
+     no BOOTSTRAP_PRIMITIVE markers in research artifact
+
+   Failure criteria results:
+   - F1 (eval_step inspects fuel): NOT HIT ✓
+     AST verification: step_mu source contains no references to fuel/head/tail.
+     eval_step signature unchanged: (projections, input_value) only.
+     G2 (no domain branching) PRESERVED.
+   - F2 (fuel construction requires host loop): HIT ✓
+     make_fuel() uses Python for-loop. fuel_run() uses Python while-loop.
+     Iteration mechanism is still host code. Fuel data is structural Mu,
+     but iteration over fuel is host. This is an honest limitation.
+   - F3 (>100x perf degradation): NOT HIT
+     O(fuel) space vs O(1) for integer, but within acceptable bounds
+     for research artifact.
+
+   Classification: H1 PARTIALLY CONFIRMED
+   - What H1 achieves: max_steps budget becomes inspectable Mu data
+     (linked-list instead of opaque Python int). eval_step contract
+     preserved (G2/G7). No new primitives.
+   - What H1 does NOT achieve: iteration is still host code. Replacing
+     `for i in range(N)` with `while fuel is not None` is isomorphic,
+     not reduced. Fuel construction itself requires a host loop.
+   - Implication for G8: max_steps classification REDUCIBLE_WITH is
+     confirmed for the DATA dimension (budget is Mu) but NOT for the
+     ITERATION dimension (loop is host). This is consistent with H3's
+     prediction that iteration is irreducible in some form.
+
+   LOC: fuel_step + fuel_run combined ≤50 LOC (self-verified by test)
+
+   Next step: D007 — H3 negative control (if pursued per heartbeat tracker)
+```
+
 ---
 
 ## References

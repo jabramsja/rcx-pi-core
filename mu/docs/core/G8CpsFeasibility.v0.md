@@ -68,6 +68,24 @@ pytest tests/research/test_h1_fuel_threading.py -v
 
 **Stop condition:** If failure criterion 1 is hit (eval_step must branch on fuel), H1 is FALSIFIED. Fuel threading cannot work without changing eval_step's contract, which would invalidate G2.
 
+**Experimental result (D006, 2026-02-19):**
+
+All 3 success criteria tested via standalone fuel threading harness in `tests/research/test_d006_h1_fuel_threading.py`. Full evidence in `L4DecisionCard.v0.md` D006 §7.
+
+| Criterion | Result |
+|-----------|--------|
+| C1: 5 canonical vectors | MET — identity stall, single match, multi-step, fuel exhaustion, nested structure |
+| C2: Parity with run_mu | MET — 4 parametrized tests, identical results |
+| C3: No new primitive | MET — calls existing step_mu unchanged |
+
+| Failure criterion | Result |
+|-------------------|--------|
+| F1: eval_step inspects fuel | NOT HIT — AST verified, G2 preserved |
+| F2: Fuel construction needs host loop | HIT — make_fuel uses for-loop, fuel_run uses while-loop |
+| F3: >100x perf degradation | NOT HIT |
+
+**Result: H1 PARTIALLY CONFIRMED.** Fuel *data* can be structural Mu (linked-list), and eval_step is unchanged (G2/G7 preserved). But fuel *iteration* is still host code — `while fuel is not None` replaces `for i in range(N)`, which is isomorphic, not reduced. Fuel construction also requires a host loop (F2 hit). The max_steps primitive is REDUCIBLE_WITH for its data dimension but not its iteration dimension. This is consistent with H3's prediction that iteration is irreducible in some form.
+
 ---
 
 ### H2 (Positive): Staged Continuation Envelopes
@@ -185,7 +203,7 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 
 | ID | Claim | Type | Status | Success Path | Failure Path | Effort |
 |----|-------|------|--------|-------------|-------------|--------|
-| H1 | Structural fuel replaces host loop | Positive | UNTESTED | Fuel linked-list as Mu data | eval_step must branch on fuel (violates G2) | Medium (test harness) |
+| H1 | Structural fuel replaces host loop | Positive | **PARTIALLY CONFIRMED** (D006) | Fuel data is Mu, eval_step unchanged (G2 ok) | Iteration still host (F2 hit) | Medium (test harness) |
 | H2 | Staged bootstrap breaks circular dep | Positive | **ALL 4 CRITERIA MET** | 52-LOC Stage 0 kernel bootstraps match.v2/subst.v2 | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
 | H3 | Loop elimination without any mechanism | Negative | UNTESTED | (Would invalidate methodology) | No non-isomorphic mechanism exists (expected) | Minimal (thought experiment) |
 
