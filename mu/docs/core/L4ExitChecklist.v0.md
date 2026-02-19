@@ -184,7 +184,7 @@ grep -n "def step\|step(" rcx_pi/selfhost/eval_seed.py
 | `stack_guard` | REDUCIBLE_WITH depth parameter | Depth counter could be Mu data threaded through eval_step, but changes eval_step signature |
 | `projection_loader` | REDUCIBLE_WITH binary format | JSON parsing could be replaced by minimal binary loader, but requires seed format redesign |
 
-**Status:** UNPROVEN — classifications are design analysis, not formal proof. Circular dependency claim for eval_step requires CPS feasibility study.
+**Status:** UNPROVEN — Research evidence (D001-D007) confirms feasibility: H2 ALL 4 CRITERIA MET (circular dependency breakable, 52-LOC Stage 0 kernel), H1 PARTIALLY CONFIRMED (fuel data = Mu, iteration = host), H3 FALSIFIED (iteration irreducible, methodology validated). However, G8 requires a **production-pilot outcome**, not just research feasibility. See D008 (`mu/docs/core/L4DecisionCard.v0.md`) for founder decision packet (GO/DEFER/NO-GO). G8 remains UNPROVEN until production evidence exists.
 
 ---
 
