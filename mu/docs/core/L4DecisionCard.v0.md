@@ -137,6 +137,66 @@ Scope: Enumerate match.v2/subst.v2 pattern set to test G8 H2 feasibility
    Next step: D002 — micro-matcher prototype (<50 LOC target) if H2 criterion 2 is pursued
 ```
 
+### D002: H2 Micro-Matcher Feasibility Experiment
+
+```
+Decision ID: D002
+Date: 2026-02-19
+Owner: RCX Core Team
+Scope: Test H2 criterion 2 — micro-matcher <=50 LOC handling D001 pattern set
+
+1. Target L4 Gate(s)
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: D001 confirmed pattern set is finite. Next question: is a
+   micro-matcher small enough to qualify as a reduction over bootstrap match/subst?
+
+2. Proposed Change (Least-Lazy Path)
+   Write standalone micro-matcher in tests/research/ (research artifact only).
+   Validate against all 20 match.v2/subst.v2 patterns. Measure LOC.
+
+3. Pass/Fail Evidence Commands
+   Pass: PYTHONHASHSEED=0 pytest tests/research/test_d002_micro_matcher.py -v
+   Fail: matcher core >50 LOC OR cannot handle same-var OR needs new primitive
+   LOC measurement: test_matcher_loc_under_threshold (self-verifying)
+
+4. Risks and Rollback Trigger
+   Risk: None (research artifact in tests/research/, not production import).
+   Rollback: Delete file if falsified.
+
+5. Not-in-Scope
+   - H2 criteria 3-4 (Stage 0→1 transition, G2/G7 preservation)
+   - Production code changes
+   - H1 or H3 experiments
+   - Substitution micro-implementation
+
+6. Decision Outcome
+   Outcome: GO
+   Rationale: D001 proved finite pattern set. LOC test is fast, isolated,
+   and directly answers whether micro-matcher reduction is real.
+
+7. Execution Result (2026-02-19)
+   Status: EXECUTED — H2 criterion 2 MET
+
+   Evidence:
+   - micro_match() function: 31 LOC (threshold: 50)
+   - Handles all 5 D001 primitives: var_bind, dict_shape, literal_string,
+     null_check, nested_var_bind
+   - Handles all 3 same-var equality constraints correctly
+   - 56 tests pass (20 positive matches, 18 literal rejection, 3 same-var,
+     2 nested-var, 7 negative cases, 2 LOC/purity checks, 4 D001 consistency)
+   - No new primitives introduced (no imports, no I/O, no globals)
+   - No production code modified
+
+   Comparison to bootstrap match/subst:
+   - Bootstrap _match_inner: ~90 LOC (handles lists, type normalization, etc.)
+   - Micro-matcher: 31 LOC (handles only D001 pattern set)
+   - Reduction: 66% smaller — micro-matcher is strictly less complex
+
+   H2 criterion 2 (<50 LOC micro-matcher): MET (31 LOC)
+   H2 criteria 3-4 (Stage 0→1 transition, G2/G7 preservation): UNTESTED
+   Next step: D003 (if pursued) — Stage 0→1 transition prototype
+```
+
 ---
 
 ## References
