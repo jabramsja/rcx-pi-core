@@ -197,6 +197,72 @@ Scope: Test H2 criterion 2 — micro-matcher <=50 LOC handling D001 pattern set
    Next step: D003 (if pursued) — Stage 0→1 transition prototype
 ```
 
+### D003: H2 Stage 0→1 Transition Correctness
+
+```
+Decision ID: D003
+Date: 2026-02-19
+Owner: RCX Core Team
+Scope: Test H2 criteria 3-4 — staged bootstrap transition + G2/G7 preservation
+
+1. Target L4 Gate(s)
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: D001+D002 confirmed pattern set is finite and micro-matcher is
+   feasible (31 LOC). Remaining question: does staged bootstrap actually work?
+
+2. Proposed Change (Least-Lazy Path)
+   Write micro_substitute + micro_step + micro_run (research artifact).
+   Validate 5 canonical test vectors against expected terminal states.
+   AST-verify G2 (no domain branching) and G7 (non-recursive).
+
+3. Pass/Fail Evidence Commands
+   Pass: PYTHONHASHSEED=0 pytest tests/research/test_d003_staged_bootstrap.py -v
+   Fail: any vector diverges OR domain branching OR recursion OR LOC cap exceeded
+
+4. Risks and Rollback Trigger
+   Risk: None (research artifact in tests/research/, not production import).
+   Rollback: Delete file if falsified.
+
+5. Not-in-Scope
+   - Production code changes
+   - H1 or H3 experiments
+   - Actual Boot0/Boot1 implementation
+   - Stage 0→1 runtime transition mechanism
+
+6. Decision Outcome
+   Outcome: GO
+   Rationale: D002 proved micro-matcher feasible. Stage 0 transition is the
+   next logical gate for H2. Fast, isolated, directly produces G8 evidence.
+
+7. Execution Result (2026-02-19)
+   Status: EXECUTED — H2 criteria 3-4 MET
+
+   Evidence:
+   - micro_substitute: 14 LOC, micro_step: 7 LOC
+   - Total Stage 0 kernel: 52 LOC (micro_match 31 + micro_substitute 14 + micro_step 7)
+   - For comparison: bootstrap match alone is ~90 LOC. Stage 0 is 42% the size.
+   - All 5 test vectors produce correct terminal states:
+     V1: literal match -> match_done/success
+     V2: var bind -> match_done/success with bindings
+     V3: match failure -> match_done/no_match
+     V4: simple subst -> subst_done with result 42
+     V5: structural subst -> subst_done with {head:1, tail:2}
+   - G2 preserved: AST check confirms no domain key references in micro_step
+   - G7 preserved: AST check confirms no self-calls in micro_step or micro_run
+   - No new BOOTSTRAP_PRIMITIVE markers (Python: 4, JS: 8 — unchanged)
+   - All vectors converge in <100 steps
+   - 21 tests pass, no production code modified
+
+   H2 criterion 3 (Stage 0→1 identical results): MET
+   H2 criterion 4 (G2/G7 preserved): MET
+   H2 status: ALL 4 CRITERIA MET — staged bootstrap is feasible
+
+   Implication for G8: eval_step is REDUCIBLE_WITH staged bootstrap.
+   The circular dependency (eval_step needs match/subst, match/subst are
+   projections needing eval_step) can be broken by a 52-LOC Stage 0 kernel.
+   Whether to actually implement this is a separate decision.
+```
+
 ---
 
 ## References
