@@ -260,3 +260,76 @@ def test_manifest_includes_l4_research_packet() -> None:
         f"roadmap/MANIFEST.md is missing L4 research packet links: {missing}\n"
         "SINK status does not remove active evidence docs from MANIFEST discoverability."
     )
+
+
+# =============================================================================
+# Governance Lane Classification — VECTOR/SINK priority ordering
+# =============================================================================
+
+
+def _extract_section(text: str, heading: str) -> str:
+    """Extract content between a heading and the next ## heading."""
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\b.*?\n(.*?)(?=\n## |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    match = pattern.search(text)
+    assert match, f"Could not find section '## {heading}' in TASKS.md"
+    return match.group(1)
+
+
+def test_g8_decision_path_in_vector_with_priority() -> None:
+    """
+    TASKS.md VECTOR must contain the G8 production decision path
+    with a [P<N>] priority tag.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    vector_section = _extract_section(tasks_text, "VECTOR")
+
+    assert "G8 Production Decision Path" in vector_section or "G8" in vector_section, (
+        "TASKS.md VECTOR is missing the G8 production decision path item. "
+        "G8 evidence (D001-D003) warrants a VECTOR design item."
+    )
+    assert re.search(r"\[P\d+\]", vector_section), (
+        "TASKS.md VECTOR items must have priority tags ([P1], [P2], ...)."
+    )
+
+
+def test_l4_full_rewrite_remains_in_sink() -> None:
+    """
+    TASKS.md SINK must contain the full L4 rewrite as a long-horizon item.
+    The bounded G8 decision path belongs in VECTOR, but the full rewrite stays parked.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    sink_section = _extract_section(tasks_text, "SINK")
+
+    assert "L4 Full Self-Hosting" in sink_section or "L4" in sink_section, (
+        "TASKS.md SINK must retain the full L4 self-hosting rewrite as a "
+        "long-horizon item (distinct from the bounded G8 decision path in VECTOR)."
+    )
+
+
+def test_vector_and_sink_have_ordered_priority_tags() -> None:
+    """
+    TASKS.md VECTOR and SINK active items must have priority tags
+    ([P1], [P2], ... for VECTOR; [S1], [S2], ... for SINK) in ascending order.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+
+    vector_section = _extract_section(tasks_text, "VECTOR")
+    vector_tags = [int(m.group(1)) for m in re.finditer(r"\[P(\d+)\]", vector_section)]
+    assert len(vector_tags) >= 2, (
+        f"TASKS.md VECTOR must have at least 2 priority-tagged items, found {len(vector_tags)}."
+    )
+    assert vector_tags == sorted(vector_tags), (
+        f"TASKS.md VECTOR priority tags are not in ascending order: {vector_tags}"
+    )
+
+    sink_section = _extract_section(tasks_text, "SINK")
+    sink_tags = [int(m.group(1)) for m in re.finditer(r"\[S(\d+)\]", sink_section)]
+    assert len(sink_tags) >= 2, (
+        f"TASKS.md SINK must have at least 2 priority-tagged items, found {len(sink_tags)}."
+    )
+    assert sink_tags == sorted(sink_tags), (
+        f"TASKS.md SINK priority tags are not in ascending order: {sink_tags}"
+    )

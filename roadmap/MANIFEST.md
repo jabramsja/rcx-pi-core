@@ -60,9 +60,9 @@
 
 5. **Baseline freeze (Gate 0)** - Introduced as TASKS.md NEXT item only when refactor begins. Does not need permanent tracking in roadmap docs.
 
-## Canonical L4 Research Packet (Discoverable Even in SINK)
+## Canonical L4 Research Packet
 
-Governance SINK status does not remove active evidence docs from MANIFEST discoverability. These documents contain live research evidence (D001-D003 feasibility results) that must remain findable regardless of L4's governance lane.
+Governance lane status (SINK or VECTOR) does not remove active evidence docs from MANIFEST discoverability. These documents contain live research evidence (D001-D003 feasibility results) that must remain findable regardless of governance classification. The G8 decision path is VECTOR P1; the full L4 rewrite is SINK S1.
 
 | Document | Role |
 |----------|------|
