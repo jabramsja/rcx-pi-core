@@ -263,6 +263,115 @@ Scope: Test H2 criteria 3-4 — staged bootstrap transition + G2/G7 preservation
    Whether to actually implement this is a separate decision.
 ```
 
+### D004: Production Pilot GO/NO-GO Decision Package
+
+```
+Decision ID: D004
+Date: 2026-02-19
+Owner: RCX Core Team
+Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
+
+1. Target L4 Gate(s)
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: D001-D003 established H2 feasibility in research artifacts
+   (52 LOC Stage 0 kernel, all 4 criteria MET). The question shifts from
+   "is it possible?" to "should we attempt production integration, and
+   under what constraints?"
+
+2. Proposed Change (Least-Lazy Path)
+   This decision card is a DECISION PACKAGE ONLY. No runtime code changes.
+
+   D004 produces a GO/NO-GO/DEFER verdict based on:
+   a) Risk-benefit analysis: what does staged bootstrap buy vs. cost?
+   b) Production LOC budget and blast-radius inventory
+   c) Invariant preservation checklist
+   d) Rollback trigger specification
+
+   If GO: authorizes a bounded D005 pilot (separate decision card).
+   If NO-GO: records reasoning, closes production pilot path.
+   If DEFER: records reasoning, preserves option for future re-evaluation.
+
+3. Pass/Fail Evidence Commands
+   This is a decision package — evidence is analytical, not executable.
+   Supporting evidence:
+     PYTHONHASHSEED=0 pytest tests/research/ -v  # D001-D003 research artifacts
+     pytest tests/docs/test_doc_contracts.py -v   # Doc consistency
+   Decision inputs:
+     - Research evidence: D001 (finite patterns), D002 (31 LOC), D003 (52 LOC)
+     - Production constraints: 4 bootstrap primitives, debt=12, infra<=48
+     - L3 parity requirement: any production change must mirror in JS
+
+4. Risks and Rollback Trigger
+   D004 risk: ZERO (decision package, no code changes).
+   For a future pilot (if GO), risks would include:
+   - Stage 0 kernel introduces new failure mode in production boot path
+   - LOC growth beyond budget signals complexity leak
+   - L3 parity cannot be maintained for staged bootstrap
+   Rollback trigger (for future pilot): any test regression, any new
+   bootstrap primitive, debt exceeds ceiling, L3 parity broken.
+
+5. Not-in-Scope
+   - Actual Stage 0 production implementation (would be D005+ if GO)
+   - H1 (fuel threading) or H3 (negative control) experiments
+   - Boot1 loop contract work (parallel NEXT item)
+   - Any changes to eval_step, step_mu, or match_mu
+   - L4ExitChecklist G8 reclassification (premature until pilot succeeds)
+   - eval_step.js modifications
+
+6. Decision Outcome
+   Outcome: GO/NO-GO/DEFER (pending founder review)
+
+   GO criteria (all required):
+   - Research evidence is sufficient (D001-D003: YES)
+   - Production LOC budget is bounded (proposed: <=100 net new in selfhost/)
+   - All invariants enumerable and preservable
+   - Rollback path is clean (revert to single-stage boot)
+   - Benefit exceeds risk at current project stage
+
+   NO-GO criteria (any sufficient):
+   - Risk exceeds benefit (L4 is SINK, not blocking any NEXT work)
+   - Invariants cannot be preserved without new primitives
+   - L3 parity cost is prohibitive
+
+   DEFER criteria:
+   - Evidence is sufficient but timing is wrong (other NEXT items higher priority)
+   - Benefit is real but risk tolerance is currently low
+
+7. Pilot Scope Boundaries (if GO)
+
+   | Boundary | Constraint |
+   |----------|------------|
+   | Max production LOC | <=100 net new in rcx_pi/selfhost/ |
+   | Forbidden changes | eval_seed.step(), match(), substitute(), step_kernel_mu() |
+   | Bootstrap primitives | Must remain exactly 4 (no increase) |
+   | BOOTSTRAP_PRIMITIVE markers | Py:4, JS:8 (no increase) |
+   | Debt ceiling | Must remain <=12 (L2 floor) |
+   | Infra ceiling | Must remain <=48 |
+   | L3 parity | If any production change, JS must mirror |
+   | Seed files | No modifications to kernel.v1, match.v2, subst.v2 |
+   | Test regression | Zero tolerance — any failure terminates pilot |
+
+8. Stop Conditions (immediate pilot termination, if authorized)
+
+   | # | Condition | Action |
+   |---|-----------|--------|
+   | S1 | Any existing test fails | STOP. Revert. |
+   | S2 | New bootstrap primitive required | STOP. Primitive count is invariant. |
+   | S3 | Stage 0 exceeds 100 LOC in production | STOP. Complexity leak. |
+   | S4 | JS parity cannot be maintained | STOP. L3 is non-negotiable. |
+   | S5 | Analysis reveals no material benefit | NO-GO. Record and close. |
+   | S6 | Founder determines risk > benefit | NO-GO. Defer to future L4. |
+
+9. Gate Mapping
+
+   | L4 Gate | De-risks? | How |
+   |---------|-----------|-----|
+   | G8 (Irreducible Primitive Consensus) | PRIMARY | Demonstrates eval_step REDUCIBLE_WITH in production context |
+   | G2 (eval_step Minimality) | Indirect | Stage 0 preserves no-domain-branching (proven D003) |
+   | G7 (eval_step Non-Recursive) | Indirect | Stage 0 preserves non-recursive (proven D003) |
+   | G1, G3-G6 | No | Already PASS; pilot must not regress them |
+```
+
 ---
 
 ## References
