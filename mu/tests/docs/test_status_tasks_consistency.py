@@ -398,6 +398,41 @@ def test_hypothesis_matrix_complete_across_docs() -> None:
         )
 
 
+def test_post_d008_operating_mode_in_status_and_tasks() -> None:
+    """
+    STATUS.md and TASKS.md must both contain a Post-D008 Operating Mode note
+    stating Boot1/NEXT primacy while preserving L4 heartbeat continuity.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+
+    for label, text in (("STATUS.md", status_text), ("TASKS.md", tasks_text)):
+        assert "Post-D008 Operating Mode" in text, (
+            f"{label} is missing 'Post-D008 Operating Mode' note."
+        )
+        assert "Boot1" in text and "NEXT" in text, (
+            f"{label} Post-D008 note must reference Boot1 as NEXT primary lane."
+        )
+        assert "DEFER" in text, (
+            f"{label} Post-D008 note must reference D008 DEFER outcome."
+        )
+
+
+def test_l4_heartbeat_not_removed() -> None:
+    """
+    TASKS.md must retain the L4 Heartbeat Tracker even after D008 DEFER.
+    L4 is deferred, not abandoned.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    assert "L4 Heartbeat Tracker" in tasks_text, (
+        "TASKS.md must retain 'L4 Heartbeat Tracker' section. "
+        "D008 DEFER means deferred, not abandoned."
+    )
+    assert "wave6" in tasks_text and "wave7" in tasks_text and "wave8" in tasks_text, (
+        "TASKS.md heartbeat tracker must retain all 3 waves (6-8)."
+    )
+
+
 def test_vector_and_sink_have_ordered_priority_tags() -> None:
     """
     TASKS.md VECTOR and SINK active items must have priority tags

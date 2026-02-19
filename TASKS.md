@@ -485,7 +485,7 @@ Current Exhaustion Layer: META_CIRCULAR
 ## SINK (ideas parked; may not advance without explicit promotion decision)
 
 **Items (priority-ordered):**
-- **[S1]** L4 Full Self-Hosting Rewrite — long-horizon goal: eliminate all 4 bootstrap primitives entirely. Depends on G8 resolution (active decision path now in VECTOR P1) + Boot1 completion (in NEXT). G1-G7 already PASS; only G8 is UNPROVEN. See `mu/docs/core/L4ExitChecklist.v0.md` for gate definitions. This is the full rewrite scope — not the bounded G8 decision path (which is VECTOR P1).
+- **[S1]** L4 Full Self-Hosting Rewrite — long-horizon goal: eliminate all 4 bootstrap primitives entirely. Depends on G8 resolution (active decision path in VECTOR P2, D008 DEFER recommended) + Boot1 completion (in NEXT). G1-G7 already PASS; only G8 is UNPROVEN. See `mu/docs/core/L4ExitChecklist.v0.md` for gate definitions. This is the full rewrite scope — not the bounded G8 decision path (which is VECTOR P2).
 - **[S2]** Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
 - **[S3]** Multi-value/concurrent execution
 - **[S4]** Performance-first optimizations
@@ -498,6 +498,8 @@ Current Exhaustion Layer: META_CIRCULAR
 | wave6 | G8 | D006 H1 fuel threading experiment | RCX Core | 2026-02-26 | DONE — H1 PARTIALLY CONFIRMED (D006). `tests/research/test_d006_h1_fuel_threading.py` |
 | wave7 | G8 | D007 H3 negative control experiment | RCX Core | 2026-03-05 | DONE — H3 FALSIFIED (expected, D007). `tests/research/test_d007_h3_negative_control.py` |
 | wave8 | G8 | D008 evidence closure + founder decision packet | Founder | 2026-03-12 | DONE — D008 assembled. Recommendation: DEFER. Awaiting founder verdict. |
+
+**Post-D008 Operating Mode:** NEXT (Boot1) is the primary execution lane. L4 research is evidence-tracked via heartbeat — not abandoned, but deferred per D008. Next L4 action: NO-OP (evidence preserved in `tests/research/` and `mu/docs/core/G8CpsFeasibility.v0.md`) unless founder overrides D008 DEFER. Re-evaluation trigger: Boot1 shadow-merge complete + Hemisphere Metabolization promoted to NEXT.
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
