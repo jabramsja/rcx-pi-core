@@ -332,3 +332,4 @@ Disable with `--no-memory` if needed.
 - Findings persist in `.agent_memory/findings.json`
 - See `mu/docs/agents/AgentGuardrails.v0.md` for format requirements
 - See `mu/docs/agents/AgentRig.v0.md` for architecture and trust model
+- See `mu/docs/agents/NoOpProofTemplate.v0.md` for structured NO-OP evidence when correct action is "do nothing"

@@ -208,6 +208,8 @@ L4 is blocked under current architecture when:
 
 - `STATUS.md` L4 section — Current L4 status and primitive table
 - `mu/docs/core/L4MicroAbi.v0.md` — L4 ABI surface (rcx_load/rcx_step/rcx_run) mapped to gates
+- `mu/docs/core/L4DecisionCard.v0.md` — L4 decision record template and log
+- `mu/docs/core/G8CpsFeasibility.v0.md` — CPS feasibility study for G8 circular dependency
 - `mu/docs/core/Boot0Architecture.v0.md` — Staged bootstrap design (Boot0/Boot1/Boot2)
 - `mu/docs/core/BootstrapPrimitives.v0.md` — Primitive specification
 - `mu/docs/core/Boot1LoopContract.v0.md` — Boot1 recursive loop design spec
