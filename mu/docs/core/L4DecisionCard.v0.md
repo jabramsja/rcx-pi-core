@@ -323,7 +323,7 @@ Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
 
    GO criteria (all required):
    - Research evidence is sufficient (D001-D003: YES)
-   - Production LOC budget is bounded (proposed: <=100 net new in selfhost/)
+   - Production LOC budget is bounded (proposed: <=100 net new per substrate)
    - All invariants enumerable and preservable
    - Rollback path is clean (revert to single-stage boot)
    - Benefit exceeds risk at current project stage
@@ -341,7 +341,7 @@ Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
 
    | Boundary | Constraint |
    |----------|------------|
-   | Max production LOC | <=100 net new in rcx_pi/selfhost/ |
+   | Max production LOC | <=100 net new per substrate (rcx_pi/selfhost/ and eval_step.js separately) |
    | Forbidden changes | eval_seed.step(), match(), substitute(), step_kernel_mu() |
    | Bootstrap primitives | Must remain exactly 4 (no increase) |
    | BOOTSTRAP_PRIMITIVE markers | Py:4, JS:8 (no increase) |
@@ -357,7 +357,7 @@ Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
    |---|-----------|--------|
    | S1 | Any existing test fails | STOP. Revert. |
    | S2 | New bootstrap primitive required | STOP. Primitive count is invariant. |
-   | S3 | Stage 0 exceeds 100 LOC in production | STOP. Complexity leak. |
+   | S3 | Stage 0 exceeds 100 LOC per substrate | STOP. Complexity leak. |
    | S4 | JS parity cannot be maintained | STOP. L3 is non-negotiable. |
    | S5 | Analysis reveals no material benefit | NO-GO. Record and close. |
    | S6 | Founder determines risk > benefit | NO-GO. Defer to future L4. |
