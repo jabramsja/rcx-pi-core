@@ -293,6 +293,26 @@ Do NOT update individual agent files - they read STATUS.md.
 
 ---
 
+## L4 Momentum Guardrails
+
+**Purpose:** Prevent L4 from stalling in SINK via unbounded tooling/docs waves without evidence progress.
+
+**Enforceable rules:**
+
+1. **Evidence-or-NO-OP per wave:** Every wave must produce either (a) one L4 evidence artifact tied to a gate, or (b) a NO-OP proof tied to a gate explaining why no evidence was possible.
+
+2. **Ratio cap:** Max 1 tooling/docs-only wave without 1 L4-evidence wave. If 2 consecutive waves yield zero L4 evidence, freeze nonessential tooling until the next evidence wave ships.
+
+3. **SINK expiry:** Each L4 SINK item must have an owner and a decision deadline (GO/DEFER/NO-GO). Items without a decision deadline are dead weight. See `mu/docs/core/L4DecisionCard.v0.md` for the required decision card format.
+
+4. **Gate mapping required:** No hardening item without an explicit L4 gate ID and evidence command. If a task can't name a gate, it's not L4 work — route it to Lane B or defer.
+
+5. **Decision card fields:** Every L4 decision card (D-series) must include: `target_gate_id`, `evidence_command`, `evidence_delta_vs_previous`, `decision_deadline`, `outcome` (GO/DEFER/NO-GO), and `no_op_proof_ref` (required when outcome=DEFER).
+
+**L4 heartbeat tracker:** See TASKS.md SINK section for next-wave tracker (wave_id, target_gate, artifact, owner, due_date, status).
+
+---
+
 ## Key Files
 
 | File | Purpose |

@@ -95,6 +95,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-19, l4-heartbeat-governance-wave1): L4 momentum guardrails codified. CLAUDE.md: 5 enforceable rules (evidence-or-NO-OP per wave, ratio cap, SINK expiry, gate mapping required, decision card fields). L4DecisionCard.v0.md: template expanded with target_gate_id, evidence_command, evidence_delta_vs_previous, decision_deadline, no_op_proof_ref. STATUS.md: guardrail posture line added. TASKS.md: L4 heartbeat tracker (waves 6-8, owner, deadlines, gate targets). No phase/debt/task change. No runtime changes.
 - Tracker sync note (2026-02-19, l4-derisk-wave5): D004 decision package — production pilot GO/NO-GO/DEFER for staged bootstrap. Added to L4DecisionCard.v0.md with scope boundaries (<=100 LOC, 4 primitives invariant, zero test regression), 6 stop conditions, gate mapping (G8 primary). STATUS.md and TASKS.md SINK synced: H2 feasibility confirmed in research artifacts, production pilot pending D004. G8CpsFeasibility.v0.md: D004 linkage with "feasible in research artifacts != production-ready" distinction. No phase/debt/task change. No runtime changes.
 - Tracker sync note (2026-02-19, l4-derisk-wave4): Executed D003 (H2 Stage 0→1 transition). Result: micro_substitute 14 LOC + micro_step 7 LOC, total Stage 0 kernel 52 LOC. All 5 test vectors produce correct terminal states. G2 preserved (AST: no domain keys). G7 preserved (AST: no self-calls). No new BOOTSTRAP_PRIMITIVE markers (Py:4, JS:8). H2 ALL 4 CRITERIA MET. Research artifact in tests/research/test_d003_staged_bootstrap.py. Updated L4DecisionCard.v0.md (D003) and G8CpsFeasibility.v0.md (H2 fully confirmed). eval_step reclassifiable: IRREDUCIBLE → REDUCIBLE_WITH staged bootstrap. No phase/debt/task change. No runtime changes.
 - Tracker sync note (2026-02-19, l4-derisk-wave3): Executed D002 (H2 micro-matcher feasibility). Result: micro_match() at 31 LOC (threshold 50), handles all 5 D001 primitives + 3 same-var constraints. 56 tests pass. H2 criterion 2 MET. Research artifact in tests/research/test_d002_micro_matcher.py (not production code). Updated L4DecisionCard.v0.md (D002 decision card + execution result) and G8CpsFeasibility.v0.md (H2 criteria 1-2 MET, hypothesis matrix updated). No phase/debt/task change. No runtime changes.
@@ -482,6 +483,14 @@ Current Exhaustion Layer: META_CIRCULAR
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
 - Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
 - L4 True Self-Hosting — measurable exit checklist with 8 gates (L4-G1 through L4-G8). See `mu/docs/core/L4ExitChecklist.v0.md`. G1-G7 PASS, G8 UNPROVEN (circular dependency research question). Stop conditions documented. L4 Micro-ABI defined (`mu/docs/core/L4MicroAbi.v0.md`): rcx_load/rcx_step/rcx_run mapped to gates. G8 CPS feasibility study (`mu/docs/core/G8CpsFeasibility.v0.md`): 3 falsifiable hypotheses with stop conditions. H2 feasibility CONFIRMED in research artifacts (D001-D003): 52 LOC Stage 0 kernel, all 4 criteria MET. Production pilot decision pending D004.
+
+**L4 Heartbeat Tracker (next 3 waves):**
+
+| wave_id | target_gate | artifact_or_noop_proof | owner | decision_deadline | status |
+|---------|-------------|------------------------|-------|-------------------|--------|
+| wave6 | G8 | D005 production pilot spec OR NO-OP proof | Founder | 2026-02-26 | PENDING (awaiting D004 founder verdict) |
+| wave7 | G8 | H1 fuel threading experiment OR NO-OP proof | RCX Core | 2026-03-05 | PENDING |
+| wave8 | G8 | H3 negative control OR NO-OP proof | RCX Core | 2026-03-12 | PENDING |
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`

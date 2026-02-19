@@ -166,6 +166,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 G8 CPS feasibility study (D001-D003) confirmed H2 staged bootstrap is feasible
 in research artifacts (52 LOC Stage 0 kernel, all 4 H2 criteria MET). Production
 pilot decision pending (D004). See `mu/docs/core/G8CpsFeasibility.v0.md`.
+L4 momentum guardrails active: evidence-or-NO-OP per wave, 2-wave freeze trigger. See CLAUDE.md.
 
 **Boot1 Current Reality (truth-sync 2026-02-18):**
 Boot1 is a **host-side loop policy alternative**, not a seed-defined structural loop. Two host paths exist:

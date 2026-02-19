@@ -29,8 +29,10 @@ Decision ID: D<NNN>
 Date: YYYY-MM-DD
 Owner: <name or team>
 Scope: <one-line summary>
+Decision Deadline: YYYY-MM-DD (when GO/DEFER/NO-GO must be rendered)
 
 1. Target L4 Gate(s)
+   target_gate_id: G<N>
    Gate: G<N> (<gate name>)
    Why now: <why this gate needs attention at this point>
 
@@ -38,8 +40,10 @@ Scope: <one-line summary>
    <concrete description, no aspirational prose>
 
 3. Pass/Fail Evidence Commands
+   evidence_command: <command that proves success>
    Pass: <command that proves success>
    Fail: <command or condition that proves failure>
+   evidence_delta_vs_previous: <what this adds beyond the last decision card>
 
 4. Risks and Rollback Trigger
    Risk: <what could go wrong>
@@ -51,6 +55,7 @@ Scope: <one-line summary>
 6. Decision Outcome
    Outcome: GO | NO-GO | DEFER
    Rationale: <why this outcome>
+   no_op_proof_ref: <required when Outcome=DEFER — link to NO-OP proof>
 ```
 
 ---
