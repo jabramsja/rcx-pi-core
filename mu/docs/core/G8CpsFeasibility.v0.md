@@ -112,6 +112,25 @@ for name in ['match.v2.json', 'subst.v2.json']:
 
 **Stop condition:** If the pattern set is not finite (failure criterion 1), H2 is FALSIFIED. The circular dependency is genuinely irreducible — no finite stage can bootstrap an open-ended matcher.
 
+**Experimental result (D001, 2026-02-19):**
+
+Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` and `mu/substrate/subst.v2.json`. Full evidence in `L4DecisionCard.v0.md` D001 §7.
+
+| Metric | Value |
+|--------|-------|
+| Total projections | 20 (8 match + 12 subst) |
+| Distinct top-level key signatures | 5 |
+| Matching primitives required | 5 (var_bind, dict_shape, literal_string, null_check, nested_var_bind) |
+| Same-var equality constraints | 3 |
+| Max pattern nesting depth | 3 |
+| Self-referential patterns | 0 |
+
+**Result: Criterion 1 MET — pattern set is FINITE AND CLOSED.** No projection body creates new projection definitions. All 20 patterns are static JSON. A micro-matcher handling exactly these 5 matching primitives across 5 top-level key signatures is feasible in principle.
+
+**H2 status: PARTIALLY CONFIRMED.** Criterion 1 (finite set) met. Criteria 2-4 (micro-matcher size, Stage 0→1 transition, G2/G7 preservation) remain UNTESTED and would require implementation (separate decision D002).
+
+**Implication for G8:** The circular dependency is NOT inherently irreducible. A staged bootstrap is structurally possible — Stage 0 can handle a known, finite pattern set. Whether the engineering cost is justified is a separate question from whether it's possible.
+
 ---
 
 ### H3 (Negative Control): Host Loop Elimination Without CPS
@@ -143,11 +162,11 @@ for name in ['match.v2.json', 'subst.v2.json']:
 
 ## Hypothesis Matrix
 
-| ID | Claim | Type | Success Path | Failure Path | Effort |
-|----|-------|------|-------------|-------------|--------|
-| H1 | Structural fuel replaces host loop | Positive | Fuel linked-list as Mu data | eval_step must branch on fuel (violates G2) | Medium (test harness) |
-| H2 | Staged bootstrap breaks circular dep | Positive | Finite pattern set → micro-matcher | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
-| H3 | Loop elimination without any mechanism | Negative | (Would invalidate methodology) | No non-isomorphic mechanism exists (expected) | Minimal (thought experiment) |
+| ID | Claim | Type | Status | Success Path | Failure Path | Effort |
+|----|-------|------|--------|-------------|-------------|--------|
+| H1 | Structural fuel replaces host loop | Positive | UNTESTED | Fuel linked-list as Mu data | eval_step must branch on fuel (violates G2) | Medium (test harness) |
+| H2 | Staged bootstrap breaks circular dep | Positive | **PARTIALLY CONFIRMED** (criterion 1/4 met) | Finite pattern set → micro-matcher | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
+| H3 | Loop elimination without any mechanism | Negative | UNTESTED | (Would invalidate methodology) | No non-isomorphic mechanism exists (expected) | Minimal (thought experiment) |
 
 ---
 
