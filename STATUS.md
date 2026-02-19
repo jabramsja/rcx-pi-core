@@ -162,12 +162,11 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 | `stack_guard` | Can depth be Mu data? | Count in Mu, not Python |
 | `projection_loader` | Can Mu load Mu? | Possibly, with file I/O primitive |
 
-**L4 Status:** G8 production decision path promoted to VECTOR P1 (design/decision only). Full L4 rewrite remains in SINK S1.
-G8 CPS feasibility study (D001-D003) confirmed H2 staged bootstrap is feasible
-in research artifacts (52 LOC Stage 0 kernel, all 4 H2 criteria MET). Production
-pilot decision pending (D004). See `mu/docs/core/G8CpsFeasibility.v0.md`.
-L4 momentum guardrails active: evidence-or-NO-OP per wave, 2-wave freeze trigger. See CLAUDE.md.
+**L4 Status:** G8 evidence loop closed (D001-D007). D008 recommendation: DEFER. Awaiting founder verdict.
+H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
 See TASKS.md VECTOR/SINK for priority ordering (P1-P6, S1-S4).
+
+**Post-D008 Operating Mode:** NEXT (Boot1) is the primary execution lane. L4 research is evidence-tracked via heartbeat — not abandoned, but deferred. Next L4 action: NO-OP (evidence preserved) unless founder overrides D008 DEFER. Re-evaluation trigger: Boot1 complete + Hemisphere Metabolization at NEXT.
 
 **Terminology Lock:** `sink` (lowercase) = runtime hemisphere bucket (e.g., `r_sink` in projection routing). `SINK` (uppercase) = governance task lane in TASKS.md (parked work items). `r_a` = runtime accumulator bucket. `Ra` = resolved-work section in TASKS.md. These are distinct concepts; never conflate them.
 
