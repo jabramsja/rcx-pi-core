@@ -1644,6 +1644,61 @@ function validateProjectionIds(seedName, seed) {
   }
 }
 
+// Parity with Python _validate_combined_bridge_ordering (step_mu.py:510)
+// Validates critical ordering invariants for bridge-enabled kernel composition.
+function validateCombinedBridgeOrdering(projections) {
+  const ids = [];
+  for (const proj of projections) {
+    if (proj && typeof proj === 'object') {
+      ids.push(proj.id);
+    }
+  }
+
+  const requiredBridgeIds = [
+    'bridge.var.check_existing',
+    'bridge.lookup.found_same',
+    'bridge.lookup.found_different',
+    'bridge.lookup.not_found_yet',
+    'bridge.lookup.not_found',
+  ];
+
+  // Check all bridge projections are present
+  const missing = requiredBridgeIds.filter(id => !ids.includes(id));
+  if (missing.length > 0) {
+    throw new Error(
+      'SECURITY: Bridge ordering invariant failed; missing bridge projections: ' +
+      JSON.stringify(missing)
+    );
+  }
+
+  // match.var must be present
+  if (!ids.includes('match.var')) {
+    throw new Error('SECURITY: Bridge ordering invariant failed; missing match.var');
+  }
+
+  // All bridge projections must come before match.var
+  const matchVarIdx = ids.indexOf('match.var');
+  for (const bridgeId of requiredBridgeIds) {
+    const bridgeIdx = ids.indexOf(bridgeId);
+    if (bridgeIdx >= matchVarIdx) {
+      throw new Error(
+        'SECURITY: Bridge ordering invariant failed; ' +
+        `${bridgeId} (index ${bridgeIdx}) must be before match.var (index ${matchVarIdx})`
+      );
+    }
+  }
+
+  // bridge.lookup.found_same must precede bridge.lookup.found_different
+  const foundSameIdx = ids.indexOf('bridge.lookup.found_same');
+  const foundDiffIdx = ids.indexOf('bridge.lookup.found_different');
+  if (foundSameIdx > foundDiffIdx) {
+    throw new Error(
+      'SECURITY: Bridge ordering invariant failed; ' +
+      'bridge.lookup.found_same must precede bridge.lookup.found_different'
+    );
+  }
+}
+
 function loadVerifiedSeed(seedPath, seedName) {
   const raw = fs.readFileSync(seedPath, 'utf8');
   verifySeedChecksum(seedName, raw);
@@ -1712,6 +1767,7 @@ const allProjectionsWithBridge = [
   ...matchSeed.projections,
   ...substSeed.projections
 ];
+validateCombinedBridgeOrdering(allProjectionsWithBridge);
 
 // Combined projections for recurrence execution (recurrence + kernel + match + subst)
 // Recurrence projections must come FIRST so they match before kernel tries to process
@@ -1729,6 +1785,7 @@ const allProjectionsWithRecurrenceAndBridge = [
   ...matchSeed.projections,
   ...substSeed.projections
 ];
+validateCombinedBridgeOrdering(allProjectionsWithRecurrenceAndBridge);
 
 // Combined projections with Exhaustion (Exhaustion + Recurrence + kernel + match + subst)
 // Exhaustion projections come first for _detect_exhaustion inputs
@@ -1748,6 +1805,7 @@ const allProjectionsWithExhaustionAndBridge = [
   ...matchSeed.projections,
   ...substSeed.projections
 ];
+validateCombinedBridgeOrdering(allProjectionsWithExhaustionAndBridge);
 
 // =============================================================================
 // Engine-Hemisphere Orchestration (L3 Parity with Python step_mu.py)
@@ -2934,6 +2992,55 @@ engineHelpersPassed = engineHelpersPassed && hemiKeysMatch;
 console.log(`\nPASS engine-hemisphere helpers: ${engineHelpersPassed}`);
 
 // =============================================================================
+// Bridge Ordering Validation Tests
+// =============================================================================
+
+console.log('\n--- Bridge ordering validation tests ---');
+let bridgeValidationPassed = true;
+
+// Test 1: valid ordering passes (already validated at load time, but verify again)
+try {
+  validateCombinedBridgeOrdering(allProjectionsWithBridge);
+  console.log('  Valid bridge ordering accepted: true (expected: true)');
+} catch (e) {
+  console.log(`  Valid bridge ordering accepted: false (expected: true) - ${e.message}`);
+  bridgeValidationPassed = false;
+}
+
+// Test 2: missing bridge projections fails
+try {
+  validateCombinedBridgeOrdering([
+    ...kernel.projections,
+    ...matchSeed.projections,
+    ...substSeed.projections
+  ]);
+  console.log('  Missing bridge rejected: false (expected: true)');
+  bridgeValidationPassed = false;
+} catch (e) {
+  const hasMissing = e.message.includes('missing bridge projections');
+  console.log(`  Missing bridge rejected: ${hasMissing} (expected: true)`);
+  bridgeValidationPassed = bridgeValidationPassed && hasMissing;
+}
+
+// Test 3: bridge after match.var fails
+try {
+  validateCombinedBridgeOrdering([
+    ...kernel.projections,
+    ...matchSeed.projections,
+    ...bridgeProjections,  // bridge AFTER match (wrong!)
+    ...substSeed.projections
+  ]);
+  console.log('  Bridge-after-match.var rejected: false (expected: true)');
+  bridgeValidationPassed = false;
+} catch (e) {
+  const hasOrdering = e.message.includes('must be before match.var');
+  console.log(`  Bridge-after-match.var rejected: ${hasOrdering} (expected: true)`);
+  bridgeValidationPassed = bridgeValidationPassed && hasOrdering;
+}
+
+console.log(`\nPASS bridge ordering validation: ${bridgeValidationPassed}`);
+
+// =============================================================================
 // Summary
 // =============================================================================
 
@@ -2942,7 +3049,8 @@ const allPassed = passed && passedStall && pass3a && pass3b && pass3c &&
                   nanRejected && infRejected && shallowOk && deepRejected &&
                   passReservedFields && isNormalizedAsDict && isPreservedAsHeadTail &&
                   parityAllPassed && securityAllPassed && structuralTraceAllPassed &&
-                  recurrenceAllPassed && e2ePassed && engineHelpersPassed;
+                  recurrenceAllPassed && e2ePassed && engineHelpersPassed &&
+                  bridgeValidationPassed;
 console.log(`All tests passed: ${allPassed}`);
 if (!allPassed) process.exit(1);
 console.log(`\nSecurity hardening (v7 - L3 Recurrence Parity, mu/ reorg):`);
