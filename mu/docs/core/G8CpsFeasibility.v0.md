@@ -127,9 +127,16 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 
 **Result: Criterion 1 MET — pattern set is FINITE AND CLOSED.** No projection body creates new projection definitions. All 20 patterns are static JSON. A micro-matcher handling exactly these 5 matching primitives across 5 top-level key signatures is feasible in principle.
 
-**H2 status: PARTIALLY CONFIRMED.** Criterion 1 (finite set) met. Criteria 2-4 (micro-matcher size, Stage 0→1 transition, G2/G7 preservation) remain UNTESTED and would require implementation (separate decision D002).
+**D002 result (2026-02-19):** Criterion 2 tested via standalone micro-matcher prototype in `tests/research/test_d002_micro_matcher.py`. Evidence in `L4DecisionCard.v0.md` D002 §7.
 
-**Implication for G8:** The circular dependency is NOT inherently irreducible. A staged bootstrap is structurally possible — Stage 0 can handle a known, finite pattern set. Whether the engineering cost is justified is a separate question from whether it's possible.
+- micro_match() core: **31 LOC** (threshold: 50) — 66% smaller than bootstrap _match_inner (~90 LOC)
+- Handles all 5 D001 primitives and all 3 same-var constraints
+- 56 tests pass, no new primitives, no I/O, no globals
+- **Criterion 2 MET**
+
+**H2 status: CRITERIA 1-2 MET (of 4).** Pattern set is finite (D001). Micro-matcher is feasible at 31 LOC (D002). Criteria 3-4 (Stage 0→1 transition, G2/G7 preservation) remain UNTESTED and would require a staged bootstrap prototype.
+
+**Implication for G8:** The circular dependency is NOT inherently irreducible. A staged bootstrap is structurally possible — Stage 0 can handle a known, finite pattern set with a 31-LOC micro-matcher that is strictly simpler than the bootstrap it replaces. Whether the engineering cost of Stage 0→1 transition is justified is a separate question from whether it's possible.
 
 ---
 
@@ -165,7 +172,7 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 | ID | Claim | Type | Status | Success Path | Failure Path | Effort |
 |----|-------|------|--------|-------------|-------------|--------|
 | H1 | Structural fuel replaces host loop | Positive | UNTESTED | Fuel linked-list as Mu data | eval_step must branch on fuel (violates G2) | Medium (test harness) |
-| H2 | Staged bootstrap breaks circular dep | Positive | **PARTIALLY CONFIRMED** (criterion 1/4 met) | Finite pattern set → micro-matcher | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
+| H2 | Staged bootstrap breaks circular dep | Positive | **CRITERIA 1-2 MET** (2/4) | Finite pattern set → micro-matcher (31 LOC) | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
 | H3 | Loop elimination without any mechanism | Negative | UNTESTED | (Would invalidate methodology) | No non-isomorphic mechanism exists (expected) | Minimal (thought experiment) |
 
 ---
