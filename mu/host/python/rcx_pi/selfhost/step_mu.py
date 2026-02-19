@@ -1619,6 +1619,12 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     Raises:
         RuntimeError: If engine loop exhausts without producing terminal result.
     """
+    # Boot1 type guard: reject non-bool to prevent truthy-string routing bugs
+    if not isinstance(use_boot1_recursive, bool):  # AST_OK: boundary
+        raise TypeError(
+            f"use_boot1_recursive must be bool, got {type(use_boot1_recursive).__name__}"
+        )
+
     # Backwards compatibility: max_iterations sets both limits
     if max_iterations is not None:
         max_engine_iterations = max_iterations
@@ -1882,6 +1888,10 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
             raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
 
     use_boot1 = engine_kwargs.pop("use_boot1_recursive", False)
+    if not isinstance(use_boot1, bool):  # AST_OK: boundary
+        raise TypeError(
+            f"use_boot1_recursive must be bool, got {type(use_boot1).__name__}"
+        )
     engine_result = run_engine_pipeline(
         projections, input_value, use_boot1_recursive=use_boot1, **engine_kwargs
     )

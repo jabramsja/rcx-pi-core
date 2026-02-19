@@ -803,3 +803,52 @@ class TestBoot1ModeRoutingContract:
             )
             assert isinstance(event["boot1_depth"], int)
             assert event["boot1_depth"] >= 0
+
+
+# ── Boot1 type hardening ────────────────────────────────────────────────
+
+
+class TestBoot1TypeHardening:
+    """Non-bool use_boot1_recursive must be rejected fail-closed (TypeError).
+
+    Prevents truthy-string routing bugs: "true" (string) is truthy in Python,
+    which would silently route to the recursive path without explicit intent.
+    """
+
+    def test_pipeline_rejects_string_true(self):
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive="true")
+
+    def test_pipeline_rejects_string_false(self):
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive="false")
+
+    def test_pipeline_rejects_int_one(self):
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive=1)
+
+    def test_pipeline_rejects_int_zero(self):
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive=0)
+
+    def test_pipeline_rejects_none(self):
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive=None)
+
+    def test_routing_rejects_string(self):
+        """run_engine_with_routing rejects non-bool use_boot1_recursive."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive="true")
+
+    def test_routing_rejects_int(self):
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
+            run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive=1)

@@ -3340,6 +3340,10 @@ if (process.argv.includes('--json-api')) {
     } else if (request.action === 'run_engine_pipeline') {
       // Run engine pipeline (APPLICATION level, algebraic effects pattern)
       const { projections: userProjs, input, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
+      // Boot1 type guard: reject non-boolean to prevent truthy-string routing bugs
+      if (request.boot1LoopMode != null && typeof request.boot1LoopMode !== 'boolean') {
+        response = { success: false, error_code: 'type_error', error: 'boot1LoopMode must be boolean if provided, got ' + typeof request.boot1LoopMode };
+      } else {
       const boot1Mode = request.boot1LoopMode ?? false;
       const observerEvents = request.observer ? [] : null;
       try {
@@ -3360,6 +3364,7 @@ if (process.argv.includes('--json-api')) {
         response = { success: false, error_code: classifyError(e), error: e.message };
         if (observerEvents) response.observer_events = observerEvents;
       }
+      } // close boot1LoopMode type guard else
     } else if (request.action === 'hash_trace') {
       // Hash trace entries for recurrence (boundary primitive)
       const { trace, maxEntries } = request;
