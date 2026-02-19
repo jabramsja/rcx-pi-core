@@ -26,6 +26,7 @@ import re
 from pathlib import Path
 
 import pytest
+# SPEED_OK: imports step_mu for constants and inspect.signature only, never calls slow kernel functions
 from rcx_pi.selfhost.step_mu import (
     KERNEL_RESERVED_FIELDS,
     ALGORITHM_ENTRYPOINT_KEYS,
@@ -173,3 +174,90 @@ class TestEngineBudgetParity:
         js_val = _extract_js_const(js, "MAX_TRACE_ENTRIES_HARD_CAP")
         # Python: _MAX_TRACE_ENTRIES_HARD_CAP = 100000
         assert js_val == 100000
+
+
+# ── Pipeline default parity ───────────────────────────────────────────────
+
+
+class TestPipelineDefaultParity:
+    """JS runEnginePipeline defaults must match Python run_engine_pipeline."""
+
+    def test_max_steps_default_parity(self):
+        """JS runEnginePipeline maxSteps default must match Python (100)."""
+        import inspect
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        py_default = inspect.signature(run_engine_pipeline).parameters["max_steps"].default
+        js = _js_source()
+        # Scope to runEnginePipeline destructuring block to avoid matching run() defaults
+        m = re.search(r'function runEnginePipeline\b.*?\{(.*?)\}\s*=\s*options', js, re.DOTALL)
+        assert m, "Could not find runEnginePipeline destructuring"
+        block = m.group(1)
+        m2 = re.search(r'maxSteps\s*=\s*(\d+)', block)
+        assert m2, "Could not find maxSteps default in runEnginePipeline"
+        js_val = int(m2.group(1))
+        assert py_default == js_val == 100, (
+            f"maxSteps drift: Python={py_default}, JS={js_val}"
+        )
+
+    def test_max_algorithm_iterations_default_parity(self):
+        """JS runEnginePipeline maxAlgorithmIterations default must match Python (50)."""
+        import inspect
+        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        py_default = inspect.signature(run_engine_pipeline).parameters["max_algorithm_iterations"].default
+        js = _js_source()
+        m = re.search(r'function runEnginePipeline\b.*?\{(.*?)\}\s*=\s*options', js, re.DOTALL)
+        assert m, "Could not find runEnginePipeline destructuring"
+        block = m.group(1)
+        m2 = re.search(r'maxAlgorithmIterations\s*=\s*(\d+)', block)
+        assert m2, "Could not find maxAlgorithmIterations default in runEnginePipeline"
+        js_val = int(m2.group(1))
+        assert py_default == js_val == 50, (
+            f"maxAlgorithmIterations drift: Python={py_default}, JS={js_val}"
+        )
+
+    def test_frozen_default_null_parity(self):
+        """JS frozen default must be null (matching Python None)."""
+        js = _js_source()
+        # In JS destructuring: frozen = null
+        assert "frozen = null" in js, (
+            "JS frozen default is not null (expected: frozen = null)"
+        )
+
+    def test_observer_default_null_parity(self):
+        """JS observer default must be null (matching Python None)."""
+        js = _js_source()
+        # In JS destructuring: observer = null
+        assert "observer = null" in js, (
+            "JS observer default is not null (expected: observer = null)"
+        )
+
+
+# ── Hemisphere routing step limit parity ──────────────────────────────────
+
+
+class TestHemisphereRoutingLimitParity:
+    """Hemisphere routing step limits must match between substrates."""
+
+    def test_hemisphere_routing_step_limit_parity(self):
+        """Python max_steps=30 must match JS const limit = 30."""
+        import re as _re
+        py_source = (_REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py").read_text()
+        # Find max_steps=N in run_hemisphere_routing function
+        m = _re.search(
+            r'def run_hemisphere_routing.*?run_mu\([^)]*max_steps=(\d+)',
+            py_source, _re.DOTALL,
+        )
+        assert m, "Could not find max_steps in run_hemisphere_routing"
+        py_limit = int(m.group(1))
+
+        js = _js_source()
+        m = _re.search(
+            r'function runHemisphereRouting.*?const limit = (\d+)',
+            js, _re.DOTALL,
+        )
+        assert m, "Could not find limit in runHemisphereRouting"
+        js_limit = int(m.group(1))
+
+        assert py_limit == js_limit == 30, (
+            f"Hemisphere routing step limit drift: Python={py_limit}, JS={js_limit}"
+        )
