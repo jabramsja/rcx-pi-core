@@ -357,3 +357,126 @@ class TestHemisphereKeysParity:
             f"  Python-only: {_HEMISPHERE_KEYS - js_keys}\n"
             f"  JS-only: {js_keys - _HEMISPHERE_KEYS}"
         )
+
+
+# ── Pipeline parameter signature lock ────────────────────────────────────
+
+
+class TestPipelineSignatureLock:
+    """All run_engine_pipeline parameter defaults must remain stable."""
+
+    def test_max_steps_default(self):
+        sig = inspect.signature(run_engine_pipeline)
+        assert sig.parameters["max_steps"].default == 100
+
+    def test_max_algorithm_iterations_default(self):
+        sig = inspect.signature(run_engine_pipeline)
+        assert sig.parameters["max_algorithm_iterations"].default == 50
+
+    def test_max_iterations_default_none(self):
+        sig = inspect.signature(run_engine_pipeline)
+        assert sig.parameters["max_iterations"].default is None
+
+    def test_use_boot1_recursive_default_false(self):
+        sig = inspect.signature(run_engine_pipeline)
+        assert sig.parameters["use_boot1_recursive"].default is False
+
+    def test_keyword_only_after_input_value(self):
+        """Parameters after input_value must be keyword-only."""
+        sig = inspect.signature(run_engine_pipeline)
+        params = list(sig.parameters.values())
+        # First two (projections, input_value) are positional-or-keyword
+        # Rest must be keyword-only
+        for param in params[2:]:
+            assert param.kind == inspect.Parameter.KEYWORD_ONLY, (
+                f"Parameter '{param.name}' should be keyword-only, "
+                f"got {param.kind.name}"
+            )
+
+
+# ── Pipeline return shape contract ───────────────────────────────────────
+
+
+class TestPipelineReturnContract:
+    """run_engine_pipeline must return a dict with exactly 8 terminal keys."""
+
+    @pytest.mark.slow
+    def test_return_is_dict(self):
+        result = run_engine_pipeline(
+            projections=[{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+            input_value=42,
+            max_steps=3,
+            use_boot1_recursive=False,
+        )
+        assert isinstance(result, dict), f"Expected dict, got {type(result).__name__}"
+
+    @pytest.mark.slow
+    def test_return_has_terminal_keys(self):
+        from rcx_pi.selfhost.step_mu import _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for return shape
+        result = run_engine_pipeline(
+            projections=[{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+            input_value=42,
+            max_steps=3,
+            use_boot1_recursive=False,
+        )
+        assert set(result.keys()) == _ENGINE_TERMINAL_KEYS, (
+            f"Return keys mismatch.\n"
+            f"  Missing: {_ENGINE_TERMINAL_KEYS - set(result.keys())}\n"
+            f"  Extra: {set(result.keys()) - _ENGINE_TERMINAL_KEYS}"
+        )
+
+
+# ── Hemisphere routing error paths ───────────────────────────────────────
+
+
+class TestHemisphereRoutingErrors:
+    """run_hemisphere_routing must reject invalid inputs."""
+
+    def test_engine_result_not_dict_raises(self):
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        with pytest.raises(ValueError, match="engine_result must be a dict"):
+            run_hemisphere_routing("not a dict", {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None})
+
+    def test_engine_result_list_raises(self):
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        with pytest.raises(ValueError, match="engine_result must be a dict"):
+            run_hemisphere_routing([1, 2, 3], {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None})
+
+    def test_engine_result_none_raises(self):
+        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        with pytest.raises(ValueError, match="engine_result must be a dict"):
+            run_hemisphere_routing(None, {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None})
+
+
+# ── Engine-with-routing validation ───────────────────────────────────────
+
+
+class TestEngineWithRoutingValidation:
+    """run_engine_with_routing must validate hemispheres parameter."""
+
+    def test_hemispheres_not_dict_raises_typeerror(self):
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        with pytest.raises(TypeError, match="hemispheres must be dict"):
+            run_engine_with_routing(
+                [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+                42,
+                hemispheres="not a dict",
+            )
+
+    def test_hemispheres_missing_keys_raises_valueerror(self):
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        with pytest.raises(ValueError, match="hemispheres shape mismatch"):
+            run_engine_with_routing(
+                [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+                42,
+                hemispheres={"r_null": None},  # missing 4 keys
+            )
+
+    def test_hemispheres_extra_keys_raises_valueerror(self):
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        with pytest.raises(ValueError, match="hemispheres shape mismatch"):
+            run_engine_with_routing(
+                [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+                42,
+                hemispheres={"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None, "extra": None},
+            )
