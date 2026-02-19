@@ -480,3 +480,53 @@ class TestEngineWithRoutingValidation:
                 42,
                 hemispheres={"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None, "extra": None},
             )
+
+
+# ── Engine-with-routing return shape lock ─────────────────────────────────
+
+
+class TestEngineWithRoutingReturnShape:
+    """run_engine_with_routing must return exactly 2 keys with correct sub-shapes."""
+
+    @pytest.mark.slow
+    def test_return_has_exactly_two_keys(self):
+        """Return dict must have exactly {engine_result, hemispheres}."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        result = run_engine_with_routing(
+            [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+            42,
+            max_steps=3,
+        )
+        assert set(result.keys()) == {"engine_result", "hemispheres"}, (
+            f"Return shape drift! Keys: {sorted(result.keys())}"
+        )
+
+    @pytest.mark.slow
+    def test_engine_result_has_terminal_keys(self):
+        """engine_result sub-dict must have exactly 8 terminal keys."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for return shape
+        result = run_engine_with_routing(
+            [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+            42,
+            max_steps=3,
+        )
+        assert set(result["engine_result"].keys()) == _ENGINE_TERMINAL_KEYS, (
+            f"engine_result sub-shape drift!\n"
+            f"  Missing: {_ENGINE_TERMINAL_KEYS - set(result['engine_result'].keys())}\n"
+            f"  Extra: {set(result['engine_result'].keys()) - _ENGINE_TERMINAL_KEYS}"
+        )
+
+    @pytest.mark.slow
+    def test_hemispheres_has_hemisphere_keys(self):
+        """hemispheres sub-dict must have exactly 5 hemisphere keys."""
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for return shape
+        result = run_engine_with_routing(
+            [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
+            42,
+            max_steps=3,
+        )
+        assert set(result["hemispheres"].keys()) == _HEMISPHERE_KEYS, (
+            f"hemispheres sub-shape drift!\n"
+            f"  Missing: {_HEMISPHERE_KEYS - set(result['hemispheres'].keys())}\n"
+            f"  Extra: {set(result['hemispheres'].keys()) - _HEMISPHERE_KEYS}"
+        )
