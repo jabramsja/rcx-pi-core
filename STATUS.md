@@ -162,11 +162,12 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 | `stack_guard` | Can depth be Mu data? | Count in Mu, not Python |
 | `projection_loader` | Can Mu load Mu? | Possibly, with file I/O primitive |
 
-**L4 Status:** Open research question in SINK. Not promised, not ruled out.
+**L4 Status:** G8 production decision path promoted to VECTOR P1 (design/decision only). Full L4 rewrite remains in SINK S1.
 G8 CPS feasibility study (D001-D003) confirmed H2 staged bootstrap is feasible
 in research artifacts (52 LOC Stage 0 kernel, all 4 H2 criteria MET). Production
 pilot decision pending (D004). See `mu/docs/core/G8CpsFeasibility.v0.md`.
 L4 momentum guardrails active: evidence-or-NO-OP per wave, 2-wave freeze trigger. See CLAUDE.md.
+See TASKS.md VECTOR/SINK for priority ordering (P1-P6, S1-S4).
 
 **Terminology Lock:** `sink` (lowercase) = runtime hemisphere bucket (e.g., `r_sink` in projection routing). `SINK` (uppercase) = governance task lane in TASKS.md (parked work items). `r_a` = runtime accumulator bucket. `Ra` = resolved-work section in TASKS.md. These are distinct concepts; never conflate them.
 
