@@ -197,6 +197,19 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 
 **Stop condition:** If no non-isomorphic mechanism is proposed after analysis, H3 is FALSIFIED (expected). This confirms that iteration is genuinely irreducible in some form.
 
+**Experimental result (D007, 2026-02-19):**
+
+H3 tested via 4 plausible "no-iteration" strategies in `tests/research/test_d007_h3_negative_control.py`. Full evidence in `L4DecisionCard.v0.md` D007 §7.
+
+| Strategy | General? | Iteration-free? | Verdict |
+|----------|----------|-----------------|---------|
+| 1. Single step | NO — converges only 1 step | YES | Fails: not general |
+| 2. Fixed unrolling (K=3, K=5) | NO — requires knowing K at definition time | YES | Fails: not general |
+| 3. Recursion (recurse until stall) | YES | NO — self-call IS iteration (AST-verified) | Isomorphic to while-loop |
+| 4. Higher-order composition (compose_n) | YES (for known N) | NO — uses range() (AST-verified) | Contains hidden iteration |
+
+**Result: H3 FALSIFIED (expected).** No strategy is both general AND iteration-free. Iteration is genuinely irreducible in some form — either the host provides it (loop/recursion) or the data encodes it (fuel/counter). This is a POSITIVE result for methodology: the falsification discipline works. Consistent with H1's finding that iteration dimension is irreducible even when fuel data is structural Mu.
+
 ---
 
 ## Hypothesis Matrix
@@ -205,7 +218,7 @@ Criterion 1 tested via pattern enumeration against `mu/substrate/match.v2.json` 
 |----|-------|------|--------|-------------|-------------|--------|
 | H1 | Structural fuel replaces host loop | Positive | **PARTIALLY CONFIRMED** (D006) | Fuel data is Mu, eval_step unchanged (G2 ok) | Iteration still host (F2 hit) | Medium (test harness) |
 | H2 | Staged bootstrap breaks circular dep | Positive | **ALL 4 CRITERIA MET** | 52-LOC Stage 0 kernel bootstraps match.v2/subst.v2 | Pattern set not finite OR micro-matcher too large | Low (analysis + enumeration) |
-| H3 | Loop elimination without any mechanism | Negative | UNTESTED | (Would invalidate methodology) | No non-isomorphic mechanism exists (expected) | Minimal (thought experiment) |
+| H3 | Loop elimination without any mechanism | Negative | **FALSIFIED** (D007, expected) | (Would invalidate methodology) | 4 strategies tested, 0 both general + iteration-free | Minimal (test harness) |
 
 ---
 

@@ -97,6 +97,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-19, l4-derisk-wave7-h3): Executed D007 (H3 negative control). Result: H3 FALSIFIED (expected). 4 strategies tested — single step (not general), fixed unrolling (not general), recursion (IS iteration), higher-order composition (CONTAINS iteration). 0 strategies are both general AND iteration-free. Iteration is irreducible in some form. Methodology validated: falsification discipline works. Research artifact: `tests/research/test_d007_h3_negative_control.py` (16 tests). Updated L4DecisionCard.v0.md (D007), G8CpsFeasibility.v0.md (H3 status + matrix), heartbeat tracker (wave7 DONE, wave8 renumbered to D005). Hypothesis matrix complete: H1 PARTIALLY CONFIRMED, H2 ALL 4 MET, H3 FALSIFIED. No phase/debt/task change. No runtime changes.
 - Tracker sync note (2026-02-19, l4-derisk-wave6-h1): Executed D006 (H1 fuel threading). Result: H1 PARTIALLY CONFIRMED. Fuel data can be structural Mu (linked-list), eval_step unchanged (G2/G7 preserved, AST-verified), no new primitives. Limitation: iteration is still host code (F2 hit — `while fuel` replaces `for i in range(N)`, isomorphic not reduced). Consistent with H3 prediction. Research artifact: `tests/research/test_d006_h1_fuel_threading.py` (20 tests). Updated L4DecisionCard.v0.md (D006), G8CpsFeasibility.v0.md (H1 status + matrix), heartbeat tracker (wave6 DONE). No phase/debt/task change. No runtime changes.
 - Tracker sync note (2026-02-19, l4-heartbeat-governance-wave1): L4 momentum guardrails codified. CLAUDE.md: 5 enforceable rules (evidence-or-NO-OP per wave, ratio cap, SINK expiry, gate mapping required, decision card fields). L4DecisionCard.v0.md: template expanded with target_gate_id, evidence_command, evidence_delta_vs_previous, decision_deadline, no_op_proof_ref. STATUS.md: guardrail posture line added. TASKS.md: L4 heartbeat tracker (waves 6-8, owner, deadlines, gate targets). No phase/debt/task change. No runtime changes.
 - Tracker sync note (2026-02-19, l4-derisk-wave5): D004 decision package — production pilot GO/NO-GO/DEFER for staged bootstrap. Added to L4DecisionCard.v0.md with scope boundaries (<=100 LOC, 4 primitives invariant, zero test regression), 6 stop conditions, gate mapping (G8 primary). STATUS.md and TASKS.md SINK synced: H2 feasibility confirmed in research artifacts, production pilot pending D004. G8CpsFeasibility.v0.md: D004 linkage with "feasible in research artifacts != production-ready" distinction. No phase/debt/task change. No runtime changes.
@@ -494,8 +495,8 @@ Current Exhaustion Layer: META_CIRCULAR
 | wave_id | target_gate | artifact_or_noop_proof | owner | decision_deadline | status |
 |---------|-------------|------------------------|-------|-------------------|--------|
 | wave6 | G8 | D006 H1 fuel threading experiment | RCX Core | 2026-02-26 | DONE — H1 PARTIALLY CONFIRMED (D006). `tests/research/test_d006_h1_fuel_threading.py` |
-| wave7 | G8 | D005 production pilot spec OR NO-OP proof | Founder | 2026-03-05 | PENDING (awaiting D004 founder verdict) |
-| wave8 | G8 | H3 negative control OR NO-OP proof | RCX Core | 2026-03-12 | PENDING |
+| wave7 | G8 | D007 H3 negative control experiment | RCX Core | 2026-03-05 | DONE — H3 FALSIFIED (expected, D007). `tests/research/test_d007_h3_negative_control.py` |
+| wave8 | G8 | D005 production pilot spec OR NO-OP proof | Founder | 2026-03-12 | PENDING (awaiting D004 founder verdict) |
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
