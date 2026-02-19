@@ -235,10 +235,25 @@ Start: G8 UNPROVEN
 
 ---
 
+## Next Decision: D004 Production Pilot
+
+H2 feasibility is established (D001-D003). The remaining question is **not** "can we build a staged bootstrap?" but "should we attempt a production pilot, and under what constraints?"
+
+D004 (`mu/docs/core/L4DecisionCard.v0.md`) defines the GO/NO-GO/DEFER decision package:
+- Blast radius inventory and LOC budget
+- Invariants that must remain unchanged (primitive count, debt ceiling, L3 parity)
+- Stop conditions that would terminate a pilot immediately
+- Gate mapping (G8 is the primary target)
+
+**Important distinction:** "Feasible in research artifacts" (D001-D003) does NOT mean "production-ready." The research kernel (`tests/research/`) is isolated and never imported by `rcx_pi/`. A production pilot would require separate validation against the full test suite, L3 parity, and security invariants.
+
+---
+
 ## References
 
 - `mu/docs/core/L4ExitChecklist.v0.md` — G8 gate definition and current UNPROVEN status
 - `mu/docs/core/L4MicroAbi.v0.md` — ABI surface that G8 classifies
 - `mu/docs/core/Boot0Architecture.v0.md` — Staged bootstrap precedent
+- `mu/docs/core/L4DecisionCard.v0.md` — D001-D004 decision cards
 - `mu/docs/core/BootstrapPrimitives.v0.md` — Current primitive specification
 - `mu/docs/core/Boot1LoopContract.v0.md` — Boot1 recursive loop (related to H1)

@@ -163,6 +163,9 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 | `projection_loader` | Can Mu load Mu? | Possibly, with file I/O primitive |
 
 **L4 Status:** Open research question in SINK. Not promised, not ruled out.
+G8 CPS feasibility study (D001-D003) confirmed H2 staged bootstrap is feasible
+in research artifacts (52 LOC Stage 0 kernel, all 4 H2 criteria MET). Production
+pilot decision pending (D004). See `mu/docs/core/G8CpsFeasibility.v0.md`.
 
 **Boot1 Current Reality (truth-sync 2026-02-18):**
 Boot1 is a **host-side loop policy alternative**, not a seed-defined structural loop. Two host paths exist:
