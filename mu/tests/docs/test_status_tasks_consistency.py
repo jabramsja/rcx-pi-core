@@ -14,6 +14,7 @@ import re
 REPO_ROOT = Path(__file__).parents[2]
 STATUS_PATH = REPO_ROOT / "STATUS.md"
 TASKS_PATH = REPO_ROOT / "TASKS.md"
+MANIFEST_PATH = REPO_ROOT / "roadmap" / "MANIFEST.md"
 
 LAYER_TOKENS = ("BOOTSTRAP", "META_CIRCULAR")
 
@@ -202,4 +203,60 @@ def test_tasks_next_section_has_active_work_only() -> None:
     assert has_active_tasks or has_empty_marker, (
         "TASKS.md NEXT should contain either active unchecked tasks "
         "('- [ ] ...') or an explicit empty marker ('No active items')."
+    )
+
+
+# =============================================================================
+# Terminology Lock — sink/SINK and r_a/Ra disambiguation
+# =============================================================================
+
+_TERMINOLOGY_LOCK_PHRASES = (
+    "Terminology Lock",
+    "sink",
+    "SINK",
+    "r_a",
+    "Ra",
+)
+
+
+def test_terminology_lock_exists_in_status_and_tasks() -> None:
+    """
+    STATUS.md and TASKS.md must contain a Terminology Lock note that
+    disambiguates runtime terms (sink, r_a) from governance terms (SINK, Ra).
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+
+    for label, text in (("STATUS.md", status_text), ("TASKS.md", tasks_text)):
+        assert "Terminology Lock" in text, (
+            f"{label} is missing a 'Terminology Lock' note. "
+            "Add disambiguation for sink/SINK and r_a/Ra."
+        )
+        # Must mention both runtime and governance meanings
+        assert "runtime hemisphere bucket" in text.lower() or "runtime" in text.lower(), (
+            f"{label} Terminology Lock must mention runtime context."
+        )
+        assert "governance task lane" in text.lower() or "governance" in text.lower(), (
+            f"{label} Terminology Lock must mention governance context."
+        )
+
+
+def test_manifest_includes_l4_research_packet() -> None:
+    """
+    roadmap/MANIFEST.md must include all 4 L4 research packet links,
+    ensuring SINK-status docs remain discoverable.
+    """
+    manifest_text = MANIFEST_PATH.read_text(encoding="utf-8")
+
+    required_links = (
+        "L4ExitChecklist.v0.md",
+        "L4MicroAbi.v0.md",
+        "G8CpsFeasibility.v0.md",
+        "L4DecisionCard.v0.md",
+    )
+
+    missing = [link for link in required_links if link not in manifest_text]
+    assert not missing, (
+        f"roadmap/MANIFEST.md is missing L4 research packet links: {missing}\n"
+        "SINK status does not remove active evidence docs from MANIFEST discoverability."
     )

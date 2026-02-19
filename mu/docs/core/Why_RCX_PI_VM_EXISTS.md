@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-16
+LAST_VERIFIED: 2026-02-19
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -137,3 +137,15 @@ But these capabilities must be earned, not assumed.
 RCX is being built so that claims about emergence can be tested honestly, without importing structure from the host language.
 
 Nothing more. Nothing less.
+
+⸻
+
+9. Terminology Note
+
+This project uses terms that appear similar but are distinct:
+- `sink` (lowercase) = runtime hemisphere bucket (projection routing target)
+- `SINK` (uppercase) = governance task lane in TASKS.md (parked work items)
+- `r_a` = runtime accumulator bucket
+- `Ra` = resolved-work section in TASKS.md
+
+See STATUS.md for the canonical terminology lock.

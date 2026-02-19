@@ -168,6 +168,8 @@ in research artifacts (52 LOC Stage 0 kernel, all 4 H2 criteria MET). Production
 pilot decision pending (D004). See `mu/docs/core/G8CpsFeasibility.v0.md`.
 L4 momentum guardrails active: evidence-or-NO-OP per wave, 2-wave freeze trigger. See CLAUDE.md.
 
+**Terminology Lock:** `sink` (lowercase) = runtime hemisphere bucket (e.g., `r_sink` in projection routing). `SINK` (uppercase) = governance task lane in TASKS.md (parked work items). `r_a` = runtime accumulator bucket. `Ra` = resolved-work section in TASKS.md. These are distinct concepts; never conflate them.
+
 **Boot1 Current Reality (truth-sync 2026-02-18):**
 Boot1 is a **host-side loop policy alternative**, not a seed-defined structural loop. Two host paths exist:
 - **Trampoline (default):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:run_engine_pipeline()`, `eval_step.js:runEnginePipeline()`)

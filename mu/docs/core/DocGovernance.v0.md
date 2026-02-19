@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-06
+LAST_VERIFIED: 2026-02-19
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_governance.py
@@ -264,6 +264,23 @@ When a doc is purely historical (not replaced, just obsolete):
 **Enforcement:** `test_doc_freshness.py` warns on hardcoded counts (except estimates and historical context).
 
 **Grounding tests:** Actual projection counts are verified by `tests/structural/test_seed_counts.py`. Always reference this file for authoritative counts.
+
+---
+
+## Naming Convention: Runtime vs Governance Terms
+
+Terms that look similar but are semantically distinct must never be conflated in docs:
+
+| Term | Domain | Meaning |
+|------|--------|---------|
+| `sink` (lowercase) | Runtime | Hemisphere bucket (projection routing target, e.g., `r_sink`) |
+| `SINK` (uppercase) | Governance | Task lane in TASKS.md (parked work items) |
+| `r_a` | Runtime | Accumulator bucket in projection routing |
+| `Ra` | Governance | Resolved-work section in TASKS.md |
+
+**Rule:** When writing about governance lanes, use uppercase (`SINK`, `VECTOR`, `NEXT`, `Ra`). When writing about runtime hemisphere buckets, use lowercase with the `r_` prefix (`r_sink`, `r_a`, `r_source`). The canonical terminology lock is in STATUS.md.
+
+**Enforcement:** `tests/docs/test_status_tasks_consistency.py` asserts that disambiguation text exists in STATUS.md and TASKS.md.
 
 ---
 

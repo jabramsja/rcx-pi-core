@@ -89,6 +89,8 @@ If a task is not listed here, it is NOT to be implemented.
 - No implementation work may begin on VECTOR items. VECTOR is design-only.
 - No SINK item may advance without answering: "What semantic question does this resolve?"
 
+**Terminology Lock:** `sink` (lowercase) = runtime hemisphere bucket (e.g., `r_sink` in projection routing). `SINK` (uppercase) = governance task lane (this section, parked work items). `r_a` = runtime accumulator bucket. `Ra` = resolved-work section (below). These are distinct concepts; never conflate them.
+
 ---
 
 ## Ra (Resolved / Merged)

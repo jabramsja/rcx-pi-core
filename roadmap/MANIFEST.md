@@ -60,6 +60,17 @@
 
 5. **Baseline freeze (Gate 0)** - Introduced as TASKS.md NEXT item only when refactor begins. Does not need permanent tracking in roadmap docs.
 
+## Canonical L4 Research Packet (Discoverable Even in SINK)
+
+Governance SINK status does not remove active evidence docs from MANIFEST discoverability. These documents contain live research evidence (D001-D003 feasibility results) that must remain findable regardless of L4's governance lane.
+
+| Document | Role |
+|----------|------|
+| [`mu/docs/core/L4ExitChecklist.v0.md`](../mu/docs/core/L4ExitChecklist.v0.md) | Gate definitions (G1-G8) and current pass/fail status |
+| [`mu/docs/core/L4MicroAbi.v0.md`](../mu/docs/core/L4MicroAbi.v0.md) | ABI surface mapped to L4 gates |
+| [`mu/docs/core/G8CpsFeasibility.v0.md`](../mu/docs/core/G8CpsFeasibility.v0.md) | H1-H3 hypotheses and experimental results (D001-D003) |
+| [`mu/docs/core/L4DecisionCard.v0.md`](../mu/docs/core/L4DecisionCard.v0.md) | Decision cards (D001-D004) with evidence and outcomes |
+
 ## Why This Architecture
 
 - **Single source of truth**: State in STATUS.md, authorization in TASKS.md
