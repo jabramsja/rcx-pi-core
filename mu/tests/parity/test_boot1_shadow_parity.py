@@ -1456,3 +1456,83 @@ class TestBoot1PrimitiveCountInvariant:
         assert result.stdout.strip() == "", (
             "_tail_call must NOT be marked as BOOTSTRAP_PRIMITIVE"
         )
+
+
+# ============================================================================
+# Wave 9: Boot1 type hardening cross-substrate parity
+# ============================================================================
+
+@pytest.mark.slow
+class TestBoot1TypeHardeningCrossSubstrate:
+    """JS must reject non-boolean boot1LoopMode identically to Python's TypeError.
+
+    Prevents truthy-string routing: JSON "true" (string) is truthy in JS
+    and would silently route to the recursive path without explicit intent.
+    """
+
+    def test_js_rejects_string_boot1(self):
+        """JS rejects boot1LoopMode="true" (string, not boolean)."""
+        resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            "input": {"x": 1},
+            "maxSteps": 5,
+            "boot1LoopMode": "true",
+        })
+        assert not resp["success"], "JS should reject string boot1LoopMode"
+        assert "boolean" in resp.get("error", "").lower()
+
+    def test_js_rejects_int_boot1(self):
+        """JS rejects boot1LoopMode=1 (number, not boolean)."""
+        resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            "input": {"x": 1},
+            "maxSteps": 5,
+            "boot1LoopMode": 1,
+        })
+        assert not resp["success"], "JS should reject numeric boot1LoopMode"
+        assert "boolean" in resp.get("error", "").lower()
+
+    def test_js_accepts_true(self):
+        """JS accepts boot1LoopMode=true (boolean)."""
+        resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            "input": {"x": 1},
+            "maxSteps": 5,
+            "boot1LoopMode": True,
+        })
+        assert resp["success"], f"JS should accept boolean true: {resp.get('error')}"
+
+    def test_js_accepts_false(self):
+        """JS accepts boot1LoopMode=false (boolean)."""
+        resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            "input": {"x": 1},
+            "maxSteps": 5,
+            "boot1LoopMode": False,
+        })
+        assert resp["success"], f"JS should accept boolean false: {resp.get('error')}"
+
+    def test_js_accepts_null_defaults_to_trampoline(self):
+        """JS accepts boot1LoopMode=null (defaults to false/trampoline)."""
+        resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            "input": {"x": 1},
+            "maxSteps": 5,
+            "boot1LoopMode": None,
+        })
+        assert resp["success"], f"JS should accept null boot1LoopMode: {resp.get('error')}"
+
+    def test_js_accepts_omitted_defaults_to_trampoline(self):
+        """JS accepts omitted boot1LoopMode (defaults to false/trampoline)."""
+        resp = _run_js_json_api({
+            "action": "run_engine_pipeline",
+            "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
+            "input": {"x": 1},
+            "maxSteps": 5,
+        })
+        assert resp["success"], f"JS should accept omitted boot1LoopMode: {resp.get('error')}"
