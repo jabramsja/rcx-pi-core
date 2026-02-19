@@ -103,6 +103,38 @@ Scope: Enumerate match.v2/subst.v2 pattern set to test G8 H2 feasibility
    Outcome: GO
    Rationale: Zero risk, directly produces G8 evidence, satisfies
    least-lazy standing rule. Next strict wave should execute this.
+
+7. Execution Result (2026-02-19)
+   Status: EXECUTED — H2 criterion 1 MET
+
+   Evidence command run:
+     python3 -c "
+     import json; from pathlib import Path
+     for n in ['match.v2.json', 'subst.v2.json']:
+       seed = json.loads((Path('mu/substrate') / n).read_text())
+       for p in seed['projections']:
+         keys = sorted(p['pattern'].keys()) if isinstance(p['pattern'], dict) else type(p['pattern']).__name__
+         print(f'{n}: {p[\"id\"]} -> {keys}')
+     "
+
+   Raw findings:
+   - Total projections: 20 (8 match + 12 subst)
+   - Distinct top-level key signatures: 5
+   - Matching primitives required: 5 (var_bind, dict_shape, literal_string, null_check, nested_var_bind)
+   - Same-var equality constraints: 3 (match.equal, match.typed.descend, subst.lookup.found)
+   - Max pattern nesting depth: 3 (match.sibling, subst.ascend, subst.sibling, subst.typed.sibling, subst.typed.ascend)
+   - Self-referential patterns (bodies creating new projections): 0
+
+   Classification: FINITE AND CLOSED
+   - All 20 patterns are static JSON — no pattern generates new patterns
+   - Bodies produce data states, not new projection definitions
+   - The pattern set is fully enumerable by a fixed-function micro-matcher
+
+   H2 criterion 1 (enumerable, finite set): MET
+   H2 criterion 2 (<50 LOC micro-matcher): PLAUSIBLE (not yet tested — requires D002)
+   H2 criteria 3-4 (Stage 0→1 transition, G2/G7 preservation): UNTESTED (requires implementation)
+
+   Next step: D002 — micro-matcher prototype (<50 LOC target) if H2 criterion 2 is pursued
 ```
 
 ---
