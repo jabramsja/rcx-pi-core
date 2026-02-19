@@ -267,6 +267,32 @@ Do NOT update individual agent files - they read STATUS.md.
 
 ---
 
+## L4 Parity-Floor Policy (Evidence-First)
+
+**Rule:** Fix L3 parity gaps ONLY if they can invalidate L4 gate evidence. Defer everything else.
+
+**Gate-mapped parity (mandatory — fix if drifted):**
+
+| Parity Concern | Gate | Evidence Command |
+|---|---|---|
+| `step()` first-match-wins semantics | G2 | `grep -n "def step\|_tail_call\|_run_engine" mu/host/python/rcx_pi/selfhost/eval_seed.py` |
+| Seed checksums match (Py↔JS) | G5 | `pytest tests/parity/test_seed_loading_parity.py -v` |
+| Seed projection ID order | G5 | `pytest tests/parity/test_seed_loading_parity.py -v` |
+| Reserved field sets identical | G1/G6 | `pytest tests/parity/test_cross_substrate_constants.py -v` |
+| MAX_MU_DEPTH / MAX_MU_WIDTH | G4 | `pytest tests/parity/test_cross_substrate_constants.py -v` |
+| Fuel/step defaults match | G3 | `pytest tests/parity/test_cross_substrate_constants.py -v` |
+| Terminal key shape match | G2 | `pytest tests/structural/test_engine_pipeline_discipline.py -v` |
+
+**Deferred parity (L3-only — fix only if gate-mapped):**
+- Observer event forwarding details
+- CLI UX / help text wording
+- Non-critical error message text (codes matter, text doesn't)
+- Hemisphere routing convenience details
+
+**Hardening rule:** Any new parity item must name (1) the L4 gate ID it de-risks and (2) the pass/fail evidence command from `mu/docs/core/L4ExitChecklist.v0.md`. No gate ID = L3-only = deferred.
+
+---
+
 ## Key Files
 
 | File | Purpose |
