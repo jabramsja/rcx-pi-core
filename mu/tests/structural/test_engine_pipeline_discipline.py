@@ -677,3 +677,129 @@ class TestJsActionListParity:
             f"  Missing: {missing}\n"
             f"  Extra: {extra}"
         )
+
+
+# ── Boot1 mode routing contract ────────────────────────────────────────
+
+
+class TestBoot1ModeRoutingContract:
+    """Boot1 mode routing must be explicit, observable, and fail-closed.
+
+    Tests that:
+    1. Python default is literally False at the AST level (not a variable).
+    2. JS boot1LoopMode defaults to false via ?? operator.
+    3. Routing is conditional — recursive path gated behind explicit flag.
+    4. Observer events differ between paths (observable routing contract).
+
+    These prevent accidental default-flip, unconditional routing bypass,
+    and implicit mode changes without observable evidence.
+    """
+
+    def test_python_default_is_literal_false_ast(self):
+        """Python use_boot1_recursive default must be the literal False at AST level."""
+        source = _STEP_MU_PATH.read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "run_engine_pipeline":
+                for arg, default in zip(
+                    reversed(node.args.kwonlyargs),
+                    reversed(node.args.kw_defaults),
+                ):
+                    if arg.arg == "use_boot1_recursive":
+                        assert isinstance(default, ast.Constant), (
+                            f"use_boot1_recursive default must be a literal constant, "
+                            f"got {type(default).__name__}"
+                        )
+                        assert default.value is False, (
+                            f"use_boot1_recursive default must be False, "
+                            f"got {default.value!r}"
+                        )
+                        return
+                pytest.fail("use_boot1_recursive parameter not found in run_engine_pipeline")
+        pytest.fail("run_engine_pipeline function not found in step_mu.py")
+
+    def test_js_boot1_defaults_to_false(self):
+        """JS boot1LoopMode must default to false via ?? operator."""
+        source = _JS_PATH.read_text()
+        assert re.search(r"request\.boot1LoopMode\s*\?\?\s*false", source), (
+            "JS must default boot1LoopMode to false via "
+            "`request.boot1LoopMode ?? false`"
+        )
+
+    def test_python_routing_is_conditional_on_flag(self):
+        """_run_engine_recursive call must be inside if use_boot1_recursive branch."""
+        source = _STEP_MU_PATH.read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "run_engine_pipeline":
+                for child in ast.walk(node):
+                    if isinstance(child, ast.If):
+                        if isinstance(child.test, ast.Name) and child.test.id == "use_boot1_recursive":
+                            for inner in ast.walk(child):
+                                if isinstance(inner, ast.Call):
+                                    func = inner.func
+                                    if isinstance(func, ast.Name) and func.id == "_run_engine_recursive":
+                                        return
+                            pytest.fail(
+                                "_run_engine_recursive not found inside "
+                                "if use_boot1_recursive branch"
+                            )
+                pytest.fail(
+                    "No `if use_boot1_recursive:` branch found in run_engine_pipeline"
+                )
+        pytest.fail("run_engine_pipeline not found in step_mu.py")
+
+    def test_js_routing_is_conditional_on_boot1mode(self):
+        """JS must use ternary routing: boot1Mode ? recursive : trampoline."""
+        source = _JS_PATH.read_text()
+        assert re.search(
+            r"boot1Mode\s*\?\s*runEnginePipelineRecursive", source
+        ), (
+            "JS must route via "
+            "`boot1Mode ? runEnginePipelineRecursive : runEnginePipeline`"
+        )
+
+    @pytest.mark.slow
+    def test_trampoline_observer_has_no_boot1_depth(self):
+        """Trampoline path observer events must NOT have boot1_depth field.
+
+        This is the negative half of the observable routing contract:
+        if boot1_depth appears on trampoline, routing is not differentiated.
+        """
+        observer: list = []
+        projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
+        run_engine_pipeline(
+            projs, {"test": 42},
+            max_steps=5, use_boot1_recursive=False, observer=observer,
+        )
+        assert len(observer) > 0, "No observer events emitted"
+        for i, event in enumerate(observer):
+            assert "boot1_depth" not in event, (
+                f"Trampoline observer event [{i}] has boot1_depth="
+                f"{event['boot1_depth']} — boot1_depth must only appear "
+                "on recursive path"
+            )
+
+    @pytest.mark.slow
+    def test_recursive_observer_has_boot1_depth(self):
+        """Recursive path step_boundary events must have boot1_depth field.
+
+        This is the positive half of the observable routing contract:
+        boot1_depth proves the recursive path was actually taken.
+        """
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+        observer: list = []
+        projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
+        run_engine_pipeline(
+            projs, {"test": 42},
+            max_steps=5, use_boot1_recursive=True, observer=observer,
+        )
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        assert len(step_events) > 0, "No step_boundary events emitted"
+        for i, event in enumerate(step_events):
+            assert "boot1_depth" in event, (
+                f"Recursive step_boundary event [{i}] missing boot1_depth"
+            )
+            assert isinstance(event["boot1_depth"], int)
+            assert event["boot1_depth"] >= 0
