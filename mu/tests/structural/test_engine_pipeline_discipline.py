@@ -480,3 +480,151 @@ class TestEngineWithRoutingValidation:
                 42,
                 hemispheres={"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None, "extra": None},
             )
+
+
+# ── run_mu callsite inventory ─────────────────────────────────────────────
+
+# All functions that call run_mu() directly in production code.
+KNOWN_RUN_MU_CALLERS = {
+    "run_hemisphere_routing",  # Only production caller (hemispheres.v1 routing)
+}
+
+
+class TestRunMuCallsiteInventory:
+    """run_mu must only be called from known locations."""
+
+    def test_no_unknown_callers(self):
+        """Fail-closed: any new caller must be added to KNOWN_RUN_MU_CALLERS."""
+        source = _STEP_MU_PATH.read_text()
+        actual = _find_callers(source, "run_mu")
+        unknown = actual - KNOWN_RUN_MU_CALLERS
+        assert not unknown, (
+            f"Unknown run_mu callers: {unknown}. "
+            "Add to KNOWN_RUN_MU_CALLERS if intentional."
+        )
+
+    def test_no_stale_inventory(self):
+        """Known callers must actually exist in source."""
+        source = _STEP_MU_PATH.read_text()
+        actual = _find_callers(source, "run_mu")
+        stale = KNOWN_RUN_MU_CALLERS - actual
+        assert not stale, (
+            f"Stale entries in KNOWN_RUN_MU_CALLERS: {stale}. "
+            "Remove if callers were deleted."
+        )
+
+    def test_caller_count_locked(self):
+        """Exactly 1 production caller of run_mu."""
+        source = _STEP_MU_PATH.read_text()
+        actual = _find_callers(source, "run_mu")
+        assert len(actual) == 1, (
+            f"Expected 1 run_mu caller, found {len(actual)}: {actual}"
+        )
+
+
+# ── run_mu_structural callsite inventory ──────────────────────────────────
+
+# All functions that call run_mu_structural() directly.
+# run_engine_pipeline: main engine loop boundary dispatch
+# _run_engine_recursive: Boot1 shadow recursive engine (reimplements pipeline)
+KNOWN_RUN_MU_STRUCTURAL_CALLERS = {
+    "run_engine_pipeline",
+    "_run_engine_recursive",
+}
+
+
+class TestRunMuStructuralCallsiteInventory:
+    """run_mu_structural must only be called from known locations."""
+
+    def test_no_unknown_callers(self):
+        """Fail-closed: any new caller must be added to KNOWN_RUN_MU_STRUCTURAL_CALLERS."""
+        source = _STEP_MU_PATH.read_text()
+        actual = _find_callers(source, "run_mu_structural")
+        unknown = actual - KNOWN_RUN_MU_STRUCTURAL_CALLERS
+        assert not unknown, (
+            f"Unknown run_mu_structural callers: {unknown}. "
+            "Add to KNOWN_RUN_MU_STRUCTURAL_CALLERS if intentional."
+        )
+
+    def test_no_stale_inventory(self):
+        """Known callers must actually exist in source."""
+        source = _STEP_MU_PATH.read_text()
+        actual = _find_callers(source, "run_mu_structural")
+        stale = KNOWN_RUN_MU_STRUCTURAL_CALLERS - actual
+        assert not stale, (
+            f"Stale entries in KNOWN_RUN_MU_STRUCTURAL_CALLERS: {stale}. "
+            "Remove if callers were deleted."
+        )
+
+    def test_caller_count_locked(self):
+        """Exactly 2 callers of run_mu_structural."""
+        source = _STEP_MU_PATH.read_text()
+        actual = _find_callers(source, "run_mu_structural")
+        assert len(actual) == 2, (
+            f"Expected 2 run_mu_structural callers, found {len(actual)}: {actual}"
+        )
+
+
+# ── JS JSON API action list parity ────────────────────────────────────────
+
+# Expected JS JSON API actions (18 total, extracted from dispatch branches)
+EXPECTED_JS_ACTIONS = {
+    "run_vector", "run_all_vectors", "run_recurrence", "run_exhaustion",
+    "get_constants", "normalize_roundtrip", "validate_mu",
+    "run_recurrence_with_bridge", "run_exhaustion_with_bridge",
+    "validate_reserved_fields", "validate_algorithm_runtime_fields",
+    "run_structural_trace", "run_hemisphere", "run_engine_pipeline",
+    "hash_trace", "run_hemisphere_routing", "run_engine_with_routing",
+    "list_actions",
+}
+
+
+def _extract_js_dispatch_actions(source: str) -> set[str]:
+    """Extract all action names from request.action === '...' branches."""
+    return set(re.findall(r"request\.action\s*===\s*'([^']+)'", source))
+
+
+def _extract_js_list_actions(source: str) -> set[str]:
+    """Extract the actions array from the list_actions response."""
+    pattern = r"request\.action\s*===\s*'list_actions'.*?actions:\s*\[(.*?)\]"
+    m = re.search(pattern, source, re.DOTALL)
+    if not m:
+        pytest.fail("Could not find list_actions response in eval_step.js")
+    return set(re.findall(r"'([^']+)'", m.group(1)))
+
+
+class TestJsActionListParity:
+    """JS JSON API action dispatch must be self-consistent and locked."""
+
+    def test_action_count_locked(self):
+        """JS must have exactly 18 JSON API actions."""
+        source = _JS_PATH.read_text()
+        actual = _extract_js_dispatch_actions(source)
+        assert len(actual) == 18, (
+            f"Expected 18 JS actions, found {len(actual)}: {sorted(actual)}"
+        )
+
+    def test_dispatch_matches_list_actions(self):
+        """Dispatch branches must exactly match list_actions response."""
+        source = _JS_PATH.read_text()
+        dispatch = _extract_js_dispatch_actions(source)
+        listed = _extract_js_list_actions(source)
+        dispatch_only = dispatch - listed
+        listed_only = listed - dispatch
+        assert not dispatch_only and not listed_only, (
+            f"JS action list drift!\n"
+            f"  In dispatch but not list_actions: {dispatch_only}\n"
+            f"  In list_actions but not dispatch: {listed_only}"
+        )
+
+    def test_actions_match_expected_set(self):
+        """JS actions must match the hardcoded expected set."""
+        source = _JS_PATH.read_text()
+        actual = _extract_js_dispatch_actions(source)
+        missing = EXPECTED_JS_ACTIONS - actual
+        extra = actual - EXPECTED_JS_ACTIONS
+        assert not missing and not extra, (
+            f"JS action set drift!\n"
+            f"  Missing: {missing}\n"
+            f"  Extra: {extra}"
+        )
