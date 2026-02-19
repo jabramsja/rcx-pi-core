@@ -221,7 +221,7 @@ fi
 
 ```bash
 # Handlers must be wrapped
-if grep -n "handlers\[" rcx_pi/kernel.py | grep -v "assert_handler_pure"; then
+if grep -n "handlers\[" rcx_pi/selfhost/kernel.py | grep -v "assert_handler_pure"; then
     echo "ERROR: Unwrapped handler registration"
     FAILED=1
 fi
@@ -231,7 +231,7 @@ fi
 
 ```bash
 # isinstance is only OK in guardrails, not in evaluation
-if grep -n "isinstance" rcx_pi/kernel.py rcx_pi/eval_seed.py 2>/dev/null | grep -v "# guardrail"; then
+if grep -n "isinstance" rcx_pi/selfhost/kernel.py rcx_pi/selfhost/eval_seed.py 2>/dev/null | grep -v "# guardrail"; then
     echo "WARNING: isinstance outside guardrail context"
     WARNINGS=$((WARNINGS + 1))
 fi

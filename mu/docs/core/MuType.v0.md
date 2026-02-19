@@ -143,7 +143,7 @@ None. The type is fully defined by JSON compatibility.
 
 ## Implementation
 
-The Mu type validation is implemented in `rcx_pi/mu_type.py`:
+The Mu type validation is implemented in `rcx_pi/selfhost/mu_type.py`:
 - `is_mu(value)` - Check if value is a valid Mu
 - `validate_mu(value)` - Stricter JSON round-trip validation
 - `assert_mu(value, context)` - Fail-loud guardrail for VM use
@@ -153,7 +153,7 @@ The semantic purity audit (`tools/audit_semantic_purity.sh`) verifies these guar
 
 ## Historical Implementation Notes
 
-1. ~~Implement `is_mu()` and `validate_mu()` in `rcx_pi/mu_type.py`~~ ✅
+1. ~~Implement `is_mu()` and `validate_mu()` in `rcx_pi/selfhost/mu_type.py`~~ ✅
 2. ~~Extend `audit_semantic_purity.sh` to check Mu type guardrails~~ ✅
 
 All core Mu type functionality is implemented. See `rcx_pi/selfhost/mu_type.py`.
