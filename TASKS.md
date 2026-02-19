@@ -95,6 +95,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-18, l4-micro-abi-wave1): Created L4MicroAbi.v0.md — L4 ABI surface (rcx_load/rcx_step/rcx_run) with 8 invariants, gate mapping table G1-G8, ABI-to-Boot layer mapping, excluded-by-design list, L4 reduction paths. Truth-sync: L4ExitChecklist.v0.md references section updated, TASKS.md SINK entry updated. No phase/debt/task change.
 - Tracker sync note (2026-02-19, core-hardening-wave6-v2): Expanded test_engine_pipeline_discipline.py with 3 slow tests: run_engine_with_routing return shape lock (exactly 2 top keys, 8 engine terminal keys, 5 hemisphere keys). Expanded test_cross_substrate_constants.py with 5 tests: runEnginePipeline maxSteps/maxAlgorithmIterations/frozen/observer default parity (scoped to destructuring block), hemisphere routing step limit parity (30==30). Total: 44 tests in pipeline file, 16 in constants file. No phase/debt/task change.
 - Tracker sync note (2026-02-19, turbo-doc-ref-audit-wave1-v2): Fixed 4 stale file:line references → function-name refs per doc governance: step_mu.py:241→step_kernel_mu(), eval_step.js:runEnginePipelineRecursive:2014→runEnginePipelineRecursive(), match_mu.py:708→match(), step_mu.py:148→ALGORITHM_ENTRYPOINT_KEYS. Also converted step_mu.py:1578→run_engine_pipeline(). Docs index verified current. No phase/debt/task change.
 - Tracker sync note (2026-02-18, core-hardening-wave5): Expanded test_engine_pipeline_discipline.py with 9 new tests: run_mu AST callsite inventory (1 caller locked), run_mu_structural AST callsite inventory (2 callers locked), JS JSON API action list parity (18 actions, dispatch↔list_actions self-consistency). New test_triad_router_discipline.py (6 tests): triad_dispatch route correctness (paradox/godel/core/heuristic), CLI replay routing, unknown command rejection. Total: 41 tests in pipeline file + 6 in router file. No phase/debt/task change.
@@ -474,7 +475,7 @@ Current Exhaustion Layer: META_CIRCULAR
 - Performance-first optimizations
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
 - Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
-- L4 True Self-Hosting — measurable exit checklist with 8 gates (L4-G1 through L4-G8). See `mu/docs/core/L4ExitChecklist.v0.md`. G1-G7 PASS, G8 UNPROVEN (circular dependency research question). Stop conditions documented.
+- L4 True Self-Hosting — measurable exit checklist with 8 gates (L4-G1 through L4-G8). See `mu/docs/core/L4ExitChecklist.v0.md`. G1-G7 PASS, G8 UNPROVEN (circular dependency research question). Stop conditions documented. L4 Micro-ABI defined (`mu/docs/core/L4MicroAbi.v0.md`): rcx_load/rcx_step/rcx_run mapped to gates.
 
 **Legacy Surface Tracker (Round 19D, 2026-02-14):**
 Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
