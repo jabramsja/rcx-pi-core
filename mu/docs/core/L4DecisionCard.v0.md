@@ -469,6 +469,111 @@ Decision Deadline: 2026-02-26 (wave6 heartbeat)
    Next step: D007 — H3 negative control (if pursued per heartbeat tracker)
 ```
 
+### D007: H3 Negative Control — Loop Elimination Without Mechanism
+
+```
+Decision ID: D007
+Date: 2026-02-19
+Owner: RCX Core Team
+Scope: Test H3 — can the host loop be eliminated without ANY iteration mechanism?
+Decision Deadline: 2026-03-12 (wave7 heartbeat)
+
+1. Target L4 Gate(s)
+   target_gate_id: G8
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: H1 (PARTIALLY CONFIRMED, D006) and H2 (ALL 4 CRITERIA MET, D001-D003)
+   are complete. H3 is the negative control validating the falsification discipline.
+   If H3 cannot be falsified, the methodology is broken.
+
+2. Proposed Change (Least-Lazy Path)
+   Write standalone negative control harness in tests/research/ (research artifact
+   only). Test 4 plausible "no-iteration" strategies against reference vectors
+   requiring multi-step convergence. Prove each strategy either fails (not general)
+   or secretly contains iteration (isomorphic to loop).
+
+3. Pass/Fail Evidence Commands
+   evidence_command: PYTHONHASHSEED=0 pytest tests/research/test_d007_h3_negative_control.py -v
+   Pass (H3 falsified, expected): All 4 strategies fail to be both general AND iteration-free
+   Fail (H3 confirmed, unexpected): A mechanism exists that is both general AND iteration-free
+   evidence_delta_vs_previous: First H3 evidence (D006 was H1, D001-D003 were H2)
+
+4. Risks and Rollback Trigger
+   Risk: None (research artifact in tests/research/, not production import).
+   Rollback: Delete file if methodology is found to be broken (unexpected).
+
+5. Not-in-Scope
+   - Production code changes
+   - H1 or H2 experiments (already complete)
+   - Any changes to eval_step, step_mu, or run_mu
+   - New iteration mechanisms or CPS transforms
+
+6. Decision Outcome
+   Outcome: GO
+   Rationale: Zero risk, completes hypothesis matrix coverage (H3 was the last
+   UNTESTED hypothesis). Validates the falsification discipline itself.
+
+7. Execution Result (2026-02-19)
+   Status: EXECUTED — H3 FALSIFIED (expected)
+
+   Evidence command run:
+     PYTHONHASHSEED=0 pytest tests/research/test_d007_h3_negative_control.py -v
+     16 tests pass
+
+   Reference vectors:
+   - MULTI: 3-step convergence (a→b→c→done)
+   - CHAIN: 5-step convergence (0→1→2→3→4→5)
+
+   Strategy results:
+
+   Strategy 1 (single step):
+   - Applies step_mu exactly once. No loop, no recursion (AST-verified).
+   - Result: a→b (not a→done). Cannot converge multi-step inputs.
+   - Verdict: iteration-free but NOT general.
+
+   Strategy 2 (fixed unrolling, K=3 and K=5):
+   - Unrolls step_mu K times inline. No loop keyword (AST-verified).
+   - K=3 works for 3-step input, FAILS for 5-step chain (reaches n=3, needs n=5).
+   - K=5 works for 5-step input but wastes steps on 3-step input.
+   - No single constant K works for all inputs — K depends on input.
+   - Verdict: iteration-free but NOT general.
+
+   Strategy 3 (recursion):
+   - Recurses until stall (hash equality check).
+   - Produces correct results for all reference vectors.
+   - AST-verified: contains self-call (recursive_run calls recursive_run).
+   - Recursion IS iteration (isomorphic to while-loop with implicit stack).
+   - Unbounded: cycling inputs hit Python RecursionError (tested).
+   - Verdict: general but NOT iteration-free.
+
+   Strategy 4 (higher-order composition):
+   - compose_n(f, N) applies f N times via function composition.
+   - Produces correct results when N is known.
+   - AST-verified: compose_n uses range() — a host iteration mechanism.
+   - Requires knowing N at call time, but N depends on input convergence.
+   - Verdict: general (for known N) but NOT iteration-free.
+
+   Summary:
+   - Strategies tested: 4
+   - Strategies that are BOTH general AND iteration-free: 0
+   - H3 FALSIFIED (expected). Iteration is irreducible in some form.
+
+   Classification: H3 FALSIFIED — METHODOLOGY VALIDATED
+   - The falsification discipline works: H3 was designed to be false, and the
+     test framework correctly detected its falsity.
+   - Core impossibility argument: to apply projections N times for unknown N,
+     something must count iterations. That counting IS iteration, whether
+     expressed as a host loop, recursion, or structural fuel.
+   - Consistent with H1 (D006): fuel data can be Mu, but iteration is host.
+   - Implication for G8: iteration is an irreducible bootstrap requirement.
+     The question is not WHETHER iteration exists, but WHERE it lives (host
+     loop vs structural fuel vs recursion — all isomorphic).
+
+   Hypothesis matrix now complete:
+   - H1: PARTIALLY CONFIRMED (data dimension reducible, iteration not)
+   - H2: ALL 4 CRITERIA MET (circular dependency breakable)
+   - H3: FALSIFIED (iteration is irreducible — methodology validated)
+```
+
 ---
 
 ## References
