@@ -313,6 +313,32 @@ Do NOT update individual agent files - they read STATUS.md.
 
 ---
 
+## Codex→Claude Prompt Contract
+
+**Purpose:** Lock prompt quality for multi-wave Codex→Claude sessions. Prevents scope creep, governance theater, and unbounded tooling waves.
+
+**Required fields for every multi-wave prompt:**
+
+| Field | What It Contains |
+|-------|------------------|
+| **Preflight gate** | Merge/CI prerequisites that must be true before work begins |
+| **Primary uncertainty** | The one thing most likely to block or invalidate this wave |
+| **Allowed/forbidden scope** | Explicit boundary: what IS and IS NOT in scope for this wave |
+| **Evidence delta** | What new evidence this wave produces vs the previous wave (if none: why) |
+| **Stop conditions** | When to stop early (blocker hit, scope exceeded, test failure) |
+| **Validation gates** | Exact commands to run and pass/fail criteria |
+| **Push/merge block** | Explicit "wait for GO PUSH / GO MERGE" — no autonomous push |
+
+**Hard rules:**
+
+1. **Governance ratio cap:** No more than 1 governance/docs-only wave in a row without an evidence wave. If 2 consecutive waves produce zero runtime/substrate/seed evidence, the third wave MUST target a concrete evidence artifact (test, seed, compiler, parity fix). Governance-only means: only CLAUDE.md, TASKS.md, STATUS.md, doc headers, or lock tests changed — no `rcx_pi/selfhost/`, `mu/host/`, `mu/substrate/`, `mu/closures/`, `mu/programs/`, `mu/bridge/`, or `tools/compilers/` changes.
+
+2. **WIP cap:** Max 2 concurrent workstreams in NEXT unless explicitly authorized by founder. A workstream is a NEXT item with uncommitted implementation work. Governance/docs waves that don't touch NEXT items don't count toward the cap.
+
+3. **No silent scope expansion:** If a wave discovers work outside its allowed scope, document it as a future task (VECTOR or SINK) — do not implement it in the current wave.
+
+---
+
 ## Key Files
 
 | File | Purpose |

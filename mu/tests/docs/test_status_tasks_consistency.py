@@ -648,3 +648,56 @@ def test_l3_truth_statement_not_overclaimed() -> None:
         "STATUS.md contains 'pure structural execution' — overclaim. "
         "Use 'structural projections with host execution substrate'."
     )
+
+
+# =============================================================================
+# Prompt Contract Lock — Codex→Claude prompt quality governance
+# =============================================================================
+
+CLAUDE_MD_PATH = REPO_ROOT / "CLAUDE.md"
+
+
+def test_claude_md_has_prompt_contract_section() -> None:
+    """
+    CLAUDE.md must contain a 'Codex→Claude Prompt Contract' section
+    that locks prompt quality for multi-wave sessions.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "Codex→Claude Prompt Contract" in text, (
+        "CLAUDE.md missing 'Codex→Claude Prompt Contract' section."
+    )
+
+
+def test_prompt_contract_has_required_fields() -> None:
+    """
+    The prompt contract must specify all 7 required fields.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    required_fields = (
+        "Preflight gate",
+        "Primary uncertainty",
+        "Allowed/forbidden scope",
+        "Evidence delta",
+        "Stop conditions",
+        "Validation gates",
+        "Push/merge block",
+    )
+    missing = [f for f in required_fields if f not in text]
+    assert not missing, (
+        f"CLAUDE.md prompt contract missing required fields: {missing}"
+    )
+
+
+def test_prompt_contract_has_governance_ratio_cap() -> None:
+    """
+    The prompt contract must enforce a governance-wave ratio cap
+    to prevent unbounded governance-only waves.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "Governance ratio cap" in text or "governance ratio cap" in text.lower(), (
+        "CLAUDE.md prompt contract missing governance ratio cap rule."
+    )
+    # Must reference the specific limit
+    assert "1 governance/docs-only wave" in text or "1 governance" in text.lower(), (
+        "Governance ratio cap must specify the max consecutive governance waves."
+    )
