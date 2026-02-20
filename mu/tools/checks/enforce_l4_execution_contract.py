@@ -102,8 +102,8 @@ def is_runtime_file(filepath: str) -> bool:
 
 
 def is_l4_gate_test(filepath: str) -> bool:
-    """Check if a file is under tests/l4_gates/."""
-    return filepath.startswith("tests/l4_gates/")
+    """Check if a file is under tests/l4_gates/ (canonical or physical mu/ path)."""
+    return filepath.startswith("tests/l4_gates/") or filepath.startswith("mu/tests/l4_gates/")
 
 
 # ---------------------------------------------------------------------------
@@ -398,8 +398,8 @@ def enforce(
         gate_test_files = [f for f in changed_files if is_l4_gate_test(f)]
         if not gate_test_files:
             errors.append(
-                "L4_STRUCTURAL wave missing changed file under tests/l4_gates/. "
-                "Must include gate-linked test evidence."
+                "L4_STRUCTURAL wave missing changed file under tests/l4_gates/ "
+                "(or mu/tests/l4_gates/). Must include gate-linked test evidence."
             )
 
         # Host semantics delta fields (checked via notes if available)
@@ -413,10 +413,11 @@ def enforce(
                 errors.append("L4_STRUCTURAL missing structural_artifact_ref in tracker note")
             if current["evidence_command"] is None:
                 errors.append("L4_STRUCTURAL missing evidence_command in tracker note")
-            elif "tests/l4_gates/" not in current["evidence_command"]:
+            elif ("tests/l4_gates/" not in current["evidence_command"]
+                  and "mu/tests/l4_gates/" not in current["evidence_command"]):
                 errors.append(
-                    "L4_STRUCTURAL evidence_command must reference tests/l4_gates/ target. "
-                    f"Got: {current['evidence_command']!r}"
+                    "L4_STRUCTURAL evidence_command must reference tests/l4_gates/ "
+                    f"(or mu/tests/l4_gates/) target. Got: {current['evidence_command']!r}"
                 )
 
     # --- L4_ENABLER ---

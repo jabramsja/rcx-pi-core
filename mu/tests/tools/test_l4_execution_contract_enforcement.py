@@ -538,6 +538,46 @@ class TestEvidenceCommandTarget:
         passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
         assert passed, f"Should pass with l4_gates ref: {errors}"
 
+    def test_mu_physical_gate_test_path_accepted(self) -> None:
+        """mu/tests/l4_gates/ physical path accepted for L4_STRUCTURAL file evidence."""
+        files = ["mu/host/js/eval_step.js", "mu/tests/l4_gates/test_boot1.py"]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+const x = true;\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff)
+        assert passed, f"mu/tests/l4_gates/ path should be accepted: {errors}"
+
+    def test_mu_physical_evidence_command_accepted(self) -> None:
+        """mu/tests/l4_gates/ in evidence_command accepted for L4_STRUCTURAL."""
+        notes = [{
+            "wave_id": "test",
+            "raw_class": "L4_STRUCTURAL",
+            "wave_class": "L4_STRUCTURAL",
+            "gate": "G8",
+            "no_op_proof": None,
+            "evidence_command": "pytest mu/tests/l4_gates/test_boot1_default_routing_gate.py -q",
+            "evidence_delta": "flipped boot1 default",
+            "host_semantics_delta_before": "trampoline default",
+            "host_semantics_delta_after": "boot1 default",
+            "structural_artifact_ref": "mu/programs/rcx_engine.v1.json",
+            "defer_reason_code": None,
+            "founder_override": None,
+            "date": "2026-02-20",
+            "raw": "test note",
+        }]
+        files = ["mu/host/js/eval_step.js", "mu/tests/l4_gates/test_boot1.py"]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+const x = true;\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert passed, f"mu/ evidence path should pass: {errors}"
+
 
 # =============================================================================
 # Fix B: Wave binding (notes ordering)

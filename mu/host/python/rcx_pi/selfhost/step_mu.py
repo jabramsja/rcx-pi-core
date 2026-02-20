@@ -1891,7 +1891,7 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
             extra = sorted(actual - _HEMISPHERE_KEYS, key=str)
             raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
 
-    use_boot1 = engine_kwargs.pop("use_boot1_recursive", False)
+    use_boot1 = engine_kwargs.pop("use_boot1_recursive", True)
     if not isinstance(use_boot1, bool):  # AST_OK: boundary
         raise TypeError(
             f"use_boot1_recursive must be bool, got {type(use_boot1).__name__}"
