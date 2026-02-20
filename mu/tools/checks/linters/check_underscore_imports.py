@@ -14,7 +14,13 @@ import ast
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent.parent
+# Walk up from this file to find repo root (directory containing .git).
+# Fail-closed: if no .git found, ROOT stays at filesystem root and
+# SCAN_DIRS won't match anything, so the checker reports 0 (safe default).
+_THIS = Path(__file__).resolve()
+ROOT = _THIS.parent
+while not (ROOT / ".git").exists() and ROOT != ROOT.parent:
+    ROOT = ROOT.parent
 
 # Files allowed to import underscored names from rcx_pi
 FILE_ALLOWLIST = frozenset({

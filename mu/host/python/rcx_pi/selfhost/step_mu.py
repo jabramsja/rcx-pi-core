@@ -7,8 +7,8 @@ and subst_mu.
 
 Phase 7d: Meta-circular kernel
 - step_mu() now uses structural kernel projections (kernel.v1 + match.v2 + subst.v2)
-- The Python for-loop is replaced with kernel projections that iterate structurally
-- Iteration uses linked-list cursor, not arithmetic
+- Kernel iteration uses linked-list cursor via host_iteration(), not arithmetic
+- Engine pipeline (trampoline) and Boot1 recursive path both use _step_trusted for stepping
 
 TERMINOLOGY NOTE:
 - kernel.v1.json = structural kernel (7 Mu projections for iteration)
@@ -959,9 +959,6 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
     """
-    from rcx_pi.selfhost.eval_seed import _step_trusted
-    from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match
-
     assert_mu(input_value, "step_algorithm_with_bridge.input")
     validate_algorithm_runtime_fields(input_value, "step_algorithm_with_bridge input")
     validate_kernel_projections_first(projections)

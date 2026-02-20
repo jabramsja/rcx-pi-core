@@ -46,21 +46,6 @@ KNOWN_PIPELINE_CALLERS = {
 }
 
 
-def _find_run_engine_pipeline_callers(source: str) -> set[str]:
-    """Find all functions that call run_engine_pipeline() via AST walk."""
-    tree = ast.parse(source)
-    callers: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        func_name = node.name
-        for child in ast.walk(node):
-            if isinstance(child, ast.Call):
-                if isinstance(child.func, ast.Name) and child.func.id == "run_engine_pipeline":
-                    callers.add(func_name)
-    return callers
-
-
 # ── AST callsite inventory ───────────────────────────────────────────────
 
 
@@ -70,7 +55,7 @@ class TestPipelineCallsiteInventory:
     def test_no_unknown_callers(self):
         """Fail-closed: any new caller must be added to KNOWN_PIPELINE_CALLERS."""
         source = _STEP_MU_PATH.read_text()
-        actual = _find_run_engine_pipeline_callers(source)
+        actual = _find_callers(source, "run_engine_pipeline")
         unknown = actual - KNOWN_PIPELINE_CALLERS
         assert not unknown, (
             f"Unknown run_engine_pipeline callers: {unknown}. "
@@ -80,7 +65,7 @@ class TestPipelineCallsiteInventory:
     def test_no_stale_inventory(self):
         """Known callers must actually exist in source."""
         source = _STEP_MU_PATH.read_text()
-        actual = _find_run_engine_pipeline_callers(source)
+        actual = _find_callers(source, "run_engine_pipeline")
         stale = KNOWN_PIPELINE_CALLERS - actual
         assert not stale, (
             f"Stale entries in KNOWN_PIPELINE_CALLERS: {stale}. "
@@ -90,7 +75,7 @@ class TestPipelineCallsiteInventory:
     def test_caller_count_locked(self):
         """Exact caller count as documentation."""
         source = _STEP_MU_PATH.read_text()
-        actual = _find_run_engine_pipeline_callers(source)
+        actual = _find_callers(source, "run_engine_pipeline")
         assert len(actual) == 1, (
             f"Expected 1 caller, found {len(actual)}: {actual}"
         )

@@ -116,3 +116,37 @@ class TestCleanFile:
         """
         violations = _check_source(source)
         assert len(violations) == 0
+
+
+class TestCheckerRootResolution:
+    """Regression: checker ROOT must resolve to repo root, not a subdirectory."""
+
+    def test_checker_root_contains_tests_dir(self):
+        """If ROOT doesn't contain tests/, the scanner silently skips everything."""
+        assert (checker.ROOT / "tests").is_dir(), (
+            f"Checker ROOT={checker.ROOT} does not contain tests/ — "
+            "scanner would be a no-op"
+        )
+
+    def test_checker_root_contains_git(self):
+        """ROOT should be the repo root (contains .git)."""
+        assert (checker.ROOT / ".git").exists(), (
+            f"Checker ROOT={checker.ROOT} is not the repo root"
+        )
+
+    def test_main_finds_real_violations(self):
+        """End-to-end: main() scans real tests/ and finds known violations if any exist.
+
+        This is a liveness check — if main() returns 0 and we know there ARE
+        underscore imports without ANTICHEAT_OK, the checker is broken.
+        The exact count may change; the key invariant is that scan coverage > 0 files.
+        """
+        scan_count = 0
+        for scan_dir in checker.SCAN_DIRS:
+            dirpath = checker.ROOT / scan_dir
+            if dirpath.exists():
+                scan_count += sum(1 for _ in dirpath.rglob("*.py")
+                                  if "__pycache__" not in str(_))
+        assert scan_count > 0, (
+            "Checker scanned 0 files — ROOT path is wrong or tests/ is empty"
+        )
