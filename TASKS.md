@@ -97,6 +97,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-20, hemisphere-execution-wave8): **E5 MET — governance closure.** Hemisphere Metabolization Contract COMPLETE in TASKS.md NEXT (E1-E5 all MET). HemisphereExecutionChecklist.v0.md E5: NOT STARTED → MET, LAST_VERIFIED updated. STATUS.md next-milestone updated to reflect completion. Cross-reference with Boot1LoopContract.v0.md maintained in checklist. Doc consistency tests extended with E5 closure locks (4 new assertions). No runtime/seed/primitive/debt change.
 - Tracker sync note (2026-02-20, hemisphere-execution-wave7): **E4 MET — security and invariant tests.** Created `tests/structural/test_hemisphere_e4_security_invariants.py`: 15 tests. S1-S5 sink-safety invariants verified against canonical synthesized engine_result shape. 4 bootstrap primitives locked (no new). 24 KERNEL_RESERVED_FIELDS locked (no new, metabolization seed has zero underscore keys). Hemisphere classify priority order locked (exhaustion first). Option B shadow-only: `exception_sink` absent from all runtime code and seeds. HemisphereExecutionChecklist.v0.md E4: NOT STARTED → MET. No primitive/debt/runtime change.
 - Tracker sync note (2026-02-20, hemisphere-execution-wave6): **E3 MET — cross-substrate metabolization parity evidence.** Created `tests/parity/test_hemisphere_metabolization_parity.py`: 15 tests (T1-T10 truth-table + 2 coverage assertions + 3 adversarial). Each test runs Python `step()` and JS `step_metabolization` JSON API, asserts structural output equality. All 5 buckets covered as routing targets. T2/T8 prove null→r_null (not r_inf/r_a). T10 proves stall (input unchanged). Added `step_metabolization` JSON API action to eval_step.js (+ list_actions). HemisphereExecutionChecklist.v0.md E3: NOT STARTED → MET. No primitive/debt count drift.
 - Tracker sync note (2026-02-20, hemisphere-execution-wave5): **E2 MET — JS metabolization behavior evidence + null-routing semantic fix.** Reordered metabolization.v1.json: `sink_to_r_null` (null-specific literal) now precedes `sink_to_r_inf` (generic var) so first-match-wins routes null state to r_null per design T2/T8. Updated checksums and projection ID order in seed_integrity.py + eval_step.js. 9 inline behavior assertions via `step()`: 6 projection tests (all via step, including null→r_null), 1 stall test, plus ID existence and order gates. All fail-closed. HemisphereExecutionChecklist.v0.md E2: PARTIAL → MET. No primitive/debt count drift.
@@ -430,18 +431,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
-- **Hemisphere Metabolization Contract** — **PROMOTED FROM VECTOR P1** (2026-02-19). All 5 promotion criteria satisfied:
-  1. Re-expression trigger model decided (automatic + manual/debug) ✓
-  2. At least 4 metabolization projection specs drafted (6 designed) ✓
-  3. Extended truth-table coverage criteria defined (10 transitions T1-T10, 3 adversarial) ✓
-  4. Engine exception policy Option B designed with sink-safety invariants ✓
-  5. Explicit VECTOR → NEXT promotion in this file with rationale ✓
-
-  **Rationale:** Boot1 complete (shadow-merge scope fulfilled, E1-E5 all MET). D008 re-evaluation trigger satisfied (Boot1 complete + Hemisphere at NEXT). Design doc (`roadmap/MuHemispheresDesign.md`) is locked. Semantics locked: 6 projection IDs, 10 transitions, 5-bucket routing, engine exception policy Option B. Implementation scope bounded and testable.
-
-  **Execution slice (bounded):** Implement metabolization projections (sink → re-expression cycle) in `mu/programs/hemispheres.v1.json` (or new `metabolization.v1.json`), with truth-table tests for T1-T10 transitions and adversarial edge cases. Python and JS parity required. No engine exception policy Option B activation in this slice (shadow-only, like Boot1).
-
-  **Execution guardrail:** `mu/docs/core/HemisphereExecutionChecklist.v0.md` (E1-E5 evidence gates).
+- ~~**Hemisphere Metabolization Contract**~~ — **COMPLETE** (2026-02-20, E1-E5 all MET). PROMOTED FROM VECTOR P1 (2026-02-19). Metabolization projections implemented in `mu/programs/metabolization.v1.json` (6 projections), loaded and verified in both Python and JS substrates. E1: seed exists + integrity verified. E2: JS behavior evidence (9 inline assertions). E3: cross-substrate parity for T1-T10 + 6 adversarial cases (15 tests). E4: S1-S5 sink-safety + routing priority + no new primitives/fields + Option B shadow-only (15 tests). E5: governance closure. See `mu/docs/core/HemisphereExecutionChecklist.v0.md` for full evidence matrix. Same E1-E5 pattern as Boot1 (`mu/docs/core/Boot1LoopContract.v0.md`).
 
 - ~~**Boot1 Recursive Loop Contract**~~ — **COMPLETE** (2026-02-19, shadow-merge scope fulfilled). E1-E5 all MET. 97 Boot1-specific tests (77 parity + 14 discipline + 6 cross-substrate), 29 security regression tests. Trampoline remains default (merge-2 not yet authorized). See Ra tracker sync note (boot1-execution-wave3) for full evidence matrix.
 
