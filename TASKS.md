@@ -97,6 +97,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-19, boot1-findings-waveA): **Agent review findings (non-runtime).** Fixed anti-cheat checker ROOT (was no-op), annotated 5 `_BOOT1_MAX_REENTRY_DEPTH` imports with ANTICHEAT_OK, deduped `_find_run_engine_pipeline_callers`, removed dead local re-imports in `step_algorithm_with_bridge`, corrected stale docstring, JS `||` → `??` in display path. No phase/debt/runtime-behavior change.
 - Tracker sync note (2026-02-19, boot1-execution-wave3): **Boot1 NEXT complete (shadow-merge scope).** E1-E5 evidence matrix verified, all MET:
   - E1: `_run_engine_recursive()` at step_mu.py:1411 (167 LOC), `use_boot1_recursive` flag, AST-verified conditional routing.
   - E2: `runEnginePipelineRecursive()` at eval_step.js:2072, `boot1LoopMode` JSON API, ternary routing.
