@@ -75,6 +75,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "recurrence.v2.json": "f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9",
     # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6, APPLICATION)
     "fix.v1.json": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
+    # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
+    "metabolization.v1.json": "94ac660cbb725459ec54453879ee0ba51b191806ccbeb976c028b061e2e27b85",
 }
 
 # Expected projection IDs for each seed.
@@ -249,6 +251,15 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "fix.vertex_add",        # Add one vertex to graph with vertices
         "fix.pass_through",      # Fallback: no perturbation possible
     ],
+    # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
+    "metabolization.v1.json": [
+        "hemisphere.metabolize.sink_to_r_inf",   # Sink entry -> r_inf (unbounded)
+        "hemisphere.metabolize.sink_to_r_null",  # Sink entry -> r_null (void)
+        "hemisphere.recover.stall_to_lobes",     # Stalled -> lobes (preferred)
+        "hemisphere.recover.stall_to_sink",      # Stalled -> sink (fallback)
+        "hemisphere.promote.lobes_to_r_a",       # Lobes -> r_a (closure evidence)
+        "hemisphere.recycle.residual_to_sink",   # Unresolvable -> sink (recycle)
+    ],
 }
 
 
@@ -275,6 +286,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     "rcx_engine.v1.json": "programs",
     "hemispheres.v1.json": "programs",
     "paxos_demo.v1.json": "programs",
+    "metabolization.v1.json": "programs",
 }
 
 
