@@ -241,6 +241,40 @@ FORBIDDEN_PATTERNS = [
     ),
 
     # =========================================================================
+    # Semantic inflation — phrases that overclaim structural purity
+    # =========================================================================
+    ForbiddenPattern(
+        r'pure structural execution',
+        "Overclaim: execution iteration is host code, not structural",
+        "Use 'structural projections with host execution substrate' or similar",
+        exceptions=[
+            "AgentRunbook.v0.md",      # Runbook may quote red-team findings
+            "AgentGuardrails.v0.md",   # Guardrails may quote examples
+            "AgentRig.v0.md",          # Agent rig critique text
+        ],
+    ),
+    ForbiddenPattern(
+        r'eliminates host semantics',
+        "Overclaim: bootstrap primitives ARE host semantics (irreducible)",
+        "Use 'minimizes host semantics' or 'makes host boundary explicit'",
+        exceptions=[
+            "AgentRunbook.v0.md",
+            "AgentGuardrails.v0.md",
+            "AgentRig.v0.md",
+        ],
+    ),
+    ForbiddenPattern(
+        r'eval_step is a projection',
+        "Overclaim: eval_step is a bootstrap primitive (host code), not a projection",
+        "Use 'eval_step applies projections' — it is the execution substrate",
+        exceptions=[
+            "AgentRunbook.v0.md",
+            "AgentGuardrails.v0.md",
+            "AgentRig.v0.md",
+        ],
+    ),
+
+    # =========================================================================
     # Duplicate status - sections that should defer to STATUS.md
     # =========================================================================
     ForbiddenPattern(
