@@ -1535,6 +1535,7 @@ const SEED_CHECKSUMS = {
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
   'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
   'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
+  'metabolization.v1.json': '94ac660cbb725459ec54453879ee0ba51b191806ccbeb976c028b061e2e27b85',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -1593,6 +1594,11 @@ const EXPECTED_PROJECTION_IDS = {
   ],
   'fix.v1.json': [
     'fix.init', 'fix.edge_add_guard', 'fix.edge_add', 'fix.vertex_add_guard', 'fix.vertex_add', 'fix.pass_through',
+  ],
+  'metabolization.v1.json': [
+    'hemisphere.metabolize.sink_to_r_inf', 'hemisphere.metabolize.sink_to_r_null',
+    'hemisphere.recover.stall_to_lobes', 'hemisphere.recover.stall_to_sink',
+    'hemisphere.promote.lobes_to_r_a', 'hemisphere.recycle.residual_to_sink',
   ],
 };
 
@@ -1722,6 +1728,7 @@ const fixSeed = loadVerifiedSeed(path.join(closuresDir, 'fix.v1.json'), 'fix.v1.
 const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'bootstrap_structural.v1.json');
 const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
 const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json'), 'rcx_engine.v1.json');
+const metabolizationSeed = loadVerifiedSeed(path.join(programsDir, 'metabolization.v1.json'), 'metabolization.v1.json');
 
 // Combine projections: kernel first, then match, then subst
 const allProjections = [
@@ -1747,6 +1754,9 @@ const hemisphereProjections = hemisphereSeed.projections;
 
 // Engine projections (APPLICATION level - orchestrates trace/recurrence/exhaustion pipeline)
 const engineProjections = engineSeed.projections;
+
+// Metabolization projections (APPLICATION level - hemisphere sink re-expression cycle)
+const metabolizationProjections = metabolizationSeed.projections;
 
 // Recurrence v2 projections (hash-accelerated, used by engine run_algorithm boundary)
 const recurrenceV2Projections = recurrenceV2Seed.projections;
@@ -2307,7 +2317,7 @@ function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs
 }
 
 console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
-console.log('Seed integrity: 10 seeds verified (checksum + structure + projection order)');
+console.log('Seed integrity: 11 seeds verified (checksum + structure + projection order)');
 console.log(`Loaded projections from mu/ folder:`);
 console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
 console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
@@ -2318,6 +2328,7 @@ console.log(`  - closures/recurrence.v2.json: ${recurrenceV2Seed.projections.len
 console.log(`  - closures/exhaustion.v1.json: ${exhaustionSeed.projections.length} projections`);
 console.log(`  - closures/fix.v1.json: ${fixSeed.projections.length} projections (draft — GAP-04-FIX)`);
 console.log(`  - programs/hemispheres.v1.json: ${hemisphereSeed.projections.length} projections`);
+console.log(`  - programs/metabolization.v1.json: ${metabolizationSeed.projections.length} projections`);
 console.log(`  - programs/rcx_engine.v1.json: ${engineSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
 console.log(`  - Total (with Bridge): ${allProjectionsWithBridge.length} projections`);
@@ -3231,6 +3242,7 @@ if (process.argv.includes('--json-api')) {
         recurrence_projection_count: recurrenceSeed.projections.length,
         exhaustion_projection_count: exhaustionSeed.projections.length,
         hemisphere_projection_count: hemisphereSeed.projections.length,
+        metabolization_projection_count: metabolizationSeed.projections.length,
         total_with_bridge: allProjectionsWithBridge.length,
         total_with_recurrence_bridge: allProjectionsWithRecurrenceAndBridge.length,
         total_with_exhaustion_bridge: allProjectionsWithExhaustionAndBridge.length

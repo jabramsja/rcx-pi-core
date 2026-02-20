@@ -75,7 +75,7 @@ This follows the same E1-E5 pattern used for Boot1 (shadow-merge scope) and GAP-
 
 **Evidence command:** `node mu/host/js/eval_step.js` (metabolization tests section)
 
-**Status:** NOT STARTED
+**Status:** PARTIAL (2026-02-20). JS substrate loads metabolization.v1.json with full integrity verification (SHA256 checksum, structure validation, projection ID ordering). Seed wiring complete. JS inline metabolization behavior tests not yet written — remaining for E2 closure.
 
 ### E3: Truth-Table Coverage (T1-T10 + Adversarial)
 
