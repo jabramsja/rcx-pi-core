@@ -97,6 +97,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-19, conjecture-parking-wave1): **Conjecture parking policy.** Added "Conjecture Parking (NOT ACTIVE)" subsection to SINK. Parks non-Euclidean/topological geometry hypothesis with explicit non-goals and founder-gated re-evaluation trigger. STATUS.md mirror note added. 3 fail-closed consistency tests. No phase/debt/runtime change.
 - Tracker sync note (2026-02-19, hemisphere-promotion-wave1): **Hemisphere Metabolization VECTOR → NEXT promotion.** All 5 promotion criteria satisfied. Boot1 complete (E1-E5 MET) + D008 re-evaluation trigger met. VECTOR reindexed: P2→P1 (G8 Decision Path), P3→P2 (Checkpoint/Resume), P4→P3, P5→P4, P6→P5. Created `mu/docs/core/HemisphereExecutionChecklist.v0.md` (E1-E5 evidence gates). STATUS.md updated: next milestone = Hemisphere Metabolization. No phase/debt/runtime change.
 - Tracker sync note (2026-02-19, boot1-findings-waveB): **I1/I2 runtime hardening.** Added `assert_mu(input_value)` boundary validation at `run_engine_pipeline` and `_run_engine_recursive` entry (Python), `isValidMu(inputValue)` at `runEnginePipeline` and `runEnginePipelineRecursive` entry (JS). Fixed `validateSeedStructure` falsy checks → key-presence (`'id' in proj`, etc.) for Python parity. No phase/debt change; runtime behavior change (rejects non-Mu input at engine pipeline boundary).
 - Tracker sync note (2026-02-19, boot1-findings-waveA): **Agent review findings (non-runtime).** Fixed anti-cheat checker ROOT (was no-op), annotated 5 `_BOOT1_MAX_REENTRY_DEPTH` imports with ANTICHEAT_OK, deduped `_find_run_engine_pipeline_callers`, removed dead local re-imports in `step_algorithm_with_bridge`, corrected stale docstring, JS `||` → `??` in display path. No phase/debt/runtime-behavior change.
@@ -510,6 +511,13 @@ Current Exhaustion Layer: META_CIRCULAR
 - **[S3]** Multi-value/concurrent execution
 - **[S4]** Performance-first optimizations
 - ~~Full VM bootstrap / meta-circular execution~~ → Promoted to VECTOR #14 (RCX Kernel v0)
+
+**Conjecture Parking (NOT ACTIVE):**
+- **Hypothesis:** Non-Euclidean / topological RCX manifold geometry; structural linear algebra overlays on Mu projections.
+- **Non-goal:** No embedding, gradient, or continuous-space semantics in core runtime. Outside math concepts are mechanism inspiration only; RCX ontology remains primary.
+- **Status:** PARKED. No implementation, no design doc, no active exploration.
+- **Re-evaluation trigger:** Explicit founder GO + gate-mapped evidence command (must target a specific L4 gate).
+- **Promotion rule:** Must map to one specific gate AND one bounded experiment (single wave, ≤1 week). No rabbit-hole expansion without bounded evidence plan.
 
 **L4 Heartbeat Tracker (next 3 waves):**
 
