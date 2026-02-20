@@ -24,8 +24,8 @@ EXISTING_HEMISPHERE_SEED = REPO_ROOT / "mu" / "programs" / "hemispheres.v1.json"
 # ── Canonical metabolization projection IDs (from design doc) ──
 
 METABOLIZATION_PROJECTION_IDS = (
+    "hemisphere.metabolize.sink_to_r_null",   # null-specific must precede generic var
     "hemisphere.metabolize.sink_to_r_inf",
-    "hemisphere.metabolize.sink_to_r_null",
     "hemisphere.recover.stall_to_lobes",
     "hemisphere.recover.stall_to_sink",
     "hemisphere.promote.lobes_to_r_a",

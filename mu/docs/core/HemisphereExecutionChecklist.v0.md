@@ -75,7 +75,7 @@ This follows the same E1-E5 pattern used for Boot1 (shadow-merge scope) and GAP-
 
 **Evidence command:** `node mu/host/js/eval_step.js` (metabolization tests section)
 
-**Status:** PARTIAL (2026-02-20). JS substrate loads metabolization.v1.json with full integrity verification (SHA256 checksum, structure validation, projection ID ordering). Seed wiring complete. JS inline metabolization behavior tests not yet written — remaining for E2 closure.
+**Status:** E2 MET (2026-02-20). JS substrate loads metabolization.v1.json with full integrity verification (SHA256 checksum, structure validation, projection ID ordering). Projection order corrected: `sink_to_r_null` (null-specific) precedes `sink_to_r_inf` (generic var) so null state routes to r_null per design T2/T8. 9 inline behavior assertions via `step()` (first-match-wins): all 6 projections tested through step(), 1 stall-on-unrecognized test, plus ID existence and order gates. All pass fail-closed (`node mu/host/js/eval_step.js`).
 
 ### E3: Truth-Table Coverage (T1-T10 + Adversarial)
 

@@ -17,10 +17,47 @@
       "Linear-only patterns (no bridge required)",
       "r_null and r_inf are terminal (no path to r_a)",
       "Promotion to r_a requires explicit closure evidence (closure_flag: true)",
-      "Unresolvable material recycles to sink"
+      "Unresolvable material recycles to sink",
+      "Null-specific projections must precede generic-var projections (first-match-wins correctness)"
     ]
   },
   "projections": [
+    {
+      "id": "hemisphere.metabolize.sink_to_r_null",
+      "description": "Metabolize: sink entry with null state routes to r_null (void/zero-structure). Must precede sink_to_r_inf (var pattern matches null).",
+      "pattern": {
+        "metabolize_mode": "scan_sink",
+        "sink_entry": {
+          "state": null,
+          "closure_flag": {"var": "cf"},
+          "origin": {"var": "orig"}
+        },
+        "remaining_sink": {"var": "rs"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "metabolize_result": {
+          "r_null": {
+            "head": {
+              "state": null,
+              "closure_flag": {"var": "cf"},
+              "origin": "metabolized"
+            },
+            "tail": {"var": "rn"}
+          },
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "rs"}
+        }
+      }
+    },
     {
       "id": "hemisphere.metabolize.sink_to_r_inf",
       "description": "Metabolize: sink entry with non-null state routes to r_inf (unbounded/diverging form)",
@@ -51,42 +88,6 @@
             },
             "tail": {"var": "ri"}
           },
-          "r_a": {"var": "ra"},
-          "lobes": {"var": "l"},
-          "sink": {"var": "rs"}
-        }
-      }
-    },
-    {
-      "id": "hemisphere.metabolize.sink_to_r_null",
-      "description": "Metabolize: sink entry with null state routes to r_null (void/zero-structure)",
-      "pattern": {
-        "metabolize_mode": "scan_sink",
-        "sink_entry": {
-          "state": null,
-          "closure_flag": {"var": "cf"},
-          "origin": {"var": "orig"}
-        },
-        "remaining_sink": {"var": "rs"},
-        "hemispheres": {
-          "r_null": {"var": "rn"},
-          "r_inf": {"var": "ri"},
-          "r_a": {"var": "ra"},
-          "lobes": {"var": "l"},
-          "sink": {"var": "sk"}
-        }
-      },
-      "body": {
-        "metabolize_result": {
-          "r_null": {
-            "head": {
-              "state": null,
-              "closure_flag": {"var": "cf"},
-              "origin": "metabolized"
-            },
-            "tail": {"var": "rn"}
-          },
-          "r_inf": {"var": "ri"},
           "r_a": {"var": "ra"},
           "lobes": {"var": "l"},
           "sink": {"var": "rs"}
