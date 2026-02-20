@@ -15,11 +15,13 @@ This file is read by Claude Code at session start.
 
 **Everything else is reference material.** Docs in `mu/docs/` are specs and historical context - they should NOT contain operational state that drifts.
 
-**At session START:**
+**At session START (required preflight read list):**
 1. Read `STATUS.md` - know current phase (L1/L2/L3) and debt counts
 2. Read `TASKS.md` - know what's in progress, what's next
-3. Run `./tools/checks/check_agent_review_needed.sh` - check for uncommitted core changes needing agent review
-4. Read `mu/docs/agents/AgentRunbook.v0.md` before running agents
+3. Read `roadmap/MANIFEST.md` - canonical reading order and document roles
+4. Read `ROADMAP.md` - sequence overview
+5. Run `./tools/checks/check_agent_review_needed.sh` - check for uncommitted core changes needing agent review
+6. Read `mu/docs/agents/AgentRunbook.v0.md` before running agents
 
 **At session END (before signing off):**
 1. Did phase or debt change? → Update `STATUS.md`
@@ -264,6 +266,26 @@ When advancing phases:
 3. Agents automatically enforce new standards
 
 Do NOT update individual agent files - they read STATUS.md.
+
+---
+
+## L4 Execution Contract (Hard Gate)
+
+**Canonical policy:** [`roadmap/L4ExecutionContract.v1.md`](roadmap/L4ExecutionContract.v1.md)
+
+Every wave that claims L4 progress MUST declare a wave class. Machine-enforced by `tools/checks/enforce_l4_execution_contract.py`.
+
+| Class | Meaning | Required Files | Forbidden |
+|-------|---------|---------------|-----------|
+| `L4_CLASS_A` | Runtime/substrate progress toward L4 | MUST touch `mu/host/`, `mu/substrate/`, `mu/closures/`, `mu/bridge/`, `mu/programs/`, `rcx_pi/selfhost/`, or `tools/compilers/` | Docs/tests-only diff auto-fails. Comment-only runtime delta auto-fails. |
+| `MAINTENANCE` | Governance, docs, tooling, hygiene | MUST NOT touch runtime/substrate dirs | Missing `NO_OP_PROOF` or `target_gate_id` auto-fails. Max 1 consecutive. |
+
+**Hard rules:**
+1. `L4_CLASS_A` requires executable runtime delta (not just comments or docstrings).
+2. `MAINTENANCE` requires `NO_OP_PROOF: <reason>` and `target_gate_id: <Gn>` in tracker sync note.
+3. No more than 1 consecutive `MAINTENANCE` wave without an `L4_CLASS_A` wave.
+4. Progress is measured by North Star invariant movement + L4 evidence delta, not governance churn.
+5. Enforcement: `tools/checks/enforce_l4_execution_contract.py --staged` (local), `--range` (CI).
 
 ---
 

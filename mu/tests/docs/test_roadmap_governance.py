@@ -253,7 +253,7 @@ class TestRoadmapCoverage:
 
     def test_required_docs_exist(self):
         """Required roadmap docs must exist."""
-        required = ["MANIFEST.md"]
+        required = ["MANIFEST.md", "L4ExecutionContract.v1.md"]
         missing = []
 
         for doc_name in required:
@@ -271,3 +271,80 @@ class TestRoadmapCoverage:
                 else:
                     msg += f"  - roadmap/{doc}\n"
             pytest.fail(msg)
+
+
+class TestL4ExecutionContractDoc:
+    """L4ExecutionContract.v1.md must exist with required content."""
+
+    L4_CONTRACT_PATH = ROADMAP_FOLDER / "L4ExecutionContract.v1.md"
+
+    def test_l4_contract_doc_exists(self):
+        """L4ExecutionContract.v1.md must exist in roadmap/."""
+        assert self.L4_CONTRACT_PATH.exists(), (
+            "roadmap/L4ExecutionContract.v1.md missing — required for L4 wave classification."
+        )
+
+    def test_l4_contract_has_wave_classes(self):
+        """L4ExecutionContract.v1.md must define both wave classes."""
+        text = self.L4_CONTRACT_PATH.read_text(encoding="utf-8")
+        assert "L4_CLASS_A" in text, "Missing L4_CLASS_A wave class definition."
+        assert "MAINTENANCE" in text, "Missing MAINTENANCE wave class definition."
+
+    def test_l4_contract_has_enforcement_reference(self):
+        """L4ExecutionContract.v1.md must reference the enforcement checker."""
+        text = self.L4_CONTRACT_PATH.read_text(encoding="utf-8")
+        assert "enforce_l4_execution_contract.py" in text, (
+            "L4ExecutionContract.v1.md must reference enforcement checker."
+        )
+
+    def test_l4_contract_references_status_and_tasks(self):
+        """L4ExecutionContract.v1.md must reference STATUS.md and TASKS.md."""
+        text = self.L4_CONTRACT_PATH.read_text(encoding="utf-8")
+        assert "STATUS.md" in text, "Must reference STATUS.md."
+        assert "TASKS.md" in text, "Must reference TASKS.md."
+
+
+class TestCodexClaudeAuditContractDoc:
+    """CodexClaudeAuditContract.v1.md must exist with required content."""
+
+    AUDIT_CONTRACT_PATH = ROADMAP_FOLDER / "CodexClaudeAuditContract.v1.md"
+
+    def test_audit_contract_doc_exists(self):
+        """CodexClaudeAuditContract.v1.md must exist in roadmap/."""
+        assert self.AUDIT_CONTRACT_PATH.exists(), (
+            "roadmap/CodexClaudeAuditContract.v1.md missing — required for audit discipline."
+        )
+
+    def test_audit_contract_references_status_and_tasks(self):
+        """CodexClaudeAuditContract.v1.md must reference STATUS.md and TASKS.md."""
+        text = self.AUDIT_CONTRACT_PATH.read_text(encoding="utf-8")
+        assert re.search(r'\[`?STATUS\.md`?\]', text), "Must reference STATUS.md."
+        assert re.search(r'\[`?TASKS\.md`?\]', text), "Must reference TASKS.md."
+
+    def test_audit_contract_has_anti_theater_clauses(self):
+        """Must include anti-theater clauses."""
+        text = self.AUDIT_CONTRACT_PATH.read_text(encoding="utf-8")
+        assert "Anti-Theater" in text, "Must have anti-theater section."
+
+    def test_audit_contract_has_preflight_docs(self):
+        """Must include preflight docs read order."""
+        text = self.AUDIT_CONTRACT_PATH.read_text(encoding="utf-8")
+        assert "Preflight" in text, "Must reference preflight docs."
+
+
+class TestManifestContractDiscoverability:
+    """MANIFEST.md must include both contract docs for discoverability."""
+
+    def test_manifest_includes_l4_execution_contract(self):
+        """MANIFEST.md must reference L4ExecutionContract.v1.md."""
+        manifest = (ROADMAP_FOLDER / "MANIFEST.md").read_text(encoding="utf-8")
+        assert "L4ExecutionContract.v1.md" in manifest, (
+            "MANIFEST.md must include L4ExecutionContract.v1.md for discoverability."
+        )
+
+    def test_manifest_includes_codex_claude_audit_contract(self):
+        """MANIFEST.md must reference CodexClaudeAuditContract.v1.md."""
+        manifest = (ROADMAP_FOLDER / "MANIFEST.md").read_text(encoding="utf-8")
+        assert "CodexClaudeAuditContract.v1.md" in manifest, (
+            "MANIFEST.md must include CodexClaudeAuditContract.v1.md for discoverability."
+        )

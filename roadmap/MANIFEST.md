@@ -62,6 +62,13 @@
 
 5. **Baseline freeze (Gate 0)** - Introduced as TASKS.md NEXT item only when refactor begins. Does not need permanent tracking in roadmap docs.
 
+## L4 Execution Contracts
+
+| Document | Role |
+|----------|------|
+| [`roadmap/L4ExecutionContract.v1.md`](L4ExecutionContract.v1.md) | Wave classification policy (L4_CLASS_A / MAINTENANCE) |
+| [`roadmap/CodexClaudeAuditContract.v1.md`](CodexClaudeAuditContract.v1.md) | Prompt quality and audit discipline for multi-wave sessions |
+
 ## Canonical L4 Research Packet
 
 Governance lane status (SINK or VECTOR) does not remove active evidence docs from MANIFEST discoverability. These documents contain live research evidence (D001-D003 feasibility results) that must remain findable regardless of governance classification. The G8 decision path is VECTOR P1; the full L4 rewrite is SINK S1.

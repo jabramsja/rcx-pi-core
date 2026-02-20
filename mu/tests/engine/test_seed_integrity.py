@@ -245,11 +245,11 @@ class TestProjectionIdValidation:
         with pytest.raises(ValueError, match="projection order mismatch"):
             validate_projection_ids("match.v1.json", seed)
 
-    def test_unknown_seed_skips_validation(self):
-        """Unknown seed name skips projection ID validation."""
+    def test_unknown_seed_fails_closed(self):
+        """Unknown seed name must raise ValueError (fail-closed)."""
         seed = {"projections": []}
-        # Should not raise (unknown seeds skip this check)
-        validate_projection_ids("unknown.json", seed)
+        with pytest.raises(ValueError, match="no entry in EXPECTED_PROJECTION_IDS"):
+            validate_projection_ids("unknown.json", seed)
 
 
 # =============================================================================

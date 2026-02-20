@@ -35,6 +35,10 @@ See `TASKS.md` NOW section for active items.
 3. Performance-first optimizations.
 4. Projection caching optimization.
 
+**Execution Contracts**
+- [`roadmap/L4ExecutionContract.v1.md`](roadmap/L4ExecutionContract.v1.md) — Wave classification policy (L4_CLASS_A / MAINTENANCE)
+- [`roadmap/CodexClaudeAuditContract.v1.md`](roadmap/CodexClaudeAuditContract.v1.md) — Prompt quality and audit discipline
+
 Notes:
 1. This roadmap is a planning view. It must not override `STATUS.md` or `TASKS.md`.
 2. Any change to execution semantics must update both Python and JS substrates per L3 parity rules.
