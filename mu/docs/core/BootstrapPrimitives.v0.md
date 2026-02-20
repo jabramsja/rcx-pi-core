@@ -64,6 +64,19 @@ All three levels USE these primitives. The primitives enable self-hosting but do
 
 ## The Four Bootstrap Primitives (+ 1 Eliminated)
 
+### Taxonomy Overlay (Docs-Only Classification)
+
+Each bootstrap primitive falls into one of these categories. This is a documentation-level taxonomy for precision; it does not change runtime markers or `@host_*` decorators.
+
+| Primitive | Category | Why This Category |
+|-----------|----------|-------------------|
+| `eval_step` | **Execution primitive** | The irreducible "apply" step — like Forth's NEXT |
+| `max_steps` | **Iteration / clock primitive** | Provides the termination clock — cannot be structural fuel |
+| `stack_guard` | **Host resource limit** (host safety constraint) | Python stack is hardware, not Mu data; see note below |
+| `projection_loader` | **I/O & trust primitive** | JSON parsing + integrity verification — file I/O is host-only |
+
+**stack_guard note:** `stack_guard` is a bootstrap primitive (it must exist), but its nature is a **host safety constraint** — it protects against Python's finite call stack, which is a hardware limitation. Unlike `eval_step` (which embodies execution semantics), `stack_guard` embodies a physical resource boundary. It remains in the bootstrap set because removing it would allow crash-by-depth attacks.
+
 ### 1. `eval_step` - Projection Application
 
 **What it does:**
@@ -420,6 +433,26 @@ Per fuzzer agent analysis:
 1. **Oscillation undetected** - Hash comparison catches A→A (stall) but not A→B→A (cycle). This is a design limitation, not a bug. Cycles hit max_steps.
 
 2. **Deeply nested operations** - MAX_MU_DEPTH protects DATA depth. OPERATION depth (recursive match/subst) is protected by match_mu/subst_mu using structural stack-based traversal.
+
+---
+
+## Boundary Scaffolding (Precision Note)
+
+The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match, bindings_to_dict) are **API/UX adapter scaffolding** — they convert between Python types and Mu linked-list format at the boundary. They are not bootstrap primitives and not semantic debt.
+
+However, normalization is not fully outside `step_kernel_mu` today: the kernel bridge path calls `normalize_projection` on each projection before structural dispatch. This normalization step is host scaffolding that remains part of the execution path. It is documented, marked `AST_OK:infra`, and capped by the scaffolding ceiling (48). It is NOT claimed to be structural.
+
+---
+
+## Boot1 Recursion Framing (Precision Note)
+
+`_run_engine_recursive()` (Python) and `runEnginePipelineRecursive()` (JS) provide an alternative engine loop that uses host call-stack recursion instead of the trampoline's iterative for-loop.
+
+**What Boot1 recursive is:** A host-call-stack-dependent shadow path. The loop-back decision is structural (projections produce `{_run_engine: ...}` envelopes); the loop-back execution is host recursion.
+
+**What Boot1 recursive is NOT:** A structural CPS proof. It does not eliminate the host iteration primitive — it replaces one host loop mechanism (for-loop) with another (call stack). Both remain host code.
+
+**Default:** Trampoline (`run_engine_pipeline`) remains the production default. Recursive mode is opt-in via `use_boot1_recursive=True` / `boot1LoopMode` JSON API.
 
 ---
 

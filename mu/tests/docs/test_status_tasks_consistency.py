@@ -618,3 +618,33 @@ def test_conjecture_parking_has_founder_trigger() -> None:
     assert "gate" in sink_section.lower(), (
         "Conjecture parking promotion rule must reference gate mapping."
     )
+
+
+# =============================================================================
+# L3 Truth Statement Lock
+# =============================================================================
+
+
+def test_l3_truth_statement_in_status() -> None:
+    """
+    STATUS.md must contain the canonical L3 truth statement with the
+    precision phrase 'evaluation rules are structural data'.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    assert "evaluation rules are structural data" in status_text, (
+        "STATUS.md missing canonical L3 truth statement. Required phrase: "
+        "'The evaluation rules are structural data, but execution iteration, "
+        "resource bounding, and API normalization remain irreducible host-language mechanics.'"
+    )
+
+
+def test_l3_truth_statement_not_overclaimed() -> None:
+    """
+    STATUS.md must NOT claim 'pure structural execution' — the host
+    iteration/clock/normalization layer is irreducible.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    assert "pure structural execution" not in status_text.lower(), (
+        "STATUS.md contains 'pure structural execution' — overclaim. "
+        "Use 'structural projections with host execution substrate'."
+    )

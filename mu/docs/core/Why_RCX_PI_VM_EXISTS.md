@@ -112,7 +112,10 @@ It is part of the claim.
 - **L1 (Algorithmic):** COMPLETE — match, subst, step expressed as Mu projections
 - **L2 (Operational):** COMPLETE — kernel.v1 state machine, recurrence/exhaustion detection
 - **L3 (Substrate Portability):** COMPLETE — Python and JavaScript run identical seeds with verified parity
-- **L4 (True Self-Hosting):** NOT STARTED — bootstrap primitives remain host-dependent; design in SINK
+- **L4 (True Self-Hosting):** DEFERRED — bootstrap primitives remain host-dependent; see `mu/docs/core/L4ExitChecklist.v0.md`
+
+**Canonical L3 truth statement:**
+RCX achieves L3 Substrate Portability by executing identical structural projections across Python and JavaScript. The evaluation rules are structural data, but execution iteration, resource bounding, and API normalization remain irreducible host-language mechanics. The host language acts as physical clock/memory manager; Mu projections are the physics.
 
 **Execution architecture:**
 - **Structural kernel bridge** is the active default for algorithm execution (`step_kernel_mu(..., kernel_mode="bridge")`)

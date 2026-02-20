@@ -83,6 +83,8 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - The host provides only mechanical execution (the 4 bootstrap primitives)
 - Recurrence closure detection works identically on both substrates
 
+**Canonical L3 truth statement:** RCX achieves L3 Substrate Portability by executing identical structural projections across Python and JavaScript. The evaluation rules are structural data, but execution iteration, resource bounding, and API normalization remain irreducible host-language mechanics. The host language acts as physical clock/memory manager; Mu projections are the physics.
+
 **L3 Parity Requirement (MANDATORY - North Star #13):**
 - Any change to Python projection behavior MUST be mirrored in JavaScript
 - **Core L3 seeds** (kernel, match, subst, recurrence, exhaustion, bootstrap_structural) MUST be loaded in BOTH substrates
