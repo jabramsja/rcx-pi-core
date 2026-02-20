@@ -60,7 +60,9 @@ This follows the same E1-E5 pattern used for Boot1 (shadow-merge scope) and GAP-
 
 **Evidence command:** `pytest tests/engine/test_seed_integrity.py -k metabolization`
 
-**Status:** NOT STARTED
+**Contract test:** `tests/structural/test_hemisphere_metabolization_contract.py` — locks 6 projection IDs, T1-T10 truth table, S1-S5 invariants against design doc. Skip-marked seed-existence tests become passing when projections are implemented.
+
+**Status:** CONTRACT DEFINED (2026-02-19). Design-doc ground truth tests pass. Seed-existence tests skip-marked pending implementation.
 
 ### E2: Metabolization Projections Exist (JavaScript)
 
