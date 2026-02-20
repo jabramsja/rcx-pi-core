@@ -601,7 +601,7 @@ class TestRunMuStructuralCallsiteInventory:
 
 # ── JS JSON API action list parity ────────────────────────────────────────
 
-# Expected JS JSON API actions (18 total, extracted from dispatch branches)
+# Expected JS JSON API actions (19 total, extracted from dispatch branches)
 EXPECTED_JS_ACTIONS = {
     "run_vector", "run_all_vectors", "run_recurrence", "run_exhaustion",
     "get_constants", "normalize_roundtrip", "validate_mu",

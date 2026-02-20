@@ -10,6 +10,7 @@ Phase 4a scope: Linear patterns only (no conflict detection).
 import pytest
 
 from rcx_pi.eval_seed import match, NO_MATCH
+from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.match_mu import (
     match_mu,
     load_match_projections,
@@ -52,7 +53,7 @@ def assert_parity(pattern, value):
             f"Parity failure: Python returned {py_result}, "
             f"but Mu returned NO_MATCH"
         )
-        assert py_result == mu_result, (
+        assert mu_equal(py_result, mu_result), (
             f"Parity failure: Python returned {py_result}, "
             f"but Mu returned {mu_result}"
         )

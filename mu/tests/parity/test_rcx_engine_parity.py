@@ -57,13 +57,13 @@ class TestEngineInit:
         """engine.init: default config initializes engine state."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.init_default")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
     def test_init_custom_config(self, engine_projections, engine_vectors):
         """engine.init_config: custom config preserved in engine state."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.init_custom")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
 
 class TestEngineTransitions:
@@ -73,31 +73,31 @@ class TestEngineTransitions:
         """engine.trace_done: trace complete triggers _detect_closure."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.trace_done")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
     def test_recurrence_done_triggers_exhaustion(self, engine_projections, engine_vectors):
         """engine.recurrence_done: closure result triggers _detect_exhaustion."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.recurrence_done_to_exhaustion")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
     def test_exhaustion_done_freeze_produces_reentry(self, engine_projections, engine_vectors):
         """engine.exhaustion_done_freeze: action=freeze produces _run_engine trampoline."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.exhaustion_done_freeze")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
     def test_exhaustion_done_terminal_produces_final_result(self, engine_projections, engine_vectors):
         """engine.exhaustion_done_terminal: non-freeze action produces engine_result."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.exhaustion_done_terminal")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
     def test_unwrap_extracts_result(self, engine_projections, engine_vectors):
         """engine.unwrap: extract final result from engine_result wrapper."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.unwrap")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
 
 class TestEngineEdgeCases:
@@ -107,7 +107,7 @@ class TestEngineEdgeCases:
         """No closure detected still triggers exhaustion check."""
         vector = next(v for v in engine_vectors if v["id"] == "engine.no_closure")
         result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-        assert result == vector["expected"], f"Expected {vector['expected']}, got {result}"
+        assert mu_equal(result, vector["expected"]), f"Expected {vector['expected']}, got {result}"
 
 
 class TestEngineStructure:
@@ -141,7 +141,7 @@ class TestEngineStructure:
             # Verify JSON roundtrip
             json_str = json.dumps(proj, sort_keys=True)
             roundtripped = json.loads(json_str)
-            assert proj == roundtripped, f"Projection {proj['id']} failed JSON roundtrip"
+            assert mu_equal(proj, roundtripped), f"Projection {proj['id']} failed JSON roundtrip"
 
     def test_init_comes_before_init_config(self, engine_projections):
         """engine.init must come before engine.init_config (more specific first)."""
@@ -189,7 +189,7 @@ class TestAllVectors:
         failures = []
         for vector in engine_vectors:
             result = run_until_stable(engine_projections, vector["input"], max_steps=1)
-            if result != vector["expected"]:
+            if not mu_equal(result, vector["expected"]):
                 failures.append(
                     f"{vector['id']}: expected {vector['expected']}, got {result}"
                 )

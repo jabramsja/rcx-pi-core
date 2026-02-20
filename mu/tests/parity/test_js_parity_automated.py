@@ -2061,6 +2061,8 @@ def classify_python_error(exc):
         return 'engine.exhausted'
     if 'engine stalled' in msg:
         return 'engine.stalled_non_terminal'
+    if 'must be bool' in msg:
+        return 'type_error'
     if 'must be dict' in msg or 'must be a dict' in msg:
         return 'input.invalid_type'
     if 'shape mismatch' in msg or 'unexpected shape' in msg:
@@ -2399,6 +2401,8 @@ def _run_python_edge_case(action_name, args):
             kwargs = {}
             if 'hemispheres' in args:
                 kwargs['hemispheres'] = args['hemispheres']
+            if 'boot1LoopMode' in args:
+                kwargs['use_boot1_recursive'] = args['boot1LoopMode']
             run_engine_with_routing(
                 args.get('projections', []), args['input'],
                 max_steps=args.get('maxSteps', 6),
@@ -3402,6 +3406,8 @@ def _run_python_r3(action, request):
             kwargs = {}
             if 'hemispheres' in request:
                 kwargs['hemispheres'] = request['hemispheres']
+            if 'boot1LoopMode' in request:
+                kwargs['use_boot1_recursive'] = request['boot1LoopMode']
             result = run_engine_with_routing(
                 request.get('projections', []), request['input'],
                 max_steps=request.get('maxSteps', 6),

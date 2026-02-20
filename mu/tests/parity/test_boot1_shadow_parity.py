@@ -1536,3 +1536,107 @@ class TestBoot1TypeHardeningCrossSubstrate:
             "maxSteps": 5,
         })
         assert resp["success"], f"JS should accept omitted boot1LoopMode: {resp.get('error')}"
+
+
+# ============================================================================
+# Wave 10: run_engine_with_routing Boot1 parity (red-team hardening)
+# ============================================================================
+
+@pytest.mark.slow
+class TestRunEngineWithRoutingBoot1:
+    """run_engine_with_routing must support boot1LoopMode like run_engine_pipeline.
+
+    This closes the parity gap identified in the red-team review: the
+    run_engine_with_routing JSON API handler lacked boot1LoopMode support.
+    """
+
+    BASE_REQUEST = {
+        "action": "run_engine_with_routing",
+        "projections": [],
+        "input": {"test": True},
+        "maxSteps": 6,
+        "maxEngineIterations": 5,
+        "maxAlgorithmIterations": 10,
+        "observer": True,
+    }
+
+    def test_boot1_true_emits_boot1_depth(self):
+        """boot1LoopMode=true routes through recursive path with boot1_depth events."""
+        req = {**self.BASE_REQUEST, "boot1LoopMode": True}
+        resp = _run_js_json_api(req)
+        events = resp.get("observer_events", [])
+        boot1_events = [e for e in events if "boot1_depth" in str(e)]
+        assert len(boot1_events) > 0, (
+            f"boot1LoopMode=true should emit boot1_depth observer events, "
+            f"got {len(events)} events: {events[:5]}"
+        )
+
+    def test_boot1_false_no_boot1_depth(self):
+        """boot1LoopMode=false routes through trampoline path (no boot1_depth)."""
+        req = {**self.BASE_REQUEST, "boot1LoopMode": False}
+        resp = _run_js_json_api(req)
+        events = resp.get("observer_events", [])
+        boot1_events = [e for e in events if "boot1_depth" in str(e)]
+        assert len(boot1_events) == 0, (
+            f"boot1LoopMode=false should NOT emit boot1_depth events, "
+            f"got: {boot1_events}"
+        )
+
+    def test_boot1_omitted_defaults_trampoline(self):
+        """Omitting boot1LoopMode defaults to trampoline (no boot1_depth)."""
+        req = {k: v for k, v in self.BASE_REQUEST.items()}
+        resp = _run_js_json_api(req)
+        events = resp.get("observer_events", [])
+        boot1_events = [e for e in events if "boot1_depth" in str(e)]
+        assert len(boot1_events) == 0, (
+            f"Omitted boot1LoopMode should default to trampoline, "
+            f"got boot1_depth events: {boot1_events}"
+        )
+
+    def test_boot1_non_boolean_rejected(self):
+        """Non-boolean boot1LoopMode must be rejected with type_error."""
+        for bad_value in ["yes", 1, "true", 0]:
+            req = {**self.BASE_REQUEST, "boot1LoopMode": bad_value}
+            resp = _run_js_json_api(req)
+            assert not resp.get("success"), (
+                f"boot1LoopMode={bad_value!r} should be rejected, got success"
+            )
+            assert resp.get("error_code") == "type_error", (
+                f"boot1LoopMode={bad_value!r} should give type_error, "
+                f"got: {resp.get('error_code')}"
+            )
+
+    def test_boot1_true_preserves_routing_shape(self):
+        """boot1LoopMode=true must still return {engine_result, hemispheres} shape."""
+        req = {**self.BASE_REQUEST, "boot1LoopMode": True}
+        resp = _run_js_json_api(req)
+        # May error (engine.exhausted) — check shape if success
+        if resp.get("success"):
+            result = resp["result"]
+            assert "engine_result" in result, "Missing engine_result key"
+            assert "hemispheres" in result, "Missing hemispheres key"
+            hemi = result["hemispheres"]
+            expected_keys = {"r_null", "r_inf", "r_a", "lobes", "sink"}
+            assert set(hemi.keys()) == expected_keys, (
+                f"Hemisphere keys mismatch: {set(hemi.keys())} != {expected_keys}"
+            )
+
+    def test_routing_parity_boot1_true_vs_false(self):
+        """run_engine_with_routing boot1=true and boot1=false produce equivalent results."""
+        projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
+        req_base = {
+            "action": "run_engine_with_routing",
+            "projections": projs,
+            "input": {"double": 42},
+            "maxSteps": 10,
+            "maxEngineIterations": 20,
+            "maxAlgorithmIterations": 50,
+        }
+        resp_false = _run_js_json_api({**req_base, "boot1LoopMode": False})
+        resp_true = _run_js_json_api({**req_base, "boot1LoopMode": True})
+        if resp_false.get("success") and resp_true.get("success"):
+            assert _cross_substrate_equal(resp_false["result"], resp_true["result"]), (
+                f"run_engine_with_routing boot1 parity mismatch:\n"
+                f"  false: {resp_false['result']}\n"
+                f"  true:  {resp_true['result']}"
+            )

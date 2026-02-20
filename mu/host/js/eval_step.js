@@ -2290,7 +2290,7 @@ function runHemisphereRouting(engineResult, hemispheres) {
  * Mirrors Python run_engine_with_routing() (step_mu.py:1635-1672).
  * FAIL-CLOSED: validates input and output shapes.
  */
-function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs) {
+function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs, boot1Mode) {
   if (hemispheres === undefined || hemispheres === null) {
     hemispheres = defaultHemispheres();
   } else {
@@ -2305,7 +2305,10 @@ function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs
     }
   }
 
-  const engineResult = runEnginePipeline(projections, inputValue, engineKwargs);
+  // Boot1 routing: recursive vs trampoline (mirrors run_engine_pipeline handler)
+  const engineResult = boot1Mode
+    ? runEnginePipelineRecursive(projections, inputValue, engineKwargs)
+    : runEnginePipeline(projections, inputValue, engineKwargs);
   const updatedHemispheres = runHemisphereRouting(engineResult, hemispheres);
 
   const outputKeys = new Set(Object.keys(updatedHemispheres));
@@ -3589,6 +3592,11 @@ if (process.argv.includes('--json-api')) {
       }
     } else if (request.action === 'run_engine_with_routing') {
       // Full engine -> hemisphere pipeline (L3 parity with Python run_engine_with_routing)
+      // Boot1 type guard: reject non-boolean to prevent truthy-string routing bugs
+      if (request.boot1LoopMode != null && typeof request.boot1LoopMode !== 'boolean') {
+        response = { success: false, error_code: 'type_error', error: 'boot1LoopMode must be boolean if provided, got ' + typeof request.boot1LoopMode };
+      } else {
+      const boot1Mode = request.boot1LoopMode ?? false;
       const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
       const observerEvents = request.observer ? [] : null;
       try {
@@ -3602,7 +3610,8 @@ if (process.argv.includes('--json-api')) {
             maxEngineIterations: maxEngineIterations ?? 20,
             maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
             observer: observerEvents,
-          }
+          },
+          boot1Mode
         );
         response = { success: true, result };
         if (observerEvents) response.observer_events = observerEvents;
@@ -3610,6 +3619,7 @@ if (process.argv.includes('--json-api')) {
         response = { success: false, error_code: classifyError(e), error: e.message };
         if (observerEvents) response.observer_events = observerEvents;
       }
+      } // close boot1LoopMode type guard else
     } else if (request.action === 'step_metabolization') {
       // Run step(metabolizationProjections, input) for cross-substrate parity testing.
       // Returns first-match-wins result or input unchanged (stall).

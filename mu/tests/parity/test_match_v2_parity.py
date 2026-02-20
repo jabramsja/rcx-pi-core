@@ -15,6 +15,7 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import NO_MATCH
 from rcx_pi.selfhost.match_mu import match_mu
+from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
@@ -72,7 +73,7 @@ class TestMatchMuBehaviorStable:
 
     def test_literal_match(self):
         """Literals match as expected."""
-        assert match_mu(42, 42) == {}
+        assert mu_equal(match_mu(42, 42), {})
 
     def test_literal_mismatch(self):
         """Literal mismatches return NO_MATCH."""
@@ -80,12 +81,12 @@ class TestMatchMuBehaviorStable:
 
     def test_variable_binding(self):
         """Variables bind correctly."""
-        assert match_mu({"var": "x"}, 42) == {"x": 42}
+        assert mu_equal(match_mu({"var": "x"}, 42), {"x": 42})
 
     def test_dict_match(self):
         """Dict patterns match correctly."""
         result = match_mu({"a": {"var": "x"}, "b": 2}, {"a": 1, "b": 2})
-        assert result == {"x": 1}
+        assert mu_equal(result, {"x": 1})
 
     def test_nested_dict_match(self):
         """Nested dict patterns match correctly."""
@@ -93,7 +94,7 @@ class TestMatchMuBehaviorStable:
             {"outer": {"inner": {"var": "v"}}},
             {"outer": {"inner": 99}}
         )
-        assert result == {"v": 99}
+        assert mu_equal(result, {"v": 99})
 
     def test_structure_mismatch(self):
         """Structure mismatches return NO_MATCH."""
@@ -101,7 +102,7 @@ class TestMatchMuBehaviorStable:
 
     def test_string_match(self):
         """String patterns match correctly."""
-        assert match_mu("hello", "hello") == {}
+        assert mu_equal(match_mu("hello", "hello"), {})
 
     def test_string_mismatch(self):
         """String mismatches return NO_MATCH."""
@@ -113,16 +114,16 @@ class TestMatchMuBehaviorStable:
             {"x": {"var": "a"}, "y": {"var": "b"}},
             {"x": 1, "y": 2}
         )
-        assert result == {"a": 1, "b": 2}
+        assert mu_equal(result, {"a": 1, "b": 2})
 
     def test_null_match(self):
         """Null patterns match correctly."""
-        assert match_mu(None, None) == {}
+        assert mu_equal(match_mu(None, None), {})
 
     def test_bool_match(self):
         """Boolean patterns match correctly."""
-        assert match_mu(True, True) == {}
-        assert match_mu(False, False) == {}
+        assert mu_equal(match_mu(True, True), {})
+        assert mu_equal(match_mu(False, False), {})
 
     def test_bool_mismatch(self):
         """Boolean mismatches return NO_MATCH."""

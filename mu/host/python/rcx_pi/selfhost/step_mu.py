@@ -1129,7 +1129,7 @@ def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     return step_kernel_mu(projections, input_value)
 
 
-@host_iteration("Kernel run loop - Phase 7d replaces with meta-circular kernel")
+@host_iteration("Kernel run loop - for-loop accepted as bootstrap primitive (L2 FULL)")
 def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[Mu, list[dict], bool]:
     """
     Run projections repeatedly until stall or max steps (core, linear-only).
@@ -1605,8 +1605,9 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
       - run_algorithm: run a sub-algorithm seed to completion
 
     Engine projections decide WHAT to do and WHERE to put results.
-    Python decides nothing — it only services generic boundary primitives.
-    Any host (JS, Rust, FPGA) can implement these same 3 operations.
+    Python services these generic boundary primitives; routing decisions
+    come from projections, not host code. Any host (JS, Rust, FPGA) can
+    implement the same 3 operations.
 
     Args:
         max_engine_iterations: Max outer loop iterations (engine state machine

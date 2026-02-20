@@ -43,12 +43,13 @@ DOCS_CORE = REPO_ROOT / "mu" / "docs" / "core"
 
 DOC_CONTRACTS: dict[str, dict[str, Any]] = {
     # =========================================================================
-    # BootstrapPrimitives.v0.md - Claims about the 5 irreducible primitives
+    # BootstrapPrimitives.v0.md - Claims about the 4 irreducible primitives
+    # (mu_equal DEMOTED 2026-02-10, now derivable from mu_hash_cached)
     # =========================================================================
     "BootstrapPrimitives.v0.md": {
         "functions": [
             "rcx_pi.selfhost.eval_seed.step",           # eval_step primitive
-            "rcx_pi.selfhost.mu_type.mu_equal",         # mu_equal primitive
+            "rcx_pi.selfhost.mu_type.mu_equal",         # mu_equal (DEMOTED, kept as convenience wrapper)
             "rcx_pi.selfhost.mu_type.is_mu",            # validation primitive
             "rcx_pi.selfhost.seed_integrity.load_verified_seed",  # projection_loader
         ],

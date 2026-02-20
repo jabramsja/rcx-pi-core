@@ -168,7 +168,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
 See TASKS.md VECTOR/SINK for priority ordering (P1-P5, S1-S4).
 
-**Post-D008 Operating Mode:** NEXT (Hemisphere Metabolization) is the primary execution lane. Boot1 shadow-merge COMPLETE (2026-02-19). L4 research is evidence-tracked via heartbeat — not abandoned, but deferred. Next L4 action: NO-OP (evidence preserved) unless founder overrides D008 DEFER. Re-evaluation trigger: SATISFIED (Boot1 complete + Hemisphere Metabolization at NEXT).
+**Post-D008 Operating Mode:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. L4 research is evidence-tracked via heartbeat — not abandoned, but deferred. Next L4 action: NO-OP (evidence preserved) unless founder overrides D008 DEFER. Re-evaluation trigger: SATISFIED (Boot1 complete + Hemisphere complete).
 
 **Conjecture Parking:** Non-Euclidean geometry / structural linear algebra hypotheses are PARKED (not active). See TASKS.md SINK "Conjecture Parking (NOT ACTIVE)" for re-evaluation trigger and promotion rules.
 

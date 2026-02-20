@@ -302,6 +302,24 @@ class TestVerifiedLoad:
         with pytest.raises(FileNotFoundError):
             load_verified_seed(Path("/nonexistent/path.json"))
 
+    def test_load_unknown_seed_fails_closed(self, tmp_path):
+        """I-7 boundary: load_verified_seed(verify=True) rejects unknown seeds.
+
+        The primary gate is verify_checksum() which raises ValueError for any
+        seed_name not in SEED_CHECKSUMS. This means validate_projection_ids()
+        warn-only for unregistered names is a secondary layer — unknown seeds
+        never reach it through the normal verified load path.
+        """
+        # Create a syntactically valid seed file with an unknown name
+        unknown_seed = tmp_path / "unknown_attacker.v1.json"
+        unknown_seed.write_text(
+            '{"meta": {"version": "1.0", "name": "ATTACK", "description": "x"}, '
+            '"projections": [{"id": "evil.inject", "pattern": {}, "body": {}}]}'
+        )
+        # verify=True must reject at checksum stage (fail-closed)
+        with pytest.raises(ValueError, match="Unknown seed"):
+            load_verified_seed(unknown_seed, verify=True)
+
 
 # =============================================================================
 # Test: Verify All Seeds
