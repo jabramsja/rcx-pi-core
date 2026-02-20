@@ -135,10 +135,10 @@ fi
 if git diff --cached --name-only | grep -q .; then
     python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
 else
-    # No staged files — check dirty tracked files instead
-    L4_DIRTY_FILES=$(git diff --name-only)
+    # No staged files — check dirty tracked + untracked files
+    L4_DIRTY_FILES=$( (git diff --name-only; git ls-files --others --exclude-standard) | sort -u )
     if [ -n "$L4_DIRTY_FILES" ]; then
-        echo "No staged files — checking dirty tracked files"
+        echo "No staged files — checking dirty tracked + untracked files"
         # shellcheck disable=SC2086
         python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
     else

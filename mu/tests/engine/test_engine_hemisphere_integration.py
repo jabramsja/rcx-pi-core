@@ -51,9 +51,9 @@ class TestWiringContract:
                 ["proj1"], "input_val", max_steps=5
             )
 
-            # Pipeline called with projections, input, explicit trampoline, and kwargs
+            # Pipeline called with projections, input, default Boot1 recursive, and kwargs
             mock_pipeline.assert_called_once_with(
-                ["proj1"], "input_val", use_boot1_recursive=False, max_steps=5
+                ["proj1"], "input_val", use_boot1_recursive=True, max_steps=5
             )
             # Routing called with engine result + default hemispheres
             mock_routing.assert_called_once()
@@ -117,8 +117,8 @@ class TestKwargCollisionRegression:
             )
             assert "engine_result" in result
 
-    def test_default_still_false(self):
-        """Without explicit kwarg, use_boot1_recursive defaults to False."""
+    def test_default_is_boot1(self):
+        """Without explicit kwarg, use_boot1_recursive defaults to True (boot1 path)."""
         fake_engine_result = {
             "value": "x", "closure_detected": False, "tau_step": 0,
             "exhaustion_detected": False, "operator_frozen": False,
@@ -134,7 +134,7 @@ class TestKwargCollisionRegression:
             run_engine_with_routing(["proj1"], "input_val")
 
             mock_pipeline.assert_called_once_with(
-                ["proj1"], "input_val", use_boot1_recursive=False
+                ["proj1"], "input_val", use_boot1_recursive=True
             )
 
 
@@ -295,8 +295,8 @@ def test_wrapper_equivalent_to_manual_chain():
 
     engine_kwargs = dict(max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50)
 
-    # Manual chain
-    engine_result = run_engine_pipeline(cycle_projs, initial, use_boot1_recursive=False, **engine_kwargs)
+    # Manual chain (use_boot1_recursive=True matches wrapper's Boot1 default)
+    engine_result = run_engine_pipeline(cycle_projs, initial, use_boot1_recursive=True, **engine_kwargs)
     hemispheres = _local_default_hemispheres()
     manual_hemispheres = run_hemisphere_routing(engine_result, hemispheres)
 

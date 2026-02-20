@@ -21,7 +21,7 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 **Required:**
 - MUST touch ≥1 file in runtime/substrate directories
 - MUST have non-comment executable delta in runtime files
-- MUST include changed file under `tests/l4_gates/` AND `evidence_command` referencing gate test target (AND rule — both required)
+- MUST include changed file under `tests/l4_gates/` (or `mu/tests/l4_gates/`) AND `evidence_command` referencing gate test target (AND rule — both required)
 - MUST include `host_semantics_delta_before` and `host_semantics_delta_after` in tracker note
 - MUST include `structural_artifact_ref` in tracker note
 
