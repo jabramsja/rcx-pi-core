@@ -77,7 +77,6 @@ class TestAnticheatOK:
 class TestAllowlist:
     def test_respects_file_allowlist(self):
         """Allowlisted filenames are skipped entirely."""
-        import os
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = Path(tmpdir) / "test_type_tag_security.py"
             filepath.write_text("from rcx_pi.selfhost.step_mu import _private\n")
