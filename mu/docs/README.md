@@ -50,6 +50,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [EngineNewsStructural.v0.md](core/EngineNewsStructural.v0.md) | Recurrence Structural Specification v0 |
 | [EntropyBudget.md](core/EntropyBudget.md) | RCX Entropy Budget (Contract) |
 | [G8CpsFeasibility.v0.md](core/G8CpsFeasibility.v0.md) | G8 CPS Feasibility Study v0 |
+| [HemisphereExecutionChecklist.v0.md](core/HemisphereExecutionChecklist.v0.md) | Hemisphere Metabolization Execution Checklist v0 |
 | [L4DecisionCard.v0.md](core/L4DecisionCard.v0.md) | L4 Decision Card Template |
 | [L4ExitChecklist.v0.md](core/L4ExitChecklist.v0.md) | L4 Exit Checklist v0 |
 | [L4MicroAbi.v0.md](core/L4MicroAbi.v0.md) | L4 Micro-ABI v0 |

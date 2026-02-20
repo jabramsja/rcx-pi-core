@@ -13,9 +13,10 @@
 6. [`mu/docs/core/BootstrapPrimitives.v0.md`](../mu/docs/core/BootstrapPrimitives.v0.md) - 4 bootstrap primitives
 7. [`mu/docs/core/SelfHosting.v0.md`](../mu/docs/core/SelfHosting.v0.md) - Self-hosting specification
 8. [`mu/docs/core/Boot1LoopContract.v0.md`](../mu/docs/core/Boot1LoopContract.v0.md) - Boot1 recursive loop contract
-9. [`roadmap/ContentAddressedMu.md`](./ContentAddressedMu.md) - Content-addressed Mu (Levels 0-1 implemented)
-10. [`mu/docs/audit/MetaCircularReadiness.v1.md`](../mu/docs/audit/MetaCircularReadiness.v1.md) - Meta-circular readiness definition
-11. [`mu/docs/core/UniversalEval.v0.md`](../mu/docs/core/UniversalEval.v0.md) - Universal eval (SINK/research, not deprecated)
+9. [`mu/docs/core/HemisphereExecutionChecklist.v0.md`](../mu/docs/core/HemisphereExecutionChecklist.v0.md) - Hemisphere Metabolization execution gates (E1-E5)
+10. [`roadmap/ContentAddressedMu.md`](./ContentAddressedMu.md) - Content-addressed Mu (Levels 0-1 implemented)
+11. [`mu/docs/audit/MetaCircularReadiness.v1.md`](../mu/docs/audit/MetaCircularReadiness.v1.md) - Meta-circular readiness definition
+12. [`mu/docs/core/UniversalEval.v0.md`](../mu/docs/core/UniversalEval.v0.md) - Universal eval (SINK/research, not deprecated)
 
 ## Document Roles
 
@@ -28,6 +29,7 @@
 | `MetaCircular_Boot0_GatePlan.md` | Gate definitions + exit criteria | Gate scope changes |
 | `AlgorithmNormalizationSpec.v0.md` | Draft design spec | Design evolves |
 | `MuHemispheresDesign.md` | Design spec (v0 core + engine integration) | Design evolves |
+| `HemisphereExecutionChecklist.v0.md` | Execution gates (E1-E5) for Hemisphere Metabolization | Gate evidence updates |
 | `ContentAddressedMu.md` | Design spec (Levels 0-2 implemented, Level 3 deferred) | Design evolves |
 | ~~`NormalizationDecisionMemo.md`~~ | Archived to `archive/docs/` (Round 24A) | N/A |
 

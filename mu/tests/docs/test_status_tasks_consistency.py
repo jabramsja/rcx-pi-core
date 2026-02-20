@@ -199,10 +199,11 @@ def test_tasks_next_section_has_active_work_only() -> None:
 
     # NEXT can be empty when all gates are complete and no follow-up work remains
     has_active_tasks = re.search(r"^\-\s*\[\s\]\s+", next_section, re.MULTILINE)
+    has_promoted_tasks = re.search(r"^\-\s*\*\*\w+", next_section, re.MULTILINE)
     has_empty_marker = "No active items" in next_section
-    assert has_active_tasks or has_empty_marker, (
-        "TASKS.md NEXT should contain either active unchecked tasks "
-        "('- [ ] ...') or an explicit empty marker ('No active items')."
+    assert has_active_tasks or has_promoted_tasks or has_empty_marker, (
+        "TASKS.md NEXT should contain active tasks "
+        "('- [ ] ...' or '- **Name**') or an explicit empty marker ('No active items')."
     )
 
 
@@ -430,6 +431,118 @@ def test_l4_heartbeat_not_removed() -> None:
     )
     assert "wave6" in tasks_text and "wave7" in tasks_text and "wave8" in tasks_text, (
         "TASKS.md heartbeat tracker must retain all 3 waves (6-8)."
+    )
+
+
+# =============================================================================
+# Hemisphere Metabolization — promotion and execution checklist consistency
+# =============================================================================
+
+HEMISPHERE_CHECKLIST_PATH = REPO_ROOT / "mu" / "docs" / "core" / "HemisphereExecutionChecklist.v0.md"
+
+
+def test_hemisphere_promoted_to_next() -> None:
+    """
+    TASKS.md NEXT must contain Hemisphere Metabolization Contract
+    with an explicit PROMOTED FROM VECTOR note.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    next_match = re.search(
+        r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
+        tasks_text,
+        re.DOTALL,
+    )
+    assert next_match, "Could not isolate TASKS.md NEXT section."
+    next_section = next_match.group(1)
+
+    assert "Hemisphere Metabolization Contract" in next_section, (
+        "TASKS.md NEXT must contain 'Hemisphere Metabolization Contract'."
+    )
+    assert "PROMOTED FROM VECTOR" in next_section, (
+        "Hemisphere NEXT entry must include 'PROMOTED FROM VECTOR' rationale."
+    )
+
+
+def test_hemisphere_removed_from_vector_active() -> None:
+    """
+    TASKS.md VECTOR active designs must NOT have Hemisphere as a [P<N>] item.
+    It should appear only in the 'Promoted to NEXT' subsection.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    vector_section = _extract_section(tasks_text, "VECTOR")
+
+    # Split at "Promoted to NEXT" to get only active designs
+    active_part = vector_section.split("Promoted to NEXT")[0] if "Promoted to NEXT" in vector_section else vector_section
+
+    # Should not have Hemisphere as an active [P<N>] item
+    assert not re.search(r"\[P\d+\].*Hemisphere Metabolization", active_part), (
+        "Hemisphere Metabolization should not be an active VECTOR [P<N>] item "
+        "after promotion to NEXT."
+    )
+
+
+def test_hemisphere_in_vector_promoted_subsection() -> None:
+    """
+    TASKS.md VECTOR 'Promoted to NEXT' must list Hemisphere Metabolization.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    vector_section = _extract_section(tasks_text, "VECTOR")
+
+    assert "Promoted to NEXT" in vector_section, (
+        "TASKS.md VECTOR must have a 'Promoted to NEXT' subsection."
+    )
+    promoted_idx = vector_section.index("Promoted to NEXT")
+    promoted_section = vector_section[promoted_idx:]
+
+    assert "Hemisphere Metabolization" in promoted_section, (
+        "VECTOR 'Promoted to NEXT' must list Hemisphere Metabolization."
+    )
+
+
+def test_hemisphere_execution_checklist_exists() -> None:
+    """
+    mu/docs/core/HemisphereExecutionChecklist.v0.md must exist
+    with E1-E5 evidence gates.
+    """
+    assert HEMISPHERE_CHECKLIST_PATH.exists(), (
+        f"Hemisphere execution checklist not found at {HEMISPHERE_CHECKLIST_PATH}"
+    )
+    text = HEMISPHERE_CHECKLIST_PATH.read_text(encoding="utf-8")
+
+    for gate in ("E1:", "E2:", "E3:", "E4:", "E5:"):
+        assert gate in text, (
+            f"HemisphereExecutionChecklist.v0.md missing evidence gate {gate}"
+        )
+
+
+def test_hemisphere_checklist_referenced_in_manifest() -> None:
+    """
+    roadmap/MANIFEST.md must reference HemisphereExecutionChecklist.v0.md
+    for discoverability.
+    """
+    manifest_text = MANIFEST_PATH.read_text(encoding="utf-8")
+    assert "HemisphereExecutionChecklist.v0.md" in manifest_text, (
+        "roadmap/MANIFEST.md must reference HemisphereExecutionChecklist.v0.md "
+        "for hemisphere execution gate discoverability."
+    )
+
+
+def test_status_next_milestone_reflects_hemisphere() -> None:
+    """
+    STATUS.md 'Next milestone' line must reference Hemisphere Metabolization
+    (not stale Boot1 reference).
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    assert "Hemisphere Metabolization" in status_text, (
+        "STATUS.md must reference Hemisphere Metabolization as the active milestone."
+    )
+    # Should not still point to Boot1 as the *next* milestone
+    milestone_match = re.search(r"\*\*Next milestone:\*\*(.+)", status_text)
+    assert milestone_match, "STATUS.md must have a 'Next milestone' line."
+    milestone_line = milestone_match.group(1)
+    assert "Hemisphere" in milestone_line, (
+        f"STATUS.md 'Next milestone' should reference Hemisphere, "
+        f"got: {milestone_line.strip()}"
     )
 
 

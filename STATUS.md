@@ -166,7 +166,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
 See TASKS.md VECTOR/SINK for priority ordering (P1-P6, S1-S4).
 
-**Post-D008 Operating Mode:** NEXT (Boot1) is the primary execution lane. L4 research is evidence-tracked via heartbeat — not abandoned, but deferred. Next L4 action: NO-OP (evidence preserved) unless founder overrides D008 DEFER. Re-evaluation trigger: Boot1 complete + Hemisphere Metabolization at NEXT.
+**Post-D008 Operating Mode:** NEXT (Hemisphere Metabolization) is the primary execution lane. Boot1 shadow-merge COMPLETE (2026-02-19). L4 research is evidence-tracked via heartbeat — not abandoned, but deferred. Next L4 action: NO-OP (evidence preserved) unless founder overrides D008 DEFER. Re-evaluation trigger: SATISFIED (Boot1 complete + Hemisphere Metabolization at NEXT).
 
 **Terminology Lock:** `sink` (lowercase) = runtime hemisphere bucket (e.g., `r_sink` in projection routing). `SINK` (uppercase) = governance task lane in TASKS.md (parked work items). `r_a` = runtime accumulator bucket. `Ra` = resolved-work section in TASKS.md. These are distinct concepts; never conflate them.
 
@@ -632,7 +632,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Last updated:** 2026-02-17 (agent review findings: O(depth²) backtracking, host debt comments, SDK rate_limit_event patch)
-**Next milestone:** Boot1 Recursive Loop Contract (NEXT — shadow-merge implementation). See TASKS.md NEXT.
+**Next milestone:** Hemisphere Metabolization Contract (NEXT — sink re-expression cycle implementation). Boot1 shadow-merge COMPLETE (2026-02-19). See TASKS.md NEXT.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
 - rcx_pi_rust → ARCHIVED, rcx_omega → ARCHIVED, worlds_json → MAINTAIN (at `mu/worlds_json/`)

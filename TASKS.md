@@ -97,6 +97,7 @@ If a task is not listed here, it is NOT to be implemented.
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-02-19, hemisphere-promotion-wave1): **Hemisphere Metabolization VECTOR → NEXT promotion.** All 5 promotion criteria satisfied. Boot1 complete (E1-E5 MET) + D008 re-evaluation trigger met. VECTOR reindexed: P2→P1 (G8 Decision Path), P3→P2 (Checkpoint/Resume), P4→P3, P5→P4, P6→P5. Created `mu/docs/core/HemisphereExecutionChecklist.v0.md` (E1-E5 evidence gates). STATUS.md updated: next milestone = Hemisphere Metabolization. No phase/debt/runtime change.
 - Tracker sync note (2026-02-19, boot1-findings-waveB): **I1/I2 runtime hardening.** Added `assert_mu(input_value)` boundary validation at `run_engine_pipeline` and `_run_engine_recursive` entry (Python), `isValidMu(inputValue)` at `runEnginePipeline` and `runEnginePipelineRecursive` entry (JS). Fixed `validateSeedStructure` falsy checks → key-presence (`'id' in proj`, etc.) for Python parity. No phase/debt change; runtime behavior change (rejects non-Mu input at engine pipeline boundary).
 - Tracker sync note (2026-02-19, boot1-findings-waveA): **Agent review findings (non-runtime).** Fixed anti-cheat checker ROOT (was no-op), annotated 5 `_BOOT1_MAX_REENTRY_DEPTH` imports with ANTICHEAT_OK, deduped `_find_run_engine_pipeline_callers`, removed dead local re-imports in `step_algorithm_with_bridge`, corrected stale docstring, JS `||` → `??` in display path. No phase/debt/runtime-behavior change.
 - Tracker sync note (2026-02-19, boot1-execution-wave3): **Boot1 NEXT complete (shadow-merge scope).** E1-E5 evidence matrix verified, all MET:
@@ -418,7 +419,18 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
-No active items — Boot1 shadow-merge complete, no new NEXT items promoted. Next promotion candidate: Hemisphere Metabolization (VECTOR P1).
+- **Hemisphere Metabolization Contract** — **PROMOTED FROM VECTOR P1** (2026-02-19). All 5 promotion criteria satisfied:
+  1. Re-expression trigger model decided (automatic + manual/debug) ✓
+  2. At least 4 metabolization projection specs drafted (6 designed) ✓
+  3. Extended truth-table coverage criteria defined (10 transitions T1-T10, 3 adversarial) ✓
+  4. Engine exception policy Option B designed with sink-safety invariants ✓
+  5. Explicit VECTOR → NEXT promotion in this file with rationale ✓
+
+  **Rationale:** Boot1 complete (shadow-merge scope fulfilled, E1-E5 all MET). D008 re-evaluation trigger satisfied (Boot1 complete + Hemisphere at NEXT). Design doc (`roadmap/MuHemispheresDesign.md`) is locked. Semantics locked: 6 projection IDs, 10 transitions, 5-bucket routing, engine exception policy Option B. Implementation scope bounded and testable.
+
+  **Execution slice (bounded):** Implement metabolization projections (sink → re-expression cycle) in `mu/programs/hemispheres.v1.json` (or new `metabolization.v1.json`), with truth-table tests for T1-T10 transitions and adversarial edge cases. Python and JS parity required. No engine exception policy Option B activation in this slice (shadow-only, like Boot1).
+
+  **Execution guardrail:** `mu/docs/core/HemisphereExecutionChecklist.v0.md` (E1-E5 evidence gates).
 
 - ~~**Boot1 Recursive Loop Contract**~~ — **COMPLETE** (2026-02-19, shadow-merge scope fulfilled). E1-E5 all MET. 97 Boot1-specific tests (77 parity + 14 discipline + 6 cross-substrate), 29 security regression tests. Trampoline remains default (merge-2 not yet authorized). See Ra tracker sync note (boot1-execution-wave3) for full evidence matrix.
 
@@ -447,17 +459,11 @@ Current Exhaustion Layer: META_CIRCULAR
 
 
 **Active designs (priority-ordered):**
-- **[P1]** Hemisphere Metabolization Contract (`roadmap/MuHemispheresDesign.md` § "FUTURE_TARGET: Hemisphere Metabolization Contract") - Sink re-expression cycle: sink → (r_inf | r_null) metabolization → (lobes | r_a) storage → residual → sink. Stall recovery: lobes-first, then sink. 6 projection IDs designed (pattern/body sketches). Engine exception policy dependency documented (Option A active, Option B designed). **Promotion criteria (all required for VECTOR → NEXT):**
-  - Re-expression trigger model decided (automatic + manual/debug, per founder directive) ✓ designed
-  - At least 4 metabolization projection specs drafted with pattern/body ✓ 6 designed
-  - Extended truth-table coverage criteria defined (≥8 metabolization transitions) ✓ 10 transitions (T1-T10), 3 adversarial, all 5 buckets covered
-  - Engine exception policy Option B (synthesized routable terminal → sink) designed with sink-safety invariants ✓ 8-field synthesized shape, 5 sink-safety invariants (S1-S5), 6 adversarial test specs (ADV-B1 to ADV-B6), 4 code touchpoints verified, enablement guard defined
-  - Explicit VECTOR → NEXT promotion in this file with rationale before any implementation
-- **[P2] L4 G8 Production Decision Path (D004→D005)** — **PROMOTED FROM SINK** (2026-02-19, task-lane-priority-wave1). Rationale: D001-D003 research evidence confirmed H2 feasibility (52 LOC Stage 0 kernel, all 4 criteria MET). G8 is the only UNPROVEN L4 gate. This VECTOR item covers the production *decision* path only: D004 founder verdict (GO/DEFER/NO-GO) → D005 pilot spec if GO. **Design/decision only, no implementation.** Evidence docs: `mu/docs/core/G8CpsFeasibility.v0.md`, `mu/docs/core/L4DecisionCard.v0.md`. **Promotion criteria (all required for VECTOR → NEXT):** (1) D004 founder verdict rendered, (2) If GO: D005 pilot spec drafted with LOC budget ≤100/substrate, (3) All D004 stop conditions enumerable, (4) L3 parity path defined, (5) Explicit VECTOR → NEXT promotion in this file with rationale.
-- **[P3]** Checkpoint/Resume Contract (bounded continuation semantics) — Explicit pause/resume semantics when engine or algorithm limits are hit. **Opened** (2026-02-14, Round 16E). **Founder decision D2=DEFER** (2026-02-16): not promoted; remains in VECTOR for future consideration. **Invariants**: (1) Limit hit is explicit (no silent truncation), (2) Hash verifies state integrity; hash alone is not resumable state, (3) Resume token carries full continuation state (or validated pointer), state_hash, seed/version checksums, and budget metadata, (4) Resume path preserves Python/JS parity, (5) Resume path reuses existing validation/security guards, (6) No bootstrap primitive count increase without explicit approval. **Promotion criteria (all required for VECTOR → NEXT):** (1) Contract doc drafted and approved, (2) Canonical token schema defined, (3) Cross-substrate parity test plan defined, (4) Security review complete, (5) Explicit VECTOR → NEXT promotion in this file with rationale.
-- **[P4]** Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
-- **[P5]** Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
-- **[P6]** Debt Categories v0 (`mu/docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
+- **[P1] L4 G8 Production Decision Path (D004→D005)** — **PROMOTED FROM SINK** (2026-02-19, task-lane-priority-wave1). Rationale: D001-D003 research evidence confirmed H2 feasibility (52 LOC Stage 0 kernel, all 4 criteria MET). G8 is the only UNPROVEN L4 gate. This VECTOR item covers the production *decision* path only: D004 founder verdict (GO/DEFER/NO-GO) → D005 pilot spec if GO. **Design/decision only, no implementation.** Evidence docs: `mu/docs/core/G8CpsFeasibility.v0.md`, `mu/docs/core/L4DecisionCard.v0.md`. **Promotion criteria (all required for VECTOR → NEXT):** (1) D004 founder verdict rendered, (2) If GO: D005 pilot spec drafted with LOC budget ≤100/substrate, (3) All D004 stop conditions enumerable, (4) L3 parity path defined, (5) Explicit VECTOR → NEXT promotion in this file with rationale.
+- **[P2]** Checkpoint/Resume Contract (bounded continuation semantics) — Explicit pause/resume semantics when engine or algorithm limits are hit. **Opened** (2026-02-14, Round 16E). **Founder decision D2=DEFER** (2026-02-16): not promoted; remains in VECTOR for future consideration. **Invariants**: (1) Limit hit is explicit (no silent truncation), (2) Hash verifies state integrity; hash alone is not resumable state, (3) Resume token carries full continuation state (or validated pointer), state_hash, seed/version checksums, and budget metadata, (4) Resume path preserves Python/JS parity, (5) Resume path reuses existing validation/security guards, (6) No bootstrap primitive count increase without explicit approval. **Promotion criteria (all required for VECTOR → NEXT):** (1) Contract doc drafted and approved, (2) Canonical token schema defined, (3) Cross-substrate parity test plan defined, (4) Security review complete, (5) Explicit VECTOR → NEXT promotion in this file with rationale.
+- **[P3]** Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) - Every Mu value carries a content hash; equality becomes O(1). **Levels 0-2 IMPLEMENTED** (L0: boundary hashing, L1: mu_equal eliminated 5→4, L2: frozen hashes — state dropped from _seen, ~77% memory savings). **Level 3 (Trie) DEFERRED** — analysis shows 5x slower for production traces (<50 steps), break-even at ~100 steps. Revisit if traces routinely exceed 100 steps.
+- **[P4]** Projection Indexing - Preprocess projections into structural trie/decision-tree for O(log N) matching instead of O(N) linear scan. Index is Mu data (structural). **Promotion criteria:** Profile real workloads first; if projection matching is >50% of runtime, promote to NEXT.
+- **[P5]** Debt Categories v0 (`mu/docs/core/DebtCategories.v0.md`) - Scaffolding vs semantic debt distinction
 
 **EngineNew gap contracts** (locked by `tests/structural/test_engine_cycle_mapping.py::TestGapRegistry`):
 - ~~GAP-04-FIX~~ — **CLOSED** (2026-02-13, Round 15I). E1–E5 complete. `fix.v1.json` (6 projections) + `rcx_engine.v1.json` (10 projections, 3 fix-dispatch). 19 invariant tests, 4 cross-substrate parity tests. EngineNew 9/10 structural.
@@ -469,6 +475,7 @@ Current Exhaustion Layer: META_CIRCULAR
 **Promoted to NEXT:**
 - ~~Mu Hemispheres v0~~ (`roadmap/MuHemispheresDesign.md`) - **PROMOTED TO NEXT** (2026-02-09, Gate 5 blocker resolved)
 - ~~Boot1 Recursive Loop Contract~~ (`mu/docs/core/Boot1LoopContract.v0.md`) - **PROMOTED TO NEXT** (2026-02-16, founder D1=YES). Shadow-merge scope: no default flip, no trampoline removal. All 6 promotion criteria satisfied. P1-P3 resolved.
+- ~~Hemisphere Metabolization Contract~~ (`roadmap/MuHemispheresDesign.md` § Metabolization) - **PROMOTED TO NEXT** (2026-02-19). All 5 promotion criteria satisfied. Boot1 complete + D008 re-evaluation trigger met. Execution checklist: `mu/docs/core/HemisphereExecutionChecklist.v0.md`.
 
 **Completed (moved to Ra):**
 - ~~Operator Exhaustion v0~~ (`mu/docs/core/OperatorExhaustion.v0.md`) - **MOVED TO Ra** (IMPLEMENTED 2026-02-02)
