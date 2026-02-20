@@ -1608,15 +1608,15 @@ function verifySeedChecksum(seedName, rawContent) {
 }
 
 function validateSeedStructure(seedName, seed) {
-  if (!seed.meta || typeof seed.meta !== 'object') {
+  if (!('meta' in seed) || seed.meta === null || typeof seed.meta !== 'object') {
     throw new Error(`Seed ${seedName}: missing or invalid 'meta' field`);
   }
-  if (!Array.isArray(seed.projections)) {
+  if (!('projections' in seed) || !Array.isArray(seed.projections)) {
     throw new Error(`Seed ${seedName}: missing or invalid 'projections' field`);
   }
   for (let i = 0; i < seed.projections.length; i++) {
     const proj = seed.projections[i];
-    if (!proj.id || !proj.pattern || !proj.body) {
+    if (!('id' in proj) || !('pattern' in proj) || !('body' in proj)) {
       throw new Error(
         `Seed ${seedName}: projection ${i} missing required field (id/pattern/body)`
       );
@@ -1926,6 +1926,11 @@ function hashTraceForRecurrence(trace, maxEntries) {
  * @host_iteration (boundary host loop, services engine state machine)
  */
 function runEnginePipeline(projections, inputValue, options) {
+  // Boundary Mu validation: reject non-Mu input before entering engine loop
+  if (!isValidMu(inputValue)) {
+    throw new RcxError('input.invalid_type', `runEnginePipeline: inputValue is not valid Mu (got ${typeof inputValue})`);
+  }
+
   const {
     maxSteps = 100,
     frozen = null,
@@ -2070,6 +2075,11 @@ function runEnginePipeline(projections, inputValue, options) {
 const BOOT1_MAX_REENTRY_DEPTH = 20;
 
 function runEnginePipelineRecursive(projections, inputValue, options, recursionDepth) {
+  // Boundary Mu validation: reject non-Mu input before entering recursive engine loop
+  if (!isValidMu(inputValue)) {
+    throw new RcxError('input.invalid_type', `runEnginePipelineRecursive: inputValue is not valid Mu (got ${typeof inputValue})`);
+  }
+
   const {
     maxSteps = 100,
     frozen = null,
