@@ -636,7 +636,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 ---
 
 **Last updated:** 2026-02-17 (agent review findings: O(depth²) backtracking, host debt comments, SDK rate_limit_event patch)
-**Next milestone:** Hemisphere Metabolization Contract (NEXT — sink re-expression cycle implementation). Boot1 shadow-merge COMPLETE (2026-02-19). See TASKS.md NEXT.
+**Next milestone:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. See TASKS.md for next VECTOR promotion candidate.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
 - rcx_pi_rust → ARCHIVED, rcx_omega → ARCHIVED, worlds_json → MAINTAIN (at `mu/worlds_json/`)

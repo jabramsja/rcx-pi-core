@@ -200,10 +200,12 @@ def test_tasks_next_section_has_active_work_only() -> None:
     # NEXT can be empty when all gates are complete and no follow-up work remains
     has_active_tasks = re.search(r"^\-\s*\[\s\]\s+", next_section, re.MULTILINE)
     has_promoted_tasks = re.search(r"^\-\s*\*\*\w+", next_section, re.MULTILINE)
+    has_completed_tasks = re.search(r"^\-\s*~~\*\*\w+", next_section, re.MULTILINE)
     has_empty_marker = "No active items" in next_section
-    assert has_active_tasks or has_promoted_tasks or has_empty_marker, (
+    assert has_active_tasks or has_promoted_tasks or has_completed_tasks or has_empty_marker, (
         "TASKS.md NEXT should contain active tasks "
-        "('- [ ] ...' or '- **Name**') or an explicit empty marker ('No active items')."
+        "('- [ ] ...' or '- **Name**'), completed tasks ('- ~~**Name**~~'), "
+        "or an explicit empty marker ('No active items')."
     )
 
 
@@ -543,6 +545,53 @@ def test_status_next_milestone_reflects_hemisphere() -> None:
     assert "Hemisphere" in milestone_line, (
         f"STATUS.md 'Next milestone' should reference Hemisphere, "
         f"got: {milestone_line.strip()}"
+    )
+
+
+# ── E5 Governance Closure Locks ──────────────────────────────────────────────
+
+
+def test_hemisphere_e5_tasks_marked_complete() -> None:
+    """TASKS.md NEXT must mark Hemisphere Metabolization Contract as COMPLETE."""
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    next_match = re.search(
+        r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
+        tasks_text,
+        re.DOTALL,
+    )
+    assert next_match, "Could not isolate TASKS.md NEXT section."
+    next_section = next_match.group(1)
+    assert "COMPLETE" in next_section, (
+        "TASKS.md NEXT Hemisphere entry must be marked COMPLETE."
+    )
+    assert "E1-E5" in next_section, (
+        "TASKS.md NEXT Hemisphere COMPLETE entry must reference E1-E5 evidence."
+    )
+
+
+def test_hemisphere_e5_checklist_all_gates_met() -> None:
+    """HemisphereExecutionChecklist.v0.md must show all 5 gates MET."""
+    text = HEMISPHERE_CHECKLIST_PATH.read_text(encoding="utf-8")
+    for gate in ("E1 MET", "E2 MET", "E3 MET", "E4 MET", "E5 MET"):
+        assert gate in text, (
+            f"HemisphereExecutionChecklist.v0.md must contain '{gate}' "
+            f"for E5 governance closure."
+        )
+
+
+def test_hemisphere_e5_checklist_last_verified_current() -> None:
+    """HemisphereExecutionChecklist.v0.md LAST_VERIFIED must be 2026-02-20."""
+    text = HEMISPHERE_CHECKLIST_PATH.read_text(encoding="utf-8")
+    assert "LAST_VERIFIED: 2026-02-20" in text, (
+        "HemisphereExecutionChecklist.v0.md LAST_VERIFIED must be updated to 2026-02-20."
+    )
+
+
+def test_hemisphere_e5_boot1_cross_reference() -> None:
+    """HemisphereExecutionChecklist must cross-reference Boot1LoopContract."""
+    text = HEMISPHERE_CHECKLIST_PATH.read_text(encoding="utf-8")
+    assert "Boot1LoopContract.v0.md" in text, (
+        "HemisphereExecutionChecklist.v0.md must cross-reference Boot1LoopContract.v0.md."
     )
 
 
