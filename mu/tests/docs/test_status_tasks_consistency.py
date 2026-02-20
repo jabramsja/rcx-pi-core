@@ -775,3 +775,92 @@ def test_status_distinguishes_primitives_from_debt_sites() -> None:
     assert "4 bootstrap primitives" in status_text, (
         "STATUS.md must explicitly state '4 bootstrap primitives'."
     )
+
+
+# =============================================================================
+# L4 Execution Contract — CLAUDE.md phrase locks
+# =============================================================================
+
+
+def test_claude_md_has_l4_execution_contract_section() -> None:
+    """
+    CLAUDE.md must contain the L4 Execution Contract (Hard Gate) section
+    that enforces wave classification.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "L4 Execution Contract (Hard Gate)" in text, (
+        "CLAUDE.md missing 'L4 Execution Contract (Hard Gate)' section."
+    )
+
+
+def test_claude_md_l4_contract_references_canonical_doc() -> None:
+    """
+    CLAUDE.md L4 contract section must reference the canonical policy doc.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "L4ExecutionContract.v1.md" in text, (
+        "CLAUDE.md L4 contract section must reference L4ExecutionContract.v1.md."
+    )
+
+
+def test_claude_md_l4_contract_references_enforcement_checker() -> None:
+    """
+    CLAUDE.md L4 contract section must reference the enforcement checker.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "enforce_l4_execution_contract.py" in text, (
+        "CLAUDE.md L4 contract section must reference enforce_l4_execution_contract.py."
+    )
+
+
+def test_claude_md_l4_contract_has_both_wave_classes() -> None:
+    """
+    CLAUDE.md must document both L4_CLASS_A and MAINTENANCE wave classes.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "L4_CLASS_A" in text, (
+        "CLAUDE.md must document L4_CLASS_A wave class."
+    )
+    assert "MAINTENANCE" in text, (
+        "CLAUDE.md must document MAINTENANCE wave class."
+    )
+
+
+def test_status_md_references_l4_execution_contract() -> None:
+    """
+    STATUS.md must contain a pointer to L4ExecutionContract.v1.md.
+    """
+    text = STATUS_PATH.read_text(encoding="utf-8")
+    assert "L4ExecutionContract.v1.md" in text, (
+        "STATUS.md must reference L4ExecutionContract.v1.md."
+    )
+
+
+def test_claude_md_preflight_read_list_includes_manifest() -> None:
+    """
+    CLAUDE.md preflight read list must include roadmap/MANIFEST.md.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "roadmap/MANIFEST.md" in text, (
+        "CLAUDE.md preflight read list must include roadmap/MANIFEST.md."
+    )
+
+
+def test_claude_md_preflight_read_list_includes_roadmap() -> None:
+    """
+    CLAUDE.md preflight read list must include ROADMAP.md.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "ROADMAP.md" in text, (
+        "CLAUDE.md preflight read list must include ROADMAP.md."
+    )
+
+
+def test_claude_md_references_codex_audit_contract() -> None:
+    """
+    CLAUDE.md must reference the Codex→Claude Prompt Contract.
+    """
+    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    assert "Codex→Claude Prompt Contract" in text, (
+        "CLAUDE.md must reference 'Codex→Claude Prompt Contract'."
+    )

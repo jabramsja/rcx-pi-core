@@ -201,8 +201,7 @@ class TestNoNewBootstrapPrimitives:
         """Metabolization seed must not declare bootstrap primitives."""
         text = METABOLIZATION_SEED.read_text(encoding="utf-8")
         assert "BOOTSTRAP_PRIMITIVE" not in text
-        assert "bootstrap" not in text.lower() or "bootstrap" in text.lower()
-        # The seed meta may reference "bootstrap" in doc strings; check no marker
+        # The seed meta may reference "bootstrap" in doc strings; check no marker in projection IDs
         seed = json.loads(text)
         for proj in seed["projections"]:
             assert "bootstrap" not in proj.get("id", "").lower(), (

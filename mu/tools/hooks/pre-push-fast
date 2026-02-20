@@ -26,6 +26,12 @@ if [ -n "$RANGE" ]; then
         echo "   Add STATUS.md or TASKS.md updates for core structural changes."
         exit 1
     fi
+    if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$RANGE"; then
+        echo ""
+        echo "❌ L4 execution contract check failed."
+        echo "   See roadmap/L4ExecutionContract.v1.md for wave classification rules."
+        exit 1
+    fi
 fi
 
 # Check for untracked backup/temp artifacts (BLOCKING)

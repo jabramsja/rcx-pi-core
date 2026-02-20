@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -394,12 +393,10 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
         ValueError: If expected projections are missing or wrap isn't last.
     """
     if seed_name not in EXPECTED_PROJECTION_IDS:
-        warnings.warn(
+        raise ValueError(
             f"Seed {seed_name} has no entry in EXPECTED_PROJECTION_IDS — "
-            f"projection ordering is NOT validated. Register it for fail-closed security.",
-            stacklevel=2,
+            f"projection ordering is NOT validated. Register it for fail-closed security."
         )
-        return
 
     expected = EXPECTED_PROJECTION_IDS[seed_name]
     projections = seed.get("projections", [])
