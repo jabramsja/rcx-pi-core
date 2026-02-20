@@ -362,9 +362,9 @@ class TestPipelineSignatureLock:
         sig = inspect.signature(run_engine_pipeline)
         assert sig.parameters["max_iterations"].default is None
 
-    def test_use_boot1_recursive_default_false(self):
+    def test_use_boot1_recursive_default_true(self):
         sig = inspect.signature(run_engine_pipeline)
-        assert sig.parameters["use_boot1_recursive"].default is False
+        assert sig.parameters["use_boot1_recursive"].default is True
 
     def test_keyword_only_after_input_value(self):
         """Parameters after input_value must be keyword-only."""
@@ -680,8 +680,8 @@ class TestBoot1ModeRoutingContract:
     and implicit mode changes without observable evidence.
     """
 
-    def test_python_default_is_literal_false_ast(self):
-        """Python use_boot1_recursive default must be the literal False at AST level."""
+    def test_python_default_is_literal_true_ast(self):
+        """Python use_boot1_recursive default must be the literal True at AST level."""
         source = _STEP_MU_PATH.read_text()
         tree = ast.parse(source)
         for node in ast.walk(tree):
@@ -695,20 +695,20 @@ class TestBoot1ModeRoutingContract:
                             f"use_boot1_recursive default must be a literal constant, "
                             f"got {type(default).__name__}"
                         )
-                        assert default.value is False, (
-                            f"use_boot1_recursive default must be False, "
+                        assert default.value is True, (
+                            f"use_boot1_recursive default must be True, "
                             f"got {default.value!r}"
                         )
                         return
                 pytest.fail("use_boot1_recursive parameter not found in run_engine_pipeline")
         pytest.fail("run_engine_pipeline function not found in step_mu.py")
 
-    def test_js_boot1_defaults_to_false(self):
-        """JS boot1LoopMode must default to false via ?? operator."""
+    def test_js_boot1_defaults_to_true(self):
+        """JS boot1LoopMode must default to true via ?? operator."""
         source = _JS_PATH.read_text()
-        assert re.search(r"request\.boot1LoopMode\s*\?\?\s*false", source), (
-            "JS must default boot1LoopMode to false via "
-            "`request.boot1LoopMode ?? false`"
+        assert re.search(r"request\.boot1LoopMode\s*\?\?\s*true", source), (
+            "JS must default boot1LoopMode to true via "
+            "`request.boot1LoopMode ?? true`"
         )
 
     def test_python_routing_is_conditional_on_flag(self):

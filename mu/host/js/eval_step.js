@@ -3551,7 +3551,7 @@ if (process.argv.includes('--json-api')) {
       if (request.boot1LoopMode != null && typeof request.boot1LoopMode !== 'boolean') {
         response = { success: false, error_code: 'type_error', error: 'boot1LoopMode must be boolean if provided, got ' + typeof request.boot1LoopMode };
       } else {
-      const boot1Mode = request.boot1LoopMode ?? false;
+      const boot1Mode = request.boot1LoopMode ?? true;
       const observerEvents = request.observer ? [] : null;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');

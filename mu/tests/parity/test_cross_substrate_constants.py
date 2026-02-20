@@ -139,17 +139,17 @@ class TestBoot1Parity:
         js_depth = _extract_js_const(_js_source(), "BOOT1_MAX_REENTRY_DEPTH")
         assert _BOOT1_MAX_REENTRY_DEPTH == js_depth == 20
 
-    def test_boot1_default_is_trampoline(self):
-        """Boot1 default must remain trampoline (off) unless explicitly enabled."""
+    def test_boot1_default_is_recursive(self):
+        """Boot1 default must be recursive (on) for direct pipeline."""
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
         import inspect
         sig = inspect.signature(run_engine_pipeline)
-        # use_boot1_recursive defaults to False (trampoline is default)
+        # use_boot1_recursive defaults to True (boot1 recursive is default)
         param = sig.parameters.get("use_boot1_recursive")
         assert param is not None, "use_boot1_recursive parameter missing"
-        assert param.default is False, (
-            f"Boot1 default changed from False to {param.default}. "
-            "Trampoline must remain default."
+        assert param.default is True, (
+            f"Boot1 default changed from True to {param.default}. "
+            "Boot1 recursive must remain default."
         )
 
 
