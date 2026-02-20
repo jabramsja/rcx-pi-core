@@ -1585,7 +1585,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     max_algorithm_iterations: int = 50,
     max_iterations: int | None = None,
     observer: list | None = None,
-    use_boot1_recursive: bool = False,
+    use_boot1_recursive: bool = True,
 ) -> Mu:
     """Host loop that drives the engine state machine defined in rcx_engine.v1.json.
 

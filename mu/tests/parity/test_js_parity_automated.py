@@ -2664,6 +2664,7 @@ class TestObserverIsomorphism:
             "action": "run_engine_pipeline",
             "input": "schema_test",
             "observer": True,
+            "boot1LoopMode": False,  # match Python's use_boot1_recursive=False above
         })
         for event in js_resp.get("observer_events", []):
             assert set(event.keys()) == required_fields, (
