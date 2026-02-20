@@ -1432,6 +1432,9 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 shadow, recursive engine l
     - Recursive shadow runs in parallel for comparison testing
     - Results must be identical on all canonical inputs
     """
+    # Boundary Mu validation: reject non-Mu input before entering recursive engine loop
+    assert_mu(input_value, "_run_engine_recursive.input")
+
     if _recursion_depth >= _BOOT1_MAX_REENTRY_DEPTH:
         raise RuntimeError(
             f"Boot1 recursive re-entry depth {_recursion_depth} exceeds "
@@ -1616,6 +1619,9 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     Raises:
         RuntimeError: If engine loop exhausts without producing terminal result.
     """
+    # Boundary Mu validation: reject non-Mu input before entering engine loop
+    assert_mu(input_value, "run_engine_pipeline.input")
+
     # Boot1 type guard: reject non-bool to prevent truthy-string routing bugs
     if not isinstance(use_boot1_recursive, bool):  # AST_OK: boundary
         raise TypeError(

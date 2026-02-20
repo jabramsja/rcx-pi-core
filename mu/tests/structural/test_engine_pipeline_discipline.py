@@ -837,3 +837,96 @@ class TestBoot1TypeHardening:
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
             run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive=1)
+
+
+# ── I1: Boundary Mu validation ──────────────────────────────────────────
+
+
+class TestPipelineBoundaryMuValidation:
+    """run_engine_pipeline and _run_engine_recursive reject non-Mu inputs at boundary."""
+
+    def test_pipeline_rejects_nan(self):
+        """NaN is not valid Mu — pipeline must reject at entry."""
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError):
+            run_engine_pipeline(projs, float("nan"), max_steps=5)
+
+    def test_pipeline_rejects_function(self):
+        """Functions are not valid Mu — pipeline must reject at entry."""
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError):
+            run_engine_pipeline(projs, lambda x: x, max_steps=5)
+
+    def test_pipeline_rejects_inf(self):
+        """Infinity is not valid Mu — pipeline must reject at entry."""
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError):
+            run_engine_pipeline(projs, float("inf"), max_steps=5)
+
+    def test_recursive_rejects_nan(self):
+        """Boot1 recursive path also validates input at boundary."""
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError):
+            run_engine_pipeline(projs, float("nan"), max_steps=5, use_boot1_recursive=True)
+
+    def test_recursive_rejects_function(self):
+        """Boot1 recursive path also validates input at boundary."""
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        with pytest.raises(TypeError):
+            run_engine_pipeline(projs, lambda x: x, max_steps=5, use_boot1_recursive=True)
+
+    def test_pipeline_accepts_valid_mu(self):
+        """Valid Mu inputs pass boundary check (regression guard)."""
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
+        # These should not raise — they are valid Mu
+        run_engine_pipeline(projs, {"x": 1}, max_steps=5)
+        run_engine_pipeline(projs, 42, max_steps=5)
+        run_engine_pipeline(projs, None, max_steps=5)
+        run_engine_pipeline(projs, "hello", max_steps=5)
+
+
+# ── I1/I2: Source contract locks for JS boundary checks ─────────────────
+
+
+class TestJsBoundaryContractLock:
+    """JS source must contain explicit boundary checks (fail-closed contract)."""
+
+    def test_js_run_engine_pipeline_has_isvalidmu_check(self):
+        """runEnginePipeline must call isValidMu on inputValue."""
+        source = _JS_PATH.read_text()
+        assert "isValidMu(inputValue)" in source, (
+            "runEnginePipeline missing isValidMu(inputValue) boundary check"
+        )
+
+    def test_js_run_engine_pipeline_recursive_has_isvalidmu_check(self):
+        """runEnginePipelineRecursive must call isValidMu on inputValue."""
+        source = _JS_PATH.read_text()
+        # Both functions should have the check
+        import re
+        matches = re.findall(r"function\s+runEnginePipeline(?:Recursive)?\b.*?isValidMu\(inputValue\)", source, re.DOTALL)
+        assert len(matches) >= 2, (
+            f"Expected isValidMu(inputValue) in both pipeline functions, found {len(matches)}"
+        )
+
+    def test_js_validate_seed_uses_key_presence(self):
+        """validateSeedStructure must use 'key' in obj, not falsy checks."""
+        source = _JS_PATH.read_text()
+        assert "'id' in proj" in source, "validateSeedStructure must use key-presence for 'id'"
+        assert "'pattern' in proj" in source, "validateSeedStructure must use key-presence for 'pattern'"
+        assert "'body' in proj" in source, "validateSeedStructure must use key-presence for 'body'"
+        assert "'meta' in seed" in source, "validateSeedStructure must use key-presence for 'meta'"
+
+    def test_js_validate_seed_no_falsy_pattern(self):
+        """Old falsy patterns must not exist in validateSeedStructure."""
+        source = _JS_PATH.read_text()
+        # Extract just the validateSeedStructure function body
+        import re
+        match = re.search(r"function validateSeedStructure\(.*?\{(.*?)\n\}", source, re.DOTALL)
+        assert match, "Could not find validateSeedStructure function"
+        func_body = match.group(1)
+        assert "!proj.id" not in func_body, "validateSeedStructure still uses falsy !proj.id"
+        assert "!proj.pattern" not in func_body, "validateSeedStructure still uses falsy !proj.pattern"
+        assert "!proj.body" not in func_body, "validateSeedStructure still uses falsy !proj.body"
+        assert "!seed.meta" not in func_body, "validateSeedStructure still uses falsy !seed.meta"
