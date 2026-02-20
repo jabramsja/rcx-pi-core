@@ -135,7 +135,7 @@ class TestBoot1Parity:
     """Boot1 loop contract constants must match."""
 
     def test_boot1_max_reentry_depth_parity(self):
-        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH
+        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies cross-substrate constant parity
         js_depth = _extract_js_const(_js_source(), "BOOT1_MAX_REENTRY_DEPTH")
         assert _BOOT1_MAX_REENTRY_DEPTH == js_depth == 20
 

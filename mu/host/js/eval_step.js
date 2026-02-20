@@ -2354,7 +2354,7 @@ console.log('Execution trace:');
 for (const t of trace.slice(0, 15)) {
   const stateStr = JSON.stringify(t.state);
   const preview = stateStr.length > 70 ? stateStr.slice(0, 70) + '...' : stateStr;
-  console.log(`  [${t.step}] ${t.projection || 'STALL'}: ${preview}`);
+  console.log(`  [${t.step}] ${t.projection ?? 'STALL'}: ${preview}`);
 }
 if (trace.length > 15) {
   console.log(`  ... (${trace.length - 15} more steps)`);
