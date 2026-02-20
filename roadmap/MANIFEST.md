@@ -66,7 +66,8 @@
 
 | Document | Role |
 |----------|------|
-| [`roadmap/L4ExecutionContract.v1.md`](L4ExecutionContract.v1.md) | Wave classification policy (L4_CLASS_A / MAINTENANCE) |
+| [`roadmap/L4ExecutionContract.v2.md`](L4ExecutionContract.v2.md) | Wave classification policy v2 (L4_STRUCTURAL / L4_ENABLER / MAINTENANCE) |
+| [`roadmap/L4ExecutionContract.v1.md`](L4ExecutionContract.v1.md) | Superseded v1 (historical reference) |
 | [`roadmap/CodexClaudeAuditContract.v1.md`](CodexClaudeAuditContract.v1.md) | Prompt quality and audit discipline for multi-wave sessions |
 
 ## Canonical L4 Research Packet

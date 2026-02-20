@@ -1,6 +1,8 @@
 <!-- DOC_STATUS: REFERENCE -->
 <!-- DOC_SCOPE: L4 execution wave classification and anti-loophole enforcement -->
 
+> **SUPERSEDED:** See [`L4ExecutionContract.v2.md`](L4ExecutionContract.v2.md) for the current 3-class wave classification policy. This v1 document is preserved for historical reference only.
+
 # L4 Execution Contract v1
 
 > **Current State**: See [`STATUS.md`](../STATUS.md) for L4 gate snapshot.

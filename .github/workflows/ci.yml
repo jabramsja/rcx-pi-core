@@ -88,7 +88,18 @@ jobs:
             RANGE="origin/dev...${{ github.sha }}"
             echo "Range: origin/dev...${{ github.sha }}"
           fi
-          python tools/checks/enforce_l4_execution_contract.py --range "$RANGE"
+          # Derive wave-id from codex branch name (if applicable)
+          # PR: github.head_ref gives source branch; push: github.ref_name
+          if [ -n "${{ github.head_ref }}" ]; then
+            BRANCH="${{ github.head_ref }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+          WAVE_ID_FLAG=""
+          if [[ "$BRANCH" == codex/* ]]; then
+            WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+          fi
+          python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 
       - name: Green gate (authoritative, python-only)
         shell: bash

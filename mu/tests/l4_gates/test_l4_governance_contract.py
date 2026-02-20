@@ -1,0 +1,391 @@
+"""
+L4 Governance Contract Tests — No-stagnation enforcement.
+
+Tests all 7 mandatory constraints (1-7) plus valid examples for all 3 classes.
+
+Usage:
+    PYTHONHASHSEED=0 pytest tests/l4_gates/test_l4_governance_contract.py -v
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "tools" / "checks"))
+
+from enforce_l4_execution_contract import (
+    GATE_ID_RE,
+    LEGACY_CLASS_ALIAS,
+    VALID_WAVE_CLASSES,
+    check_consecutive_maintenance,
+    check_founder_override_replay,
+    check_legacy_alias_in_new_notes,
+    check_noop_throttle,
+    check_rolling_window,
+    enforce,
+    is_runtime_file,
+    parse_tracker_notes,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers — build tracker notes for testing
+# ---------------------------------------------------------------------------
+
+def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
+          evidence_command="pytest tests/l4_gates/", evidence_delta="delta",
+          hd_before=None, hd_after=None, sa_ref=None,
+          defer_reason=None, founder_override=None, wave_id="test-wave"):
+    """Build a mock tracker note dict."""
+    return {
+        "wave_id": wave_id,
+        "raw_class": raw_class or wave_class,
+        "wave_class": wave_class,
+        "gate": gate,
+        "no_op_proof": no_op_proof,
+        "evidence_command": evidence_command,
+        "evidence_delta": evidence_delta,
+        "host_semantics_delta_before": hd_before,
+        "host_semantics_delta_after": hd_after,
+        "structural_artifact_ref": sa_ref,
+        "defer_reason_code": defer_reason,
+        "founder_override": founder_override,
+        "date": "2026-02-20",
+        "raw": f"Class: {raw_class or wave_class}",
+    }
+
+
+# =============================================================================
+# Constraint 1: L4_ENABLER runtime prohibition
+# =============================================================================
+
+class TestL4EnablerRuntimeProhibition:
+    """L4_ENABLER cannot touch runtime/substrate dirs."""
+
+    def test_enabler_runtime_touch_fails(self):
+        files = ["rcx_pi/selfhost/eval_seed.py", "TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files)
+        assert not passed
+        assert any("L4_ENABLER" in e and "runtime" in e.lower() for e in errors)
+
+    def test_enabler_no_runtime_passes(self):
+        notes = [_note("L4_ENABLER")]
+        files = ["TASKS.md", "CLAUDE.md", "tests/l4_gates/test_foo.py"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Should pass: {errors}"
+
+
+# =============================================================================
+# Constraint 2: NO_OP throttling
+# =============================================================================
+
+class TestNoopThrottle:
+    """Same gate cannot use NO_OP_PROOF twice in rolling window."""
+
+    def test_repeated_noop_same_gate_fails(self):
+        notes = [
+            _note("MAINTENANCE", gate="G8", no_op_proof="reason1", defer_reason="d1"),
+            _note("L4_STRUCTURAL", gate="G8"),
+            _note("MAINTENANCE", gate="G8", no_op_proof="reason2", defer_reason="d2"),
+        ]
+        passed, errors = check_noop_throttle(notes)
+        assert not passed
+        assert any("NO_OP throttle" in e for e in errors)
+
+    def test_noop_different_gates_passes(self):
+        notes = [
+            _note("MAINTENANCE", gate="G8", no_op_proof="r1", defer_reason="d1"),
+            _note("L4_STRUCTURAL", gate="G5"),
+            _note("MAINTENANCE", gate="G5", no_op_proof="r2", defer_reason="d2"),
+        ]
+        passed, errors = check_noop_throttle(notes)
+        assert passed, f"Different gates should pass: {errors}"
+
+
+# =============================================================================
+# Constraint 3: Founder override
+# =============================================================================
+
+class TestFounderOverride:
+    """FOUNDER_OVERRIDE token grants one exception; replays fail."""
+
+    def test_override_allows_noop_repeat(self):
+        notes = [
+            _note("MAINTENANCE", gate="G8", no_op_proof="r1", defer_reason="d1",
+                  founder_override="2026-02-20-exception"),
+            _note("L4_STRUCTURAL", gate="G8"),
+            _note("MAINTENANCE", gate="G8", no_op_proof="r2", defer_reason="d2"),
+        ]
+        passed, _ = check_noop_throttle(notes)
+        assert passed  # Override active
+
+    def test_override_does_not_cover_triple_noop(self):
+        """3 NO_OP for same gate fails even with override (one exception only)."""
+        notes = [
+            _note("MAINTENANCE", gate="G8", no_op_proof="r1", defer_reason="d1",
+                  founder_override="2026-02-20-exception"),
+            _note("MAINTENANCE", gate="G8", no_op_proof="r2", defer_reason="d2"),
+            _note("MAINTENANCE", gate="G8", no_op_proof="r3", defer_reason="d3"),
+        ]
+        passed, errors = check_noop_throttle(notes)
+        assert not passed
+        assert any("one exception only" in e for e in errors)
+
+    def test_override_cross_gate_isolation(self):
+        """Override on G8 must not suppress G5 throttle."""
+        notes = [
+            _note("MAINTENANCE", gate="G8", no_op_proof="r1", defer_reason="d1",
+                  founder_override="override-g8"),
+            _note("MAINTENANCE", gate="G5", no_op_proof="r2", defer_reason="d2"),
+            _note("MAINTENANCE", gate="G5", no_op_proof="r3", defer_reason="d3"),
+        ]
+        passed, errors = check_noop_throttle(notes)
+        assert not passed
+        assert any("G5" in e for e in errors)
+
+    def test_override_replay_fails(self):
+        notes = [
+            _note("MAINTENANCE", gate="G8", founder_override="same-id", defer_reason="d1"),
+            _note("L4_STRUCTURAL", gate="G8"),
+            _note("MAINTENANCE", gate="G5", founder_override="same-id", defer_reason="d2"),
+        ]
+        passed, errors = check_founder_override_replay(notes)
+        assert not passed
+        assert any("replay" in e.lower() for e in errors)
+
+
+# =============================================================================
+# Constraint 4: Rolling window quota (tested in TestRollingWindowQuota below)
+
+# Constraint 5: Legacy alias lock
+# =============================================================================
+
+class TestLegacyAliasLock:
+    """L4_CLASS_A accepted for historical parse only; new notes must fail."""
+
+    def test_new_note_with_l4_class_a_fails(self):
+        notes = [_note("L4_STRUCTURAL", raw_class="L4_CLASS_A")]
+        passed, errors = check_legacy_alias_in_new_notes(notes)
+        assert not passed
+        assert any("legacy" in e.lower() or "L4_CLASS_A" in e for e in errors)
+
+    def test_historical_alias_parses_correctly(self):
+        text = (
+            "## Ra\n\n"
+            "- Tracker sync note (2026-02-20, old-wave): **Old wave.** "
+            "Class: L4_CLASS_A. Gate: G8. Evidence: old stuff.\n"
+        )
+        notes = parse_tracker_notes(text)
+        assert len(notes) == 1
+        assert notes[0]["wave_class"] == "L4_STRUCTURAL"
+        assert notes[0]["raw_class"] == "L4_CLASS_A"
+
+
+# =============================================================================
+# Constraint 6: L4_STRUCTURAL anti-theater (AND rule)
+# =============================================================================
+
+class TestStructuralAntiTheater:
+    """L4_STRUCTURAL requires runtime touch + l4_gates test + host delta."""
+
+    def test_structural_missing_l4_gates_change_fails(self):
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/test_foo.py"]
+        passed, errors = enforce("L4_STRUCTURAL", files)
+        assert not passed
+        assert any("tests/l4_gates/" in e for e in errors)
+
+    def test_structural_missing_host_delta_fails(self):
+        notes = [_note("L4_STRUCTURAL", hd_before=None, hd_after=None, sa_ref=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("host_semantics_delta_before" in e for e in errors)
+
+    def test_structural_missing_evidence_command_fails(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", evidence_command=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("evidence_command" in e for e in errors)
+
+    def test_structural_no_runtime_fails(self):
+        files = ["TASKS.md", "tests/l4_gates/test_gate.py"]
+        passed, errors = enforce("L4_STRUCTURAL", files)
+        assert not passed
+        assert any("no runtime" in e.lower() for e in errors)
+
+    def test_structural_evidence_command_must_reference_l4_gates(self):
+        """evidence_command without tests/l4_gates/ reference fails."""
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", evidence_command="pytest tests/")]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("tests/l4_gates/" in e for e in errors)
+
+    def test_structural_evidence_command_with_l4_gates_passes(self):
+        """evidence_command referencing tests/l4_gates/ passes."""
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", evidence_command="pytest tests/l4_gates/")]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert passed, f"Should pass with l4_gates ref: {errors}"
+
+
+# =============================================================================
+# Constraint 7: No empty-scope auto-pass (tested at unit level)
+# =============================================================================
+
+class TestFailClosedOnMissingMarker:
+    """Runtime changes without class marker must fail."""
+
+    def test_runtime_no_class_fails(self):
+        files = ["rcx_pi/selfhost/eval_seed.py"]
+        passed, errors = enforce(None, files)
+        assert not passed
+        assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_no_runtime_no_class_passes(self):
+        files = ["README.md", "TASKS.md"]
+        passed, errors = enforce(None, files)
+        assert passed
+
+
+# =============================================================================
+# Rolling structural quota
+# =============================================================================
+
+class TestRollingWindowQuota:
+    """Last 3 class-marked waves must include >=1 L4_STRUCTURAL."""
+
+    def test_rolling_window_no_structural_fails(self):
+        notes = [
+            _note("L4_ENABLER"),
+            _note("MAINTENANCE", no_op_proof="r", defer_reason="d"),
+            _note("L4_ENABLER"),
+        ]
+        passed, errors = check_rolling_window(notes)
+        assert not passed
+        assert any("Rolling structural quota" in e for e in errors)
+
+    def test_rolling_window_with_structural_passes(self):
+        notes = [
+            _note("L4_ENABLER"),
+            _note("L4_STRUCTURAL"),
+            _note("MAINTENANCE", no_op_proof="r", defer_reason="d"),
+        ]
+        passed, errors = check_rolling_window(notes)
+        assert passed, f"Should pass: {errors}"
+
+    def test_rolling_window_bootstrap_grace(self):
+        """Fewer than 3 notes = bootstrap grace, skip check."""
+        notes = [_note("L4_ENABLER"), _note("MAINTENANCE", no_op_proof="r", defer_reason="d")]
+        passed, errors = check_rolling_window(notes)
+        assert passed
+
+
+# =============================================================================
+# Strict validation
+# =============================================================================
+
+class TestStrictValidation:
+    """Strict enum and gate ID validation."""
+
+    def test_3_class_model_defined(self):
+        assert VALID_WAVE_CLASSES == {"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"}
+
+    def test_legacy_alias_mapping(self):
+        assert LEGACY_CLASS_ALIAS == {"L4_CLASS_A": "L4_STRUCTURAL"}
+
+    def test_invalid_class_fails(self):
+        passed, errors = enforce("UNKNOWN_CLASS", ["README.md"])
+        assert not passed
+        assert any("Unknown wave class" in e for e in errors)
+
+    @pytest.mark.parametrize("gate_id", ["G0", "G9", "G10", "GX", "g1", ""])
+    def test_invalid_gate_id_rejected(self, gate_id):
+        assert not GATE_ID_RE.match(gate_id)
+
+    @pytest.mark.parametrize("gate_id", ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"])
+    def test_valid_gate_id_accepted(self, gate_id):
+        assert GATE_ID_RE.match(gate_id)
+
+    def test_maintenance_runtime_touch_fails(self):
+        passed, errors = enforce("MAINTENANCE", ["mu/host/js/eval_step.js"])
+        assert not passed
+        assert any("touches runtime" in e for e in errors)
+
+    def test_consecutive_maintenance_cap(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="r1", defer_reason="d1"),
+            _note("MAINTENANCE", no_op_proof="r2", defer_reason="d2"),
+        ]
+        assert check_consecutive_maintenance(notes) is True
+
+
+# =============================================================================
+# Valid examples for all 3 classes
+# =============================================================================
+
+class TestValidExamples:
+    """Valid waves for all 3 classes must pass."""
+
+    def test_valid_l4_structural(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="mu/substrate/kernel.v1.json",
+                       evidence_command="pytest tests/l4_gates/")]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert passed, f"Valid L4_STRUCTURAL should pass: {errors}"
+
+    def test_valid_l4_enabler(self):
+        notes = [_note("L4_ENABLER")]
+        files = ["tools/checks/enforce_l4_execution_contract.py", "TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Valid L4_ENABLER should pass: {errors}"
+
+    def test_valid_maintenance(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="docs only", defer_reason="not_needed",
+                  evidence_command=None, evidence_delta=None),
+            _note("L4_STRUCTURAL"),  # Not consecutive
+        ]
+        files = ["TASKS.md", "STATUS.md"]
+        passed, errors = enforce("MAINTENANCE", files, notes=notes)
+        assert passed, f"Valid MAINTENANCE should pass: {errors}"

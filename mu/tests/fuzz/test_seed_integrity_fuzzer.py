@@ -258,11 +258,11 @@ class TestProjectionIdValidationFuzzing:
         lambda x: x not in EXPECTED_PROJECTION_IDS
     ))
     @settings(deadline=5000)
-    def test_unknown_seed_skips_validation(self, unknown_seed):
-        """Unknown seed names skip projection ID validation (for extensibility)."""
+    def test_unknown_seed_rejects_unregistered(self, unknown_seed):
+        """Unregistered seed names must raise ValueError (fail-closed security)."""
         seed = {"projections": []}
-        # Should not raise (skips validation for unknown seeds)
-        validate_projection_ids(unknown_seed, seed)
+        with pytest.raises(ValueError, match="has no entry in EXPECTED_PROJECTION_IDS"):
+            validate_projection_ids(unknown_seed, seed)
 
 
 # =============================================================================
