@@ -101,13 +101,13 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1 | ✅ | v1 is POC; v2 is hash-accelerated production version |
 | **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
 | **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
-| **Programs** | rcx_engine.v1, hemispheres.v1, paxos_demo.v1 | rcx_engine + hemispheres: ✅ | Engine orchestration + hemisphere routing L3 parity; paxos_demo application |
+| **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization: ✅ | Engine orchestration + hemisphere routing + metabolization L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
 - JS file has DEBT SUMMARY header with counts: 16 total (9 iteration + 4 recursion + 3 builtin)
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
-- These are AST-level host loop markers, analogous to Python's AST_OK:infra (42), NOT the 12 semantic bootstrap primitives
-- Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: match, substitute, eval_step, mu_equal)
+- These are AST-level host loop markers, analogous to Python's AST_OK:infra (42), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 12 Python host-debt decorator sites implementing them — these are distinct concepts.
+- Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
 - `tools/checks/check_js_debt.sh` validates markers are present
 - `tools/checks/linters/contraband_js.sh` validates no forbidden patterns (determinism, purity)
 - Both audit scripts (fast/all) run JS debt check and contraband check

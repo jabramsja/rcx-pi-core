@@ -701,3 +701,28 @@ def test_prompt_contract_has_governance_ratio_cap() -> None:
     assert "1 governance/docs-only wave" in text or "1 governance" in text.lower(), (
         "Governance ratio cap must specify the max consecutive governance waves."
     )
+
+
+# =============================================================================
+# Primitive vs Debt Count Precision Lock
+# =============================================================================
+
+
+def test_status_distinguishes_primitives_from_debt_sites() -> None:
+    """
+    STATUS.md must not conflate '4 bootstrap primitives' with
+    '12 host-debt decorator sites'. These are distinct concepts.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    # Must NOT say "12 semantic bootstrap primitives" or "12 bootstrap primitives"
+    assert "12 semantic bootstrap primitives" not in status_text, (
+        "STATUS.md conflates debt count (12) with primitive count (4). "
+        "There are 4 bootstrap primitives and 12 host-debt sites."
+    )
+    assert "12 bootstrap primitives" not in status_text, (
+        "STATUS.md conflates debt count (12) with primitive count (4)."
+    )
+    # Must contain the correct distinction
+    assert "4 bootstrap primitives" in status_text, (
+        "STATUS.md must explicitly state '4 bootstrap primitives'."
+    )
