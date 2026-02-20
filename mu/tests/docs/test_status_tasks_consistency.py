@@ -570,3 +570,51 @@ def test_vector_and_sink_have_ordered_priority_tags() -> None:
     assert sink_tags == sorted(sink_tags), (
         f"TASKS.md SINK priority tags are not in ascending order: {sink_tags}"
     )
+
+
+# =============================================================================
+# Conjecture Parking — fail-closed governance guard
+# =============================================================================
+
+
+def test_conjecture_parking_exists_in_sink() -> None:
+    """
+    TASKS.md SINK must contain a 'Conjecture Parking (NOT ACTIVE)' subsection
+    to prevent uncontrolled expansion of speculative hypotheses.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    sink_section = _extract_section(tasks_text, "SINK")
+    assert "Conjecture Parking (NOT ACTIVE)" in sink_section, (
+        "TASKS.md SINK must contain 'Conjecture Parking (NOT ACTIVE)' subsection."
+    )
+
+
+def test_conjecture_parking_parked_in_both_trackers() -> None:
+    """
+    STATUS.md and TASKS.md must both reflect conjecture as parked/not-active.
+    """
+    status_text = STATUS_PATH.read_text(encoding="utf-8")
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+
+    assert "PARKED" in status_text and "conjecture" in status_text.lower(), (
+        "STATUS.md must reflect conjecture parking as PARKED."
+    )
+    assert "PARKED" in tasks_text and "conjecture" in tasks_text.lower(), (
+        "TASKS.md must reflect conjecture parking as PARKED."
+    )
+
+
+def test_conjecture_parking_has_founder_trigger() -> None:
+    """
+    Conjecture parking must require explicit founder GO + gate mapping
+    before any re-evaluation.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    sink_section = _extract_section(tasks_text, "SINK")
+
+    assert "founder GO" in sink_section or "founder go" in sink_section.lower(), (
+        "Conjecture parking re-evaluation trigger must require 'founder GO'."
+    )
+    assert "gate" in sink_section.lower(), (
+        "Conjecture parking promotion rule must reference gate mapping."
+    )
