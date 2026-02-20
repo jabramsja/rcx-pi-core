@@ -164,7 +164,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 | `stack_guard` | Can depth be Mu data? | Count in Mu, not Python |
 | `projection_loader` | Can Mu load Mu? | Possibly, with file I/O primitive |
 
-**L4 Execution Contract:** See [`roadmap/L4ExecutionContract.v1.md`](roadmap/L4ExecutionContract.v1.md) for wave classification policy. Enforced by `tools/checks/enforce_l4_execution_contract.py`.
+**L4 Execution Contract:** See [`roadmap/L4ExecutionContract.v2.md`](roadmap/L4ExecutionContract.v2.md) for 3-class wave classification policy (L4_STRUCTURAL / L4_ENABLER / MAINTENANCE). Enforced by `tools/checks/enforce_l4_execution_contract.py`.
 
 **L4 Status:** G8 evidence loop closed (D001-D007). D008 recommendation: DEFER. Awaiting founder verdict.
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).

@@ -36,7 +36,7 @@ See `TASKS.md` NOW section for active items.
 4. Projection caching optimization.
 
 **Execution Contracts**
-- [`roadmap/L4ExecutionContract.v1.md`](roadmap/L4ExecutionContract.v1.md) — Wave classification policy (L4_CLASS_A / MAINTENANCE)
+- [`roadmap/L4ExecutionContract.v2.md`](roadmap/L4ExecutionContract.v2.md) — Wave classification policy v2 (L4_STRUCTURAL / L4_ENABLER / MAINTENANCE)
 - [`roadmap/CodexClaudeAuditContract.v1.md`](roadmap/CodexClaudeAuditContract.v1.md) — Prompt quality and audit discipline
 
 Notes:

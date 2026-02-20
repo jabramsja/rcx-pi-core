@@ -50,20 +50,20 @@ Every wave completion report must include:
 
 These rules prevent governance churn from substituting for real progress:
 
-1. **No docs-only substitution for required L4_CLASS_A wave.** If a wave claims
+1. **No docs-only substitution for required L4_STRUCTURAL wave.** If a wave claims
    runtime progress, it must have executable runtime delta. Docs, tests, and
-   governance changes do not count as L4_CLASS_A evidence.
+   governance changes do not count as L4_STRUCTURAL evidence.
 
 2. **No runtime comment-only credit.** Changing comments or docstrings in
-   runtime files does not satisfy L4_CLASS_A requirements. At least one
+   runtime files does not satisfy L4_STRUCTURAL requirements. At least one
    non-comment line must change in a runtime/substrate directory.
 
 3. **No status inflation without executable evidence.** STATUS.md gate
    advancement requires test evidence commands that pass, not narrative claims.
 
-4. **Governance ratio cap.** Max 1 consecutive MAINTENANCE wave without an
-   L4_CLASS_A wave. If 2 consecutive waves yield zero runtime evidence,
-   freeze nonessential tooling until the next evidence wave ships.
+4. **Rolling structural quota.** At least 1 L4_STRUCTURAL wave in every 3
+   class-marked waves. NO_OP throttle: same gate cannot use no_op_proof twice
+   in 3-wave window without FOUNDER_OVERRIDE. See [`L4ExecutionContract.v2.md`](L4ExecutionContract.v2.md).
 
 5. **WIP cap.** Max 2 concurrent NEXT workstreams. Additional items must
    wait in VECTOR until a NEXT slot opens.
@@ -79,5 +79,5 @@ These rules prevent governance churn from substituting for real progress:
 
 - [`STATUS.md`](../STATUS.md) — Current L4 status and gate snapshot
 - [`TASKS.md`](../TASKS.md) — Wave tracker sync notes
-- [`roadmap/L4ExecutionContract.v1.md`](L4ExecutionContract.v1.md) — Wave classification policy
+- [`roadmap/L4ExecutionContract.v2.md`](L4ExecutionContract.v2.md) — Wave classification policy v2
 - [`CLAUDE.md`](../CLAUDE.md) — Session onboarding and prompt contract section

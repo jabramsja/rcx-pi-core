@@ -18,6 +18,12 @@ MANIFEST_PATH = REPO_ROOT / "roadmap" / "MANIFEST.md"
 
 LAYER_TOKENS = ("BOOTSTRAP", "META_CIRCULAR")
 
+# Shared regex for extracting NEXT section from TASKS.md (used by multiple tests)
+_NEXT_SECTION_RE = re.compile(
+    r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
+    re.DOTALL,
+)
+
 
 def _extract_canonical_layer(text: str, label: str) -> str:
     pattern = re.compile(rf"^{re.escape(label)}:\s*(BOOTSTRAP|META_CIRCULAR)\s*$", re.MULTILINE)
@@ -169,11 +175,7 @@ def test_tasks_next_section_has_active_work_only() -> None:
     Historical implementation detail belongs in Ra/STATUS, not in NEXT.
     """
     tasks_text = TASKS_PATH.read_text(encoding="utf-8")
-    next_match = re.search(
-        r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
-        tasks_text,
-        re.DOTALL,
-    )
+    next_match = _NEXT_SECTION_RE.search(tasks_text)
     assert next_match, "Could not isolate TASKS.md NEXT section."
     next_section = next_match.group(1)
 
@@ -449,11 +451,7 @@ def test_hemisphere_promoted_to_next() -> None:
     with an explicit PROMOTED FROM VECTOR note.
     """
     tasks_text = TASKS_PATH.read_text(encoding="utf-8")
-    next_match = re.search(
-        r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
-        tasks_text,
-        re.DOTALL,
-    )
+    next_match = _NEXT_SECTION_RE.search(tasks_text)
     assert next_match, "Could not isolate TASKS.md NEXT section."
     next_section = next_match.group(1)
 
@@ -554,11 +552,7 @@ def test_status_next_milestone_reflects_hemisphere() -> None:
 def test_hemisphere_e5_tasks_marked_complete() -> None:
     """TASKS.md NEXT must mark Hemisphere Metabolization Contract as COMPLETE."""
     tasks_text = TASKS_PATH.read_text(encoding="utf-8")
-    next_match = re.search(
-        r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
-        tasks_text,
-        re.DOTALL,
-    )
+    next_match = _NEXT_SECTION_RE.search(tasks_text)
     assert next_match, "Could not isolate TASKS.md NEXT section."
     next_section = next_match.group(1)
     assert "COMPLETE" in next_section, (
@@ -795,11 +789,11 @@ def test_claude_md_has_l4_execution_contract_section() -> None:
 
 def test_claude_md_l4_contract_references_canonical_doc() -> None:
     """
-    CLAUDE.md L4 contract section must reference the canonical policy doc.
+    CLAUDE.md L4 contract section must reference the canonical policy doc (v2).
     """
     text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
-    assert "L4ExecutionContract.v1.md" in text, (
-        "CLAUDE.md L4 contract section must reference L4ExecutionContract.v1.md."
+    assert "L4ExecutionContract.v2.md" in text, (
+        "CLAUDE.md L4 contract section must reference L4ExecutionContract.v2.md."
     )
 
 
@@ -813,13 +807,16 @@ def test_claude_md_l4_contract_references_enforcement_checker() -> None:
     )
 
 
-def test_claude_md_l4_contract_has_both_wave_classes() -> None:
+def test_claude_md_l4_contract_has_all_three_wave_classes() -> None:
     """
-    CLAUDE.md must document both L4_CLASS_A and MAINTENANCE wave classes.
+    CLAUDE.md must document all 3 v2 wave classes: L4_STRUCTURAL, L4_ENABLER, MAINTENANCE.
     """
     text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
-    assert "L4_CLASS_A" in text, (
-        "CLAUDE.md must document L4_CLASS_A wave class."
+    assert "L4_STRUCTURAL" in text, (
+        "CLAUDE.md must document L4_STRUCTURAL wave class."
+    )
+    assert "L4_ENABLER" in text, (
+        "CLAUDE.md must document L4_ENABLER wave class."
     )
     assert "MAINTENANCE" in text, (
         "CLAUDE.md must document MAINTENANCE wave class."
@@ -828,11 +825,11 @@ def test_claude_md_l4_contract_has_both_wave_classes() -> None:
 
 def test_status_md_references_l4_execution_contract() -> None:
     """
-    STATUS.md must contain a pointer to L4ExecutionContract.v1.md.
+    STATUS.md must contain a pointer to L4ExecutionContract.v2.md.
     """
     text = STATUS_PATH.read_text(encoding="utf-8")
-    assert "L4ExecutionContract.v1.md" in text, (
-        "STATUS.md must reference L4ExecutionContract.v1.md."
+    assert "L4ExecutionContract.v2.md" in text, (
+        "STATUS.md must reference L4ExecutionContract.v2.md."
     )
 
 

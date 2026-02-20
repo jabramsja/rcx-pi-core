@@ -20,17 +20,30 @@ elif git show-ref --verify --quiet refs/remotes/origin/dev; then
 fi
 
 if [ -n "$RANGE" ]; then
-    if ! "$REPO_ROOT/tools/checks/enforce_tracker_sync.sh" --range "$RANGE"; then
-        echo ""
-        echo "❌ Pre-push tracker sync check failed."
-        echo "   Add STATUS.md or TASKS.md updates for core structural changes."
-        exit 1
-    fi
-    if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$RANGE"; then
-        echo ""
-        echo "❌ L4 execution contract check failed."
-        echo "   See roadmap/L4ExecutionContract.v1.md for wave classification rules."
-        exit 1
+    # Check if range has any changed files (nothing to push = nothing to enforce)
+    RANGE_FILES="$(git diff --name-only "$RANGE" 2>/dev/null || true)"
+    if [ -z "$RANGE_FILES" ]; then
+        echo "No committed changes in range $RANGE — skipping tracker sync and L4 checks"
+    else
+        if ! "$REPO_ROOT/tools/checks/enforce_tracker_sync.sh" --range "$RANGE"; then
+            echo ""
+            echo "❌ Pre-push tracker sync check failed."
+            echo "   Add STATUS.md or TASKS.md updates for core structural changes."
+            exit 1
+        fi
+        # Derive wave-id from codex branch name (if applicable)
+        # PR: github.head_ref gives source branch; local: git branch name
+        BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+        WAVE_ID_FLAG=""
+        if [[ "$BRANCH" == codex/* ]]; then
+            WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+        fi
+        if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$RANGE" $WAVE_ID_FLAG; then
+            echo ""
+            echo "❌ L4 execution contract check failed."
+            echo "   See roadmap/L4ExecutionContract.v2.md for wave classification rules."
+            exit 1
+        fi
     fi
 fi
 

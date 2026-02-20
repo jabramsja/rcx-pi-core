@@ -48,12 +48,6 @@ def get_roadmap_docs() -> list[Path]:
 class TestRoadmapReferenceHeaders:
     """Roadmap docs must link UP to canonical sources."""
 
-    # Required reference patterns - docs must link to STATUS.md and TASKS.md
-    REQUIRED_REFERENCES = [
-        (r'\[`?STATUS\.md`?\]', "STATUS.md reference"),
-        (r'\[`?TASKS\.md`?\]', "TASKS.md reference"),
-    ]
-
     def test_roadmap_folder_exists(self):
         """roadmap/ folder must exist."""
         assert ROADMAP_FOLDER.exists(), "roadmap/ folder missing"
@@ -173,11 +167,8 @@ class TestRoadmapLinkValidation:
                 if link_target.startswith(('http://', 'https://', '#')):
                     continue
 
-                # Resolve relative path
-                if link_target.startswith('../'):
-                    target_path = doc_path.parent / link_target
-                else:
-                    target_path = doc_path.parent / link_target
+                # Resolve relative path from the doc's directory
+                target_path = doc_path.parent / link_target
 
                 # Normalize and check existence
                 target_path = target_path.resolve()
@@ -253,7 +244,7 @@ class TestRoadmapCoverage:
 
     def test_required_docs_exist(self):
         """Required roadmap docs must exist."""
-        required = ["MANIFEST.md", "L4ExecutionContract.v1.md"]
+        required = ["MANIFEST.md", "L4ExecutionContract.v1.md", "L4ExecutionContract.v2.md"]
         missing = []
 
         for doc_name in required:
@@ -274,32 +265,47 @@ class TestRoadmapCoverage:
 
 
 class TestL4ExecutionContractDoc:
-    """L4ExecutionContract.v1.md must exist with required content."""
+    """L4ExecutionContract v1 (superseded) and v2 (current) must exist."""
 
-    L4_CONTRACT_PATH = ROADMAP_FOLDER / "L4ExecutionContract.v1.md"
+    L4_CONTRACT_V1_PATH = ROADMAP_FOLDER / "L4ExecutionContract.v1.md"
+    L4_CONTRACT_V2_PATH = ROADMAP_FOLDER / "L4ExecutionContract.v2.md"
 
-    def test_l4_contract_doc_exists(self):
-        """L4ExecutionContract.v1.md must exist in roadmap/."""
-        assert self.L4_CONTRACT_PATH.exists(), (
-            "roadmap/L4ExecutionContract.v1.md missing — required for L4 wave classification."
+    def test_l4_contract_v1_exists(self):
+        """L4ExecutionContract.v1.md must exist (historical reference)."""
+        assert self.L4_CONTRACT_V1_PATH.exists(), (
+            "roadmap/L4ExecutionContract.v1.md missing — required for historical reference."
         )
 
-    def test_l4_contract_has_wave_classes(self):
-        """L4ExecutionContract.v1.md must define both wave classes."""
-        text = self.L4_CONTRACT_PATH.read_text(encoding="utf-8")
-        assert "L4_CLASS_A" in text, "Missing L4_CLASS_A wave class definition."
+    def test_l4_contract_v1_marked_superseded(self):
+        """L4ExecutionContract.v1.md must be marked as superseded."""
+        text = self.L4_CONTRACT_V1_PATH.read_text(encoding="utf-8")
+        assert "SUPERSEDED" in text, (
+            "L4ExecutionContract.v1.md must be marked SUPERSEDED."
+        )
+
+    def test_l4_contract_v2_exists(self):
+        """L4ExecutionContract.v2.md must exist (current policy)."""
+        assert self.L4_CONTRACT_V2_PATH.exists(), (
+            "roadmap/L4ExecutionContract.v2.md missing — required for 3-class wave classification."
+        )
+
+    def test_l4_contract_v2_has_three_wave_classes(self):
+        """L4ExecutionContract.v2.md must define all 3 wave classes."""
+        text = self.L4_CONTRACT_V2_PATH.read_text(encoding="utf-8")
+        assert "L4_STRUCTURAL" in text, "Missing L4_STRUCTURAL wave class definition."
+        assert "L4_ENABLER" in text, "Missing L4_ENABLER wave class definition."
         assert "MAINTENANCE" in text, "Missing MAINTENANCE wave class definition."
 
-    def test_l4_contract_has_enforcement_reference(self):
-        """L4ExecutionContract.v1.md must reference the enforcement checker."""
-        text = self.L4_CONTRACT_PATH.read_text(encoding="utf-8")
+    def test_l4_contract_v2_has_enforcement_reference(self):
+        """L4ExecutionContract.v2.md must reference the enforcement checker."""
+        text = self.L4_CONTRACT_V2_PATH.read_text(encoding="utf-8")
         assert "enforce_l4_execution_contract.py" in text, (
-            "L4ExecutionContract.v1.md must reference enforcement checker."
+            "L4ExecutionContract.v2.md must reference enforcement checker."
         )
 
-    def test_l4_contract_references_status_and_tasks(self):
-        """L4ExecutionContract.v1.md must reference STATUS.md and TASKS.md."""
-        text = self.L4_CONTRACT_PATH.read_text(encoding="utf-8")
+    def test_l4_contract_v2_references_status_and_tasks(self):
+        """L4ExecutionContract.v2.md must reference STATUS.md and TASKS.md."""
+        text = self.L4_CONTRACT_V2_PATH.read_text(encoding="utf-8")
         assert "STATUS.md" in text, "Must reference STATUS.md."
         assert "TASKS.md" in text, "Must reference TASKS.md."
 
@@ -333,13 +339,20 @@ class TestCodexClaudeAuditContractDoc:
 
 
 class TestManifestContractDiscoverability:
-    """MANIFEST.md must include both contract docs for discoverability."""
+    """MANIFEST.md must include all contract docs for discoverability."""
 
-    def test_manifest_includes_l4_execution_contract(self):
-        """MANIFEST.md must reference L4ExecutionContract.v1.md."""
+    def test_manifest_includes_l4_execution_contract_v1(self):
+        """MANIFEST.md must reference L4ExecutionContract.v1.md (superseded)."""
         manifest = (ROADMAP_FOLDER / "MANIFEST.md").read_text(encoding="utf-8")
         assert "L4ExecutionContract.v1.md" in manifest, (
             "MANIFEST.md must include L4ExecutionContract.v1.md for discoverability."
+        )
+
+    def test_manifest_includes_l4_execution_contract_v2(self):
+        """MANIFEST.md must reference L4ExecutionContract.v2.md (current)."""
+        manifest = (ROADMAP_FOLDER / "MANIFEST.md").read_text(encoding="utf-8")
+        assert "L4ExecutionContract.v2.md" in manifest, (
+            "MANIFEST.md must include L4ExecutionContract.v2.md for discoverability."
         )
 
     def test_manifest_includes_codex_claude_audit_contract(self):

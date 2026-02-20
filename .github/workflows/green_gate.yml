@@ -120,8 +120,8 @@ jobs:
           elif [ "${{ github.event_name }}" = "push" ]; then
             BEFORE="${{ github.event.before }}"
             if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-              echo "Skipping L4 contract check for new branch push"
-              exit 0
+              echo "New branch push — using HEAD~1...HEAD as L4 contract range"
+              RANGE="HEAD~1...HEAD"
             elif git cat-file -e "$BEFORE" 2>/dev/null; then
               RANGE="${BEFORE}...${{ github.sha }}"
             else
@@ -129,10 +129,21 @@ jobs:
               RANGE="origin/dev...${{ github.sha }}"
             fi
           else
-            echo "Skipping L4 contract check for event: ${{ github.event_name }}"
-            exit 0
+            echo "Non-push/PR event (${{ github.event_name }}) — using HEAD~1...HEAD as L4 contract range"
+            RANGE="HEAD~1...HEAD"
           fi
-          python tools/checks/enforce_l4_execution_contract.py --range "$RANGE"
+          # Derive wave-id from codex branch name (if applicable)
+          # PR: github.head_ref gives source branch; push: github.ref_name
+          if [ -n "${{ github.head_ref }}" ]; then
+            BRANCH="${{ github.head_ref }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+          WAVE_ID_FLAG=""
+          if [[ "$BRANCH" == codex/* ]]; then
+            WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+          fi
+          python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 
       - name: Run green gate
         shell: bash

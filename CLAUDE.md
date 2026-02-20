@@ -271,21 +271,23 @@ Do NOT update individual agent files - they read STATUS.md.
 
 ## L4 Execution Contract (Hard Gate)
 
-**Canonical policy:** [`roadmap/L4ExecutionContract.v1.md`](roadmap/L4ExecutionContract.v1.md)
+**Canonical policy:** [`roadmap/L4ExecutionContract.v2.md`](roadmap/L4ExecutionContract.v2.md)
 
-Every wave that claims L4 progress MUST declare a wave class. Machine-enforced by `tools/checks/enforce_l4_execution_contract.py`.
+Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_l4_execution_contract.py`.
 
-| Class | Meaning | Required Files | Forbidden |
-|-------|---------|---------------|-----------|
-| `L4_CLASS_A` | Runtime/substrate progress toward L4 | MUST touch `mu/host/`, `mu/substrate/`, `mu/closures/`, `mu/bridge/`, `mu/programs/`, `rcx_pi/selfhost/`, or `tools/compilers/` | Docs/tests-only diff auto-fails. Comment-only runtime delta auto-fails. |
-| `MAINTENANCE` | Governance, docs, tooling, hygiene | MUST NOT touch runtime/substrate dirs | Missing `NO_OP_PROOF` or `target_gate_id` auto-fails. Max 1 consecutive. |
+| Class | Meaning | Required | Forbidden |
+|-------|---------|----------|-----------|
+| `L4_STRUCTURAL` | Runtime/substrate structural production | MUST touch runtime dirs + `tests/l4_gates/` change + `host_semantics_delta` + `evidence_command` (AND rule) | Comment-only runtime delta. Docs/tests-only diff. |
+| `L4_ENABLER` | Tooling/governance prerequisite for specific gate | MUST NOT touch runtime dirs. Requires `target_gate_id` + `evidence_command` + `evidence_delta`. | Claiming `host_semantics_delta` without runtime touch. |
+| `MAINTENANCE` | No L4 progress | MUST NOT touch runtime dirs. Requires `no_op_proof` + `defer_reason_code` + `target_gate_id`. | Max 1 consecutive. Cannot advance gate status. |
 
-**Hard rules:**
-1. `L4_CLASS_A` requires executable runtime delta (not just comments or docstrings).
-2. `MAINTENANCE` requires `NO_OP_PROOF: <reason>` and `target_gate_id: <Gn>` in tracker sync note.
-3. No more than 1 consecutive `MAINTENANCE` wave without an `L4_CLASS_A` wave.
-4. Progress is measured by North Star invariant movement + L4 evidence delta, not governance churn.
-5. Enforcement: `tools/checks/enforce_l4_execution_contract.py --staged` (local), `--range` (CI).
+**Anti-stagnation rules:**
+1. Rolling structural quota: ≥1 `L4_STRUCTURAL` in every 3 class-marked waves.
+2. NO_OP throttle: same `target_gate_id` cannot use `no_op_proof` twice in 3-wave window.
+3. Fail-closed: runtime changes without class marker = violation (not skip).
+4. Legacy lock: `L4_CLASS_A` accepted for historical parsing only; new notes must use v2 classes.
+5. Founder override: `FOUNDER_OVERRIDE:<id>` grants one exception; replay = fail.
+6. Enforcement: `--staged` (local), `--range` (CI), `--files` (tests).
 
 ---
 

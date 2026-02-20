@@ -125,6 +125,27 @@ pytest tests/docs/test_root_files.py -q
 echo "== 1l) Roadmap governance check =="
 pytest tests/docs/test_roadmap_governance.py -q
 
+echo "== 1m) L4 execution contract check =="
+# Derive wave-id from codex branch name (if applicable)
+L4_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+L4_WAVE_ID_FLAG=""
+if [[ "$L4_BRANCH" == codex/* ]]; then
+    L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+fi
+if git diff --cached --name-only | grep -q .; then
+    python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
+else
+    # No staged files — check dirty tracked files instead
+    L4_DIRTY_FILES=$(git diff --name-only)
+    if [ -n "$L4_DIRTY_FILES" ]; then
+        echo "No staged files — checking dirty tracked files"
+        # shellcheck disable=SC2086
+        python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
+    else
+        echo "No staged or dirty tracked files — nothing to check"
+    fi
+fi
+
 echo "== 2a) Structural lint (projection validity) =="
 python3 tools/docs/structural_lint.py mu/
 
@@ -141,6 +162,7 @@ echo "== 4) Core structural tests (parallel if available) =="
 pytest $PARALLEL_FLAG -q \
     tests/structural/ \
     tests/tools/ \
+    tests/l4_gates/ \
     tests/parity/test_match_parity.py \
     tests/parity/test_match_v2_parity.py \
     tests/parity/test_subst_parity.py \
