@@ -76,7 +76,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6, APPLICATION)
     "fix.v1.json": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
     # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
-    "metabolization.v1.json": "94ac660cbb725459ec54453879ee0ba51b191806ccbeb976c028b061e2e27b85",
+    "metabolization.v1.json": "a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7",
 }
 
 # Expected projection IDs for each seed.
@@ -253,8 +253,8 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
     ],
     # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
     "metabolization.v1.json": [
+        "hemisphere.metabolize.sink_to_r_null",  # Sink entry -> r_null (void) — must precede r_inf
         "hemisphere.metabolize.sink_to_r_inf",   # Sink entry -> r_inf (unbounded)
-        "hemisphere.metabolize.sink_to_r_null",  # Sink entry -> r_null (void)
         "hemisphere.recover.stall_to_lobes",     # Stalled -> lobes (preferred)
         "hemisphere.recover.stall_to_sink",      # Stalled -> sink (fallback)
         "hemisphere.promote.lobes_to_r_a",       # Lobes -> r_a (closure evidence)

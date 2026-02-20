@@ -1535,7 +1535,7 @@ const SEED_CHECKSUMS = {
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
   'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
   'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
-  'metabolization.v1.json': '94ac660cbb725459ec54453879ee0ba51b191806ccbeb976c028b061e2e27b85',
+  'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -1596,7 +1596,7 @@ const EXPECTED_PROJECTION_IDS = {
     'fix.init', 'fix.edge_add_guard', 'fix.edge_add', 'fix.vertex_add_guard', 'fix.vertex_add', 'fix.pass_through',
   ],
   'metabolization.v1.json': [
-    'hemisphere.metabolize.sink_to_r_inf', 'hemisphere.metabolize.sink_to_r_null',
+    'hemisphere.metabolize.sink_to_r_null', 'hemisphere.metabolize.sink_to_r_inf',
     'hemisphere.recover.stall_to_lobes', 'hemisphere.recover.stall_to_sink',
     'hemisphere.promote.lobes_to_r_a', 'hemisphere.recycle.residual_to_sink',
   ],
@@ -3013,6 +3013,188 @@ engineHelpersPassed = engineHelpersPassed && hemiKeysMatch;
 console.log(`\nPASS engine-hemisphere helpers: ${engineHelpersPassed}`);
 
 // =============================================================================
+// Test: Metabolization Projection Behavior (E2 Evidence)
+// =============================================================================
+
+console.log('\n=== Test: Metabolization Behavior ===\n');
+let metabolizationBehaviorPassed = true;
+
+// Gate: verify all 6 expected projection IDs exist in loaded seed (fail-closed on drift)
+const EXPECTED_METABOLIZATION_IDS = [
+  'hemisphere.metabolize.sink_to_r_null',
+  'hemisphere.metabolize.sink_to_r_inf',
+  'hemisphere.recover.stall_to_lobes',
+  'hemisphere.recover.stall_to_sink',
+  'hemisphere.promote.lobes_to_r_a',
+  'hemisphere.recycle.residual_to_sink',
+];
+const loadedMetabIds = metabolizationProjections.map(p => p.id);
+const metabIdMissing = EXPECTED_METABOLIZATION_IDS.filter(id => !loadedMetabIds.includes(id));
+const metabIdCheck = metabIdMissing.length === 0;
+console.log(`  All 6 metabolization IDs present: ${metabIdCheck} (expected: true)`);
+if (!metabIdCheck) {
+  console.log(`    Missing: ${JSON.stringify(metabIdMissing)}`);
+  metabolizationBehaviorPassed = false;
+}
+const metabIdOrderMatch = JSON.stringify(loadedMetabIds) === JSON.stringify(EXPECTED_METABOLIZATION_IDS);
+console.log(`  Metabolization ID order matches: ${metabIdOrderMatch} (expected: true)`);
+metabolizationBehaviorPassed = metabolizationBehaviorPassed && metabIdOrderMatch;
+
+// Build projection lookup by ID for result verification
+const metabById = {};
+for (const p of metabolizationProjections) {
+  metabById[p.id] = p;
+}
+
+// Helper: run step() and verify which projection matched
+function stepMetab(input) {
+  // step() returns first-match result or unchanged input on stall
+  const result = step(metabolizationProjections, input);
+  return result;
+}
+
+// Test 1: sink_to_r_inf — non-null state routes to r_inf
+{
+  const input = {
+    metabolize_mode: 'scan_sink',
+    sink_entry: { state: 'active_data', closure_flag: false, origin: 'engine' },
+    remaining_sink: null,
+    hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null }
+  };
+  const result = stepMetab(input);
+  const ok = typeof result === 'object' && result !== null &&
+    result.metabolize_result !== undefined &&
+    result.metabolize_result.r_inf !== null &&
+    result.metabolize_result.r_inf.head !== undefined &&
+    result.metabolize_result.r_inf.head.state === 'active_data' &&
+    result.metabolize_result.r_inf.head.origin === 'metabolized' &&
+    result.metabolize_result.r_null === null &&
+    result.metabolize_result.r_a === null;
+  console.log(`  sink_to_r_inf (non-null state → r_inf): ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+// Test 2: sink_to_r_null — null state routes to r_null via step() (design T2/T8)
+// sink_to_r_null is ordered before sink_to_r_inf so null-specific literal fires first.
+{
+  const input = {
+    metabolize_mode: 'scan_sink',
+    sink_entry: { state: null, closure_flag: false, origin: 'engine' },
+    remaining_sink: null,
+    hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null }
+  };
+  const result = stepMetab(input);
+  const ok = typeof result === 'object' && result !== null &&
+    result.metabolize_result !== undefined &&
+    result.metabolize_result.r_null !== null &&
+    result.metabolize_result.r_null.head !== undefined &&
+    result.metabolize_result.r_null.head.state === null &&
+    result.metabolize_result.r_null.head.origin === 'metabolized' &&
+    result.metabolize_result.r_inf === null &&
+    result.metabolize_result.r_a === null;
+  console.log(`  sink_to_r_null (null state → r_null via step): ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+// Test 3: stall_to_lobes — stalled entry routes to lobes when lobes non-null
+{
+  const input = {
+    recover_mode: 'check_stall',
+    stalled_entry: { state: 'stalled_thing', origin: 'engine' },
+    hemispheres: {
+      r_null: null, r_inf: null, r_a: null,
+      lobes: { head: 'existing_lobe', tail: null },
+      sink: null
+    }
+  };
+  const result = stepMetab(input);
+  const ok = typeof result === 'object' && result !== null &&
+    result.recover_result !== undefined &&
+    result.recover_result.lobes !== null &&
+    result.recover_result.lobes.head !== undefined &&
+    muEqual(result.recover_result.lobes.head, { state: 'stalled_thing', origin: 'engine' }) &&
+    result.recover_result.lobes.tail !== null &&
+    result.recover_result.lobes.tail.head === 'existing_lobe';
+  console.log(`  stall_to_lobes (lobes non-null → prepend): ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+// Test 4: stall_to_sink — stalled entry routes to sink when lobes is null
+{
+  const input = {
+    recover_mode: 'check_stall',
+    stalled_entry: { state: 'stalled_thing', origin: 'engine' },
+    hemispheres: {
+      r_null: null, r_inf: null, r_a: null,
+      lobes: null,
+      sink: null
+    }
+  };
+  const result = stepMetab(input);
+  const ok = typeof result === 'object' && result !== null &&
+    result.recover_result !== undefined &&
+    result.recover_result.lobes === null &&
+    result.recover_result.sink !== null &&
+    muEqual(result.recover_result.sink.head, { state: 'stalled_thing', origin: 'engine' });
+  console.log(`  stall_to_sink (lobes null → sink fallback): ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+// Test 5: lobes_to_r_a — closure evidence promotes to r_a
+{
+  const input = {
+    promote_mode: 'check_closure',
+    lobes_entry: { state: 'closed_form', closure_flag: true, origin: 'lobes' },
+    remaining_lobes: null,
+    hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null }
+  };
+  const result = stepMetab(input);
+  const ok = typeof result === 'object' && result !== null &&
+    result.promote_result !== undefined &&
+    result.promote_result.r_a !== null &&
+    result.promote_result.r_a.head !== undefined &&
+    result.promote_result.r_a.head.state === 'closed_form' &&
+    result.promote_result.r_a.head.closure_flag === true &&
+    result.promote_result.r_a.head.origin === 'promoted' &&
+    result.promote_result.lobes === null;
+  console.log(`  lobes_to_r_a (closure_flag true → r_a): ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+// Test 6: residual_to_sink — unresolvable entry recycles to sink
+{
+  const input = {
+    recycle_mode: 'drain',
+    source_bucket: 'r_inf',
+    unresolvable_entry: { type: 'unknown', data: 42 },
+    hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null }
+  };
+  const result = stepMetab(input);
+  const ok = typeof result === 'object' && result !== null &&
+    result.recycle_result !== undefined &&
+    result.recycle_result.sink !== null &&
+    result.recycle_result.sink.head !== undefined &&
+    muEqual(result.recycle_result.sink.head.state, { type: 'unknown', data: 42 }) &&
+    result.recycle_result.sink.head.origin === 'recycled' &&
+    result.recycle_result.r_null === null &&
+    result.recycle_result.r_inf === null;
+  console.log(`  residual_to_sink (drain → sink recycled): ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+// Test 7: stall on non-matching input (no projection fires)
+{
+  const input = { unrecognized_mode: 'garbage', data: 123 };
+  const result = stepMetab(input);
+  // step() returns input unchanged on stall
+  const ok = muEqual(result, input);
+  console.log(`  stall on non-matching input: ${ok} (expected: true)`);
+  metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
+}
+
+console.log(`\nPASS metabolization behavior: ${metabolizationBehaviorPassed}`);
+
+// =============================================================================
 // Bridge Ordering Validation Tests
 // =============================================================================
 
@@ -3071,7 +3253,7 @@ const allPassed = passed && passedStall && pass3a && pass3b && pass3c &&
                   passReservedFields && isNormalizedAsDict && isPreservedAsHeadTail &&
                   parityAllPassed && securityAllPassed && structuralTraceAllPassed &&
                   recurrenceAllPassed && e2ePassed && engineHelpersPassed &&
-                  bridgeValidationPassed;
+                  metabolizationBehaviorPassed && bridgeValidationPassed;
 console.log(`All tests passed: ${allPassed}`);
 if (!allPassed) process.exit(1);
 console.log(`\nSecurity hardening (v7 - L3 Recurrence Parity, mu/ reorg):`);
