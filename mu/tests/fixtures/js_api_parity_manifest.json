@@ -308,6 +308,14 @@
         }
       ]
     },
+    "step_metabolization": {
+      "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Runs step() on metabolization projections; inputs are structurally validated by step()",
+      "required_args": {"input": {"metabolize_mode": "scan_sink", "sink_entry": {"state": "test", "closure_flag": false, "origin": "test"}, "remaining_sink": null, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}}},
+      "optional_args": {},
+      "edge_args": []
+    },
     "list_actions": {
       "type": "introspection",
       "requires_error_edges": false,

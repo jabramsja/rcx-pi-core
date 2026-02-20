@@ -609,7 +609,7 @@ EXPECTED_JS_ACTIONS = {
     "validate_reserved_fields", "validate_algorithm_runtime_fields",
     "run_structural_trace", "run_hemisphere", "run_engine_pipeline",
     "hash_trace", "run_hemisphere_routing", "run_engine_with_routing",
-    "list_actions",
+    "step_metabolization", "list_actions",
 }
 
 
@@ -631,11 +631,11 @@ class TestJsActionListParity:
     """JS JSON API action dispatch must be self-consistent and locked."""
 
     def test_action_count_locked(self):
-        """JS must have exactly 18 JSON API actions."""
+        """JS must have exactly 19 JSON API actions."""
         source = _JS_PATH.read_text()
         actual = _extract_js_dispatch_actions(source)
-        assert len(actual) == 18, (
-            f"Expected 18 JS actions, found {len(actual)}: {sorted(actual)}"
+        assert len(actual) == 19, (
+            f"Expected 19 JS actions, found {len(actual)}: {sorted(actual)}"
         )
 
     def test_dispatch_matches_list_actions(self):

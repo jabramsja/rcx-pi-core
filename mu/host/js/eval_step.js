@@ -3610,6 +3610,16 @@ if (process.argv.includes('--json-api')) {
         response = { success: false, error_code: classifyError(e), error: e.message };
         if (observerEvents) response.observer_events = observerEvents;
       }
+    } else if (request.action === 'step_metabolization') {
+      // Run step(metabolizationProjections, input) for cross-substrate parity testing.
+      // Returns first-match-wins result or input unchanged (stall).
+      const { input } = request;
+      try {
+        const result = step(metabolizationProjections, input);
+        response = { success: true, result };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
     } else if (request.action === 'list_actions') {
       response = {
         success: true,
@@ -3620,7 +3630,7 @@ if (process.argv.includes('--json-api')) {
           'validate_reserved_fields', 'validate_algorithm_runtime_fields',
           'run_structural_trace', 'run_hemisphere', 'run_engine_pipeline',
           'hash_trace', 'run_hemisphere_routing', 'run_engine_with_routing',
-          'list_actions'
+          'step_metabolization', 'list_actions'
         ]
       };
     } else {

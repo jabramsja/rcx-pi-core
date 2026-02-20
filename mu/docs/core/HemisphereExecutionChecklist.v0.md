@@ -89,7 +89,7 @@ This follows the same E1-E5 pattern used for Boot1 (shadow-merge scope) and GAP-
 
 **Evidence command:** `pytest tests/parity/test_hemisphere_metabolization_parity.py -v` (or equivalent)
 
-**Status:** NOT STARTED
+**Status:** E3 MET (2026-02-20). Cross-substrate parity test file `tests/parity/test_hemisphere_metabolization_parity.py` created with 15 tests: T1-T10 truth-table (10 tests, one per transition), 2 structural coverage assertions, plus 3 additional adversarial/edge-case tests (double-metabolization, empty-remaining-sink, adversarial count gate). Each T-test runs Python `step()` and JS `step_metabolization` JSON API, asserts structural output equality. All 5 buckets appear as routing targets: r_null (T2, T8), r_inf (T1, T7), r_a (T5), lobes (T3, T10-stall), sink (T4, T6, T9). T2/T8 prove null → r_null (not r_inf/r_a). T10 proves stall semantics (input unchanged). 15/15 pass.
 
 ### E4: Security and Invariant Tests
 
