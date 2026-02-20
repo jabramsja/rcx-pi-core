@@ -115,4 +115,5 @@ fi
 
 echo "PASSED: All JS debt markers present"
 echo ""
-echo "Note: JS debt (16) = 9 iteration + 4 recursion + 3 builtin"
+TOTAL=$((HOST_ITERATION + HOST_RECURSION + HOST_BUILTIN))
+echo "Note: JS debt ($TOTAL) = $HOST_ITERATION iteration + $HOST_RECURSION recursion + $HOST_BUILTIN builtin"

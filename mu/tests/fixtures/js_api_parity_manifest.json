@@ -287,12 +287,17 @@
       "requires_error_edges": true,
       "happy_path_may_error": true,
       "required_args": {"projections": [], "input": {"test": true}, "maxSteps": 6, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
-      "optional_args": {"hemispheres": null, "frozen": null},
+      "optional_args": {"hemispheres": null, "frozen": null, "boot1LoopMode": false},
       "edge_args": [
         {
           "description": "Bad hemispheres shape",
           "args": {"projections": [], "input": {"test": true}, "hemispheres": {"bad": "shape"}, "maxSteps": 1},
           "expected_error_code": "input.shape_mismatch"
+        },
+        {
+          "description": "boot1LoopMode non-boolean rejected with type_error",
+          "args": {"projections": [], "input": {"test": true}, "boot1LoopMode": "yes", "maxSteps": 6, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+          "expected_error_code": "type_error"
         },
         {
           "description": "maxSteps exceeds API_MAX_STEPS cap",

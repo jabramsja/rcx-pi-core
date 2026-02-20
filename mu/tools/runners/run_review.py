@@ -951,10 +951,12 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 lines.append(f"**⚠️ Compliance Error:** {result.compliance_error}")
                 lines.append("")
             lines.append("```")
-            # Truncate very long outputs
+            # Truncate very long outputs (15000 chars preserves most agent reports;
+            # use --output flag precisely to avoid Bash 30k truncation, so don't
+            # aggressively truncate here)
             output = result.output
-            if len(output) > 3000:
-                output = output[:3000] + "\n... (truncated)"
+            if len(output) > 15000:
+                output = output[:15000] + "\n... (truncated)"
             lines.append(output)
             lines.append("```")
             lines.append("")
@@ -1181,6 +1183,10 @@ Examples:
     # Apply max-turns override if specified (use local copy, don't mutate module-level)
     agent_max_turns = dict(AGENT_MAX_TURNS)
     if args.max_turns:
+        min_default = min(AGENT_MAX_TURNS.values())
+        if args.max_turns < min_default:
+            print(f"WARNING: --max-turns {args.max_turns} is below smallest agent default "
+                  f"({min_default}). Agents may exhaust turns before producing a verdict.")
         for key in agent_max_turns:
             agent_max_turns[key] = args.max_turns
         print(f"Max turns override: {args.max_turns} for all agents")

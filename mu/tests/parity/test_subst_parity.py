@@ -10,6 +10,7 @@ Phase 4b: Substitute as Mu projections.
 import pytest
 
 from rcx_pi.eval_seed import substitute
+from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.subst_mu import (
     subst_mu,
     load_subst_projections,
@@ -39,7 +40,7 @@ def assert_parity(body, bindings):
     """Assert that subst_mu and substitute produce identical results."""
     py_result = substitute(body, bindings)
     mu_result = subst_mu(body, bindings)
-    assert py_result == mu_result, (
+    assert mu_equal(py_result, mu_result), (
         f"Parity failure:\n"
         f"  body: {body}\n"
         f"  bindings: {bindings}\n"

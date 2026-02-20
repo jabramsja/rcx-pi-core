@@ -57,24 +57,77 @@ SYNTHESIZED_ENGINE_RESULT_STALL = {
 
 
 class TestSinkSafetyInvariants:
-    """S1-S5: Verify synthesized engine_result shape satisfies sink-safety."""
+    """S1-S5: Verify synthesized engine_result shape satisfies sink-safety.
+
+    S1-S3 are grounded against hemisphere projection patterns (source of truth),
+    not just self-declared test constants. The hemisphere.classify.exhaustion
+    projection pattern proves what the routing code requires.
+    """
 
     def test_S1_exhaustion_detected_true(self):
-        """S1: Synthesized engine_result MUST have exhaustion_detected: true."""
+        """S1: Synthesized engine_result MUST have exhaustion_detected: true.
+
+        Grounded: hemisphere.classify.exhaustion pattern requires
+        hemi_exhaustion: true (verified against seed file). This is the
+        routing input field that maps from engine_result.exhaustion_detected.
+        """
+        # Verify against synthesized constants
         assert SYNTHESIZED_ENGINE_RESULT_EXHAUSTION["exhaustion_detected"] is True
         assert SYNTHESIZED_ENGINE_RESULT_STALL["exhaustion_detected"] is True
+        # Ground against actual hemisphere projection pattern
+        seed = json.loads(HEMISPHERES_SEED.read_text(encoding="utf-8"))
+        exhaust_proj = next(
+            p for p in seed["projections"]
+            if p["id"] == "hemisphere.classify.exhaustion"
+        )
+        # The pattern must require hemi_exhaustion: true
+        assert exhaust_proj["pattern"]["hemi_exhaustion"] is True, (
+            "hemisphere.classify.exhaustion pattern must require hemi_exhaustion: true"
+        )
 
     def test_S2_closure_detected_false(self):
-        """S2: Synthesized engine_result MUST have closure_detected: false."""
+        """S2: Synthesized engine_result MUST have closure_detected: false.
+
+        Grounded: hemisphere.classify.closure pattern requires
+        hemi_closure: true, so exhaustion path (which sets false)
+        does NOT match the closure classifier.
+        """
         assert SYNTHESIZED_ENGINE_RESULT_EXHAUSTION["closure_detected"] is False
         assert SYNTHESIZED_ENGINE_RESULT_STALL["closure_detected"] is False
+        # Ground: closure classifier requires hemi_closure: true
+        seed = json.loads(HEMISPHERES_SEED.read_text(encoding="utf-8"))
+        closure_proj = next(
+            p for p in seed["projections"]
+            if p["id"] == "hemisphere.classify.closure"
+        )
+        assert closure_proj["pattern"]["hemi_closure"] is True, (
+            "hemisphere.classify.closure pattern must require hemi_closure: true — "
+            "this proves our synthesized result (closure_detected: false) won't match closure"
+        )
 
     def test_S3_action_not_freeze(self):
-        """S3: Synthesized engine_result MUST NOT have action: 'freeze'."""
+        """S3: Synthesized engine_result MUST NOT have action: 'freeze'.
+
+        Grounded: hemisphere classify patterns use hemi_* fields for routing,
+        not action fields. No classify pattern matches on 'action' at all,
+        so the action value passes through to the body (output) stage only.
+        """
         assert SYNTHESIZED_ENGINE_RESULT_EXHAUSTION["action"] != "freeze"
         assert SYNTHESIZED_ENGINE_RESULT_STALL["action"] != "freeze"
         assert SYNTHESIZED_ENGINE_RESULT_EXHAUSTION["action"] == "exception_sink"
         assert SYNTHESIZED_ENGINE_RESULT_STALL["action"] == "exception_sink"
+        # Ground: no classify pattern references 'action' — routing is by hemi_* fields only
+        seed = json.loads(HEMISPHERES_SEED.read_text(encoding="utf-8"))
+        classify_projs = [
+            p for p in seed["projections"]
+            if p["id"].startswith("hemisphere.classify.")
+        ]
+        for proj in classify_projs:
+            pattern_keys = set(proj["pattern"].keys())
+            assert "action" not in pattern_keys, (
+                f"{proj['id']} pattern contains 'action' key — "
+                "hemisphere classifiers should route by hemi_* fields, not action"
+            )
 
     def test_S4_cross_substrate_shape_parity(self):
         """S4: Both substrates produce identical synthesized results.

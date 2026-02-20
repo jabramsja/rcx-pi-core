@@ -497,11 +497,11 @@ Phase 5 complete:
 **Phase 8 (Bootstrap Primitives + Mechanical Kernel):**
 - [x] 8a: Document 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader; mu_equal eliminated)
 - [x] 8b: Simplify step_kernel_mu to mechanical operation (~15 lines)
-- Deferred: 8c oscillation detection (future research)
+- Deferred: oscillation detection (future research, was 8c candidate)
 - [x] 8d: EngineNews trace model (complete; see L3 notes below)
 
 **L3 Substrate Portability (7-agent reviewed 2026-01-30):**
-- [x] JS POC exists (`mu/host/js/eval_step.js`, ~1300 LOC core + ~900 LOC inline tests)
+- [x] JS POC exists (`mu/host/js/eval_step.js`, ~3600 LOC total — see `wc -l` for current count)
 - [x] Same projections run on Python AND JavaScript
 - [x] Step 1: Fix JS security gaps (KERNEL_RESERVED_FIELDS, type tag, dict kv-pair)
 - [x] Step 2: Cross-substrate parity tests (`tests/parity/test_parity_python.py`, 20 vectors)

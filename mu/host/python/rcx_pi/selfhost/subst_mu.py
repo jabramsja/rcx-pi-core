@@ -35,9 +35,13 @@ is_subst_done, is_subst_state, run_subst_projections = make_projection_runner("s
 
 
 def is_head_tail_structure(value: Mu) -> bool:
-    """Check if value is a head/tail dict (not a normalized list/dict)."""
+    """Check if value is a head/tail dict (not a normalized list/dict).
+
+    isinstance at boundary is scaffolding: this is a type-dispatch guard
+    at the host/Mu boundary, consistent with is_mu() and normalize_for_match().
+    """
     return (
-        isinstance(value, dict)
+        isinstance(value, dict)  # BOUNDARY SCAFFOLDING: host type check
         and set(value.keys()) == {"head", "tail"}
     )
 

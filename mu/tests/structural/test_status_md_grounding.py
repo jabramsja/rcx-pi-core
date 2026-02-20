@@ -142,14 +142,14 @@ class TestSelfHostingLevelClaims:
         )
 
     def test_l2_kernel_loop_is_still_python(self):
-        """L2 DESIGN: kernel loop should still be Python (not yet structural)."""
+        """L2 FULL: kernel loop uses Python for-loop (accepted as bootstrap primitive)."""
         step_mu_path = ROOT / "rcx_pi" / "selfhost" / "step_mu.py"
         content = step_mu_path.read_text()
 
-        # Should have Python for-loop (scaffolding debt)
+        # Python for-loop is accepted as irreducible bootstrap primitive (L2 FULL)
         assert "for proj in projections" in content, (
-            "step_mu.py should have Python for-loop (L2 is DESIGN, not DONE)\n"
-            "If kernel loop is now structural, update STATUS.md to L2 DONE"
+            "step_mu.py should have Python for-loop (bootstrap primitive, L2 FULL)\n"
+            "The for-loop is accepted as irreducible — see Phase 8 decision"
         )
 
 
