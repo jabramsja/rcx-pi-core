@@ -1,7 +1,7 @@
-"""Boot1 shadow parity tests: trampoline vs recursive engine loop.
+"""Boot1 shadow parity tests: recursive (default) vs trampoline engine loop.
 
-Verifies that run_engine_pipeline(use_boot1_recursive=True) produces
-identical results to the default trampoline path on all canonical inputs.
+Verifies that run_engine_pipeline with Boot1 recursive (default) produces
+identical results to the explicit trampoline path on all canonical inputs.
 
 Also tests _tail_call recognition and Boot1 safety invariants.
 
@@ -1516,8 +1516,8 @@ class TestBoot1TypeHardeningCrossSubstrate:
         })
         assert resp["success"], f"JS should accept boolean false: {resp.get('error')}"
 
-    def test_js_accepts_null_defaults_to_trampoline(self):
-        """JS accepts boot1LoopMode=null (defaults to false/trampoline)."""
+    def test_js_accepts_null_defaults_to_boot1(self):
+        """JS accepts boot1LoopMode=null (defaults to true/boot1 recursive)."""
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
@@ -1527,8 +1527,8 @@ class TestBoot1TypeHardeningCrossSubstrate:
         })
         assert resp["success"], f"JS should accept null boot1LoopMode: {resp.get('error')}"
 
-    def test_js_accepts_omitted_defaults_to_trampoline(self):
-        """JS accepts omitted boot1LoopMode (defaults to false/trampoline)."""
+    def test_js_accepts_omitted_defaults_to_boot1(self):
+        """JS accepts omitted boot1LoopMode (defaults to true/boot1 recursive)."""
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
@@ -1582,15 +1582,15 @@ class TestRunEngineWithRoutingBoot1:
             f"got: {boot1_events}"
         )
 
-    def test_boot1_omitted_defaults_trampoline(self):
-        """Omitting boot1LoopMode defaults to trampoline (no boot1_depth)."""
+    def test_boot1_omitted_defaults_boot1(self):
+        """Omitting boot1LoopMode defaults to boot1 recursive (boot1_depth present)."""
         req = {k: v for k, v in self.BASE_REQUEST.items()}
         resp = _run_js_json_api(req)
         events = resp.get("observer_events", [])
         boot1_events = [e for e in events if "boot1_depth" in str(e)]
-        assert len(boot1_events) == 0, (
-            f"Omitted boot1LoopMode should default to trampoline, "
-            f"got boot1_depth events: {boot1_events}"
+        assert len(boot1_events) > 0, (
+            f"Omitted boot1LoopMode should default to boot1 recursive, "
+            f"got no boot1_depth events out of {len(events)} total"
         )
 
     def test_boot1_non_boolean_rejected(self):
