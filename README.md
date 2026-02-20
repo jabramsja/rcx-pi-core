@@ -11,6 +11,9 @@ A projection-based computational substrate where **structure is the primitive**.
 | **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
 | **Gates 1-5** | Meta-circular parity (structural default) | ✅ COMPLETE |
 | **Hemispheres v0** | Native structural routing (12 projections) | ✅ DONE |
+| **L4** | True self-hosting (bootstrap primitive elimination) | DEFERRED — see `mu/docs/core/L4ExitChecklist.v0.md` |
+
+> **Current reality:** L1-L3 are complete and gate-enforced. L4 (full meta-circularity / bootstrap primitive elimination) is a research goal with open feasibility questions — see `mu/docs/core/G8CpsFeasibility.v0.md`. Hemispheres v0 is structural routing; hemisphere metabolization (NEXT) is in contract-test phase.
 
 - **3,690+ tests** across 180+ test files
 - **12 semantic debt** (irreducible bootstrap floor)

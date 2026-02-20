@@ -407,6 +407,52 @@ class TestRootFileConsistency:
                         f"README.md claims {level} is incomplete but STATUS.md says COMPLETE"
                     )
 
+    def test_readme_does_not_claim_l4_complete(self):
+        """README must not claim L4 is complete — it is deferred research."""
+        readme_path = REPO_ROOT / "README.md"
+        if not readme_path.exists():
+            pytest.skip("README.md doesn't exist")
+
+        content = readme_path.read_text()
+        # L4 row must NOT have a checkmark or DONE/COMPLETE
+        l4_done_patterns = [
+            r"L4.*✅",
+            r"L4.*DONE",
+            r"L4.*COMPLETE",
+        ]
+        for pat in l4_done_patterns:
+            assert not re.search(pat, content, re.I), (
+                f"README.md claims L4 is complete (matched {pat!r}). "
+                "L4 is deferred research — see L4ExitChecklist.v0.md"
+            )
+
+        # L4 row should reference deferral or exit checklist
+        assert re.search(r"L4.*(?:DEFERRED|deferred|ExitChecklist)", content), (
+            "README.md mentions L4 but doesn't indicate it is deferred. "
+            "Add 'DEFERRED' status and link to L4ExitChecklist.v0.md"
+        )
+
+    def test_ci_workflows_have_sha_fallback(self):
+        """Both CI workflows must have SHA existence check + fallback for tracker sync."""
+        workflows = [
+            REPO_ROOT / ".github" / "workflows" / "ci.yml",
+            REPO_ROOT / ".github" / "workflows" / "green_gate.yml",
+        ]
+        for wf in workflows:
+            if not wf.exists():
+                pytest.skip(f"{wf.name} doesn't exist")
+
+            content = wf.read_text()
+            # Must use git cat-file -e to verify SHA exists
+            assert "git cat-file -e" in content, (
+                f"{wf.name} missing SHA existence check (git cat-file -e). "
+                "Force-push can make event.before unreachable."
+            )
+            # Must have origin/dev fallback
+            assert "origin/dev" in content, (
+                f"{wf.name} missing origin/dev fallback for unreachable SHAs."
+            )
+
     def test_critical_test_files_count_matches(self):
         """CRITICAL_TEST_FILES count must match between README and STATUS."""
         status_path = REPO_ROOT / "STATUS.md"

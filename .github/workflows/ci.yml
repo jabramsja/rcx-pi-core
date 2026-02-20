@@ -53,10 +53,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # New branch — compare with parent
             RANGE="HEAD~1...HEAD"
+            echo "Range: HEAD~1...HEAD (new branch)"
+          elif git cat-file -e "$BEFORE" 2>/dev/null; then
+            # Normal push — before SHA exists in history
+            RANGE="${BEFORE}...${{ github.sha }}"
+            echo "Range: ${BEFORE}...${{ github.sha }}"
           else
-            RANGE="${{ github.event.before }}...${{ github.sha }}"
+            # Force-push rewrote history — before SHA unreachable
+            echo "FALLBACK: event.before ($BEFORE) unreachable after force-push, using origin/dev as base"
+            git fetch origin dev --quiet
+            RANGE="origin/dev...${{ github.sha }}"
+            echo "Range: origin/dev...${{ github.sha }}"
           fi
           tools/checks/enforce_tracker_sync.sh --range "$RANGE"
 

@@ -75,9 +75,30 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            RANGE="${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
-          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            RANGE="${{ github.event.before }}...${{ github.sha }}"
+            BASE="${{ github.event.pull_request.base.sha }}"
+            if git cat-file -e "$BASE" 2>/dev/null; then
+              RANGE="${BASE}...${{ github.sha }}"
+              echo "Range: ${BASE}...${{ github.sha }} (PR base)"
+            else
+              echo "FALLBACK: PR base SHA ($BASE) unreachable, using origin/dev as base"
+              git fetch origin dev --quiet
+              RANGE="origin/dev...${{ github.sha }}"
+              echo "Range: origin/dev...${{ github.sha }}"
+            fi
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE="${{ github.event.before }}"
+            if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              echo "Skipping tracker sync check for new branch push"
+              exit 0
+            elif git cat-file -e "$BEFORE" 2>/dev/null; then
+              RANGE="${BEFORE}...${{ github.sha }}"
+              echo "Range: ${BEFORE}...${{ github.sha }} (push)"
+            else
+              echo "FALLBACK: event.before ($BEFORE) unreachable after force-push, using origin/dev as base"
+              git fetch origin dev --quiet
+              RANGE="origin/dev...${{ github.sha }}"
+              echo "Range: origin/dev...${{ github.sha }}"
+            fi
           else
             echo "Skipping tracker sync check for event: ${{ github.event_name }}"
             exit 0
