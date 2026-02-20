@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "METABOLIZATION",
+    "description": "Hemisphere metabolization: sink re-expression cycle (sink -> metabolization -> storage -> residual -> sink)",
+    "doc": "roadmap/MuHemispheresDesign.md",
+    "spec_ref": "HemisphereExecutionChecklist.v0.md gate E1",
+    "status": "testable",
+    "execution_layer": "APPLICATION",
+    "requires_patterns": ["linear"],
+    "dependencies": [
+      "hemispheres.v1.json (produces 5-bucket hemisphere state)"
+    ],
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Metabolization decisions expressed as structural projections, not host logic",
+      "Linear-only patterns (no bridge required)",
+      "r_null and r_inf are terminal (no path to r_a)",
+      "Promotion to r_a requires explicit closure evidence (closure_flag: true)",
+      "Unresolvable material recycles to sink"
+    ]
+  },
+  "projections": [
+    {
+      "id": "hemisphere.metabolize.sink_to_r_inf",
+      "description": "Metabolize: sink entry with non-null state routes to r_inf (unbounded/diverging form)",
+      "pattern": {
+        "metabolize_mode": "scan_sink",
+        "sink_entry": {
+          "state": {"var": "s"},
+          "closure_flag": {"var": "cf"},
+          "origin": {"var": "orig"}
+        },
+        "remaining_sink": {"var": "rs"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "metabolize_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {
+            "head": {
+              "state": {"var": "s"},
+              "closure_flag": {"var": "cf"},
+              "origin": "metabolized"
+            },
+            "tail": {"var": "ri"}
+          },
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "rs"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.metabolize.sink_to_r_null",
+      "description": "Metabolize: sink entry with null state routes to r_null (void/zero-structure)",
+      "pattern": {
+        "metabolize_mode": "scan_sink",
+        "sink_entry": {
+          "state": null,
+          "closure_flag": {"var": "cf"},
+          "origin": {"var": "orig"}
+        },
+        "remaining_sink": {"var": "rs"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "metabolize_result": {
+          "r_null": {
+            "head": {
+              "state": null,
+              "closure_flag": {"var": "cf"},
+              "origin": "metabolized"
+            },
+            "tail": {"var": "rn"}
+          },
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "rs"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.recover.stall_to_lobes",
+      "description": "Recovery: stalled entry routes to lobes when lobes is non-null (can accept)",
+      "pattern": {
+        "recover_mode": "check_stall",
+        "stalled_entry": {"var": "entry"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {
+            "head": {"var": "lh"},
+            "tail": {"var": "lt"}
+          },
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "recover_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {
+            "head": {"var": "entry"},
+            "tail": {
+              "head": {"var": "lh"},
+              "tail": {"var": "lt"}
+            }
+          },
+          "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.recover.stall_to_sink",
+      "description": "Recovery fallback: stalled entry routes to sink when lobes is null (cannot accept)",
+      "pattern": {
+        "recover_mode": "check_stall",
+        "stalled_entry": {"var": "entry"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": null,
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "recover_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": null,
+          "sink": {
+            "head": {"var": "entry"},
+            "tail": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "hemisphere.promote.lobes_to_r_a",
+      "description": "Promotion: lobes entry with closure evidence promotes to r_a",
+      "pattern": {
+        "promote_mode": "check_closure",
+        "lobes_entry": {
+          "state": {"var": "s"},
+          "closure_flag": true,
+          "origin": {"var": "orig"}
+        },
+        "remaining_lobes": {"var": "rl"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "promote_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {
+            "head": {
+              "state": {"var": "s"},
+              "closure_flag": true,
+              "origin": "promoted"
+            },
+            "tail": {"var": "ra"}
+          },
+          "lobes": {"var": "rl"},
+          "sink": {"var": "sk"}
+        }
+      }
+    },
+    {
+      "id": "hemisphere.recycle.residual_to_sink",
+      "description": "Residual: unresolvable entry from any bucket recycles to sink",
+      "pattern": {
+        "recycle_mode": "drain",
+        "source_bucket": {"var": "src"},
+        "unresolvable_entry": {"var": "entry"},
+        "hemispheres": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {"var": "sk"}
+        }
+      },
+      "body": {
+        "recycle_result": {
+          "r_null": {"var": "rn"},
+          "r_inf": {"var": "ri"},
+          "r_a": {"var": "ra"},
+          "lobes": {"var": "l"},
+          "sink": {
+            "head": {
+              "state": {"var": "entry"},
+              "origin": "recycled"
+            },
+            "tail": {"var": "sk"}
+          }
+        }
+      }
+    }
+  ]
+}

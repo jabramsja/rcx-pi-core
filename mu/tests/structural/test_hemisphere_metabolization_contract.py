@@ -144,10 +144,6 @@ def _find_metabolization_seed() -> Path | None:
     return None
 
 
-_E1_SKIP = pytest.mark.skip(reason="E1: metabolization seed not yet implemented")
-
-
-@_E1_SKIP
 class TestMetabolizationSeedExists:
     """Gate E1: metabolization projections exist and are loadable."""
 
