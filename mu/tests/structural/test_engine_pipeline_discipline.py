@@ -560,7 +560,7 @@ class TestRunMuCallsiteInventory:
 
 # All functions that call run_mu_structural() directly.
 # run_engine_pipeline: main engine loop boundary dispatch
-# _run_engine_recursive: Boot1 shadow recursive engine (reimplements pipeline)
+# _run_engine_recursive: Boot1 engine loop with iterative re-entry (reimplements pipeline)
 KNOWN_RUN_MU_STRUCTURAL_CALLERS = {
     "run_engine_pipeline",
     "_run_engine_recursive",

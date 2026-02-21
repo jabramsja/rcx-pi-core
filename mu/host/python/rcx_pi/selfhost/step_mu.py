@@ -1405,7 +1405,7 @@ def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:
 _BOOT1_MAX_REENTRY_DEPTH = 20  # AST_OK: infra — Boot1 recursive re-entry depth limit
 
 
-def _run_engine_recursive(  # AST_OK: infra — Boot1 shadow, recursive engine loop
+def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-entry)
     projections: list[Mu],
     input_value: Mu,
     *,
@@ -1416,35 +1416,30 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 shadow, recursive engine l
     observer: list | None = None,
     _recursion_depth: int = 0,
 ) -> Mu:
-    """Boot1 shadow: recursive engine pipeline for parity testing.
+    """Boot1 engine pipeline with iterative re-entry (no host recursion).
 
-    Functionally identical to run_engine_pipeline() trampoline, but handles
-    engine re-entry (engine.exhaustion_done_freeze producing {_run_engine: ...})
-    via explicit Python recursion instead of for-loop iteration.
-
-    Also recognizes {_tail_call: ...} as the Boot1 native re-entry signal.
+    Handles engine re-entry signals (_run_engine, _tail_call) via an explicit
+    outer loop with frame state update, eliminating host stack dependency.
+    Semantically identical to the trampoline path.
 
     Re-entry depth bounded by _BOOT1_MAX_REENTRY_DEPTH (safety invariant S2).
-    Per-entry step budget bounded by max_engine_iterations (same as trampoline).
-
-    This is the shadow path (3-merge cutover rule, merge 1):
-    - Trampoline remains default
-    - Recursive shadow runs in parallel for comparison testing
-    - Results must be identical on all canonical inputs
+    Per-entry step budget bounded by remaining_iterations (same as trampoline).
     """
-    # Boundary Mu validation: reject non-Mu input before entering recursive engine loop
+    # Boundary Mu validation: reject non-Mu input before entering engine loop
     assert_mu(input_value, "_run_engine_recursive.input")
-
-    if _recursion_depth >= _BOOT1_MAX_REENTRY_DEPTH:
-        raise RuntimeError(
-            f"Boot1 recursive re-entry depth {_recursion_depth} exceeds "
-            f"limit {_BOOT1_MAX_REENTRY_DEPTH}. Possible infinite re-entry loop."
-        )
 
     engine_projs = load_verified_seed(get_seed_path("rcx_engine.v1.json"))["projections"]
 
-    # Observer event helper — no-op when observer is None
-    _obs_ts = [0]  # mutable counter for logical timestamp
+    # Frame state for iterative re-entry
+    depth = _recursion_depth
+    remaining_iterations = max_engine_iterations
+    cur_projections = projections
+    cur_input = input_value
+    cur_max_steps = max_steps
+    cur_frozen = frozen
+
+    # Observer event helper — uses mutable depth counter, resets ts per re-entry
+    _obs_ts = [0]
 
     def _emit(event_name, step_num, state_val, error_code=None):
         if observer is None:
@@ -1462,117 +1457,133 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 shadow, recursive engine l
             "error_code": error_code,
             "substrate": "python",
             "timestamp": _obs_ts[0],
-            "boot1_depth": _recursion_depth,
+            "boot1_depth": depth,
         })
         _obs_ts[0] += 1
 
-    # Feed engine its initial input
-    state: Mu = {"_run_engine": {"projections": projections, "input": input_value, "max_steps": max_steps, "frozen": frozen}}
-
-    # Engine stepping loop (per re-entry pass)
-    for iteration in range(max_engine_iterations):  # AST_OK: infra — Boot1 boundary host loop iteration
-        next_state = _step_trusted(engine_projs, state)
-
-        _emit("step_boundary", iteration, state)
-
-        # Engine stalled — check for terminal result
-        if next_state is state:
-            if _is_engine_terminal(state):
-                if isinstance(state, dict):
-                    if state.get("closure_detected"):
-                        _emit("closure_detected", iteration, state)
-                    if state.get("stall"):
-                        _emit("stall_detected", iteration, state)
-                return state
-            _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
+    # Outer loop: handles re-entry without host recursion
+    while True:
+        if depth >= _BOOT1_MAX_REENTRY_DEPTH:
             raise RuntimeError(
-                f"Boot1 engine stalled at iteration {iteration} (depth {_recursion_depth}) "
-                f"without producing terminal result. "
-                f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
+                f"Boot1 re-entry depth {depth} exceeds "
+                f"limit {_BOOT1_MAX_REENTRY_DEPTH}. Possible infinite re-entry loop."
             )
 
-        # Check for boundary effect request
-        if isinstance(next_state, dict) and "_boundary_request" in next_state:
-            request = next_state["_boundary_request"]
-            operation = request["operation"]
-            req_input = request["input"]
-            context = dict(request["context"])
-            inject_key = request["inject_key"]
+        # Per-re-entry validation (initial entry already validated above)
+        if depth > _recursion_depth:
+            assert_mu(cur_input, "_run_engine_recursive.input")
 
-            # SECURITY: inject_key must not be a kernel-reserved field
-            if inject_key in KERNEL_RESERVED_FIELDS:
-                _emit("fail_closed", iteration, state, error_code="input.reserved_field")
-                raise ValueError(
-                    f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
-                    f"Boundary requests cannot inject reserved fields."
+        # Reset observer timestamp counter per re-entry (matches original per-call semantics)
+        _obs_ts[0] = 0
+
+        # Feed engine its initial input
+        state: Mu = {"_run_engine": {"projections": cur_projections, "input": cur_input, "max_steps": cur_max_steps, "frozen": cur_frozen}}
+
+        # Engine stepping loop (per re-entry pass)
+        reentry = False
+        for iteration in range(remaining_iterations):  # AST_OK: infra — Boot1 boundary host loop iteration
+            next_state = _step_trusted(engine_projs, state)
+
+            _emit("step_boundary", iteration, state)
+
+            # Engine stalled — check for terminal result
+            if next_state is state:
+                if _is_engine_terminal(state):
+                    if isinstance(state, dict):
+                        if state.get("closure_detected"):
+                            _emit("closure_detected", iteration, state)
+                        if state.get("stall"):
+                            _emit("stall_detected", iteration, state)
+                    return state
+                _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
+                raise RuntimeError(
+                    f"Boot1 engine stalled at iteration {iteration} (depth {depth}) "
+                    f"without producing terminal result. "
+                    f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
                 )
 
-            if operation == "run_trace":
-                raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
-                result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
-            elif operation == "hash_trace":
-                result = hash_trace_for_recurrence(req_input)
-            elif operation == "run_algorithm":
-                algo_projs = load_verified_seed(get_seed_path(request["algorithm"]))["projections"]
-                result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
-            else:
-                _emit("fail_closed", iteration, state, error_code="api.bad_request")
-                raise ValueError(f"Unknown boundary operation: {operation}")
+            # Check for boundary effect request
+            if isinstance(next_state, dict) and "_boundary_request" in next_state:
+                request = next_state["_boundary_request"]
+                operation = request["operation"]
+                req_input = request["input"]
+                context = dict(request["context"])
+                inject_key = request["inject_key"]
 
-            # SECURITY: validate boundary result before re-injection
-            validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
+                # SECURITY: inject_key must not be a kernel-reserved field
+                if inject_key in KERNEL_RESERVED_FIELDS:
+                    _emit("fail_closed", iteration, state, error_code="input.reserved_field")
+                    raise ValueError(
+                        f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
+                        f"Boundary requests cannot inject reserved fields."
+                    )
 
-            context[inject_key] = result
-            state = context
+                if operation == "run_trace":
+                    raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
+                    result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
+                elif operation == "hash_trace":
+                    result = hash_trace_for_recurrence(req_input)
+                elif operation == "run_algorithm":
+                    algo_projs = load_verified_seed(get_seed_path(request["algorithm"]))["projections"]
+                    result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
+                else:
+                    _emit("fail_closed", iteration, state, error_code="api.bad_request")
+                    raise ValueError(f"Unknown boundary operation: {operation}")
+
+                # SECURITY: validate boundary result before re-injection
+                validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
+
+                context[inject_key] = result
+                state = context
+                continue
+
+            # Boot1: detect re-entry envelope — update frame and restart outer loop.
+            # engine.exhaustion_done_freeze produces {_run_engine: {projections, input, max_steps, frozen}}.
+            if isinstance(next_state, dict) and "_run_engine" in next_state and len(next_state) == 1:
+                payload = next_state["_run_engine"]
+                cur_projections = payload["projections"]
+                cur_input = payload["input"]
+                cur_max_steps = payload.get("max_steps", cur_max_steps)
+                cur_frozen = payload.get("frozen")
+                remaining_iterations = remaining_iterations - iteration - 1
+                depth += 1
+                reentry = True
+                break
+
+            # Boot1: _tail_call recognition — update frame and restart outer loop
+            if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
+                payload = next_state["_tail_call"]
+                cur_projections = payload["projections"]
+                cur_input = payload["input"]
+                cur_max_steps = payload.get("max_steps", cur_max_steps)
+                cur_frozen = payload.get("frozen")
+                remaining_iterations = remaining_iterations - iteration - 1
+                depth += 1
+                reentry = True
+                break
+
+            # Check if engine produced terminal result
+            if _is_engine_terminal(next_state):
+                if isinstance(next_state, dict):
+                    if next_state.get("closure_detected"):
+                        _emit("closure_detected", iteration, next_state)
+                    if next_state.get("stall"):
+                        _emit("stall_detected", iteration, next_state)
+                return next_state
+
+            # Engine advanced internally — keep stepping
+            state = next_state
+
+        if reentry:
             continue
 
-        # Boot1: detect re-entry envelope — recurse instead of continuing loop.
-        # engine.exhaustion_done_freeze produces {_run_engine: {projections, input, max_steps, frozen}}.
-        # The trampoline lets the for-loop handle this; Boot1 recursive makes it explicit.
-        if isinstance(next_state, dict) and "_run_engine" in next_state and len(next_state) == 1:
-            payload = next_state["_run_engine"]
-            return _run_engine_recursive(
-                payload["projections"], payload["input"],
-                max_steps=payload.get("max_steps", max_steps),
-                frozen=payload.get("frozen"),
-                max_engine_iterations=max_engine_iterations - iteration - 1,
-                max_algorithm_iterations=max_algorithm_iterations,
-                observer=observer,
-                _recursion_depth=_recursion_depth + 1,
-            )
-
-        # Boot1: _tail_call recognition — recurse with payload
-        if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
-            payload = next_state["_tail_call"]
-            return _run_engine_recursive(
-                payload["projections"], payload["input"],
-                max_steps=payload.get("max_steps", max_steps),
-                frozen=payload.get("frozen"),
-                max_engine_iterations=max_engine_iterations - iteration - 1,
-                max_algorithm_iterations=max_algorithm_iterations,
-                observer=observer,
-                _recursion_depth=_recursion_depth + 1,
-            )
-
-        # Check if engine produced terminal result
-        if _is_engine_terminal(next_state):
-            if isinstance(next_state, dict):
-                if next_state.get("closure_detected"):
-                    _emit("closure_detected", iteration, next_state)
-                if next_state.get("stall"):
-                    _emit("stall_detected", iteration, next_state)
-            return next_state
-
-        # Engine advanced internally — keep stepping
-        state = next_state
-
-    # FAIL CLOSED: engine loop exhausted without terminal result
-    _emit("fail_closed", max_engine_iterations - 1, state, error_code="engine.exhausted")
-    raise RuntimeError(
-        f"Boot1 engine pipeline exhausted {max_engine_iterations} iterations "
-        f"(depth {_recursion_depth}) without terminal result. "
-        f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
-    )
+        # FAIL CLOSED: engine loop exhausted without terminal result
+        _emit("fail_closed", remaining_iterations - 1, state, error_code="engine.exhausted")
+        raise RuntimeError(
+            f"Boot1 engine pipeline exhausted {remaining_iterations} iterations "
+            f"(depth {depth}) without terminal result. "
+            f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
+        )
 
 
 def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engine state machine
