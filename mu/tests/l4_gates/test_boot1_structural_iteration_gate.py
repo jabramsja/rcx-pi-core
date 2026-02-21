@@ -11,7 +11,9 @@ Anti-theater:
      (Python), structural source proof (JS).
   3. Structural source locks: BOTH Python and JS verified at source level —
      no recursive self-calls, while-true loop, depth increment.
-  4. Cross-substrate parity: Python and JS produce identical results.
+  4. Real re-entry proof: deterministic cycling input triggers exhaustion
+     freeze path, producing boot1_depth >= 1 in BOTH substrates without mocks.
+  5. Cross-substrate parity: Python and JS produce identical results.
 
 Usage:
     PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_boot1_structural_iteration_gate.py -v
@@ -371,6 +373,225 @@ class TestJsStructuralIterationProof:
         body = m.group(1)
         assert "depth++" in body, (
             "runEnginePipelineRecursive must contain 'depth++' for iterative depth tracking"
+        )
+
+
+# =============================================================================
+# Real re-entry proof (no mocks — deterministic cycling input)
+# =============================================================================
+
+# Same-ID cycling projections: trigger closure → exhaustion freeze → re-entry.
+_CYCLE_PROJECTIONS = [
+    {"id": "cycle.loop", "pattern": {"state": "A"}, "body": {"state": "B"}},
+    {"id": "cycle.loop", "pattern": {"state": "B"}, "body": {"state": "A"}},
+]
+_CYCLE_INPUT = {"state": "A"}
+
+
+@pytest.mark.slow
+class TestRealReentryProof:
+    """Prove real (non-mock) engine re-entry via exhaustion freeze path.
+
+    Same-ID cycling projections cause:
+    1. Closure detection (state repeats at tau)
+    2. Exhaustion scan finds same operator throughout → action=freeze
+    3. engine.exhaustion_done_freeze produces {_run_engine: ...} envelope
+    4. Iterative re-entry loop increments depth
+
+    This is STRONGER than mock-based tests because it exercises the
+    full engine pipeline end-to-end with no artificial injection.
+    """
+
+    def test_python_real_reentry_depth(self):
+        """Python cycling input reaches boot1_depth >= 1 via real freeze."""
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+
+        observer = []
+        result = run_engine_pipeline(
+            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=100, observer=observer,
+        )
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        assert len(step_events) > 0, "must emit step_boundary events"
+
+        depths = [e["boot1_depth"] for e in step_events]
+        max_depth = max(depths)
+        assert max_depth >= 1, (
+            f"Real re-entry must produce boot1_depth >= 1, got max={max_depth}. "
+            f"Depths: {depths}"
+        )
+        assert 0 in depths, "Must have depth-0 events before re-entry"
+        # Verify exhaustion freeze actually triggered (frozen_set non-empty)
+        assert result.get("frozen_set") is not None, (
+            f"Exhaustion freeze must produce non-null frozen_set, got: {result}"
+        )
+
+    def test_js_real_reentry_depth(self):
+        """JS cycling input reaches boot1_depth >= 1 via real freeze."""
+        resp = _js_request(
+            "run_engine_pipeline",
+            projections=_CYCLE_PROJECTIONS, input=_CYCLE_INPUT,
+            maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=100,
+            observer=True,
+        )
+        assert resp["success"], f"JS request must succeed: {resp.get('error')}"
+        events = resp["observer_events"]
+        step_events = [e for e in events if e.get("event_name") == "step_boundary"]
+        assert len(step_events) > 0, "must emit step_boundary events"
+
+        depths = [e["boot1_depth"] for e in step_events]
+        max_depth = max(depths)
+        assert max_depth >= 1, (
+            f"Real re-entry must produce boot1_depth >= 1, got max={max_depth}. "
+            f"Depths: {depths}"
+        )
+        assert 0 in depths, "Must have depth-0 events before re-entry"
+
+    def test_real_reentry_cross_substrate_parity(self):
+        """Python and JS produce identical results on cycling input."""
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+
+        py_result = run_engine_pipeline(
+            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=100,
+        )
+
+        resp = _js_request(
+            "run_engine_pipeline",
+            projections=_CYCLE_PROJECTIONS, input=_CYCLE_INPUT,
+            maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=100,
+        )
+        assert resp["success"], f"JS must succeed: {resp.get('error')}"
+        js_result = resp["result"]
+
+        assert py_result == js_result, (
+            f"Real re-entry cross-substrate parity failure.\n"
+            f"Python: {py_result}\n"
+            f"JS: {js_result}"
+        )
+
+    def test_real_reentry_depth_monotonic(self):
+        """boot1_depth is non-decreasing across real re-entry."""
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+
+        observer = []
+        run_engine_pipeline(
+            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=100, observer=observer,
+        )
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        depths = [e["boot1_depth"] for e in step_events]
+        for i in range(1, len(depths)):
+            assert depths[i] >= depths[i - 1], (
+                f"Depth decreased at event {i}: {depths[i-1]} -> {depths[i]}. "
+                f"All depths: {depths}"
+            )
+
+    def test_trampoline_mode_freeze_parity(self):
+        """Explicit trampoline mode (use_boot1_recursive=False) also triggers freeze.
+
+        The exhaustion sentinel stripping must be applied in BOTH the
+        Boot1 and trampoline boundary handlers.  Without this, the
+        trampoline path returns action=continue while Boot1 returns
+        action=already_frozen — a parity violation.
+        """
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+
+        py_result = run_engine_pipeline(
+            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=100,
+            use_boot1_recursive=False,
+        )
+        # Trampoline path must also reach freeze (frozen_set populated)
+        assert py_result.get("frozen_set") is not None, (
+            f"Trampoline path must produce non-null frozen_set on cycling input, "
+            f"got: {py_result}"
+        )
+        assert py_result.get("action") != "continue", (
+            f"Trampoline path must NOT return action=continue on cycling input, "
+            f"got: {py_result.get('action')}"
+        )
+
+        # JS trampoline path must match
+        resp = _js_request(
+            "run_engine_pipeline",
+            projections=_CYCLE_PROJECTIONS, input=_CYCLE_INPUT,
+            maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=100,
+            boot1LoopMode=False,
+        )
+        assert resp["success"], f"JS must succeed: {resp.get('error')}"
+        js_result = resp["result"]
+
+        assert py_result == js_result, (
+            f"Trampoline-mode parity failure on cycling input.\n"
+            f"Python: {py_result}\n"
+            f"JS: {js_result}"
+        )
+
+
+# =============================================================================
+# Regression lock: stall/closure case unchanged by trace sanitization
+# =============================================================================
+
+@pytest.mark.slow
+class TestRegressionLock:
+    """Guard against global trace stripping side effects.
+
+    The terminal sentinel stripping is exhaustion-targeted only.
+    Stall/closure cases with empty projections must behave identically
+    to pre-fix behavior.
+    """
+
+    def test_stall_case_no_reentry(self):
+        """Empty projections: depth stays 0, action=continue."""
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+
+        observer = []
+        result = run_engine_pipeline(
+            [], {"test": True},
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=50, observer=observer,
+        )
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        depths = [e["boot1_depth"] for e in step_events]
+        assert max(depths) == 0, (
+            f"Stall case must NOT trigger re-entry, got max_depth={max(depths)}"
+        )
+        assert result.get("action") == "continue", (
+            f"Stall case must produce action=continue, got {result.get('action')}"
+        )
+
+    def test_different_id_cycle_no_freeze(self):
+        """Different-ID cycling projections: exhaustion scan_different fires, no freeze."""
+        from rcx_pi.selfhost.kernel import reset_step_budget
+        reset_step_budget()
+
+        projections = [
+            {"id": "cycle.a2b", "pattern": {"state": "A"}, "body": {"state": "B"}},
+            {"id": "cycle.b2a", "pattern": {"state": "B"}, "body": {"state": "A"}},
+        ]
+        observer = []
+        result = run_engine_pipeline(
+            projections, {"state": "A"},
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=100, observer=observer,
+        )
+        step_events = [e for e in observer if e["event_name"] == "step_boundary"]
+        depths = [e["boot1_depth"] for e in step_events]
+        assert max(depths) == 0, (
+            f"Different-ID cycle must NOT trigger re-entry, got max_depth={max(depths)}"
+        )
+        assert result.get("action") == "continue", (
+            f"Different-ID cycle must produce action=continue, got {result.get('action')}"
         )
 
 
