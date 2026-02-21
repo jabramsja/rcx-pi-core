@@ -321,6 +321,14 @@
       "optional_args": {},
       "edge_args": []
     },
+    "step_kernel_meta": {
+      "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Runs stepKernel with returnMeta=true; inputs validated by stepKernel domain projection checks",
+      "required_args": {"input": "a", "projections": [{"id": "test.rewrite", "pattern": "a", "body": "b"}]},
+      "optional_args": {"maxSteps": 100, "kernelMode": "core"},
+      "edge_args": []
+    },
     "list_actions": {
       "type": "introspection",
       "requires_error_edges": false,
