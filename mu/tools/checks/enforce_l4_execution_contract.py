@@ -110,6 +110,29 @@ def is_l4_gate_test(filepath: str) -> bool:
 # Git helpers
 # ---------------------------------------------------------------------------
 
+def filter_to_tracked_files(files: list[str]) -> list[str]:
+    """Filter file list to only git-tracked files (defense against untracked leaks).
+
+    Scope policy: the L4 checker operates on tracked changes only.
+    Untracked files are not part of any wave scope and must be excluded.
+    """
+    if not files:
+        return files
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--"] + files,
+            capture_output=True, text=True,
+        )
+        tracked = set(result.stdout.strip().split("\n")) if result.stdout.strip() else set()
+        untracked = [f for f in files if f not in tracked]
+        if untracked:
+            print(f"NOTE: Stripping {len(untracked)} untracked file(s) from scope: "
+                  f"{untracked[:5]}")
+        return [f for f in files if f in tracked]
+    except Exception:
+        return files  # If git fails, pass through unchanged
+
+
 def get_changed_files_staged() -> list[str]:
     """Get staged file paths."""
     result = subprocess.run(
@@ -525,17 +548,26 @@ def main() -> int:
         changed_files = get_changed_files_range(args.range)
         diff_text = get_diff_range(args.range) if changed_files else None
     else:
-        changed_files = args.files or []
+        changed_files = filter_to_tracked_files(args.files or [])
         diff_text = None
 
-    # Empty-scope policy
-    if not changed_files and not args.files:
+    # Empty-scope policy — applies AFTER untracked filtering
+    if not changed_files:
         if args.wave_id:
-            # wave-id provided but no files to verify — cannot certify compliance
-            print(f"ERROR: --wave-id '{args.wave_id}' provided but no changed files "
-                  f"found (--range={args.range!r}, --staged={args.staged}). "
+            # wave-id provided but no tracked files to verify — cannot certify
+            scope_desc = (
+                f"--files (all untracked)" if args.files
+                else f"--range={args.range!r}" if args.range
+                else "--staged" if args.staged
+                else "(no scope)"
+            )
+            print(f"ERROR: --wave-id '{args.wave_id}' provided but no tracked files "
+                  f"found ({scope_desc}). "
                   f"Cannot verify wave against empty change set.")
             return 1
+        if args.files:
+            print("No tracked files after filtering — skipping enforcement.")
+            return 0
         if args.range:
             print(f"No changed files in range '{args.range}' — skipping enforcement.")
             return 0
