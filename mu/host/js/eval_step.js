@@ -1872,6 +1872,32 @@ function isEngineTerminal(value) {
  * Mirrors Python _run_sub_algorithm() (step_mu.py:1404).
  * AST_OK: infra — boundary sub-algorithm runner
  */
+
+/**
+ * Remove trailing terminal sentinel from a linked-list trace.
+ * Terminal sentinels have projection===null plus a stall or max_steps marker.
+ * Applied only to exhaustion input — keeps run_trace output untouched.
+ * Iterative implementation avoids host stack depth risk on long traces.
+ */
+function stripTraceTerminalSentinel(trace) {
+  // Collect non-sentinel entries in order
+  const kept = [];
+  let node = trace;
+  while (node != null) {
+    const head = node.head;
+    if (!(head.projection === null && ('stall' in head || 'max_steps' in head))) {
+      kept.push(head);
+    }
+    node = node.tail ?? null;
+  }
+  // Rebuild linked list tail-first
+  let result = null;
+  for (let i = kept.length - 1; i >= 0; i--) {
+    result = { head: kept[i], tail: result };
+  }
+  return result;
+}
+
 function runSubAlgorithm(algorithmProjs, initial, maxIterations) {
   let current = initial;
   let currentHash = muHashCached(initial);
@@ -2029,7 +2055,17 @@ function runEnginePipeline(projections, inputValue, options) {
         if (!algoProjs) {
           throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
         }
-        result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
+        // Exhaustion-targeted: strip terminal sentinel from trace
+        // so non-linear scan sees only real projection entries.
+        let algoInput = reqInput;
+        if (algoName === 'exhaustion.v1.json'
+            && reqInput != null && typeof reqInput === 'object'
+            && '_detect_exhaustion' in reqInput) {
+          const inner = Object.assign({}, reqInput._detect_exhaustion);
+          inner.trace = stripTraceTerminalSentinel(inner.trace);
+          algoInput = { _detect_exhaustion: inner };
+        }
+        result = runSubAlgorithm(algoProjs, algoInput, maxAlgorithmIterations);
       } else {
         emit('fail_closed', iteration, state, 'api.bad_request');
         throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
@@ -2202,7 +2238,17 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
           if (!algoProjs) {
             throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
           }
-          result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
+          // Exhaustion-targeted: strip terminal sentinel from trace
+          // so non-linear scan sees only real projection entries.
+          let algoInput = reqInput;
+          if (algoName === 'exhaustion.v1.json'
+              && reqInput != null && typeof reqInput === 'object'
+              && '_detect_exhaustion' in reqInput) {
+            const inner = Object.assign({}, reqInput._detect_exhaustion);
+            inner.trace = stripTraceTerminalSentinel(inner.trace);
+            algoInput = { _detect_exhaustion: inner };
+          }
+          result = runSubAlgorithm(algoProjs, algoInput, maxAlgorithmIterations);
         } else {
           emit('fail_closed', iteration, state, 'api.bad_request');
           throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
