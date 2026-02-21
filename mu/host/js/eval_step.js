@@ -38,7 +38,7 @@
  *     - listToLinked()            - for loop for conversion
  *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
  *     - runEnginePipeline()       - engine state machine effect handler loop
- *     - runEnginePipelineRecursive() - Boot1 shadow recursive engine loop
+ *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
  *
  *   @host_recursion: 4
  *     - match()             - recursive pattern matching
@@ -2075,17 +2075,17 @@ function runEnginePipeline(projections, inputValue, options) {
 }
 
 /**
- * Boot1 shadow: recursive engine pipeline for parity testing.
+ * Boot1 engine pipeline with iterative re-entry (no host recursion).
  * Mirrors Python _run_engine_recursive() — handles engine re-entry via
- * explicit recursion instead of for-loop iteration.
+ * explicit outer loop with frame state update, not host call stack.
  * Also recognizes {_tail_call: ...} as Boot1 native re-entry signal.
- * @host_iteration: for loop per re-entry pass (Boot1 shadow)
- * AST_OK: infra — Boot1 shadow recursive engine loop
+ * @host_iteration: for loop per re-entry pass (Boot1 iterative)
+ * AST_OK: infra — Boot1 engine loop (iterative re-entry)
  */
 const BOOT1_MAX_REENTRY_DEPTH = 20;
 
 function runEnginePipelineRecursive(projections, inputValue, options, recursionDepth) {
-  // Boundary Mu validation: reject non-Mu input before entering recursive engine loop
+  // Boundary Mu validation: reject non-Mu input before entering engine loop
   if (!isValidMu(inputValue)) {
     throw new RcxError('input.invalid_type', `runEnginePipelineRecursive: inputValue is not valid Mu (got ${typeof inputValue})`);
   }
@@ -2098,17 +2098,18 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
     observer = null,
   } = options ?? {};
 
-  recursionDepth = recursionDepth ?? 0;
+  // Frame state for iterative re-entry
+  let depth = recursionDepth ?? 0;
+  const initialDepth = depth;
+  let remainingIterations = maxEngineIterations;
+  let curProjections = projections;
+  let curInput = inputValue;
+  let curMaxSteps = maxSteps;
+  let curFrozen = frozen;
 
-  if (recursionDepth >= BOOT1_MAX_REENTRY_DEPTH) {
-    throw new RcxError('engine.boot1_depth_exceeded',
-      `Boot1 recursive re-entry depth ${recursionDepth} exceeds limit ${BOOT1_MAX_REENTRY_DEPTH}.`
-    );
-  }
-
-  // Observer event helper
+  // Observer event helper — uses mutable depth counter, resets ts per re-entry
   let obsTs = 0;
-  function emit(eventName, stepNum, stateVal, errorCode) {
+  const emit = function(eventName, stepNum, stateVal, errorCode) {
     if (observer === null) return;
     let stateHash = null;
     try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
@@ -2119,133 +2120,149 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
       error_code: errorCode ?? null,
       substrate: 'js',
       timestamp: obsTs,
-      boot1_depth: recursionDepth,
+      boot1_depth: depth,
     });
     obsTs++;
-  }
-
-  // Feed engine its initial input
-  let state = {
-    _run_engine: {
-      projections: projections,
-      input: inputValue,
-      max_steps: maxSteps,
-      frozen: frozen,
-    }
   };
 
-  // Engine stepping loop (per re-entry pass)
-  for (let iteration = 0; iteration < maxEngineIterations; iteration++) {
-    const nextState = step(engineProjections, state);
-
-    emit('step_boundary', iteration, state);
-
-    // Engine stalled
-    if (nextState === state) {
-      if (isEngineTerminal(state)) {
-        if (typeof state === 'object' && state !== null) {
-          if (state.closure_detected) emit('closure_detected', iteration, state);
-          if (state.stall) emit('stall_detected', iteration, state);
-        }
-        return state;
-      }
-      emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
-      throw new RcxError('engine.stalled_non_terminal',
-        `Boot1 engine stalled at iteration ${iteration} (depth ${recursionDepth}) without terminal result.`
+  // Outer loop: handles re-entry without host recursion
+  while (true) {
+    if (depth >= BOOT1_MAX_REENTRY_DEPTH) {
+      throw new RcxError('engine.boot1_depth_exceeded',
+        `Boot1 re-entry depth ${depth} exceeds limit ${BOOT1_MAX_REENTRY_DEPTH}.`
       );
     }
 
-    // Boundary effect request
-    if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
-      const request = nextState._boundary_request;
-      const operation = request.operation;
-      const reqInput = request.input;
-      const context = Object.assign({}, request.context);
-      const injectKey = request.inject_key;
+    // Per-re-entry validation (initial entry already validated above)
+    if (depth > initialDepth) {
+      if (!isValidMu(curInput)) {
+        throw new RcxError('input.invalid_type', 'runEnginePipelineRecursive: re-entry inputValue is not valid Mu');
+      }
+    }
 
-      if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
-        emit('fail_closed', iteration, state, 'input.reserved_field');
-        throw new RcxError('input.reserved_field',
-          `SECURITY: inject_key '${injectKey}' is a kernel-reserved field.`
+    // Reset observer timestamp counter per re-entry (matches original per-call semantics)
+    obsTs = 0;
+
+    // Feed engine its initial input
+    let state = {
+      _run_engine: {
+        projections: curProjections,
+        input: curInput,
+        max_steps: curMaxSteps,
+        frozen: curFrozen,
+      }
+    };
+
+    // Engine stepping loop (per re-entry pass)
+    let reentry = false;
+    for (let iteration = 0; iteration < remainingIterations; iteration++) {
+      const nextState = step(engineProjections, state);
+
+      emit('step_boundary', iteration, state);
+
+      // Engine stalled
+      if (nextState === state) {
+        if (isEngineTerminal(state)) {
+          if (typeof state === 'object' && state !== null) {
+            if (state.closure_detected) emit('closure_detected', iteration, state);
+            if (state.stall) emit('stall_detected', iteration, state);
+          }
+          return state;
+        }
+        emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
+        throw new RcxError('engine.stalled_non_terminal',
+          `Boot1 engine stalled at iteration ${iteration} (depth ${depth}) without terminal result.`
         );
       }
 
-      let result;
-      if (operation === 'run_trace') {
-        const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
-        result = { result: raw.result, trace: raw.trace, stall: raw.stall };
-      } else if (operation === 'hash_trace') {
-        result = hashTraceForRecurrence(reqInput);
-      } else if (operation === 'run_algorithm') {
-        const algoName = request.algorithm;
-        const algoProjs = seedProjectionMap[algoName];
-        if (!algoProjs) {
-          throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
+      // Boundary effect request
+      if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
+        const request = nextState._boundary_request;
+        const operation = request.operation;
+        const reqInput = request.input;
+        const context = Object.assign({}, request.context);
+        const injectKey = request.inject_key;
+
+        if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
+          emit('fail_closed', iteration, state, 'input.reserved_field');
+          throw new RcxError('input.reserved_field',
+            `SECURITY: inject_key '${injectKey}' is a kernel-reserved field.`
+          );
         }
-        result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
-      } else {
-        emit('fail_closed', iteration, state, 'api.bad_request');
-        throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
+
+        let result;
+        if (operation === 'run_trace') {
+          const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
+          result = { result: raw.result, trace: raw.trace, stall: raw.stall };
+        } else if (operation === 'hash_trace') {
+          result = hashTraceForRecurrence(reqInput);
+        } else if (operation === 'run_algorithm') {
+          const algoName = request.algorithm;
+          const algoProjs = seedProjectionMap[algoName];
+          if (!algoProjs) {
+            throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
+          }
+          result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
+        } else {
+          emit('fail_closed', iteration, state, 'api.bad_request');
+          throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
+        }
+
+        validateNoKernelReservedFields(result, `boundary_result(${operation})`);
+
+        context[injectKey] = result;
+        state = context;
+        continue;
       }
 
-      validateNoKernelReservedFields(result, `boundary_result(${operation})`);
-
-      context[injectKey] = result;
-      state = context;
-      continue;
-    }
-
-    // Boot1: detect re-entry envelope — recurse instead of continuing loop
-    if (typeof nextState === 'object' && nextState !== null
-        && '_run_engine' in nextState && Object.keys(nextState).length === 1) {
-      const payload = nextState._run_engine;
-      return runEnginePipelineRecursive(
-        payload.projections, payload.input,
-        {
-          maxSteps: payload.max_steps ?? maxSteps,
-          frozen: payload.frozen ?? null,
-          maxEngineIterations: maxEngineIterations - iteration - 1,
-          maxAlgorithmIterations,
-          observer,
-        },
-        recursionDepth + 1,
-      );
-    }
-
-    // Boot1: _tail_call recognition — recurse with payload
-    if (typeof nextState === 'object' && nextState !== null
-        && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
-      const payload = nextState._tail_call;
-      return runEnginePipelineRecursive(
-        payload.projections, payload.input,
-        {
-          maxSteps: payload.max_steps ?? maxSteps,
-          frozen: payload.frozen ?? null,
-          maxEngineIterations: maxEngineIterations - iteration - 1,
-          maxAlgorithmIterations,
-          observer,
-        },
-        recursionDepth + 1,
-      );
-    }
-
-    // Terminal result
-    if (isEngineTerminal(nextState)) {
-      if (typeof nextState === 'object' && nextState !== null) {
-        if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
-        if (nextState.stall) emit('stall_detected', iteration, nextState);
+      // Boot1: detect re-entry envelope — update frame and restart outer loop
+      if (typeof nextState === 'object' && nextState !== null
+          && '_run_engine' in nextState && Object.keys(nextState).length === 1) {
+        const payload = nextState._run_engine;
+        curProjections = payload.projections;
+        curInput = payload.input;
+        curMaxSteps = payload.max_steps ?? curMaxSteps;
+        curFrozen = payload.frozen ?? null;
+        remainingIterations = remainingIterations - iteration - 1;
+        depth++;
+        reentry = true;
+        break;
       }
-      return nextState;
+
+      // Boot1: _tail_call recognition — update frame and restart outer loop
+      if (typeof nextState === 'object' && nextState !== null
+          && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
+        const payload = nextState._tail_call;
+        curProjections = payload.projections;
+        curInput = payload.input;
+        curMaxSteps = payload.max_steps ?? curMaxSteps;
+        curFrozen = payload.frozen ?? null;
+        remainingIterations = remainingIterations - iteration - 1;
+        depth++;
+        reentry = true;
+        break;
+      }
+
+      // Terminal result
+      if (isEngineTerminal(nextState)) {
+        if (typeof nextState === 'object' && nextState !== null) {
+          if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
+          if (nextState.stall) emit('stall_detected', iteration, nextState);
+        }
+        return nextState;
+      }
+
+      // Engine advanced internally
+      state = nextState;
     }
 
-    // Engine advanced internally
-    state = nextState;
+    if (reentry) continue;
+
+    emit('fail_closed', remainingIterations - 1, state, 'engine.exhausted');
+    throw new RcxError('engine.exhausted',
+      `Boot1 engine pipeline exhausted ${remainingIterations} iterations (depth ${depth}).`
+    );
   }
-
-  emit('fail_closed', maxEngineIterations - 1, state, 'engine.exhausted');
-  throw new RcxError('engine.exhausted',
-    `Boot1 engine pipeline exhausted ${maxEngineIterations} iterations (depth ${recursionDepth}).`
-  );
 }
 
 /**
