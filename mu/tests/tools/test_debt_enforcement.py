@@ -333,8 +333,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 42 (44 pre-archival minus 2 archived with legacy evaluator stack)
-    assert infra_count == 42, (
-        f"Expected 42 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 43 (42 pre-wave7 + 1 _derive_engine_exit_reason)
+    assert infra_count == 43, (
+        f"Expected 43 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

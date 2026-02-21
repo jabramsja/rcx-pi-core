@@ -1429,6 +1429,25 @@ def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:
 
 _BOOT1_MAX_REENTRY_DEPTH = 20  # AST_OK: infra — Boot1 recursive re-entry depth limit
 
+# Engine exit reason enum — derived from 8-key terminal flags, priority order.
+# Pure function: reads existing flags, never changes the terminal shape.
+ENGINE_EXIT_REASONS = frozenset(["closure", "exhaustion", "stall", "completed"])
+
+
+def _derive_engine_exit_reason(engine_result: dict) -> str:  # AST_OK: infra — pure derivation from terminal flags
+    """Derive engine_exit_reason from the existing 8-key terminal dict.
+
+    Priority: closure > exhaustion > stall > completed.
+    Does NOT modify engine_result.
+    """
+    if engine_result.get("closure_detected"):
+        return "closure"
+    if engine_result.get("exhaustion_detected"):
+        return "exhaustion"
+    if engine_result.get("stall"):
+        return "stall"
+    return "completed"
+
 
 def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-entry)
     projections: list[Mu],
@@ -1623,6 +1642,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     max_iterations: int | None = None,
     observer: list | None = None,
     use_boot1_recursive: bool = True,
+    return_meta: bool = False,
 ) -> Mu:
     """Host loop that drives the engine state machine defined in rcx_engine.v1.json.
 
@@ -1653,6 +1673,10 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
             (recurrence/exhaustion). Controls convergence within a phase.
         max_iterations: DEPRECATED — if provided, sets both engine and algorithm
             limits for backwards compatibility. Will be removed.
+        return_meta: When True, returns metadata envelope with fields:
+            `engine_result` (8-key dict, unchanged), `engine_exit_reason` (str),
+            `engine_iterations_used` (int), `max_engine_iterations` (int).
+            Reason enum: closure, exhaustion, stall, completed.
 
     Raises:
         RuntimeError: If engine loop exhausts without producing terminal result.
@@ -1670,6 +1694,36 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     if max_iterations is not None:
         max_engine_iterations = max_iterations
         max_algorithm_iterations = max_iterations
+
+    # Meta path: capture observer events for iteration count, derive reason from result.
+    # Internal functions and 8-key terminal shape are unchanged.
+    if return_meta:
+        meta_observer = observer if observer is not None else []
+        if use_boot1_recursive:
+            engine_result = _run_engine_recursive(
+                projections, input_value,
+                max_steps=max_steps, frozen=frozen,
+                max_engine_iterations=max_engine_iterations,
+                max_algorithm_iterations=max_algorithm_iterations,
+                observer=meta_observer,
+            )
+        else:
+            engine_result = run_engine_pipeline(
+                projections, input_value,
+                max_steps=max_steps, frozen=frozen,
+                max_engine_iterations=max_engine_iterations,
+                max_algorithm_iterations=max_algorithm_iterations,
+                observer=meta_observer,
+                use_boot1_recursive=False,
+                return_meta=False,
+            )
+        iterations_used = sum(1 for e in meta_observer if e.get("event_name") == "step_boundary")
+        return {
+            "engine_result": engine_result,
+            "engine_exit_reason": _derive_engine_exit_reason(engine_result),
+            "engine_iterations_used": iterations_used,
+            "max_engine_iterations": max_engine_iterations,
+        }
 
     # Boot1 shadow: opt-in recursive engine loop (parity with trampoline)
     if use_boot1_recursive:

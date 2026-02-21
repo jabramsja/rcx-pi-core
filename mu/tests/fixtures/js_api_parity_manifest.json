@@ -329,6 +329,14 @@
       "optional_args": {"maxSteps": 100, "kernelMode": "core"},
       "edge_args": []
     },
+    "run_engine_pipeline_meta": {
+      "type": "operation",
+      "requires_error_edges": false,
+      "success_only_reason": "Runs engine pipeline with meta envelope; inputs validated by engine pipeline checks",
+      "required_args": {"input": "test", "projections": []},
+      "optional_args": {"maxSteps": 100, "maxEngineIterations": 20, "maxAlgorithmIterations": 50, "boot1LoopMode": true},
+      "edge_args": []
+    },
     "list_actions": {
       "type": "introspection",
       "requires_error_edges": false,
