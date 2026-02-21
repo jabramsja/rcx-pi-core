@@ -1485,7 +1485,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
     # Observer event helper — uses mutable depth counter, resets ts per re-entry
     _obs_ts = [0]
 
-    def _emit(event_name, step_num, state_val, error_code=None):
+    def _emit(event_name, step_num, state_val, error_code=None, **extra):
         if observer is None:
             return
         state_hash = None
@@ -1494,7 +1494,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 state_hash = mu_hash(state_val)
             except Exception:
                 pass
-        observer.append({
+        event = {
             "event_name": event_name,
             "step": step_num,
             "state_hash": state_hash,
@@ -1502,8 +1502,14 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             "substrate": "python",
             "timestamp": _obs_ts[0],
             "boot1_depth": depth,
-        })
+        }
+        if extra:
+            event.update(extra)
+        observer.append(event)
         _obs_ts[0] += 1
+
+    # Running total of engine iterations across all re-entry passes
+    _total_iterations = [0]
 
     # Outer loop: handles re-entry without host recursion
     while True:
@@ -1529,6 +1535,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             next_state = _step_trusted(engine_projs, state)
 
             _emit("step_boundary", iteration, state)
+            _total_iterations[0] += 1
 
             # Engine stalled — check for terminal result
             if next_state is state:
@@ -1538,6 +1545,9 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                             _emit("closure_detected", iteration, state)
                         if state.get("stall"):
                             _emit("stall_detected", iteration, state)
+                    _emit("engine_terminal", iteration, state,
+                          engine_exit_reason=_derive_engine_exit_reason(state),
+                          engine_iterations_used=_total_iterations[0])
                     return state
                 _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
                 raise RuntimeError(
@@ -1614,6 +1624,9 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                         _emit("closure_detected", iteration, next_state)
                     if next_state.get("stall"):
                         _emit("stall_detected", iteration, next_state)
+                _emit("engine_terminal", iteration, next_state,
+                      engine_exit_reason=_derive_engine_exit_reason(next_state),
+                      engine_iterations_used=_total_iterations[0])
                 return next_state
 
             # Engine advanced internally — keep stepping
@@ -1741,7 +1754,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     # Observer event helper — no-op when observer is None
     _obs_ts = [0]  # mutable counter for logical timestamp
 
-    def _emit(event_name, step, state_val, error_code=None):
+    def _emit(event_name, step, state_val, error_code=None, **extra):
         if observer is None:
             return
         state_hash = None
@@ -1750,14 +1763,17 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
                 state_hash = mu_hash(state_val)
             except Exception:
                 pass
-        observer.append({
+        event = {
             "event_name": event_name,
             "step": step,
             "state_hash": state_hash,
             "error_code": error_code,
             "substrate": "python",
             "timestamp": _obs_ts[0],
-        })
+        }
+        if extra:
+            event.update(extra)
+        observer.append(event)
         _obs_ts[0] += 1
 
     # Feed engine its initial input (always use full config form → engine.init_config)
@@ -1779,6 +1795,9 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
                         _emit("closure_detected", iteration, state)
                     if state.get("stall"):
                         _emit("stall_detected", iteration, state)
+                _emit("engine_terminal", iteration, state,
+                      engine_exit_reason=_derive_engine_exit_reason(state),
+                      engine_iterations_used=iteration + 1)
                 return state
             # Non-terminal stall — engine stuck in intermediate state
             _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
@@ -1846,6 +1865,9 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
                     _emit("closure_detected", iteration, next_state)
                 if next_state.get("stall"):
                     _emit("stall_detected", iteration, next_state)
+            _emit("engine_terminal", iteration, next_state,
+                  engine_exit_reason=_derive_engine_exit_reason(next_state),
+                  engine_iterations_used=iteration + 1)
             return next_state
 
         # Engine advanced internally — keep stepping

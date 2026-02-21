@@ -2642,8 +2642,9 @@ class TestObserverIsomorphism:
         assert len(js_step_boundaries) > 0, "JS emitted no step_boundary events"
 
     def test_observer_events_have_contract_fields(self):
-        """All emitted events conform to N6a schema (6 required fields)."""
-        required_fields = {"event_name", "step", "state_hash", "error_code", "substrate", "timestamp"}
+        """All emitted events conform to N6a schema (6 base + optional engine_terminal extras)."""
+        base_fields = {"event_name", "step", "state_hash", "error_code", "substrate", "timestamp"}
+        terminal_extra_fields = {"engine_exit_reason", "engine_iterations_used"}
 
         py_observer = []
         from rcx_pi.selfhost.step_mu import run_engine_pipeline
@@ -2653,9 +2654,15 @@ class TestObserverIsomorphism:
             pass
 
         for event in py_observer:
-            assert set(event.keys()) == required_fields, (
-                f"Python event has wrong fields: {set(event.keys())} != {required_fields}"
-            )
+            keys = set(event.keys())
+            if event["event_name"] == "engine_terminal":
+                assert keys == base_fields | terminal_extra_fields, (
+                    f"Python engine_terminal event has wrong fields: {keys}"
+                )
+            else:
+                assert keys == base_fields, (
+                    f"Python event has wrong fields: {keys} != {base_fields}"
+                )
             assert event["substrate"] == "python"
             assert isinstance(event["step"], int) and event["step"] >= 0
             assert isinstance(event["timestamp"], int) and event["timestamp"] >= 0
@@ -2667,9 +2674,15 @@ class TestObserverIsomorphism:
             "boot1LoopMode": False,  # match Python's use_boot1_recursive=False above
         })
         for event in js_resp.get("observer_events", []):
-            assert set(event.keys()) == required_fields, (
-                f"JS event has wrong fields: {set(event.keys())} != {required_fields}"
-            )
+            keys = set(event.keys())
+            if event["event_name"] == "engine_terminal":
+                assert keys == base_fields | terminal_extra_fields, (
+                    f"JS engine_terminal event has wrong fields: {keys}"
+                )
+            else:
+                assert keys == base_fields, (
+                    f"JS event has wrong fields: {keys} != {base_fields}"
+                )
             assert event["substrate"] == "js"
             assert isinstance(event["step"], int) and event["step"] >= 0
             assert isinstance(event["timestamp"], int) and event["timestamp"] >= 0
