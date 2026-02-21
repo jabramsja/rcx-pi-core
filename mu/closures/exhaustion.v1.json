@@ -1,6 +1,6 @@
 {
     "meta": {
-        "version": "1.2.0",
+        "version": "1.3.0",
         "name": "EXHAUSTION_SEED",
         "description": "Structural operator exhaustion detection for Rule 3.1",
         "doc": "mu/docs/core/OperatorExhaustion.v0.md",
@@ -823,6 +823,406 @@
                                                                     }
                                                                 },
                                                                 "tail": null
+                                                            }
+                                                        },
+                                                        "_type": "dict"
+                                                    },
+                                                    "tail": {
+                                                        "var": "rest"
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_frozen",
+                    "tail": {
+                        "head": {
+                            "var": "frozen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "exhaustion",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_operator_ids",
+                            "tail": {
+                                "head": {
+                                    "var": "op_ids"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_phase",
+                                "tail": {
+                                    "head": "scan",
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_tau_operator",
+                                    "tail": {
+                                        "head": {
+                                            "var": "proj"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_tau_step",
+                                        "tail": {
+                                            "head": {
+                                                "var": "tau_step"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_trace",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "rest"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "exhaustion.scan_skip_sentinel_maxsteps",
+            "description": "Skip terminal sentinel (max_steps) during scan \u2014 structural tolerance",
+            "pattern": {
+                "head": {
+                    "head": "_frozen",
+                    "tail": {
+                        "head": {
+                            "var": "frozen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "exhaustion",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_operator_ids",
+                            "tail": {
+                                "head": {
+                                    "var": "op_ids"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_phase",
+                                "tail": {
+                                    "head": "scan",
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_tau_operator",
+                                    "tail": {
+                                        "head": {
+                                            "var": "proj"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_tau_step",
+                                        "tail": {
+                                            "head": {
+                                                "var": "tau_step"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_trace",
+                                            "tail": {
+                                                "head": {
+                                                    "head": {
+                                                        "head": {
+                                                            "head": "max_steps",
+                                                            "tail": {
+                                                                "head": {
+                                                                    "var": "_m"
+                                                                },
+                                                                "tail": null
+                                                            }
+                                                        },
+                                                        "tail": {
+                                                            "head": {
+                                                                "head": "projection",
+                                                                "tail": {
+                                                                    "head": null,
+                                                                    "tail": null
+                                                                }
+                                                            },
+                                                            "tail": {
+                                                                "head": {
+                                                                    "head": "state",
+                                                                    "tail": {
+                                                                        "head": {
+                                                                            "var": "_s"
+                                                                        },
+                                                                        "tail": null
+                                                                    }
+                                                                },
+                                                                "tail": {
+                                                                    "head": {
+                                                                        "head": "step",
+                                                                        "tail": {
+                                                                            "head": {
+                                                                                "var": "_st"
+                                                                            },
+                                                                            "tail": null
+                                                                        }
+                                                                    },
+                                                                    "tail": null
+                                                                }
+                                                            }
+                                                        },
+                                                        "_type": "dict"
+                                                    },
+                                                    "tail": {
+                                                        "var": "rest"
+                                                    }
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            },
+            "body": {
+                "head": {
+                    "head": "_frozen",
+                    "tail": {
+                        "head": {
+                            "var": "frozen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "exhaustion",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_operator_ids",
+                            "tail": {
+                                "head": {
+                                    "var": "op_ids"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_phase",
+                                "tail": {
+                                    "head": "scan",
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_tau_operator",
+                                    "tail": {
+                                        "head": {
+                                            "var": "proj"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_tau_step",
+                                        "tail": {
+                                            "head": {
+                                                "var": "tau_step"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_trace",
+                                            "tail": {
+                                                "head": {
+                                                    "var": "rest"
+                                                },
+                                                "tail": null
+                                            }
+                                        },
+                                        "tail": null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "_type": "dict"
+            }
+        },
+        {
+            "id": "exhaustion.scan_skip_sentinel_stall",
+            "description": "Skip terminal sentinel (stall) during scan \u2014 structural tolerance",
+            "pattern": {
+                "head": {
+                    "head": "_frozen",
+                    "tail": {
+                        "head": {
+                            "var": "frozen"
+                        },
+                        "tail": null
+                    }
+                },
+                "tail": {
+                    "head": {
+                        "head": "_mode",
+                        "tail": {
+                            "head": "exhaustion",
+                            "tail": null
+                        }
+                    },
+                    "tail": {
+                        "head": {
+                            "head": "_operator_ids",
+                            "tail": {
+                                "head": {
+                                    "var": "op_ids"
+                                },
+                                "tail": null
+                            }
+                        },
+                        "tail": {
+                            "head": {
+                                "head": "_phase",
+                                "tail": {
+                                    "head": "scan",
+                                    "tail": null
+                                }
+                            },
+                            "tail": {
+                                "head": {
+                                    "head": "_tau_operator",
+                                    "tail": {
+                                        "head": {
+                                            "var": "proj"
+                                        },
+                                        "tail": null
+                                    }
+                                },
+                                "tail": {
+                                    "head": {
+                                        "head": "_tau_step",
+                                        "tail": {
+                                            "head": {
+                                                "var": "tau_step"
+                                            },
+                                            "tail": null
+                                        }
+                                    },
+                                    "tail": {
+                                        "head": {
+                                            "head": "_trace",
+                                            "tail": {
+                                                "head": {
+                                                    "head": {
+                                                        "head": {
+                                                            "head": "projection",
+                                                            "tail": {
+                                                                "head": null,
+                                                                "tail": null
+                                                            }
+                                                        },
+                                                        "tail": {
+                                                            "head": {
+                                                                "head": "stall",
+                                                                "tail": {
+                                                                    "head": {
+                                                                        "var": "_stl"
+                                                                    },
+                                                                    "tail": null
+                                                                }
+                                                            },
+                                                            "tail": {
+                                                                "head": {
+                                                                    "head": "state",
+                                                                    "tail": {
+                                                                        "head": {
+                                                                            "var": "_s"
+                                                                        },
+                                                                        "tail": null
+                                                                    }
+                                                                },
+                                                                "tail": {
+                                                                    "head": {
+                                                                        "head": "step",
+                                                                        "tail": {
+                                                                            "head": {
+                                                                                "var": "_st"
+                                                                            },
+                                                                            "tail": null
+                                                                        }
+                                                                    },
+                                                                    "tail": null
+                                                                }
                                                             }
                                                         },
                                                         "_type": "dict"

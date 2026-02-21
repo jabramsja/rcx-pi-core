@@ -53,7 +53,7 @@ EXPECTED_COUNTS = {
     # mu/closures/ seeds
     "recurrence.v1.json": 9,   # closure detection
     "recurrence.v2.json": 9,   # hash-accelerated closure detection
-    "exhaustion.v1.json": 11,  # operator exhaustion
+    "exhaustion.v1.json": 13,  # operator exhaustion (v1.3.0: +2 sentinel-skip)
     "fix.v1.json": 6,          # structural fix (GAP-04-FIX, Rule 0.6) + idempotence guards
     # mu/programs/
     "rcx_engine.v1.json": 11,  # main program (+ fix dispatch + fix routing + trampoline loop)

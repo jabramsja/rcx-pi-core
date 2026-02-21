@@ -14,6 +14,9 @@ Anti-theater:
   4. Real re-entry proof: deterministic cycling input triggers exhaustion
      freeze path, producing boot1_depth >= 1 in BOTH substrates without mocks.
   5. Cross-substrate parity: Python and JS produce identical results.
+  6. Structural sentinel tolerance: exhaustion seed handles terminal
+     sentinels via scan_skip_sentinel_* projections — host has zero
+     exhaustion-specific branches.
 
 Usage:
     PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_boot1_structural_iteration_gate.py -v
@@ -543,9 +546,9 @@ class TestRealReentryProof:
 
 @pytest.mark.slow
 class TestRegressionLock:
-    """Guard against global trace stripping side effects.
+    """Guard against sentinel tolerance side effects.
 
-    The terminal sentinel stripping is exhaustion-targeted only.
+    Sentinel handling is structural (in the exhaustion seed, not host).
     Stall/closure cases with empty projections must behave identically
     to pre-fix behavior.
     """
@@ -626,4 +629,170 @@ class TestCrossSubstrateParity:
             f"Cross-substrate parity failure.\n"
             f"Python: {py_result}\n"
             f"JS: {js_result}"
+        )
+
+
+# =============================================================================
+# Structural sentinel tolerance locks (wave 5)
+# =============================================================================
+
+class TestExhaustionSeedSentinelTolerance:
+    """Prove exhaustion seed structurally handles terminal sentinels.
+
+    Wave 5 moved sentinel handling from host `if exhaustion.v1.json`
+    branches into the seed itself via scan_skip_sentinel_* projections.
+    These tests lock that structural property.
+    """
+
+    def _load_exhaustion_seed(self):
+        seed_path = REPO_ROOT / "mu" / "closures" / "exhaustion.v1.json"
+        with open(seed_path) as f:
+            return json.load(f)
+
+    def test_sentinel_skip_projections_exist(self):
+        """Exhaustion seed must contain both sentinel-skip projection IDs."""
+        seed = self._load_exhaustion_seed()
+        proj_ids = [p["id"] for p in seed["projections"]]
+        assert "exhaustion.scan_skip_sentinel_maxsteps" in proj_ids, (
+            "Missing exhaustion.scan_skip_sentinel_maxsteps in seed"
+        )
+        assert "exhaustion.scan_skip_sentinel_stall" in proj_ids, (
+            "Missing exhaustion.scan_skip_sentinel_stall in seed"
+        )
+
+    def test_sentinel_skip_ordering(self):
+        """Sentinel-skip projections must be between scan_same and scan_different."""
+        seed = self._load_exhaustion_seed()
+        proj_ids = [p["id"] for p in seed["projections"]]
+        idx_same = proj_ids.index("exhaustion.scan_same")
+        idx_maxsteps = proj_ids.index("exhaustion.scan_skip_sentinel_maxsteps")
+        idx_stall = proj_ids.index("exhaustion.scan_skip_sentinel_stall")
+        idx_different = proj_ids.index("exhaustion.scan_different")
+        assert idx_same < idx_maxsteps < idx_different, (
+            f"Ordering violation: scan_same({idx_same}) < "
+            f"scan_skip_sentinel_maxsteps({idx_maxsteps}) < "
+            f"scan_different({idx_different})"
+        )
+        assert idx_same < idx_stall < idx_different, (
+            f"Ordering violation: scan_same({idx_same}) < "
+            f"scan_skip_sentinel_stall({idx_stall}) < "
+            f"scan_different({idx_different})"
+        )
+
+    def test_sentinel_skip_patterns_match_null_projection(self):
+        """Sentinel-skip patterns must structurally match projection=null."""
+        seed = self._load_exhaustion_seed()
+        for proj in seed["projections"]:
+            if not proj["id"].startswith("exhaustion.scan_skip_sentinel_"):
+                continue
+            # Walk pattern to find _trace value, then trace head dict
+            pattern = proj["pattern"]
+            # Navigate linked list to find _trace key-value
+            node = pattern
+            trace_val = None
+            while node is not None and isinstance(node, dict) and "head" in node:
+                kv = node["head"]
+                if isinstance(kv, dict) and kv.get("head") == "_trace":
+                    trace_val = kv["tail"]["head"]  # value of _trace
+                    break
+                node = node.get("tail")
+            assert trace_val is not None, f"{proj['id']}: _trace not found in pattern"
+            # trace_val is cons cell: {head: <dict>, tail: {var: rest}}
+            trace_head = trace_val["head"]
+            assert trace_head.get("_type") == "dict", (
+                f"{proj['id']}: trace head is not a dict pattern"
+            )
+            # Find projection key in trace head dict and verify value is null
+            th_node = trace_head
+            found_null_proj = False
+            while th_node is not None and isinstance(th_node, dict) and "head" in th_node:
+                kv = th_node["head"]
+                if isinstance(kv, dict) and kv.get("head") == "projection":
+                    val = kv["tail"]["head"]
+                    assert val is None, (
+                        f"{proj['id']}: projection value must be null, got {val}"
+                    )
+                    found_null_proj = True
+                th_node = th_node.get("tail")
+            assert found_null_proj, f"{proj['id']}: no projection key in trace head"
+
+    def test_seed_version_bumped(self):
+        """Exhaustion seed version must be >= 1.3.0 (sentinel tolerance)."""
+        seed = self._load_exhaustion_seed()
+        version = seed["meta"]["version"]
+        major, minor, patch = (int(x) for x in version.split("."))
+        assert (major, minor) >= (1, 3), (
+            f"Exhaustion seed version must be >= 1.3.0, got {version}"
+        )
+
+
+class TestHostHasNoExhaustionBranch:
+    """Prove host runtime has zero exhaustion-specific branches.
+
+    Wave 5 removed all `if exhaustion.v1.json` conditionals from
+    boundary handlers.  These tests lock that absence.
+    """
+
+    def test_python_host_no_exhaustion_conditional(self):
+        """Python step_mu.py boundary handlers must not reference exhaustion.v1.json."""
+        source = _py_source()
+        # Extract both boundary handler sections
+        # Boot1: _run_engine_recursive
+        boot1_m = re.search(
+            r"(def _run_engine_recursive\b.*?)(?=\ndef [a-zA-Z_]|\Z)",
+            source, re.DOTALL,
+        )
+        assert boot1_m, "Could not find _run_engine_recursive"
+        # Trampoline: run_engine_pipeline (the main function)
+        tramp_m = re.search(
+            r"(def run_engine_pipeline\b.*?)(?=\ndef [a-zA-Z_]|\Z)",
+            source, re.DOTALL,
+        )
+        assert tramp_m, "Could not find run_engine_pipeline"
+
+        for name, body in [("_run_engine_recursive", boot1_m.group(1)),
+                           ("run_engine_pipeline", tramp_m.group(1))]:
+            matches = re.findall(r'exhaustion\.v1\.json', body)
+            assert len(matches) == 0, (
+                f"{name} still references 'exhaustion.v1.json' "
+                f"({len(matches)} occurrence(s)). Host must be algorithm-agnostic."
+            )
+
+    def test_js_host_no_exhaustion_conditional(self):
+        """JS eval_step.js boundary handlers must not reference exhaustion.v1.json."""
+        source = _js_source()
+        # Extract both boundary handler functions
+        # Trampoline: runEnginePipeline (the non-recursive path)
+        tramp_m = re.search(
+            r"(function runEnginePipeline\b.*?)(?=\nfunction\s|\Z)",
+            source, re.DOTALL,
+        )
+        assert tramp_m, "Could not find runEnginePipeline"
+        # Boot1: runEnginePipelineRecursive
+        boot1_m = re.search(
+            r"(function runEnginePipelineRecursive\b.*?)(?=\nfunction\s|\Z)",
+            source, re.DOTALL,
+        )
+        assert boot1_m, "Could not find runEnginePipelineRecursive"
+
+        for name, body in [("runEnginePipeline", tramp_m.group(1)),
+                           ("runEnginePipelineRecursive", boot1_m.group(1))]:
+            matches = re.findall(r'exhaustion\.v1\.json', body)
+            assert len(matches) == 0, (
+                f"{name} still references 'exhaustion.v1.json' "
+                f"({len(matches)} occurrence(s)). Host must be algorithm-agnostic."
+            )
+
+    def test_python_no_strip_sentinel_helper(self):
+        """Python must not contain _strip_trace_terminal_sentinel."""
+        source = _py_source()
+        assert "_strip_trace_terminal_sentinel" not in source, (
+            "Dead helper _strip_trace_terminal_sentinel still in step_mu.py"
+        )
+
+    def test_js_no_strip_sentinel_helper(self):
+        """JS must not contain stripTraceTerminalSentinel."""
+        source = _js_source()
+        assert "stripTraceTerminalSentinel" not in source, (
+            "Dead helper stripTraceTerminalSentinel still in eval_step.js"
         )

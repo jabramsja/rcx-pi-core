@@ -100,7 +100,7 @@ class TestExhaustionStructure:
     def test_projections_are_valid_mu(self, exhaust_projections):
         """All projections must be valid Mu (JSON-compatible)."""
         # If we got here, seed loaded and validated
-        assert len(exhaust_projections) == 11, f"Expected 11 projections, got {len(exhaust_projections)}"
+        assert len(exhaust_projections) == 13, f"Expected 13 projections, got {len(exhaust_projections)}"
 
     def test_no_python_sets_in_frozen(self, exhaust_projections, exhaustion_vectors):
         """Frozen must be JSON-compatible list, not Python set."""
@@ -247,8 +247,8 @@ class TestCrossSubstrateExhaustion:
             if line.startswith('JSON_API_RESPONSE:'):
                 response = json.loads(line[len('JSON_API_RESPONSE:'):])
                 assert response.get("success"), f"API failed: {response}"
-                assert response.get("exhaustion_projection_count") == 11, \
-                    f"Expected 11 exhaustion projections, got {response.get('exhaustion_projection_count')}"
+                assert response.get("exhaustion_projection_count") == 13, \
+                    f"Expected 13 exhaustion projections, got {response.get('exhaustion_projection_count')}"
                 return
 
         pytest.fail("No JSON_API_RESPONSE found")

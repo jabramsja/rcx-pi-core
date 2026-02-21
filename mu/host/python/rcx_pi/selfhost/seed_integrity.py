@@ -57,7 +57,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
     # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
     # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
-    "exhaustion.v1.json": "2497881e19015db553a834c9d1f287c7774c2607effc224ed460b4b8051dffe0",
+    # v1.3.0: sentinel-skip projections (scan_skip_sentinel_maxsteps/stall) — structural tolerance
+    "exhaustion.v1.json": "8489398b8264dd547b231f67c98543bba1d6d45a24bb5504039395a24eb068d3",
     # RCX Engine: structural specification for pipeline orchestration (7 projections)
     # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
     "rcx_engine.v1.json": "1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f",
@@ -179,6 +180,8 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "exhaustion.find_continue",    # Not at tau_step yet, advance
         "exhaustion.find_not_found",   # End of trace without finding tau
         "exhaustion.scan_same",        # Same operator (non-linear), continue
+        "exhaustion.scan_skip_sentinel_maxsteps",  # Skip terminal sentinel (max_steps)
+        "exhaustion.scan_skip_sentinel_stall",     # Skip terminal sentinel (stall)
         "exhaustion.scan_different",   # Different operator -> not exhausted
         "exhaustion.scan_end",         # End of trace, all same -> check frozen
         "exhaustion.frozen_found",     # Operator in frozen list (non-linear)

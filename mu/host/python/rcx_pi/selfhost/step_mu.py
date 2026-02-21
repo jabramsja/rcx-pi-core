@@ -160,12 +160,16 @@ ALGORITHM_INTERNAL_UNRESERVED_FIELDS = frozenset({  # AST_OK: security policy al
     "_closure",
     "_frozen_check",
     "_head",
+    "_m",         # sentinel-skip: max_steps value (exhaustion.v1.json v1.3.0)
     "_maxsteps",
     "_op_ids",
     "_operator",
     "_other",
     "_rest",
+    "_s",         # sentinel-skip: state value (exhaustion.v1.json v1.3.0)
+    "_st",        # sentinel-skip: step value (exhaustion.v1.json v1.3.0)
     "_state",
+    "_stl",       # sentinel-skip: stall value (exhaustion.v1.json v1.3.0)
     "_tau_op",
     "_tau_operator",
     "_trace",
@@ -1369,36 +1373,6 @@ def _is_engine_terminal(value: Mu) -> bool:  # AST_OK: infra — engine terminal
     return frozenset(value.keys()) == _ENGINE_TERMINAL_KEYS  # AST_OK: key — engine terminal comparison
 
 
-def _strip_trace_terminal_sentinel(trace: Mu) -> Mu:
-    """Remove trailing terminal sentinel from a linked-list trace.
-
-    run_mu_structural appends a sentinel entry with projection=None
-    (plus stall=True or max_steps=True) at trace end.  The exhaustion
-    algorithm's non-linear scan requires projection equality; a None
-    projection causes scan_different to fire, aborting the freeze path.
-
-    Only strips entries where projection is None AND a terminal marker
-    (stall or max_steps) is present — normal entries are never touched.
-    Applied only to exhaustion input, not globally.
-
-    Iterative implementation: collects non-sentinel entries, rebuilds
-    the linked list tail-first.  Avoids host stack depth risk on long traces.
-    """
-    # Collect non-sentinel entries in order
-    kept: list[Mu] = []
-    node = trace
-    while node is not None:
-        head = node["head"]
-        if not (head.get("projection") is None
-                and ("stall" in head or "max_steps" in head)):
-            kept.append(head)
-        node = node.get("tail")
-    # Rebuild linked list tail-first
-    result: Mu = None
-    for entry in reversed(kept):
-        result = {"head": entry, "tail": result}
-    return result
-
 
 def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:  # AST_OK: infra — boundary sub-algorithm runner
     """Run a sub-algorithm (recurrence/exhaustion) to completion.
@@ -1557,16 +1531,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 elif operation == "run_algorithm":
                     algo_name = request["algorithm"]
                     algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
-                    algo_input = req_input
-                    # Exhaustion-targeted: strip terminal sentinel from trace
-                    # so non-linear scan sees only real projection entries.
-                    if (algo_name == "exhaustion.v1.json"
-                            and isinstance(req_input, dict)
-                            and "_detect_exhaustion" in req_input):
-                        inner = dict(req_input["_detect_exhaustion"])
-                        inner["trace"] = _strip_trace_terminal_sentinel(inner.get("trace"))
-                        algo_input = {"_detect_exhaustion": inner}
-                    result = _run_sub_algorithm(algo_projs, algo_input, max_algorithm_iterations)
+                    result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
                 else:
                     _emit("fail_closed", iteration, state, error_code="api.bad_request")
                     raise ValueError(f"Unknown boundary operation: {operation}")
@@ -1774,16 +1739,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
             elif operation == "run_algorithm":
                 algo_name = request["algorithm"]
                 algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
-                algo_input = req_input
-                # Exhaustion-targeted: strip terminal sentinel from trace
-                # so non-linear scan sees only real projection entries.
-                if (algo_name == "exhaustion.v1.json"
-                        and isinstance(req_input, dict)
-                        and "_detect_exhaustion" in req_input):
-                    inner = dict(req_input["_detect_exhaustion"])
-                    inner["trace"] = _strip_trace_terminal_sentinel(inner.get("trace"))
-                    algo_input = {"_detect_exhaustion": inner}
-                result = _run_sub_algorithm(algo_projs, algo_input, max_algorithm_iterations)
+                result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
             else:
                 _emit("fail_closed", iteration, state, error_code="api.bad_request")
                 raise ValueError(f"Unknown boundary operation: {operation}")
