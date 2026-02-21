@@ -1699,6 +1699,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     # Internal functions and 8-key terminal shape are unchanged.
     if return_meta:
         meta_observer = observer if observer is not None else []
+        baseline = sum(1 for e in meta_observer if e.get("event_name") == "step_boundary")
         if use_boot1_recursive:
             engine_result = _run_engine_recursive(
                 projections, input_value,
@@ -1717,7 +1718,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
                 use_boot1_recursive=False,
                 return_meta=False,
             )
-        iterations_used = sum(1 for e in meta_observer if e.get("event_name") == "step_boundary")
+        iterations_used = sum(1 for e in meta_observer if e.get("event_name") == "step_boundary") - baseline
         return {
             "engine_result": engine_result,
             "engine_exit_reason": _derive_engine_exit_reason(engine_result),
