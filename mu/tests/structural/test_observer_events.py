@@ -34,6 +34,7 @@ VALID_EVENT_NAMES = frozenset({
     "stall_detected",
     "closure_detected",
     "fail_closed",
+    "engine_terminal",
 })
 
 VALID_SUBSTRATES = frozenset({"python", "js"})
@@ -104,7 +105,7 @@ class TestObserverEventSchema:
 
     def test_success_events_have_null_error_code(self):
         """Non-failure events must have null error_code."""
-        for name in ("step_boundary", "stall_detected", "closure_detected"):
+        for name in ("step_boundary", "stall_detected", "closure_detected", "engine_terminal"):
             event = _make_event(event_name=name, error_code=None)
             assert event["error_code"] is None
 

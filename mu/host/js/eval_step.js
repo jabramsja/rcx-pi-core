@@ -1969,18 +1969,20 @@ function runEnginePipeline(projections, inputValue, options) {
 
   // Observer event helper — no-op when observer is null
   let obsTs = 0;
-  function emit(eventName, stepNum, stateVal, errorCode) {
+  function emit(eventName, stepNum, stateVal, errorCode, extra) {
     if (observer === null) return;
     let stateHash = null;
     try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
-    observer.push({
+    const event = {
       event_name: eventName,
       step: stepNum,
       state_hash: stateHash,
       error_code: errorCode ?? null,
       substrate: 'js',
       timestamp: obsTs,
-    });
+    };
+    if (extra) Object.assign(event, extra);
+    observer.push(event);
     obsTs++;
   }
 
@@ -2008,6 +2010,10 @@ function runEnginePipeline(projections, inputValue, options) {
           if (state.closure_detected) emit('closure_detected', iteration, state);
           if (state.stall) emit('stall_detected', iteration, state);
         }
+        emit('engine_terminal', iteration, state, null, {
+          engine_exit_reason: deriveEngineExitReason(state),
+          engine_iterations_used: iteration + 1,
+        });
         return state;
       }
       emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
@@ -2078,6 +2084,10 @@ function runEnginePipeline(projections, inputValue, options) {
         if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
         if (nextState.stall) emit('stall_detected', iteration, nextState);
       }
+      emit('engine_terminal', iteration, nextState, null, {
+        engine_exit_reason: deriveEngineExitReason(nextState),
+        engine_iterations_used: iteration + 1,
+      });
       return nextState;
     }
 
@@ -2127,11 +2137,12 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
 
   // Observer event helper — uses mutable depth counter, resets ts per re-entry
   let obsTs = 0;
-  const emit = function(eventName, stepNum, stateVal, errorCode) {
+  let totalIterations = 0;
+  const emit = function(eventName, stepNum, stateVal, errorCode, extra) {
     if (observer === null) return;
     let stateHash = null;
     try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
-    observer.push({
+    const event = {
       event_name: eventName,
       step: stepNum,
       state_hash: stateHash,
@@ -2139,7 +2150,9 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
       substrate: 'js',
       timestamp: obsTs,
       boot1_depth: depth,
-    });
+    };
+    if (extra) Object.assign(event, extra);
+    observer.push(event);
     obsTs++;
   };
 
@@ -2177,6 +2190,7 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
       const nextState = step(engineProjections, state);
 
       emit('step_boundary', iteration, state);
+      totalIterations++;
 
       // Engine stalled
       if (nextState === state) {
@@ -2185,6 +2199,10 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
             if (state.closure_detected) emit('closure_detected', iteration, state);
             if (state.stall) emit('stall_detected', iteration, state);
           }
+          emit('engine_terminal', iteration, state, null, {
+            engine_exit_reason: deriveEngineExitReason(state),
+            engine_iterations_used: totalIterations,
+          });
           return state;
         }
         emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
@@ -2267,6 +2285,10 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
           if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
           if (nextState.stall) emit('stall_detected', iteration, nextState);
         }
+        emit('engine_terminal', iteration, nextState, null, {
+          engine_exit_reason: deriveEngineExitReason(nextState),
+          engine_iterations_used: totalIterations,
+        });
         return nextState;
       }
 

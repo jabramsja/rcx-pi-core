@@ -26,7 +26,7 @@ N6b = cross-substrate isomorphic stream comparison (out of scope, deferred).
 
 ## Event Schema (v0)
 
-Every observer event is a JSON-compatible dict with exactly these required fields:
+Every observer event is a JSON-compatible dict with these 6 base required fields; some events carry additional event-specific fields (see Mandatory Event Points below):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -76,6 +76,7 @@ This ensures `sha256(canonical_json(event))` produces identical hashes on both s
 | `stall_detected` | When the engine detects a stall (no progress) | null (stall is a signal, not an error) |
 | `closure_detected` | When recurrence detection finds a closure | null |
 | `fail_closed` | When a fail-closed guard triggers (bad shape, cycle, etc.) | required (from error taxonomy) |
+| `engine_terminal` | Exactly once per successful engine pipeline termination | null |
 
 ### Event Point Semantics
 
@@ -83,6 +84,7 @@ This ensures `sha256(canonical_json(event))` produces identical hashes on both s
 - **`stall_detected`**: Emitted when `run_engine_pipeline` detects that the engine has stalled (non-terminal state with no progress). `state_hash` reflects the stalled state.
 - **`closure_detected`**: Emitted when recurrence detection sets `closure_detected=true`. `state_hash` reflects the state at closure.
 - **`fail_closed`**: Emitted when any fail-closed validation rejects input. `error_code` is mandatory and must match the existing dotted error taxonomy (e.g. `input.shape_mismatch`, `trace.cycle_detected`).
+- **`engine_terminal`**: Emitted exactly once per successful engine pipeline termination, immediately before `return`. Carries two extra fields beyond the base schema: `engine_exit_reason` (string from `ENGINE_EXIT_REASONS`: closure, exhaustion, stall, completed) and `engine_iterations_used` (integer, total engine steps across all re-entry passes). Never emitted on error paths (`engine.exhausted`, `engine.stalled_non_terminal`).
 
 ## Parity Intent
 
