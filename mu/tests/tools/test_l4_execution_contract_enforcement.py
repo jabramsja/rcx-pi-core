@@ -26,6 +26,7 @@ from enforce_l4_execution_contract import (
     RUNTIME_DIRS,
     VALID_WAVE_CLASSES,
     enforce,
+    filter_to_tracked_files,
     has_non_comment_runtime_delta,
     is_comment_line,
     is_runtime_file,
@@ -707,3 +708,118 @@ class TestEmptyScopePolicy:
         )
         assert result.returncode == 0
         assert "skipping enforcement" in result.stdout.lower()
+
+
+# =============================================================================
+# Scope policy: untracked files must never false-positive
+# =============================================================================
+
+
+class TestScopePolicy:
+    """Verify scope policy: untracked files are excluded from checker scope."""
+
+    def test_filter_to_tracked_files_strips_untracked(self) -> None:
+        """filter_to_tracked_files removes files not tracked by git."""
+        # README.md is always tracked; a random name is not
+        result = filter_to_tracked_files(["README.md", "nonexistent_untracked_xyz.py"])
+        assert "README.md" in result
+        assert "nonexistent_untracked_xyz.py" not in result
+
+    def test_filter_to_tracked_files_empty_input(self) -> None:
+        """Empty input returns empty output."""
+        assert filter_to_tracked_files([]) == []
+
+    def test_filter_to_tracked_files_all_tracked(self) -> None:
+        """All-tracked input passes through unchanged."""
+        tracked = ["README.md", "STATUS.md"]
+        result = filter_to_tracked_files(tracked)
+        assert result == tracked
+
+    def test_files_mode_strips_untracked_via_cli(self) -> None:
+        """--files with an untracked path strips it from scope.
+
+        Note: overall pass/fail may depend on TASKS.md anti-stagnation state.
+        The scope invariant is that untracked files are stripped (Stripping msg).
+        """
+        import subprocess
+        result = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py",
+             "--files", "README.md", "nonexistent_untracked_xyz.py"],
+            capture_output=True, text=True,
+        )
+        assert "Stripping" in result.stdout
+        assert "Changed files: 1" in result.stdout
+
+    def test_range_mode_ignores_untracked(self) -> None:
+        """--range uses only committed changes (untracked files cannot appear).
+
+        We only check that the filter_to_tracked_files stripping message never
+        appears — range mode uses git diff, not --files, so the filter is
+        never invoked. The overall pass/fail depends on TASKS.md state which
+        is not relevant to this scope policy test.
+        """
+        import subprocess
+        result = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py",
+             "--range", "HEAD~1...HEAD"],
+            capture_output=True, text=True,
+        )
+        # Range mode only sees committed files — untracked stripping never fires
+        assert "Stripping" not in result.stdout
+
+    def test_staged_mode_ignores_untracked(self) -> None:
+        """--staged uses only staged tracked files (untracked never enter scope)."""
+        import subprocess
+        subprocess.run(["git", "reset", "HEAD", "--quiet"], capture_output=True)
+        result = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py",
+             "--staged"],
+            capture_output=True, text=True,
+        )
+        # Staged mode only sees git diff --cached — untracked never enter scope
+        assert result.returncode == 0
+        assert "Stripping" not in result.stdout
+
+    def test_files_all_untracked_with_wave_id_fails(self) -> None:
+        """--files with only untracked files + --wave-id => FAIL (exit 1).
+
+        This is the P1 loophole: filter_to_tracked_files() empties the list,
+        but the old guard `not args.files` was truthy, skipping fail-closed.
+        """
+        import subprocess
+        result = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py",
+             "--files", "nonexistent_untracked_xyz.py",
+             "--wave-id", "test-wave",
+             "--wave-class", "MAINTENANCE"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        assert "Cannot verify wave against empty change set" in result.stdout
+
+    def test_files_all_untracked_no_wave_id_skips(self) -> None:
+        """--files with only untracked files + no wave-id => non-blocking skip."""
+        import subprocess
+        result = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py",
+             "--files", "nonexistent_untracked_xyz.py"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "skipping enforcement" in result.stdout.lower()
+
+    def test_files_mixed_tracked_untracked_enforces_tracked(self) -> None:
+        """--files with mixed tracked+untracked => tracked subset enforced.
+
+        Note: overall pass/fail may depend on TASKS.md anti-stagnation state.
+        The scope invariant is that untracked files are stripped and tracked
+        files proceed to enforcement (Changed files: 1, not 0 or 2).
+        """
+        import subprocess
+        result = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py",
+             "--files", "README.md", "nonexistent_untracked_xyz.py"],
+            capture_output=True, text=True,
+        )
+        assert "Stripping" in result.stdout
+        assert "Changed files: 1" in result.stdout

@@ -135,14 +135,32 @@ fi
 if git diff --cached --name-only | grep -q .; then
     python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
 else
-    # No staged files — check dirty tracked + untracked files
-    L4_DIRTY_FILES=$( (git diff --name-only; git ls-files --others --exclude-standard) | sort -u )
-    if [ -n "$L4_DIRTY_FILES" ]; then
-        echo "No staged files — checking dirty tracked + untracked files"
-        # shellcheck disable=SC2086
-        python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
+    # No staged files — use committed range (matches pre-push-fast logic).
+    # NEVER include untracked files — they are not part of any wave scope.
+    L4_RANGE=""
+    if git rev-parse --verify --quiet "@{upstream}" >/dev/null 2>&1; then
+        L4_RANGE="@{upstream}...HEAD"
+    elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+        L4_RANGE="origin/dev...HEAD"
+    fi
+    if [ -n "$L4_RANGE" ]; then
+        L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
+        if [ -n "$L4_RANGE_FILES" ]; then
+            echo "No staged files — using committed range $L4_RANGE"
+            python3 tools/checks/enforce_l4_execution_contract.py --range "$L4_RANGE" $L4_WAVE_ID_FLAG
+        else
+            echo "No staged files, no committed changes in $L4_RANGE — skipping L4 check"
+        fi
     else
-        echo "No staged or dirty tracked files — nothing to check"
+        # No upstream — check dirty tracked files only (NO untracked)
+        L4_DIRTY_FILES="$(git diff --name-only | sort -u)"
+        if [ -n "$L4_DIRTY_FILES" ]; then
+            echo "No staged files, no upstream — checking dirty tracked files only"
+            # shellcheck disable=SC2086
+            python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
+        else
+            echo "No staged or dirty tracked files — skipping L4 check"
+        fi
     fi
 fi
 
