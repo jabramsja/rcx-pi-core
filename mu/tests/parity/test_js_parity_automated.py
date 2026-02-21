@@ -2673,11 +2673,19 @@ class TestObserverIsomorphism:
             "observer": True,
             "boot1LoopMode": False,  # match Python's use_boot1_recursive=False above
         })
+        from rcx_pi.selfhost.step_mu import ENGINE_EXIT_REASONS
         for event in js_resp.get("observer_events", []):
             keys = set(event.keys())
             if event["event_name"] == "engine_terminal":
                 assert keys == base_fields | terminal_extra_fields, (
                     f"JS engine_terminal event has wrong fields: {keys}"
+                )
+                # Value validation (not just presence)
+                assert event["engine_exit_reason"] in ENGINE_EXIT_REASONS, (
+                    f"JS engine_exit_reason {event['engine_exit_reason']!r} not in {ENGINE_EXIT_REASONS}"
+                )
+                assert isinstance(event["engine_iterations_used"], int) and event["engine_iterations_used"] > 0, (
+                    f"JS engine_iterations_used must be int > 0, got {event['engine_iterations_used']}"
                 )
             else:
                 assert keys == base_fields, (

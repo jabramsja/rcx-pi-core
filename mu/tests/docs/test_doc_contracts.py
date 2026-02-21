@@ -187,6 +187,17 @@ DOC_CONTRACTS: dict[str, dict[str, Any]] = {
             "kernel.v1.json": 7,
         },
     },
+
+    # =========================================================================
+    # ObserverEventContract.v0.md - Observer event schema and event names
+    # =========================================================================
+    "ObserverEventContract.v0.md": {
+        "functions": [],
+        "constants": {
+            "rcx_pi.selfhost.step_mu.ENGINE_EXIT_REASONS": 4,  # 4 exit reasons (closure, exhaustion, stall, completed)
+        },
+        "seeds": {},
+    },
 }
 
 

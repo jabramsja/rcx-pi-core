@@ -37,6 +37,16 @@ Every observer event is a JSON-compatible dict with these 6 base required fields
 | `substrate` | string | `"python"` or `"js"` — which substrate emitted the event |
 | `timestamp` | integer ≥ 0 | Logical clock value (NOT wall-clock); monotonically increasing per substrate per run |
 
+### Event-Specific Extension Fields
+
+Some events carry additional fields beyond the 6 base fields:
+
+| Field | Event | Type | Description |
+|-------|-------|------|-------------|
+| `engine_exit_reason` | `engine_terminal` | string | Exit reason from `ENGINE_EXIT_REASONS`: closure, exhaustion, stall, completed |
+| `engine_iterations_used` | `engine_terminal` | integer > 0 | Total engine steps across all re-entry passes |
+| `boot1_depth` | *(Boot1 path only)* | integer ≥ 0 | Re-entry depth counter; present on ALL events from Boot1 recursive path, absent on trampoline path |
+
 ### Field Invariants
 
 1. `event_name` must be one of the registered event names (see Mandatory Event Points below).
@@ -45,6 +55,7 @@ Every observer event is a JSON-compatible dict with these 6 base required fields
 4. `error_code` must be null on success events. On failure events, it must be a dotted code from the existing error taxonomy.
 5. `substrate` must be `"python"` or `"js"`. No other values.
 6. `timestamp` is a logical counter, not wall-clock. Starts at 0 per run, increments by 1 per event emitted on that substrate.
+7. `boot1_depth` is present on all Boot1 recursive path events and absent on trampoline path events.
 
 ## Event Ordering and Canonicalization
 
