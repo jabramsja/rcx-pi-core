@@ -735,14 +735,17 @@ def step_kernel_mu(
         validation_mode: `domain` uses reserved-field protection for untrusted
             domain inputs. `algorithm_runtime` allows trusted algorithm state
             with strict underscore allowlisting.
-        return_meta: When True, returns metadata payload
-            `{\"output\": <Mu>, \"stall\": <bool>}`.
+        return_meta: When True, returns metadata payload with fields:
+            `output` (Mu), `stall` (bool), `termination_reason` (str),
+            `steps_used` (int), `max_steps` (int).
+            Reason enum: projection_applied, kernel_stall, hash_stall,
+            max_steps_exhausted.
         max_steps: Maximum kernel iteration steps. Default 10000.
             For single-projection calls (e.g. apply_mu), 500 is sufficient.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
-        If `return_meta=True`, returns a metadata dict with `output` and `stall`.
+        If `return_meta=True`, returns a metadata dict with termination details.
 
     Raises:
         ValueError: If kernel projections appear after domain projections (security).
@@ -839,19 +842,24 @@ def step_kernel_mu(
 
     # Phase 8b: Simplified mechanical loop - no semantic decisions inside
     try:
-        for _ in range(max_steps):
+        for step_i in range(max_steps):
             # Account for kernel-driver work in the shared global budget.
             budget.consume(1)
             result = _step_trusted(kernel_projs, current)
 
             # Terminal state check - simple structural marker detection
             if is_kernel_terminal(result):
+                is_stall = result.get("_stall") is True
                 output = extract_kernel_result(result, input_value)
                 validator(output, "step_kernel_mu output")
                 if return_meta:
+                    reason = "kernel_stall" if is_stall else "projection_applied"
                     return {
                         "output": output,
-                        "stall": bool(result.get("_stall") is True),
+                        "stall": bool(is_stall),
+                        "termination_reason": reason,
+                        "steps_used": step_i + 1,
+                        "max_steps": max_steps,
                     }
                 return output
 
@@ -863,7 +871,13 @@ def step_kernel_mu(
                 if result_hash == current_hash:
                     validator(input_value, "step_kernel_mu output")
                     if return_meta:
-                        return {"output": input_value, "stall": True}
+                        return {
+                            "output": input_value,
+                            "stall": True,
+                            "termination_reason": "hash_stall",
+                            "steps_used": step_i + 1,
+                            "max_steps": max_steps,
+                        }
                     return input_value
                 current_hash = result_hash
 
@@ -872,7 +886,13 @@ def step_kernel_mu(
         # Max steps exceeded - return original input (stall)
         validator(input_value, "step_kernel_mu output")
         if return_meta:
-            return {"output": input_value, "stall": True}
+            return {
+                "output": input_value,
+                "stall": True,
+                "termination_reason": "max_steps_exhausted",
+                "steps_used": max_steps,
+                "max_steps": max_steps,
+            }
         return input_value
     finally:
         if started_budget:

@@ -1317,13 +1317,14 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       // Check for kernel terminal state BEFORE unwrap
       if (isKernelTerminal(result)) {
         const stall = result._stall === true;
+        const reason = stall ? 'kernel_stall' : 'projection_applied';
         if (stall) {
           validator(domainInput, 'stepKernel output');
-          return { output: domainInput, stall: true };
+          return { output: domainInput, stall: true, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
         }
         const output = denormalize(result._result);
         validator(output, 'stepKernel output');
-        return { output, stall: false };
+        return { output, stall: false, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
       }
 
       // Stall check: no change means no progress.
@@ -1333,7 +1334,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
         const resultHash = muHashCached(result);
         if (resultHash === currentHash) {
           validator(domainInput, 'stepKernel output');
-          return { output: domainInput, stall: true };
+          return { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
         }
         currentHash = resultHash;
       }
@@ -1342,7 +1343,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     }
     // Max steps exceeded — stall
     validator(domainInput, 'stepKernel output');
-    return { output: domainInput, stall: true };
+    return { output: domainInput, stall: true, termination_reason: 'max_steps_exhausted', steps_used: maxSteps, max_steps: maxSteps };
   }
 
   // Non-meta mode: run() with isKernelIntermediate stall-skip.
@@ -3641,6 +3642,24 @@ if (process.argv.includes('--json-api')) {
         if (observerEvents) response.observer_events = observerEvents;
       }
       } // close boot1LoopMode type guard else
+    } else if (request.action === 'step_kernel_meta') {
+      // Run stepKernel with returnMeta=true for cross-substrate parity testing.
+      // Returns termination_reason, steps_used, max_steps, output, stall.
+      const { input, projections: domainProjs, maxSteps: reqMaxSteps, kernelMode } = request;
+      guardMaxSteps(reqMaxSteps, 'maxSteps');
+      try {
+        const kernelProjs = (kernelMode === 'bridge')
+          ? allProjectionsWithBridge
+          : allProjections;
+        const meta = stepKernel(kernelProjs, input, domainProjs ?? [], {
+          maxSteps: reqMaxSteps ?? 100,
+          returnMeta: true,
+          validationMode: 'domain',
+        });
+        response = { success: true, result: meta };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
     } else if (request.action === 'step_metabolization') {
       // Run step(metabolizationProjections, input) for cross-substrate parity testing.
       // Returns first-match-wins result or input unchanged (stall).
@@ -3661,7 +3680,7 @@ if (process.argv.includes('--json-api')) {
           'validate_reserved_fields', 'validate_algorithm_runtime_fields',
           'run_structural_trace', 'run_hemisphere', 'run_engine_pipeline',
           'hash_trace', 'run_hemisphere_routing', 'run_engine_with_routing',
-          'step_metabolization', 'list_actions'
+          'step_metabolization', 'step_kernel_meta', 'list_actions'
         ]
       };
     } else {
