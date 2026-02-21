@@ -1870,6 +1870,19 @@ function isEngineTerminal(value) {
 }
 
 /**
+ * Derive engine_exit_reason from the existing 8-key terminal dict.
+ * Priority: closure > exhaustion > stall > completed.
+ * Pure function — does NOT modify engine_result.
+ * Mirrors Python _derive_engine_exit_reason().
+ */
+function deriveEngineExitReason(engineResult) {
+  if (engineResult.closure_detected) return 'closure';
+  if (engineResult.exhaustion_detected) return 'exhaustion';
+  if (engineResult.stall) return 'stall';
+  return 'completed';
+}
+
+/**
  * Run a sub-algorithm (recurrence/exhaustion) to completion.
  * Mirrors Python _run_sub_algorithm() (step_mu.py:1404).
  * AST_OK: infra — boundary sub-algorithm runner
@@ -3660,6 +3673,42 @@ if (process.argv.includes('--json-api')) {
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
       }
+    } else if (request.action === 'run_engine_pipeline_meta') {
+      // Run engine pipeline with meta envelope for cross-substrate parity testing.
+      // Returns engine_result (8-key dict), engine_exit_reason, engine_iterations_used, max_engine_iterations.
+      const { projections: userProjs, input, maxSteps, frozen, maxEngineIterations: reqMaxEngineIter, maxAlgorithmIterations } = request;
+      if (request.boot1LoopMode != null && typeof request.boot1LoopMode !== 'boolean') {
+        response = { success: false, error_code: 'type_error', error: 'boot1LoopMode must be boolean if provided, got ' + typeof request.boot1LoopMode };
+      } else {
+      const boot1Mode = request.boot1LoopMode ?? true;
+      const metaObserver = [];
+      const maxEngIter = reqMaxEngineIter ?? 20;
+      try {
+        guardMaxSteps(maxSteps, 'maxSteps');
+        const opts = {
+          maxSteps: maxSteps ?? 100,
+          frozen: frozen ?? null,
+          maxEngineIterations: maxEngIter,
+          maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
+          observer: metaObserver,
+        };
+        const engineResult = boot1Mode
+          ? runEnginePipelineRecursive(userProjs ?? [], input, opts)
+          : runEnginePipeline(userProjs ?? [], input, opts);
+        const iterationsUsed = metaObserver.filter(e => e.event_name === 'step_boundary').length;
+        response = {
+          success: true,
+          result: {
+            engine_result: engineResult,
+            engine_exit_reason: deriveEngineExitReason(engineResult),
+            engine_iterations_used: iterationsUsed,
+            max_engine_iterations: maxEngIter,
+          },
+        };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
+      } // close boot1LoopMode type guard else
     } else if (request.action === 'step_metabolization') {
       // Run step(metabolizationProjections, input) for cross-substrate parity testing.
       // Returns first-match-wins result or input unchanged (stall).
@@ -3680,7 +3729,7 @@ if (process.argv.includes('--json-api')) {
           'validate_reserved_fields', 'validate_algorithm_runtime_fields',
           'run_structural_trace', 'run_hemisphere', 'run_engine_pipeline',
           'hash_trace', 'run_hemisphere_routing', 'run_engine_with_routing',
-          'step_metabolization', 'step_kernel_meta', 'list_actions'
+          'step_metabolization', 'step_kernel_meta', 'run_engine_pipeline_meta', 'list_actions'
         ]
       };
     } else {

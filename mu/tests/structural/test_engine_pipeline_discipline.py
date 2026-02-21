@@ -43,6 +43,7 @@ _JS_PATH = _REPO / "mu" / "host" / "js" / "eval_step.js"
 # (it does NOT call run_engine_pipeline), so it's not in this set.
 KNOWN_PIPELINE_CALLERS = {
     "run_engine_with_routing",    # Chains pipeline → hemisphere routing
+    "run_engine_pipeline",        # Self-call: trampoline meta path (return_meta=True)
 }
 
 
@@ -76,8 +77,8 @@ class TestPipelineCallsiteInventory:
         """Exact caller count as documentation."""
         source = _STEP_MU_PATH.read_text()
         actual = _find_callers(source, "run_engine_pipeline")
-        assert len(actual) == 1, (
-            f"Expected 1 caller, found {len(actual)}: {actual}"
+        assert len(actual) == 2, (
+            f"Expected 2 callers, found {len(actual)}: {actual}"
         )
 
 
@@ -601,7 +602,7 @@ class TestRunMuStructuralCallsiteInventory:
 
 # ── JS JSON API action list parity ────────────────────────────────────────
 
-# Expected JS JSON API actions (20 total, extracted from dispatch branches)
+# Expected JS JSON API actions (21 total, extracted from dispatch branches)
 EXPECTED_JS_ACTIONS = {
     "run_vector", "run_all_vectors", "run_recurrence", "run_exhaustion",
     "get_constants", "normalize_roundtrip", "validate_mu",
@@ -609,7 +610,8 @@ EXPECTED_JS_ACTIONS = {
     "validate_reserved_fields", "validate_algorithm_runtime_fields",
     "run_structural_trace", "run_hemisphere", "run_engine_pipeline",
     "hash_trace", "run_hemisphere_routing", "run_engine_with_routing",
-    "step_metabolization", "step_kernel_meta", "list_actions",
+    "step_metabolization", "step_kernel_meta", "run_engine_pipeline_meta",
+    "list_actions",
 }
 
 
@@ -631,11 +633,11 @@ class TestJsActionListParity:
     """JS JSON API action dispatch must be self-consistent and locked."""
 
     def test_action_count_locked(self):
-        """JS must have exactly 20 JSON API actions."""
+        """JS must have exactly 21 JSON API actions."""
         source = _JS_PATH.read_text()
         actual = _extract_js_dispatch_actions(source)
-        assert len(actual) == 20, (
-            f"Expected 20 JS actions, found {len(actual)}: {sorted(actual)}"
+        assert len(actual) == 21, (
+            f"Expected 21 JS actions, found {len(actual)}: {sorted(actual)}"
         )
 
     def test_dispatch_matches_list_actions(self):
