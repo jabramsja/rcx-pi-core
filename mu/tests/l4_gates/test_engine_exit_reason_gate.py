@@ -198,6 +198,41 @@ class TestPythonEngineExitReason:
                 max_algorithm_iterations=50, return_meta=True,
             )
 
+    def test_prepopulated_observer_does_not_inflate_iterations(self):
+        """Pre-populated observer must not inflate engine_iterations_used.
+
+        Regression: if caller passes an observer with prior step_boundary events,
+        the delta-based count must exclude them.
+        """
+        reset_step_budget()
+        # Seed observer with prior step_boundary events (simulating a previous run)
+        prior_observer = [
+            {"event_name": "step_boundary", "iteration": 0},
+            {"event_name": "step_boundary", "iteration": 1},
+            {"event_name": "step_boundary", "iteration": 2},
+        ]
+        prior_count = len(prior_observer)
+
+        meta = run_engine_pipeline(
+            [], "test_input",
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=50, return_meta=True,
+            observer=prior_observer,
+        )
+        _assert_meta_shape(meta, expected_reason="closure")
+
+        # Count step_boundary events added by THIS run only
+        total_step_boundaries = sum(
+            1 for e in prior_observer if e.get("event_name") == "step_boundary"
+        )
+        events_from_this_run = total_step_boundaries - prior_count
+
+        assert meta["engine_iterations_used"] == events_from_this_run, (
+            f"engine_iterations_used ({meta['engine_iterations_used']}) should equal "
+            f"delta ({events_from_this_run}), not total ({total_step_boundaries})"
+        )
+        assert meta["engine_iterations_used"] > 0, "Must have at least 1 iteration"
+
 
 # =============================================================================
 # JS: engine_exit_reason via run_engine_pipeline_meta API
