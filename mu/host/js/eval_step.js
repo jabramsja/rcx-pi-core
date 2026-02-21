@@ -1530,7 +1530,7 @@ const SEED_CHECKSUMS = {
   'subst.v2.json': '0b735c52da437a6eae1478dc4c992269bff8978c7e9084d15ffcba6c06e3037f',
   'recurrence.v1.json': 'ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0',
   'recurrence.v2.json': 'f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9',
-  'exhaustion.v1.json': '2497881e19015db553a834c9d1f287c7774c2607effc224ed460b4b8051dffe0',
+  'exhaustion.v1.json': '8489398b8264dd547b231f67c98543bba1d6d45a24bb5504039395a24eb068d3',
   'bootstrap_structural.v1.json': 'dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964',
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
   'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
@@ -1570,6 +1570,7 @@ const EXPECTED_PROJECTION_IDS = {
   'exhaustion.v1.json': [
     'exhaustion.init_null', 'exhaustion.init', 'exhaustion.find_match',
     'exhaustion.find_continue', 'exhaustion.find_not_found', 'exhaustion.scan_same',
+    'exhaustion.scan_skip_sentinel_maxsteps', 'exhaustion.scan_skip_sentinel_stall',
     'exhaustion.scan_different', 'exhaustion.scan_end', 'exhaustion.frozen_found',
     'exhaustion.frozen_check_tail', 'exhaustion.do_freeze',
   ],
@@ -1873,30 +1874,7 @@ function isEngineTerminal(value) {
  * AST_OK: infra — boundary sub-algorithm runner
  */
 
-/**
- * Remove trailing terminal sentinel from a linked-list trace.
- * Terminal sentinels have projection===null plus a stall or max_steps marker.
- * Applied only to exhaustion input — keeps run_trace output untouched.
- * Iterative implementation avoids host stack depth risk on long traces.
- */
-function stripTraceTerminalSentinel(trace) {
-  // Collect non-sentinel entries in order
-  const kept = [];
-  let node = trace;
-  while (node != null) {
-    const head = node.head;
-    if (!(head.projection === null && ('stall' in head || 'max_steps' in head))) {
-      kept.push(head);
-    }
-    node = node.tail ?? null;
-  }
-  // Rebuild linked list tail-first
-  let result = null;
-  for (let i = kept.length - 1; i >= 0; i--) {
-    result = { head: kept[i], tail: result };
-  }
-  return result;
-}
+
 
 function runSubAlgorithm(algorithmProjs, initial, maxIterations) {
   let current = initial;
@@ -2055,17 +2033,7 @@ function runEnginePipeline(projections, inputValue, options) {
         if (!algoProjs) {
           throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
         }
-        // Exhaustion-targeted: strip terminal sentinel from trace
-        // so non-linear scan sees only real projection entries.
-        let algoInput = reqInput;
-        if (algoName === 'exhaustion.v1.json'
-            && reqInput != null && typeof reqInput === 'object'
-            && '_detect_exhaustion' in reqInput) {
-          const inner = Object.assign({}, reqInput._detect_exhaustion);
-          inner.trace = stripTraceTerminalSentinel(inner.trace);
-          algoInput = { _detect_exhaustion: inner };
-        }
-        result = runSubAlgorithm(algoProjs, algoInput, maxAlgorithmIterations);
+        result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
       } else {
         emit('fail_closed', iteration, state, 'api.bad_request');
         throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
@@ -2238,17 +2206,7 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
           if (!algoProjs) {
             throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
           }
-          // Exhaustion-targeted: strip terminal sentinel from trace
-          // so non-linear scan sees only real projection entries.
-          let algoInput = reqInput;
-          if (algoName === 'exhaustion.v1.json'
-              && reqInput != null && typeof reqInput === 'object'
-              && '_detect_exhaustion' in reqInput) {
-            const inner = Object.assign({}, reqInput._detect_exhaustion);
-            inner.trace = stripTraceTerminalSentinel(inner.trace);
-            algoInput = { _detect_exhaustion: inner };
-          }
-          result = runSubAlgorithm(algoProjs, algoInput, maxAlgorithmIterations);
+          result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
         } else {
           emit('fail_closed', iteration, state, 'api.bad_request');
           throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);

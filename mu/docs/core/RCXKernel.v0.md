@@ -316,7 +316,7 @@ The kernel is maximally general. Specific behaviors (EngineeNews, Wolfram-style,
 | `mu/substrate/match.v2.json` | Pattern matching (8 projections) | Active |
 | `mu/substrate/subst.v2.json` | Substitution (12 projections) | Active |
 | `mu/closures/recurrence.v1.json` | Closure detection (9 projections) | Active |
-| `mu/closures/exhaustion.v1.json` | Exhaustion handling (11 projections) | Active |
+| `mu/closures/exhaustion.v1.json` | Exhaustion handling (13 projections) | Active |
 | `rcx_pi/selfhost/step_mu.py` | step_kernel_mu() orchestrates projections | Active |
 | `rcx_pi/selfhost/eval_seed.py` | Bootstrap match/substitute (4 primitives) | Active |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) | Active |

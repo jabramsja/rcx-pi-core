@@ -445,9 +445,9 @@ class TestCombinedProjectionOrder:
 
     def test_combined_projection_count(self, combined_projections):
         """Combined projections should have engine + recurrence + exhaustion."""
-        # engine: 11, recurrence: 9, exhaustion: 11 = 31 total
-        assert len(combined_projections) == 31, \
-            f"Expected 31 combined projections, got {len(combined_projections)}"
+        # engine: 11, recurrence: 9, exhaustion: 13 = 33 total
+        assert len(combined_projections) == 33, \
+            f"Expected 33 combined projections, got {len(combined_projections)}"
 
 
 # =============================================================================

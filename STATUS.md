@@ -659,7 +659,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - Gate 5: COMPLETE (2026-02-09 meta-circular parity verified)
   - 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
   - Structural execution is default; bootstrap is explicit fallback only
-  - Cross-substrate parity intact (Python + JS, all 47 core projections)
+  - Cross-substrate parity intact (Python + JS, all 49 core projections)
   - B-structural match_mu (match.v2 + bridge) provides non-linear pattern support
 
 Current Recurrence Layer: META_CIRCULAR
@@ -696,7 +696,7 @@ New organized structure makes architecture visible:
 3. ✅ Phase 8d trace model in Python (run_mu_structural, tests/engine/test_structural_trace.py)
 4. ✅ Ported trace to JS (runStructural in mu/host/js/eval_step.js)
 5. ✅ Recurrence structural closure detection (mu/closures/recurrence.v1.json, 9 projections)
-6. ✅ Operator Exhaustion (mu/closures/exhaustion.v1.json, 11 projections)
+6. ✅ Operator Exhaustion (mu/closures/exhaustion.v1.json, 13 projections)
 
 **L3 COMPLETE:** All projections run on both Python and JavaScript with identical semantics.
 
@@ -705,10 +705,10 @@ New organized structure makes architecture visible:
 - [x] match.v2.json: 8 projections (Python ✓, JS ✓) - META_CIRCULAR (linear only)
 - [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
-- [x] exhaustion.v1.json: 11 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
+- [x] exhaustion.v1.json: 13 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] hemispheres.v1.json: 12 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
-- [x] Total: 47 core projections across 5 L3-complete seeds + 12 hemisphere projections
-- [x] `seed_police.sh`: 15 seeds valid, 102 projection IDs, 0 collisions
+- [x] Total: 49 core projections across 5 L3-complete seeds + 12 hemisphere projections
+- [x] `seed_police.sh`: 15 seeds valid, 110 projection IDs, 0 collisions
 - [x] 5 Recurrence + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**

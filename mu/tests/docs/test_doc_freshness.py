@@ -543,7 +543,7 @@ class TestNoHardcodedCounts:
 
             # Filter out counts that are verified by grounding tests
             # These are the actual seed projection counts (from test_seed_counts.py)
-            verified_counts = {"5", "6", "7", "8", "9", "11", "12"}
+            verified_counts = {"5", "6", "7", "8", "9", "11", "12", "13"}
             suspicious = [m for m in matches if m not in verified_counts]
 
             if suspicious:

@@ -453,7 +453,7 @@ Phase 5 complete:
   - `bridge/bootstrap_structural.v1.json` - Bridge projections (5 rules, non-linear pattern support)
   - `closures/recurrence.v1.json` - Closure detection v1 (9 projections, proof-of-concept)
   - `closures/recurrence.v2.json` - Closure detection v2 (9 projections, hash-accelerated)
-  - `closures/exhaustion.v1.json` - Operator exhaustion (11 projections)
+  - `closures/exhaustion.v1.json` - Operator exhaustion (13 projections)
   - `programs/hemispheres.v1.json` - Hemisphere routing (12 projections)
   - `programs/paxos_demo.v1.json` - Paxos deadlock demo (6 projections)
   - `utilities/eval.v1.json` - EVAL_SEED traversal projections

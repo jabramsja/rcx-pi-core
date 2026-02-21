@@ -18,7 +18,7 @@ A projection-based computational substrate where **structure is the primitive**.
 - **3,690+ tests** across 180+ test files
 - **12 semantic debt** (irreducible bootstrap floor)
 - **43 CRITICAL_TEST_FILES** protected from silent skipping
-- **47 core projections** across 5 L3-complete seeds + 12 hemisphere projections
+- **49 core projections** across 5 L3-complete seeds + 12 hemisphere projections
 
 **Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
 Three automatic routes: null→r_null, closure→r_a, default→lobes. Cross-substrate parity verified.
@@ -91,7 +91,7 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/bridge/bootstrap_structural.v1.json` | Non-linear pattern support (5 projections) |
 | `mu/closures/recurrence.v1.json` | Closure detection (9 projections) - Rule 2.2♢ (proof-of-concept) |
 | `mu/closures/recurrence.v2.json` | Hash-accelerated closure detection (9 projections) - production |
-| `mu/closures/exhaustion.v1.json` | Operator exhaustion (11 projections) - Rule 3.1 |
+| `mu/closures/exhaustion.v1.json` | Operator exhaustion (13 projections) - Rule 3.1 |
 | `mu/programs/hemispheres.v1.json` | Hemisphere routing (12 projections) - native structural routing |
 | `mu/programs/paxos_demo.v1.json` | Paxos deadlock demo (6 projections) - application |
 | `mu/programs/rcx_engine.v1.json` | Engine orchestration (11 projections) - structural specification |

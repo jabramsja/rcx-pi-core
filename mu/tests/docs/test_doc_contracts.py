@@ -140,7 +140,7 @@ DOC_CONTRACTS: dict[str, dict[str, Any]] = {
         "functions": [],
         "constants": {},
         "seeds": {
-            "exhaustion.v1.json": 11,  # 11 exhaustion projections
+            "exhaustion.v1.json": 13,  # 13 exhaustion projections (v1.3.0: +2 sentinel-skip)
         },
     },
 
