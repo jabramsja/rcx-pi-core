@@ -20,6 +20,8 @@ sys.path.insert(0, str(REPO_ROOT / "tools" / "checks"))
 from enforce_l4_execution_contract import (
     GATE_ID_RE,
     LEGACY_CLASS_ALIAS,
+    NON_GATE_TEST_DOMAINS,
+    VALID_BLOCKER_CLASSES,
     VALID_WAVE_CLASSES,
     check_consecutive_maintenance,
     check_founder_override_replay,
@@ -39,7 +41,8 @@ from enforce_l4_execution_contract import (
 def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
           evidence_command="pytest tests/l4_gates/", evidence_delta="delta",
           hd_before=None, hd_after=None, sa_ref=None,
-          defer_reason=None, founder_override=None, wave_id="test-wave"):
+          defer_reason=None, founder_override=None, wave_id="test-wave",
+          blocker_class="INTEGRATION", sweep=None):
     """Build a mock tracker note dict."""
     return {
         "wave_id": wave_id,
@@ -54,6 +57,8 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
         "structural_artifact_ref": sa_ref,
         "defer_reason_code": defer_reason,
         "founder_override": founder_override,
+        "primary_blocker_class": blocker_class,
+        "post_gate_contract_sweep": sweep,
         "date": "2026-02-20",
         "raw": f"Class: {raw_class or wave_class}",
     }
@@ -249,7 +254,8 @@ class TestStructuralAntiTheater:
     def test_structural_evidence_command_with_l4_gates_passes(self):
         """evidence_command referencing tests/l4_gates/ passes."""
         notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
-                       sa_ref="ref", evidence_command="pytest tests/l4_gates/")]
+                       sa_ref="ref", evidence_command="pytest tests/l4_gates/",
+                       sweep="pytest tests/structural/ tests/engine/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
         diff = (
             "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
@@ -362,7 +368,8 @@ class TestValidExamples:
     def test_valid_l4_structural(self):
         notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
                        sa_ref="mu/substrate/kernel.v1.json",
-                       evidence_command="pytest tests/l4_gates/")]
+                       evidence_command="pytest tests/l4_gates/",
+                       sweep="pytest tests/structural/ tests/engine/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
         diff = (
             "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
@@ -388,3 +395,145 @@ class TestValidExamples:
         files = ["TASKS.md", "STATUS.md"]
         passed, errors = enforce("MAINTENANCE", files, notes=notes)
         assert passed, f"Valid MAINTENANCE should pass: {errors}"
+
+
+# =============================================================================
+# Constraint 8: Primary blocker classification (all classes)
+# =============================================================================
+
+class TestBlockerClassification:
+    """Every class-marked wave must declare primary_blocker_class."""
+
+    def test_missing_blocker_class_fails(self):
+        notes = [_note("L4_ENABLER", blocker_class=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("primary_blocker_class" in e for e in errors)
+
+    def test_invalid_blocker_class_fails(self):
+        notes = [_note("L4_ENABLER", blocker_class="INVALID")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("Invalid primary_blocker_class" in e for e in errors)
+
+    @pytest.mark.parametrize("cls", sorted(VALID_BLOCKER_CLASSES))
+    def test_valid_blocker_classes_accepted(self, cls):
+        notes = [_note("L4_ENABLER", blocker_class=cls)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Blocker class {cls} should be accepted: {errors}"
+
+    def test_blocker_class_required_for_structural(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest tests/structural/",
+                       blocker_class=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("primary_blocker_class" in e for e in errors)
+
+    def test_blocker_class_required_for_maintenance(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="docs", defer_reason="d",
+                  evidence_command=None, evidence_delta=None, blocker_class=None),
+            _note("L4_STRUCTURAL"),  # Not consecutive
+        ]
+        files = ["TASKS.md"]
+        passed, errors = enforce("MAINTENANCE", files, notes=notes)
+        assert not passed
+        assert any("primary_blocker_class" in e for e in errors)
+
+    def test_valid_blocker_classes_constant(self):
+        assert VALID_BLOCKER_CLASSES == {"DESIGN", "INTEGRATION", "PERFORMANCE"}
+
+
+# =============================================================================
+# Constraint 9: Post-gate contract sweep (L4_STRUCTURAL only)
+# =============================================================================
+
+class TestPostGateContractSweep:
+    """L4_STRUCTURAL must include post_gate_contract_sweep with non-gate targets."""
+
+    def test_missing_sweep_fails(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("post_gate_contract_sweep" in e for e in errors)
+
+    def test_sweep_with_only_l4_gates_fails(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest tests/l4_gates/")]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("non-gate test domain" in e for e in errors)
+
+    def test_sweep_with_non_gate_target_passes(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest tests/structural/ tests/engine/")]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert passed, f"Sweep with non-gate target should pass: {errors}"
+
+    def test_sweep_with_mu_path_passes(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest mu/tests/structural/")]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert passed, f"Sweep with mu/ path should pass: {errors}"
+
+    def test_sweep_not_required_for_enabler(self):
+        notes = [_note("L4_ENABLER", sweep=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"L4_ENABLER should not require sweep: {errors}"
+
+    def test_sweep_not_required_for_maintenance(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="docs", defer_reason="d",
+                  evidence_command=None, evidence_delta=None, sweep=None),
+            _note("L4_STRUCTURAL"),
+        ]
+        files = ["TASKS.md"]
+        passed, errors = enforce("MAINTENANCE", files, notes=notes)
+        assert passed, f"MAINTENANCE should not require sweep: {errors}"
+
+    def test_non_gate_test_domains_constant(self):
+        assert "tests/engine/" in NON_GATE_TEST_DOMAINS
+        assert "tests/structural/" in NON_GATE_TEST_DOMAINS
+        assert "mu/tests/engine/" in NON_GATE_TEST_DOMAINS
+        assert len(NON_GATE_TEST_DOMAINS) == 10
