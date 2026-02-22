@@ -39,6 +39,23 @@ from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed
 
+
+# =============================================================================
+# Typed Engine Error (parity with JS RcxError)
+# =============================================================================
+
+class RcxEngineError(RuntimeError):
+    """Engine error with machine-readable error_code (mirrors JS RcxError).
+
+    Subclasses RuntimeError so existing ``except RuntimeError`` and
+    ``pytest.raises(RuntimeError, match=...)`` patterns remain valid.
+    """
+
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
+
+
 # Terminal shape key sets (module-level constants, avoids repeated construction)
 _RECURRENCE_TERMINAL_KEYS = frozenset({"closure_detected", "final_result", "tau_step"})  # AST_OK: constant — recurrence output shape
 _EXHAUSTION_TERMINAL_KEYS = frozenset({"action", "exhaustion_detected", "frozen", "operator_to_freeze"})  # AST_OK: constant — exhaustion output shape
@@ -1520,7 +1537,8 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
     # Outer loop: handles re-entry without host recursion
     while True:
         if depth >= _BOOT1_MAX_REENTRY_DEPTH:
-            raise RuntimeError(
+            raise RcxEngineError(
+                "engine.boot1_depth_exceeded",
                 f"Boot1 re-entry depth {depth} exceeds "
                 f"limit {_BOOT1_MAX_REENTRY_DEPTH}. Possible infinite re-entry loop."
             )
@@ -1556,7 +1574,8 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                           engine_iterations_used=_total_iterations[0])
                     return state
                 _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
-                raise RuntimeError(
+                raise RcxEngineError(
+                    "engine.stalled_non_terminal",
                     f"Boot1 engine stalled at iteration {iteration} (depth {depth}) "
                     f"without producing terminal result. "
                     f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
@@ -1643,7 +1662,8 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
 
         # FAIL CLOSED: engine loop exhausted without terminal result
         _emit("fail_closed", remaining_iterations - 1, state, error_code="engine.exhausted")
-        raise RuntimeError(
+        raise RcxEngineError(
+            "engine.exhausted",
             f"Boot1 engine pipeline exhausted {remaining_iterations} iterations "
             f"(depth {depth}) without terminal result. "
             f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
@@ -1813,7 +1833,8 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
                 return state
             # Non-terminal stall — engine stuck in intermediate state
             _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
-            raise RuntimeError(
+            raise RcxEngineError(
+                "engine.stalled_non_terminal",
                 f"Engine stalled at iteration {iteration} without producing terminal result. "
                 f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
             )
@@ -1887,7 +1908,8 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 
     # FAIL CLOSED: engine loop exhausted without terminal result
     _emit("fail_closed", max_engine_iterations - 1, state, error_code="engine.exhausted")
-    raise RuntimeError(
+    raise RcxEngineError(
+        "engine.exhausted",
         f"Engine pipeline exhausted {max_engine_iterations} iterations without terminal result. "
         f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
     )
@@ -1971,7 +1993,8 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
     # Verify the result looks like a completed hemisphere dict
     if isinstance(result, dict) and set(result.keys()) == _HEMISPHERE_KEYS:
         return result
-    raise RuntimeError(
+    raise RcxEngineError(
+        "input.shape_mismatch",
         f"Hemisphere routing did not produce valid hemisphere dict. "
         f"Got: {sorted(result.keys()) if isinstance(result, dict) else type(result).__name__}"
     )
@@ -2038,6 +2061,6 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
 
     # Fail-closed: validate output shape before returning
     if not isinstance(updated_hemispheres, dict) or set(updated_hemispheres.keys()) != _HEMISPHERE_KEYS:  # AST_OK: boundary
-        raise RuntimeError("run_hemisphere_routing returned unexpected shape")
+        raise RcxEngineError("input.shape_mismatch", "run_hemisphere_routing returned unexpected shape")
 
     return {"engine_result": engine_result, "hemispheres": updated_hemispheres}
