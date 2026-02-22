@@ -26,6 +26,7 @@ from enforce_l4_execution_contract import (
     NON_GATE_TEST_DOMAINS,
     RUNTIME_DIRS,
     VALID_BLOCKER_CLASSES,
+    VALID_INVARIANT_IDS,
     VALID_WAVE_CLASSES,
     enforce,
     filter_to_tracked_files,
@@ -217,6 +218,9 @@ class TestMaintenanceEnforcement:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": None,
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": None,
+            "progress_proof_after": None,
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -473,6 +477,9 @@ class TestLoopholeDetection:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": None,
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -506,6 +513,9 @@ class TestEvidenceCommandTarget:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": "pytest tests/structural/",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -536,6 +546,9 @@ class TestEvidenceCommandTarget:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": "pytest tests/structural/ tests/engine/",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -578,6 +591,9 @@ class TestEvidenceCommandTarget:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": "pytest tests/structural/",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -617,6 +633,9 @@ class TestWaveBinding:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": None,
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -635,6 +654,9 @@ class TestWaveBinding:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": "pytest tests/structural/",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -661,6 +683,9 @@ class TestWaveBinding:
             "founder_override": None,
             "primary_blocker_class": "INTEGRATION",
             "post_gate_contract_sweep": "pytest tests/structural/",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
             "date": "2026-02-20",
             "raw": "test",
         }
