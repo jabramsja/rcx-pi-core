@@ -221,6 +221,9 @@ class TestMaintenanceEnforcement:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": None,
             "progress_proof_after": None,
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -480,6 +483,9 @@ class TestLoopholeDetection:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -516,6 +522,9 @@ class TestEvidenceCommandTarget:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -549,6 +558,9 @@ class TestEvidenceCommandTarget:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -594,6 +606,9 @@ class TestEvidenceCommandTarget:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -636,6 +651,9 @@ class TestWaveBinding:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -657,6 +675,9 @@ class TestWaveBinding:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -686,6 +707,9 @@ class TestWaveBinding:
             "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
             "progress_proof_before": "before-state",
             "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "date": "2026-02-20",
             "raw": "test",
         }

@@ -475,6 +475,7 @@ Both paths produce identical results. The execution path verification tests (`te
 - `mu/substrate/match.v2.json` - Current linear-only matcher
 - `mu/closures/recurrence.v1.json` - Requires non-linear patterns
 - `mu/closures/exhaustion.v1.json` - Requires non-linear patterns
+- `roadmap/L4ExecutionContract.v2.md` - Canonical L4 enforcement policy; locks `SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP` as the bootstrap endgame policy (anti-stagnation rule 13)
 
 ---
 

@@ -18,7 +18,10 @@ from tests.repo_root import REPO_ROOT
 sys.path.insert(0, str(REPO_ROOT / "tools" / "checks"))
 
 from enforce_l4_execution_contract import (
+    CANONICAL_BOOTSTRAP_POLICY,
+    CANONICAL_COLLECTOR_PATH,
     GATE_ID_RE,
+    INDICATOR_REQUIRED_KEYS,
     LEGACY_CLASS_ALIAS,
     NON_GATE_TEST_DOMAINS,
     VALID_BLOCKER_CLASSES,
@@ -33,6 +36,7 @@ from enforce_l4_execution_contract import (
     enforce,
     is_runtime_file,
     parse_tracker_notes,
+    validate_indicator_artifact_json,
 )
 
 
@@ -46,7 +50,10 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
           defer_reason=None, founder_override=None, wave_id="test-wave",
           blocker_class="INTEGRATION", sweep=None,
           invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
-          pp_before="before-state", pp_after="after-state"):
+          pp_before="before-state", pp_after="after-state",
+          indicator_ref="reports/l4_wave_indicators/test-wave.json",
+          indicator_cmd="python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+          bootstrap_policy="SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP"):
     """Build a mock tracker note dict."""
     return {
         "wave_id": wave_id,
@@ -66,6 +73,9 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
         "primary_invariant_id": invariant_id,
         "progress_proof_before": pp_before,
         "progress_proof_after": pp_after,
+        "indicator_artifact_ref": indicator_ref,
+        "indicator_collection_command": indicator_cmd,
+        "bootstrap_endgame_policy": bootstrap_policy,
         "date": "2026-02-20",
         "raw": f"Class: {raw_class or wave_class}",
     }
@@ -715,3 +725,208 @@ class TestNonStructuralAdjacency:
         notes = [_note("L4_ENABLER")]
         passed, errors = check_non_structural_adjacency(notes)
         assert passed, f"Single note = bootstrap grace: {errors}"
+
+
+# =============================================================================
+# Constraint 13: Indicator artifact (all classes)
+# =============================================================================
+
+class TestIndicatorArtifact:
+    """Every class-marked wave must declare indicator_artifact_ref and indicator_collection_command."""
+
+    def test_missing_indicator_ref_fails(self):
+        notes = [_note("L4_ENABLER", indicator_ref=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("indicator_artifact_ref" in e for e in errors)
+
+    def test_missing_indicator_cmd_fails(self):
+        notes = [_note("L4_ENABLER", indicator_cmd=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("indicator_collection_command" in e for e in errors)
+
+    def test_wrong_collector_path_fails(self):
+        notes = [_note("L4_ENABLER", indicator_cmd="python3 wrong/path.py --wave-id x")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("canonical collector" in e for e in errors)
+
+    def test_correct_indicator_fields_pass(self):
+        notes = [_note("L4_ENABLER")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Valid indicator fields should pass: {errors}"
+
+    def test_indicator_required_for_structural(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest tests/structural/",
+                       indicator_ref=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("indicator_artifact_ref" in e for e in errors)
+
+    def test_indicator_required_for_maintenance(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="docs", defer_reason="d",
+                  evidence_command=None, evidence_delta=None,
+                  indicator_ref=None),
+            _note("L4_STRUCTURAL"),
+        ]
+        files = ["TASKS.md"]
+        passed, errors = enforce("MAINTENANCE", files, notes=notes)
+        assert not passed
+        assert any("indicator_artifact_ref" in e for e in errors)
+
+    def test_canonical_collector_path_constant(self):
+        assert CANONICAL_COLLECTOR_PATH == "tools/metrics/collect_l4_wave_indicators.py"
+
+    def test_indicator_required_keys_constant(self):
+        assert set(INDICATOR_REQUIRED_KEYS.keys()) == {
+            "repeat_run_speedup_ratio", "parity_diff_count",
+            "net_host_semantic_delta", "step_growth_slope",
+        }
+
+
+# =============================================================================
+# Constraint 14: Bootstrap endgame policy (all classes)
+# =============================================================================
+
+class TestBootstrapPolicy:
+    """Every class-marked wave must declare bootstrap_endgame_policy."""
+
+    def test_missing_bootstrap_policy_fails(self):
+        notes = [_note("L4_ENABLER", bootstrap_policy=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("bootstrap_endgame_policy" in e for e in errors)
+
+    def test_wrong_bootstrap_policy_fails(self):
+        notes = [_note("L4_ENABLER", bootstrap_policy="WRONG_POLICY")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("Invalid bootstrap_endgame_policy" in e for e in errors)
+
+    def test_correct_bootstrap_policy_passes(self):
+        notes = [_note("L4_ENABLER")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Valid bootstrap policy should pass: {errors}"
+
+    def test_canonical_policy_constant(self):
+        assert CANONICAL_BOOTSTRAP_POLICY == "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP"
+
+
+# =============================================================================
+# Constraint 15: Rolling window founder override
+# =============================================================================
+
+class TestRollingWindowFounderOverride:
+    """Founder override on most recent note bypasses rolling window quota."""
+
+    def test_founder_override_bypasses_rolling_window(self):
+        notes = [
+            _note("L4_ENABLER", wave_id="w3",
+                  founder_override="2026-02-22-wave16-rolling-window-bootstrap"),
+            _note("L4_ENABLER", wave_id="w2"),
+            _note("L4_ENABLER", wave_id="w1"),
+        ]
+        passed, errors = check_rolling_window(notes)
+        assert passed, f"Founder override should bypass rolling window: {errors}"
+
+    def test_rolling_window_without_override_fails(self):
+        notes = [
+            _note("L4_ENABLER", wave_id="w3"),
+            _note("L4_ENABLER", wave_id="w2"),
+            _note("L4_ENABLER", wave_id="w1"),
+        ]
+        passed, errors = check_rolling_window(notes)
+        assert not passed
+        assert any("Rolling structural quota" in e for e in errors)
+
+
+# =============================================================================
+# Constraint 16: Indicator artifact JSON validation
+# =============================================================================
+
+class TestValidateIndicatorJson:
+    """validate_indicator_artifact_json validates file content."""
+
+    def test_valid_artifact(self, tmp_path):
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": 0.0,
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert passed, f"Valid artifact should pass: {errors}"
+
+    def test_missing_key_fails(self, tmp_path):
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 1.0,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": 0.0,
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("parity_diff_count" in e for e in errors)
+
+    def test_wrong_type_fails(self, tmp_path):
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": "not_a_number",
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": 0.0,
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("repeat_run_speedup_ratio" in e for e in errors)
+
+    def test_nonexistent_file_fails(self):
+        passed, errors = validate_indicator_artifact_json("/nonexistent/path.json")
+        assert not passed
+        assert any("does not exist" in e for e in errors)
+
+    def test_invalid_json_fails(self, tmp_path):
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text("not valid json {{{")
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("invalid json" in e.lower() for e in errors)
+
+    def test_boolean_type_rejected(self, tmp_path):
+        """Python bool is subclass of int — must be explicitly rejected."""
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": True,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": 0.0,
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("parity_diff_count" in e for e in errors)

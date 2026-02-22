@@ -39,6 +39,8 @@ ALLOWED_ROOT_DIRS: frozenset[str] = frozenset({
     # Archive + legacy
     "archive",
     ".rcx_library",
+    # L4 governance artifacts (force-tracked despite reports/ gitignore)
+    "reports",
 })
 
 

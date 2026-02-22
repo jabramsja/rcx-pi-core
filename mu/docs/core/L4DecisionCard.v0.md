@@ -663,8 +663,13 @@ Decision Deadline: 2026-03-12 (wave8 heartbeat)
 
 ---
 
+## Normative Lock
+
+**Bootstrap endgame policy:** The canonical bootstrap endgame policy is `SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP`, as locked by `roadmap/L4ExecutionContract.v2.md` (anti-stagnation rule 13). This resolves the design split between "eliminate bootstrap entirely" and "irreducible bootstrap forever" — the canonical position is: minimize bootstrap to substrate-independent irreducible primitives. All future L4 decision cards must declare this policy in their tracker sync notes.
+
 ## References
 
 - `mu/docs/core/L4ExitChecklist.v0.md` — Gate definitions (G1-G8)
 - `mu/docs/core/G8CpsFeasibility.v0.md` — Hypothesis definitions (H1-H3)
 - `mu/docs/core/L4MicroAbi.v0.md` — ABI surface mapped to gates
+- `roadmap/L4ExecutionContract.v2.md` — Canonical L4 enforcement policy (3-class model)
