@@ -20,9 +20,9 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import (
     ENGINE_EXIT_REASONS,
     TERMINAL_KINDS,
-    _ENGINE_TERMINAL_KEYS,
-    _EXHAUSTION_TERMINAL_KEYS,
-    _RECURRENCE_TERMINAL_KEYS,
+    _ENGINE_TERMINAL_KEYS,  # ANTICHEAT_OK: parity gate compares Python key sets against JS source
+    _EXHAUSTION_TERMINAL_KEYS,  # ANTICHEAT_OK: parity gate compares Python key sets against JS source
+    _RECURRENCE_TERMINAL_KEYS,  # ANTICHEAT_OK: parity gate compares Python key sets against JS source
     classify_terminal_kind,
 )
 
