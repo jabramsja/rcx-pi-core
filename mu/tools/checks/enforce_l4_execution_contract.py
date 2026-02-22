@@ -87,6 +87,8 @@ _PROGRESS_AFTER_RE = re.compile(r"progress_proof_after:\s*(.+?)(?:\.\s|$)")
 _INDICATOR_REF_RE = re.compile(r"indicator_artifact_ref:\s*(.+?)(?:\.\s|$)")
 _INDICATOR_CMD_RE = re.compile(r"indicator_collection_command:\s*(.+?)(?:\.\s|$)")
 _BOOTSTRAP_POLICY_RE = re.compile(r"(?<!`)bootstrap_endgame_policy:\s*([A-Z_]+)")
+_BOOT0_TRACK_RE = re.compile(r"(?<!`)boot0_track_id:\s*([A-Za-z0-9]+)")
+_BOOT0_PROGRESS_RE = re.compile(r"(?<!`)boot0_progress_state:\s*([A-Z]+)")
 
 # Rolling window size
 ROLLING_WINDOW = 3
@@ -121,6 +123,24 @@ INDICATOR_REQUIRED_KEYS = {
     "parity_diff_count": (int,),
     "net_host_semantic_delta": (int,),
     "step_growth_slope": (int, float),
+}
+
+# Valid Boot0/Hex0 track IDs (from roadmap/Hex0_Boot0_Checklist.md)
+VALID_BOOT0_TRACK_IDS = frozenset({
+    "N1a", "N1b", "N2", "N3", "N4", "N5", "N6a", "N6b",
+    "V1", "V2", "V3", "V4", "V5",
+})
+
+# Valid Boot0 progress states
+VALID_BOOT0_PROGRESS_STATES = frozenset({"ADVANCE", "HOLD", "DEFER"})
+
+# Required provenance keys in indicator JSON (Wave 18+)
+INDICATOR_PROVENANCE_KEYS = {
+    "repeat_run_raw_seconds": list,
+    "step_growth_points": list,
+    "parity_diff_source": str,
+    "collection_timestamp_utc": str,
+    "collector_version": str,
 }
 
 
@@ -275,6 +295,8 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
         indicator_ref_match = _INDICATOR_REF_RE.search(body_text)
         indicator_cmd_match = _INDICATOR_CMD_RE.search(body_text)
         bootstrap_policy_match = _BOOTSTRAP_POLICY_RE.search(body_text)
+        boot0_track_match = _BOOT0_TRACK_RE.search(body_text)
+        boot0_progress_match = _BOOT0_PROGRESS_RE.search(body_text)
 
         notes.append({
             "wave_id": wave_id,
@@ -297,6 +319,8 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "indicator_artifact_ref": indicator_ref_match.group(1).strip() if indicator_ref_match else None,
             "indicator_collection_command": indicator_cmd_match.group(1).strip() if indicator_cmd_match else None,
             "bootstrap_endgame_policy": bootstrap_policy_match.group(1).strip() if bootstrap_policy_match else None,
+            "boot0_track_id": boot0_track_match.group(1).strip() if boot0_track_match else None,
+            "boot0_progress_state": boot0_progress_match.group(1).strip() if boot0_progress_match else None,
             "date": date_str,
             "raw": body,
         })
@@ -453,8 +477,25 @@ def check_legacy_alias_in_new_notes(notes: list[dict]) -> tuple[bool, list[str]]
 # Indicator artifact validation
 # ---------------------------------------------------------------------------
 
+def _is_numeric_not_bool(val: object) -> bool:
+    """Check if value is numeric (int or float) but not bool."""
+    return not isinstance(val, bool) and isinstance(val, (int, float))
+
+
+def _compute_slope(points: list[dict]) -> float:
+    """Compute step_growth_slope from step_growth_points via linear fit.
+
+    Formula: slope = (elapsed_last - elapsed_first) / (step_last - step_first)
+    """
+    first, last = points[0], points[-1]
+    dx = last["step"] - first["step"]
+    if dx == 0:
+        return 0.0
+    return (last["elapsed_seconds"] - first["elapsed_seconds"]) / dx
+
+
 def validate_indicator_artifact_json(artifact_path: str) -> tuple[bool, list[str]]:
-    """Validate indicator artifact JSON: required keys + correct types."""
+    """Validate indicator artifact JSON: required keys, types, provenance, derivation."""
     import json as _json
     errors: list[str] = []
     path = Path(artifact_path)
@@ -464,6 +505,8 @@ def validate_indicator_artifact_json(artifact_path: str) -> tuple[bool, list[str
         data = _json.loads(path.read_text(encoding="utf-8"))
     except (_json.JSONDecodeError, OSError) as exc:
         return False, [f"Indicator artifact '{artifact_path}' invalid JSON: {exc}"]
+
+    # --- Core metric keys ---
     for key, types in INDICATOR_REQUIRED_KEYS.items():
         if key not in data:
             errors.append(f"Indicator artifact missing required key: '{key}'")
@@ -474,6 +517,100 @@ def validate_indicator_artifact_json(artifact_path: str) -> tuple[bool, list[str
                     f"Indicator key '{key}': got {type(val).__name__}, "
                     f"expected {'/'.join(t.__name__ for t in types)}"
                 )
+
+    # --- Provenance keys ---
+    for key, expected_type in INDICATOR_PROVENANCE_KEYS.items():
+        if key not in data:
+            errors.append(f"Indicator artifact missing provenance key: '{key}'")
+        else:
+            val = data[key]
+            if not isinstance(val, expected_type):
+                errors.append(
+                    f"Provenance key '{key}': got {type(val).__name__}, "
+                    f"expected {expected_type.__name__}"
+                )
+
+    # --- repeat_run_raw_seconds shape ---
+    raw_secs = data.get("repeat_run_raw_seconds")
+    if isinstance(raw_secs, list):
+        if len(raw_secs) != 2:
+            errors.append(
+                f"repeat_run_raw_seconds must have exactly 2 elements, got {len(raw_secs)}"
+            )
+        else:
+            for i, v in enumerate(raw_secs):
+                if not _is_numeric_not_bool(v):
+                    errors.append(
+                        f"repeat_run_raw_seconds[{i}]: got {type(v).__name__}, "
+                        f"expected numeric (not bool)"
+                    )
+                elif v <= 0:
+                    errors.append(f"repeat_run_raw_seconds[{i}]: must be > 0, got {v}")
+
+    # --- step_growth_points shape ---
+    sgp = data.get("step_growth_points")
+    sgp_valid = False
+    if isinstance(sgp, list):
+        if len(sgp) < 2:
+            errors.append(
+                f"step_growth_points must have >= 2 elements, got {len(sgp)}"
+            )
+        else:
+            sgp_valid = True
+            prev_step = None
+            for i, pt in enumerate(sgp):
+                if not isinstance(pt, dict):
+                    errors.append(f"step_growth_points[{i}]: must be object, got {type(pt).__name__}")
+                    sgp_valid = False
+                    continue
+                for fld in ("step", "elapsed_seconds"):
+                    fv = pt.get(fld)
+                    if fv is None:
+                        errors.append(f"step_growth_points[{i}] missing '{fld}'")
+                        sgp_valid = False
+                    elif not _is_numeric_not_bool(fv):
+                        errors.append(
+                            f"step_growth_points[{i}].{fld}: got {type(fv).__name__}, "
+                            f"expected numeric (not bool)"
+                        )
+                        sgp_valid = False
+                if sgp_valid and prev_step is not None:
+                    if pt["step"] <= prev_step:
+                        errors.append(
+                            f"step_growth_points[{i}].step ({pt['step']}) must be "
+                            f"strictly greater than previous ({prev_step})"
+                        )
+                        sgp_valid = False
+                if sgp_valid:
+                    prev_step = pt["step"]
+
+    # --- String provenance: non-empty ---
+    for skey in ("parity_diff_source", "collection_timestamp_utc", "collector_version"):
+        sv = data.get(skey)
+        if isinstance(sv, str) and not sv.strip():
+            errors.append(f"Provenance key '{skey}' must be non-empty string")
+
+    # --- Derivation check: repeat_run_speedup_ratio ---
+    if (isinstance(raw_secs, list) and len(raw_secs) == 2
+            and all(_is_numeric_not_bool(v) and v > 0 for v in raw_secs)):
+        expected_ratio = round(raw_secs[0] / raw_secs[1], 6)
+        actual_ratio = data.get("repeat_run_speedup_ratio")
+        if _is_numeric_not_bool(actual_ratio) and round(actual_ratio, 6) != expected_ratio:
+            errors.append(
+                f"Derivation mismatch: repeat_run_speedup_ratio={actual_ratio} "
+                f"but round(raw[0]/raw[1], 6)={expected_ratio}"
+            )
+
+    # --- Derivation check: step_growth_slope ---
+    if sgp_valid and isinstance(sgp, list) and len(sgp) >= 2:
+        expected_slope = round(_compute_slope(sgp), 6)
+        actual_slope = data.get("step_growth_slope")
+        if _is_numeric_not_bool(actual_slope) and round(actual_slope, 6) != expected_slope:
+            errors.append(
+                f"Derivation mismatch: step_growth_slope={actual_slope} "
+                f"but computed from points={expected_slope}"
+            )
+
     return len(errors) == 0, errors
 
 
@@ -684,6 +821,32 @@ def enforce(
             errors.append(
                 f"Invalid bootstrap_endgame_policy: '{policy}'. "
                 f"Must be exactly: {CANONICAL_BOOTSTRAP_POLICY}"
+            )
+
+        # Boot0 track ID (all classes)
+        boot0_track = current.get("boot0_track_id")
+        if boot0_track is None:
+            errors.append(
+                "Missing boot0_track_id in tracker note "
+                f"(required: one of {sorted(VALID_BOOT0_TRACK_IDS)})"
+            )
+        elif boot0_track not in VALID_BOOT0_TRACK_IDS:
+            errors.append(
+                f"Invalid boot0_track_id: '{boot0_track}'. "
+                f"Must be one of: {sorted(VALID_BOOT0_TRACK_IDS)}"
+            )
+
+        # Boot0 progress state (all classes)
+        boot0_progress = current.get("boot0_progress_state")
+        if boot0_progress is None:
+            errors.append(
+                "Missing boot0_progress_state in tracker note "
+                f"(required: one of {sorted(VALID_BOOT0_PROGRESS_STATES)})"
+            )
+        elif boot0_progress not in VALID_BOOT0_PROGRESS_STATES:
+            errors.append(
+                f"Invalid boot0_progress_state: '{boot0_progress}'. "
+                f"Must be one of: {sorted(VALID_BOOT0_PROGRESS_STATES)}"
             )
 
         # Non-structural adjacency cap

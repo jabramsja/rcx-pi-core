@@ -75,6 +75,10 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 13. **Bootstrap endgame policy lock (all classes):** Every class-marked wave must declare `bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP`. This resolves the documented design split between "eliminate bootstrap" and "irreducible bootstrap forever" — the canonical policy is minimal substrate-independent bootstrap. See `L4DecisionCard.v0.md` and `BootstrapStructuralBridge.v0.md` for architectural context.
 
+14. **Boot0 track binding (all classes):** Every class-marked wave must declare `boot0_track_id` from the enum: `N1a`, `N1b`, `N2`, `N3`, `N4`, `N5`, `N6a`, `N6b`, `V1`, `V2`, `V3`, `V4`, `V5` (from `Hex0_Boot0_Checklist.md`). Must also declare `boot0_progress_state` from: `ADVANCE`, `HOLD`, `DEFER`. Unknown values fail.
+
+15. **Indicator provenance (all classes):** Indicator artifact JSON must include provenance keys: `repeat_run_raw_seconds` (array of 2 positive numbers), `step_growth_points` (array of ≥2 objects with strictly increasing `step` and `elapsed_seconds`), `parity_diff_source` (non-empty string), `collection_timestamp_utc` (non-empty string), `collector_version` (non-empty string). Derivation checks: `repeat_run_speedup_ratio` must equal `round(raw[0] / raw[1], 6)`, `step_growth_slope` must be consistent with `step_growth_points`. Boolean values rejected for all numeric fields.
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
@@ -108,6 +112,8 @@ Required fields by class (machine-parseable `key: value` format):
 | `indicator_artifact_ref` | required | required | required |
 | `indicator_collection_command` | required | required | required |
 | `bootstrap_endgame_policy` | required | required | required |
+| `boot0_track_id` | required | required | required |
+| `boot0_progress_state` | required | required | required |
 | `founder_override` | optional | optional | optional |
 
 ## Enforcement

@@ -483,6 +483,10 @@ The bootstrap `match()` and `substitute()` functions are NOT exposed to external
    - Keep as compatibility shims during migration
    - Deprecate after Boot1 is stable
 
+## L4 Governance Binding
+
+Boot0 architecture tracks are machine-linked to L4 execution waves via `boot0_track_id` and `boot0_progress_state` fields in the L4 tracker sync note schema. This ensures every L4 wave explicitly declares which Boot0/Hex0 acceptance criterion it advances (or holds/defers). Track IDs correspond to the Execution Track (N1a–N6b) and Research Track (V1–V5) items in `roadmap/Hex0_Boot0_Checklist.md`. Enforcement is via `tools/checks/enforce_l4_execution_contract.py` (rule 14 in `roadmap/L4ExecutionContract.v2.md`).
+
 ## References
 
 - [Hex0 Bootstrap](https://bootstrappable.org/) - Inspiration for staged architecture
