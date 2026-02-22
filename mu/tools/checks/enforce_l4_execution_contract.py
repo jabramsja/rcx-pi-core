@@ -81,6 +81,9 @@ _DEFER_REASON_RE = re.compile(r"defer_reason_code:\s*(.+?)(?:\.\s|$)")
 _FOUNDER_OVERRIDE_RE = re.compile(r"FOUNDER_OVERRIDE:(\S+)")
 _BLOCKER_CLASS_RE = re.compile(r"(?<!`)primary_blocker_class:\s*([A-Z_]+)")
 _SWEEP_RE = re.compile(r"post_gate_contract_sweep:\s*(.+?)(?:\.\s|$)")
+_INVARIANT_ID_RE = re.compile(r"(?<!`)primary_invariant_id:\s*([A-Z_]+)")
+_PROGRESS_BEFORE_RE = re.compile(r"progress_proof_before:\s*(.+?)(?:\.\s|$)")
+_PROGRESS_AFTER_RE = re.compile(r"progress_proof_after:\s*(.+?)(?:\.\s|$)")
 
 # Rolling window size
 ROLLING_WINDOW = 3
@@ -93,6 +96,15 @@ NON_GATE_TEST_DOMAINS = (
     "tests/engine/", "tests/parity/", "tests/structural/", "tests/tools/", "tests/docs/",
     "mu/tests/engine/", "mu/tests/parity/", "mu/tests/structural/", "mu/tests/tools/", "mu/tests/docs/",
 )
+
+# Valid primary invariant IDs (every class-marked wave must declare one)
+VALID_INVARIANT_IDS = frozenset({
+    "INV_BOUND_HOST_TERMINATION",
+    "INV_TERMINAL_SCHEMA_LOCK",
+    "INV_CROSS_SUBSTRATE_PARITY",
+    "INV_STRUCTURAL_FORWARD_MOTION",
+    "INV_TYPED_FAIL_CLOSED_OUTCOMES",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +252,9 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
         override_match = _FOUNDER_OVERRIDE_RE.search(body_text)
         blocker_match = _BLOCKER_CLASS_RE.search(body_text)
         sweep_match = _SWEEP_RE.search(body_text)
+        invariant_match = _INVARIANT_ID_RE.search(body_text)
+        progress_before_match = _PROGRESS_BEFORE_RE.search(body_text)
+        progress_after_match = _PROGRESS_AFTER_RE.search(body_text)
 
         notes.append({
             "wave_id": wave_id,
@@ -256,6 +271,9 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "founder_override": override_match.group(1).strip() if override_match else None,
             "primary_blocker_class": blocker_match.group(1).strip() if blocker_match else None,
             "post_gate_contract_sweep": sweep_match.group(1).strip() if sweep_match else None,
+            "primary_invariant_id": invariant_match.group(1).strip() if invariant_match else None,
+            "progress_proof_before": progress_before_match.group(1).strip() if progress_before_match else None,
+            "progress_proof_after": progress_after_match.group(1).strip() if progress_after_match else None,
             "date": date_str,
             "raw": body,
         })
@@ -354,6 +372,25 @@ def check_founder_override_replay(notes: list[dict]) -> tuple[bool, list[str]]:
                 f"in last {ROLLING_WINDOW} waves. Each override ID is single-use."
             )
     return len(errors) == 0, errors
+
+
+def check_non_structural_adjacency(notes: list[dict]) -> tuple[bool, list[str]]:
+    """Non-structural adjacency cap: last 2 class-marked waves cannot both be non-STRUCTURAL.
+
+    Founder override on current wave grants bypass.
+    """
+    if len(notes) < 2:
+        return True, []
+    if notes[0]["wave_class"] != "L4_STRUCTURAL" and notes[1]["wave_class"] != "L4_STRUCTURAL":
+        if notes[0].get("founder_override"):
+            print(f"  FOUNDER_OVERRIDE active — allowing non-structural adjacency")
+            return True, []
+        return False, [
+            f"Non-structural adjacency cap violated: last 2 waves are "
+            f"{notes[0]['wave_class']} and {notes[1]['wave_class']}. "
+            f"At least 1 must be L4_STRUCTURAL. Use FOUNDER_OVERRIDE:<id> to bypass."
+        ]
+    return True, []
 
 
 def check_maintenance_metadata(notes: list[dict]) -> tuple[bool, list[str]]:
@@ -537,6 +574,42 @@ def enforce(
                 f"Invalid primary_blocker_class: '{blocker}'. "
                 f"Must be one of: {sorted(VALID_BLOCKER_CLASSES)}"
             )
+
+        # Primary invariant ID (all classes)
+        invariant_id = current.get("primary_invariant_id")
+        if invariant_id is None:
+            errors.append(
+                "Missing primary_invariant_id in tracker note "
+                "(required: one of " + ", ".join(sorted(VALID_INVARIANT_IDS)) + ")"
+            )
+        elif invariant_id not in VALID_INVARIANT_IDS:
+            errors.append(
+                f"Invalid primary_invariant_id: '{invariant_id}'. "
+                f"Must be one of: {sorted(VALID_INVARIANT_IDS)}"
+            )
+
+        # Progress proof (required for STRUCTURAL + ENABLER)
+        if wave_class in ("L4_STRUCTURAL", "L4_ENABLER"):
+            pp_before = current.get("progress_proof_before")
+            pp_after = current.get("progress_proof_after")
+            if pp_before is None:
+                errors.append(
+                    f"{wave_class} missing progress_proof_before in tracker note"
+                )
+            if pp_after is None:
+                errors.append(
+                    f"{wave_class} missing progress_proof_after in tracker note"
+                )
+            if pp_before and pp_after and pp_before == pp_after:
+                errors.append(
+                    f"{wave_class} progress_proof_before and progress_proof_after "
+                    f"must not be identical (anti-theater)"
+                )
+
+        # Non-structural adjacency cap
+        adj_ok, adj_errors = check_non_structural_adjacency(notes)
+        if not adj_ok:
+            errors.extend(adj_errors)
 
         # Rolling structural quota
         rw_ok, rw_errors = check_rolling_window(notes)

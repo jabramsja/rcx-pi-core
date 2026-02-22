@@ -63,6 +63,12 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 7. **Post-gate contract sweep (L4_STRUCTURAL only):** Gate pass alone is insufficient. `post_gate_contract_sweep` must reference at least one non-gate test domain (e.g., `tests/engine/`, `tests/structural/`). Sweep commands that only reference `tests/l4_gates/` are rejected.
 
+8. **Primary invariant ID (all classes):** Every class-marked wave must declare `primary_invariant_id` from the enum: `INV_BOUND_HOST_TERMINATION`, `INV_TERMINAL_SCHEMA_LOCK`, `INV_CROSS_SUBSTRATE_PARITY`, `INV_STRUCTURAL_FORWARD_MOTION`, `INV_TYPED_FAIL_CLOSED_OUTCOMES`. Unknown values fail.
+
+9. **Progress proof (STRUCTURAL + ENABLER):** Both `progress_proof_before` and `progress_proof_after` are required for L4_STRUCTURAL and L4_ENABLER waves. Values must not be identical (anti-theater). MAINTENANCE is exempt.
+
+10. **Non-structural adjacency cap:** The two most recent class-marked waves cannot both be non-L4_STRUCTURAL. At least one must be L4_STRUCTURAL. Founder override on the current wave grants bypass.
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
@@ -88,6 +94,9 @@ Required fields by class (machine-parseable `key: value` format):
 | `structural_artifact_ref` | required | — | — |
 | `post_gate_contract_sweep` | required | — | — |
 | `primary_blocker_class` | required | required | required |
+| `primary_invariant_id` | required | required | required |
+| `progress_proof_before` | required | required | — |
+| `progress_proof_after` | required | required | — |
 | `no_op_proof` | — | — | required |
 | `defer_reason_code` | — | — | required |
 | `founder_override` | optional | optional | optional |

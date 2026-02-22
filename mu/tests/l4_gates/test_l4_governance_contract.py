@@ -22,10 +22,12 @@ from enforce_l4_execution_contract import (
     LEGACY_CLASS_ALIAS,
     NON_GATE_TEST_DOMAINS,
     VALID_BLOCKER_CLASSES,
+    VALID_INVARIANT_IDS,
     VALID_WAVE_CLASSES,
     check_consecutive_maintenance,
     check_founder_override_replay,
     check_legacy_alias_in_new_notes,
+    check_non_structural_adjacency,
     check_noop_throttle,
     check_rolling_window,
     enforce,
@@ -42,7 +44,9 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
           evidence_command="pytest tests/l4_gates/", evidence_delta="delta",
           hd_before=None, hd_after=None, sa_ref=None,
           defer_reason=None, founder_override=None, wave_id="test-wave",
-          blocker_class="INTEGRATION", sweep=None):
+          blocker_class="INTEGRATION", sweep=None,
+          invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+          pp_before="before-state", pp_after="after-state"):
     """Build a mock tracker note dict."""
     return {
         "wave_id": wave_id,
@@ -59,6 +63,9 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
         "founder_override": founder_override,
         "primary_blocker_class": blocker_class,
         "post_gate_contract_sweep": sweep,
+        "primary_invariant_id": invariant_id,
+        "progress_proof_before": pp_before,
+        "progress_proof_after": pp_after,
         "date": "2026-02-20",
         "raw": f"Class: {raw_class or wave_class}",
     }
@@ -537,3 +544,174 @@ class TestPostGateContractSweep:
         assert "tests/structural/" in NON_GATE_TEST_DOMAINS
         assert "mu/tests/engine/" in NON_GATE_TEST_DOMAINS
         assert len(NON_GATE_TEST_DOMAINS) == 10
+
+
+# =============================================================================
+# Constraint 10: Primary invariant ID (all classes)
+# =============================================================================
+
+class TestInvariantId:
+    """Every class-marked wave must declare primary_invariant_id."""
+
+    def test_missing_invariant_id_fails(self):
+        notes = [_note("L4_ENABLER", invariant_id=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("primary_invariant_id" in e for e in errors)
+
+    def test_invalid_invariant_id_fails(self):
+        notes = [_note("L4_ENABLER", invariant_id="INV_BOGUS")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("Invalid primary_invariant_id" in e for e in errors)
+
+    @pytest.mark.parametrize("inv_id", sorted(VALID_INVARIANT_IDS))
+    def test_valid_invariant_ids_accepted(self, inv_id):
+        notes = [_note("L4_ENABLER", invariant_id=inv_id)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Invariant ID {inv_id} should be accepted: {errors}"
+
+    def test_invariant_id_required_for_structural(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest tests/structural/",
+                       invariant_id=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("primary_invariant_id" in e for e in errors)
+
+    def test_valid_invariant_ids_constant(self):
+        assert VALID_INVARIANT_IDS == {
+            "INV_BOUND_HOST_TERMINATION",
+            "INV_TERMINAL_SCHEMA_LOCK",
+            "INV_CROSS_SUBSTRATE_PARITY",
+            "INV_STRUCTURAL_FORWARD_MOTION",
+            "INV_TYPED_FAIL_CLOSED_OUTCOMES",
+        }
+
+
+# =============================================================================
+# Constraint 11: Progress proof (STRUCTURAL + ENABLER)
+# =============================================================================
+
+class TestProgressProof:
+    """STRUCTURAL and ENABLER must declare progress_proof_before/after."""
+
+    def test_missing_progress_proof_before_fails(self):
+        notes = [_note("L4_ENABLER", pp_before=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("progress_proof_before" in e for e in errors)
+
+    def test_missing_progress_proof_after_fails(self):
+        notes = [_note("L4_ENABLER", pp_after=None)]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("progress_proof_after" in e for e in errors)
+
+    def test_identical_progress_proof_fails(self):
+        notes = [_note("L4_ENABLER", pp_before="same", pp_after="same")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert not passed
+        assert any("anti-theater" in e for e in errors)
+
+    def test_valid_progress_proof_passes(self):
+        notes = [_note("L4_ENABLER", pp_before="no invariant check",
+                       pp_after="invariant check enforced")]
+        files = ["TASKS.md"]
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+        assert passed, f"Valid progress proof should pass: {errors}"
+
+    def test_progress_proof_not_required_for_maintenance(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="docs", defer_reason="d",
+                  evidence_command=None, evidence_delta=None,
+                  pp_before=None, pp_after=None),
+            _note("L4_STRUCTURAL"),  # Not consecutive
+        ]
+        files = ["TASKS.md"]
+        passed, errors = enforce("MAINTENANCE", files, notes=notes)
+        assert passed, f"MAINTENANCE should not require progress proof: {errors}"
+
+    def test_progress_proof_required_for_structural(self):
+        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+                       sa_ref="ref", sweep="pytest tests/structural/",
+                       pp_before=None, pp_after=None)]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("progress_proof_before" in e for e in errors)
+
+
+# =============================================================================
+# Constraint 12: Non-structural adjacency cap
+# =============================================================================
+
+class TestNonStructuralAdjacency:
+    """Last 2 class-marked waves cannot both be non-STRUCTURAL."""
+
+    def test_two_enablers_fails(self):
+        notes = [
+            _note("L4_ENABLER", wave_id="w2"),
+            _note("L4_ENABLER", wave_id="w1"),
+        ]
+        passed, errors = check_non_structural_adjacency(notes)
+        assert not passed
+        assert any("Non-structural adjacency" in e for e in errors)
+
+    def test_enabler_then_maintenance_fails(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="x", defer_reason="d", wave_id="w2"),
+            _note("L4_ENABLER", wave_id="w1"),
+        ]
+        passed, errors = check_non_structural_adjacency(notes)
+        assert not passed
+        assert any("Non-structural adjacency" in e for e in errors)
+
+    def test_structural_then_enabler_passes(self):
+        notes = [
+            _note("L4_ENABLER", wave_id="w2"),
+            _note("L4_STRUCTURAL", wave_id="w1"),
+        ]
+        passed, errors = check_non_structural_adjacency(notes)
+        assert passed, f"STRUCTURAL then ENABLER should pass: {errors}"
+
+    def test_enabler_then_structural_passes(self):
+        notes = [
+            _note("L4_STRUCTURAL", wave_id="w2"),
+            _note("L4_ENABLER", wave_id="w1"),
+        ]
+        passed, errors = check_non_structural_adjacency(notes)
+        assert passed, f"ENABLER then STRUCTURAL should pass: {errors}"
+
+    def test_founder_override_bypasses_adjacency(self):
+        notes = [
+            _note("L4_ENABLER", wave_id="w2",
+                  founder_override="2026-02-22-wave15-bootstrap"),
+            _note("L4_ENABLER", wave_id="w1"),
+        ]
+        passed, errors = check_non_structural_adjacency(notes)
+        assert passed, f"Founder override should bypass adjacency: {errors}"
+
+    def test_bootstrap_grace_with_one_note(self):
+        notes = [_note("L4_ENABLER")]
+        passed, errors = check_non_structural_adjacency(notes)
+        assert passed, f"Single note = bootstrap grace: {errors}"
