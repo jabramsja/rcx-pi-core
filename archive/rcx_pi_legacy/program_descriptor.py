@@ -47,6 +47,8 @@ def _resolve_mu_program(program: str, cwd_base: Path) -> Path:
 
     # 3) active fixture home (canonical for tools/tests)
     candidates.append((repo_root / "mu" / "mu_programs" / f"{name}.mu").resolve())
+    # 4) sandbox subfolder (sandbox-generated worlds)
+    candidates.append((repo_root / "mu" / "mu_programs" / "sandbox" / f"{name}.mu").resolve())
 
     for c in candidates:
         if c.exists() and c.is_file():

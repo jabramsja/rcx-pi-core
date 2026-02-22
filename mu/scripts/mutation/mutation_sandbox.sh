@@ -118,8 +118,8 @@ report: dict = {
 comparison: dict = {}
 
 def _stage_world_for_mu_programs(src_path: Path, tag: str, run_dir: Path) -> str:
-    # Stage world files into mu/mu_programs/ for trace-cli runner.
-    mu_dir = Path("mu") / "mu_programs"
+    # Stage world files into mu/mu_programs/sandbox/ for trace-cli runner.
+    mu_dir = Path("mu") / "mu_programs" / "sandbox"
     mu_dir.mkdir(parents=True, exist_ok=True)
     run_id_env = os.environ.get("RCX_SANDBOX_RUN_ID") or run_dir.name or str(int(time.time()))
     world_name = f"__sandbox_{run_id_env}_{tag}"
