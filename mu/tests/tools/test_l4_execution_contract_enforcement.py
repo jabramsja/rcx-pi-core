@@ -30,6 +30,7 @@ from enforce_l4_execution_contract import (
     VALID_WAVE_CLASSES,
     enforce,
     filter_to_tracked_files,
+    validate_indicator_artifact_json,
     has_non_comment_runtime_delta,
     is_comment_line,
     is_runtime_file,
@@ -224,6 +225,8 @@ class TestMaintenanceEnforcement:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -486,6 +489,8 @@ class TestLoopholeDetection:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -525,6 +530,8 @@ class TestEvidenceCommandTarget:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -561,6 +568,8 @@ class TestEvidenceCommandTarget:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -609,6 +618,8 @@ class TestEvidenceCommandTarget:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -654,6 +665,8 @@ class TestWaveBinding:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -678,6 +691,8 @@ class TestWaveBinding:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -710,6 +725,8 @@ class TestWaveBinding:
             "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
             "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -890,3 +907,75 @@ class TestScopePolicy:
         )
         assert "Stripping" in result.stdout
         assert "Changed files: 1" in result.stdout
+
+
+class TestIndicatorDerivationAntiTheater:
+    """Indicator artifact derivation values must match raw provenance data."""
+
+    def test_speedup_ratio_mismatch_fails(self, tmp_path) -> None:
+        """Artifact with ratio not matching raw seconds is rejected."""
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 99.0,  # wrong — raw says 1.0
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": 1.5,
+            "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [
+                {"step": 1, "elapsed_seconds": 1.5},
+                {"step": 2, "elapsed_seconds": 3.0},
+            ],
+            "parity_diff_source": "tools/checks/check_js_debt.sh",
+            "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+            "collector_version": "2.0.0",
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed, "Should reject mismatched derivation"
+        assert any("Derivation mismatch" in e and "repeat_run_speedup_ratio" in e for e in errors)
+
+    def test_slope_mismatch_fails(self, tmp_path) -> None:
+        """Artifact with slope not matching growth points is rejected."""
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": 999.0,  # wrong — points say 1.5
+            "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [
+                {"step": 1, "elapsed_seconds": 1.5},
+                {"step": 2, "elapsed_seconds": 3.0},
+            ],
+            "parity_diff_source": "tools/checks/check_js_debt.sh",
+            "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+            "collector_version": "2.0.0",
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed, "Should reject mismatched slope"
+        assert any("Derivation mismatch" in e and "step_growth_slope" in e for e in errors)
+
+    def test_valid_derivation_passes(self, tmp_path) -> None:
+        """Artifact with correct derivations passes."""
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": round(1.5 / 1.5, 6),
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 0,
+            "step_growth_slope": round((3.0 - 1.5) / (2 - 1), 6),
+            "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [
+                {"step": 1, "elapsed_seconds": 1.5},
+                {"step": 2, "elapsed_seconds": 3.0},
+            ],
+            "parity_diff_source": "tools/checks/check_js_debt.sh",
+            "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+            "collector_version": "2.0.0",
+        }))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert passed, f"Should pass: {errors}"

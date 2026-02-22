@@ -76,6 +76,15 @@ Promotion rule: canonical vectors produce identical outputs and typed errors acr
 
 Promotion rule for all SINK items: no promotion until NEXT is fully green and CI remains stable for 30 consecutive daily runs.
 
+## Machine Enforcement
+
+Boot0 track binding is machine-enforced by `tools/checks/enforce_l4_execution_contract.py`. Every L4 class-marked wave must declare:
+
+- `boot0_track_id`: One of the 13 track IDs from the Execution and Research tracks above (N1a, N1b, N2, N3, N4, N5, N6a, N6b, V1, V2, V3, V4, V5). Unknown values fail the checker.
+- `boot0_progress_state`: One of `ADVANCE`, `HOLD`, `DEFER`. Unknown values fail the checker.
+
+This ensures every L4 wave is explicitly linked to a Boot0/Hex0 acceptance criterion. See `roadmap/L4ExecutionContract.v2.md` rule 14 for the full specification.
+
 ## Merge Policy
 
 1. If a change touches `rcx_pi/selfhost/`, `mu/host/js/`, or seed files under `mu/`, **C1-C4 must be green**.

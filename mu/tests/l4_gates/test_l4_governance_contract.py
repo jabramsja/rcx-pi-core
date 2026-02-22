@@ -53,7 +53,8 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
           pp_before="before-state", pp_after="after-state",
           indicator_ref="reports/l4_wave_indicators/test-wave.json",
           indicator_cmd="python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
-          bootstrap_policy="SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP"):
+          bootstrap_policy="SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+          boot0_track="N6b", boot0_progress="ADVANCE"):
     """Build a mock tracker note dict."""
     return {
         "wave_id": wave_id,
@@ -76,6 +77,8 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
         "indicator_artifact_ref": indicator_ref,
         "indicator_collection_command": indicator_cmd,
         "bootstrap_endgame_policy": bootstrap_policy,
+        "boot0_track_id": boot0_track,
+        "boot0_progress_state": boot0_progress,
         "date": "2026-02-20",
         "raw": f"Class: {raw_class or wave_class}",
     }
@@ -869,10 +872,18 @@ class TestValidateIndicatorJson:
         artifact = tmp_path / "indicators.json"
         artifact.write_text(json.dumps({
             "wave_id": "test",
-            "repeat_run_speedup_ratio": 1.0,
+            "repeat_run_speedup_ratio": round(1.5 / 1.5, 6),
             "parity_diff_count": 21,
             "net_host_semantic_delta": 0,
-            "step_growth_slope": 0.0,
+            "step_growth_slope": round((3.0 - 1.5) / (2 - 1), 6),
+            "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [
+                {"step": 1, "elapsed_seconds": 1.5},
+                {"step": 2, "elapsed_seconds": 3.0},
+            ],
+            "parity_diff_source": "tools/checks/check_js_debt.sh",
+            "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+            "collector_version": "2.0.0",
         }))
         passed, errors = validate_indicator_artifact_json(str(artifact))
         assert passed, f"Valid artifact should pass: {errors}"
@@ -930,3 +941,177 @@ class TestValidateIndicatorJson:
         passed, errors = validate_indicator_artifact_json(str(artifact))
         assert not passed
         assert any("parity_diff_count" in e for e in errors)
+
+
+def _valid_artifact_data():
+    """Return a fully valid indicator artifact dict with provenance."""
+    return {
+        "wave_id": "test",
+        "repeat_run_speedup_ratio": round(1.5 / 1.5, 6),
+        "parity_diff_count": 21,
+        "net_host_semantic_delta": 0,
+        "step_growth_slope": round((3.0 - 1.5) / (2 - 1), 6),
+        "repeat_run_raw_seconds": [1.5, 1.5],
+        "step_growth_points": [
+            {"step": 1, "elapsed_seconds": 1.5},
+            {"step": 2, "elapsed_seconds": 3.0},
+        ],
+        "parity_diff_source": "tools/checks/check_js_debt.sh",
+        "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+        "collector_version": "2.0.0",
+    }
+
+
+# =============================================================================
+# Boot0 track binding
+# =============================================================================
+
+class TestBoot0TrackBinding:
+    """boot0_track_id and boot0_progress_state must be valid."""
+
+    def test_valid_boot0_fields(self):
+        n = _note("L4_ENABLER", boot0_track="N6b", boot0_progress="ADVANCE")
+        passed, errors = enforce("L4_ENABLER", [], notes=[n])
+        assert passed, errors
+
+    def test_missing_boot0_track_id(self):
+        n = _note("L4_ENABLER", boot0_track=None)
+        passed, errors = enforce("L4_ENABLER", [], notes=[n])
+        assert not passed
+        assert any("boot0_track_id" in e for e in errors)
+
+    def test_invalid_boot0_track_id(self):
+        n = _note("L4_ENABLER", boot0_track="INVALID")
+        passed, errors = enforce("L4_ENABLER", [], notes=[n])
+        assert not passed
+        assert any("boot0_track_id" in e and "INVALID" in e for e in errors)
+
+    def test_missing_boot0_progress_state(self):
+        n = _note("L4_ENABLER", boot0_progress=None)
+        passed, errors = enforce("L4_ENABLER", [], notes=[n])
+        assert not passed
+        assert any("boot0_progress_state" in e for e in errors)
+
+    def test_invalid_boot0_progress_state(self):
+        n = _note("L4_ENABLER", boot0_progress="UNKNOWN")
+        passed, errors = enforce("L4_ENABLER", [], notes=[n])
+        assert not passed
+        assert any("boot0_progress_state" in e and "UNKNOWN" in e for e in errors)
+
+    def test_all_execution_track_ids_accepted(self):
+        for tid in ("N1a", "N1b", "N2", "N3", "N4", "N5", "N6a", "N6b"):
+            n = _note("L4_ENABLER", boot0_track=tid)
+            passed, errors = enforce("L4_ENABLER", [], notes=[n])
+            assert passed, f"Track ID {tid} rejected: {errors}"
+
+    def test_all_research_track_ids_accepted(self):
+        for tid in ("V1", "V2", "V3", "V4", "V5"):
+            n = _note("L4_ENABLER", boot0_track=tid)
+            passed, errors = enforce("L4_ENABLER", [], notes=[n])
+            assert passed, f"Track ID {tid} rejected: {errors}"
+
+    def test_all_progress_states_accepted(self):
+        for state in ("ADVANCE", "HOLD", "DEFER"):
+            n = _note("L4_ENABLER", boot0_progress=state)
+            passed, errors = enforce("L4_ENABLER", [], notes=[n])
+            assert passed, f"Progress state {state} rejected: {errors}"
+
+
+# =============================================================================
+# Indicator provenance validation
+# =============================================================================
+
+class TestIndicatorProvenance:
+    """Indicator artifacts must include provenance keys with derivation consistency."""
+
+    def test_valid_provenance_artifact(self, tmp_path):
+        artifact = tmp_path / "indicators.json"
+        import json
+        artifact.write_text(json.dumps(_valid_artifact_data()))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert passed, errors
+
+    def test_missing_provenance_key(self, tmp_path):
+        import json
+        data = _valid_artifact_data()
+        del data["repeat_run_raw_seconds"]
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("repeat_run_raw_seconds" in e for e in errors)
+
+    def test_raw_seconds_wrong_length(self, tmp_path):
+        import json
+        data = _valid_artifact_data()
+        data["repeat_run_raw_seconds"] = [1.0]
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("exactly 2" in e for e in errors)
+
+    def test_raw_seconds_bool_rejected(self, tmp_path):
+        import json
+        data = _valid_artifact_data()
+        data["repeat_run_raw_seconds"] = [True, 1.5]
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("not bool" in e for e in errors)
+
+    def test_raw_seconds_zero_rejected(self, tmp_path):
+        import json
+        data = _valid_artifact_data()
+        data["repeat_run_raw_seconds"] = [0.0, 1.5]
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("> 0" in e for e in errors)
+
+    def test_step_growth_points_not_increasing(self, tmp_path):
+        import json
+        data = _valid_artifact_data()
+        data["step_growth_points"] = [
+            {"step": 2, "elapsed_seconds": 1.0},
+            {"step": 1, "elapsed_seconds": 2.0},
+        ]
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("strictly greater" in e for e in errors)
+
+    def test_derivation_mismatch_speedup_ratio(self, tmp_path):
+        """Anti-theater: derived ratio must match raw provenance."""
+        import json
+        data = _valid_artifact_data()
+        data["repeat_run_speedup_ratio"] = 99.0  # wrong
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("Derivation mismatch" in e and "repeat_run_speedup_ratio" in e for e in errors)
+
+    def test_derivation_mismatch_slope(self, tmp_path):
+        """Anti-theater: slope must be consistent with growth points."""
+        import json
+        data = _valid_artifact_data()
+        data["step_growth_slope"] = 999.0  # wrong
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("Derivation mismatch" in e and "step_growth_slope" in e for e in errors)
+
+    def test_empty_string_provenance_rejected(self, tmp_path):
+        import json
+        data = _valid_artifact_data()
+        data["parity_diff_source"] = ""
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(str(artifact))
+        assert not passed
+        assert any("non-empty" in e for e in errors)
