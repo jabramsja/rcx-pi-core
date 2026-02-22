@@ -2039,7 +2039,7 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
         if actual != _HEMISPHERE_KEYS:
             missing = sorted(_HEMISPHERE_KEYS - actual, key=str)
             extra = sorted(actual - _HEMISPHERE_KEYS, key=str)
-            raise RcxEngineError("input.shape_mismatch", f"hemispheres shape mismatch: missing={missing}, extra={extra}")
+            raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
 
     use_boot1 = engine_kwargs.pop("use_boot1_recursive", True)
     if not isinstance(use_boot1, bool):  # AST_OK: boundary

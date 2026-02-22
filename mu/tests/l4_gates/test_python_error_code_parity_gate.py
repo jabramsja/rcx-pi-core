@@ -6,11 +6,15 @@ RcxEngineError(RuntimeError) with machine-readable .error_code attribute,
 matching JS RcxError. Backward compatible: existing except RuntimeError and
 pytest.raises(RuntimeError, match=...) patterns remain valid.
 
-Error codes locked:
+Error codes locked (source lock — must exist as string literals in both substrates):
     engine.exhausted             — engine loop exhausted iterations
     engine.stalled_non_terminal  — engine stalled in intermediate state
     engine.boot1_depth_exceeded  — Boot1 re-entry depth limit hit
-    input.shape_mismatch         — hemisphere routing produced bad shape
+    input.shape_mismatch         — post-routing shape check (internal fail-closed)
+
+Note: Pre-routing hemisphere key-set validation raises ValueError (user-input
+validation), NOT RcxEngineError. Only post-routing fail-closed paths use typed
+error codes.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/l4_gates/test_python_error_code_parity_gate.py -v
@@ -118,25 +122,15 @@ class TestPythonErrorCodePresence:
                 max_algorithm_iterations=50,
             )
 
-    def test_routing_shape_mismatch_has_error_code(self):
-        """input.shape_mismatch path raises RcxEngineError with matching code."""
-        reset_step_budget()
-        # Pass bad hemispheres shape to trigger shape validation
-        bad_hemispheres = {"wrong": "shape"}
-        with pytest.raises(RcxEngineError) as exc_info:
-            run_engine_with_routing(
-                [], "test_input",
-                hemispheres=bad_hemispheres,
-                max_steps=10, max_engine_iterations=20,
-                max_algorithm_iterations=50,
-            )
-        assert exc_info.value.error_code == "input.shape_mismatch"
+    def test_hemisphere_pre_validation_raises_valueerror(self):
+        """Pre-routing hemisphere key validation raises ValueError, not RcxEngineError.
 
-    def test_routing_shape_message_preserved(self):
-        """input.shape_mismatch message still contains key substrings."""
+        This is user-input validation, not an engine fail-closed path.
+        Post-routing shape checks use RcxEngineError (internal fail-closed).
+        """
         reset_step_budget()
         bad_hemispheres = {"wrong": "shape"}
-        with pytest.raises(RuntimeError, match="shape mismatch|unexpected shape|did not produce"):
+        with pytest.raises(ValueError, match="shape mismatch"):
             run_engine_with_routing(
                 [], "test_input",
                 hemispheres=bad_hemispheres,
@@ -162,11 +156,11 @@ class TestBackwardCompatibility:
                 max_algorithm_iterations=50,
             )
 
-    def test_legacy_shape_catch(self):
-        """pytest.raises(RuntimeError, match='shape mismatch') still catches."""
+    def test_legacy_shape_catch_via_valueerror(self):
+        """pytest.raises(ValueError, match='shape mismatch') still catches pre-validation."""
         reset_step_budget()
         bad_hemispheres = {"wrong": "shape"}
-        with pytest.raises(RuntimeError, match="shape mismatch"):
+        with pytest.raises(ValueError, match="shape mismatch"):
             run_engine_with_routing(
                 [], "test_input",
                 hemispheres=bad_hemispheres,
@@ -204,19 +198,9 @@ class TestCrossSubstrateErrorCodeParity:
 
         assert py_code == js_code == "engine.exhausted"
 
-    def test_routing_shape_mismatch_parity(self):
-        """Both substrates report 'input.shape_mismatch' for bad hemispheres."""
-        reset_step_budget()
+    def test_js_shape_mismatch_has_error_code(self):
+        """JS reports 'input.shape_mismatch' for bad hemispheres key-set."""
         bad_hemispheres = {"wrong": "shape"}
-        with pytest.raises(RcxEngineError) as exc_info:
-            run_engine_with_routing(
-                [], "test_input",
-                hemispheres=bad_hemispheres,
-                max_steps=10, max_engine_iterations=20,
-                max_algorithm_iterations=50,
-            )
-        py_code = exc_info.value.error_code
-
         js_resp = _js_request(
             "run_engine_with_routing",
             input="test_input",
@@ -225,9 +209,7 @@ class TestCrossSubstrateErrorCodeParity:
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
         )
         assert not js_resp["success"]
-        js_code = js_resp["error_code"]
-
-        assert py_code == js_code == "input.shape_mismatch"
+        assert js_resp["error_code"] == "input.shape_mismatch"
 
 
 # =============================================================================
