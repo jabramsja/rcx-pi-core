@@ -69,6 +69,12 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 10. **Non-structural adjacency cap:** The two most recent class-marked waves cannot both be non-L4_STRUCTURAL. At least one must be L4_STRUCTURAL. Founder override on the current wave grants bypass.
 
+11. **Indicator artifact (all classes):** Every class-marked wave must include `indicator_artifact_ref` pointing to a JSON artifact in `reports/l4_wave_indicators/<wave_id>.json` and `indicator_collection_command` referencing the canonical collector `tools/metrics/collect_l4_wave_indicators.py`. Artifact must be committed as part of the wave. CLI-level validation checks artifact is in changed files and JSON is valid.
+
+12. **Indicator artifact JSON schema:** Required keys: `repeat_run_speedup_ratio` (float), `parity_diff_count` (int), `net_host_semantic_delta` (int), `step_growth_slope` (float). Boolean values are explicitly rejected (Python `bool` is subclass of `int`).
+
+13. **Bootstrap endgame policy lock (all classes):** Every class-marked wave must declare `bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP`. This resolves the documented design split between "eliminate bootstrap" and "irreducible bootstrap forever" — the canonical policy is minimal substrate-independent bootstrap. See `L4DecisionCard.v0.md` and `BootstrapStructuralBridge.v0.md` for architectural context.
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
@@ -99,6 +105,9 @@ Required fields by class (machine-parseable `key: value` format):
 | `progress_proof_after` | required | required | — |
 | `no_op_proof` | — | — | required |
 | `defer_reason_code` | — | — | required |
+| `indicator_artifact_ref` | required | required | required |
+| `indicator_collection_command` | required | required | required |
+| `bootstrap_endgame_policy` | required | required | required |
 | `founder_override` | optional | optional | optional |
 
 ## Enforcement

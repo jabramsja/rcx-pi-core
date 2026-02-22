@@ -84,6 +84,9 @@ _SWEEP_RE = re.compile(r"post_gate_contract_sweep:\s*(.+?)(?:\.\s|$)")
 _INVARIANT_ID_RE = re.compile(r"(?<!`)primary_invariant_id:\s*([A-Z_]+)")
 _PROGRESS_BEFORE_RE = re.compile(r"progress_proof_before:\s*(.+?)(?:\.\s|$)")
 _PROGRESS_AFTER_RE = re.compile(r"progress_proof_after:\s*(.+?)(?:\.\s|$)")
+_INDICATOR_REF_RE = re.compile(r"indicator_artifact_ref:\s*(.+?)(?:\.\s|$)")
+_INDICATOR_CMD_RE = re.compile(r"indicator_collection_command:\s*(.+?)(?:\.\s|$)")
+_BOOTSTRAP_POLICY_RE = re.compile(r"(?<!`)bootstrap_endgame_policy:\s*([A-Z_]+)")
 
 # Rolling window size
 ROLLING_WINDOW = 3
@@ -105,6 +108,20 @@ VALID_INVARIANT_IDS = frozenset({
     "INV_STRUCTURAL_FORWARD_MOTION",
     "INV_TYPED_FAIL_CLOSED_OUTCOMES",
 })
+
+# Canonical bootstrap endgame policy (single allowed value, resolves design split)
+CANONICAL_BOOTSTRAP_POLICY = "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP"
+
+# Canonical indicator collector script path
+CANONICAL_COLLECTOR_PATH = "tools/metrics/collect_l4_wave_indicators.py"
+
+# Required indicator JSON keys with expected Python types
+INDICATOR_REQUIRED_KEYS = {
+    "repeat_run_speedup_ratio": (int, float),
+    "parity_diff_count": (int,),
+    "net_host_semantic_delta": (int,),
+    "step_growth_slope": (int, float),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +272,9 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
         invariant_match = _INVARIANT_ID_RE.search(body_text)
         progress_before_match = _PROGRESS_BEFORE_RE.search(body_text)
         progress_after_match = _PROGRESS_AFTER_RE.search(body_text)
+        indicator_ref_match = _INDICATOR_REF_RE.search(body_text)
+        indicator_cmd_match = _INDICATOR_CMD_RE.search(body_text)
+        bootstrap_policy_match = _BOOTSTRAP_POLICY_RE.search(body_text)
 
         notes.append({
             "wave_id": wave_id,
@@ -274,6 +294,9 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "primary_invariant_id": invariant_match.group(1).strip() if invariant_match else None,
             "progress_proof_before": progress_before_match.group(1).strip() if progress_before_match else None,
             "progress_proof_after": progress_after_match.group(1).strip() if progress_after_match else None,
+            "indicator_artifact_ref": indicator_ref_match.group(1).strip() if indicator_ref_match else None,
+            "indicator_collection_command": indicator_cmd_match.group(1).strip() if indicator_cmd_match else None,
+            "bootstrap_endgame_policy": bootstrap_policy_match.group(1).strip() if bootstrap_policy_match else None,
             "date": date_str,
             "raw": body,
         })
@@ -305,6 +328,9 @@ def check_rolling_window(notes: list[dict]) -> tuple[bool, list[str]]:
     window = notes[:ROLLING_WINDOW]
     has_structural = any(n["wave_class"] == "L4_STRUCTURAL" for n in window)
     if not has_structural:
+        if notes[0].get("founder_override"):
+            print(f"  FOUNDER_OVERRIDE active — allowing rolling window without STRUCTURAL")
+            return True, []
         classes = [n["wave_class"] for n in window]
         return False, [
             f"Rolling structural quota violated: last {ROLLING_WINDOW} waves "
@@ -421,6 +447,34 @@ def check_legacy_alias_in_new_notes(notes: list[dict]) -> tuple[bool, list[str]]
             "Use L4_STRUCTURAL, L4_ENABLER, or MAINTENANCE instead."
         ]
     return True, []
+
+
+# ---------------------------------------------------------------------------
+# Indicator artifact validation
+# ---------------------------------------------------------------------------
+
+def validate_indicator_artifact_json(artifact_path: str) -> tuple[bool, list[str]]:
+    """Validate indicator artifact JSON: required keys + correct types."""
+    import json as _json
+    errors: list[str] = []
+    path = Path(artifact_path)
+    if not path.exists():
+        return False, [f"Indicator artifact '{artifact_path}' does not exist on disk."]
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except (_json.JSONDecodeError, OSError) as exc:
+        return False, [f"Indicator artifact '{artifact_path}' invalid JSON: {exc}"]
+    for key, types in INDICATOR_REQUIRED_KEYS.items():
+        if key not in data:
+            errors.append(f"Indicator artifact missing required key: '{key}'")
+        else:
+            val = data[key]
+            if isinstance(val, bool) or not isinstance(val, types):
+                errors.append(
+                    f"Indicator key '{key}': got {type(val).__name__}, "
+                    f"expected {'/'.join(t.__name__ for t in types)}"
+                )
+    return len(errors) == 0, errors
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +660,32 @@ def enforce(
                     f"must not be identical (anti-theater)"
                 )
 
+        # Indicator artifact and collection command (all classes)
+        indicator_ref = current.get("indicator_artifact_ref")
+        indicator_cmd = current.get("indicator_collection_command")
+        if indicator_ref is None:
+            errors.append("Missing indicator_artifact_ref in tracker note")
+        if indicator_cmd is None:
+            errors.append("Missing indicator_collection_command in tracker note")
+        elif CANONICAL_COLLECTOR_PATH not in indicator_cmd:
+            errors.append(
+                f"indicator_collection_command must reference canonical collector "
+                f"'{CANONICAL_COLLECTOR_PATH}'. Got: {indicator_cmd!r}"
+            )
+
+        # Bootstrap endgame policy (all classes)
+        policy = current.get("bootstrap_endgame_policy")
+        if policy is None:
+            errors.append(
+                "Missing bootstrap_endgame_policy in tracker note "
+                f"(required: {CANONICAL_BOOTSTRAP_POLICY})"
+            )
+        elif policy != CANONICAL_BOOTSTRAP_POLICY:
+            errors.append(
+                f"Invalid bootstrap_endgame_policy: '{policy}'. "
+                f"Must be exactly: {CANONICAL_BOOTSTRAP_POLICY}"
+            )
+
         # Non-structural adjacency cap
         adj_ok, adj_errors = check_non_structural_adjacency(notes)
         if not adj_ok:
@@ -738,6 +818,21 @@ def main() -> int:
     print(f"Runtime files: {runtime_count}")
 
     passed, errors = enforce(wave_class, changed_files, diff_text, notes)
+
+    # Indicator artifact file-level validation (CLI only)
+    if notes:
+        indicator_ref = notes[0].get("indicator_artifact_ref")
+        if indicator_ref:
+            if indicator_ref not in changed_files:
+                passed = False
+                errors.append(
+                    f"indicator_artifact_ref '{indicator_ref}' not in changed files. "
+                    f"Artifact must be committed as part of the wave."
+                )
+            art_ok, art_errors = validate_indicator_artifact_json(indicator_ref)
+            if not art_ok:
+                passed = False
+                errors.extend(art_errors)
 
     if passed:
         print(f"✅ L4 Execution Contract v2: {wave_class or 'no-class'} compliant")

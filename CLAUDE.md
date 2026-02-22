@@ -281,7 +281,7 @@ Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_
 | `L4_ENABLER` | Tooling/governance prerequisite for specific gate | MUST NOT touch runtime dirs. Requires `target_gate_id` + `evidence_command` + `evidence_delta`. | Claiming `host_semantics_delta` without runtime touch. |
 | `MAINTENANCE` | No L4 progress | MUST NOT touch runtime dirs. Requires `no_op_proof` + `defer_reason_code` + `target_gate_id`. | Max 1 consecutive. Cannot advance gate status. |
 
-**All classes require:** `primary_blocker_class: DESIGN|INTEGRATION|PERFORMANCE` + `primary_invariant_id` (enum) in tracker note.
+**All classes require:** `primary_blocker_class: DESIGN|INTEGRATION|PERFORMANCE` + `primary_invariant_id` (enum) + `indicator_artifact_ref` + `indicator_collection_command` (must reference canonical collector) + `bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP` in tracker note.
 
 **STRUCTURAL + ENABLER additionally require:** `progress_proof_before` + `progress_proof_after` (must differ).
 
@@ -293,7 +293,9 @@ Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_
 5. Founder override: `FOUNDER_OVERRIDE:<id>` grants one exception; replay = fail.
 6. Post-gate sweep: `L4_STRUCTURAL` must include `post_gate_contract_sweep` referencing non-gate test domains.
 7. Non-structural adjacency cap: last 2 waves cannot both be non-STRUCTURAL (founder override bypass).
-8. Enforcement: `--staged` (local), `--range` (CI), `--files` (tests).
+8. Indicator artifact: per-wave JSON in `reports/l4_wave_indicators/`, validated at CLI level.
+9. Bootstrap policy lock: `SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP` (single canonical value).
+10. Enforcement: `--staged` (local), `--range` (CI), `--files` (tests).
 
 ---
 
