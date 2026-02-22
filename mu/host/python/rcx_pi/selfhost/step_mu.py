@@ -1472,6 +1472,12 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
     # Boundary Mu validation: reject non-Mu input before entering engine loop
     assert_mu(input_value, "_run_engine_recursive.input")
 
+    # Observer type guard: reject non-list before engine loop entry
+    if observer is not None and not isinstance(observer, list):  # AST_OK: boundary
+        raise TypeError(
+            f"observer.invalid_type: observer must be list or None, got {type(observer).__name__}"
+        )
+
     engine_projs = load_verified_seed(get_seed_path("rcx_engine.v1.json"))["projections"]
 
     # Frame state for iterative re-entry
@@ -1696,6 +1702,12 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     """
     # Boundary Mu validation: reject non-Mu input before entering engine loop
     assert_mu(input_value, "run_engine_pipeline.input")
+
+    # Observer type guard: reject non-list before engine loop entry
+    if observer is not None and not isinstance(observer, list):  # AST_OK: boundary
+        raise TypeError(
+            f"observer.invalid_type: observer must be list or None, got {type(observer).__name__}"
+        )
 
     # Boot1 type guard: reject non-bool to prevent truthy-string routing bugs
     if not isinstance(use_boot1_recursive, bool):  # AST_OK: boundary
@@ -2011,6 +2023,14 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
         raise TypeError(
             f"use_boot1_recursive must be bool, got {type(use_boot1).__name__}"
         )
+
+    # Observer type guard: validate before forwarding to run_engine_pipeline
+    obs = engine_kwargs.get("observer")
+    if obs is not None and not isinstance(obs, list):  # AST_OK: boundary
+        raise TypeError(
+            f"observer.invalid_type: observer must be list or None, got {type(obs).__name__}"
+        )
+
     engine_result = run_engine_pipeline(
         projections, input_value, use_boot1_recursive=use_boot1, **engine_kwargs
     )

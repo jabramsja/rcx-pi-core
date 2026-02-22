@@ -1967,6 +1967,12 @@ function runEnginePipeline(projections, inputValue, options) {
     observer = null,
   } = options ?? {};
 
+  // Observer type guard: reject non-array before engine loop entry
+  if (observer !== null && !Array.isArray(observer)) {
+    throw new RcxError('observer.invalid_type',
+      `observer must be array or null, got ${typeof observer}`);
+  }
+
   // Observer event helper — no-op when observer is null
   let obsTs = 0;
   function emit(eventName, stepNum, stateVal, errorCode, extra) {
@@ -2125,6 +2131,12 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
     maxAlgorithmIterations = 50,
     observer = null,
   } = options ?? {};
+
+  // Observer type guard: reject non-array before engine loop entry
+  if (observer !== null && !Array.isArray(observer)) {
+    throw new RcxError('observer.invalid_type',
+      `observer must be array or null, got ${typeof observer}`);
+  }
 
   // Frame state for iterative re-entry
   let depth = recursionDepth ?? 0;
@@ -2360,6 +2372,13 @@ function runEngineWithRouting(projections, inputValue, hemispheres, engineKwargs
       const extra = [...actual].filter(k => !HEMISPHERE_KEYS.has(k)).sort();
       throw new RcxError('input.shape_mismatch', `hemispheres shape mismatch: missing=${JSON.stringify(missing)}, extra=${JSON.stringify(extra)}`);
     }
+  }
+
+  // Observer type guard: validate before forwarding to runEnginePipeline
+  const obs = engineKwargs ? engineKwargs.observer : undefined;
+  if (obs !== undefined && obs !== null && !Array.isArray(obs)) {
+    throw new RcxError('observer.invalid_type',
+      `observer must be array or null, got ${typeof obs}`);
   }
 
   // Boot1 routing: recursive vs trampoline (mirrors run_engine_pipeline handler)
