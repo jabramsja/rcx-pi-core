@@ -1883,21 +1883,21 @@ function setsEqual(a, b) {
 
 /**
  * Check for recurrence/exhaustion terminal output shape.
- * Mirrors Python _is_terminal_shape() (step_mu.py:1371).
+ * Delegates to classifyTerminalKind() for single-source terminal logic.
+ * Mirrors Python _is_terminal_shape().
  */
 function isTerminalShape(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const keys = new Set(Object.keys(value));
-  return setsEqual(keys, RECURRENCE_TERMINAL_KEYS) || setsEqual(keys, EXHAUSTION_TERMINAL_KEYS);
+  const kind = classifyTerminalKind(value);
+  return kind === 'recurrence_terminal' || kind === 'exhaustion_terminal';
 }
 
 /**
  * Check if engine has produced its final unwrapped result (8-key shape).
- * Mirrors Python _is_engine_terminal() (step_mu.py:1391).
+ * Delegates to classifyTerminalKind() for single-source terminal logic.
+ * Mirrors Python _is_engine_terminal().
  */
 function isEngineTerminal(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  return setsEqual(new Set(Object.keys(value)), ENGINE_TERMINAL_KEYS);
+  return classifyTerminalKind(value) === 'engine_terminal';
 }
 
 /**
