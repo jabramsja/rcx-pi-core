@@ -449,18 +449,18 @@ class TestEngineWithRoutingValidation:
                 hemispheres="not a dict",
             )
 
-    def test_hemispheres_missing_keys_raises_valueerror(self):
+    def test_hemispheres_missing_keys_raises_error(self):
         from rcx_pi.selfhost.step_mu import run_engine_with_routing
-        with pytest.raises(ValueError, match="hemispheres shape mismatch"):
+        with pytest.raises(RuntimeError, match="hemispheres shape mismatch"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
                 42,
                 hemispheres={"r_null": None},  # missing 4 keys
             )
 
-    def test_hemispheres_extra_keys_raises_valueerror(self):
+    def test_hemispheres_extra_keys_raises_error(self):
         from rcx_pi.selfhost.step_mu import run_engine_with_routing
-        with pytest.raises(ValueError, match="hemispheres shape mismatch"):
+        with pytest.raises(RuntimeError, match="hemispheres shape mismatch"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
                 42,

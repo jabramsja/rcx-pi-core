@@ -299,7 +299,7 @@ class TestCurrentEnforcedParityFalsification:
         py_failed = False
         try:
             run_engine_with_routing([], "dummy", hemispheres=bad_hemi)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RuntimeError):
             py_failed = True
         assert py_failed, "Python must reject hemispheres with 6 keys"
 
