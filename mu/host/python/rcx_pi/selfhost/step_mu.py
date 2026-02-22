@@ -1417,16 +1417,10 @@ def _is_terminal_shape(value: Mu) -> bool:  # AST_OK: infra — terminal shape d
     - exhaustion: {action, exhaustion_detected, frozen, operator_to_freeze}
 
     Detecting these early avoids unnecessary hash-stall iterations.
-    Uses module-level frozenset constants for AST compliance.
+    Delegates to classify_terminal_kind() for single-source terminal logic.
     """
-    if not isinstance(value, dict):
-        return False
-    keys = frozenset(value.keys())  # AST_OK: key — terminal shape comparison
-    if keys == _RECURRENCE_TERMINAL_KEYS:
-        return True
-    if keys == _EXHAUSTION_TERMINAL_KEYS:
-        return True
-    return False
+    kind = classify_terminal_kind(value)
+    return kind == "recurrence_terminal" or kind == "exhaustion_terminal"
 
 
 def _is_engine_terminal(value: Mu) -> bool:  # AST_OK: infra — engine terminal shape detection
@@ -1435,11 +1429,9 @@ def _is_engine_terminal(value: Mu) -> bool:  # AST_OK: infra — engine terminal
     After engine.exhaustion_done → engine.unwrap, the output has shape:
     {value, closure_detected, tau_step, exhaustion_detected, operator_frozen,
      frozen_set, action, stall}
-    Uses module-level frozenset constant for AST compliance.
+    Delegates to classify_terminal_kind() for single-source terminal logic.
     """
-    if not isinstance(value, dict):
-        return False
-    return frozenset(value.keys()) == _ENGINE_TERMINAL_KEYS  # AST_OK: key — engine terminal comparison
+    return classify_terminal_kind(value) == "engine_terminal"
 
 
 

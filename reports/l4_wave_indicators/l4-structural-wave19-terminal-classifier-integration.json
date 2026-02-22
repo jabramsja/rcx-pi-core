@@ -1,0 +1,24 @@
+{
+  "wave_id": "l4-structural-wave19-terminal-classifier-integration",
+  "repeat_run_speedup_ratio": 1.59514,
+  "parity_diff_count": 21,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.418298,
+  "repeat_run_raw_seconds": [
+    0.667244,
+    0.418298
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.667244
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.085542
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-22T22:22:05Z",
+  "collector_version": "2.0.0"
+}
