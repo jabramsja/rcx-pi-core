@@ -64,6 +64,38 @@ _ENGINE_TERMINAL_KEYS = frozenset({  # AST_OK: constant — engine unwrapped out
     "operator_frozen", "frozen_set", "action", "stall",
 })
 
+# Terminal kind enum — unified classification of all terminal states.
+# Every dict result falls into exactly one kind. Pure structural check.
+TERMINAL_KINDS = frozenset({  # AST_OK: constant — terminal classification enum
+    "kernel_done",             # {_mode: "done", _result: ..., _stall: ...}
+    "recurrence_terminal",     # {closure_detected, final_result, tau_step}
+    "exhaustion_terminal",     # {action, exhaustion_detected, frozen, operator_to_freeze}
+    "engine_terminal",         # 8-key unwrapped engine output
+    "non_terminal",            # none of the above
+})
+
+
+def classify_terminal_kind(value) -> str:  # AST_OK: infra — unified terminal classification
+    """Classify a value into exactly one terminal kind.
+
+    Returns one of TERMINAL_KINDS. Pure structural check — no side effects.
+    Priority: kernel_done > recurrence_terminal > exhaustion_terminal > engine_terminal > non_terminal.
+    Cross-substrate parity: must match JS classifyTerminalKind() exactly.
+    """
+    if not isinstance(value, dict):
+        return "non_terminal"
+    # Kernel terminal: {_mode: "done", _result, _stall}
+    if value.get("_mode") == "done" and "_result" in value and "_stall" in value:
+        return "kernel_done"
+    keys = frozenset(value.keys())  # AST_OK: key — terminal kind comparison
+    if keys == _RECURRENCE_TERMINAL_KEYS:
+        return "recurrence_terminal"
+    if keys == _EXHAUSTION_TERMINAL_KEYS:
+        return "exhaustion_terminal"
+    if keys == _ENGINE_TERMINAL_KEYS:
+        return "engine_terminal"
+    return "non_terminal"
+
 
 # =============================================================================
 # Projection Order Security (Phase 7+)

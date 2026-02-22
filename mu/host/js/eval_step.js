@@ -1831,6 +1831,37 @@ const ENGINE_TERMINAL_KEYS = new Set([
   'operator_frozen', 'frozen_set', 'action', 'stall',
 ]);
 
+// Engine exit reason enum (mirrors Python ENGINE_EXIT_REASONS)
+const ENGINE_EXIT_REASONS = new Set(['closure', 'exhaustion', 'stall', 'completed']);
+
+// Terminal kind enum — unified classification of all terminal states.
+// Every dict result falls into exactly one kind. Pure structural check.
+// Mirrors Python TERMINAL_KINDS.
+const TERMINAL_KINDS = new Set([
+  'kernel_done',             // {_mode: "done", _result: ..., _stall: ...}
+  'recurrence_terminal',     // {closure_detected, final_result, tau_step}
+  'exhaustion_terminal',     // {action, exhaustion_detected, frozen, operator_to_freeze}
+  'engine_terminal',         // 8-key unwrapped engine output
+  'non_terminal',            // none of the above
+]);
+
+/**
+ * Classify a value into exactly one terminal kind.
+ * Returns one of TERMINAL_KINDS. Pure structural check — no side effects.
+ * Priority: kernel_done > recurrence > exhaustion > engine > non_terminal.
+ * Cross-substrate parity: must match Python classify_terminal_kind() exactly.
+ */
+function classifyTerminalKind(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return 'non_terminal';
+  // Kernel terminal: {_mode: "done", _result, _stall}
+  if (value._mode === 'done' && '_result' in value && '_stall' in value) return 'kernel_done';
+  const keys = new Set(Object.keys(value));
+  if (setsEqual(keys, RECURRENCE_TERMINAL_KEYS)) return 'recurrence_terminal';
+  if (setsEqual(keys, EXHAUSTION_TERMINAL_KEYS)) return 'exhaustion_terminal';
+  if (setsEqual(keys, ENGINE_TERMINAL_KEYS)) return 'engine_terminal';
+  return 'non_terminal';
+}
+
 // Hemisphere constants (mirrors Python step_mu.py:1626-1632)
 const HEMISPHERE_KEY_ORDER = ['r_null', 'r_inf', 'r_a', 'lobes', 'sink'];
 const HEMISPHERE_KEYS = new Set(HEMISPHERE_KEY_ORDER);
