@@ -79,9 +79,20 @@ _HOST_DELTA_AFTER_RE = re.compile(r"host_semantics_delta_after:\s*(.+?)(?:\.\s|$
 _STRUCTURAL_ARTIFACT_RE = re.compile(r"structural_artifact_ref:\s*(.+?)(?:\.\s|$)")
 _DEFER_REASON_RE = re.compile(r"defer_reason_code:\s*(.+?)(?:\.\s|$)")
 _FOUNDER_OVERRIDE_RE = re.compile(r"FOUNDER_OVERRIDE:(\S+)")
+_BLOCKER_CLASS_RE = re.compile(r"(?<!`)primary_blocker_class:\s*([A-Z_]+)")
+_SWEEP_RE = re.compile(r"post_gate_contract_sweep:\s*(.+?)(?:\.\s|$)")
 
 # Rolling window size
 ROLLING_WINDOW = 3
+
+# Blocker classification (required for all class-marked waves)
+VALID_BLOCKER_CLASSES = frozenset({"DESIGN", "INTEGRATION", "PERFORMANCE"})
+
+# Non-gate test domains for post-gate contract sweep validation
+NON_GATE_TEST_DOMAINS = (
+    "tests/engine/", "tests/parity/", "tests/structural/", "tests/tools/", "tests/docs/",
+    "mu/tests/engine/", "mu/tests/parity/", "mu/tests/structural/", "mu/tests/tools/", "mu/tests/docs/",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +238,8 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
         sa_match = _STRUCTURAL_ARTIFACT_RE.search(body_text)
         defer_match = _DEFER_REASON_RE.search(body_text)
         override_match = _FOUNDER_OVERRIDE_RE.search(body_text)
+        blocker_match = _BLOCKER_CLASS_RE.search(body_text)
+        sweep_match = _SWEEP_RE.search(body_text)
 
         notes.append({
             "wave_id": wave_id,
@@ -241,6 +254,8 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "structural_artifact_ref": sa_match.group(1).strip() if sa_match else None,
             "defer_reason_code": defer_match.group(1).strip() if defer_match else None,
             "founder_override": override_match.group(1).strip() if override_match else None,
+            "primary_blocker_class": blocker_match.group(1).strip() if blocker_match else None,
+            "post_gate_contract_sweep": sweep_match.group(1).strip() if sweep_match else None,
             "date": date_str,
             "raw": body,
         })
@@ -442,6 +457,17 @@ def enforce(
                     "L4_STRUCTURAL evidence_command must reference tests/l4_gates/ "
                     f"(or mu/tests/l4_gates/) target. Got: {current['evidence_command']!r}"
                 )
+            # Post-gate contract sweep (must reference non-gate test domains)
+            if current.get("post_gate_contract_sweep") is None:
+                errors.append("L4_STRUCTURAL missing post_gate_contract_sweep in tracker note")
+            else:
+                sweep_cmd = current["post_gate_contract_sweep"]
+                if not any(d in sweep_cmd for d in NON_GATE_TEST_DOMAINS):
+                    errors.append(
+                        "L4_STRUCTURAL post_gate_contract_sweep must reference at least one "
+                        "non-gate test domain (tests/engine/, tests/structural/, etc.). "
+                        f"Got: {sweep_cmd!r}"
+                    )
 
     # --- L4_ENABLER ---
     elif wave_class == "L4_ENABLER":
@@ -498,6 +524,19 @@ def enforce(
             meta_ok, meta_errors = check_maintenance_metadata(notes)
             if not meta_ok:
                 errors.extend(meta_errors)
+
+        # Primary blocker classification (all classes)
+        blocker = current.get("primary_blocker_class")
+        if blocker is None:
+            errors.append(
+                "Missing primary_blocker_class in tracker note "
+                "(required: DESIGN, INTEGRATION, or PERFORMANCE)"
+            )
+        elif blocker not in VALID_BLOCKER_CLASSES:
+            errors.append(
+                f"Invalid primary_blocker_class: '{blocker}'. "
+                f"Must be one of: {sorted(VALID_BLOCKER_CLASSES)}"
+            )
 
         # Rolling structural quota
         rw_ok, rw_errors = check_rolling_window(notes)

@@ -23,7 +23,9 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "tools" / "checks"))
 from enforce_l4_execution_contract import (
     LEGACY_CLASS_ALIAS,
+    NON_GATE_TEST_DOMAINS,
     RUNTIME_DIRS,
+    VALID_BLOCKER_CLASSES,
     VALID_WAVE_CLASSES,
     enforce,
     filter_to_tracked_files,
@@ -213,6 +215,8 @@ class TestMaintenanceEnforcement:
             "structural_artifact_ref": None,
             "defer_reason_code": "ENABLER_PREREQUISITE",
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": None,
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -467,6 +471,8 @@ class TestLoopholeDetection:
             "structural_artifact_ref": None,
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": None,
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -498,6 +504,8 @@ class TestEvidenceCommandTarget:
             "structural_artifact_ref": "mu/substrate/kernel.v1.json",
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "pytest tests/structural/",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -526,6 +534,8 @@ class TestEvidenceCommandTarget:
             "structural_artifact_ref": "mu/substrate/kernel.v1.json",
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "pytest tests/structural/ tests/engine/",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -566,6 +576,8 @@ class TestEvidenceCommandTarget:
             "structural_artifact_ref": "mu/programs/rcx_engine.v1.json",
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "pytest tests/structural/",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -603,6 +615,8 @@ class TestWaveBinding:
             "structural_artifact_ref": None,
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": None,
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -619,6 +633,8 @@ class TestWaveBinding:
             "structural_artifact_ref": "ref",
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "pytest tests/structural/",
             "date": "2026-02-20",
             "raw": "test",
         }
@@ -643,6 +659,8 @@ class TestWaveBinding:
             "structural_artifact_ref": "ref",
             "defer_reason_code": None,
             "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "pytest tests/structural/",
             "date": "2026-02-20",
             "raw": "test",
         }

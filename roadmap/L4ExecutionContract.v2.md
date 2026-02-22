@@ -24,6 +24,7 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 - MUST include changed file under `tests/l4_gates/` (or `mu/tests/l4_gates/`) AND `evidence_command` referencing gate test target (AND rule — both required)
 - MUST include `host_semantics_delta_before` and `host_semantics_delta_after` in tracker note
 - MUST include `structural_artifact_ref` in tracker note
+- MUST include `post_gate_contract_sweep` referencing at least one non-gate test domain (`tests/engine/`, `tests/structural/`, etc.). Gate pass alone is insufficient; cross-contract sweep is mandatory.
 
 **Runtime/substrate directories:**
 `mu/host/`, `mu/substrate/`, `mu/closures/`, `mu/bridge/`, `mu/programs/`, `rcx_pi/selfhost/`, `tools/compilers/`
@@ -58,6 +59,10 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 5. **Legacy alias lock:** `L4_CLASS_A` is accepted for historical parsing only. New tracker notes using `L4_CLASS_A` must fail.
 
+6. **Blocker classification:** Every class-marked wave must declare `primary_blocker_class: DESIGN|INTEGRATION|PERFORMANCE` identifying the dominant blocker type for the target gate.
+
+7. **Post-gate contract sweep (L4_STRUCTURAL only):** Gate pass alone is insufficient. `post_gate_contract_sweep` must reference at least one non-gate test domain (e.g., `tests/engine/`, `tests/structural/`). Sweep commands that only reference `tests/l4_gates/` are rejected.
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
@@ -81,6 +86,8 @@ Required fields by class (machine-parseable `key: value` format):
 | `host_semantics_delta_before` | required | — | — |
 | `host_semantics_delta_after` | required | — | — |
 | `structural_artifact_ref` | required | — | — |
+| `post_gate_contract_sweep` | required | — | — |
+| `primary_blocker_class` | required | required | required |
 | `no_op_proof` | — | — | required |
 | `defer_reason_code` | — | — | required |
 | `founder_override` | optional | optional | optional |
