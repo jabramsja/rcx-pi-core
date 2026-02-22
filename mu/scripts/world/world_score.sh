@@ -201,9 +201,10 @@ rule_signature_basis = None
 
 world_name = obj.get("world") if isinstance(obj, dict) else None
 if isinstance(world_name, str) and world_name:
-    # mu/mu_programs/ is the active fixture home.
+    # mu/mu_programs/ is the active fixture home; sandbox files live in sandbox/.
     candidates = [
         Path("mu") / "mu_programs" / f"{world_name}.mu",
+        Path("mu") / "mu_programs" / "sandbox" / f"{world_name}.mu",
     ]
     for wp in candidates:
         if wp.is_file():

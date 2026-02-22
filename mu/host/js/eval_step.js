@@ -3628,7 +3628,10 @@ if (process.argv.includes('--json-api')) {
         response = { success: false, error_code: 'type_error', error: 'boot1LoopMode must be boolean if provided, got ' + typeof request.boot1LoopMode };
       } else {
       const boot1Mode = request.boot1LoopMode ?? true;
-      const observerEvents = request.observer ? [] : null;
+      // Strict observer mode: pass value directly for type validation testing
+      const observerEvents = request.observer_strict !== undefined
+        ? request.observer_strict
+        : (request.observer ? [] : null);
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
         const opts = {
@@ -3642,10 +3645,10 @@ if (process.argv.includes('--json-api')) {
           ? runEnginePipelineRecursive(userProjs ?? [], input, opts)
           : runEnginePipeline(userProjs ?? [], input, opts);
         response = { success: true, result };
-        if (observerEvents) response.observer_events = observerEvents;
+        if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
-        if (observerEvents) response.observer_events = observerEvents;
+        if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
       }
       } // close boot1LoopMode type guard else
     } else if (request.action === 'hash_trace') {
@@ -3674,7 +3677,10 @@ if (process.argv.includes('--json-api')) {
       } else {
       const boot1Mode = request.boot1LoopMode ?? true;
       const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
-      const observerEvents = request.observer ? [] : null;
+      // Strict observer mode: pass value directly for type validation testing
+      const observerEvents = request.observer_strict !== undefined
+        ? request.observer_strict
+        : (request.observer ? [] : null);
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
         const result = runEngineWithRouting(
@@ -3690,10 +3696,10 @@ if (process.argv.includes('--json-api')) {
           boot1Mode
         );
         response = { success: true, result };
-        if (observerEvents) response.observer_events = observerEvents;
+        if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
-        if (observerEvents) response.observer_events = observerEvents;
+        if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
       }
       } // close boot1LoopMode type guard else
     } else if (request.action === 'step_kernel_meta') {
@@ -3722,8 +3728,15 @@ if (process.argv.includes('--json-api')) {
         response = { success: false, error_code: 'type_error', error: 'boot1LoopMode must be boolean if provided, got ' + typeof request.boot1LoopMode };
       } else {
       const boot1Mode = request.boot1LoopMode ?? true;
-      const metaObserver = [];
+      // Strict observer mode: pass value directly for type validation testing
+      const metaObserver = request.observer_strict !== undefined
+        ? request.observer_strict
+        : [];
       const maxEngIter = reqMaxEngineIter ?? 20;
+      // Delta-based iteration count: snapshot baseline before run
+      const baseline = Array.isArray(metaObserver)
+        ? metaObserver.filter(e => e.event_name === 'step_boundary').length
+        : 0;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
         const opts = {
@@ -3736,7 +3749,9 @@ if (process.argv.includes('--json-api')) {
         const engineResult = boot1Mode
           ? runEnginePipelineRecursive(userProjs ?? [], input, opts)
           : runEnginePipeline(userProjs ?? [], input, opts);
-        const iterationsUsed = metaObserver.filter(e => e.event_name === 'step_boundary').length;
+        const iterationsUsed = Array.isArray(metaObserver)
+          ? metaObserver.filter(e => e.event_name === 'step_boundary').length - baseline
+          : 0;
         response = {
           success: true,
           result: {

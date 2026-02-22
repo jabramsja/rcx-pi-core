@@ -10,12 +10,11 @@ Usage:
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+from tests.repo_root import REPO_ROOT
+
 sys.path.insert(0, str(REPO_ROOT / "tools" / "checks"))
 
 from enforce_l4_execution_contract import (

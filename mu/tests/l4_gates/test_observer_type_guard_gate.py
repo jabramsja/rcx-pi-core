@@ -23,13 +23,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.step_mu import run_engine_pipeline, run_engine_with_routing
 from rcx_pi.selfhost.kernel import reset_step_budget
