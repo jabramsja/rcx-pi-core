@@ -987,7 +987,8 @@ def main() -> int:
     passed, errors = enforce(wave_class, changed_files, diff_text, notes)
 
     # Indicator artifact file-level validation (CLI only)
-    if notes:
+    # Only validate when wave_class is active (skip for non-wave PRs)
+    if notes and wave_class:
         indicator_ref = notes[0].get("indicator_artifact_ref")
         if indicator_ref:
             if indicator_ref not in changed_files:
