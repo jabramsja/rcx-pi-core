@@ -361,3 +361,59 @@ class TestManifestContractDiscoverability:
         assert "CodexClaudeAuditContract.v1.md" in manifest, (
             "MANIFEST.md must include CodexClaudeAuditContract.v1.md for discoverability."
         )
+
+    def test_manifest_includes_north_star_semantics(self):
+        """MANIFEST.md must reference NorthStarSemantics.v0.md."""
+        manifest = (ROADMAP_FOLDER / "MANIFEST.md").read_text(encoding="utf-8")
+        assert "NorthStarSemantics.v0.md" in manifest, (
+            "MANIFEST.md must include NorthStarSemantics.v0.md for discoverability."
+        )
+
+
+class TestNorthStarSemanticsLock:
+    """NorthStarSemantics.v0.md must exist and be referenced in governance chain."""
+
+    DOCS_CORE = REPO_ROOT / "mu" / "docs" / "core"
+
+    def test_north_star_semantics_exists(self):
+        """NorthStarSemantics.v0.md must exist in mu/docs/core/."""
+        path = self.DOCS_CORE / "NorthStarSemantics.v0.md"
+        assert path.exists(), "NorthStarSemantics.v0.md must exist"
+
+    def test_status_references_semantics_lock(self):
+        """STATUS.md must reference NorthStarSemantics.v0.md."""
+        status = (REPO_ROOT / "STATUS.md").read_text(encoding="utf-8")
+        assert "NorthStarSemantics.v0.md" in status, (
+            "STATUS.md must reference NorthStarSemantics.v0.md"
+        )
+
+    def test_claude_md_references_semantics_lock(self):
+        """CLAUDE.md must reference NorthStarSemantics.v0.md."""
+        claude = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "NorthStarSemantics.v0.md" in claude, (
+            "CLAUDE.md must reference NorthStarSemantics.v0.md"
+        )
+
+    def test_bootstrap_bridge_has_normative_pointer(self):
+        """BootstrapStructuralBridge.v0.md must point to NorthStarSemantics as normative."""
+        bridge = (self.DOCS_CORE / "BootstrapStructuralBridge.v0.md").read_text(encoding="utf-8")
+        assert "NorthStarSemantics.v0.md" in bridge, (
+            "BootstrapStructuralBridge.v0.md must reference NorthStarSemantics.v0.md"
+        )
+        assert "normative" in bridge.lower(), (
+            "BootstrapStructuralBridge.v0.md must identify NorthStarSemantics as normative"
+        )
+
+    def test_semantics_lock_covers_required_policies(self):
+        """NorthStarSemantics.v0.md must cover all required policy sections."""
+        content = (self.DOCS_CORE / "NorthStarSemantics.v0.md").read_text(encoding="utf-8")
+        for section in [
+            "Undefined-as-Structure",
+            "Zero Canonicalization",
+            "Bounded Non-Closure",
+            "Routing Tie-Break",
+            "Boot0/Hex0",
+        ]:
+            assert section in content, (
+                f"NorthStarSemantics.v0.md must contain '{section}' section"
+            )

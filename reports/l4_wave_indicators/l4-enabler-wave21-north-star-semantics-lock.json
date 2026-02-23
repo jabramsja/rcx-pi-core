@@ -1,0 +1,24 @@
+{
+  "wave_id": "l4-enabler-wave21-north-star-semantics-lock",
+  "repeat_run_speedup_ratio": 2.643929,
+  "parity_diff_count": 21,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.457653,
+  "repeat_run_raw_seconds": [
+    1.210002,
+    0.457653
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 1.210002
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.667655
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-23T05:51:08Z",
+  "collector_version": "2.1.0"
+}
