@@ -1,6 +1,6 @@
 <!--
 DOC_STATUS
-TYPE: DESIGN_SPEC
+TYPE: IMPLEMENTATION
 LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
@@ -102,7 +102,7 @@ def eval_step(projections: list[Projection], value: Mu) -> Mu:
 
 **Non-linear Pattern Support (binding conflict detection):**
 - When a variable like `{"var": "x"}` appears twice in a pattern, both occurrences must bind to equal values
-- eval_seed.match() implements this via binding conflict detection (lines 331-336, 351-355)
+- eval_seed.match() implements this via binding conflict detection in `_match_inner()`
 - If `x` is already bound to `A`, and the pattern tries to bind `x` to `B`, match FAILS
 - This is how `recurrence.found_in_seen` detects state equality structurally
 - Both Python and JS substrates handle binding conflicts identically
@@ -351,7 +351,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## L3 Substrate Portability: JavaScript POC
 
-**Location:** `mu/host/js/eval_step.js` (~1300 LOC core + ~900 LOC inline tests)
+**Location:** `mu/host/js/eval_step.js` (see `wc -l` for current count; ~3800 LOC total)
 
 **What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json, recurrence.v1.json, exhaustion.v1.json, hemispheres.v1.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 
@@ -376,7 +376,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 **Role clarification:**
 - **Python:** Primary development substrate (comprehensive test coverage, agent-reviewed - see STATUS.md)
-- **JavaScript:** Portability proof (auditable ~1300 LOC core, all parity tests pass)
+- **JavaScript:** Portability proof (all parity tests pass)
 
 ---
 

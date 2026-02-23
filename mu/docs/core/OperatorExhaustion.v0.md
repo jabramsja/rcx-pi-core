@@ -145,30 +145,25 @@ After freezing, the kernel enters Post-Closure Recursion Mode:
 }
 ```
 
-### Required Projections (Simplified per Expert Review)
-
-The Expert agent suggested reducing from 10 to ~6 projections by merging related
-logic. The simplified design:
+### Projections (13 in exhaustion.v1.json)
 
 | Projection ID | Purpose |
 |---------------|---------|
-| `exhaustion.init` | Entry: no tau_step → continue (no exhaustion possible) |
-| `exhaustion.scan_start` | Begin scanning trace from tau_step |
+| `exhaustion.init_null` | Entry: null tau_step → continue (no exhaustion possible) |
+| `exhaustion.init` | Entry: non-null tau_step → begin exhaustion check |
+| `exhaustion.find_match` | Found matching operator in trace → proceed to scan |
+| `exhaustion.find_continue` | Continue searching trace for tau operator |
+| `exhaustion.find_not_found` | Tau operator not in trace → not exhausted |
 | `exhaustion.scan_same` | Current entry has same operator, continue scan |
+| `exhaustion.scan_skip_sentinel_maxsteps` | Skip `_maxsteps` sentinel during scan |
+| `exhaustion.scan_skip_sentinel_stall` | Skip `_stall` sentinel during scan |
 | `exhaustion.scan_different` | Different operator found → not exhausted |
-| `exhaustion.exhausted` | End of scan, same operator throughout → freeze |
-| `exhaustion.unwrap` | Extract final result |
+| `exhaustion.scan_end` | End of scan, same operator throughout → exhausted |
+| `exhaustion.frozen_found` | Operator already in frozen set → skip |
+| `exhaustion.frozen_check_tail` | Continue checking frozen linked list |
+| `exhaustion.do_freeze` | Add exhausted operator to frozen set |
 
-**Merged logic:**
-- `exhaustion.init` handles both entry AND no-tau case (originally 2 projections)
-- `exhaustion.scan_same` and `exhaustion.scan_different` use non-linear patterns for
-  operator equality checking (originally 4 projections)
-- Frozen list membership is checked via non-linear pattern in `exhaustion.exhausted`
-
-**Estimated:** ~6 projections (simpler than Recurrence's 9)
-
-**Note:** Globalstall detection can be added as a separate projection if needed,
-but the primary use case (single operator exhaustion) is served by the 6 above.
+See `tests/structural/test_seed_counts.py` for projection count verification.
 
 ---
 
@@ -395,7 +390,7 @@ def validate_frozen_list(frozen: Mu) -> None:
 
 1. **Update KERNEL_RESERVED_FIELDS** with exhaustion fields (V2 fix)
 2. **Update Recurrence** to return tau_step (Q2 resolution)
-3. **Create `mu/closures/exhaustion.v1.json`** with ~6 projections (Expert simplification)
+3. **Create `mu/closures/exhaustion.v1.json`** with 13 projections
 4. **Add frozen list validation** in step_mu.py (V3 fix)
 5. **Create parity vectors** in `tests/fixtures/exhaustion_vectors.json`
 6. **Create Python tests** in `tests/parity/test_exhaustion_parity.py`
@@ -561,7 +556,7 @@ is safe. We can relax later without breaking correctness.
 ## Changelog
 
 - **v0.2 (2026-02-02):** IMPLEMENTED - Step 6 complete
-  - Created `mu/closures/exhaustion.v1.json` with 11 projections (more than estimated due to three-phase state machine)
+  - Created `mu/closures/exhaustion.v1.json` with 13 projections (three-phase state machine with sentinel skipping and frozen-set management)
   - Non-linear patterns for equality detection (step, operator, frozen membership)
   - First-match-wins ordering for scan_same before scan_different
   - 17 parity tests in `tests/parity/test_exhaustion_parity.py`
@@ -577,5 +572,5 @@ is safe. We can relax later without breaking correctness.
   - Q3 RESOLVED: No automatic unfreezing in Step 6 (keep simple)
   - V2 FIX: Add exhaustion fields to KERNEL_RESERVED_FIELDS
   - V3 FIX: Add frozen list structure validation
-  - SIMPLIFIED: Reduce from 10 to ~6 projections (Expert review)
+  - REVISED: 13 projections (Expert review led to clearer decomposition, not fewer)
 - **v0 (2026-02-01):** Initial design doc for Rule 3.1 (Operator Exhaustion)

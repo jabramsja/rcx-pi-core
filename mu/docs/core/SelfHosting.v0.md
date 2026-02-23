@@ -538,7 +538,7 @@ EngineNews rules are expressed as Mu projections in `mu/closures/recurrence.v1.j
 
 5. **Key design: Non-linear patterns for state equality**
    - `recurrence.found_in_seen` uses `{"var": "state"}` twice in pattern
-   - eval_seed.match() binding conflict detection (lines 331-336, 351-355) enforces equality
+   - eval_seed.match() binding conflict detection in `_match_inner()` enforces equality
    - This is bootstrap primitive (like Forth's NEXT), not semantic debt
    - Both Python and JS substrates handle binding conflicts identically
 

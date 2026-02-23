@@ -1703,6 +1703,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 payload = next_state["_run_engine"]
                 cur_projections = payload["projections"]
                 cur_input = payload["input"]
+                validate_no_kernel_reserved_fields(cur_input, "Boot1 re-entry input")
                 cur_max_steps = payload.get("max_steps", cur_max_steps)
                 cur_frozen = payload.get("frozen")
                 remaining_iterations = remaining_iterations - iteration - 1
@@ -1715,6 +1716,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 payload = next_state["_tail_call"]
                 cur_projections = payload["projections"]
                 cur_input = payload["input"]
+                validate_no_kernel_reserved_fields(cur_input, "Boot1 tail_call input")
                 cur_max_steps = payload.get("max_steps", cur_max_steps)
                 cur_frozen = payload.get("frozen")
                 remaining_iterations = remaining_iterations - iteration - 1

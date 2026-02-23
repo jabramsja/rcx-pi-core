@@ -98,7 +98,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | Category | Seeds | JS Loaded | Notes |
 |----------|-------|-----------|-------|
 | **Substrate (Core)** | kernel.v1, match.v2, subst.v2 | ✅ | Required for L3 |
-| **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1 | ✅ | v1 is POC; v2 is hash-accelerated production version |
+| **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1 | ✅ | v1 is POC; v2 is hash-accelerated production; fix.v1 is edge/vertex repair |
 | **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
 | **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization: ✅ | Engine orchestration + hemisphere routing + metabolization L3 parity; paxos_demo application |

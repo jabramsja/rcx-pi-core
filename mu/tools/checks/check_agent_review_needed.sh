@@ -11,8 +11,8 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 # Check for uncommitted changes to core files
-CORE_CHANGES=$(git diff --name-only HEAD 2>/dev/null | grep -E '^(rcx_pi/selfhost/|mu/)' || true)
-STAGED_CORE=$(git diff --cached --name-only 2>/dev/null | grep -E '^(rcx_pi/selfhost/|mu/)' || true)
+CORE_CHANGES=$(git diff --name-only HEAD 2>/dev/null | grep -E '^(rcx_pi/selfhost/|mu/host/python/rcx_pi/selfhost/|mu/)' || true)
+STAGED_CORE=$(git diff --cached --name-only 2>/dev/null | grep -E '^(rcx_pi/selfhost/|mu/host/python/rcx_pi/selfhost/|mu/)' || true)
 
 ALL_CORE_CHANGES=$(echo -e "${CORE_CHANGES}\n${STAGED_CORE}" | grep -v '^$' | sort -u || true)
 

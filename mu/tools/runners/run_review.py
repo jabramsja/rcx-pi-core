@@ -63,24 +63,8 @@ if str(_tools_dir.parent.parent) not in sys.path:
 SDK_IMPORT_ERROR: Exception | None = None
 try:
     from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
-    # Patch SDK to handle rate_limit_event (CLI v2.1.45+ sends this but SDK
-    # v0.1.37 doesn't recognize it, crashing all agents with MessageParseError).
-    try:
-        import claude_agent_sdk._internal.message_parser as _msg_parser
-        import claude_agent_sdk._internal.client as _int_client
-        from claude_agent_sdk.types import SystemMessage as _SystemMessage
-        _original_parse = _msg_parser.parse_message
-
-        def _patched_parse_message(data):
-            if isinstance(data, dict) and data.get("type") == "rate_limit_event":
-                # Silently skip — rate limit events are informational
-                return _SystemMessage(subtype="rate_limit_event", data=data)
-            return _original_parse(data)
-
-        _msg_parser.parse_message = _patched_parse_message
-        _int_client.parse_message = _patched_parse_message
-    except Exception:
-        pass  # If patching fails, fall through to original behavior
+    # rate_limit_event monkey-patch now lives in shared_agent_utils.py
+    # (imported above), so all runners get it automatically.
 except Exception as _sdk_import_error:
     SDK_IMPORT_ERROR = _sdk_import_error
     query = None  # type: ignore[assignment]
@@ -460,7 +444,8 @@ class ReviewOrchestrator:
                  continue_on_hard_gate: bool = True,
                  force_grounding: bool = False,
                  model_override: str | None = None,
-                 agent_max_turns: dict | None = None):
+                 agent_max_turns: dict | None = None,
+                 output_path: Path | None = None):
         self.files = files
         self.depth = depth
         self.verbose = verbose
@@ -471,6 +456,7 @@ class ReviewOrchestrator:
         self.force_grounding = force_grounding
         self.model_override = model_override
         self.agent_max_turns = agent_max_turns or dict(AGENT_MAX_TURNS)
+        self.output_path = output_path
         self.agents_to_run = self._resolve_agents_to_run(depth)
         self.agent_definitions = create_agent_definitions(model_override=model_override)
         self.results: list[AgentResult] = []
@@ -786,6 +772,11 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             group_results = await self.run_agent_group(group_agents)
             all_results.extend(group_results)
 
+            # Progressive write: save partial results after each group
+            self.results = all_results
+            completed_names = ", ".join(r.name for r in all_results)
+            self.write_progressive_report(f"completed {completed_names}")
+
             # Check hard gate failures - retry compliance failures once, then stop if still failing
             hard_gate_failures = [r for r in group_results if r.blocks_merge]
             if hard_gate_failures and i == 0:  # Only stop after first group
@@ -963,6 +954,51 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
 
         return "\n".join(lines)
 
+    def write_progressive_report(self, phase_label: str = "") -> None:
+        """Write current results to output file after each phase.
+
+        This ensures partial results survive if the process crashes mid-run.
+        Each call overwrites the previous partial report with the latest state.
+        """
+        if not self.output_path:
+            return
+        lines = [
+            f"# RCX Review Report (in progress)",
+            f"",
+            f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"**Files:** {', '.join(self.files)}",
+            f"**Depth:** {self.depth}",
+            f"**Status:** Running — {phase_label}" if phase_label else "**Status:** Running",
+            f"",
+            "## Results So Far",
+            "",
+            "| Agent | Verdict | Status |",
+            "|-------|---------|--------|",
+        ]
+        for result in self.results:
+            status = "✅ Pass" if result.passed else "❌ Fail"
+            if not result.is_compliant:
+                status = "⚠️ Non-compliant"
+            gate = " (GATE)" if result.is_hard_gate else ""
+            lines.append(f"| {result.name}{gate} | {result.verdict} | {status} |")
+        lines.append("")
+        lines.append("## Detailed Reports")
+        lines.append("")
+        for result in self.results:
+            lines.append(f"### {result.name.title()}")
+            lines.append("")
+            if not result.is_compliant:
+                lines.append(f"**⚠️ Compliance Error:** {result.compliance_error}")
+                lines.append("")
+            lines.append("```")
+            output = result.output
+            if len(output) > 15000:
+                output = output[:15000] + "\n... (truncated)"
+            lines.append(output)
+            lines.append("```")
+            lines.append("")
+        self.output_path.write_text("\n".join(lines))
+
     def get_exit_code(self) -> int:
         """Get appropriate exit code based on results."""
         # Check compliance failures
@@ -1016,7 +1052,7 @@ def get_changed_files() -> list[str]:
             raise RuntimeError(f"git diff failed: {result.stderr}")
         files = [f for f in result.stdout.strip().split('\n') if f]
         # Filter to relevant files
-        return [f for f in files if f.endswith('.py') or f.endswith('.json')]
+        return [f for f in files if f.endswith('.py') or f.endswith('.json') or f.endswith('.js')]
     except subprocess.TimeoutExpired:
         raise RuntimeError("git diff timed out")
     except FileNotFoundError:
@@ -1203,6 +1239,7 @@ Examples:
         force_grounding=args.force_grounding,
         model_override=args.model,
         agent_max_turns=agent_max_turns,
+        output_path=args.output,
     )
     await orchestrator.run_all()
 
@@ -1256,6 +1293,9 @@ Examples:
 
         if not approvals_to_challenge:
             print("\n🔍 RIGOROUS: no approvals to challenge")
+
+        # Progressive write after reasoning validation
+        orchestrator.write_progressive_report("reasoning validation complete, awaiting skeptic")
 
     # Rigorous mode: consolidated skeptic challenge.
     if args.rigorous and approvals_to_challenge:
@@ -1344,6 +1384,9 @@ Examples:
 
         for result in approvals_to_challenge:
             result.blocks_merge = result.is_hard_gate and (not result.passed)
+
+        # Progressive write after skeptic challenge
+        orchestrator.write_progressive_report("skeptic challenge complete, generating final report")
 
     # Generate report
     report = orchestrator.synthesize_report()

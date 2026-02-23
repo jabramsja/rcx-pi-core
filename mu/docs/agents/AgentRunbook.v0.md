@@ -45,7 +45,7 @@ Which tool to use and when:
 | **Quick** | `python tools/runners/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
 | **Full** | `python tools/runners/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
 | **Rigorous** | `python tools/runners/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
-| **Release** | `python tools/runners/run_review.py rcx_pi/selfhost/ mu/ --rigorous --max-turns 12 --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+| **Release** | `python tools/runners/run_review.py rcx_pi/selfhost/ mu/ --rigorous --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
 
 Times assume healthy SDK/runtime infrastructure (auth, Claude SDK, Bun compatibility). Infra failures can fail fast before review starts.
 
