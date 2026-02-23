@@ -560,11 +560,11 @@ class TestRunMuCallsiteInventory:
 # ── run_mu_structural callsite inventory ──────────────────────────────────
 
 # All functions that call run_mu_structural() directly.
-# run_engine_pipeline: main engine loop boundary dispatch
-# _run_engine_recursive: Boot1 engine loop with iterative re-entry (reimplements pipeline)
+# _service_boundary_effect: shared boundary effect handler (called by both paths below)
+# run_engine_pipeline: main engine loop (trampoline path, delegates boundary to shared helper)
+# _run_engine_recursive: Boot1 engine loop (recursive path, delegates boundary to shared helper)
 KNOWN_RUN_MU_STRUCTURAL_CALLERS = {
-    "run_engine_pipeline",
-    "_run_engine_recursive",
+    "_service_boundary_effect",
 }
 
 
@@ -592,11 +592,11 @@ class TestRunMuStructuralCallsiteInventory:
         )
 
     def test_caller_count_locked(self):
-        """Exactly 2 callers of run_mu_structural."""
+        """Exactly 1 caller of run_mu_structural (shared boundary handler)."""
         source = _STEP_MU_PATH.read_text()
         actual = _find_callers(source, "run_mu_structural")
-        assert len(actual) == 2, (
-            f"Expected 2 run_mu_structural callers, found {len(actual)}: {actual}"
+        assert len(actual) == 1, (
+            f"Expected 1 run_mu_structural caller, found {len(actual)}: {actual}"
         )
 
 

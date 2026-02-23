@@ -106,12 +106,16 @@ const ALGORITHM_INTERNAL_UNRESERVED_FIELDS = new Set([
   '_closure',
   '_frozen_check',
   '_head',
+  '_m',         // sentinel-skip: max_steps value (exhaustion.v1.json v1.3.0)
   '_maxsteps',
   '_op_ids',
   '_operator',
   '_other',
   '_rest',
+  '_s',         // sentinel-skip: state value (exhaustion.v1.json v1.3.0)
+  '_st',        // sentinel-skip: step value (exhaustion.v1.json v1.3.0)
   '_state',
+  '_stl',       // sentinel-skip: stall value (exhaustion.v1.json v1.3.0)
   '_tau_op',
   '_tau_operator',
   '_trace',
@@ -270,132 +274,97 @@ function looksLikeNormalizedDictCandidate(value) {
 }
 
 /**
- * Validate that a value does not contain kernel-reserved fields.
- * Deep recursive check with depth guard (fail closed).
- * Matches Python step_mu.py:validate_no_kernel_reserved_fields()
+ * Walk a Mu value tree and validate keys via keyChecker callback.
+ * Shared traversal for validateNoKernelReservedFields and
+ * validateAlgorithmRuntimeFields (mirrors Python _walk_and_validate).
  *
- * Gate 4 hardening: domain validation is strict. Reserved fields are rejected
- * everywhere. Trusted algorithm state uses validateAlgorithmRuntimeFields().
+ * @param {*} value - The Mu value to validate.
+ * @param {function(string): string|null} keyChecker - Returns error message if invalid, null if valid.
+ * @param {string} context - Description for error messages.
+ * @param {number} _depth - Internal recursion depth tracker.
  */
-function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
-  // Depth guard - fail CLOSED (reject on deep structures)
+function _walkAndValidate(value, keyChecker, context, _depth = 0) {
   if (_depth > MAX_VALIDATION_DEPTH) {
     throw new Error(
-      `Validation depth exceeded (${MAX_VALIDATION_DEPTH}) in ${context}. ` +
-      `Possible attack via deeply nested structure. Failing closed.`
+      `SECURITY: ${context} exceeded maximum validation depth (${MAX_VALIDATION_DEPTH}). ` +
+      `Possible deeply nested attack structure. Failing closed.`
     );
   }
 
-  // Primitives are safe
   if (value === null || typeof value !== 'object') {
     return;
   }
 
-  // Arrays: validate each element
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      validateNoKernelReservedFields(value[i], `${context}[${i}]`, _depth + 1);
+      _walkAndValidate(value[i], keyChecker, `${context}[${i}]`, _depth + 1);
     }
     return;
   }
 
-  // Gate 3 Security: Check normalized dict encoding (keys stored as values).
-  // Without this, reserved fields in normalized dicts bypass validation.
   const dictPairs = iterNormalizedDictPairs(value);
   if (dictPairs !== null) {
     for (const [key, val] of dictPairs) {
-      if (KERNEL_RESERVED_FIELDS.has(key)) {
-        throw new RcxError(
-          'input.reserved_field',
-          `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
-          `Reserved fields are not allowed in domain input.`
-        );
+      const err = keyChecker(key);
+      if (err) {
+        throw new RcxError('input.reserved_field', `SECURITY: ${context} ${err}`);
       }
-      validateNoKernelReservedFields(val, `${context}.${key}`, _depth + 1);
+      _walkAndValidate(val, keyChecker, `${context}.${key}`, _depth + 1);
     }
     return;
   }
   if (looksLikeNormalizedDictCandidate(value)) {
     throw new RcxError(
       'input.reserved_field',
-      `SECURITY: Malformed normalized dict encoding at ${context}. ` +
-      `Failing closed to prevent reserved-field bypass.`
+      `SECURITY: Malformed normalized dict encoding at ${context}. Failing closed to prevent reserved-field bypass.`
     );
   }
 
-  // Regular objects: check keys and recurse into values
   for (const [key, val] of Object.entries(value)) {
-    if (KERNEL_RESERVED_FIELDS.has(key)) {
-      throw new RcxError(
-        'input.reserved_field',
-        `SECURITY: Kernel-reserved field '${key}' found in domain data at ${context}. ` +
-        `Reserved fields are not allowed in domain input.`
+    const err = keyChecker(key);
+    if (err) {
+      throw new RcxError('input.reserved_field', `SECURITY: ${context} ${err}`);
+    }
+    _walkAndValidate(val, keyChecker, `${context}.${key}`, _depth + 1);
+  }
+}
+
+function _checkKernelReserved(key) {
+  if (KERNEL_RESERVED_FIELDS.has(key)) {
+    return `contains kernel-reserved field '${key}'. Reserved fields are not allowed in domain input.`;
+  }
+  return null;
+}
+
+function _checkAlgorithmRuntime(key) {
+  if (typeof key === 'string' && key.startsWith('_')) {
+    if (!ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
+      return (
+        `contains unsupported algorithm underscore field: ${key}. ` +
+        `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
       );
     }
-    validateNoKernelReservedFields(val, `${context}.${key}`, _depth + 1);
   }
+  return null;
+}
+
+/**
+ * Validate that a value does not contain kernel-reserved fields.
+ * Deep recursive check with depth guard (fail closed).
+ * Matches Python step_mu.py:validate_no_kernel_reserved_fields()
+ */
+function validateNoKernelReservedFields(value, context = 'input', _depth = 0) {
+  _walkAndValidate(value, _checkKernelReserved, context, _depth);
 }
 
 /**
  * Validate trusted algorithm runtime state at kernel entry.
- *
  * Mirrors Python validate_algorithm_runtime_fields():
  * - unknown underscore fields are rejected (fail closed)
  * - underscore keys inside normalized dict encodings are validated
  */
 function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
-  if (_depth > MAX_VALIDATION_DEPTH) {
-    throw new Error(
-      `SECURITY: ${context} exceeded maximum validation depth (${MAX_VALIDATION_DEPTH}). ` +
-      `Possible deeply nested attack structure.`
-    );
-  }
-
-  if (value === null || typeof value !== 'object') {
-    return;
-  }
-
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      validateAlgorithmRuntimeFields(value[i], `${context}[${i}]`, _depth + 1);
-    }
-    return;
-  }
-
-  const dictPairs = iterNormalizedDictPairs(value);
-  if (dictPairs !== null) {
-    for (const [key, val] of dictPairs) {
-      if (key.startsWith('_') && !ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
-        throw new RcxError(
-          'input.reserved_field',
-          `SECURITY: ${context} contains unsupported algorithm underscore field: ${key}. ` +
-          `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
-        );
-      }
-      validateAlgorithmRuntimeFields(val, `${context}.${key}`, _depth + 1);
-    }
-    return;
-  }
-
-  if (looksLikeNormalizedDictCandidate(value)) {
-    throw new RcxError(
-      'input.reserved_field',
-      `SECURITY: ${context} contains malformed normalized dict encoding. Failing closed.`
-    );
-  }
-
-  for (const [key, val] of Object.entries(value)) {
-    if (typeof key === 'string' && key.startsWith('_')) {
-      if (!ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS.has(key)) {
-        throw new RcxError(
-          'input.reserved_field',
-          `SECURITY: ${context} contains unsupported algorithm underscore field: ${key}. ` +
-          `Allowed: ${Array.from(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort().join(', ')}`
-        );
-      }
-    }
-    validateAlgorithmRuntimeFields(val, `${context}.${key}`, _depth + 1);
-  }
+  _walkAndValidate(value, _checkAlgorithmRuntime, context, _depth);
 }
 
 // =============================================================================
@@ -1301,6 +1270,18 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     }
     validator(proj.pattern, `domainProjections[${i}].pattern`);
     validator(proj.body, `domainProjections[${i}].body`);
+
+    // SECURITY: Reject kernel projections — stepKernel expects DOMAIN projections only.
+    // Kernel projections are loaded separately via allProjectionsWithBridge.
+    // Check by ID (kernel.*) not by _mode pattern because algorithm projections use _mode.
+    // Parity with Python step_kernel_mu (step_mu.py:847-854).
+    const projId = (typeof proj.id === 'string') ? proj.id : '';
+    if (projId.startsWith('kernel.')) {
+      throw new Error(
+        `SECURITY: stepKernel expects DOMAIN projections only, ` +
+        `got kernel projection at index ${i}: ${projId}`
+      );
+    }
   }
 
   // Normalize if requested
@@ -1808,13 +1789,6 @@ const allProjectionsWithBridge = [
 ];
 validateCombinedBridgeOrdering(allProjectionsWithBridge);
 
-// Combined projections for recurrence execution (recurrence + kernel + match + subst)
-// Recurrence projections must come FIRST so they match before kernel tries to process
-const allProjectionsWithRecurrence = [
-  ...recurrenceProjections,
-  ...allProjections
-];
-
 // Combined projections for recurrence with bridge (meta-circular path)
 // Order: recurrence -> kernel -> bridge -> match -> subst
 const allProjectionsWithRecurrenceAndBridge = [
@@ -2011,11 +1985,60 @@ function hashTraceForRecurrence(trace, maxEntries) {
  * FAIL-CLOSED: throws if engine loop exhausts without terminal result.
  * @host_iteration (boundary host loop, services engine state machine)
  */
+
+/**
+ * Service a boundary effect request from the engine state machine.
+ * Shared implementation for both trampoline and Boot1 recursive paths.
+ * Parity with Python _service_boundary_effect().
+ */
+function serviceBoundaryEffect(request, maxAlgorithmIterations, emitFn, iteration, state) {
+  const operation = request.operation;
+  const reqInput = request.input;
+  const context = Object.assign({}, request.context);
+  const injectKey = request.inject_key;
+
+  if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
+    emitFn('fail_closed', iteration, state, 'input.reserved_field');
+    throw new RcxError('input.reserved_field',
+      `SECURITY: inject_key '${injectKey}' is a kernel-reserved field. ` +
+      `Boundary requests cannot inject reserved fields.`
+    );
+  }
+
+  let result;
+  if (operation === 'run_trace') {
+    const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
+    result = { result: raw.result, trace: raw.trace, stall: raw.stall };
+  } else if (operation === 'hash_trace') {
+    result = hashTraceForRecurrence(reqInput);
+  } else if (operation === 'run_algorithm') {
+    const algoName = request.algorithm;
+    const algoProjs = seedProjectionMap[algoName];
+    if (!algoProjs) {
+      throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
+    }
+    result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
+  } else {
+    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
+  }
+
+  validateNoKernelReservedFields(result, `boundary_result(${operation})`);
+
+  context[injectKey] = result;
+  return context;
+}
+
 function runEnginePipeline(projections, inputValue, options) {
   // Boundary Mu validation: reject non-Mu input before entering engine loop
   if (!isValidMu(inputValue)) {
     throw new RcxError('input.invalid_type', `runEnginePipeline: inputValue is not valid Mu (got ${typeof inputValue})`);
   }
+
+  // SECURITY: Reject domain input containing kernel-reserved fields.
+  // Engine pipeline is a public entry point — user input must be clean.
+  // Parity with Python run_engine_pipeline.
+  validateNoKernelReservedFields(inputValue, 'runEnginePipeline input');
 
   const {
     maxSteps = 100,
@@ -2089,47 +2112,9 @@ function runEnginePipeline(projections, inputValue, options) {
 
     // Check for boundary effect request
     if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
-      const request = nextState._boundary_request;
-      const operation = request.operation;
-      const reqInput = request.input;
-      const context = Object.assign({}, request.context);
-      const injectKey = request.inject_key;
-
-      // SECURITY: inject_key must not be a kernel-reserved field.
-      // Parity with Python run_engine_pipeline (step_mu.py:1480).
-      if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
-        emit('fail_closed', iteration, state, 'input.reserved_field');
-        throw new RcxError('input.reserved_field',
-          `SECURITY: inject_key '${injectKey}' is a kernel-reserved field. ` +
-          `Boundary requests cannot inject reserved fields.`
-        );
-      }
-
-      let result;
-      if (operation === 'run_trace') {
-        const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
-        result = { result: raw.result, trace: raw.trace, stall: raw.stall };
-      } else if (operation === 'hash_trace') {
-        result = hashTraceForRecurrence(reqInput);
-      } else if (operation === 'run_algorithm') {
-        const algoName = request.algorithm;
-        const algoProjs = seedProjectionMap[algoName];
-        if (!algoProjs) {
-          throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
-        }
-        result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
-      } else {
-        emit('fail_closed', iteration, state, 'api.bad_request');
-        throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
-      }
-
-      // SECURITY: validate boundary result before re-injection.
-      // Prevents boundary operations from smuggling kernel-reserved
-      // fields back into engine state (parity with Python step_mu.py).
-      validateNoKernelReservedFields(result, `boundary_result(${operation})`);
-
-      context[injectKey] = result;
-      state = context;
+      state = serviceBoundaryEffect(
+        nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state
+      );
       continue;
     }
 
@@ -2283,41 +2268,9 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
 
       // Boundary effect request
       if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
-        const request = nextState._boundary_request;
-        const operation = request.operation;
-        const reqInput = request.input;
-        const context = Object.assign({}, request.context);
-        const injectKey = request.inject_key;
-
-        if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
-          emit('fail_closed', iteration, state, 'input.reserved_field');
-          throw new RcxError('input.reserved_field',
-            `SECURITY: inject_key '${injectKey}' is a kernel-reserved field.`
-          );
-        }
-
-        let result;
-        if (operation === 'run_trace') {
-          const raw = runStructural(reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
-          result = { result: raw.result, trace: raw.trace, stall: raw.stall };
-        } else if (operation === 'hash_trace') {
-          result = hashTraceForRecurrence(reqInput);
-        } else if (operation === 'run_algorithm') {
-          const algoName = request.algorithm;
-          const algoProjs = seedProjectionMap[algoName];
-          if (!algoProjs) {
-            throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
-          }
-          result = runSubAlgorithm(algoProjs, reqInput, maxAlgorithmIterations);
-        } else {
-          emit('fail_closed', iteration, state, 'api.bad_request');
-          throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
-        }
-
-        validateNoKernelReservedFields(result, `boundary_result(${operation})`);
-
-        context[injectKey] = result;
-        state = context;
+        state = serviceBoundaryEffect(
+          nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state
+        );
         continue;
       }
 
@@ -2469,7 +2422,7 @@ console.log(`  - programs/metabolization.v1.json: ${metabolizationSeed.projectio
 console.log(`  - programs/rcx_engine.v1.json: ${engineSeed.projections.length} projections`);
 console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
 console.log(`  - Total (with Bridge): ${allProjectionsWithBridge.length} projections`);
-console.log(`  - Total (with Recurrence): ${allProjectionsWithRecurrence.length} projections`);
+console.log(`  - Total (with Recurrence): ${recurrenceProjections.length + allProjections.length} projections`);
 console.log(`  - Total (with Recurrence+Bridge): ${allProjectionsWithRecurrenceAndBridge.length} projections`);
 console.log(`  - Total (with Exhaustion): ${allProjectionsWithExhaustion.length} projections`);
 console.log(`  - Total (with Exhaustion+Bridge): ${allProjectionsWithExhaustionAndBridge.length} projections\n`);
@@ -3417,7 +3370,10 @@ console.log(`  10. Same projections, same semantics, two substrates ✓`);
 
 /**
  * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
- * Shared helper for run_recurrence_with_bridge and run_exhaustion_with_bridge JSON API actions.
+ * Inner convergence loop is needed because stepKernel's single-pass doesn't fully
+ * converge algorithm seeds — JS stepKernel returns after one kernel terminal,
+ * but algorithms need multiple rounds to reach terminal shape.
+ * Outer convergence (terminal/hash-stall) is handled by runSubAlgorithm.
  * @host_iteration (bridge-backed algorithm execution loop)
  */
 function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {

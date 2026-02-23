@@ -7,6 +7,7 @@
 # 2. Checks debt ceiling is not exceeded - BLOCKS on failure
 # 3. Runs targeted staged-file checks (py_compile, bare except, AST police, seed police)
 # 4. Enforces tracker sync for core changes (`mu/` or `rcx_pi/selfhost/`) - BLOCKS on failure
+# 5. Enforces agent review for core files (requires .agent_memory <30min) - BLOCKS on failure
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -137,7 +138,7 @@ if [ -f "./tools/checks/check_untracked_artifacts.sh" ]; then
     fi
 fi
 
-# === 6. Check if agents were run on staged core files (WARNING) ===
+# === 6. Check if agents were run on staged core files (BLOCKING) ===
 CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)
 if [ -n "$CORE_FILES_CHANGED" ]; then
     MEMORY_FILE=".agent_memory/findings.json"
@@ -158,15 +159,16 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
 
     if [ "$AGENT_RUN_RECENT" = "false" ]; then
         echo ""
-        echo "⚠️  AGENT REVIEW REMINDER:"
+        echo "❌ AGENT REVIEW REQUIRED:"
         echo "   Core files staged: $(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')"
         echo "   No recent agent review detected (.agent_memory older than 30min or missing)"
         echo ""
         echo "   Run before commit:"
         echo "     python tools/runners/run_review.py <files> --depth full"
         echo ""
-        echo "   Skip this check with --no-verify (not recommended for core changes)"
+        echo "   Skip with --no-verify (not recommended for core changes)"
         echo ""
+        FAILED=1
     fi
 fi
 

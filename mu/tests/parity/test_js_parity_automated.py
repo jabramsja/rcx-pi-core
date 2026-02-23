@@ -1859,18 +1859,22 @@ class TestBoundaryResultValidationParity:
         )
 
     def test_js_boundary_result_validation_contract_lock(self):
-        """Contract lock: validation call is between result computation and injection."""
+        """Contract lock: validation call is between result computation and injection.
+
+        After dedup refactor, boundary logic lives in serviceBoundaryEffect().
+        The contract is the same: validate BEFORE inject.
+        """
         js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
         lines = js_path.read_text().splitlines(keepends=True)
 
-        # Find the validation line and the injection line within runEnginePipeline
+        # Find the validation line and the injection line within serviceBoundaryEffect
         validation_line = None
         injection_line = None
-        in_engine_pipeline = False
+        in_boundary_fn = False
         for i, line in enumerate(lines, 1):
-            if 'function runEnginePipeline(' in line:
-                in_engine_pipeline = True
-            if in_engine_pipeline:
+            if 'function serviceBoundaryEffect(' in line:
+                in_boundary_fn = True
+            if in_boundary_fn:
                 if 'validateNoKernelReservedFields(result,' in line:
                     validation_line = i
                 if 'context[injectKey] = result' in line:
@@ -1879,10 +1883,10 @@ class TestBoundaryResultValidationParity:
 
         assert validation_line is not None, (
             "REGRESSION: validateNoKernelReservedFields(result, ...) not found "
-            "in runEnginePipeline(). See Round 17D P1 fix."
+            "in serviceBoundaryEffect(). See Round 17D P1 fix."
         )
         assert injection_line is not None, (
-            "REGRESSION: context[injectKey] = result not found in runEnginePipeline()."
+            "REGRESSION: context[injectKey] = result not found in serviceBoundaryEffect()."
         )
         assert validation_line < injection_line, (
             f"REGRESSION: boundary result validation (line {validation_line}) must occur "
