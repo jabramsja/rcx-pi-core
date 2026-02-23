@@ -1168,6 +1168,26 @@ function isKernelIntermediate(result) {
 }
 
 /**
+ * Create a canonical undefined-result motif (NorthStarSemantics.v0.md Section A).
+ * Parity with Python make_undefined_motif() in step_mu.py.
+ */
+function makeUndefinedMotif(op, lhs, rhs, cause, details = null) {
+  function safeHash(value) {
+    if (value === null || value === undefined) return null;
+    try { return muHashCached(value); }
+    catch (_e) { return null; }
+  }
+  return {
+    _undefined: true,
+    op: op,
+    lhs_hash: safeHash(lhs),
+    rhs_hash: safeHash(rhs),
+    cause: cause,
+    details: details,
+  };
+}
+
+/**
  * BOOTSTRAP_PRIMITIVE: max_steps (termination guard)
  * Run projections until fixpoint (stall or max steps).
  *
@@ -1320,7 +1340,14 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
         const reason = stall ? 'kernel_stall' : 'projection_applied';
         if (stall) {
           validator(domainInput, 'stepKernel output');
-          return { output: domainInput, stall: true, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
+          return {
+            output: domainInput,
+            stall: true,
+            termination_reason: reason,
+            steps_used: i + 1,
+            max_steps: maxSteps,
+            undefined_motif: makeUndefinedMotif('kernel', domainInput, null, 'no_matching_projection'),
+          };
         }
         const output = denormalize(result._result);
         validator(output, 'stepKernel output');

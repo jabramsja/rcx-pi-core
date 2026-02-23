@@ -744,6 +744,30 @@ def extract_kernel_result(terminal_state: Mu, original_input: Mu) -> Mu:
     return denormalize_from_match(terminal_state.get("_result"))
 
 
+def make_undefined_motif(op: str, lhs, rhs, cause: str, details=None) -> dict:
+    """Create a canonical undefined-result motif (NorthStarSemantics.v0.md Section A).
+
+    Returns a hashable Mu dict representing a structurally undefined operation.
+    Contract violations remain fail-closed errors; this is for semantic unknowns.
+    """
+    def _safe_hash(value):
+        if value is None:
+            return None
+        try:
+            return mu_hash_cached(value)
+        except Exception:
+            return None
+
+    return {
+        "_undefined": True,
+        "op": op,
+        "lhs_hash": _safe_hash(lhs),
+        "rhs_hash": _safe_hash(rhs),
+        "cause": cause,
+        "details": details,
+    }
+
+
 @host_iteration("Kernel execution loop - mechanical driver (Phase 8b simplified)")
 def step_kernel_mu(
     projections: list[Mu],
@@ -903,13 +927,21 @@ def step_kernel_mu(
                 validator(output, "step_kernel_mu output")
                 if return_meta:
                     reason = "kernel_stall" if is_stall else "projection_applied"
-                    return {
+                    meta = {
                         "output": output,
                         "stall": bool(is_stall),
                         "termination_reason": reason,
                         "steps_used": step_i + 1,
                         "max_steps": max_steps,
                     }
+                    if is_stall:
+                        meta["undefined_motif"] = make_undefined_motif(
+                            op="kernel",
+                            lhs=input_value,
+                            rhs=None,
+                            cause="no_matching_projection",
+                        )
+                    return meta
                 return output
 
             # Stall check - no change means no progress
