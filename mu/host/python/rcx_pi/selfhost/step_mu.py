@@ -637,7 +637,6 @@ def load_combined_kernel_with_bridge_projections(*, _copy: bool = True) -> list[
     """
     global _combined_kernel_bridge_cache
     if _combined_kernel_bridge_cache is not None:
-        _validate_combined_bridge_ordering(_combined_kernel_bridge_cache)
         if _copy:
             return json.loads(json.dumps(_combined_kernel_bridge_cache))
         return _combined_kernel_bridge_cache
@@ -1040,22 +1039,14 @@ def run_algorithm_meta_circular(
 
 
 def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
-    """
-    Run algorithm projections (recurrence, exhaustion) with bridge-enabled matching.
+    """DEBUG_ONLY: Bootstrap algorithm execution (not used in production path).
 
-    EXECUTION MODEL (Gate 3):
-    Algorithm seeds now use NORMALIZED patterns (linked-list dict format).
-    Input is normalized before matching so patterns can match correctly.
-    Output is DENORMALIZED for backwards compatibility with Kernel and tests.
-    (Gate 4+ may transition to fully normalized internal state.)
+    Production path uses ``run_algorithm_meta_circular(execution_mode="structural")``.
+    This function exists only for controlled debugging via
+    ``execution_mode="bootstrap", allow_bootstrap_fallback=True``.
 
-    Algorithm projections require NON-LINEAR PATTERN SUPPORT (same variable
-    can appear twice, and binding conflicts must be detected). Python's
-    match() handles this correctly.
-
-    The bootstrap_structural bridge PROVES that non-linear pattern support
-    CAN be implemented structurally (via bridge.var.check_existing and
-    bridge.lookup.* projections). This satisfies the META_CIRCULAR declaration.
+    Runs algorithm projections (recurrence, exhaustion) with bridge-enabled
+    matching. Input is normalized before matching, output is denormalized.
 
     Args:
         projections: Algorithm projections (recurrence.v1 or exhaustion.v1).
@@ -1507,6 +1498,67 @@ _BOOT1_MAX_REENTRY_DEPTH = 20  # AST_OK: infra — Boot1 recursive re-entry dept
 ENGINE_EXIT_REASONS = frozenset(["closure", "exhaustion", "stall", "completed"])
 
 
+def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handler
+    request: dict,
+    max_algorithm_iterations: int,
+    emit_fn,
+    iteration: int,
+    state: Mu,
+) -> tuple[Mu, Mu]:
+    """Service a boundary effect request from the engine state machine.
+
+    Shared implementation for both Boot1 recursive and trampoline engine paths.
+    Handles the three generic boundary operations (run_trace, hash_trace,
+    run_algorithm) and validates the result before re-injection.
+
+    Args:
+        request: The _boundary_request dict from engine output.
+        max_algorithm_iterations: Max iterations for sub-algorithm convergence.
+        emit_fn: Observer emit callback (for error reporting).
+        iteration: Current engine iteration (for error reporting).
+        state: Current engine state (for error reporting).
+
+    Returns:
+        (context, result) tuple — caller injects result into context.
+
+    Raises:
+        ValueError: On reserved inject_key, unknown operation, or
+            reserved fields in boundary result.
+    """
+    operation = request["operation"]
+    req_input = request["input"]
+    context = dict(request["context"])
+    inject_key = request["inject_key"]
+
+    # SECURITY: inject_key must not be a kernel-reserved field.
+    # Prevents boundary requests from forging kernel state.
+    if inject_key in KERNEL_RESERVED_FIELDS:
+        emit_fn("fail_closed", iteration, state, error_code="input.reserved_field")
+        raise ValueError(
+            f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
+            f"Boundary requests cannot inject reserved fields."
+        )
+
+    if operation == "run_trace":
+        raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
+        result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
+    elif operation == "hash_trace":
+        result = hash_trace_for_recurrence(req_input)
+    elif operation == "run_algorithm":
+        algo_name = request["algorithm"]
+        algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
+        result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
+    else:
+        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        raise ValueError(f"Unknown boundary operation: {operation}")
+
+    # SECURITY: validate boundary result before re-injection.
+    validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
+
+    context[inject_key] = result
+    return context
+
+
 def _derive_engine_exit_reason(engine_result: dict) -> str:  # AST_OK: infra — pure derivation from terminal flags
     """Derive engine_exit_reason from the existing 8-key terminal dict.
 
@@ -1639,38 +1691,10 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
 
             # Check for boundary effect request
             if isinstance(next_state, dict) and "_boundary_request" in next_state:
-                request = next_state["_boundary_request"]
-                operation = request["operation"]
-                req_input = request["input"]
-                context = dict(request["context"])
-                inject_key = request["inject_key"]
-
-                # SECURITY: inject_key must not be a kernel-reserved field
-                if inject_key in KERNEL_RESERVED_FIELDS:
-                    _emit("fail_closed", iteration, state, error_code="input.reserved_field")
-                    raise ValueError(
-                        f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
-                        f"Boundary requests cannot inject reserved fields."
-                    )
-
-                if operation == "run_trace":
-                    raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
-                    result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
-                elif operation == "hash_trace":
-                    result = hash_trace_for_recurrence(req_input)
-                elif operation == "run_algorithm":
-                    algo_name = request["algorithm"]
-                    algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
-                    result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
-                else:
-                    _emit("fail_closed", iteration, state, error_code="api.bad_request")
-                    raise ValueError(f"Unknown boundary operation: {operation}")
-
-                # SECURITY: validate boundary result before re-injection
-                validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
-
-                context[inject_key] = result
-                state = context
+                state = _service_boundary_effect(
+                    next_state["_boundary_request"],
+                    max_algorithm_iterations, _emit, iteration, state,
+                )
                 continue
 
             # Boot1: detect re-entry envelope — update frame and restart outer loop.
@@ -1778,6 +1802,10 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     """
     # Boundary Mu validation: reject non-Mu input before entering engine loop
     assert_mu(input_value, "run_engine_pipeline.input")
+
+    # SECURITY: Reject domain input containing kernel-reserved fields.
+    # Engine pipeline is a public entry point — user input must be clean.
+    validate_no_kernel_reserved_fields(input_value, "run_engine_pipeline input")
 
     # Observer type guard: reject non-list before engine loop entry
     if observer is not None and not isinstance(observer, list):  # AST_OK: boundary
@@ -1897,44 +1925,10 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 
         # Check for boundary effect request
         if isinstance(next_state, dict) and "_boundary_request" in next_state:
-            request = next_state["_boundary_request"]
-            operation = request["operation"]
-            req_input = request["input"]
-            context = dict(request["context"])  # copy — we'll mutate with inject
-            inject_key = request["inject_key"]
-
-            # SECURITY: inject_key must not be a kernel-reserved field.
-            # Prevents boundary requests from forging kernel state (adversary finding #2).
-            if inject_key in KERNEL_RESERVED_FIELDS:
-                _emit("fail_closed", iteration, state, error_code="input.reserved_field")
-                raise ValueError(
-                    f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
-                    f"Boundary requests cannot inject reserved fields."
-                )
-
-            # Service the boundary operation (3 generic primitives)
-            if operation == "run_trace":
-                raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
-                # Strip boundary-only field (steps) — engine expects {result, trace, stall}
-                result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
-            elif operation == "hash_trace":
-                result = hash_trace_for_recurrence(req_input)
-            elif operation == "run_algorithm":
-                algo_name = request["algorithm"]
-                algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
-                result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
-            else:
-                _emit("fail_closed", iteration, state, error_code="api.bad_request")
-                raise ValueError(f"Unknown boundary operation: {operation}")
-
-            # SECURITY: validate boundary result before re-injection.
-            # Prevents boundary operations from smuggling kernel-reserved
-            # fields back into engine state (adversary finding r3-P1).
-            validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
-
-            # Inject result into context and resume engine
-            context[inject_key] = result
-            state = context
+            state = _service_boundary_effect(
+                next_state["_boundary_request"],
+                max_algorithm_iterations, _emit, iteration, state,
+            )
             continue
 
         # Boot1: _tail_call recognition (shadow merge — seed doesn't produce this yet).

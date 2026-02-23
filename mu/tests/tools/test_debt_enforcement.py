@@ -333,8 +333,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 44 (43 pre-wave17 + 1 classify_terminal_kind)
-    assert infra_count == 44, (
-        f"Expected 44 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 45 (44 pre-wave22 + 1 _service_boundary_effect)
+    assert infra_count == 45, (
+        f"Expected 45 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
