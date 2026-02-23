@@ -1,0 +1,24 @@
+{
+  "wave_id": "l4-enabler-wave20-indicator-collector-fail-closed",
+  "repeat_run_speedup_ratio": 1.266394,
+  "parity_diff_count": 21,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.421935,
+  "repeat_run_raw_seconds": [
+    0.534336,
+    0.421935
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.534336
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.956271
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-23T05:18:54Z",
+  "collector_version": "2.1.0"
+}

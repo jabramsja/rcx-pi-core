@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Collect L4 wave indicator metrics (v2.0.0).
+Collect L4 wave indicator metrics (v2.1.0).
 
 Generates a JSON artifact with required indicator and provenance fields for
 L4 contract enforcement.  All values are deterministically computed from
 repo state using cheap, fixed-scope probes.
+
+Fail-closed policy: probe failures and unparseable outputs abort with
+exit code 1 instead of silently coercing to zero/default values.
 
 Usage:
     python tools/metrics/collect_l4_wave_indicators.py --wave-id <id> --output <path>
@@ -12,7 +15,7 @@ Usage:
 
 Exit codes:
     0 -> artifact written successfully
-    1 -> required field could not be computed
+    1 -> required field could not be computed or probe failed
 """
 
 from __future__ import annotations
@@ -26,7 +29,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-COLLECTOR_VERSION = "2.0.0"
+COLLECTOR_VERSION = "2.1.0"
+
+
+class CollectorError(RuntimeError):
+    """Raised when a probe or measurement fails (fail-closed)."""
 
 RUNTIME_DIRS = (
     "mu/host/", "mu/substrate/", "mu/closures/", "mu/bridge/",
@@ -40,11 +47,11 @@ METRIC_KEYS = {
     "step_growth_slope": (int, float),
 }
 
-# Small, cheap probe command — collects only the l4_gates __init__ import
-# to produce wall-clock timing with minimal runtime cost.
+# Small, cheap probe command — runs 2 legacy-alias tests to produce
+# wall-clock timing with minimal runtime cost.
 PROBE_CMD = [
     sys.executable, "-m", "pytest",
-    "tests/l4_gates/test_l4_governance_contract.py::TestWaveClassEnum",
+    "tests/l4_gates/test_l4_governance_contract.py::TestLegacyAliasLock",
     "-q", "--tb=no", "--no-header",
 ]
 
@@ -68,30 +75,47 @@ def count_runtime_changes(git_range: str | None) -> int:
 
 
 def count_parity_diffs() -> int:
-    """Count JS debt markers as proxy for parity diff count."""
-    try:
-        result = subprocess.run(
-            ["bash", "tools/checks/check_js_debt.sh"],
-            capture_output=True, text=True, timeout=30,
+    """Count JS debt markers as proxy for parity diff count.
+
+    Fail-closed: raises CollectorError if the debt script fails or its
+    output cannot be parsed for a JS debt count.
+    """
+    result = subprocess.run(
+        ["bash", "tools/checks/check_js_debt.sh"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        snippet = (result.stderr or result.stdout or "")[:200]
+        raise CollectorError(
+            f"check_js_debt.sh failed (exit {result.returncode}): {snippet}"
         )
-        for line in result.stdout.split("\n"):
-            if "JS debt" in line:
-                m = re.search(r"JS debt.*?(\d+)", line)
-                if m:
-                    return int(m.group(1))
-        return 0
-    except Exception:
-        return 0
+    for line in result.stdout.split("\n"):
+        if "JS debt" in line:
+            m = re.search(r"JS debt.*?(\d+)", line)
+            if m:
+                return int(m.group(1))
+    raise CollectorError(
+        "check_js_debt.sh output did not contain parseable 'JS debt' count"
+    )
 
 
 def timed_probe() -> float:
-    """Run a small fixed probe and return wall-clock seconds."""
+    """Run a small fixed probe and return wall-clock seconds.
+
+    Fail-closed: raises CollectorError if the probe command exits non-zero.
+    """
     start = time.monotonic()
-    subprocess.run(
+    result = subprocess.run(
         PROBE_CMD, capture_output=True, text=True, timeout=60,
         env={**__import__("os").environ, "PYTHONHASHSEED": "0"},
     )
-    return round(time.monotonic() - start, 6)
+    elapsed = round(time.monotonic() - start, 6)
+    if result.returncode != 0:
+        snippet = (result.stderr or result.stdout or "")[:200]
+        raise CollectorError(
+            f"Probe command failed (exit {result.returncode}): {snippet}"
+        )
+    return elapsed
 
 
 def collect_repeat_run_raw() -> list[float]:
@@ -126,10 +150,19 @@ def main() -> int:
     args = parser.parse_args()
 
     net_host_delta = count_runtime_changes(args.range)
-    parity_diffs = count_parity_diffs()
+
+    try:
+        parity_diffs = count_parity_diffs()
+    except CollectorError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     # Provenance: repeat-run timing
-    raw_seconds = collect_repeat_run_raw()
+    try:
+        raw_seconds = collect_repeat_run_raw()
+    except CollectorError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     speedup_ratio = round(raw_seconds[0] / raw_seconds[1], 6)
 
     # Provenance: step growth

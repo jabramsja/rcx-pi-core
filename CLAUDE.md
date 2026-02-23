@@ -281,7 +281,7 @@ Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_
 | `L4_ENABLER` | Tooling/governance prerequisite for specific gate | MUST NOT touch runtime dirs. Requires `target_gate_id` + `evidence_command` + `evidence_delta`. | Claiming `host_semantics_delta` without runtime touch. |
 | `MAINTENANCE` | No L4 progress | MUST NOT touch runtime dirs. Requires `no_op_proof` + `defer_reason_code` + `target_gate_id`. | Max 1 consecutive. Cannot advance gate status. |
 
-**All classes require:** `primary_blocker_class: DESIGN|INTEGRATION|PERFORMANCE` + `primary_invariant_id` (enum) + `indicator_artifact_ref` + `indicator_collection_command` (must reference canonical collector) + `bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP` + `boot0_track_id` (enum from Hex0_Boot0_Checklist.md: N1a-N6b, V1-V5) + `boot0_progress_state: ADVANCE|HOLD|DEFER` in tracker note. Indicator artifacts must include provenance keys with derivation consistency (see L4ExecutionContract.v2.md rules 14-15).
+**All classes require:** `primary_blocker_class: DESIGN|INTEGRATION|PERFORMANCE` + `primary_invariant_id` (enum) + `indicator_artifact_ref` + `indicator_collection_command` (must reference canonical collector) + `bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP` + `boot0_track_id` (enum from Hex0_Boot0_Checklist.md: N1a-N6b, V1-V5) + `boot0_progress_state: ADVANCE|HOLD|DEFER` in tracker note. Indicator artifacts must include provenance keys with derivation consistency (see L4ExecutionContract.v2.md rules 14-15). Collector is fail-closed: probe/debt failures abort with exit 1 (rule 16).
 
 **STRUCTURAL + ENABLER additionally require:** `progress_proof_before` + `progress_proof_after` (must differ).
 

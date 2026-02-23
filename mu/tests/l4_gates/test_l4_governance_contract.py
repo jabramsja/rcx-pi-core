@@ -1115,3 +1115,96 @@ class TestIndicatorProvenance:
         passed, errors = validate_indicator_artifact_json(str(artifact))
         assert not passed
         assert any("non-empty" in e for e in errors)
+
+
+# =============================================================================
+# Collector Fail-Closed (Wave 20)
+# =============================================================================
+
+
+class TestCollectorFailClosed:
+    """Collector must exit non-zero on probe/debt failures, not silently coerce."""
+
+    def test_probe_failure_raises(self, monkeypatch):
+        """timed_probe raises CollectorError when probe command fails."""
+        import subprocess as sp
+        from tools.metrics.collect_l4_wave_indicators import (
+            CollectorError,
+            timed_probe,
+        )
+
+        def fake_run(*args, **kwargs):
+            result = sp.CompletedProcess(args=args[0], returncode=1,
+                                         stdout="", stderr="probe crashed")
+            return result
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(CollectorError, match="Probe command failed"):
+            timed_probe()
+
+    def test_debt_command_failure_raises(self, monkeypatch):
+        """count_parity_diffs raises CollectorError when debt script fails."""
+        import subprocess as sp
+        from tools.metrics.collect_l4_wave_indicators import (
+            CollectorError,
+            count_parity_diffs,
+        )
+
+        def fake_run(*args, **kwargs):
+            return sp.CompletedProcess(args=args[0], returncode=1,
+                                       stdout="", stderr="script error")
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(CollectorError, match="check_js_debt.sh failed"):
+            count_parity_diffs()
+
+    def test_debt_unparseable_output_raises(self, monkeypatch):
+        """count_parity_diffs raises CollectorError when output lacks debt count."""
+        import subprocess as sp
+        from tools.metrics.collect_l4_wave_indicators import (
+            CollectorError,
+            count_parity_diffs,
+        )
+
+        def fake_run(*args, **kwargs):
+            return sp.CompletedProcess(args=args[0], returncode=0,
+                                       stdout="No useful output here\n",
+                                       stderr="")
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(CollectorError, match="parseable"):
+            count_parity_diffs()
+
+    def test_successful_probe_returns_positive_float(self, monkeypatch):
+        """Positive control: timed_probe returns elapsed time on success."""
+        import subprocess as sp
+        from tools.metrics.collect_l4_wave_indicators import timed_probe
+
+        def fake_run(*args, **kwargs):
+            return sp.CompletedProcess(args=args[0], returncode=0,
+                                       stdout="1 passed\n", stderr="")
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        elapsed = timed_probe()
+        assert isinstance(elapsed, float)
+        assert elapsed >= 0
+
+    def test_successful_debt_returns_count(self, monkeypatch):
+        """Positive control: count_parity_diffs returns parsed count on success."""
+        import subprocess as sp
+        from tools.metrics.collect_l4_wave_indicators import count_parity_diffs
+
+        def fake_run(*args, **kwargs):
+            return sp.CompletedProcess(
+                args=args[0], returncode=0,
+                stdout="Note: JS debt (21) = 12 iteration + 5 recursion + 4 builtin\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        assert count_parity_diffs() == 21
+
+    def test_collector_version_is_2_1_0(self):
+        """Collector version must be 2.1.0 after fail-closed upgrade."""
+        from tools.metrics.collect_l4_wave_indicators import COLLECTOR_VERSION
+        assert COLLECTOR_VERSION == "2.1.0"

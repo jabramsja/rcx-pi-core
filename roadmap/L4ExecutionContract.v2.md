@@ -79,6 +79,8 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 15. **Indicator provenance (all classes):** Indicator artifact JSON must include provenance keys: `repeat_run_raw_seconds` (array of 2 positive numbers), `step_growth_points` (array of ≥2 objects with strictly increasing `step` and `elapsed_seconds`), `parity_diff_source` (non-empty string), `collection_timestamp_utc` (non-empty string), `collector_version` (non-empty string). Derivation checks: `repeat_run_speedup_ratio` must equal `round(raw[0] / raw[1], 6)`, `step_growth_slope` must be consistent with `step_growth_points`. Boolean values rejected for all numeric fields.
 
+16. **Collector fail-closed policy:** The canonical indicator collector (`tools/metrics/collect_l4_wave_indicators.py`) must exit non-zero if any probe command fails (non-zero exit code) or if parity-diff output cannot be parsed. Silent coercion of failures to zero/default values is prohibited. Collector version ≥2.1.0 enforces this.
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
