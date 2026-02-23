@@ -47,7 +47,9 @@ This document is the single canonical source for these policies. If a design doc
 3. Fail-closed still applies to **contract violations** (forged kernel fields, non-Mu input, depth/width overflow). The distinction: contract violations are structural illegality; undefined operations are structural unknowns.
 4. The sentinel vocabulary for undefined motifs is not yet locked. Future waves that introduce undefined-result representations must declare their motif shapes in this document.
 
-**Current implementation:** Undefined operations manifest as stalls (hash-equal consecutive states in `step_kernel_mu`). This is consistent with the policy: stalls are hashable, structural, and pattern-matchable.
+**v0 motif shape (Wave 22):** `{_undefined: true, op: string, lhs_hash: string|null, rhs_hash: string|null, cause: string, details: object|null}`. Implemented as `make_undefined_motif` (Python) / `makeUndefinedMotif` (JS). Wired into kernel stall meta path (`return_meta=True`, `termination_reason: "kernel_stall"`). Verified by `tests/l4_gates/test_undefined_motif_runtime_gate.py`.
+
+**Current implementation:** Undefined operations manifest as stalls (hash-equal consecutive states in `step_kernel_mu`). The kernel stall meta path now also produces an `undefined_motif` field carrying the canonical v0 motif shape.
 
 ## B. Zero Canonicalization Policy
 
