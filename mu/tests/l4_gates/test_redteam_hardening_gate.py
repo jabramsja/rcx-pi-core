@@ -2,16 +2,11 @@
 
 Evidence for: substitute() depth parity with JS, Boot1 reserved-field defense-in-depth.
 """
-import sys
-from pathlib import Path
-
-# Canonical repo root resolution (shared helper)
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from repo_root import REPO_ROOT  # noqa: E402
-
-sys.path.insert(0, str(REPO_ROOT))
+from __future__ import annotations
 
 import pytest
+
+from tests.repo_root import REPO_ROOT
 
 
 class TestSubstituteDepthGuard:
