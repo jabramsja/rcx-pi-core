@@ -970,8 +970,12 @@ def main() -> int:
         notes = all_notes
 
     # Determine wave class
+    # Only auto-detect from notes if TASKS.md is in the changed files (meaning
+    # this PR includes a tracker note update) or --wave-id was explicitly given.
+    # Otherwise non-wave PRs inherit the latest wave's class — false positives.
+    tasks_in_changed = any(f in ("TASKS.md",) for f in changed_files)
     wave_class = args.wave_class
-    if not wave_class and notes:
+    if not wave_class and notes and (bound_note or tasks_in_changed):
         wave_class = notes[0]["wave_class"] if notes else None
 
     runtime_count = sum(1 for f in changed_files if is_runtime_file(f))
@@ -983,7 +987,8 @@ def main() -> int:
     passed, errors = enforce(wave_class, changed_files, diff_text, notes)
 
     # Indicator artifact file-level validation (CLI only)
-    if notes:
+    # Only validate when wave_class is active (skip for non-wave PRs)
+    if notes and wave_class:
         indicator_ref = notes[0].get("indicator_artifact_ref")
         if indicator_ref:
             if indicator_ref not in changed_files:

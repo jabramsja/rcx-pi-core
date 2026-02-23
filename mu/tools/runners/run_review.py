@@ -656,13 +656,28 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             findings_stored=findings_stored,
         )
 
+    def _report_agent_done(self, result: AgentResult) -> None:
+        """Print agent completion to stdout and write progressive report."""
+        status = "✅" if result.passed else "❌"
+        gate = " (GATE)" if result.is_hard_gate else ""
+        print(f"  {status} {result.name}{gate}: {result.verdict}")
+        sys.stdout.flush()
+        self.write_progressive_report(f"latest: {result.name} → {result.verdict}")
+
     async def run_agent_group(self, agents: list[str]) -> list[AgentResult]:
         """Run a group of agents in parallel, with format compliance retry."""
         agents_in_scope = [a for a in agents if a in self.agents_to_run]
         if not agents_in_scope:
             return []
 
-        tasks = [self.run_single_agent(agent) for agent in agents_in_scope]
+        # Wrap each agent to report completion immediately (per-agent progressive output)
+        async def _run_and_report(agent_name: str) -> AgentResult:
+            result = await self.run_single_agent(agent_name)
+            self.results.append(result)
+            self._report_agent_done(result)
+            return result
+
+        tasks = [_run_and_report(agent) for agent in agents_in_scope]
         results = await asyncio.gather(*tasks)
 
         # Retry agents that failed format compliance (1 retry attempt)
@@ -675,6 +690,13 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     result.name,
                     retry_feedback=result.compliance_error,
                 )
+                # Replace in self.results
+                try:
+                    idx = self.results.index(result)
+                    self.results[idx] = retry
+                except ValueError:
+                    self.results.append(retry)
+                self._report_agent_done(retry)
                 retry_results.append(retry)
             else:
                 retry_results.append(result)
@@ -761,7 +783,8 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     print(f"⚠️  REGRESSION CHECK: {len(self.regression_warnings)} warning(s) ({sev_summary}) — use --show-warnings for details")
                 print()
 
-        all_results = []
+        # self.results is populated incrementally by _run_and_report()
+        self.results = []
 
         for i, group in enumerate(PARALLEL_GROUPS):
             group_agents = [a for a in group if a in self.agents_to_run]
@@ -769,13 +792,8 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 continue
 
             print(f"Phase {i+1}: Running {', '.join(group_agents)} in parallel...")
+            sys.stdout.flush()
             group_results = await self.run_agent_group(group_agents)
-            all_results.extend(group_results)
-
-            # Progressive write: save partial results after each group
-            self.results = all_results
-            completed_names = ", ".join(r.name for r in all_results)
-            self.write_progressive_report(f"completed {completed_names}")
 
             # Check hard gate failures - retry compliance failures once, then stop if still failing
             hard_gate_failures = [r for r in group_results if r.blocks_merge]
@@ -801,16 +819,16 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
 
                         if retry.is_compliant:
                             print(f"   ✓ {r.name}: Retry passed compliance")
-                            # Replace in all_results
-                            idx = all_results.index(r)
-                            all_results[idx] = retry
+                            # Replace in self.results
+                            idx = self.results.index(r)
+                            self.results[idx] = retry
                         else:
                             print(f"   ✗ {r.name}: Retry still non-compliant")
                             error_preview = (retry.compliance_error or "unknown")[:100]
                             print(f"     └─ {error_preview}")
 
                 # Re-check hard gate failures after retry
-                hard_gate_failures = [r for r in all_results if r.blocks_merge]
+                hard_gate_failures = [r for r in self.results if r.blocks_merge]
 
                 if hard_gate_failures:
                     print(f"\n⚠️  Hard gate failure(s) after retry:")
@@ -823,14 +841,12 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     print(f"\n   Run with --verbose for full details")
                     self._hard_gate_failed = True
                     if not self.continue_on_hard_gate:
-                        self.results = all_results
-                        self.total_findings_stored = sum(r.findings_stored for r in all_results)
-                        return all_results
+                        self.total_findings_stored = sum(r.findings_stored for r in self.results)
+                        return self.results
                     print("\n⚠️  Continuing despite hard gate failure (diagnostic mode)")
 
-        self.results = all_results
-        self._hard_gate_failed = any(r.blocks_merge for r in all_results)
-        self.total_findings_stored = sum(r.findings_stored for r in all_results)
+        self._hard_gate_failed = any(r.blocks_merge for r in self.results)
+        self.total_findings_stored = sum(r.findings_stored for r in self.results)
 
         # Collect soft warnings (non-hard-gate failures)
         # Uses verdict_to_severity() as single source of truth for severity mapping
@@ -840,7 +856,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 'verdict': r.verdict,
                 'severity': verdict_to_severity(r.verdict),
             }
-            for r in all_results if not r.blocks_merge and not r.passed
+            for r in self.results if not r.blocks_merge and not r.passed
         ]
 
         # End-of-run warning summary (progressive disclosure)
@@ -870,7 +886,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 sev_summary = ", ".join(parts) if parts else "all low"
                 print(f"\n⚠️  {total_warnings} warning(s) ({sev_summary}) — use --show-warnings for details")
 
-        return all_results
+        return self.results
 
     def synthesize_report(self) -> str:
         """Synthesize all agent results into a unified report."""
@@ -1414,5 +1430,24 @@ Examples:
     sys.exit(exit_code)
 
 
+def _suppress_sdk_teardown_noise(loop, context):
+    """Suppress known SDK async generator cleanup errors.
+
+    The claude_agent_sdk process_query async generator raises RuntimeError
+    ('Attempted to exit cancel scope in a different task') during teardown.
+    This is harmless — the query result is already received — but noisy.
+    """
+    exc = context.get("exception")
+    if isinstance(exc, RuntimeError) and "cancel scope" in str(exc):
+        return  # Suppress silently
+    # Fall through to default handler for real errors
+    loop.default_exception_handler(context)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(_suppress_sdk_teardown_noise)
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()
