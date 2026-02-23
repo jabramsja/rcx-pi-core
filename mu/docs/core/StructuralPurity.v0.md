@@ -217,24 +217,18 @@ if grep -n "lambda" rcx_pi/selfhost/*.py 2>/dev/null | grep -v "# allowed"; then
 fi
 ```
 
-### Check 2: All handlers wrapped with assert_handler_pure
+### Check 2: No contraband in runtime code
 
 ```bash
-# Handlers must be wrapped
-if grep -n "handlers\[" rcx_pi/selfhost/kernel.py | grep -v "assert_handler_pure"; then
-    echo "ERROR: Unwrapped handler registration"
-    FAILED=1
-fi
+# contraband.sh catches forbidden patterns (eval, exec, lambda, etc.)
+bash tools/checks/linters/contraband.sh
 ```
 
-### Check 3: No isinstance in evaluation paths
+### Check 3: AST police catches structural violations
 
 ```bash
-# isinstance is only OK in guardrails, not in evaluation
-if grep -n "isinstance" rcx_pi/selfhost/kernel.py rcx_pi/selfhost/eval_seed.py 2>/dev/null | grep -v "# guardrail"; then
-    echo "WARNING: isinstance outside guardrail context"
-    WARNINGS=$((WARNINGS + 1))
-fi
+# ast_police.py catches set comprehensions, walrus, isinstance in eval paths
+python tools/checks/linters/ast_police.py
 ```
 
 ### Check 4: Seeds are loadable as JSON
@@ -251,24 +245,25 @@ done
 
 ## Boundary Definition
 
-There is ONE place where Python touches Mu: the kernel primitives.
+There is ONE place where Python touches Mu: the 4 bootstrap primitives.
 
 ```
 PYTHON WORLD          BOUNDARY              MU WORLD
 ─────────────────────────────────────────────────────
                          │
-hashlib.sha256() ───────►│◄─────── compute_identity()
+eval_seed.step() ──────►│◄─────── eval_step (match + subst)
                          │
-str == str ─────────────►│◄─────── detect_stall()
+max_steps (10000) ─────►│◄─────── max_steps (step budget)
                          │
-list.append() ──────────►│◄─────── record_trace()
+MAX_MU_DEPTH (300) ────►│◄─────── stack_guard (depth limit)
                          │
-dict.get() + call() ────►│◄─────── gate_dispatch()
+load_verified_seed() ──►│◄─────── projection_loader
                          │
 ─────────────────────────────────────────────────────
 ```
 
-Python is allowed ONLY for these 4 primitives. Everything else must be Mu.
+Python is allowed ONLY for these 4 bootstrap primitives. Everything else must be Mu.
+See `BootstrapPrimitives.v0.md` for the full specification.
 
 ## Enforcement Levels
 

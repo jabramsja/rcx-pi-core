@@ -2280,6 +2280,7 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
         const payload = nextState._run_engine;
         curProjections = payload.projections;
         curInput = payload.input;
+        validateNoKernelReservedFields(curInput, 'Boot1 re-entry input');
         curMaxSteps = payload.max_steps ?? curMaxSteps;
         curFrozen = payload.frozen ?? null;
         remainingIterations = remainingIterations - iteration - 1;
@@ -2294,6 +2295,7 @@ function runEnginePipelineRecursive(projections, inputValue, options, recursionD
         const payload = nextState._tail_call;
         curProjections = payload.projections;
         curInput = payload.input;
+        validateNoKernelReservedFields(curInput, 'Boot1 tail_call input');
         curMaxSteps = payload.max_steps ?? curMaxSteps;
         curFrozen = payload.frozen ?? null;
         remainingIterations = remainingIterations - iteration - 1;

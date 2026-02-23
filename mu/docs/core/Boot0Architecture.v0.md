@@ -1,6 +1,6 @@
 <!--
 DOC_STATUS
-TYPE: IMPLEMENTATION
+TYPE: DESIGN_SPEC
 LAST_VERIFIED: 2026-02-09
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
@@ -307,14 +307,18 @@ Boot2.eval(projections, value) =
     )
 ```
 
-### Current Implementation Status
+### Seed Inventory
 
-- `kernel.v1.json`: EXISTS, 7 projections
-- `recurrence.v1.json`: EXISTS, 9 projections (Step 5 complete)
+- `kernel.v1.json`: 7 projections
+- `recurrence.v1.json`: 9 projections (POC); `recurrence.v2.json`: 9 projections (production)
+- `exhaustion.v1.json`: 13 projections
+- `rcx_engine.v1.json`: 11 projections
+- `hemispheres.v1.json`: 12 projections
+- `metabolization.v1.json`: 6 projections
 - Integration: `step_mu.py:step_kernel_mu()` orchestrates
 - Tests: `test_recurrence_parity.py`, `test_kernel_projections.py`
 
-**Boot2 is ~80% complete.** The seeds exist. Migration clarifies the layering.
+See `STATUS.md` for current implementation status.
 
 ## Migration Path
 

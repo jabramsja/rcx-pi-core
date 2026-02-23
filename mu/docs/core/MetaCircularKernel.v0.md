@@ -46,12 +46,10 @@ Status: **DONE** (promoted 2026-01-27, Phase 7 COMPLETE, L2 FULL achieved via ex
 - Replaces Python for-loops with structural pattern matching
 - THIS is "the kernel" in "meta-circular kernel"
 
-**Kernel class** (Python scaffolding):
-- Hash computation (`compute_identity`) for stall detection
-- Trace recording (`record_trace`) for replay
-- Handler dispatch (`gate_dispatch`) for event routing
-- Infrastructure only - NOT the operational kernel
-- **DEPRECATED (2026-01-29)**: Emits deprecation warning when instantiated
+**Kernel class** (Python scaffolding — DELETED):
+- Previously contained: hash computation, trace recording, handler dispatch
+- Infrastructure only - was NOT the operational kernel
+- **DELETED (2026-01-29)**: Class removed from `kernel.py` (only step budget infrastructure remains)
 - Tests archived to `tests/archive/legacy/test_kernel_v0.py`
 
 **Why this matters:** Phase 7d-1 correctly uses kernel.v1.json projections. The `step_kernel_mu()` function is NOT "bypassing" the kernel - it IS using the structural kernel. The Python Kernel class is boundary scaffolding, not the self-hosting target.
@@ -823,7 +821,7 @@ The "guard" is implemented by **projection ordering**, not pattern syntax. Remov
 - `mu/substrate/match.v1.json` - Match projections v1 (7, legacy)
 - `mu/substrate/match.v2.json` - Match projections v2 (8, used by kernel + match_mu)
 - `mu/bridge/bootstrap_structural.v1.json` - Bridge projections (5, non-linear pattern support)
-- `mu/substrate/subst.v1.json` - Subst projections (12)
+- `mu/substrate/subst.v2.json` - Subst projections (12, with `_subst_ctx` passthrough)
 - `mu/utilities/classify.v1.json` - Classify projections (6)
 - `mu/utilities/eval.v1.json` - Eval projections (7)
 - `mu/substrate/kernel.v1.json` - Kernel projections (7)

@@ -19,7 +19,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 **Goal:** Define honest boundaries for self-hosting while maximizing structural execution
 
-> **Implementation Status:** See `STATUS.md` for current phase (8a/8b complete).
+> **Implementation Status:** See `STATUS.md` for current phase.
 > See `mu/docs/core/BootstrapPrimitives.v0.md` for the 4 irreducible primitives (mu_equal eliminated).
 > The design below captures the approach.
 

@@ -14,7 +14,7 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached
+from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH
 
 
 # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
@@ -355,7 +355,7 @@ def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
     "subst_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
-def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
+def substitute(body: Mu, bindings: dict[str, Mu], _depth: int = 0) -> Mu:
     """
     Substitute variable sites in body with bound values.
 
@@ -366,14 +366,19 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
     Args:
         body: The body with possible {"var": "x"} sites.
         bindings: Dict mapping variable names to values.
+        _depth: Current recursion depth (internal). Parity with JS substitute.
 
     Returns:
         Body with variables replaced by their bound values.
 
     Raises:
         KeyError: If a variable in body is not in bindings.
+        TypeError: If depth exceeds MAX_MU_DEPTH.
     """
-    assert_mu(body, "substitute.body")
+    if _depth > MAX_MU_DEPTH:
+        raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
+    if _depth == 0:
+        assert_mu(body, "substitute.body")
 
     # Variable site - replace with bound value
     if is_var(body):
@@ -388,11 +393,11 @@ def substitute(body: Mu, bindings: dict[str, Mu]) -> Mu:
 
     # List - recursively substitute
     if isinstance(body, list):
-        return [substitute(elem, bindings) for elem in body]  # AST_OK: bootstrap - subst_mu replaces this
+        return [substitute(elem, bindings, _depth + 1) for elem in body]  # AST_OK: bootstrap - subst_mu replaces this
 
     # Dict - recursively substitute values
     if isinstance(body, dict):
-        return {k: substitute(v, bindings) for k, v in body.items()}  # AST_OK: bootstrap - subst_mu replaces this
+        return {k: substitute(v, bindings, _depth + 1) for k, v in body.items()}  # AST_OK: bootstrap - subst_mu replaces this
 
     # Should not reach here
     raise TypeError(f"Invalid body type: {type(body)}")

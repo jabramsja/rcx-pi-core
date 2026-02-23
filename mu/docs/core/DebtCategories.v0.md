@@ -93,6 +93,7 @@ Code that **interprets Mu** or **determines what operations mean**.
 |--------|----------|---------|
 | `@host_recursion` | Semantic | Python recursion doing Mu work |
 | `@host_builtin` | Semantic | Python builtins interpreting Mu |
+| `@host_iteration` | Semantic | Python iteration doing Mu work (bootstrap kernel execution loop) |
 | `@host_mutation` | Scaffolding | Python mutation (dict assignment) |
 
 ### AST_OK Bypasses
@@ -203,18 +204,15 @@ Kernel loop self-hosting (Phase 7) is tracked in TASKS.md.
 
 ### Empty Collection Normalization
 
-Both `{}` (empty dict) and `[]` (empty list) normalize to `null` (empty linked list). This is intentional:
+Empty collections preserve their type via type-tagged encoding (Phase 8b fix):
 
-1. **Why identical normalization:** Structurally, an empty sequence is an empty sequence regardless of whether it was a Python list or dict. The head/tail encoding cannot distinguish them.
+- `normalize([])` → `{"_type": "list"}` (empty list sentinel)
+- `normalize({})` → `{"_type": "dict"}` (empty dict sentinel)
+- `denormalize({"_type": "list"})` → `[]`
+- `denormalize({"_type": "dict"})` → `{}`
 
-2. **Denormalization behavior:** An empty linked list (`null`) denormalizes to `[]`, not `{}`. This means:
-   - `normalize({})` → `null`
-   - `denormalize(null)` → `[]`
-   - Round-trip changes empty dicts to empty lists
-
-3. **Implication for matching:** `{}` and `[]` match the same patterns. A pattern matching `[]` will also match `{}`.
-
-4. **Why this is acceptable:** In RCX, empty collections are semantically equivalent empty sequences. If your logic depends on distinguishing empty dict from empty list, you need a different encoding (e.g., a wrapper like `{"type": "dict", "items": []}`).
+Round-trips are type-preserving: `denormalize(normalize([])) == []` and
+`denormalize(normalize({})) == {}`.
 
 ### Head/Tail Key Collision
 

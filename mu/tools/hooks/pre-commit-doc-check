@@ -49,7 +49,7 @@ fi
 # === 3. Get staged files ===
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
 STAGED_PY=$(echo "$STAGED_FILES" | grep -E '\.py$' || true)
-STAGED_RCX_PY=$(echo "$STAGED_PY" | grep '^rcx_pi/' || true)
+STAGED_RCX_PY=$(echo "$STAGED_PY" | grep -E '^(rcx_pi/|mu/host/python/rcx_pi/)' || true)
 STAGED_SEEDS=$(echo "$STAGED_FILES" | grep -E '^mu/.*\.json$' || true)
 
 DOCS_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(mu/docs/|roadmap/|mu/tools/agents/|README\.md|STATUS\.md|TASKS\.md|ROADMAP\.md|CLAUDE\.md|CHANGELOG\.md)' || true)
@@ -139,7 +139,7 @@ if [ -f "./tools/checks/check_untracked_artifacts.sh" ]; then
 fi
 
 # === 6. Check if agents were run on staged core files (BLOCKING) ===
-CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)
+CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/host/python/rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)
 if [ -n "$CORE_FILES_CHANGED" ]; then
     MEMORY_FILE=".agent_memory/findings.json"
     AGENT_RUN_RECENT=false

@@ -121,7 +121,7 @@ else
     echo "JavaScript Guardrails (L3 Parity Enforcement)"
     echo "----------------------------------------------"
     # Check that all JS guardrail scripts exist and are executable
-    JS_GUARDS=("check_js_debt.sh" "contraband_js.sh" "ast_police_js.sh" "check_test_theater_js.sh" "seed_police.sh")
+    JS_GUARDS=("checks/check_js_debt.sh" "checks/linters/contraband_js.sh" "checks/linters/ast_police_js.sh" "checks/check_test_theater_js.sh" "checks/linters/seed_police.sh")
     for guard in "${JS_GUARDS[@]}"; do
         if [ -x "tools/$guard" ]; then
             printf "  ✓ %s\\n" "$guard"
