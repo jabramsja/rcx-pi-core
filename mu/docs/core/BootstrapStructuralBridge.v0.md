@@ -476,6 +476,7 @@ Both paths produce identical results. The execution path verification tests (`te
 - `mu/closures/recurrence.v1.json` - Requires non-linear patterns
 - `mu/closures/exhaustion.v1.json` - Requires non-linear patterns
 - `roadmap/L4ExecutionContract.v2.md` - Canonical L4 enforcement policy; locks `SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP` as the bootstrap endgame policy (anti-stagnation rule 13)
+- `mu/docs/core/NorthStarSemantics.v0.md` - Canonical semantic policy lock; defines undefined-as-structure, zero canonicalization, bounded non-closure, and routing tie-break deferral. Where this document discusses bootstrap trade-offs, NorthStarSemantics.v0.md is the normative source for semantic decisions.
 
 ---
 

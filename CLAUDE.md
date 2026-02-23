@@ -285,6 +285,8 @@ Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_
 
 **STRUCTURAL + ENABLER additionally require:** `progress_proof_before` + `progress_proof_after` (must differ).
 
+**Semantic policy lock:** `mu/docs/core/NorthStarSemantics.v0.md` is the canonical source for undefined-as-structure, zero canonicalization, bounded non-closure, and routing tie-break policies.
+
 **Anti-stagnation rules:**
 1. Rolling structural quota: ≥1 `L4_STRUCTURAL` in every 3 class-marked waves.
 2. NO_OP throttle: same `target_gate_id` cannot use `no_op_proof` twice in 3-wave window.

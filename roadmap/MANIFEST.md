@@ -17,6 +17,7 @@
 10. [`roadmap/ContentAddressedMu.md`](./ContentAddressedMu.md) - Content-addressed Mu (Levels 0-1 implemented)
 11. [`mu/docs/audit/MetaCircularReadiness.v1.md`](../mu/docs/audit/MetaCircularReadiness.v1.md) - Meta-circular readiness definition
 12. [`mu/docs/core/UniversalEval.v0.md`](../mu/docs/core/UniversalEval.v0.md) - Universal eval (SINK/research, not deprecated)
+13. [`mu/docs/core/NorthStarSemantics.v0.md`](../mu/docs/core/NorthStarSemantics.v0.md) - Canonical semantic policy lock (undefined-as-structure, zero canonicalization, bounded non-closure, routing tie-break)
 
 ## Document Roles
 
@@ -31,6 +32,7 @@
 | `MuHemispheresDesign.md` | Design spec (v0 core + engine integration) | Design evolves |
 | `HemisphereExecutionChecklist.v0.md` | Execution gates (E1-E5) for Hemisphere Metabolization | Gate evidence updates |
 | `ContentAddressedMu.md` | Design spec (Levels 0-2 implemented, Level 3 deferred) | Design evolves |
+| `NorthStarSemantics.v0.md` | Canonical semantic policy lock (undefined, zero, non-closure, tie-break) | Semantic decisions locked or deferred |
 | ~~`NormalizationDecisionMemo.md`~~ | Archived to `archive/docs/` (Round 24A) | N/A |
 
 ## Gate Levels and Execution Order
