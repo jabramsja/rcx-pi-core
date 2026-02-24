@@ -4,7 +4,6 @@
  *
  * Handles --json-api action dispatch for cross-substrate verification.
  * Depends on: core/*, engine/*, and the seeds context from cli/main.js
- * KERNEL_RESERVED_FIELDS: 25 (includes _boundary_request)
  */
 
 const { classifyError, RcxError } = require('../core/constants');

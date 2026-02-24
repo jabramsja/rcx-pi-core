@@ -1,7 +1,6 @@
 """L4 gate tests for red-team hardening wave (substitute depth guard + Boot1 re-entry validation).
 
 Evidence for: substitute() depth parity with JS, Boot1 reserved-field defense-in-depth.
-KERNEL_RESERVED_FIELDS: 25 (updated 2026-02-24, includes _boundary_request).
 """
 from __future__ import annotations
 
