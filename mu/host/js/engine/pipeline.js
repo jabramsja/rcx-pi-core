@@ -16,6 +16,15 @@ const { step } = require('../core/bootstrap_core');
 const { isTerminalShape, isEngineTerminal, deriveEngineExitReason } = require('../core/terminal_classification');
 const { stepKernel, runStructural } = require('./kernel');
 
+// JS built-in property names that must never be used as inject_key.
+// Prevents prototype chain poisoning via boundary requests.
+const FORBIDDEN_INJECT_KEYS = new Set([
+  '__proto__', 'constructor', 'toString', 'valueOf',
+  'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable',
+  'toLocaleString', '__defineGetter__', '__defineSetter__',
+  '__lookupGetter__', '__lookupSetter__',
+]);
+
 /**
  * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
  * @host_iteration (bridge-backed algorithm execution loop)
@@ -78,8 +87,10 @@ function hashTraceForRecurrence(trace, maxEntries) {
     }
     let entry = current.head;
     if (entry !== null && typeof entry === 'object' && 'state' in entry) {
-      entry = Object.assign({}, entry);
-      entry.state_hash = muHash(entry.state);
+      entry = Object.assign(Object.create(null), entry);
+      if (isValidMu(entry.state)) {
+        entry.state_hash = muHash(entry.state);
+      }
     }
     entries.push(entry);
     current = current.tail !== undefined ? current.tail : null;
@@ -98,20 +109,31 @@ function hashTraceForRecurrence(trace, maxEntries) {
 function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, maxAlgorithmIterations, emitFn, iteration, state) {
   const operation = request.operation;
   const reqInput = request.input;
-  const context = Object.assign({}, request.context);
+  const context = Object.assign(Object.create(null), request.context);
   const injectKey = request.inject_key;
 
-  if (KERNEL_RESERVED_FIELDS.has(injectKey)) {
+  if (typeof injectKey !== 'string') {
     emitFn('fail_closed', iteration, state, 'input.reserved_field');
     throw new RcxError('input.reserved_field',
-      `SECURITY: inject_key '${injectKey}' is a kernel-reserved field. ` +
+      `SECURITY: inject_key must be a string, got ${typeof injectKey}.`
+    );
+  }
+  if (KERNEL_RESERVED_FIELDS.has(injectKey) || FORBIDDEN_INJECT_KEYS.has(injectKey)) {
+    emitFn('fail_closed', iteration, state, 'input.reserved_field');
+    throw new RcxError('input.reserved_field',
+      `SECURITY: inject_key '${injectKey}' is forbidden (kernel-reserved or JS built-in). ` +
       `Boundary requests cannot inject reserved fields.`
     );
   }
 
+  const MAX_BOUNDARY_TRACE_STEPS = 10000;
+
   let result;
   if (operation === 'run_trace') {
-    const raw = runStructural(kernelProjections, reqInput.projections, reqInput.value, reqInput.max_steps ?? 100);
+    let traceMaxSteps = reqInput.max_steps ?? 100;
+    if (typeof traceMaxSteps !== 'number' || traceMaxSteps < 0) traceMaxSteps = 100;
+    if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) traceMaxSteps = MAX_BOUNDARY_TRACE_STEPS;
+    const raw = runStructural(kernelProjections, reqInput.projections, reqInput.value, traceMaxSteps);
     result = { result: raw.result, trace: raw.trace, stall: raw.stall };
   } else if (operation === 'hash_trace') {
     result = hashTraceForRecurrence(reqInput);
@@ -154,6 +176,11 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
     maxAlgorithmIterations = 50,
     observer = null,
   } = options ?? {};
+
+  // SECURITY: Validate frozen for kernel-reserved fields (parity with input validation)
+  if (frozen !== null && frozen !== undefined) {
+    validateNoKernelReservedFields(frozen, 'runEnginePipeline frozen');
+  }
 
   if (observer !== null && !Array.isArray(observer)) {
     throw new RcxError('observer.invalid_type',
@@ -221,6 +248,9 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
     if (typeof nextState === 'object' && nextState !== null
         && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
       const tailPayload = nextState._tail_call;
+      if (tailPayload && typeof tailPayload === 'object' && tailPayload.input) {
+        validateNoKernelReservedFields(tailPayload.input, 'tail_call re-entry input');
+      }
       state = { _run_engine: tailPayload };
       continue;
     }
@@ -264,6 +294,11 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
     maxAlgorithmIterations = 50,
     observer = null,
   } = options ?? {};
+
+  // SECURITY: Validate frozen for kernel-reserved fields (parity with input validation)
+  if (frozen !== null && frozen !== undefined) {
+    validateNoKernelReservedFields(frozen, 'runEnginePipelineRecursive frozen');
+  }
 
   if (observer !== null && !Array.isArray(observer)) {
     throw new RcxError('observer.invalid_type',
@@ -362,6 +397,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
         validateNoKernelReservedFields(curInput, 'Boot1 re-entry input');
         curMaxSteps = payload.max_steps ?? curMaxSteps;
         curFrozen = payload.frozen ?? null;
+        if (curFrozen !== null) validateNoKernelReservedFields(curFrozen, 'Boot1 re-entry frozen');
         remainingIterations = remainingIterations - iteration - 1;
         depth++;
         reentry = true;
@@ -376,6 +412,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
         validateNoKernelReservedFields(curInput, 'Boot1 tail_call input');
         curMaxSteps = payload.max_steps ?? curMaxSteps;
         curFrozen = payload.frozen ?? null;
+        if (curFrozen !== null) validateNoKernelReservedFields(curFrozen, 'Boot1 tail_call frozen');
         remainingIterations = remainingIterations - iteration - 1;
         depth++;
         reentry = true;

@@ -10,7 +10,9 @@
 # 5. Enforces agent review for core files (requires .agent_memory <30min) - BLOCKS on failure
 # 6. [reserved - section numbering in code]
 # 7. Runs adversary agent (sonnet) on staged core files - BLOCKS if not SECURE
-#    After 3 consecutive failures, prompts founder for bypass via /dev/tty
+#    After 3 consecutive failures, requires founder bypass:
+#      - Interactive (/dev/tty available): prompts founder
+#      - Non-interactive (CI/sandbox): requires RCX_ADVERSARY_BYPASS=1 env var
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -177,7 +179,7 @@ fi
 
 # === 7. Adversarial security gate on staged core files (BLOCKING) ===
 # Runs adversary agent (sonnet) automatically. Blocks if not SECURE.
-# After 3 consecutive failures, prompts founder for bypass via /dev/tty.
+# After 3 consecutive failures: env var RCX_ADVERSARY_BYPASS=1, or /dev/tty prompt, or fail closed.
 ATTEMPT_FILE="/tmp/.rcx_adversary_attempts"
 
 if [ -n "$CORE_FILES_CHANGED" ]; then
@@ -186,8 +188,10 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
     CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
 
     ADVERSARY_OUTPUT_FILE="/tmp/.rcx_adversary_output.md"
-    ADVERSARY_EXIT=0
-    PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet > "$ADVERSARY_OUTPUT_FILE" 2>&1 || ADVERSARY_EXIT=$?
+    set +e
+    PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet 2>&1 | tee "$ADVERSARY_OUTPUT_FILE"
+    ADVERSARY_EXIT=${PIPESTATUS[0]}
+    set -e
 
     if [ "$ADVERSARY_EXIT" -eq 0 ]; then
         echo "   ✅ Adversary: SECURE"
@@ -213,14 +217,29 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
         if [ "$ATTEMPTS" -ge 3 ]; then
             echo ""
             echo "   ⚠️  $ATTEMPTS consecutive failures."
-            echo -n "   Founder override? (y/n): " > /dev/tty
-            read -r OVERRIDE < /dev/tty
-            if [ "$OVERRIDE" = "y" ] || [ "$OVERRIDE" = "Y" ]; then
-                echo "   Founder override accepted. Proceeding with commit."
+
+            # Check for env-var bypass first (works in all environments)
+            if [ "${RCX_ADVERSARY_BYPASS:-}" = "1" ]; then
+                echo "   RCX_ADVERSARY_BYPASS=1 detected. Founder override accepted."
                 echo "   (Counter reset. Next commit will run adversary again.)"
                 rm -f "$ATTEMPT_FILE"
+            # Interactive fallback: prompt via /dev/tty if available
+            elif [ -w /dev/tty ] 2>/dev/null; then
+                echo -n "   Founder override? (y/n): " > /dev/tty
+                read -r OVERRIDE < /dev/tty
+                if [ "$OVERRIDE" = "y" ] || [ "$OVERRIDE" = "Y" ]; then
+                    echo "   Founder override accepted. Proceeding with commit."
+                    echo "   (Counter reset. Next commit will run adversary again.)"
+                    rm -f "$ATTEMPT_FILE"
+                else
+                    echo "   Override declined. Commit blocked."
+                    FAILED=1
+                fi
             else
-                echo "   Override declined. Commit blocked."
+                # Non-interactive (CI/sandbox): fail closed with clear instructions
+                echo "   /dev/tty not available (CI/sandbox environment)."
+                echo "   To bypass: RCX_ADVERSARY_BYPASS=1 git commit ..."
+                echo "   Commit blocked."
                 FAILED=1
             fi
         else

@@ -213,12 +213,12 @@ const engineProjections = engineSeed.projections;
 const metabolizationProjections = metabolizationSeed.projections;
 const recurrenceV2Projections = recurrenceV2Seed.projections;
 
-const seedProjectionMap = {
+const seedProjectionMap = Object.assign(Object.create(null), {
   'recurrence.v1.json': recurrenceProjections,
   'recurrence.v2.json': recurrenceV2Projections,
   'exhaustion.v1.json': exhaustionProjections,
   'fix.v1.json': fixProjections,
-};
+});
 
 const allProjectionsWithBridge = [
   ...kernel.projections, ...bridgeProjections,

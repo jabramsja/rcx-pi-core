@@ -111,7 +111,7 @@ function muHash(value) {
   function canonicalize(v) {
     if (v === null) return 'null';
     if (typeof v === 'boolean') return v ? 'true' : 'false';
-    if (typeof v === 'number') return JSON.stringify(v);
+    if (typeof v === 'number') return Object.is(v, -0) ? '-0.0' : JSON.stringify(v);
     if (typeof v === 'string') return JSON.stringify(v);
     if (Array.isArray(v)) {
       return '[' + v.map(canonicalize).join(', ') + ']';
@@ -134,6 +134,7 @@ const _muHashCache = new Map();
 function muHashCached(value) {
   // Deterministic cache key: sorted-key JSON (JS-local, not cross-substrate)
   const key = JSON.stringify(value, (_, v) => {
+    if (typeof v === 'number' && Object.is(v, -0)) return '\x00NEGZERO';
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       const sorted = {};
       for (const k of Object.keys(v).sort(compareMuStringKeysByCodepoint)) sorted[k] = v[k];

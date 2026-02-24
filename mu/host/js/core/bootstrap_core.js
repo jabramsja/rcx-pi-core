@@ -48,12 +48,12 @@ function match(pattern, input, _depth = 0) {
     if (!Array.isArray(input) || pattern.length !== input.length) {
       return NO_MATCH;
     }
-    const bindings = {};
+    const bindings = Object.create(null);
     for (let i = 0; i < pattern.length; i++) {
       const sub = match(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
-        if (k in bindings && muHashCached(bindings[k]) !== muHashCached(v)) {
+        if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) {
           return NO_MATCH;
         }
         bindings[k] = v;
@@ -82,12 +82,12 @@ function match(pattern, input, _depth = 0) {
         if (!iKeys.has(k)) return NO_MATCH;
       }
     }
-    const bindings = {};
+    const bindings = Object.create(null);
     for (const k of pKeys) {
       const sub = match(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
-        if (bk in bindings && muHashCached(bindings[bk]) !== muHashCached(bv)) {
+        if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) {
           return NO_MATCH;
         }
         bindings[bk] = bv;
@@ -112,7 +112,7 @@ function substitute(body, bindings, _depth = 0) {
 
   if (isVar(body)) {
     const name = body.var;
-    if (!(name in bindings)) {
+    if (!Object.hasOwn(bindings, name)) {
       throw new Error(`Unbound variable: ${name}`);
     }
     return bindings[name];
@@ -179,7 +179,7 @@ function step(projections, input) {
  */
 function isKernelTerminal(result) {
   return typeof result === 'object' && result !== null &&
-    result._mode === 'done' && '_result' in result && '_stall' in result;
+    result._mode === 'done' && Object.hasOwn(result, '_result') && Object.hasOwn(result, '_stall');
 }
 
 /**
@@ -188,8 +188,8 @@ function isKernelTerminal(result) {
  */
 function isKernelIntermediate(result) {
   if (result === null || typeof result !== 'object' || Array.isArray(result)) return false;
-  if ('_subst_ctx' in result || '_match_ctx' in result || '_kernel_ctx' in result) return true;
-  if ('_mode' in result && result._mode !== 'done') return true;
+  if (Object.hasOwn(result, '_subst_ctx') || Object.hasOwn(result, '_match_ctx') || Object.hasOwn(result, '_kernel_ctx')) return true;
+  if (Object.hasOwn(result, '_mode') && result._mode !== 'done') return true;
   return false;
 }
 
@@ -219,9 +219,14 @@ function makeUndefinedMotif(op, lhs, rhs, cause, details = null) {
  *
  * @host_iteration — for loop until stall/max_steps
  */
-function run(projections, input, maxSteps = 10000) {
+const MAX_RUN_STEPS = 10000; // Hard cap — prevents unbounded trace accumulation
+
+function run(projections, input, maxSteps = MAX_RUN_STEPS) {
   if (!isValidMu(input)) {
     throw new RcxError('input.invalid_type', 'Invalid Mu input to run()');
+  }
+  if (typeof maxSteps !== 'number' || maxSteps < 0 || maxSteps > MAX_RUN_STEPS) {
+    maxSteps = MAX_RUN_STEPS;
   }
 
   let current = input;

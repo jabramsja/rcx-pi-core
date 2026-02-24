@@ -12,19 +12,20 @@
  */
 const crypto = require('crypto');
 const fs = require('fs');
+const { compareMuStringKeysByCodepoint } = require('./core/types');
 
-// Canonical JSON serialization — must match Python json.dumps(value, sort_keys=True, ensure_ascii=False)
-// This is copied from eval_step.js muHash to ensure we test the SAME algorithm.
+// Canonical JSON serialization — must match eval_step.js muHash exactly.
+// Uses compareMuStringKeysByCodepoint for full Unicode codepoint sort (not UTF-16).
 function canonicalize(v) {
   if (v === null) return 'null';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (typeof v === 'number') return JSON.stringify(v);
+  if (typeof v === 'number') return Object.is(v, -0) ? '-0.0' : JSON.stringify(v);
   if (typeof v === 'string') return JSON.stringify(v);
   if (Array.isArray(v)) {
     return '[' + v.map(canonicalize).join(', ') + ']';
   }
-  // Object: sort keys, use Python separators
-  const keys = Object.keys(v).sort();
+  // Object: sort keys by Unicode codepoint (matching production muHash)
+  const keys = Object.keys(v).sort(compareMuStringKeysByCodepoint);
   const pairs = keys.map(k => JSON.stringify(k) + ': ' + canonicalize(v[k]));
   return '{' + pairs.join(', ') + '}';
 }

@@ -16,8 +16,10 @@ const { stepKernel, runStructural } = require('../engine/kernel');
 const { runAlgorithmWithBridge, runEnginePipeline, runEnginePipelineRecursive, hashTraceForRecurrence } = require('../engine/pipeline');
 const { runHemisphereRouting, runEngineWithRouting } = require('../engine/routing');
 
-// API-level cap for maxSteps on externally reachable endpoints.
+// API-level caps for externally reachable endpoints.
 const API_MAX_STEPS = 10000;
+const API_MAX_ENGINE_ITERATIONS = 100;
+const API_MAX_ALGORITHM_ITERATIONS = 200;
 
 function guardMaxSteps(value, fieldName) {
   if (value == null) return;
@@ -29,6 +31,19 @@ function guardMaxSteps(value, fieldName) {
   }
   if (value > API_MAX_STEPS) {
     throw new RcxError('api.bad_request', `${fieldName} exceeds API cap of ${API_MAX_STEPS}`);
+  }
+}
+
+function guardIterationCap(value, fieldName, cap) {
+  if (value == null) return;
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new RcxError('api.bad_request', `${fieldName} must be an integer, got ${typeof value}`);
+  }
+  if (value < 0) {
+    throw new RcxError('api.bad_request', `${fieldName} must be >= 0, got ${value}`);
+  }
+  if (value > cap) {
+    throw new RcxError('api.bad_request', `${fieldName} exceeds API cap of ${cap}`);
   }
 }
 
@@ -114,6 +129,7 @@ function handleJsonApi(apiArg, seeds) {
       const { input, maxSteps } = request;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
+        validateNoKernelReservedFields(input, 'run_exhaustion input');
         let current = input;
         let steps = 0;
         const limit = maxSteps ?? 200;
@@ -238,10 +254,12 @@ function handleJsonApi(apiArg, seeds) {
       } else {
         const boot1Mode = request.boot1LoopMode ?? true;
         const observerEvents = request.observer_strict !== undefined
-          ? request.observer_strict
+          ? (Array.isArray(request.observer_strict) && request.observer_strict.length === 0 ? [] : (() => { throw new RcxError('api.bad_request', 'observer_strict must be an empty array'); })())
           : (request.observer ? [] : null);
         try {
           guardMaxSteps(maxSteps, 'maxSteps');
+          guardIterationCap(maxEngineIterations, 'maxEngineIterations', API_MAX_ENGINE_ITERATIONS);
+          guardIterationCap(maxAlgorithmIterations, 'maxAlgorithmIterations', API_MAX_ALGORITHM_ITERATIONS);
           const opts = {
             maxSteps: maxSteps ?? 100,
             frozen: frozen ?? null,
@@ -285,10 +303,12 @@ function handleJsonApi(apiArg, seeds) {
         const boot1Mode = request.boot1LoopMode ?? true;
         const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
         const observerEvents = request.observer_strict !== undefined
-          ? request.observer_strict
+          ? (Array.isArray(request.observer_strict) && request.observer_strict.length === 0 ? [] : (() => { throw new RcxError('api.bad_request', 'observer_strict must be an empty array'); })())
           : (request.observer ? [] : null);
         try {
           guardMaxSteps(maxSteps, 'maxSteps');
+          guardIterationCap(maxEngineIterations, 'maxEngineIterations', API_MAX_ENGINE_ITERATIONS);
+          guardIterationCap(maxAlgorithmIterations, 'maxAlgorithmIterations', API_MAX_ALGORITHM_ITERATIONS);
           const result = runEngineWithRouting(
             allProjections, hemisphereProjections, allProjectionsWithBridge, seedProjectionMap, engineProjections,
             userProjs ?? [], input,
@@ -332,7 +352,7 @@ function handleJsonApi(apiArg, seeds) {
       } else {
         const boot1Mode = request.boot1LoopMode ?? true;
         const metaObserver = request.observer_strict !== undefined
-          ? request.observer_strict
+          ? (Array.isArray(request.observer_strict) && request.observer_strict.length === 0 ? [] : (() => { throw new RcxError('api.bad_request', 'observer_strict must be an empty array'); })())
           : [];
         const maxEngIter = reqMaxEngineIter ?? 20;
         const baseline = Array.isArray(metaObserver)
@@ -340,6 +360,8 @@ function handleJsonApi(apiArg, seeds) {
           : 0;
         try {
           guardMaxSteps(maxSteps, 'maxSteps');
+          guardIterationCap(reqMaxEngineIter, 'maxEngineIterations', API_MAX_ENGINE_ITERATIONS);
+          guardIterationCap(maxAlgorithmIterations, 'maxAlgorithmIterations', API_MAX_ALGORITHM_ITERATIONS);
           const opts = {
             maxSteps: maxSteps ?? 100,
             frozen: frozen ?? null,
@@ -372,6 +394,7 @@ function handleJsonApi(apiArg, seeds) {
     } else if (request.action === 'step_metabolization') {
       const { input } = request;
       try {
+        validateNoKernelReservedFields(input, 'step_metabolization input');
         const result = step(metabolizationProjections, input);
         response = { success: true, result };
       } catch (e) {
