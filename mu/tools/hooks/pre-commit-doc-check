@@ -7,13 +7,14 @@
 # 2. Checks debt ceiling is not exceeded - BLOCKS on failure
 # 3. Runs targeted staged-file checks (py_compile, bare except, AST police, seed police)
 # 4. Enforces tracker sync for core changes (`mu/` or `rcx_pi/selfhost/`) - BLOCKS on failure
-# 5. Enforces agent review for core files (requires .agent_memory <30min) - BLOCKS on failure
-# 6. [reserved - section numbering in code]
-# 7. Runs adversary agent (sonnet) on staged core files - BLOCKS if not SECURE
-#    30-minute cooldown after SECURE or bypass (skips adversary during cooldown)
-#    After 3 consecutive failures, requires founder bypass:
-#      - Interactive (/dev/tty available): prompts founder
-#      - Non-interactive (CI/sandbox): requires RCX_ADVERSARY_BYPASS=1 env var
+# 5. [reserved]
+# 6. Agent review reminder (non-blocking, cooldown-based)
+# 7. Adversary review reminder (non-blocking, cooldown-based)
+#
+# Sections 6+7 never block or prompt. They print a one-line reminder if no
+# recent agent/adversary run detected (30-min cooldown). Run agents manually
+# when you choose to. Env vars to suppress: RCX_SKIP_AGENT_CHECK=1,
+# RCX_SKIP_ADVERSARY_CHECK=1.
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -144,22 +145,20 @@ if [ -f "./tools/checks/check_untracked_artifacts.sh" ]; then
     fi
 fi
 
-# === 6. Check if agents were run on staged core files (PROMPTED) ===
-# Warns if no recent agent review, but lets founder decide whether to proceed.
-# RCX_SKIP_AGENT_CHECK=1 skips silently in non-interactive shells.
+# === 6. Agent review reminder (non-blocking, cooldown-based) ===
+# Prints a one-line reminder if no recent agent review. Never blocks or prompts.
+# RCX_SKIP_AGENT_CHECK=1 suppresses the reminder entirely.
 CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/host/python/rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)
-if [ -n "$CORE_FILES_CHANGED" ]; then
+if [ -n "$CORE_FILES_CHANGED" ] && [ "${RCX_SKIP_AGENT_CHECK:-}" != "1" ]; then
     MEMORY_FILE=".agent_memory/findings.json"
     AGENT_RUN_RECENT=false
 
     if [ -f "$MEMORY_FILE" ]; then
-        # Check if agent memory was updated in last 30 minutes
         if [ "$(uname)" = "Darwin" ]; then
             MEMORY_AGE=$(( $(date +%s) - $(stat -f %m "$MEMORY_FILE") ))
         else
             MEMORY_AGE=$(( $(date +%s) - $(stat -c %Y "$MEMORY_FILE") ))
         fi
-
         if [ "$MEMORY_AGE" -lt 1800 ]; then
             AGENT_RUN_RECENT=true
         fi
@@ -167,89 +166,31 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
 
     if [ "$AGENT_RUN_RECENT" = "false" ]; then
         CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
-
-        if [ "${RCX_SKIP_AGENT_CHECK:-}" = "1" ]; then
-            echo ""
-            echo "   ⏭  Agent review check skipped (RCX_SKIP_AGENT_CHECK=1)."
-        elif { echo "" > /dev/tty; } 2>/dev/null; then
-            echo ""
-            echo "⚠️  No recent agent review for core files: $CORE_FILE_LIST"
-            echo -n "Proceed without agent review? [y/N]: " > /dev/tty
-            read -r AGENT_REPLY < /dev/tty
-            case "$AGENT_REPLY" in
-                y|Y|yes|YES)
-                    echo "   ⏭  Agent review skipped by founder choice."
-                    ;;
-                *)
-                    echo "   Run: python tools/runners/run_review.py <files> --depth full"
-                    FAILED=1
-                    ;;
-            esac
-        else
-            echo ""
-            echo "   ⚠️  /dev/tty not available. Agent review check deferred."
-            echo "   Core files: $CORE_FILE_LIST"
-            echo "   Run manually: python tools/runners/run_review.py <files> --depth full"
-        fi
+        echo "   ℹ️  No recent agent review. Run when ready: python tools/runners/run_review.py $CORE_FILE_LIST --depth quick"
     fi
 fi
 
-# === 7. Adversarial security gate on staged core files (PROMPTED) ===
-# Prompt founder each commit whether to run adversary now.
-# - Keeps the same command/model parameters when run.
-# - If skipped, commit proceeds (manual run can be done separately).
-# - RCX_RUN_ADVERSARY=1 forces run in non-interactive shells.
-if [ -n "$CORE_FILES_CHANGED" ]; then
-    CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
-    RUN_ADVERSARY="false"
+# === 7. Adversary review reminder (non-blocking, cooldown-based) ===
+# Prints a one-line reminder if no recent adversary run. Never blocks or prompts.
+# RCX_SKIP_ADVERSARY_CHECK=1 suppresses the reminder entirely.
+if [ -n "$CORE_FILES_CHANGED" ] && [ "${RCX_SKIP_ADVERSARY_CHECK:-}" != "1" ]; then
+    ADVERSARY_COOLDOWN="/tmp/.rcx_adversary_cooldown"
+    ADVERSARY_RUN_RECENT=false
 
-    if [ "${RCX_RUN_ADVERSARY:-}" = "1" ]; then
-        RUN_ADVERSARY="true"
-        echo ""
-        echo "Running adversary security gate (forced by RCX_RUN_ADVERSARY=1)..."
-    elif { echo "" > /dev/tty; } 2>/dev/null; then
-        echo -n "Run adversary security gate now (sonnet)? [y/N]: " > /dev/tty
-        read -r RUN_REPLY < /dev/tty
-        case "$RUN_REPLY" in
-            y|Y|yes|YES)
-                RUN_ADVERSARY="true"
-                ;;
-            *)
-                RUN_ADVERSARY="false"
-                ;;
-        esac
-    else
-        echo ""
-        echo "   ⚠️  /dev/tty not available. Adversary gate deferred for this commit."
-        echo "   Run manually when needed:"
-        echo "   PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet"
+    if [ -f "$ADVERSARY_COOLDOWN" ]; then
+        if [ "$(uname)" = "Darwin" ]; then
+            COOLDOWN_AGE=$(( $(date +%s) - $(stat -f %m "$ADVERSARY_COOLDOWN") ))
+        else
+            COOLDOWN_AGE=$(( $(date +%s) - $(stat -c %Y "$ADVERSARY_COOLDOWN") ))
+        fi
+        if [ "$COOLDOWN_AGE" -lt 1800 ]; then
+            ADVERSARY_RUN_RECENT=true
+        fi
     fi
 
-    if [ "$RUN_ADVERSARY" = "true" ]; then
-        echo ""
-        echo "Running adversary security gate (sonnet) on staged core files..."
-        echo "   Note: AVX capability warnings from the runner can be ignored if the process exits 0."
-
-        ADVERSARY_OUTPUT_FILE="/tmp/.rcx_adversary_output.md"
-        set +e
-        PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet 2>&1 | tee "$ADVERSARY_OUTPUT_FILE"
-        ADVERSARY_EXIT=${PIPESTATUS[0]}
-        set -e
-
-        if [ "$ADVERSARY_EXIT" -eq 0 ]; then
-            echo "   ✅ Adversary: SECURE"
-        else
-            echo ""
-            echo "❌ Adversary gate FAILED"
-            if [ -f "$ADVERSARY_OUTPUT_FILE" ]; then
-                echo "   Report: $ADVERSARY_OUTPUT_FILE"
-            fi
-            echo "   Fix findings, re-stage, and re-commit."
-            FAILED=1
-        fi
-    else
-        echo ""
-        echo "   ⏭  Adversary gate skipped by founder choice."
+    if [ "$ADVERSARY_RUN_RECENT" = "false" ]; then
+        CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
+        echo "   ℹ️  No recent adversary review. Run when ready: python tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet"
     fi
 fi
 

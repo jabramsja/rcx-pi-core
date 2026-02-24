@@ -95,6 +95,9 @@ class TestPythonCanonnicalization:
         assert mu_hash_control(-42.0) == mu_hash_control(-42)
         # 2**52 is safe
         assert mu_hash_control(float(2**52)) == mu_hash_control(2**52)
+        # 1e16 and 1e20 are within 1e21 threshold — must be int-cast
+        assert mu_hash_control(1e16) == mu_hash_control(int(1e16))
+        assert mu_hash_control(1e20) == mu_hash_control(int(1e20))
 
     def test_global_mu_hash_unchanged(self):
         """mu_hash(1.0) != mu_hash(1) — global hash is NOT canonicalized."""
@@ -184,6 +187,14 @@ class TestCrossSubstrateParity:
         py_hash = mu_hash_control({"a": 1, "b": [2, 3]})
         js_hash = self._js_hash('{"a": 1, "b": [2, 3]}')
         assert py_hash == js_hash
+
+    def test_mid_range_integral_float_parity(self):
+        """1e20 must hash identically across substrates (int-cast, both use integer form)."""
+        py_hash = mu_hash_control(1e20)
+        js_hash = self._js_hash("1e20")
+        assert py_hash == js_hash, (
+            f"Mid-range integral float hash divergence: py={py_hash}, js={js_hash}"
+        )
 
     def test_large_integral_float_parity(self):
         """1e30 must hash identically across substrates (no int-casting)."""

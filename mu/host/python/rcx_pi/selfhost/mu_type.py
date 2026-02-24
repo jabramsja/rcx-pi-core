@@ -559,15 +559,16 @@ def _canonicalize_hash_numeric(value: Any) -> Any:
     This ensures 1.0 and 1 hash identically, and -0.0 maps to 0.
     Only used in control-channel wrappers after assert_hash_numeric_safe.
 
-    Guard: only int-cast when abs(value) < 2**53 (JS safe integer range).
-    Large integral floats like 1e30 serialize differently in Python vs JS
-    (Python: "1000000000000000000000000000000", JS: "1e+30"), so we leave
-    them as floats to preserve cross-substrate hash parity.
+    Guard: only int-cast when abs(value) < 1e21 (JS JSON.stringify integer
+    threshold). JS uses full integer form for values < 1e21, then switches
+    to scientific notation at 1e21+. Python int() always uses full integer
+    form. So int-casting is safe below 1e21 (both substrates agree on the
+    string), but diverges at 1e21+ (Python: full digits, JS: scientific).
     """
     if isinstance(value, float):
         if value == 0.0:
             return 0
-        if value.is_integer() and abs(value) < 2**53:
+        if value.is_integer() and abs(value) < 1e21:
             return int(value)
         return value  # non-integer or large integral float — keep as-is
     if type(value) is list:
