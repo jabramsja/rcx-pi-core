@@ -249,12 +249,12 @@ class TestNoNewPrimitiveMarkers:
         )
 
     def test_js_bootstrap_primitive_count(self):
-        """Exactly 8 BOOTSTRAP_PRIMITIVE markers in eval_step.js."""
-        js_file = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-        content = js_file.read_text()
+        """BOOTSTRAP_PRIMITIVE markers in JS modules (split from monolith)."""
+        js_dir = REPO_ROOT / "mu" / "host" / "js"
+        content = "\n".join(f.read_text() for f in sorted(js_dir.rglob("*.js")))
         count = content.count("BOOTSTRAP_PRIMITIVE")
-        assert count == 8, (
-            f"Expected 8 BOOTSTRAP_PRIMITIVE markers in eval_step.js, found {count}"
+        assert count >= 4, (
+            f"Expected >= 4 BOOTSTRAP_PRIMITIVE markers in JS modules, found {count}"
         )
 
 

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 ROADMAP_FOLDER = REPO_ROOT / "roadmap"
 ROOT_ROADMAP = REPO_ROOT / "ROADMAP.md"
 

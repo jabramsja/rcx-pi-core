@@ -17,8 +17,9 @@ from pathlib import Path
 import pytest
 
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+from tests.repo_root import REPO_ROOT
 
-ROOT = Path(__file__).parent.parent.parent
+ROOT = REPO_ROOT
 MU_DIR = ROOT / "mu"
 
 # mu/ folder structure (canonical location for all seeds)

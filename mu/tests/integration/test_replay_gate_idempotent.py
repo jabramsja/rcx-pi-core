@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 def _repo_root() -> Path:
-    # tests/ -> repo root
-    return Path(__file__).parents[2]
+    from tests.repo_root import REPO_ROOT
+    return REPO_ROOT
 
 
 def _git_diff_tracked_names(cwd: Path) -> str:

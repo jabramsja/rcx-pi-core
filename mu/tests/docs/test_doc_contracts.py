@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 DOCS_CORE = REPO_ROOT / "mu" / "docs" / "core"
 
 
@@ -55,7 +55,7 @@ DOC_CONTRACTS: dict[str, dict[str, Any]] = {
         ],
         "constants": {
             # max_steps and stack_guard are constants, not functions
-            "rcx_pi.selfhost.step_mu.KERNEL_RESERVED_FIELDS": 24,  # Security boundary (Gate 3: entry points moved out, Boot1 P2/P3: +_run_engine, +_tail_call)
+            "rcx_pi.selfhost.step_mu.KERNEL_RESERVED_FIELDS": 25,  # Security boundary (+_boundary_request, adversary hardening 2026-02-24)
         },
         "seeds": {},  # No specific seed counts claimed
     },

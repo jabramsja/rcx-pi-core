@@ -18,9 +18,10 @@ from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 from rcx_pi.selfhost.step_mu import run_mu
 
 from tests.hemisphere_helpers import load_hemisphere_projections as _load_hemisphere_projections
+from tests.repo_root import REPO_ROOT
 
 
-ROOT = Path(__file__).parents[2]
+ROOT = REPO_ROOT
 FIXTURES = ROOT / "tests" / "fixtures"
 
 

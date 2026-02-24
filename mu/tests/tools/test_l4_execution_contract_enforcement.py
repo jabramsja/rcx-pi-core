@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 import pytest
 
-REPO_ROOT = Path(__file__).parents[2]
+from tests.repo_root import REPO_ROOT
 sys.path.insert(0, str(REPO_ROOT))
 
 # Import the enforcement module directly

@@ -313,7 +313,9 @@ class TestKernelReservedFieldsValidation:
             # Engine pipeline dispatch field (Boot1 P2 hardening, 2026-02-14)
             "_run_engine",
             # Boot1 recursive loop contract field (Boot1 P3 hardening, 2026-02-14)
-            "_tail_call"
+            "_tail_call",
+            # Boundary effect dispatch field (adversary hardening, 2026-02-24)
+            "_boundary_request"
         }
         assert KERNEL_RESERVED_FIELDS == expected
 

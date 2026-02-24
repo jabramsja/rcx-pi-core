@@ -35,6 +35,15 @@ STEP_MU_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "s
 EVAL_STEP_JS_PATH = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
 
 
+def _read_all_js_source() -> str:
+    """Read all JS module files from mu/host/js/ recursively."""
+    js_dir = REPO_ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
+
+
 def _get_python_function_body(source_path: Path, func_name: str) -> str:
     """Extract the body of a Python function from source."""
     source = source_path.read_text()
@@ -46,8 +55,8 @@ def _get_python_function_body(source_path: Path, func_name: str) -> str:
 
 
 def _get_js_function_body(source_path: Path, func_name: str) -> str:
-    """Extract the body of a JS function from source."""
-    source = source_path.read_text()
+    """Extract the body of a JS function from all JS module sources."""
+    source = _read_all_js_source()
     # Find function definition
     pattern = re.compile(rf"function {func_name}\b.*?\{{(.*?)\n\}}", re.DOTALL)
     match = pattern.search(source)

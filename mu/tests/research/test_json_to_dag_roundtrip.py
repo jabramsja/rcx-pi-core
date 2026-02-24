@@ -15,10 +15,9 @@ import pytest
 
 # Import path assumes running from repo root
 import sys
-sys.path.insert(0, str(Path(__file__).parents[2] / "tools" / "compilers"))
+from tests.repo_root import REPO_ROOT
+sys.path.insert(0, str(REPO_ROOT / "tools" / "compilers"))
 from json_to_dag import compile_to_dag, dag_to_json_seed, serialize_dag  # noqa: E402
-
-REPO_ROOT = Path(__file__).parents[2]
 MATCH_V2 = REPO_ROOT / "mu" / "substrate" / "match.v2.json"
 SUBST_V2 = REPO_ROOT / "mu" / "substrate" / "subst.v2.json"
 

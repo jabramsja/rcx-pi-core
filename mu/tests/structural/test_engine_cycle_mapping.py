@@ -372,10 +372,13 @@ class TestGapRegistry:
         assert len(gaps) == 0, f"Expected 0 gaps, got {len(gaps)}"
 
 
+from tests.repo_root import REPO_ROOT as _GAP_ROOT
+
+
 class TestGapContractDocs:
     """Verify gap entries with contract docs have complete design contracts."""
 
-    ROOT = Path(__file__).parents[2]
+    ROOT = _GAP_ROOT
 
     # GAP-04-FIX tests removed: gap resolved via engine integration (E4).
     # Contract doc retained at mu/docs/core/EngineNewFixContract.v0.md.

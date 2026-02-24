@@ -241,13 +241,13 @@ class TestSourceLock:
     """JS source must contain observer_strict in all 3 API handlers."""
 
     def test_source_contains_three_observer_strict_branches(self):
-        """eval_step.js has observer_strict in all 3 API handlers (2 refs each)."""
-        js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text()
+        """JS source has observer_strict in all 3 API handlers (5 refs each)."""
+        js_dir = REPO_ROOT / "mu" / "host" / "js"
+        source = "\n".join(f.read_text() for f in sorted(js_dir.rglob("*.js")))
         count = source.count("request.observer_strict")
-        # 3 handlers × 2 references each (conditional + value) = 6
-        assert count == 6, (
-            f"Expected 6 request.observer_strict references (3 handlers × 2), got {count}"
+        # 3 handlers × 5 references each (conditional + isArray + value + null check + typeof) = 15
+        assert count == 15, (
+            f"Expected 15 request.observer_strict references (3 handlers × 5), got {count}"
         )
 
 

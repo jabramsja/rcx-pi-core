@@ -9,6 +9,15 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 
+def _read_all_js_source() -> str:
+    """Read all JS module files from mu/host/js/ recursively."""
+    js_dir = REPO_ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
+
+
 class TestSubstituteDepthGuard:
     """Verify Python substitute() has MAX_MU_DEPTH guard matching JS."""
 
@@ -58,14 +67,14 @@ class TestBoot1ReentryValidation:
 
     def test_js_reentry_validates_reserved_fields(self):
         """JS runEnginePipelineRecursive must call validateNoKernelReservedFields on re-entry."""
-        src = (REPO_ROOT / "mu/host/js/eval_step.js").read_text()
+        src = _read_all_js_source()
         assert "validateNoKernelReservedFields(curInput, 'Boot1 re-entry input')" in src
         assert "validateNoKernelReservedFields(curInput, 'Boot1 tail_call input')" in src
 
     def test_cross_substrate_reentry_validation_parity(self):
         """Both substrates must validate reserved fields at both re-entry points."""
         py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
-        js_src = (REPO_ROOT / "mu/host/js/eval_step.js").read_text()
+        js_src = _read_all_js_source()
         # Count validation sites — must be 2 in each substrate (re-entry + tail_call)
         py_count = py_src.count("validate_no_kernel_reserved_fields(cur_input")
         js_count = js_src.count("validateNoKernelReservedFields(curInput")

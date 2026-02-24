@@ -61,8 +61,12 @@ def _js_request(action, **kwargs):
 
 
 def _js_source() -> str:
-    """Read eval_step.js source."""
-    return (REPO_ROOT / "mu" / "host" / "js" / "eval_step.js").read_text()
+    """Read all JS module files concatenated (monolith was split into modules)."""
+    js_dir = REPO_ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
 
 
 def _py_source() -> str:

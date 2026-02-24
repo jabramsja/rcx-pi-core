@@ -29,6 +29,15 @@ from rcx_pi.selfhost.step_mu import step_kernel_mu
 from rcx_pi.selfhost.kernel import reset_step_budget
 
 
+def _read_all_js_source() -> str:
+    """Read all JS module files from mu/host/js/ recursively."""
+    js_dir = REPO_ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -316,8 +325,7 @@ class TestReasonSourceLock:
 
     def test_js_source_contains_all_reasons(self):
         """JS eval_step.js contains all 4 termination reason strings."""
-        js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text()
+        source = _read_all_js_source()
         for reason in REASON_ENUM:
             assert reason in source, (
                 f"JS source missing reason string: {reason!r}"

@@ -22,6 +22,15 @@ from hypothesis import strategies as st
 from tests.repo_root import REPO_ROOT as ROOT
 
 
+def _read_all_js_source() -> str:
+    """Read all JS module files concatenated (monolith was split into modules)."""
+    js_dir = ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
+
+
 class TestJSTestSuitePasses:
     """Verify the JavaScript test suite passes completely."""
 
@@ -680,8 +689,8 @@ class TestJSSecurityParity:
         """
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
-        # Python has 24 reserved fields (12 kernel + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge)
-        assert len(KERNEL_RESERVED_FIELDS) == 24, "Python reserved fields changed"
+        # Python has 25 reserved fields (12 kernel + 3 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge)
+        assert len(KERNEL_RESERVED_FIELDS) == 25, "Python reserved fields changed"
 
         # JS test output should confirm reserved fields are checked
         result = subprocess.run(
@@ -1840,8 +1849,7 @@ class TestBoundaryResultValidationParity:
 
     def test_js_boundary_result_validation_source_lock(self):
         """Source-level lock: JS runEnginePipeline contains boundary result validation."""
-        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text()
+        source = _read_all_js_source()
 
         # The validation call must exist in the JS source
         assert "validateNoKernelReservedFields(result," in source, (
@@ -1864,8 +1872,7 @@ class TestBoundaryResultValidationParity:
         After dedup refactor, boundary logic lives in serviceBoundaryEffect().
         The contract is the same: validate BEFORE inject.
         """
-        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
-        lines = js_path.read_text().splitlines(keepends=True)
+        lines = _read_all_js_source().splitlines(keepends=True)
 
         # Find the validation line and the injection line within serviceBoundaryEffect
         validation_line = None
@@ -1985,8 +1992,7 @@ class TestNoOrBarBarNumericDefaults:
     def test_no_or_bar_bar_on_numeric_caps(self):
         """No numeric cap field uses || default in eval_step.js."""
         import re
-        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text(encoding="utf-8")
+        source = _read_all_js_source()
         lines = source.splitlines()
 
         violations = []
@@ -2008,8 +2014,7 @@ class TestNoOrBarBarNumericDefaults:
     def test_nullish_coalescing_present(self):
         """Confirm ?? is used for numeric defaults (positive check)."""
         import re
-        js_path = ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text(encoding="utf-8")
+        source = _read_all_js_source()
 
         expected_patterns = [
             (r"maxSteps\s*\?\?", "maxSteps"),
@@ -2111,7 +2116,7 @@ class TestActionSetSync:
         silently miss it).
         """
         import re
-        js_source = (ROOT / "mu" / "host" / "js" / "eval_step.js").read_text()
+        js_source = _read_all_js_source()
 
         # Extract all request.action === '...' branches from the JSON API section
         # Match both == and === comparisons

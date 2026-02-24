@@ -352,9 +352,9 @@ class TestEngineReasonSourceLock:
             )
 
     def test_js_source_contains_all_reasons(self):
-        """JS eval_step.js contains all 4 engine exit reason strings."""
-        js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text()
+        """JS source contains all 4 engine exit reason strings."""
+        js_dir = REPO_ROOT / "mu" / "host" / "js"
+        source = "\n".join(f.read_text() for f in sorted(js_dir.rglob("*.js")))
         for reason in ENGINE_EXIT_REASONS:
             assert f"'{reason}'" in source, (
                 f"JS source missing reason string: {reason!r}"
@@ -369,6 +369,7 @@ class TestEngineReasonSourceLock:
     def test_engine_exhausted_in_both_substrates(self):
         """engine.exhausted error code exists in both substrate source files."""
         py_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
-        js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
+        js_dir = REPO_ROOT / "mu" / "host" / "js"
+        js_source = "\n".join(f.read_text() for f in sorted(js_dir.rglob("*.js")))
         assert "engine.exhausted" in py_path.read_text()
-        assert "engine.exhausted" in js_path.read_text()
+        assert "engine.exhausted" in js_source

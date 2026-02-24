@@ -279,7 +279,8 @@ class TestSingleSkepticInvocation:
         """Verify run_review calls run_consolidated_skeptic exactly once,
         not run_skeptic N times + convergence check."""
 
-        review_path = Path(__file__).parent.parent.parent / "tools" / "runners" / "run_review.py"
+        from tests.repo_root import REPO_ROOT
+        review_path = REPO_ROOT / "tools" / "runners" / "run_review.py"
         tree = ast.parse(review_path.read_text())
 
         # Find the rigorous block start dynamically by locating the

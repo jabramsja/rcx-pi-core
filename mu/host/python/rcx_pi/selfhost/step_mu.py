@@ -190,7 +190,9 @@ KERNEL_RESERVED_FIELDS = frozenset({  # AST_OK: security whitelist - frozen cons
     # Engine pipeline dispatch field (Boot1 P2 hardening, 2026-02-14)
     "_run_engine",
     # Boot1 recursive loop contract field (Boot1 P3 hardening, 2026-02-14)
-    "_tail_call"
+    "_tail_call",
+    # Boundary effect dispatch field (adversary hardening, 2026-02-24)
+    "_boundary_request"
 })
 
 # Algorithm entrypoint keys used by trusted algorithm runtime payloads.
@@ -1706,6 +1708,8 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 validate_no_kernel_reserved_fields(cur_input, "Boot1 re-entry input")
                 cur_max_steps = payload.get("max_steps", cur_max_steps)
                 cur_frozen = payload.get("frozen")
+                if cur_frozen is not None:
+                    validate_no_kernel_reserved_fields(cur_frozen, "Boot1 re-entry frozen")
                 remaining_iterations = remaining_iterations - iteration - 1
                 depth += 1
                 reentry = True
@@ -1719,6 +1723,8 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 validate_no_kernel_reserved_fields(cur_input, "Boot1 tail_call input")
                 cur_max_steps = payload.get("max_steps", cur_max_steps)
                 cur_frozen = payload.get("frozen")
+                if cur_frozen is not None:
+                    validate_no_kernel_reserved_fields(cur_frozen, "Boot1 tail_call frozen")
                 remaining_iterations = remaining_iterations - iteration - 1
                 depth += 1
                 reentry = True
@@ -1808,6 +1814,10 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
     # SECURITY: Reject domain input containing kernel-reserved fields.
     # Engine pipeline is a public entry point — user input must be clean.
     validate_no_kernel_reserved_fields(input_value, "run_engine_pipeline input")
+
+    # SECURITY: Validate frozen for kernel-reserved fields (parity with input validation)
+    if frozen is not None:
+        validate_no_kernel_reserved_fields(frozen, "run_engine_pipeline frozen")
 
     # Observer type guard: reject non-list before engine loop entry
     if observer is not None and not isinstance(observer, list):  # AST_OK: boundary

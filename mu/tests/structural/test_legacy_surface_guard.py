@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 
 # Files that are grandfathered (existing before this guard was added).
 # Do NOT add new entries here without a governance reason documented in

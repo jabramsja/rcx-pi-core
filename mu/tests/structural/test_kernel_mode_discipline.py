@@ -17,7 +17,7 @@ import inspect
 from pathlib import Path
 
 import pytest
-from rcx_pi.selfhost.step_mu import (
+from rcx_pi.selfhost.step_mu import (  # SPEED_OK: imported for callsite inspection, not called
     step_kernel_mu,
     step_mu,
     run_mu,
@@ -166,8 +166,8 @@ class TestReservedFieldBoundary:
 
     def test_reserved_fields_count_is_stable(self):
         """Fail if reserved fields set changes without review."""
-        # 24 fields as of Phase 8c hardening
-        assert len(KERNEL_RESERVED_FIELDS) == 24, (
+        # 25 fields as of adversary hardening 2026-02-24 (+_boundary_request)
+        assert len(KERNEL_RESERVED_FIELDS) == 25, (
             f"KERNEL_RESERVED_FIELDS count changed: {len(KERNEL_RESERVED_FIELDS)}. "
             "Review security implications and update this test."
         )

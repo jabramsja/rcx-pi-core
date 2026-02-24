@@ -8,6 +8,12 @@
 # 3. Runs targeted staged-file checks (py_compile, bare except, AST police, seed police)
 # 4. Enforces tracker sync for core changes (`mu/` or `rcx_pi/selfhost/`) - BLOCKS on failure
 # 5. Enforces agent review for core files (requires .agent_memory <30min) - BLOCKS on failure
+# 6. [reserved - section numbering in code]
+# 7. Runs adversary agent (sonnet) on staged core files - BLOCKS if not SECURE
+#    30-minute cooldown after SECURE or bypass (skips adversary during cooldown)
+#    After 3 consecutive failures, requires founder bypass:
+#      - Interactive (/dev/tty available): prompts founder
+#      - Non-interactive (CI/sandbox): requires RCX_ADVERSARY_BYPASS=1 env var
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -170,6 +176,101 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
         echo ""
         FAILED=1
     fi
+fi
+
+# === 7. Adversarial security gate on staged core files (BLOCKING) ===
+# Runs adversary agent (sonnet) automatically. Blocks if not SECURE.
+# Cooldown: After SECURE or bypass, skip adversary for 30 minutes.
+# After 3 consecutive failures: env var RCX_ADVERSARY_BYPASS=1, or /dev/tty prompt, or fail closed.
+ATTEMPT_FILE="/tmp/.rcx_adversary_attempts"
+COOLDOWN_FILE="/tmp/.rcx_adversary_cooldown"
+COOLDOWN_SECONDS=1800  # 30 minutes
+
+if [ -n "$CORE_FILES_CHANGED" ]; then
+    # Check cooldown — skip adversary if recently passed/bypassed
+    SKIP_ADVERSARY=false
+    if [ -f "$COOLDOWN_FILE" ]; then
+        if [ "$(uname)" = "Darwin" ]; then
+            COOLDOWN_AGE=$(( $(date +%s) - $(stat -f %m "$COOLDOWN_FILE") ))
+        else
+            COOLDOWN_AGE=$(( $(date +%s) - $(stat -c %Y "$COOLDOWN_FILE") ))
+        fi
+        if [ "$COOLDOWN_AGE" -lt "$COOLDOWN_SECONDS" ]; then
+            REMAINING=$(( (COOLDOWN_SECONDS - COOLDOWN_AGE) / 60 ))
+            echo ""
+            echo "   ⏭  Adversary gate: cooldown active (${REMAINING}min remaining). Skipping."
+            SKIP_ADVERSARY=true
+        fi
+    fi
+
+    if [ "$SKIP_ADVERSARY" = "false" ]; then
+    echo ""
+    echo "Running adversary security gate (sonnet) on staged core files..."
+    CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
+
+    ADVERSARY_OUTPUT_FILE="/tmp/.rcx_adversary_output.md"
+    set +e
+    PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet 2>&1 | tee "$ADVERSARY_OUTPUT_FILE"
+    ADVERSARY_EXIT=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$ADVERSARY_EXIT" -eq 0 ]; then
+        echo "   ✅ Adversary: SECURE"
+        # Reset attempt counter and start cooldown
+        rm -f "$ATTEMPT_FILE"
+        touch "$COOLDOWN_FILE"
+    else
+        # Increment attempt counter
+        if [ -f "$ATTEMPT_FILE" ]; then
+            ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
+        else
+            ATTEMPTS=0
+        fi
+        ATTEMPTS=$((ATTEMPTS + 1))
+        echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+
+        echo ""
+        echo "❌ Adversary gate FAILED (attempt $ATTEMPTS)"
+        if [ -f "$ADVERSARY_OUTPUT_FILE" ]; then
+            echo "   Report: $ADVERSARY_OUTPUT_FILE"
+        fi
+        echo "   Fix findings, re-stage, and re-commit."
+
+        if [ "$ATTEMPTS" -ge 3 ]; then
+            echo ""
+            echo "   ⚠️  $ATTEMPTS consecutive failures."
+
+            # Check for env-var bypass first (works in all environments)
+            if [ "${RCX_ADVERSARY_BYPASS:-}" = "1" ]; then
+                echo "   RCX_ADVERSARY_BYPASS=1 detected. Founder override accepted."
+                echo "   (Counter reset. Cooldown active for 30min.)"
+                rm -f "$ATTEMPT_FILE"
+                touch "$COOLDOWN_FILE"
+            # Interactive fallback: prompt via /dev/tty if available
+            elif [ -w /dev/tty ] 2>/dev/null; then
+                echo -n "   Founder override? (y/n): " > /dev/tty
+                read -r OVERRIDE < /dev/tty
+                if [ "$OVERRIDE" = "y" ] || [ "$OVERRIDE" = "Y" ]; then
+                    echo "   Founder override accepted. Proceeding with commit."
+                    echo "   (Counter reset. Cooldown active for 30min.)"
+                    rm -f "$ATTEMPT_FILE"
+                    touch "$COOLDOWN_FILE"
+                else
+                    echo "   Override declined. Commit blocked."
+                    FAILED=1
+                fi
+            else
+                # Non-interactive (CI/sandbox): fail closed with clear instructions
+                echo "   /dev/tty not available (CI/sandbox environment)."
+                echo "   To bypass: RCX_ADVERSARY_BYPASS=1 git commit ..."
+                echo "   Commit blocked."
+                FAILED=1
+            fi
+        else
+            FAILED=1
+        fi
+    fi
+    fi  # end SKIP_ADVERSARY check
 fi
 
 # Exit with failure if any blocking check failed

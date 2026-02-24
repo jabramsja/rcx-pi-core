@@ -26,8 +26,10 @@ from rcx_pi.selfhost.step_mu import (
 )
 
 
+from tests.repo_root import REPO_ROOT
+
 # Root directory for JS tests
-ROOT = Path(__file__).parent.parent.parent
+ROOT = REPO_ROOT
 
 
 class TestSpoofedModeAttack:

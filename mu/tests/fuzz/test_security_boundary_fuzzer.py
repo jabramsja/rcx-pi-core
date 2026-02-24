@@ -128,13 +128,13 @@ class TestReservedFieldsBasic:
                 validate_no_kernel_reserved_fields(malicious, "test")
 
     def test_reserved_fields_count(self):
-        """Verify exactly 22 reserved fields exist (12 kernel + 3 Recurrence + 3 Exhaustion + 4 Bridge).
+        """Verify exactly 25 reserved fields exist (includes _boundary_request).
 
         Gate 3 (2026-02-04): Entry points (_detect_closure, _detect_exhaustion) moved
         to ALGORITHM_ENTRYPOINT_KEYS.
         """
-        assert len(KERNEL_RESERVED_FIELDS) == 24, (
-            f"Expected 24 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
+        assert len(KERNEL_RESERVED_FIELDS) == 25, (
+            f"Expected 25 reserved fields, found {len(KERNEL_RESERVED_FIELDS)}"
         )
 
 

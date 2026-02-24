@@ -36,12 +36,15 @@ from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH, MAX_MU_WIDTH
 # ── Locate JS source ────────────────────────────────────────────────────
 
 _REPO = Path(__file__).resolve().parents[3]
-_JS_PATH = _REPO / "mu" / "host" / "js" / "eval_step.js"
+_JS_DIR = _REPO / "mu" / "host" / "js"
 
 
 def _js_source() -> str:
-    """Read eval_step.js once and cache."""
-    return _JS_PATH.read_text()
+    """Read all JS module files concatenated (monolith was split into modules)."""
+    parts = []
+    for f in sorted(_JS_DIR.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
 
 
 def _extract_js_set(source: str, var_name: str) -> set[str]:

@@ -26,7 +26,15 @@ from rcx_pi.selfhost.step_mu import (
 )
 
 PY_RUNTIME = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
-JS_RUNTIME = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
+
+
+def _read_all_js_source() -> str:
+    """Read all JS module files from mu/host/js/ recursively."""
+    js_dir = REPO_ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
 
 
 # ===========================================================================
@@ -42,13 +50,13 @@ class TestUnreservedFieldsParity:
 
     def test_js_has_exhaustion_sentinel_fields(self):
         """JS must include _m, _s, _st, _stl."""
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         for field in ("_m", "_s", "_st", "_stl"):
             assert f"'{field}'" in src or f'"{field}"' in src, f"JS missing {field}"
 
     def test_field_count_parity(self):
         """Both substrates must have same field count."""
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         # Extract JS set contents
         match = re.search(
             r"const ALGORITHM_INTERNAL_UNRESERVED_FIELDS = new Set\(\[(.*?)\]\)",
@@ -62,7 +70,7 @@ class TestUnreservedFieldsParity:
 
     def test_field_set_exact_parity(self):
         """Both substrates must have identical field sets."""
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         match = re.search(
             r"const ALGORITHM_INTERNAL_UNRESERVED_FIELDS = new Set\(\[(.*?)\]\)",
             src, re.DOTALL,
@@ -91,7 +99,7 @@ class TestKernelProjectionIDRejection:
 
     def test_js_source_has_kernel_id_check(self):
         """JS stepKernel must check for kernel.* projection IDs."""
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         assert "startsWith('kernel.')" in src, (
             "JS stepKernel missing kernel-projection-ID rejection"
         )
@@ -118,7 +126,7 @@ class TestEnginePipelineReservedFieldValidation:
 
     def test_js_source_has_validation_at_entry(self):
         """JS runEnginePipeline calls validateNoKernelReservedFields."""
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         fn_start = src.index("function runEnginePipeline(")
         fn_body = src[fn_start:fn_start + 2000]
         assert "validateNoKernelReservedFields(inputValue" in fn_body
@@ -142,11 +150,11 @@ class TestBoundaryHandlerDedup:
         assert count >= 3, f"Expected >=3 refs (def + 2 calls), got {count}"
 
     def test_js_has_service_boundary_effect(self):
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         assert "function serviceBoundaryEffect(" in src
 
     def test_js_engine_calls_shared_handler(self):
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         count = src.count("serviceBoundaryEffect(")
         assert count >= 3, f"Expected >=3 refs (def + 2 calls), got {count}"
 
@@ -158,12 +166,12 @@ class TestJSValidationUnification:
     """JS validation must use shared _walkAndValidate (not duplicated)."""
 
     def test_js_has_walk_and_validate(self):
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         assert "function _walkAndValidate(" in src
 
     def test_js_validators_delegate_to_walk(self):
         """Both validators must call _walkAndValidate, not duplicate traversal."""
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         # Find validateNoKernelReservedFields body
         fn_start = src.index("function validateNoKernelReservedFields(")
         fn_body = src[fn_start:fn_start + 500]

@@ -26,7 +26,7 @@ from rcx_pi.selfhost.step_mu import (
     classify_terminal_kind,
 )
 
-JS_PATH = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
+JS_DIR = REPO_ROOT / "mu" / "host" / "js"
 PY_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
 
 
@@ -35,7 +35,11 @@ PY_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_m
 # ---------------------------------------------------------------------------
 
 def _js_source() -> str:
-    return JS_PATH.read_text(encoding="utf-8")
+    """Read all JS module files concatenated (monolith was split into modules)."""
+    parts = []
+    for f in sorted(JS_DIR.rglob("*.js")):
+        parts.append(f.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 def _extract_js_set(source: str, var_name: str) -> set[str]:

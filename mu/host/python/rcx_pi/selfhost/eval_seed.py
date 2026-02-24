@@ -249,10 +249,10 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
 
-    return _match_inner(pattern, input_value)
+    return _match_inner(pattern, input_value, 0)
 
 
-def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
+def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu] | _NoMatch:
     """Internal recursive matcher — no validation (already done at match() entry).
 
     This function contains 13 isinstance calls for Python type dispatch
@@ -261,6 +261,9 @@ def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     decorator on match(). Callers: match() (public entry) and
     _apply_projection_trusted() (kernel-internal fast path).
     """
+    if _depth > MAX_MU_DEPTH:
+        return NO_MATCH
+
     # Variable site - matches anything
     if is_var(pattern):
         name = get_var_name(pattern)
@@ -303,7 +306,7 @@ def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
             return NO_MATCH
         bindings: dict[str, Mu] = {}
         for p_elem, i_elem in zip(pattern, input_value):
-            sub_bindings = _match_inner(p_elem, i_elem)
+            sub_bindings = _match_inner(p_elem, i_elem, _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
             # Merge bindings (check for conflicts)
@@ -334,7 +337,7 @@ def _match_inner(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
                 return NO_MATCH
         bindings = {}
         for key in pattern:
-            sub_bindings = _match_inner(pattern[key], input_value[key])
+            sub_bindings = _match_inner(pattern[key], input_value[key], _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
             # Merge bindings

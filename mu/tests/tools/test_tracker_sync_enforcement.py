@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 
-REPO_ROOT = Path(__file__).parents[2]
+from tests.repo_root import REPO_ROOT
 SCRIPT = REPO_ROOT / "tools" / "checks" / "enforce_tracker_sync.sh"
 
 

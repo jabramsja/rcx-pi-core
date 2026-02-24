@@ -22,12 +22,13 @@ import pytest
 from rcx_pi.selfhost.eval_seed import step, NO_MATCH
 from rcx_pi.selfhost.mu_type import assert_mu, mu_equal, mu_hash, is_mu, MAX_MU_DEPTH
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from tests.repo_root import REPO_ROOT
 
 pytestmark = [pytest.mark.slow]
 
 
 # Project root
-ROOT = Path(__file__).parent.parent.parent
+ROOT = REPO_ROOT
 
 
 # =============================================================================
