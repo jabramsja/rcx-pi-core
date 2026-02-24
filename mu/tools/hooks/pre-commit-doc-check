@@ -8,6 +8,9 @@
 # 3. Runs targeted staged-file checks (py_compile, bare except, AST police, seed police)
 # 4. Enforces tracker sync for core changes (`mu/` or `rcx_pi/selfhost/`) - BLOCKS on failure
 # 5. Enforces agent review for core files (requires .agent_memory <30min) - BLOCKS on failure
+# 6. [reserved - section numbering in code]
+# 7. Runs adversary agent (sonnet) on staged core files - BLOCKS if not SECURE
+#    After 3 consecutive failures, prompts founder for bypass via /dev/tty
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -169,6 +172,60 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
         echo "   Skip with --no-verify (not recommended for core changes)"
         echo ""
         FAILED=1
+    fi
+fi
+
+# === 7. Adversarial security gate on staged core files (BLOCKING) ===
+# Runs adversary agent (sonnet) automatically. Blocks if not SECURE.
+# After 3 consecutive failures, prompts founder for bypass via /dev/tty.
+ATTEMPT_FILE="/tmp/.rcx_adversary_attempts"
+
+if [ -n "$CORE_FILES_CHANGED" ]; then
+    echo ""
+    echo "Running adversary security gate (sonnet) on staged core files..."
+    CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
+
+    ADVERSARY_OUTPUT_FILE="/tmp/.rcx_adversary_output.md"
+    ADVERSARY_EXIT=0
+    PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet > "$ADVERSARY_OUTPUT_FILE" 2>&1 || ADVERSARY_EXIT=$?
+
+    if [ "$ADVERSARY_EXIT" -eq 0 ]; then
+        echo "   ✅ Adversary: SECURE"
+        # Reset attempt counter on success
+        rm -f "$ATTEMPT_FILE"
+    else
+        # Increment attempt counter
+        if [ -f "$ATTEMPT_FILE" ]; then
+            ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
+        else
+            ATTEMPTS=0
+        fi
+        ATTEMPTS=$((ATTEMPTS + 1))
+        echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+
+        echo ""
+        echo "❌ Adversary gate FAILED (attempt $ATTEMPTS)"
+        if [ -f "$ADVERSARY_OUTPUT_FILE" ]; then
+            echo "   Report: $ADVERSARY_OUTPUT_FILE"
+        fi
+        echo "   Fix findings, re-stage, and re-commit."
+
+        if [ "$ATTEMPTS" -ge 3 ]; then
+            echo ""
+            echo "   ⚠️  $ATTEMPTS consecutive failures."
+            echo -n "   Founder override? (y/n): " > /dev/tty
+            read -r OVERRIDE < /dev/tty
+            if [ "$OVERRIDE" = "y" ] || [ "$OVERRIDE" = "Y" ]; then
+                echo "   Founder override accepted. Proceeding with commit."
+                echo "   (Counter reset. Next commit will run adversary again.)"
+                rm -f "$ATTEMPT_FILE"
+            else
+                echo "   Override declined. Commit blocked."
+                FAILED=1
+            fi
+        else
+            FAILED=1
+        fi
     fi
 fi
 
