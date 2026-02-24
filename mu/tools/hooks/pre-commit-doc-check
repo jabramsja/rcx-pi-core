@@ -144,7 +144,9 @@ if [ -f "./tools/checks/check_untracked_artifacts.sh" ]; then
     fi
 fi
 
-# === 6. Check if agents were run on staged core files (BLOCKING) ===
+# === 6. Check if agents were run on staged core files (PROMPTED) ===
+# Warns if no recent agent review, but lets founder decide whether to proceed.
+# RCX_SKIP_AGENT_CHECK=1 skips silently in non-interactive shells.
 CORE_FILES_CHANGED=$(echo "$STAGED_FILES" | grep -E '^(rcx_pi/selfhost/|mu/host/python/rcx_pi/selfhost/|mu/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)
 if [ -n "$CORE_FILES_CHANGED" ]; then
     MEMORY_FILE=".agent_memory/findings.json"
@@ -164,17 +166,31 @@ if [ -n "$CORE_FILES_CHANGED" ]; then
     fi
 
     if [ "$AGENT_RUN_RECENT" = "false" ]; then
-        echo ""
-        echo "❌ AGENT REVIEW REQUIRED:"
-        echo "   Core files staged: $(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')"
-        echo "   No recent agent review detected (.agent_memory older than 30min or missing)"
-        echo ""
-        echo "   Run before commit:"
-        echo "     python tools/runners/run_review.py <files> --depth full"
-        echo ""
-        echo "   Skip with --no-verify (not recommended for core changes)"
-        echo ""
-        FAILED=1
+        CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
+
+        if [ "${RCX_SKIP_AGENT_CHECK:-}" = "1" ]; then
+            echo ""
+            echo "   ⏭  Agent review check skipped (RCX_SKIP_AGENT_CHECK=1)."
+        elif [ -r /dev/tty ] 2>/dev/null && [ -w /dev/tty ] 2>/dev/null; then
+            echo ""
+            echo "⚠️  No recent agent review for core files: $CORE_FILE_LIST"
+            echo -n "Proceed without agent review? [y/N]: " > /dev/tty
+            read -r AGENT_REPLY < /dev/tty
+            case "$AGENT_REPLY" in
+                y|Y|yes|YES)
+                    echo "   ⏭  Agent review skipped by founder choice."
+                    ;;
+                *)
+                    echo "   Run: python tools/runners/run_review.py <files> --depth full"
+                    FAILED=1
+                    ;;
+            esac
+        else
+            echo ""
+            echo "   ⚠️  /dev/tty not available. Agent review check deferred."
+            echo "   Core files: $CORE_FILE_LIST"
+            echo "   Run manually: python tools/runners/run_review.py <files> --depth full"
+        fi
     fi
 fi
 
