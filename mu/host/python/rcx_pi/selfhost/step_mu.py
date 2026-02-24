@@ -34,7 +34,7 @@ import json
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached
+from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached
 from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed
@@ -902,7 +902,7 @@ def step_kernel_mu(
     # INVARIANT: eval_step is functionally pure — it returns new structures,
     # never mutates its input. current_hash caching depends on this property.
     current = kernel_entry
-    current_hash = mu_hash_cached(kernel_entry)
+    current_hash = mu_hash_control_cached(kernel_entry, "step_kernel_mu")
     # BOOTSTRAP_PRIMITIVE: max_steps
     # This is the irreducible resource exhaustion guard.
     # Cannot be structural (would require arithmetic on fuel).
@@ -949,7 +949,7 @@ def step_kernel_mu(
             # Skip for intermediate kernel states (they have deep nested structures
             # and are mid-execution by definition, not stalls)
             if not is_kernel_intermediate(result):
-                result_hash = mu_hash_cached(result)
+                result_hash = mu_hash_control_cached(result, "step_kernel_mu.stall")
                 if result_hash == current_hash:
                     validator(input_value, "step_kernel_mu output")
                     if return_meta:
@@ -1085,7 +1085,7 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
 
     # Single bootstrap step — trusted because we validated at boundary above.
     normalized_result = _step_trusted(projections, normalized_input)
-    if mu_hash_cached(normalized_result) == mu_hash_cached(normalized_input):
+    if mu_hash_control_cached(normalized_result, "step_algorithm.stall") == mu_hash_control_cached(normalized_input, "step_algorithm.stall"):
         return input_value
 
     result = denormalize_from_match(normalized_result)
@@ -1265,7 +1265,7 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     trace = []
     current = initial
     # INVARIANT: step_mu is functionally pure — current_hash caching is safe.
-    current_hash = mu_hash_cached(initial)
+    current_hash = mu_hash_control_cached(initial, "run_mu")
 
     for i in range(max_steps):
         trace.append({"step": i, "value": current})
@@ -1273,7 +1273,7 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
         result = step_mu(projections, current)
 
         # Check for stall (no change)
-        result_hash = mu_hash_cached(result)
+        result_hash = mu_hash_control_cached(result, "run_mu.stall")
         if result_hash == current_hash:
             trace.append({"step": i + 1, "value": result, "stall": True})
             return result, trace, True
@@ -1306,7 +1306,7 @@ def _resolve_trace_projection_id(
     # SECURITY: Do NOT suspend the step budget. Probes must consume from the
     # caller's budget to prevent unbounded computation (adversary finding #1).
     # Cache next_value hash — it doesn't change across iterations.
-    next_value_hash = mu_hash_cached(next_value)
+    next_value_hash = mu_hash_control_cached(next_value, "resolve_trace_projection")
     for proj in projections:
         if not isinstance(proj, dict):
             continue
@@ -1321,7 +1321,7 @@ def _resolve_trace_projection_id(
         )
         if candidate["stall"] is True:
             continue
-        if mu_hash_cached(candidate["output"]) == next_value_hash:
+        if mu_hash_control_cached(candidate["output"], "resolve_trace_projection.match") == next_value_hash:
             return proj.get("id")
     return None
 
@@ -1377,7 +1377,7 @@ def run_mu_structural(
     trace_entries = []
     current = initial
     # INVARIANT: step_kernel_mu returns new structures — current_hash caching is safe.
-    current_hash = mu_hash_cached(initial)
+    current_hash = mu_hash_control_cached(initial, "run_mu_structural")
 
     try:
         for i in range(max_steps):
@@ -1398,7 +1398,7 @@ def run_mu_structural(
             })
 
             # Check for stall (no change)
-            result_hash = mu_hash_cached(result)
+            result_hash = mu_hash_control_cached(result, "run_mu_structural.stall")
             if result_hash == current_hash:
                 trace_entries.append({
                     "step": i + 1,
@@ -1478,14 +1478,14 @@ def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:
     """
     current = initial
     # INVARIANT: run_algorithm_meta_circular returns new structures — hash caching is safe.
-    current_hash = mu_hash_cached(initial)
+    current_hash = mu_hash_control_cached(initial, "run_hemisphere_routing")
     for _ in range(max_iterations):  # AST_OK: infra — boundary iteration loop
         result = run_algorithm_meta_circular(projs, current)
         # Early termination: semantic final shape detected
         if _is_terminal_shape(result):
             return result
         # Hash-stall fallback: algorithm converged
-        result_hash = mu_hash_cached(result)
+        result_hash = mu_hash_control_cached(result, "run_hemisphere_routing.stall")
         if result_hash == current_hash:
             return result
         current = result
@@ -2019,7 +2019,7 @@ def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST
         entry = current["head"]
         if isinstance(entry, dict) and "state" in entry:
             entry = dict(entry)
-            entry["state_hash"] = mu_hash(entry["state"])
+            entry["state_hash"] = mu_hash_control(entry["state"], "hash_trace_for_recurrence")
         entries.append(entry)
         current = current.get("tail")
     # Rebuild linked list from tail to head

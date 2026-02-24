@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Collect L4 wave indicator metrics (v2.1.0).
+Collect L4 wave indicator metrics (v2.2.0).
 
 Generates a JSON artifact with required indicator and provenance fields for
 L4 contract enforcement.  All values are deterministically computed from
@@ -29,7 +29,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-COLLECTOR_VERSION = "2.1.0"
+COLLECTOR_VERSION = "2.2.0"
 
 
 class CollectorError(RuntimeError):
@@ -39,6 +39,16 @@ RUNTIME_DIRS = (
     "mu/host/", "mu/substrate/", "mu/closures/", "mu/bridge/",
     "mu/programs/", "rcx_pi/selfhost/", "tools/compilers/",
 )
+
+COMMENT_ONLY_PATTERNS = [
+    re.compile(r"^\s*#"),          # Python comment
+    re.compile(r"^\s*//"),         # JS comment
+    re.compile(r"^\s*\*(?!\w)"),   # JS block comment line (not star-expr)
+    re.compile(r"^\s*/\*"),        # JS block comment start
+    re.compile(r"^\s*\*/"),        # JS block comment end
+    re.compile(r'^\s*"""'),        # Python docstring delimiter
+    re.compile(r"^\s*'''"),        # Python docstring delimiter
+]
 
 METRIC_KEYS = {
     "repeat_run_speedup_ratio": (int, float),
@@ -68,10 +78,49 @@ def get_changed_files(git_range: str | None) -> list[str]:
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
-def count_runtime_changes(git_range: str | None) -> int:
-    """Count runtime file changes in diff scope."""
+def get_diff_text(git_range: str | None) -> str:
+    """Get diff text for range or staged scope."""
+    if git_range:
+        cmd = ["git", "diff", "-U0", git_range]
+    else:
+        cmd = ["git", "diff", "-U0", "--cached"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return ""
+    return result.stdout
+
+
+def is_comment_line(line: str) -> bool:
+    """Check whether a diff +/- line is comment-only content."""
+    content = line.lstrip("+").lstrip("-")
+    if not content.strip():
+        return True
+    return any(p.match(content) for p in COMMENT_ONLY_PATTERNS)
+
+
+def count_runtime_executable_delta(git_range: str | None) -> int:
+    """Compute net executable runtime delta (added - deleted non-comment lines)."""
     files = get_changed_files(git_range)
-    return sum(1 for f in files if any(f.startswith(d) for d in RUNTIME_DIRS))
+    runtime_files = {f for f in files if any(f.startswith(d) for d in RUNTIME_DIRS)}
+    if not runtime_files:
+        return 0
+
+    diff_text = get_diff_text(git_range)
+    current_file = None
+    added = 0
+    deleted = 0
+    for line in diff_text.split("\n"):
+        if line.startswith("diff --git"):
+            parts = line.split(" b/")
+            current_file = parts[-1] if len(parts) >= 2 else None
+        elif current_file and current_file in runtime_files:
+            if line.startswith("+") and not line.startswith("+++"):
+                if not is_comment_line(line):
+                    added += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                if not is_comment_line(line):
+                    deleted += 1
+    return added - deleted
 
 
 def count_parity_diffs() -> int:
@@ -149,7 +198,17 @@ def main() -> int:
     parser.add_argument("--range", type=str, help="Git range for diff analysis")
     args = parser.parse_args()
 
-    net_host_delta = count_runtime_changes(args.range)
+    scoped_files = get_changed_files(args.range)
+    if not scoped_files:
+        scope_hint = f"--range {args.range}" if args.range else "staged files"
+        print(
+            f"ERROR: No changed files in {scope_hint}. "
+            f"Provide a valid --range or stage files before collecting indicators.",
+            file=sys.stderr,
+        )
+        return 1
+
+    net_host_delta = count_runtime_executable_delta(args.range)
 
     try:
         parity_diffs = count_parity_diffs()

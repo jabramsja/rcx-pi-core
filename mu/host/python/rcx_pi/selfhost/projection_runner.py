@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .mu_type import Mu, mu_hash_cached
+from .mu_type import Mu, mu_hash_cached, mu_hash_control_cached
 from .eval_seed import _step_trusted
 from .kernel import get_step_budget
 
@@ -90,7 +90,7 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
         budget = get_step_budget()
         state = initial_state
         # INVARIANT: step() is functionally pure — state_hash caching is safe.
-        state_hash = mu_hash_cached(initial_state)
+        state_hash = mu_hash_control_cached(initial_state, "projection_runner")
         for i in range(max_steps):
             # Check if done
             if is_done(state):
@@ -101,8 +101,8 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
             # Take a step — trusted: boundary validated by caller (match_mu, subst_mu)
             next_state = _step_trusted(projections, state)
 
-            # Check for stall (no change) - use mu_hash_cached to avoid Python type coercion
-            next_hash = mu_hash_cached(next_state)
+            # Check for stall (no change) - use mu_hash_control_cached for numeric safety
+            next_hash = mu_hash_control_cached(next_state, "projection_runner.stall")
             if next_hash == state_hash:
                 # Report steps consumed to global budget.
                 # A step was executed before stall detection, so consume i + 1.

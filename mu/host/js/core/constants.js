@@ -161,6 +161,7 @@ function classifyError(e) {
   if (msg.includes('must be a dict') || msg.includes('must be dict')) return 'input.invalid_type';
   if (msg.includes('shape mismatch') || msg.includes('unexpected shape')) return 'input.shape_mismatch';
   if (msg.includes('reserved') || msg.includes('kernel-reserved') || msg.includes('unsupported algorithm underscore')) return 'input.reserved_field';
+  if (msg.includes('numeric_hash_unsupported')) return 'input.numeric_hash_unsupported';
   if (msg.includes('not valid mu') || msg.includes('max depth exceeded')) return 'input.malformed_normalized';
   return 'api.bad_request';
 }

@@ -42,6 +42,12 @@
     {"id": "special_key_chars", "value": {"a.b": 1, "a-b": 2, "a_b": 3}},
     {"id": "numeric_string_key", "value": {"1": "a", "2": "b", "10": "c"}},
     {"id": "trace_like", "value": {"head": {"step": 0, "state": "A", "state_hash": "abc123", "projection": "p1"}, "tail": null}},
-    {"id": "engine_like", "value": {"_mode": "engine", "_frozen": null, "_trace_result": {"result": "B", "trace": null, "stall": true}}}
+    {"id": "engine_like", "value": {"_mode": "engine", "_frozen": null, "_trace_result": {"result": "B", "trace": null, "stall": true}}},
+    {"id": "float_half", "value": 0.5},
+    {"id": "float_negative", "value": -1.5},
+    {"id": "float_pi", "value": 3.14159},
+    {"id": "float_small", "value": 0.001},
+    {"id": "float_in_list", "value": [1.5, -2.5, 0.75]},
+    {"id": "float_in_dict", "value": {"x": 1.5, "y": -0.5}}
   ]
 }

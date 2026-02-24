@@ -59,6 +59,13 @@ COMMENT_ONLY_PATTERNS = [
     re.compile(r"^\s*'''"),     # Python docstring delimiter
 ]
 
+# Low-signal placeholders that should not be accepted as proof text.
+LOW_SIGNAL_PROOF_TOKENS = frozenset({
+    "old", "new", "before", "after", "before-state", "after-state",
+    "runtime change", "runtime changes", "added function", "updated",
+    "changed", "n/a", "na", "none", "todo", "tbd", "placeholder",
+})
+
 # Tracker note regex — captures header (date, wave_id) and body
 _NOTE_HEADER_RE = re.compile(
     r"- Tracker sync note \(([^,]+),\s*([^)]+)\):\s*\*\*[^*]+\*\*\s*"
@@ -231,6 +238,18 @@ def get_diff_range(git_range: str) -> str:
 
 def has_non_comment_runtime_delta(diff_text: str, runtime_files: list[str]) -> bool:
     """Check if any runtime file has non-comment changes."""
+    added, deleted, _ = compute_runtime_exec_delta(diff_text, runtime_files)
+    return (added + deleted) > 0
+
+
+def compute_runtime_exec_delta(diff_text: str, runtime_files: list[str]) -> tuple[int, int, int]:
+    """Compute runtime executable delta from diff text.
+
+    Returns:
+        (added_lines, deleted_lines, net_delta)
+    """
+    added = 0
+    deleted = 0
     current_file = None
     for line in diff_text.split("\n"):
         if line.startswith("diff --git"):
@@ -239,11 +258,11 @@ def has_non_comment_runtime_delta(diff_text: str, runtime_files: list[str]) -> b
         elif current_file and current_file in runtime_files:
             if line.startswith("+") and not line.startswith("+++"):
                 if not is_comment_line(line):
-                    return True
+                    added += 1
             elif line.startswith("-") and not line.startswith("---"):
                 if not is_comment_line(line):
-                    return True
-    return False
+                    deleted += 1
+    return added, deleted, (added - deleted)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +501,16 @@ def _is_numeric_not_bool(val: object) -> bool:
     return not isinstance(val, bool) and isinstance(val, (int, float))
 
 
+def _is_low_signal_proof(text: str | None) -> bool:
+    """Detect placeholder/theater proof text."""
+    if text is None:
+        return True
+    normalized = " ".join(text.strip().lower().split())
+    if len(normalized) < 12:
+        return True
+    return normalized in LOW_SIGNAL_PROOF_TOKENS
+
+
 def _compute_slope(points: list[dict]) -> float:
     """Compute step_growth_slope from step_growth_points via linear fit.
 
@@ -494,7 +523,11 @@ def _compute_slope(points: list[dict]) -> float:
     return (last["elapsed_seconds"] - first["elapsed_seconds"]) / dx
 
 
-def validate_indicator_artifact_json(artifact_path: str) -> tuple[bool, list[str]]:
+def validate_indicator_artifact_json(
+    artifact_path: str,
+    *,
+    expected_net_host_delta: int | None = None,
+) -> tuple[bool, list[str]]:
     """Validate indicator artifact JSON: required keys, types, provenance, derivation."""
     import json as _json
     errors: list[str] = []
@@ -611,6 +644,16 @@ def validate_indicator_artifact_json(artifact_path: str) -> tuple[bool, list[str
                 f"but computed from points={expected_slope}"
             )
 
+    # --- Scope consistency check: net_host_semantic_delta ---
+    if expected_net_host_delta is not None:
+        actual_net = data.get("net_host_semantic_delta")
+        if _is_numeric_not_bool(actual_net):
+            if int(actual_net) != int(expected_net_host_delta):
+                errors.append(
+                    "Indicator mismatch: net_host_semantic_delta="
+                    f"{actual_net} but executable runtime diff net={expected_net_host_delta}"
+                )
+
     return len(errors) == 0, errors
 
 
@@ -671,10 +714,20 @@ def enforce(
         # Host semantics delta fields (checked via notes if available)
         if notes:
             current = notes[0]
+            if current["evidence_delta"] is None:
+                errors.append("L4_STRUCTURAL missing evidence_delta in tracker note")
             if current["host_semantics_delta_before"] is None:
                 errors.append("L4_STRUCTURAL missing host_semantics_delta_before in tracker note")
             if current["host_semantics_delta_after"] is None:
                 errors.append("L4_STRUCTURAL missing host_semantics_delta_after in tracker note")
+            if _is_low_signal_proof(current["host_semantics_delta_before"]):
+                errors.append(
+                    "L4_STRUCTURAL host_semantics_delta_before is low-signal/placeholder text"
+                )
+            if _is_low_signal_proof(current["host_semantics_delta_after"]):
+                errors.append(
+                    "L4_STRUCTURAL host_semantics_delta_after is low-signal/placeholder text"
+                )
             if current["structural_artifact_ref"] is None:
                 errors.append("L4_STRUCTURAL missing structural_artifact_ref in tracker note")
             if current["evidence_command"] is None:
@@ -997,7 +1050,15 @@ def main() -> int:
                     f"indicator_artifact_ref '{indicator_ref}' not in changed files. "
                     f"Artifact must be committed as part of the wave."
                 )
-            art_ok, art_errors = validate_indicator_artifact_json(indicator_ref)
+            expected_net_delta = None
+            if diff_text is not None:
+                runtime_files = [f for f in changed_files if is_runtime_file(f)]
+                _, _, expected_net_delta = compute_runtime_exec_delta(diff_text, runtime_files)
+
+            art_ok, art_errors = validate_indicator_artifact_json(
+                indicator_ref,
+                expected_net_host_delta=expected_net_delta,
+            )
             if not art_ok:
                 passed = False
                 errors.extend(art_errors)

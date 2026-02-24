@@ -182,8 +182,10 @@ fi
 # Runs adversary agent (sonnet) automatically. Blocks if not SECURE.
 # Cooldown: After SECURE or bypass, skip adversary for 30 minutes.
 # After 3 consecutive failures: env var RCX_ADVERSARY_BYPASS=1, or /dev/tty prompt, or fail closed.
-ATTEMPT_FILE="/tmp/.rcx_adversary_attempts"
-COOLDOWN_FILE="/tmp/.rcx_adversary_cooldown"
+# Scope counter/cooldown to this repo (prevents cross-repo bleed on shared machines)
+REPO_HASH=$(printf '%s' "$(pwd)" | md5sum 2>/dev/null | cut -c1-8 || printf '%s' "$(pwd)" | md5 2>/dev/null | cut -c1-8 || echo "default")
+ATTEMPT_FILE="/tmp/.rcx_adversary_attempts_${REPO_HASH}"
+COOLDOWN_FILE="/tmp/.rcx_adversary_cooldown_${REPO_HASH}"
 COOLDOWN_SECONDS=1800  # 30 minutes
 
 if [ -n "$CORE_FILES_CHANGED" ]; then

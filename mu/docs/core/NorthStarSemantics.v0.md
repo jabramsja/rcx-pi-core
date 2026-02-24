@@ -65,6 +65,31 @@ This document is the single canonical source for these policies. If a design doc
 
 **Current implementation:** `mu_hash_cached()` uses `json.dumps()` for serialization, which canonicalizes `0.0` and `-0.0` to `0`. This satisfies constraints 1-2.
 
+### B.1 Control-Channel Hash Safety Lock (Wave 24)
+
+**Policy:** Control-flow hash paths (stall detection, convergence, recurrence trace) use dedicated `mu_hash_control`/`mu_hash_control_cached` wrappers that canonicalize integer-valued floats to int before hashing.
+
+**Rationale:** Python `json.dumps(1.0)` produces `"1.0"` while JS `JSON.stringify(1.0)` produces `"1"`. This means `mu_hash_cached(1.0)` in Python differs from `muHashCached(1.0)` in JS, despite representing the same mathematical value. For control paths (stall detection, convergence checks, recurrence trace hashing), this divergence can cause one substrate to detect stall while the other continues iterating.
+
+**Scope:**
+- **Control paths (use `mu_hash_control*`):** stall detection in `step_kernel_mu`/`stepKernel`, `run_mu`/`run`, `run_mu_structural`/`runStructural`, `run_hemisphere_routing`, `_resolve_trace_projection_id`/`resolveTraceProjectionId`, `projection_runner`, `runSubAlgorithm`, `hash_trace_for_recurrence`/`hashTraceForRecurrence`.
+- **Data paths (use `mu_hash`/`mu_hash_cached`):** observer event hashing, undefined motif output, `makeUndefinedMotif`.
+- **Explicitly excluded:** non-linear binding in `match()`/`_match_inner()` — changing those would alter matcher semantics (deferred).
+
+**Canonicalization rules:**
+1. Integer-valued floats → int: `1.0` → `1`, `-3.0` → `-3`
+2. ±0.0 → 0 (consistent with §B above)
+3. Non-integer floats (3.14) pass through unchanged (serialize identically in both substrates)
+4. Non-numeric types pass through unchanged
+
+**Constraints:**
+1. Global `mu_hash`/`mu_hash_cached`/`muHash`/`muHashCached` MUST NOT be modified.
+2. Control wrappers MUST call `assert_mu`/`isValidMu` before canonicalization.
+3. `mu_hash_control(1.0)` MUST equal `mu_hash_control(1)` in both substrates.
+4. `muHashControl(1)` (JS) MUST equal `mu_hash_control(1.0)` (Python) — cross-substrate parity.
+
+**Gate test:** `tests/l4_gates/test_numeric_hash_safety_lock_gate.py` (27 tests)
+
 ## C. Bounded Non-Closure Policy
 
 **Policy:** Non-repeating outcomes that exhaust budget without closure detection must produce explicit terminal classifications, not silent hangs.

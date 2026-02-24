@@ -12,7 +12,10 @@ Usage:
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 import pytest
 
@@ -36,6 +39,23 @@ from enforce_l4_execution_contract import (
     is_runtime_file,
     parse_tracker_notes,
 )
+
+
+def _run_checker_cli(args: list[str], *, clean_index: bool = False) -> subprocess.CompletedProcess:
+    """Run checker CLI with optional temporary clean git index."""
+    cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"] + args
+    env = os.environ.copy()
+    if not clean_index:
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    with tempfile.NamedTemporaryFile(delete=False) as tf:
+        index_path = tf.name
+    try:
+        env["GIT_INDEX_FILE"] = index_path
+        subprocess.run(["git", "read-tree", "HEAD"], check=True, capture_output=True, env=env)
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+    finally:
+        Path(index_path).unlink(missing_ok=True)
 
 
 # =============================================================================
@@ -517,8 +537,8 @@ class TestEvidenceCommandTarget:
             "no_op_proof": None,
             "evidence_command": "pytest tests/engine/",
             "evidence_delta": "added function",
-            "host_semantics_delta_before": "old",
-            "host_semantics_delta_after": "new",
+            "host_semantics_delta_before": "before runtime projection dispatch update",
+            "host_semantics_delta_after": "after runtime projection dispatch update",
             "structural_artifact_ref": "mu/substrate/kernel.v1.json",
             "defer_reason_code": None,
             "founder_override": None,
@@ -555,8 +575,8 @@ class TestEvidenceCommandTarget:
             "no_op_proof": None,
             "evidence_command": "pytest tests/l4_gates/test_gate.py",
             "evidence_delta": "added function",
-            "host_semantics_delta_before": "old",
-            "host_semantics_delta_after": "new",
+            "host_semantics_delta_before": "before runtime projection dispatch update",
+            "host_semantics_delta_after": "after runtime projection dispatch update",
             "structural_artifact_ref": "mu/substrate/kernel.v1.json",
             "defer_reason_code": None,
             "founder_override": None,
@@ -635,6 +655,53 @@ class TestEvidenceCommandTarget:
 
 
 # =============================================================================
+# Host-delta anti-theater signal checks
+# =============================================================================
+
+
+class TestHostSemanticsDeltaSignal:
+    """Placeholder host delta proofs must fail for L4_STRUCTURAL."""
+
+    def test_low_signal_host_semantics_delta_fails(self) -> None:
+        notes = [{
+            "wave_id": "test",
+            "raw_class": "L4_STRUCTURAL",
+            "wave_class": "L4_STRUCTURAL",
+            "gate": "G8",
+            "no_op_proof": None,
+            "evidence_command": "pytest tests/l4_gates/test_gate.py",
+            "evidence_delta": "runtime control-path extraction",
+            "host_semantics_delta_before": "old",
+            "host_semantics_delta_after": "new",
+            "structural_artifact_ref": "mu/substrate/kernel.v1.json",
+            "defer_reason_code": None,
+            "founder_override": None,
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "pytest tests/structural/ tests/engine/",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "before-state",
+            "progress_proof_after": "after-state",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/test-wave.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "N6b",
+            "boot0_progress_state": "ADVANCE",
+            "date": "2026-02-20",
+            "raw": "test note",
+        }]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("low-signal" in e for e in errors)
+
+
+# =============================================================================
 # Fix B: Wave binding (notes ordering)
 # =============================================================================
 
@@ -678,8 +745,8 @@ class TestWaveBinding:
             "no_op_proof": None,
             "evidence_command": "pytest tests/l4_gates/",
             "evidence_delta": "runtime change",
-            "host_semantics_delta_before": "old",
-            "host_semantics_delta_after": "new",
+            "host_semantics_delta_before": "before runtime projection dispatch update",
+            "host_semantics_delta_after": "after runtime projection dispatch update",
             "structural_artifact_ref": "ref",
             "defer_reason_code": None,
             "founder_override": None,
@@ -712,8 +779,8 @@ class TestWaveBinding:
             "no_op_proof": None,
             "evidence_command": "pytest tests/l4_gates/",
             "evidence_delta": "runtime change",
-            "host_semantics_delta_before": "old",
-            "host_semantics_delta_after": "new",
+            "host_semantics_delta_before": "before runtime projection dispatch update",
+            "host_semantics_delta_after": "after runtime projection dispatch update",
             "structural_artifact_ref": "ref",
             "defer_reason_code": None,
             "founder_override": None,
@@ -746,50 +813,30 @@ class TestEmptyScopePolicy:
 
     def test_empty_range_with_wave_id_fails(self) -> None:
         """--range with no files + --wave-id => cannot certify, exit 1."""
-        import subprocess
-        result = subprocess.run(
-            ["python3", "tools/checks/enforce_l4_execution_contract.py",
-             "--range", "HEAD...HEAD",  # same commit = empty range
-             "--wave-id", "l4-governance-hardening-wave2"],
-            capture_output=True, text=True,
+        result = _run_checker_cli(
+            ["--range", "HEAD...HEAD", "--wave-id", "l4-governance-hardening-wave2"],
         )
         assert result.returncode == 1
         assert "Cannot verify wave against empty change set" in result.stdout
 
     def test_empty_range_without_wave_id_skips(self) -> None:
         """--range with no files + no wave-id => non-blocking skip."""
-        import subprocess
-        result = subprocess.run(
-            ["python3", "tools/checks/enforce_l4_execution_contract.py",
-             "--range", "HEAD...HEAD"],
-            capture_output=True, text=True,
-        )
+        result = _run_checker_cli(["--range", "HEAD...HEAD"])
         assert result.returncode == 0
         assert "skipping enforcement" in result.stdout.lower()
 
     def test_empty_staged_with_wave_id_fails(self) -> None:
         """--staged with nothing staged + --wave-id => cannot certify, exit 1."""
-        import subprocess
-        # Ensure nothing is staged
-        subprocess.run(["git", "reset", "HEAD", "--quiet"], capture_output=True)
-        result = subprocess.run(
-            ["python3", "tools/checks/enforce_l4_execution_contract.py",
-             "--staged",
-             "--wave-id", "l4-governance-hardening-wave2"],
-            capture_output=True, text=True,
+        result = _run_checker_cli(
+            ["--staged", "--wave-id", "l4-governance-hardening-wave2"],
+            clean_index=True,
         )
         assert result.returncode == 1
         assert "Cannot verify wave against empty change set" in result.stdout
 
     def test_empty_staged_without_wave_id_skips(self) -> None:
         """--staged with nothing staged + no wave-id => non-blocking skip."""
-        import subprocess
-        subprocess.run(["git", "reset", "HEAD", "--quiet"], capture_output=True)
-        result = subprocess.run(
-            ["python3", "tools/checks/enforce_l4_execution_contract.py",
-             "--staged"],
-            capture_output=True, text=True,
-        )
+        result = _run_checker_cli(["--staged"], clean_index=True)
         assert result.returncode == 0
         assert "skipping enforcement" in result.stdout.lower()
 
@@ -853,13 +900,7 @@ class TestScopePolicy:
 
     def test_staged_mode_ignores_untracked(self) -> None:
         """--staged uses only staged tracked files (untracked never enter scope)."""
-        import subprocess
-        subprocess.run(["git", "reset", "HEAD", "--quiet"], capture_output=True)
-        result = subprocess.run(
-            ["python3", "tools/checks/enforce_l4_execution_contract.py",
-             "--staged"],
-            capture_output=True, text=True,
-        )
+        result = _run_checker_cli(["--staged"], clean_index=True)
         # Staged mode only sees git diff --cached — untracked never enter scope
         assert result.returncode == 0
         assert "Stripping" not in result.stdout
@@ -979,3 +1020,54 @@ class TestIndicatorDerivationAntiTheater:
         }))
         passed, errors = validate_indicator_artifact_json(str(artifact))
         assert passed, f"Should pass: {errors}"
+
+    def test_net_host_delta_mismatch_fails(self, tmp_path) -> None:
+        """Artifact net_host_semantic_delta must match executable runtime diff net."""
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 4,
+            "step_growth_slope": 1.5,
+            "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [
+                {"step": 1, "elapsed_seconds": 1.5},
+                {"step": 2, "elapsed_seconds": 3.0},
+            ],
+            "parity_diff_source": "tools/checks/check_js_debt.sh",
+            "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+            "collector_version": "2.2.0",
+        }))
+        passed, errors = validate_indicator_artifact_json(
+            str(artifact),
+            expected_net_host_delta=3,
+        )
+        assert not passed, "Should reject mismatched net_host_semantic_delta"
+        assert any("Indicator mismatch: net_host_semantic_delta" in e for e in errors)
+
+    def test_net_host_delta_match_passes(self, tmp_path) -> None:
+        """Artifact net_host_semantic_delta passes when matching executable diff net."""
+        import json
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test",
+            "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 21,
+            "net_host_semantic_delta": 3,
+            "step_growth_slope": 1.5,
+            "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [
+                {"step": 1, "elapsed_seconds": 1.5},
+                {"step": 2, "elapsed_seconds": 3.0},
+            ],
+            "parity_diff_source": "tools/checks/check_js_debt.sh",
+            "collection_timestamp_utc": "2026-02-22T12:00:00Z",
+            "collector_version": "2.2.0",
+        }))
+        passed, errors = validate_indicator_artifact_json(
+            str(artifact),
+            expected_net_host_delta=3,
+        )
+        assert passed, f"Should pass with matching net delta: {errors}"

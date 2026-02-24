@@ -237,7 +237,7 @@ class TestStructuralAntiTheater:
         assert any("host_semantics_delta_before" in e for e in errors)
 
     def test_structural_missing_evidence_command_fails(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", evidence_command=None)]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
         diff = (
@@ -258,7 +258,7 @@ class TestStructuralAntiTheater:
 
     def test_structural_evidence_command_must_reference_l4_gates(self):
         """evidence_command without tests/l4_gates/ reference fails."""
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", evidence_command="pytest tests/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
         diff = (
@@ -273,7 +273,7 @@ class TestStructuralAntiTheater:
 
     def test_structural_evidence_command_with_l4_gates_passes(self):
         """evidence_command referencing tests/l4_gates/ passes."""
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", evidence_command="pytest tests/l4_gates/",
                        sweep="pytest tests/structural/ tests/engine/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
@@ -386,7 +386,7 @@ class TestValidExamples:
     """Valid waves for all 3 classes must pass."""
 
     def test_valid_l4_structural(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="mu/substrate/kernel.v1.json",
                        evidence_command="pytest tests/l4_gates/",
                        sweep="pytest tests/structural/ tests/engine/")]
@@ -446,7 +446,7 @@ class TestBlockerClassification:
         assert passed, f"Blocker class {cls} should be accepted: {errors}"
 
     def test_blocker_class_required_for_structural(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest tests/structural/",
                        blocker_class=None)]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
@@ -483,7 +483,7 @@ class TestPostGateContractSweep:
     """L4_STRUCTURAL must include post_gate_contract_sweep with non-gate targets."""
 
     def test_missing_sweep_fails(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep=None)]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
         diff = (
@@ -497,7 +497,7 @@ class TestPostGateContractSweep:
         assert any("post_gate_contract_sweep" in e for e in errors)
 
     def test_sweep_with_only_l4_gates_fails(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest tests/l4_gates/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
         diff = (
@@ -511,7 +511,7 @@ class TestPostGateContractSweep:
         assert any("non-gate test domain" in e for e in errors)
 
     def test_sweep_with_non_gate_target_passes(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest tests/structural/ tests/engine/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
         diff = (
@@ -524,7 +524,7 @@ class TestPostGateContractSweep:
         assert passed, f"Sweep with non-gate target should pass: {errors}"
 
     def test_sweep_with_mu_path_passes(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest mu/tests/structural/")]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
         diff = (
@@ -588,7 +588,7 @@ class TestInvariantId:
         assert passed, f"Invariant ID {inv_id} should be accepted: {errors}"
 
     def test_invariant_id_required_for_structural(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest tests/structural/",
                        invariant_id=None)]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
@@ -659,7 +659,7 @@ class TestProgressProof:
         assert passed, f"MAINTENANCE should not require progress proof: {errors}"
 
     def test_progress_proof_required_for_structural(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest tests/structural/",
                        pp_before=None, pp_after=None)]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
@@ -765,7 +765,7 @@ class TestIndicatorArtifact:
         assert passed, f"Valid indicator fields should pass: {errors}"
 
     def test_indicator_required_for_structural(self):
-        notes = [_note("L4_STRUCTURAL", hd_before="old", hd_after="new",
+        notes = [_note("L4_STRUCTURAL", hd_before="pre structural runtime state", hd_after="post structural runtime state",
                        sa_ref="ref", sweep="pytest tests/structural/",
                        indicator_ref=None)]
         files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_foo.py"]
@@ -1116,6 +1116,33 @@ class TestIndicatorProvenance:
         assert not passed
         assert any("non-empty" in e for e in errors)
 
+    def test_net_host_semantic_delta_scope_mismatch_rejected(self, tmp_path):
+        """Artifact net delta must match executable runtime delta for scope."""
+        import json
+        data = _valid_artifact_data()
+        data["net_host_semantic_delta"] = 5
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(
+            str(artifact),
+            expected_net_host_delta=3,
+        )
+        assert not passed
+        assert any("Indicator mismatch: net_host_semantic_delta" in e for e in errors)
+
+    def test_net_host_semantic_delta_scope_match_passes(self, tmp_path):
+        """Artifact net delta passes when it matches executable runtime delta."""
+        import json
+        data = _valid_artifact_data()
+        data["net_host_semantic_delta"] = 3
+        artifact = tmp_path / "indicators.json"
+        artifact.write_text(json.dumps(data))
+        passed, errors = validate_indicator_artifact_json(
+            str(artifact),
+            expected_net_host_delta=3,
+        )
+        assert passed, errors
+
 
 # =============================================================================
 # Collector Fail-Closed (Wave 20)
@@ -1209,7 +1236,20 @@ class TestCollectorFailClosed:
         monkeypatch.setattr(sp, "run", fake_run)
         assert mod.count_parity_diffs() == 21
 
-    def test_collector_version_is_2_1_0(self):
-        """Collector version must be 2.1.0 after fail-closed upgrade."""
+    def test_collector_version_is_2_2_0(self):
+        """Collector version must be 2.2.0 after executable-delta upgrade."""
         mod = _import_collector()
-        assert mod.COLLECTOR_VERSION == "2.1.0"
+        assert mod.COLLECTOR_VERSION == "2.2.0"
+
+    def test_main_fails_closed_when_scope_empty(self, monkeypatch):
+        """Collector exits 1 when range/staged scope has no changed files."""
+        mod = _import_collector()
+        monkeypatch.setattr(sys, "argv", [
+            "collect_l4_wave_indicators.py",
+            "--wave-id", "test-wave",
+            "--output", "/tmp/ignored.json",
+            "--range", "HEAD...HEAD",
+        ])
+        monkeypatch.setattr(mod, "get_changed_files", lambda _range: [])
+        rc = mod.main()
+        assert rc == 1
