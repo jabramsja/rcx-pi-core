@@ -156,13 +156,13 @@ else
         fi
 
         # Quick JS test check
-        if node "$JS_FILE" 2>&1 | grep -q "All tests passed: true"; then
+        if node "$JS_DIR/eval_step.js" 2>&1 | grep -q "All tests passed: true"; then
             echo "  OK: JS tests pass"
         else
             echo "  WARNING: JS tests may be failing"
         fi
     else
-        echo "  WARNING: $JS_FILE not found"
+        echo "  WARNING: $JS_DIR not found"
     fi
     echo ""
 

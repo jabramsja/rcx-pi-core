@@ -90,7 +90,8 @@ check_function_marker() {
     local func_name="$1"
     local marker="$2"
     # Search all JS files for the function with its marker within 15 lines above
-    if grep -rB15 "function $func_name" "$JS_DIR" --include='*.js' | grep -q "$marker"; then
+    # Use "function name(" to avoid prefix matches (e.g., "run" matching "runStructural")
+    if grep -rB15 "function ${func_name}(" "$JS_DIR" --include='*.js' | grep -q "$marker"; then
         echo "  ✓ $func_name has $marker"
     else
         echo "  ✗ $func_name MISSING $marker"
