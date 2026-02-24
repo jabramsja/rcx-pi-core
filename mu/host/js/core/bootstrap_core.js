@@ -12,7 +12,7 @@
  */
 
 const { MAX_DEPTH, NO_MATCH, RcxError } = require('./constants');
-const { isVar, isValidMu, muHashCached } = require('./types');
+const { isVar, isValidMu, muHashCached, muHashControlCached } = require('./types');
 const { normalize, denormalize } = require('./normalize');
 
 /**
@@ -230,7 +230,7 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
   }
 
   let current = input;
-  let currentHash = muHashCached(input);
+  let currentHash = muHashControlCached(input, 'run');
   const trace = [];
 
   for (let i = 0; i < maxSteps; i++) {
@@ -246,7 +246,7 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
 
     const next = step(projections, current);
 
-    const nextHash = muHashCached(next);
+    const nextHash = muHashControlCached(next, 'run.stall');
     if (nextHash === currentHash) {
       return { result: current, steps: i, stalled: true, trace };
     }

@@ -528,6 +528,73 @@ def mu_hash(value: Any) -> str:
 
 
 # =============================================================================
+# Numeric Hash Control (Control-Channel Safety Lock)
+# =============================================================================
+# Control-flow hash paths (stall detection, convergence, recurrence trace)
+# must reject ambiguous numeric domain to prevent cross-substrate divergence.
+# Python json.dumps(1.0) → "1.0" but JS JSON.stringify(1.0) → "1".
+# These wrappers: validate Mu → reject non-integer floats → canonicalize → hash.
+# Data-flow paths (observer output, undefined motif) use mu_hash directly.
+# See NorthStarSemantics.v0.md §B.1 for policy.
+# =============================================================================
+
+
+class NumericHashError(TypeError):
+    """Raised when a non-integer float enters a hash-sensitive control path.
+
+    Currently unused (canonicalization handles all cases), but retained as
+    the canonical error type for future strictness if needed.
+    """
+    error_code = "input.numeric_hash_unsupported"
+
+    def __init__(self, context: str, value: Any):
+        super().__init__(
+            f"{context}: non-integer float {value!r} in hash-sensitive path"
+        )
+
+
+def _canonicalize_hash_numeric(value: Any) -> Any:
+    """Canonicalize numeric domain: integral float→int, ±0.0→0.
+
+    This ensures 1.0 and 1 hash identically, and -0.0 maps to 0.
+    Only used in control-channel wrappers after assert_hash_numeric_safe.
+    """
+    if isinstance(value, float):
+        if value == 0.0:
+            return 0
+        if value.is_integer():
+            return int(value)
+        return value  # non-integer float (caught by assert above)
+    if type(value) is list:
+        return [_canonicalize_hash_numeric(v) for v in value]  # AST_OK: infra — numeric canonicalization helper
+    if type(value) is dict:
+        return {k: _canonicalize_hash_numeric(v) for k, v in value.items()}  # AST_OK: infra — numeric canonicalization helper
+    return value  # str, int, bool, None — unchanged
+
+
+def mu_hash_control(value: Any, context: str = "mu_hash_control") -> str:
+    """Hash a Mu value for control-flow paths (stall, convergence, trace).
+
+    Validates Mu, canonicalizes numerics (integral float→int, ±0→0), then
+    delegates to mu_hash. Use this instead of mu_hash in control paths.
+    """
+    assert_mu(value, context)
+    canonical_value = _canonicalize_hash_numeric(value)
+    return mu_hash(canonical_value)
+
+
+def mu_hash_control_cached(value: Any, context: str = "mu_hash_control_cached") -> str:
+    """Hash a Mu value for control-flow paths with caching.
+
+    Validates Mu, canonicalizes numerics (integral float→int, ±0→0), then
+    delegates to mu_hash_cached. Use this instead of mu_hash_cached in control paths.
+    """
+    assert_mu(value, context)
+    canonical_value = _canonicalize_hash_numeric(value)
+    return mu_hash_cached(canonical_value)
+
+
+# =============================================================================
 # Bootstrap Markers
 # =============================================================================
 # Functions for marking Python code that will be replaced by seeds.

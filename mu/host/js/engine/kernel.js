@@ -9,7 +9,7 @@
  */
 
 const { NO_MATCH, RcxError } = require('../core/constants');
-const { isValidMu, muHash, muHashCached } = require('../core/types');
+const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif } = require('../core/bootstrap_core');
@@ -87,7 +87,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
 
   if (returnMeta) {
     let current = kernelInput;
-    let currentHash = muHashCached(kernelInput);
+    let currentHash = muHashControlCached(kernelInput, 'stepKernel');
     for (let i = 0; i < maxSteps; i++) {
       const result = step(projections, current);
 
@@ -111,7 +111,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       }
 
       if (!isKernelIntermediate(result)) {
-        const resultHash = muHashCached(result);
+        const resultHash = muHashControlCached(result, 'stepKernel.stall');
         if (resultHash === currentHash) {
           validator(domainInput, 'stepKernel output');
           return { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
@@ -127,13 +127,13 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
 
   // Non-meta mode
   let current = kernelInput;
-  let currentHash = muHashCached(kernelInput);
+  let currentHash = muHashControlCached(kernelInput, 'stepKernel.nonmeta');
   const trace = [];
   for (let i = 0; i < maxSteps; i++) {
     const next = step(projections, current);
 
     if (!isKernelIntermediate(next)) {
-      const nextHash = muHashCached(next);
+      const nextHash = muHashControlCached(next, 'stepKernel.nonmeta.stall');
       if (nextHash === currentHash) {
         return { result: current, steps: i, stalled: true, trace };
       }
@@ -150,7 +150,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
  * Parameterized: takes kernelProjections instead of module-global.
  */
 function resolveTraceProjectionId(kernelProjections, domainProjections, current, nextValue) {
-  const nextValueHash = muHashCached(nextValue);
+  const nextValueHash = muHashControlCached(nextValue, 'resolveTraceProjectionId');
   for (const proj of domainProjections) {
     if (typeof proj !== 'object' || proj === null) continue;
     if (!('pattern' in proj) || !('body' in proj)) continue;
@@ -159,7 +159,7 @@ function resolveTraceProjectionId(kernelProjections, domainProjections, current,
       returnMeta: true,
     });
     if (candidate.stall) continue;
-    if (muHashCached(candidate.output) === nextValueHash) {
+    if (muHashControlCached(candidate.output, 'resolveTraceProjectionId.match') === nextValueHash) {
       return proj.id ?? null;
     }
   }
@@ -192,7 +192,7 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
 
   const traceEntries = [];
   let current = input;
-  let currentHash = muHashCached(input);
+  let currentHash = muHashControlCached(input, 'runStructural');
 
   for (let i = 0; i < maxSteps; i++) {
     const meta = stepKernel(kernelProjections, current, domainProjections, {
@@ -209,7 +209,7 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
       projection: matchedId
     });
 
-    const resultHash = muHashCached(result);
+    const resultHash = muHashControlCached(result, 'runStructural.stall');
     if (resultHash === currentHash) {
       traceEntries.push({
         step: i + 1,

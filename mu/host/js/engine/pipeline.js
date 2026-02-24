@@ -9,7 +9,7 @@
  */
 
 const { KERNEL_RESERVED_FIELDS, RcxError } = require('../core/constants');
-const { isValidMu, muHash, muEqual, muHashCached } = require('../core/types');
+const { isValidMu, muHash, muEqual, muHashCached, muHashControl, muHashControlCached } = require('../core/types');
 const { denormalize } = require('../core/normalize');
 const { validateNoKernelReservedFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
@@ -53,11 +53,11 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
  */
 function runSubAlgorithm(kernelProjections, seedProjectionMap, algorithmProjs, initial, maxIterations) {
   let current = initial;
-  let currentHash = muHashCached(initial);
+  let currentHash = muHashControlCached(initial, 'runSubAlgorithm');
   for (let i = 0; i < maxIterations; i++) {
     const result = runAlgorithmWithBridge(kernelProjections, current, algorithmProjs, 200);
     if (isTerminalShape(result)) return result;
-    const resultHash = muHashCached(result);
+    const resultHash = muHashControlCached(result, 'runSubAlgorithm.stall');
     if (resultHash === currentHash) return result;
     current = result;
     currentHash = resultHash;
@@ -89,7 +89,7 @@ function hashTraceForRecurrence(trace, maxEntries) {
     if (entry !== null && typeof entry === 'object' && 'state' in entry) {
       entry = Object.assign(Object.create(null), entry);
       if (isValidMu(entry.state)) {
-        entry.state_hash = muHash(entry.state);
+        entry.state_hash = muHashControl(entry.state, 'hashTraceForRecurrence');
       }
     }
     entries.push(entry);

@@ -6,7 +6,7 @@
  */
 
 const crypto = require('crypto');
-const { MAX_DEPTH } = require('./constants');
+const { MAX_DEPTH, RcxError } = require('./constants');
 
 const MAX_MU_WIDTH = 1000;
 
@@ -73,11 +73,14 @@ function isValidMu(value, _depth = 0) {
 /**
  * ELIMINATED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
  * Previously a bootstrap primitive. Now derivable from muHashCached.
- * Production code uses muHashCached directly. This wrapper remains for
- * test convenience and backward compatibility.
+ * Used in production stall-detection loops (pipeline.js, json_handlers.js)
+ * and tests.
  * @host_builtin - convenience wrapper around muHashCached
  */
 function muEqual(a, b) {
+  if (!isValidMu(a) || !isValidMu(b)) {
+    throw new RcxError('input.invalid_type', 'muEqual: value is not valid Mu');
+  }
   return muHashCached(a) === muHashCached(b);
 }
 
@@ -159,6 +162,55 @@ function muHashCached(value) {
   return hash;
 }
 
+// =============================================================================
+// Numeric Hash Control (Control-Channel Safety Lock)
+// =============================================================================
+// Control-flow hash paths (stall detection, convergence, recurrence trace)
+// must reject ambiguous numeric domain to prevent cross-substrate divergence.
+// See NorthStarSemantics.v0.md §B.1 for policy.
+// =============================================================================
+
+/**
+ * Canonicalize numeric domain: ±0 → 0. In JS all numbers are IEEE 754 doubles,
+ * so there's no int/float distinction to resolve — only -0 needs canonicalization.
+ */
+function canonicalizeHashNumeric(value) {
+  if (typeof value === 'number') return Object.is(value, -0) ? 0 : value;
+  if (Array.isArray(value)) return value.map(canonicalizeHashNumeric);
+  if (value !== null && typeof value === 'object') {
+    const out = Object.create(null);
+    for (const k of Object.keys(value)) out[k] = canonicalizeHashNumeric(value[k]);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Hash a Mu value for control-flow paths (stall, convergence, trace).
+ * Validates Mu, canonicalizes numerics (±0→0), then delegates to muHash.
+ */
+function muHashControl(value, context) {
+  context = context || 'muHashControl';
+  if (!isValidMu(value)) {
+    throw new RcxError('input.invalid_type',
+      `${context}: value is not valid Mu`);
+  }
+  return muHash(canonicalizeHashNumeric(value));
+}
+
+/**
+ * Hash a Mu value for control-flow paths with caching.
+ * Validates Mu, canonicalizes numerics (±0→0), then delegates to muHashCached.
+ */
+function muHashControlCached(value, context) {
+  context = context || 'muHashControlCached';
+  if (!isValidMu(value)) {
+    throw new RcxError('input.invalid_type',
+      `${context}: value is not valid Mu`);
+  }
+  return muHashCached(canonicalizeHashNumeric(value));
+}
+
 module.exports = {
   MAX_MU_WIDTH,
   MAX_MU_HASH_CACHE,
@@ -169,4 +221,7 @@ module.exports = {
   compareMuStringKeysByCodepoint,
   muHash,
   muHashCached,
+  canonicalizeHashNumeric,
+  muHashControl,
+  muHashControlCached,
 };
