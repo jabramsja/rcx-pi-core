@@ -71,6 +71,31 @@ class TestPythonCanonnicalization:
         assert mu_hash_control(True) == mu_hash(True)
         assert mu_hash_control(None) == mu_hash(None)
 
+    def test_large_integral_float_not_int_cast(self):
+        """1e30 is integral but must NOT be int-cast (diverges cross-substrate).
+
+        Python int(1e30) serializes as "1000000000000000000000000000000"
+        but JS JSON.stringify(1e30) produces "1e+30". Leaving as float
+        preserves cross-substrate hash parity.
+        """
+        # Large integral floats must NOT hash the same as their int equivalent
+        # because int-casting causes JSON serialization divergence
+        h_float = mu_hash_control(1e30)
+        assert isinstance(h_float, str) and len(h_float) == 64
+        # Verify it's NOT the same as hashing the int version
+        # (which would mean int-casting happened)
+        import json
+        int_canonical = json.dumps(int(1e30), sort_keys=True, ensure_ascii=False)
+        float_canonical = json.dumps(1e30, sort_keys=True, ensure_ascii=False)
+        assert int_canonical != float_canonical  # proves they diverge
+
+    def test_safe_integer_float_still_canonicalized(self):
+        """Floats within safe integer range are still int-cast."""
+        assert mu_hash_control(100.0) == mu_hash_control(100)
+        assert mu_hash_control(-42.0) == mu_hash_control(-42)
+        # 2**52 is safe
+        assert mu_hash_control(float(2**52)) == mu_hash_control(2**52)
+
     def test_global_mu_hash_unchanged(self):
         """mu_hash(1.0) != mu_hash(1) — global hash is NOT canonicalized."""
         # This verifies we didn't modify the global hash function
@@ -158,6 +183,23 @@ class TestCrossSubstrateParity:
     def test_nested_structure_parity(self):
         py_hash = mu_hash_control({"a": 1, "b": [2, 3]})
         js_hash = self._js_hash('{"a": 1, "b": [2, 3]}')
+        assert py_hash == js_hash
+
+    def test_large_integral_float_parity(self):
+        """1e30 must hash identically across substrates (no int-casting)."""
+        py_hash = mu_hash_control(1e30)
+        js_hash = self._js_hash("1e30")
+        assert py_hash == js_hash, (
+            f"Large integral float hash divergence: py={py_hash}, js={js_hash}"
+        )
+
+    def test_negative_large_integral_float_parity(self):
+        """Negative large integral float parity (must use >=1e21 to avoid
+        pre-existing JSON serialization divergence: JS JSON.stringify(1e20)
+        gives '100000000000000000000' while Python gives '1e+20'. Both
+        substrates agree on scientific notation for >=1e21)."""
+        py_hash = mu_hash_control(-1e30)
+        js_hash = self._js_hash("-1e30")
         assert py_hash == js_hash
 
 
