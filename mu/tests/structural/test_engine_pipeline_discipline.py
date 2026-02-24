@@ -33,7 +33,15 @@ from rcx_pi.selfhost.step_mu import run_engine_pipeline
 
 _REPO = Path(__file__).resolve().parents[3]
 _STEP_MU_PATH = _REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
-_JS_PATH = _REPO / "mu" / "host" / "js" / "eval_step.js"
+
+
+def _read_all_js_source() -> str:
+    """Read all JS module files from mu/host/js/ recursively."""
+    js_dir = _REPO / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
 
 # ── Known callsite inventory ─────────────────────────────────────────────
 
@@ -300,7 +308,7 @@ class TestEngineResultShapeParity:
     def test_js_engine_terminal_keys_match_python(self):
         """JS ENGINE_TERMINAL_KEYS must match Python exactly."""
         from rcx_pi.selfhost.step_mu import _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for engine shape contract
-        js_keys = _extract_js_set_literal(_JS_PATH.read_text(), "ENGINE_TERMINAL_KEYS")
+        js_keys = _extract_js_set_literal(_read_all_js_source(), "ENGINE_TERMINAL_KEYS")
         assert js_keys == _ENGINE_TERMINAL_KEYS, (
             f"Engine terminal key drift!\n"
             f"  Python-only: {_ENGINE_TERMINAL_KEYS - js_keys}\n"
@@ -332,7 +340,7 @@ class TestHemisphereKeysParity:
     def test_js_hemisphere_keys_match_python(self):
         """JS HEMISPHERE_KEYS must match Python exactly."""
         from rcx_pi.selfhost.step_mu import _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for hemisphere shape contract
-        js_source = _JS_PATH.read_text()
+        js_source = _read_all_js_source()
         # HEMISPHERE_KEYS derived from HEMISPHERE_KEY_ORDER array
         pattern = r"const\s+HEMISPHERE_KEY_ORDER\s*=\s*\[(.*?)\]"
         m = re.search(pattern, js_source, re.DOTALL)
@@ -634,7 +642,7 @@ class TestJsActionListParity:
 
     def test_action_count_locked(self):
         """JS must have exactly 21 JSON API actions."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         actual = _extract_js_dispatch_actions(source)
         assert len(actual) == 21, (
             f"Expected 21 JS actions, found {len(actual)}: {sorted(actual)}"
@@ -642,7 +650,7 @@ class TestJsActionListParity:
 
     def test_dispatch_matches_list_actions(self):
         """Dispatch branches must exactly match list_actions response."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         dispatch = _extract_js_dispatch_actions(source)
         listed = _extract_js_list_actions(source)
         dispatch_only = dispatch - listed
@@ -655,7 +663,7 @@ class TestJsActionListParity:
 
     def test_actions_match_expected_set(self):
         """JS actions must match the hardcoded expected set."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         actual = _extract_js_dispatch_actions(source)
         missing = EXPECTED_JS_ACTIONS - actual
         extra = actual - EXPECTED_JS_ACTIONS
@@ -707,7 +715,7 @@ class TestBoot1ModeRoutingContract:
 
     def test_js_boot1_defaults_to_true(self):
         """JS boot1LoopMode must default to true via ?? operator."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         assert re.search(r"request\.boot1LoopMode\s*\?\?\s*true", source), (
             "JS must default boot1LoopMode to true via "
             "`request.boot1LoopMode ?? true`"
@@ -737,13 +745,18 @@ class TestBoot1ModeRoutingContract:
         pytest.fail("run_engine_pipeline not found in step_mu.py")
 
     def test_js_routing_is_conditional_on_boot1mode(self):
-        """JS must use ternary routing: boot1Mode ? recursive : trampoline."""
-        source = _JS_PATH.read_text()
-        assert re.search(
+        """JS must conditionally route: boot1Mode → recursive vs trampoline."""
+        source = _read_all_js_source()
+        # Either ternary or if/else is acceptable
+        has_ternary = re.search(
             r"boot1Mode\s*\?\s*runEnginePipelineRecursive", source
-        ), (
-            "JS must route via "
-            "`boot1Mode ? runEnginePipelineRecursive : runEnginePipeline`"
+        )
+        has_if_else = re.search(
+            r"if\s*\(boot1Mode\)", source
+        ) and "runEnginePipelineRecursive" in source and "runEnginePipeline" in source
+        assert has_ternary or has_if_else, (
+            "JS must route via boot1Mode conditional "
+            "(ternary or if/else) to runEnginePipelineRecursive / runEnginePipeline"
         )
 
     @pytest.mark.slow
@@ -897,14 +910,14 @@ class TestJsBoundaryContractLock:
 
     def test_js_run_engine_pipeline_has_isvalidmu_check(self):
         """runEnginePipeline must call isValidMu on inputValue."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         assert "isValidMu(inputValue)" in source, (
             "runEnginePipeline missing isValidMu(inputValue) boundary check"
         )
 
     def test_js_run_engine_pipeline_recursive_has_isvalidmu_check(self):
         """runEnginePipelineRecursive must call isValidMu on inputValue."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         # Both functions should have the check
         import re
         matches = re.findall(r"function\s+runEnginePipeline(?:Recursive)?\b.*?isValidMu\(inputValue\)", source, re.DOTALL)
@@ -914,7 +927,7 @@ class TestJsBoundaryContractLock:
 
     def test_js_validate_seed_uses_key_presence(self):
         """validateSeedStructure must use 'key' in obj, not falsy checks."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         assert "'id' in proj" in source, "validateSeedStructure must use key-presence for 'id'"
         assert "'pattern' in proj" in source, "validateSeedStructure must use key-presence for 'pattern'"
         assert "'body' in proj" in source, "validateSeedStructure must use key-presence for 'body'"
@@ -922,7 +935,7 @@ class TestJsBoundaryContractLock:
 
     def test_js_validate_seed_no_falsy_pattern(self):
         """Old falsy patterns must not exist in validateSeedStructure."""
-        source = _JS_PATH.read_text()
+        source = _read_all_js_source()
         # Extract just the validateSeedStructure function body
         import re
         match = re.search(r"function validateSeedStructure\(.*?\{(.*?)\n\}", source, re.DOTALL)

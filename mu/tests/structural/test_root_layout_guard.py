@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 
 # Allowlisted root directories and symlinks (tracked by git).
 # Add new entries here ONLY with a governance reason.

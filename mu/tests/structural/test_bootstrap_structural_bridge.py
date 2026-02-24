@@ -16,8 +16,10 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed
 
 
 # Load seeds
-BRIDGE_SEED_PATH = Path(__file__).parents[2] / "mu" / "bridge" / "bootstrap_structural.v1.json"
-MATCH_V2_PATH = Path(__file__).parents[2] / "mu" / "substrate" / "match.v2.json"
+from tests.repo_root import REPO_ROOT
+
+BRIDGE_SEED_PATH = REPO_ROOT / "mu" / "bridge" / "bootstrap_structural.v1.json"
+MATCH_V2_PATH = REPO_ROOT / "mu" / "substrate" / "match.v2.json"
 
 
 def load_bridge_projections():

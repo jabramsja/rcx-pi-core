@@ -33,11 +33,16 @@ from rcx_pi.selfhost.step_mu import (
 # ── Locate JS source ────────────────────────────────────────────────────
 
 _REPO = Path(__file__).resolve().parents[3]
-_JS_PATH = _REPO / "mu" / "host" / "js" / "eval_step.js"
+_JS_DIR = _REPO / "mu" / "host" / "js"
+_JS_PATH = _JS_DIR / "eval_step.js"  # CLI entrypoint (shim)
 
 
 def _js_source() -> str:
-    return _JS_PATH.read_text()
+    """Read all JS module files concatenated (monolith was split into modules)."""
+    parts = []
+    for f in sorted(_JS_DIR.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
 
 
 # ── JS function existence ────────────────────────────────────────────────

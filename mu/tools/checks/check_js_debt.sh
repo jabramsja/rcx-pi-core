@@ -1,46 +1,52 @@
 #!/usr/bin/env bash
 # Check JavaScript debt markers for L3 parity with Python
 #
-# This script verifies that mu/host/js/eval_step.js has proper debt tracking
+# This script verifies that mu/host/js/ modules have proper debt tracking
 # that matches Python's semantic debt markers.
 #
 # Usage: ./tools/check_js_debt.sh
 
 set -euo pipefail
 
-JS_FILE="mu/host/js/eval_step.js"
+JS_DIR="mu/host/js"
+# The DEBT SUMMARY header lives in core/constants.js
+JS_HEADER_FILE="$JS_DIR/core/constants.js"
 
 echo "=== Checking JavaScript Debt Markers ==="
 echo ""
 
-if [ ! -f "$JS_FILE" ]; then
-    echo "ERROR: $JS_FILE not found"
+if [ ! -d "$JS_DIR" ]; then
+    echo "ERROR: $JS_DIR not found"
     exit 1
 fi
 
-# Count debt markers
-HOST_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" || echo 0)
-HOST_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" || echo 0)
-HOST_BUILTIN=$(grep -c "@host_builtin" "$JS_FILE" || echo 0)
-BOOTSTRAP_PRIMITIVE=$(grep -c "BOOTSTRAP_PRIMITIVE" "$JS_FILE" || echo 0)
+if [ ! -f "$JS_HEADER_FILE" ]; then
+    echo "ERROR: $JS_HEADER_FILE not found (DEBT SUMMARY header expected here)"
+    exit 1
+fi
 
-echo "Debt markers found in $JS_FILE:"
+# Count debt markers across all JS module files
+HOST_ITERATION=$(grep -rc "@host_iteration" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
+HOST_RECURSION=$(grep -rc "@host_recursion" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
+HOST_BUILTIN=$(grep -rc "@host_builtin" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
+BOOTSTRAP_PRIMITIVE=$(grep -rc "BOOTSTRAP_PRIMITIVE" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
+
+echo "Debt markers found across $JS_DIR/**/*.js:"
 echo "  @host_iteration:    $HOST_ITERATION"
 echo "  @host_recursion:    $HOST_RECURSION"
 echo "  @host_builtin:      $HOST_BUILTIN"
 echo "  BOOTSTRAP_PRIMITIVE: $BOOTSTRAP_PRIMITIVE"
 echo ""
 
-# Extract expected counts from DEBT SUMMARY header (self-documenting, no drift)
-# Uses portable grep (no -P flag which isn't available on macOS)
-EXPECTED_ITERATION=$(grep -o '@host_iteration: [0-9]*' "$JS_FILE" | head -1 | cut -d' ' -f2)
-EXPECTED_RECURSION=$(grep -o '@host_recursion: [0-9]*' "$JS_FILE" | head -1 | cut -d' ' -f2)
-EXPECTED_BUILTIN=$(grep -o '@host_builtin: [0-9]*' "$JS_FILE" | head -1 | cut -d' ' -f2)
-EXPECTED_BOOTSTRAP=$(grep -o 'BOOTSTRAP PRIMITIVES ([0-9]*' "$JS_FILE" | head -1 | grep -o '[0-9]*')
+# Extract expected counts from DEBT SUMMARY header in core/constants.js
+EXPECTED_ITERATION=$(grep -o '@host_iteration: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
+EXPECTED_RECURSION=$(grep -o '@host_recursion: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
+EXPECTED_BUILTIN=$(grep -o '@host_builtin: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
+EXPECTED_BOOTSTRAP=$(grep -o 'BOOTSTRAP PRIMITIVES ([0-9]*' "$JS_HEADER_FILE" | head -1 | grep -o '[0-9]*')
 
 # Validate we extracted the counts (fail if header is missing/malformed)
 if [ -z "$EXPECTED_ITERATION" ] || [ -z "$EXPECTED_RECURSION" ] || [ -z "$EXPECTED_BUILTIN" ] || [ -z "$EXPECTED_BOOTSTRAP" ]; then
-    echo "ERROR: Could not extract expected counts from DEBT SUMMARY header in $JS_FILE"
+    echo "ERROR: Could not extract expected counts from DEBT SUMMARY header in $JS_HEADER_FILE"
     echo "  EXPECTED_ITERATION: ${EXPECTED_ITERATION:-MISSING}"
     echo "  EXPECTED_RECURSION: ${EXPECTED_RECURSION:-MISSING}"
     echo "  EXPECTED_BUILTIN: ${EXPECTED_BUILTIN:-MISSING}"
@@ -72,19 +78,19 @@ if [ "$BOOTSTRAP_PRIMITIVE" -lt "$EXPECTED_BOOTSTRAP" ]; then
 fi
 
 # Check for DEBT SUMMARY header
-if ! grep -q "DEBT SUMMARY" "$JS_FILE"; then
-    echo "ERROR: Missing DEBT SUMMARY header in $JS_FILE"
+if ! grep -q "DEBT SUMMARY" "$JS_HEADER_FILE"; then
+    echo "ERROR: Missing DEBT SUMMARY header in $JS_HEADER_FILE"
     ERRORS=$((ERRORS + 1))
 fi
 
-# Check that key functions have markers
+# Check that key functions have debt markers (scan across all modules)
 echo "Checking key functions have debt markers:"
 
 check_function_marker() {
     local func_name="$1"
     local marker="$2"
-    # Look up to 15 lines before the function for JSDoc comments
-    if grep -B15 "function $func_name" "$JS_FILE" | grep -q "$marker"; then
+    # Search all JS files for the function with its marker within 15 lines above
+    if grep -rB15 "function $func_name" "$JS_DIR" --include='*.js' | grep -q "$marker"; then
         echo "  ✓ $func_name has $marker"
     else
         echo "  ✗ $func_name MISSING $marker"

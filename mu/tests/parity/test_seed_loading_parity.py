@@ -33,11 +33,15 @@ from rcx_pi.selfhost.seed_integrity import (
 # ── Locate JS source ────────────────────────────────────────────────────
 
 _REPO = Path(__file__).resolve().parents[3]
-_JS_PATH = _REPO / "mu" / "host" / "js" / "eval_step.js"
+_JS_DIR = _REPO / "mu" / "host" / "js"
 
 
 def _js_source() -> str:
-    return _JS_PATH.read_text()
+    """Read all JS module files concatenated (monolith was split into modules)."""
+    parts = []
+    for f in sorted(_JS_DIR.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
 
 
 def _extract_js_seed_checksums(source: str) -> dict[str, str]:

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 
 # Directories where `import ast` is forbidden (runtime code)
 FORBIDDEN_DIRS = [

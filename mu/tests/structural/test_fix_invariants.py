@@ -23,8 +23,9 @@ from rcx_pi.selfhost.step_mu import (
     KERNEL_RESERVED_FIELDS,
     run_algorithm_meta_circular,
 )
+from tests.repo_root import REPO_ROOT
 
-ROOT = Path(__file__).parents[2]
+ROOT = REPO_ROOT
 
 
 # ---------------------------------------------------------------------------

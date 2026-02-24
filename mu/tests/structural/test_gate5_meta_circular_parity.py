@@ -24,9 +24,11 @@ from rcx_pi.selfhost.step_mu import (
 )
 
 
+from tests.repo_root import REPO_ROOT
+
 pytestmark = pytest.mark.slow
 
-ROOT = Path(__file__).parents[2]
+ROOT = REPO_ROOT
 FIXTURES = ROOT / "tests" / "fixtures"
 
 

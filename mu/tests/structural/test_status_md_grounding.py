@@ -14,8 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.repo_root import REPO_ROOT
+
 # Project root
-ROOT = Path(__file__).parent.parent.parent
+ROOT = REPO_ROOT
 
 
 def read_status_md() -> str:

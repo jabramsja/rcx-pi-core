@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.repo_root import REPO_ROOT
 
-REPO_ROOT = Path(__file__).parents[2]
 DESIGN_DOC = REPO_ROOT / "roadmap" / "MuHemispheresDesign.md"
 EXECUTION_CHECKLIST = REPO_ROOT / "mu" / "docs" / "core" / "HemisphereExecutionChecklist.v0.md"
 EXISTING_HEMISPHERE_SEED = REPO_ROOT / "mu" / "programs" / "hemispheres.v1.json"

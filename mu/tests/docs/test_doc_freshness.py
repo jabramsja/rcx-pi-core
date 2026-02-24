@@ -21,7 +21,8 @@ from __future__ import annotations
 # pytest adds tests/ to sys.path which shadows repo root's tools package
 import sys as _sys
 from pathlib import Path as _Path
-_repo_root = str(_Path(__file__).parent.parent.parent)
+from tests.repo_root import REPO_ROOT as _REPO_ROOT
+_repo_root = str(_REPO_ROOT)
 if _sys.path[0] != _repo_root:
     if _repo_root in _sys.path:
         _sys.path.remove(_repo_root)

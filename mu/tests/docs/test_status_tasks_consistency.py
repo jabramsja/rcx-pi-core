@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 
 
-REPO_ROOT = Path(__file__).parents[2]
+from tests.repo_root import REPO_ROOT
 STATUS_PATH = REPO_ROOT / "STATUS.md"
 TASKS_PATH = REPO_ROOT / "TASKS.md"
 MANIFEST_PATH = REPO_ROOT / "roadmap" / "MANIFEST.md"

@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 DOCS_CORE = REPO_ROOT / "mu" / "docs" / "core"
 
 

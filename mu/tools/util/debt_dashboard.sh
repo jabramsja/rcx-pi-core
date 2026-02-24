@@ -40,12 +40,12 @@ if [ "$JSON_OUTPUT" = true ]; then
     TOTAL_TRACKED=$((HOST_RECURSION + HOST_BUILTIN + HOST_ITERATION + HOST_MUTATION + BOOTSTRAP))
     TOTAL_SEMANTIC=$((TOTAL_TRACKED + AST_OK_BOOTSTRAP))
 
-    # JavaScript debt
-    JS_FILE="mu/host/js/eval_step.js"
-    JS_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" 2>/dev/null || echo 0)
-    JS_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" 2>/dev/null || echo 0)
-    JS_BUILTIN=$(grep -c "@host_builtin" "$JS_FILE" 2>/dev/null || echo 0)
-    JS_BOOTSTRAP=$(grep -c "BOOTSTRAP_PRIMITIVE" "$JS_FILE" 2>/dev/null || echo 0)
+    # JavaScript debt (scan all modules)
+    JS_DIR="mu/host/js"
+    JS_ITERATION=$(grep -rc "@host_iteration" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+    JS_RECURSION=$(grep -rc "@host_recursion" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+    JS_BUILTIN=$(grep -rc "@host_builtin" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+    JS_BOOTSTRAP=$(grep -rc "BOOTSTRAP_PRIMITIVE" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
     JS_TOTAL=$((JS_ITERATION + JS_RECURSION + JS_BUILTIN))
 
     cat <<EOF
@@ -131,14 +131,14 @@ else
     done
     echo ""
 
-    echo "JavaScript Debt (mu/host/js/eval_step.js) - L3 Parity"
+    echo "JavaScript Debt (mu/host/js/) - L3 Parity"
     echo "----------------------------------------------"
-    JS_FILE="mu/host/js/eval_step.js"
-    if [ -f "$JS_FILE" ]; then
-        JS_ITERATION=$(grep -c "@host_iteration" "$JS_FILE" 2>/dev/null || echo 0)
-        JS_RECURSION=$(grep -c "@host_recursion" "$JS_FILE" 2>/dev/null || echo 0)
-        JS_BUILTIN=$(grep -c "@host_builtin" "$JS_FILE" 2>/dev/null || echo 0)
-        JS_BOOTSTRAP=$(grep -c "BOOTSTRAP_PRIMITIVE" "$JS_FILE" 2>/dev/null || echo 0)
+    JS_DIR="mu/host/js"
+    if [ -d "$JS_DIR" ]; then
+        JS_ITERATION=$(grep -rc "@host_iteration" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+        JS_RECURSION=$(grep -rc "@host_recursion" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+        JS_BUILTIN=$(grep -rc "@host_builtin" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+        JS_BOOTSTRAP=$(grep -rc "BOOTSTRAP_PRIMITIVE" "$JS_DIR" --include='*.js' 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
 
         printf "  @host_iteration:     %3d (header + inline markers)\n" "$JS_ITERATION"
         printf "  @host_recursion:     %3d (header + inline markers)\n" "$JS_RECURSION"

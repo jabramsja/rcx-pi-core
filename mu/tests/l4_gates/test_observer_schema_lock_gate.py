@@ -149,9 +149,9 @@ class TestEventNameSourceLock:
             )
 
     def test_all_event_names_in_js_source(self):
-        """JS eval_step.js contains all 5 event name strings."""
-        js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text()
+        """JS source contains all 5 event name strings."""
+        js_dir = REPO_ROOT / "mu" / "host" / "js"
+        source = "\n".join(f.read_text() for f in sorted(js_dir.rglob("*.js")))
         for name in VALID_EVENT_NAMES:
             assert f"'{name}'" in source, (
                 f"JS source missing event name string: {name!r}"

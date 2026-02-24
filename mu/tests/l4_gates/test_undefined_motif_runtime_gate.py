@@ -38,6 +38,16 @@ from rcx_pi.selfhost.mu_type import mu_hash_cached
 PY_RUNTIME = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
 JS_RUNTIME = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
 
+
+def _read_all_js_source() -> str:
+    """Read all JS module files from mu/host/js/ recursively."""
+    js_dir = REPO_ROOT / "mu" / "host" / "js"
+    parts = []
+    for f in sorted(js_dir.rglob("*.js")):
+        parts.append(f.read_text())
+    return "\n".join(parts)
+
+
 # Canonical v0 key-set
 V0_KEYS = frozenset({"_undefined", "op", "lhs_hash", "rhs_hash", "cause", "details"})
 
@@ -256,7 +266,7 @@ class TestSourceLock:
         assert re.search(r"def make_undefined_motif\(", src)
 
     def test_js_has_make_undefined_motif(self):
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         assert re.search(r"function makeUndefinedMotif\(", src)
 
     def test_python_kernel_stall_calls_make_undefined_motif(self):
@@ -264,5 +274,5 @@ class TestSourceLock:
         assert "make_undefined_motif(" in src
 
     def test_js_kernel_stall_calls_make_undefined_motif(self):
-        src = JS_RUNTIME.read_text()
+        src = _read_all_js_source()
         assert "makeUndefinedMotif(" in src

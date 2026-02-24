@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).parents[2]
+from tests.repo_root import REPO_ROOT
 SCRIPT = REPO_ROOT / "tools" / "docs" / "docs_sync_report.py"
 
 

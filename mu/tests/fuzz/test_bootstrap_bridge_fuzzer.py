@@ -23,6 +23,7 @@ from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.match_mu import normalize_for_match, bindings_to_dict
 from rcx_pi.selfhost.mu_type import is_mu, mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
+from tests.repo_root import REPO_ROOT as _REPO_ROOT
 
 
 # =============================================================================
@@ -33,8 +34,8 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 @pytest.fixture(scope="module")
 def match_with_bridge_projections():
     """Load match.v2 + bootstrap_structural projections (combined at runtime)."""
-    match_path = Path(__file__).parent.parent.parent / "mu" / "substrate" / "match.v2.json"
-    bridge_path = Path(__file__).parent.parent.parent / "mu" / "bridge" / "bootstrap_structural.v1.json"
+    match_path = _REPO_ROOT / "mu" / "substrate" / "match.v2.json"
+    bridge_path = _REPO_ROOT / "mu" / "bridge" / "bootstrap_structural.v1.json"
 
     with open(match_path) as f:
         match_seed = json.load(f)
@@ -53,7 +54,7 @@ def match_with_bridge_projections():
 @pytest.fixture(scope="module")
 def match_v2_projections():
     """Load match.v2 projections (baseline for linear parity)."""
-    path = Path(__file__).parent.parent.parent / "mu" / "substrate" / "match.v2.json"
+    path = _REPO_ROOT / "mu" / "substrate" / "match.v2.json"
     with open(path) as f:
         seed = json.load(f)
     return seed["projections"]

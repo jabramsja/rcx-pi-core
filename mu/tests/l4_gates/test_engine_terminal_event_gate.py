@@ -305,7 +305,7 @@ class TestEngineTerminalSourceLock:
         assert '"engine_terminal"' in source, "Python source missing 'engine_terminal'"
 
     def test_js_source_contains_engine_terminal(self):
-        """JS eval_step.js contains 'engine_terminal' string."""
-        js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-        source = js_path.read_text()
+        """JS source contains 'engine_terminal' string."""
+        js_dir = REPO_ROOT / "mu" / "host" / "js"
+        source = "\n".join(f.read_text() for f in sorted(js_dir.rglob("*.js")))
         assert "'engine_terminal'" in source, "JS source missing 'engine_terminal'"

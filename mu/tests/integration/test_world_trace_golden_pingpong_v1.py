@@ -5,7 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).parents[2]
+from tests.repo_root import REPO_ROOT
+ROOT = REPO_ROOT
 FIXTURE = (
     ROOT / "tests" / "fixtures" / "world_trace" / "pingpong.world_trace.v1.canon.json"
 )

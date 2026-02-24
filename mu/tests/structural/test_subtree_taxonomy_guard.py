@@ -18,7 +18,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+from tests.repo_root import REPO_ROOT
 
 # Directories where test files must NOT appear.
 FORBIDDEN_TEST_DIRS = ["mu/tools", "mu/scripts"]

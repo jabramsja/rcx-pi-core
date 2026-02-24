@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 
 from rcx_pi.selfhost.eval_seed import step
+from tests.repo_root import REPO_ROOT as _REPO_ROOT
 
 pytestmark = [pytest.mark.slow]
 
@@ -98,7 +99,7 @@ def run_with_trace(projections: list[dict], initial_state: dict, max_steps: int 
 @pytest.fixture(scope="module")
 def bridge_projections():
     """Load bootstrap_structural bridge projections."""
-    path = Path(__file__).parents[2] / "mu" / "bridge" / "bootstrap_structural.v1.json"
+    path = _REPO_ROOT / "mu" / "bridge" / "bootstrap_structural.v1.json"
     with open(path) as f:
         seed = json.load(f)
     return seed["projections"]
@@ -107,7 +108,7 @@ def bridge_projections():
 @pytest.fixture(scope="module")
 def match_v2_projections():
     """Load match.v2 projections."""
-    path = Path(__file__).parents[2] / "mu" / "substrate" / "match.v2.json"
+    path = _REPO_ROOT / "mu" / "substrate" / "match.v2.json"
     with open(path) as f:
         seed = json.load(f)
     return seed["projections"]
@@ -445,7 +446,7 @@ class TestAlgorithmExecutionPath:
     @pytest.fixture
     def recurrence_projections(self):
         """Load recurrence projections."""
-        path = Path(__file__).parents[2] / "mu" / "closures" / "recurrence.v1.json"
+        path = _REPO_ROOT / "mu" / "closures" / "recurrence.v1.json"
         with open(path) as f:
             seed = json.load(f)
         return seed["projections"]
@@ -453,7 +454,7 @@ class TestAlgorithmExecutionPath:
     @pytest.fixture
     def exhaustion_projections(self):
         """Load exhaustion projections."""
-        path = Path(__file__).parents[2] / "mu" / "closures" / "exhaustion.v1.json"
+        path = _REPO_ROOT / "mu" / "closures" / "exhaustion.v1.json"
         with open(path) as f:
             seed = json.load(f)
         return seed["projections"]
