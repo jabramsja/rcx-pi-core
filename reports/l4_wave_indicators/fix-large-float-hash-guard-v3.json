@@ -1,0 +1,30 @@
+{
+  "wave_id": "fix-large-float-hash-guard-v3",
+  "wave_class": "L4_STRUCTURAL",
+  "target_gate_id": "G5",
+  "primary_invariant_id": "INV_CROSS_SUBSTRATE_PARITY",
+  "primary_blocker_class": "INTEGRATION",
+  "host_semantics_delta": "_canonicalize_hash_numeric no longer int-casts floats with abs >= 2**53; pre-commit hook sections 6+7 switched from blocking to prompted",
+  "evidence_command": "PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_numeric_hash_safety_lock_gate.py -v",
+  "evidence_delta": "5 new gate tests (large float guard, safe integer range, cross-substrate parity for 1e30/-1e30)",
+  "progress_proof_before": "int(1e30) in Python produces huge integer literal diverging from JS JSON.stringify(1e30); pre-commit gates block in non-interactive shells",
+  "progress_proof_after": "abs(value) < 2**53 guard prevents int-casting large floats; both gates prompt interactively or defer gracefully",
+  "post_gate_contract_sweep": "mu/tests/parity/test_js_parity_automated.py (285 tests), mu/tests/parity/test_hash_parity.py (10 tests)",
+  "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+  "boot0_track_id": "N3",
+  "boot0_progress_state": "ADVANCE",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/fix-large-float-hash-guard-v3.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id fix-large-float-hash-guard-v3 --output reports/l4_wave_indicators/fix-large-float-hash-guard-v3.json",
+  "collection_timestamp_utc": "2026-02-24T22:52:04Z",
+  "collector_version": "2.2.0",
+  "repeat_run_speedup_ratio": 1.272914,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 4,
+  "step_growth_slope": 0.42793,
+  "repeat_run_raw_seconds": [0.544718, 0.42793],
+  "step_growth_points": [
+    {"step": 1, "elapsed_seconds": 0.544718},
+    {"step": 2, "elapsed_seconds": 0.972648}
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh"
+}
