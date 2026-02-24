@@ -175,9 +175,9 @@ def mu_type_name(value: Any) -> str:
         return "float"
     if isinstance(value, str):
         return "str"
-    if isinstance(value, list):
+    if type(value) is list:
         return "list"
-    if isinstance(value, dict):
+    if type(value) is dict:
         return "dict"
     return "INVALID"
 
