@@ -254,7 +254,7 @@ function handleJsonApi(apiArg, seeds) {
       } else {
         const boot1Mode = request.boot1LoopMode ?? true;
         const observerEvents = request.observer_strict !== undefined
-          ? (Array.isArray(request.observer_strict) && request.observer_strict.length === 0 ? [] : (() => { throw new RcxError('api.bad_request', 'observer_strict must be an empty array'); })())
+          ? (Array.isArray(request.observer_strict) ? request.observer_strict : request.observer_strict === null ? null : (() => { throw new RcxError('observer.invalid_type', 'observer_strict must be an array or null, got ' + typeof request.observer_strict); })())
           : (request.observer ? [] : null);
         try {
           guardMaxSteps(maxSteps, 'maxSteps');
@@ -303,7 +303,7 @@ function handleJsonApi(apiArg, seeds) {
         const boot1Mode = request.boot1LoopMode ?? true;
         const { projections: userProjs, input, hemispheres, maxSteps, frozen, maxEngineIterations, maxAlgorithmIterations } = request;
         const observerEvents = request.observer_strict !== undefined
-          ? (Array.isArray(request.observer_strict) && request.observer_strict.length === 0 ? [] : (() => { throw new RcxError('api.bad_request', 'observer_strict must be an empty array'); })())
+          ? (Array.isArray(request.observer_strict) ? request.observer_strict : request.observer_strict === null ? null : (() => { throw new RcxError('observer.invalid_type', 'observer_strict must be an array or null, got ' + typeof request.observer_strict); })())
           : (request.observer ? [] : null);
         try {
           guardMaxSteps(maxSteps, 'maxSteps');
@@ -352,7 +352,7 @@ function handleJsonApi(apiArg, seeds) {
       } else {
         const boot1Mode = request.boot1LoopMode ?? true;
         const metaObserver = request.observer_strict !== undefined
-          ? (Array.isArray(request.observer_strict) && request.observer_strict.length === 0 ? [] : (() => { throw new RcxError('api.bad_request', 'observer_strict must be an empty array'); })())
+          ? (Array.isArray(request.observer_strict) ? request.observer_strict : request.observer_strict === null ? null : (() => { throw new RcxError('observer.invalid_type', 'observer_strict must be an array or null, got ' + typeof request.observer_strict); })())
           : [];
         const maxEngIter = reqMaxEngineIter ?? 20;
         const baseline = Array.isArray(metaObserver)

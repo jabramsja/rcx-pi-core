@@ -232,11 +232,11 @@ class TestNoNewKernelReservedFields:
         )
 
     def test_kernel_reserved_fields_count_unchanged(self):
-        """KERNEL_RESERVED_FIELDS count must remain at 24."""
+        """KERNEL_RESERVED_FIELDS count must remain at 25."""
         from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 
-        assert len(KERNEL_RESERVED_FIELDS) == 24, (
-            f"Expected 24 KERNEL_RESERVED_FIELDS, got {len(KERNEL_RESERVED_FIELDS)}. "
+        assert len(KERNEL_RESERVED_FIELDS) == 25, (
+            f"Expected 25 KERNEL_RESERVED_FIELDS, got {len(KERNEL_RESERVED_FIELDS)}. "
             f"Metabolization must not add new reserved fields. "
             f"Current: {sorted(KERNEL_RESERVED_FIELDS)}"
         )
