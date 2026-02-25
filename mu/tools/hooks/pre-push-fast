@@ -31,12 +31,15 @@ if [ -n "$RANGE" ]; then
             echo "   Add STATUS.md or TASKS.md updates for core structural changes."
             exit 1
         fi
-        # Derive wave-id from codex branch name (if applicable)
-        # PR: github.head_ref gives source branch; local: git branch name
+        # Derive wave-id from codex branch name only when this push updates TASKS.md.
+        # This avoids forcing structural-wave validation on follow-up CI/tooling commits
+        # that happen to be on a codex/l4-* branch but do not carry tracker-note updates.
         BRANCH="$(git rev-parse --abbrev-ref HEAD)"
         WAVE_ID_FLAG=""
         if [[ "$BRANCH" == codex/* ]]; then
-            WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+            if echo "$RANGE_FILES" | grep -qx "TASKS.md"; then
+                WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+            fi
         fi
         if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$RANGE" $WAVE_ID_FLAG; then
             echo ""
