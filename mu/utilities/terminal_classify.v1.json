@@ -1,0 +1,108 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "TERMINAL_CLASSIFY_SEED",
+    "description": "Structural terminal classification and engine exit-reason derivation as Mu projections",
+    "doc": "mu/docs/core/SelfHosting.v0.md",
+    "execution_layer": "STRUCTURAL",
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Deterministic: same input -> same output",
+      "Classification uses exact key-set matching via _tc wrapper",
+      "Exit-reason uses boolean priority via _tc_exit wrapper",
+      "kernel_done is NOT handled here (requires key-membership check)"
+    ]
+  },
+  "projections": [
+    {
+      "id": "tc.recurrence",
+      "description": "Recurrence terminal: {closure_detected, final_result, tau_step}",
+      "pattern": {
+        "_tc": {
+          "closure_detected": {"var": "_cd"},
+          "final_result": {"var": "_fr"},
+          "tau_step": {"var": "_ts"}
+        }
+      },
+      "body": "recurrence_terminal"
+    },
+    {
+      "id": "tc.exhaustion",
+      "description": "Exhaustion terminal: {action, exhaustion_detected, frozen, operator_to_freeze}",
+      "pattern": {
+        "_tc": {
+          "action": {"var": "_a"},
+          "exhaustion_detected": {"var": "_ed"},
+          "frozen": {"var": "_f"},
+          "operator_to_freeze": {"var": "_otf"}
+        }
+      },
+      "body": "exhaustion_terminal"
+    },
+    {
+      "id": "tc.engine",
+      "description": "Engine terminal: 8-key unwrapped engine output",
+      "pattern": {
+        "_tc": {
+          "value": {"var": "_v"},
+          "closure_detected": {"var": "_cd"},
+          "tau_step": {"var": "_ts"},
+          "exhaustion_detected": {"var": "_ed"},
+          "operator_frozen": {"var": "_of"},
+          "frozen_set": {"var": "_fs"},
+          "action": {"var": "_a"},
+          "stall": {"var": "_s"}
+        }
+      },
+      "body": "engine_terminal"
+    },
+    {
+      "id": "tc.exit.closure",
+      "description": "Exit reason: closure detected (highest priority)",
+      "pattern": {
+        "_tc_exit": {
+          "cd": true,
+          "ed": {"var": "_ed"},
+          "st": {"var": "_st"}
+        }
+      },
+      "body": "closure"
+    },
+    {
+      "id": "tc.exit.exhaustion",
+      "description": "Exit reason: exhaustion detected (second priority)",
+      "pattern": {
+        "_tc_exit": {
+          "cd": false,
+          "ed": true,
+          "st": {"var": "_st"}
+        }
+      },
+      "body": "exhaustion"
+    },
+    {
+      "id": "tc.exit.stall",
+      "description": "Exit reason: stall (third priority)",
+      "pattern": {
+        "_tc_exit": {
+          "cd": false,
+          "ed": false,
+          "st": true
+        }
+      },
+      "body": "stall"
+    },
+    {
+      "id": "tc.exit.completed",
+      "description": "Exit reason: completed (lowest priority — no flags set)",
+      "pattern": {
+        "_tc_exit": {
+          "cd": false,
+          "ed": false,
+          "st": false
+        }
+      },
+      "body": "completed"
+    }
+  ]
+}

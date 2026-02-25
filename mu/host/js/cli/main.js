@@ -32,6 +32,7 @@ const SEED_CHECKSUMS = {
   'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
   'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
   'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
+  'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -95,6 +96,10 @@ const EXPECTED_PROJECTION_IDS = {
     'hemisphere.metabolize.sink_to_r_null', 'hemisphere.metabolize.sink_to_r_inf',
     'hemisphere.recover.stall_to_lobes', 'hemisphere.recover.stall_to_sink',
     'hemisphere.promote.lobes_to_r_a', 'hemisphere.recycle.residual_to_sink',
+  ],
+  'terminal_classify.v1.json': [
+    'tc.recurrence', 'tc.exhaustion', 'tc.engine',
+    'tc.exit.closure', 'tc.exit.exhaustion', 'tc.exit.stall', 'tc.exit.completed',
   ],
 };
 

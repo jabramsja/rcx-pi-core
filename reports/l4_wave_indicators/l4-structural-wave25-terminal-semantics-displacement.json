@@ -1,0 +1,30 @@
+{
+  "wave_id": "l4-structural-wave25-terminal-semantics-displacement",
+  "wave_class": "L4_STRUCTURAL",
+  "target_gate_id": "G2",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "primary_blocker_class": "DESIGN",
+  "host_semantics_delta": "classify_terminal_kind and _derive_engine_exit_reason in Python and JS now delegate to terminal_classify.v1.json seed projections via eval_step/step; kernel_done remains host-side; compatibility constants preserved",
+  "evidence_command": "PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_terminal_semantics_displacement_gate.py -v",
+  "evidence_delta": "36 new gate tests (seed structure, classification, exit-reason, source locks, behavior parity, compat constants, no-main-import lock)",
+  "progress_proof_before": "Terminal classification and exit-reason derivation are host-encoded if/else chains with frozenset/Set comparisons in Python and JS",
+  "progress_proof_after": "Terminal classification and exit-reason derivation delegate to 7-projection terminal_classify.v1.json seed via structural step(); host retains kernel_done check only",
+  "post_gate_contract_sweep": "mu/tests/parity/test_js_parity_automated.py, mu/tests/l4_gates/test_terminal_classification_parity_gate.py, mu/tests/structural/test_engine_pipeline_discipline.py",
+  "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+  "boot0_track_id": "N3",
+  "boot0_progress_state": "ADVANCE",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/l4-structural-wave25-terminal-semantics-displacement.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id l4-structural-wave25-terminal-semantics-displacement --output reports/l4_wave_indicators/l4-structural-wave25-terminal-semantics-displacement.json",
+  "collection_timestamp_utc": "2026-02-25T06:01:51Z",
+  "collector_version": "2.2.0",
+  "repeat_run_speedup_ratio": 1.261429,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 66,
+  "step_growth_slope": 0.441967,
+  "repeat_run_raw_seconds": [0.55751, 0.441967],
+  "step_growth_points": [
+    {"step": 1, "elapsed_seconds": 0.55751},
+    {"step": 2, "elapsed_seconds": 0.999477}
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh"
+}

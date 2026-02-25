@@ -38,6 +38,10 @@ from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached, mu_hash_control, mu
 from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed
+from .projection_loader import make_projection_loader
+
+# Cached loader for terminal classification seed (structural displacement of classify/exit-reason logic)
+_load_tc_projections, _clear_tc_cache = make_projection_loader("terminal_classify.v1.json")
 
 
 # =============================================================================
@@ -81,20 +85,20 @@ def classify_terminal_kind(value) -> str:  # AST_OK: infra — unified terminal 
     Returns one of TERMINAL_KINDS. Pure structural check — no side effects.
     Priority: kernel_done > recurrence_terminal > exhaustion_terminal > engine_terminal > non_terminal.
     Cross-substrate parity: must match JS classifyTerminalKind() exactly.
+
+    Structural displacement (Wave 25): classification logic now delegated to
+    terminal_classify.v1.json seed projections via eval_step(). kernel_done
+    stays host-side (requires key-membership check, not exact-key-match).
     """
     if not isinstance(value, dict):
         return "non_terminal"
-    # Kernel terminal: {_mode: "done", _result, _stall}
+    # Kernel terminal: {_mode: "done", _result, _stall} — host-side (key-membership)
     if value.get("_mode") == "done" and "_result" in value and "_stall" in value:
         return "kernel_done"
-    keys = frozenset(value.keys())  # AST_OK: key — terminal kind comparison
-    if keys == _RECURRENCE_TERMINAL_KEYS:
-        return "recurrence_terminal"
-    if keys == _EXHAUSTION_TERMINAL_KEYS:
-        return "exhaustion_terminal"
-    if keys == _ENGINE_TERMINAL_KEYS:
-        return "engine_terminal"
-    return "non_terminal"
+    # Structural seed classification via projection matching
+    tc_projs = _load_tc_projections()
+    result = eval_step(tc_projs, {"_tc": value})
+    return result if isinstance(result, str) else "non_terminal"
 
 
 # =============================================================================
@@ -676,17 +680,9 @@ def is_kernel_terminal(result: Mu) -> bool:
     Check if result is in kernel terminal state.
 
     Terminal state is: {"_mode": "done", "_result": ..., "_stall": ...}
-    This is a simple structural marker check - no semantic decisions.
-    The kernel itself determines what "done" means; we just detect the marker.
-
-    Phase 8b: This replaces the semantic branching that was inside the loop.
+    Delegates to classify_terminal_kind (host-side kernel_done check).
     """
-    return (
-        isinstance(result, dict) and
-        result.get("_mode") == "done" and
-        "_result" in result and
-        "_stall" in result
-    )
+    return classify_terminal_kind(result) == "kernel_done"
 
 
 def is_kernel_intermediate(result: Mu) -> bool:
@@ -1566,14 +1562,18 @@ def _derive_engine_exit_reason(engine_result: dict) -> str:  # AST_OK: infra —
 
     Priority: closure > exhaustion > stall > completed.
     Does NOT modify engine_result.
+
+    Structural displacement (Wave 25): exit-reason derivation now delegated to
+    terminal_classify.v1.json seed projections via eval_step().
     """
-    if engine_result.get("closure_detected"):
-        return "closure"
-    if engine_result.get("exhaustion_detected"):
-        return "exhaustion"
-    if engine_result.get("stall"):
-        return "stall"
-    return "completed"
+    tc_projs = _load_tc_projections()
+    wrapped = {"_tc_exit": {
+        "cd": bool(engine_result.get("closure_detected")),
+        "ed": bool(engine_result.get("exhaustion_detected")),
+        "st": bool(engine_result.get("stall")),
+    }}
+    result = eval_step(tc_projs, wrapped)
+    return result if isinstance(result, str) else "completed"
 
 
 def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-entry)
