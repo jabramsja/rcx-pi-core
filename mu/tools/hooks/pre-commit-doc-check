@@ -9,12 +9,13 @@
 # 4. Enforces tracker sync for core changes (`mu/` or `rcx_pi/selfhost/`) - BLOCKS on failure
 # 5. [reserved]
 # 6. Agent review reminder (non-blocking, cooldown-based)
-# 7. Adversary review reminder (non-blocking, cooldown-based)
+# 7. Adversary review (non-blocking reminder by default; optional explicit run)
 #
-# Sections 6+7 never block or prompt. They print a one-line reminder if no
-# recent agent/adversary run detected (30-min cooldown). Run agents manually
-# when you choose to. Env vars to suppress: RCX_SKIP_AGENT_CHECK=1,
-# RCX_SKIP_ADVERSARY_CHECK=1.
+# Section 6+7 never prompt by default.
+# Env vars:
+#   RCX_SKIP_AGENT_CHECK=1      -> suppress agent reminder
+#   RCX_SKIP_ADVERSARY_CHECK=1  -> suppress adversary reminder/run
+#   RCX_RUN_ADVERSARY=1         -> run adversary explicitly in this commit
 #
 # Use --no-verify to skip entirely (not recommended).
 
@@ -170,27 +171,30 @@ if [ -n "$CORE_FILES_CHANGED" ] && [ "${RCX_SKIP_AGENT_CHECK:-}" != "1" ]; then
     fi
 fi
 
-# === 7. Adversary review reminder (non-blocking, cooldown-based) ===
-# Prints a one-line reminder if no recent adversary run. Never blocks or prompts.
-# RCX_SKIP_ADVERSARY_CHECK=1 suppresses the reminder entirely.
+# === 7. Adversary review (non-blocking reminder; explicit opt-in run) ===
+# Default: reminder only (never prompts, never blocks).
+# Optional: set RCX_RUN_ADVERSARY=1 to run adversary in-hook; non-zero then blocks.
+# RCX_SKIP_ADVERSARY_CHECK=1 suppresses both reminder and in-hook run.
 if [ -n "$CORE_FILES_CHANGED" ] && [ "${RCX_SKIP_ADVERSARY_CHECK:-}" != "1" ]; then
-    ADVERSARY_COOLDOWN="/tmp/.rcx_adversary_cooldown"
-    ADVERSARY_RUN_RECENT=false
-
-    if [ -f "$ADVERSARY_COOLDOWN" ]; then
-        if [ "$(uname)" = "Darwin" ]; then
-            COOLDOWN_AGE=$(( $(date +%s) - $(stat -f %m "$ADVERSARY_COOLDOWN") ))
-        else
-            COOLDOWN_AGE=$(( $(date +%s) - $(stat -c %Y "$ADVERSARY_COOLDOWN") ))
+    CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
+    if [ "${RCX_RUN_ADVERSARY:-}" = "1" ]; then
+        echo "   ℹ️  RCX_RUN_ADVERSARY=1 set; running adversary review (sonnet)."
+        echo "Running adversary review (sonnet)..."
+        echo "   Note: AVX warnings can be ignored if run_adversary exits 0."
+        ADVERSARY_OUTPUT_FILE="/tmp/.rcx_adversary_output.md"
+        set +e
+        PYTHONHASHSEED=0 python3 tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet 2>&1 | tee "$ADVERSARY_OUTPUT_FILE"
+        ADVERSARY_EXIT=${PIPESTATUS[0]}
+        set -e
+        if [ "$ADVERSARY_EXIT" -ne 0 ]; then
+            echo ""
+            echo "❌ Adversary review failed"
+            echo "   Report: $ADVERSARY_OUTPUT_FILE"
+            FAILED=1
         fi
-        if [ "$COOLDOWN_AGE" -lt 1800 ]; then
-            ADVERSARY_RUN_RECENT=true
-        fi
-    fi
-
-    if [ "$ADVERSARY_RUN_RECENT" = "false" ]; then
-        CORE_FILE_LIST=$(echo "$CORE_FILES_CHANGED" | tr '\n' ' ')
-        echo "   ℹ️  No recent adversary review. Run when ready: python tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet"
+    else
+        echo "   ℹ️  Adversary not run in pre-commit (non-interactive default)."
+        echo "      Run manually when needed: python tools/runners/run_adversary.py $CORE_FILE_LIST --model sonnet"
     fi
 fi
 
