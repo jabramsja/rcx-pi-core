@@ -123,17 +123,22 @@ class TestClassifyTerminalKindSourceParity:
             assert f'"{kind}"' in source, f"Python source missing terminal kind: {kind!r}"
 
     def test_js_classify_priority_matches_python(self):
-        """JS function checks kernel_done before recurrence/exhaustion/engine."""
+        """JS function checks kernel_done before seed-based classification.
+
+        Wave 25: classification now delegates to terminal_classify.v1.json seed.
+        Priority is: kernel_done (host-side) checked first, then seed step() handles
+        recurrence > exhaustion > engine via projection order.
+        """
         js = _js_source()
         # Extract function body
         start = js.index("function classifyTerminalKind(value)")
         body = js[start:start + 600]
-        # Verify priority order: kernel_done checked before others
+        # kernel_done must appear before step() call (host-side check first)
         kernel_pos = body.index("kernel_done")
-        recurrence_pos = body.index("recurrence_terminal")
-        exhaustion_pos = body.index("exhaustion_terminal")
-        engine_pos = body.index("engine_terminal")
-        assert kernel_pos < recurrence_pos < exhaustion_pos < engine_pos
+        step_pos = body.index("step(")
+        assert kernel_pos < step_pos, (
+            "kernel_done must be checked before seed step() delegation"
+        )
 
 
 # =============================================================================

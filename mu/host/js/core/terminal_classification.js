@@ -3,10 +3,17 @@
  * RCX Terminal Classification
  *
  * Terminal shape checks, hemisphere keys, engine exit reasons.
- * Depends on: core/constants.js only
+ * Structural displacement (Wave 25): classify/exit-reason logic delegated
+ * to terminal_classify.v1.json seed projections via step().
+ * kernel_done stays host-side (key-membership check).
+ *
+ * Depends on: core/constants.js, core/bootstrap_core.js, core/seed_loader.js
  */
 
-// Terminal shape key sets (mirrors Python step_mu.py:42-47)
+const { step } = require('./bootstrap_core');
+
+// Terminal shape key sets — concrete compatibility exports (kept this wave).
+// Mirrors Python step_mu.py frozenset constants.
 const RECURRENCE_TERMINAL_KEYS = new Set(['closure_detected', 'final_result', 'tau_step']);
 const EXHAUSTION_TERMINAL_KEYS = new Set(['action', 'exhaustion_detected', 'frozen', 'operator_to_freeze']);
 const ENGINE_TERMINAL_KEYS = new Set([
@@ -26,7 +33,7 @@ const TERMINAL_KINDS = new Set([
   'non_terminal',
 ]);
 
-// Hemisphere constants (mirrors Python step_mu.py:1626-1632)
+// Hemisphere constants (mirrors Python step_mu.py)
 const HEMISPHERE_KEY_ORDER = ['r_null', 'r_inf', 'r_a', 'lobes', 'sink'];
 const HEMISPHERE_KEYS = new Set(HEMISPHERE_KEY_ORDER);
 
@@ -41,20 +48,42 @@ function setsEqual(a, b) {
   return true;
 }
 
+// Cached terminal classify seed projections (lazy-loaded)
+let _tcProjections = null;
+function _loadTcProjections() {
+  if (!_tcProjections) {
+    const { loadVerifiedSeed } = require('./seed_loader');
+    const seed = loadVerifiedSeed('terminal_classify.v1.json', 'utilities');
+    _tcProjections = seed.projections;
+  }
+  return _tcProjections;
+}
+
 /**
  * Classify a value into exactly one terminal kind.
  * Returns one of TERMINAL_KINDS. Pure structural check — no side effects.
  * Priority: kernel_done > recurrence > exhaustion > engine > non_terminal.
  * Cross-substrate parity: must match Python classify_terminal_kind() exactly.
+ *
+ * Structural displacement (Wave 25): delegates to terminal_classify.v1.json
+ * seed projections via step(). kernel_done stays host-side.
  */
 function classifyTerminalKind(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return 'non_terminal';
+  // kernel_done: host-side (key-membership check, not exact-key-match)
   if (value._mode === 'done' && '_result' in value && '_stall' in value) return 'kernel_done';
+  // Key-set prefilter: only candidate shapes reach the seed path.
+  // Avoids step() (and its assertMu walk) on engine-internal state dicts.
   const keys = new Set(Object.keys(value));
-  if (setsEqual(keys, RECURRENCE_TERMINAL_KEYS)) return 'recurrence_terminal';
-  if (setsEqual(keys, EXHAUSTION_TERMINAL_KEYS)) return 'exhaustion_terminal';
-  if (setsEqual(keys, ENGINE_TERMINAL_KEYS)) return 'engine_terminal';
-  return 'non_terminal';
+  if (!setsEqual(keys, RECURRENCE_TERMINAL_KEYS) &&
+      !setsEqual(keys, EXHAUSTION_TERMINAL_KEYS) &&
+      !setsEqual(keys, ENGINE_TERMINAL_KEYS)) {
+    return 'non_terminal';
+  }
+  // Structural seed classification via projection matching
+  const projs = _loadTcProjections();
+  const result = step(projs, { _tc: value });
+  return typeof result === 'string' ? result : 'non_terminal';
 }
 
 /**
@@ -79,12 +108,21 @@ function isEngineTerminal(value) {
  * Priority: closure > exhaustion > stall > completed.
  * Pure function — does NOT modify engine_result.
  * Mirrors Python _derive_engine_exit_reason().
+ *
+ * Structural displacement (Wave 25): delegates to terminal_classify.v1.json
+ * seed projections via step().
  */
 function deriveEngineExitReason(engineResult) {
-  if (engineResult.closure_detected) return 'closure';
-  if (engineResult.exhaustion_detected) return 'exhaustion';
-  if (engineResult.stall) return 'stall';
-  return 'completed';
+  const projs = _loadTcProjections();
+  const wrapped = {
+    _tc_exit: {
+      cd: !!engineResult.closure_detected,
+      ed: !!engineResult.exhaustion_detected,
+      st: !!engineResult.stall,
+    },
+  };
+  const result = step(projs, wrapped);
+  return typeof result === 'string' ? result : 'completed';
 }
 
 function defaultHemispheres() {

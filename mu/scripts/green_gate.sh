@@ -9,6 +9,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 MODE="${1:-all}"   # all | python-only
+PYTEST_TIMEOUT="${PYTEST_TIMEOUT:-300}"  # per-test timeout guard (seconds)
 
 # Check if pytest-xdist is available for parallel execution (2-3x speedup)
 # Using --dist worksteal for better load balancing (idle workers steal from busy)
@@ -70,6 +71,7 @@ run_python() {
   # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
   # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
   # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
+  # Note: mu/utilities/ seeds (terminal_classify) use underscore-prefixed fields for wrapper keys (_tc, _tc_exit)
   # Note: mu/tests/fixtures/ test vectors intentionally use underscore keys for kernel-internal state
   if grep -RInE --include='*.json' '"_[a-zA-Z]+":' mu/ 2>/dev/null | \
       grep -v '"_marker":' | \
@@ -83,6 +85,7 @@ run_python() {
       grep -v 'enginenews.v1.json' | \
       grep -v 'exhaust.v1.json' | \
       grep -v 'bootstrap_structural.v1.json' | \
+      grep -v 'terminal_classify.v1.json' | \
       grep -v 'mu/tests/fixtures/'; then
     echo "ERROR: Found non-standard underscore keys in JSON"
     exit 1
@@ -98,14 +101,17 @@ run_python() {
   # push/PR excludes fuzzers and slow (JS parity verified via node run in step 11)
   if [ "${HYPOTHESIS_PROFILE:-}" = "ci_full" ]; then
     echo "[PY 7/10] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
-    python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --timeout=300
+    python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --timeout="$PYTEST_TIMEOUT"
   else
     echo "[PY 7/10] Python test suite (excludes stress, slow, fuzzer, and JS parity tests)"
     # Fuzzer tests run 50+ hypothesis examples each, consuming ~22 min on CI
     # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
     # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
     # JS parity tests spawn node subprocesses — nightly only; fast path has step 11
-    python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" --ignore=tests/stress/ --ignore=tests/parity/test_js_parity_automated.py
+    python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" \
+      --ignore=tests/stress/ \
+      --ignore=tests/parity/test_js_parity_automated.py \
+      --timeout="$PYTEST_TIMEOUT"
   fi
   echo
 

@@ -77,6 +77,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "fix.v1.json": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
     # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
     "metabolization.v1.json": "a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7",
+    # Terminal classify v1: structural terminal classification and exit-reason derivation (STRUCTURAL)
+    "terminal_classify.v1.json": "413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7",
 }
 
 # Expected projection IDs for each seed.
@@ -262,6 +264,16 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "hemisphere.promote.lobes_to_r_a",       # Lobes -> r_a (closure evidence)
         "hemisphere.recycle.residual_to_sink",   # Unresolvable -> sink (recycle)
     ],
+    # Terminal classify v1: structural terminal classification + exit-reason derivation (STRUCTURAL)
+    "terminal_classify.v1.json": [
+        "tc.recurrence",       # Recurrence terminal (3-key shape)
+        "tc.exhaustion",       # Exhaustion terminal (4-key shape)
+        "tc.engine",           # Engine terminal (8-key shape)
+        "tc.exit.closure",     # Exit reason: closure (highest priority)
+        "tc.exit.exhaustion",  # Exit reason: exhaustion
+        "tc.exit.stall",       # Exit reason: stall
+        "tc.exit.completed",   # Exit reason: completed (lowest priority)
+    ],
 }
 
 
@@ -284,6 +296,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     # Utilities
     "classify.v1.json": "utilities",
     "eval.v1.json": "utilities",
+    "terminal_classify.v1.json": "utilities",
     # Programs
     "rcx_engine.v1.json": "programs",
     "hemispheres.v1.json": "programs",

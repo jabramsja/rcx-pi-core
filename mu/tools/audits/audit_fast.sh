@@ -126,13 +126,15 @@ echo "== 1l) Roadmap governance check =="
 pytest tests/docs/test_roadmap_governance.py -q
 
 echo "== 1m) L4 execution contract check =="
-# Derive wave-id from codex branch name (if applicable)
+# Derive wave-id from codex branch name only when TASKS.md is in the scope
+# being checked.  Follow-up CI/tooling commits on codex/* branches skip
+# wave-class enforcement (same logic as pre-push-fast).
 L4_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-L4_WAVE_ID_FLAG=""
-if [[ "$L4_BRANCH" == codex/* ]]; then
-    L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
-fi
 if git diff --cached --name-only | grep -q .; then
+    L4_WAVE_ID_FLAG=""
+    if [[ "$L4_BRANCH" == codex/* ]] && git diff --cached --name-only | grep -qx "TASKS.md"; then
+        L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+    fi
     python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
 else
     # No staged files — use committed range (matches pre-push-fast logic).
@@ -147,6 +149,10 @@ else
         L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
         if [ -n "$L4_RANGE_FILES" ]; then
             echo "No staged files — using committed range $L4_RANGE"
+            L4_WAVE_ID_FLAG=""
+            if [[ "$L4_BRANCH" == codex/* ]] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
+                L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+            fi
             python3 tools/checks/enforce_l4_execution_contract.py --range "$L4_RANGE" $L4_WAVE_ID_FLAG
         else
             echo "No staged files, no committed changes in $L4_RANGE — skipping L4 check"
@@ -156,6 +162,10 @@ else
         L4_DIRTY_FILES="$(git diff --name-only | sort -u)"
         if [ -n "$L4_DIRTY_FILES" ]; then
             echo "No staged files, no upstream — checking dirty tracked files only"
+            L4_WAVE_ID_FLAG=""
+            if [[ "$L4_BRANCH" == codex/* ]] && echo "$L4_DIRTY_FILES" | grep -qx "TASKS.md"; then
+                L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+            fi
             # shellcheck disable=SC2086
             python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
         else
@@ -177,7 +187,7 @@ echo "== 4) Core structural tests (parallel if available) =="
 # Run core algorithm tests - these are the most important for local iteration
 # Skip fuzzer tests (those run 500-1000 examples each, slow locally)
 # Core tests: match, subst, step, kernel, eval_seed, mu_type
-pytest $PARALLEL_FLAG -q \
+pytest $PARALLEL_FLAG -q -m "not slow and not fuzzer" \
     tests/structural/ \
     tests/tools/ \
     tests/l4_gates/ \

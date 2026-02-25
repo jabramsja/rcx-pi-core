@@ -31,14 +31,24 @@ if [ -n "$RANGE" ]; then
             echo "   Add STATUS.md or TASKS.md updates for core structural changes."
             exit 1
         fi
-        # Derive wave-id from codex branch name (if applicable)
-        # PR: github.head_ref gives source branch; local: git branch name
+        # L4 contract must evaluate the FULL wave diff from dev, not
+        # per-push incremental.  Incremental ranges miss runtime files
+        # committed in earlier pushes, causing indicator delta mismatches
+        # with CI (which always uses origin/dev...HEAD).
+        L4_RANGE="origin/dev...HEAD"
+        L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
+        # Derive wave-id from codex branch name only when the full wave
+        # diff includes TASKS.md.  This avoids forcing structural-wave
+        # validation on follow-up CI/tooling commits that happen to be on
+        # a codex/l4-* branch but do not carry tracker-note updates.
         BRANCH="$(git rev-parse --abbrev-ref HEAD)"
         WAVE_ID_FLAG=""
         if [[ "$BRANCH" == codex/* ]]; then
-            WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+            if echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
+                WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+            fi
         fi
-        if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$RANGE" $WAVE_ID_FLAG; then
+        if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$L4_RANGE" $WAVE_ID_FLAG; then
             echo ""
             echo "❌ L4 execution contract check failed."
             echo "   See roadmap/L4ExecutionContract.v2.md for wave classification rules."

@@ -37,7 +37,8 @@ MAX_MU_DEPTH = 300
 MAX_MU_WIDTH = 1000
 
 
-def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
+def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0,
+          _memo: dict[tuple[int, int], bool] | None = None) -> bool:
     """
     Check if a value is a valid Mu (JSON-compatible).
 
@@ -53,6 +54,7 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
         value: The value to check.
         _seen: Internal parameter for cycle detection. Do not pass.
         _depth: Internal parameter for depth tracking. Do not pass.
+        _memo: Internal parameter for per-call memoization. Do not pass.
 
     Returns:
         True if value is a valid Mu, False otherwise.
@@ -62,6 +64,12 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
         Deep nesting beyond MAX_MU_DEPTH is rejected (return False).
         Wide structures beyond MAX_MU_WIDTH are rejected (return False).
         This prevents infinite recursion/stack overflow and resource exhaustion attacks.
+
+        Per-call memoization: compound nodes already validated at a given depth
+        are not re-walked. Memo key is (id(obj), depth) so that the same object
+        at different depths is re-checked (depth affects validity). The memo is
+        per-call only (no global cache) and fail-closed: only True results are
+        memoized; False results and cycles are always re-checked.
     """
     # Depth limit check (prevents RecursionError attacks)
     if _depth > MAX_MU_DEPTH:
@@ -89,7 +97,13 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
     if value_type is list or value_type is dict:
         if _seen is None:
             _seen = set()
+        if _memo is None:
+            _memo = {}
         value_id = id(value)
+        # Per-call memo: skip re-validation of nodes already proven valid at this depth.
+        memo_key = (value_id, _depth)
+        if memo_key in _memo:
+            return _memo[memo_key]
         if value_id in _seen:
             # Circular reference detected - not valid Mu
             return False
@@ -104,8 +118,10 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
         if len(value) > MAX_MU_WIDTH:
             _seen.discard(value_id)
             return False
-        result = all(is_mu(item, _seen, _depth + 1) for item in value)
+        result = all(is_mu(item, _seen, _depth + 1, _memo) for item in value)
         _seen.discard(value_id)
+        if result:
+            _memo[memo_key] = True
         return result
     if value_type is dict:
         # Width limit check (prevents resource exhaustion attacks)
@@ -114,9 +130,11 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0) -> bool:
             return False
         result = (
             all(type(k) is str for k in value.keys()) and
-            all(is_mu(v, _seen, _depth + 1) for v in value.values())
+            all(is_mu(v, _seen, _depth + 1, _memo) for v in value.values())
         )
         _seen.discard(value_id)
+        if result:
+            _memo[memo_key] = True
         return result
     # Anything else (function, class, object, bytes, set, tuple, subclasses, etc.) is not a Mu
     return False
