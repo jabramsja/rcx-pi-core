@@ -589,6 +589,10 @@ def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
     for proj in projections:
         if isinstance(proj, dict):
             ids.append(proj.get("id"))
+        else:
+            raise ValueError(
+                f"SECURITY: Non-dict projection in bridge ordering validation: {type(proj).__name__}"
+            )
 
     required_bridge_ids = (
         "bridge.var.check_existing",
@@ -1959,6 +1963,14 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
         # See Boot1LoopContract.v0.md §3 Option A.
         if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
             tail_payload = next_state["_tail_call"]
+            # Validate reserved fields on re-entry (parity with Boot1 path, line ~1733)
+            if isinstance(tail_payload, dict):
+                tail_input = tail_payload.get("input")
+                if tail_input is not None:
+                    validate_no_kernel_reserved_fields(tail_input, "trampoline tail_call input")
+                tail_frozen = tail_payload.get("frozen")
+                if tail_frozen is not None:
+                    validate_no_kernel_reserved_fields(tail_frozen, "trampoline tail_call frozen")
             state = {"_run_engine": tail_payload}
             continue
 
