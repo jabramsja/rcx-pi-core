@@ -1,0 +1,18 @@
+{
+  "wave_id": "wave-a2-doc-drift",
+  "repeat_run_speedup_ratio": 1.0,
+  "parity_diff_count": 0,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.001,
+  "repeat_run_raw_seconds": [
+    0.001,
+    0.001
+  ],
+  "step_growth_points": [
+    {"step": 1, "elapsed_seconds": 0.001},
+    {"step": 2, "elapsed_seconds": 0.002}
+  ],
+  "parity_diff_source": "docs-only wave, no runtime changes",
+  "collection_timestamp_utc": "2026-02-25T19:35:34Z",
+  "collector_version": "2.2.0"
+}

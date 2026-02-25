@@ -20,7 +20,7 @@ If a task is not listed here, it is NOT to be implemented.
 11. Enginenews-like specs are target workloads to prove: "does ω/closure actually emerge?"
 12. Every task must answer: "Does this reduce host smuggling and increase native emergence?"
 13. **L3 Parity: Python and JavaScript must run identical projections with identical semantics.**
-    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1, metabolization.v1 (47+ core projections + 11 engine + 6 fix + 6 metabolization)
+    - Same seeds: kernel.v1, match.v2, subst.v2, recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1, hemispheres.v1, rcx_engine.v1, metabolization.v1, bootstrap_structural.v1, terminal_classify.v1 (projection counts verified by `mu/tests/structural/test_seed_counts.py::EXPECTED_COUNTS`)
     - Same bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu)
     - Any change to Python projection behavior MUST be mirrored in JS
     - Any new seed MUST be loaded and tested in BOTH substrates
@@ -96,6 +96,8 @@ If a task is not listed here, it is NOT to be implemented.
 ## Ra (Resolved / Merged)
 
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
+
+- Tracker sync note (2026-02-25, wave-a2-doc-drift): **Fix 6 stale numeric claims in STATUS.md, TASKS.md, OperatorExhaustion.v0.md.** Class: MAINTENANCE. no_op_proof: docs-only wave fixing stale test count (3690→4736), projection totals (47/49→61 + test_seed_counts.py references), seed inventory (15/110→17/143), KERNEL_RESERVED_FIELDS (24→25), last-updated date. No runtime/substrate changes. defer_reason_code: DOC_DRIFT. target_gate_id: G5. primary_blocker_class: DESIGN. primary_invariant_id: INV_CROSS_SUBSTRATE_PARITY. indicator_artifact_ref: reports/l4_wave_indicators/wave-a2-doc-drift.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id wave-a2-doc-drift --range origin/dev...HEAD --output reports/l4_wave_indicators/wave-a2-doc-drift.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: N3. boot0_progress_state: HOLD. No phase/debt change.
 
 - Tracker sync note (2026-02-25, wave-a1-runtime-defects): **Close 3 runtime defects: trampoline reserved-field validation, JS MAX_DENORM_ITER parity, bridge ordering fail-closed.** Class: L4_STRUCTURAL. target_gate_id: G5. evidence_command: `PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_redteam_hardening_gate.py mu/tests/parity/test_boot1_shadow_parity.py mu/tests/parity/test_bridge_ordering_parity.py -v`. host_semantics_delta_before: trampoline _tail_call had no reserved-field validation (unlike Boot1 path); JS denormalize used MAX_DEPTH (depth limit) instead of iteration limit; bridge ordering silently skipped non-dict projections. host_semantics_delta_after: D-02 adds reserved-field validation to trampoline _tail_call re-entry (step_mu.py); D-03 adds MAX_DENORM_ITER in JS constants.js, replaces MAX_DEPTH in normalize.js nodeDepth guards; D-04 adds fail-closed non-dict rejection in _validate_combined_bridge_ordering (step_mu.py). structural_artifact_ref: mu/host/python/rcx_pi/selfhost/step_mu.py, mu/host/js/core/constants.js, mu/host/js/core/normalize.js. evidence_delta: 8 new regression tests (4 source-lock, 2 runtime monkeypatch, 2 non-dict rejection). progress_proof_before: trampoline _tail_call had no reserved-field validation; JS denormalize used MAX_DEPTH instead of iteration limit; bridge ordering silently skipped non-dict projections. progress_proof_after: all 3 gaps closed with 8 regression tests. post_gate_contract_sweep: `pytest mu/tests/parity/test_js_parity_automated.py mu/tests/parity/test_cross_substrate_constants.py -q`. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_CROSS_SUBSTRATE_PARITY. indicator_artifact_ref: reports/l4_wave_indicators/wave-a1-runtime-defects.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id wave-a1-runtime-defects --range dev..HEAD --output reports/l4_wave_indicators/wave-a1-runtime-defects.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: N3. boot0_progress_state: HOLD. No phase/debt change.
 
@@ -449,7 +451,7 @@ Items here are implemented and verified under current invariants. Changes requir
   - 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
   - Structural execution is default for recurrence/exhaustion on both substrates
   - Bootstrap execution is explicit fallback-only (requires `execution_mode="bootstrap", allow_bootstrap_fallback=True`)
-  - Cross-substrate parity intact: all 47 core projections run identically on Python and JS
+  - Cross-substrate parity intact: all L3 seed projections run identically on Python and JS (see test_seed_counts.py)
   - B-structural match_mu provides non-linear pattern support via match.v2 + bridge
   - Gates 1-5 ALL COMPLETE — hemisphere implementation unblocked
 - Mu Hemispheres v0 Core (2026-02-09):
@@ -506,7 +508,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 - Gate 5: COMPLETE (2026-02-09 meta-circular parity verified)
   - 56 exit criteria tests: 9 gate5 parity + 17 execution path + 30 JS parity
   - Structural execution default; bootstrap explicit fallback only
-  - Cross-substrate parity intact (Python + JS, all 47 core projections)
+  - Cross-substrate parity intact (Python + JS, all L3 seed projections — see test_seed_counts.py)
   - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(..., kernel_mode="bridge", validation_mode="algorithm_runtime")` on production path.
 
 Current Recurrence Layer: META_CIRCULAR
