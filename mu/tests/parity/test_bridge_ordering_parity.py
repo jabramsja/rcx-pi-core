@@ -166,3 +166,41 @@ class TestCrossSubstrateBridgeValidation:
         assert "PASS bridge ordering validation: true" in result.stdout, (
             "JS bridge validation tests did not pass"
         )
+
+    def test_js_rejects_non_dict_projection_source_lock(self):
+        """JS validateCombinedBridgeOrdering must reject non-dict entries (D-04 parity)."""
+        source = _js_source()
+        assert "Non-dict projection in bridge ordering validation" in source, (
+            "JS missing non-dict fail-closed error message (parity with Python D-04)"
+        )
+
+    def test_js_rejects_arrays_in_bridge_ordering(self):
+        """JS must also reject Array entries (arrays are typeof 'object' in JS)."""
+        source = _js_source()
+        # The fix adds !Array.isArray(proj) check
+        assert "Array.isArray(proj)" in source, (
+            "JS must check Array.isArray to distinguish arrays from dicts"
+        )
+
+    def test_js_runtime_rejects_non_dict_projection(self):
+        """JS runtime actually rejects non-dict entries in bridge ordering (not just source-lock).
+
+        The self-tests in self_tests.js exercise validateCombinedBridgeOrdering
+        with null and array entries. This test verifies those runtime checks pass.
+        """
+        result = subprocess.run(
+            ["node", str(_JS_PATH)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"JS tests failed:\nstdout: {result.stdout[-500:]}\nstderr: {result.stderr[-500:]}"
+        )
+        # Verify the non-dict rejection tests actually ran and passed
+        assert "Non-dict (null) rejected: true" in result.stdout, (
+            "JS did not reject null projection at runtime"
+        )
+        assert "Non-dict (array) rejected: true" in result.stdout, (
+            "JS did not reject array projection at runtime"
+        )

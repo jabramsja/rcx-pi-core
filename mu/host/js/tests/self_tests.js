@@ -430,6 +430,10 @@ module.exports = function runSelfTests(seeds) {
   catch (e) { const ok = e.message.includes('missing bridge projections'); console.log(`  Missing bridge rejected: ${ok} (expected: true)`); bridgeValidationPassed = bridgeValidationPassed && ok; }
   try { validateCombinedBridgeOrdering([...kernel.projections, ...matchSeed.projections, ...bridgeProjections, ...substSeed.projections]); console.log('  Bridge-after-match.var rejected: false (expected: true)'); bridgeValidationPassed = false; }
   catch (e) { const ok = e.message.includes('must be before match.var'); console.log(`  Bridge-after-match.var rejected: ${ok} (expected: true)`); bridgeValidationPassed = bridgeValidationPassed && ok; }
+  try { validateCombinedBridgeOrdering([...allProjectionsWithBridge, null]); console.log('  Non-dict (null) rejected: false (expected: true)'); bridgeValidationPassed = false; }
+  catch (e) { const ok = e.message.includes('Non-dict projection'); console.log(`  Non-dict (null) rejected: ${ok} (expected: true)`); bridgeValidationPassed = bridgeValidationPassed && ok; }
+  try { validateCombinedBridgeOrdering([...allProjectionsWithBridge, [1, 2]]); console.log('  Non-dict (array) rejected: false (expected: true)'); bridgeValidationPassed = false; }
+  catch (e) { const ok = e.message.includes('Non-dict projection'); console.log(`  Non-dict (array) rejected: ${ok} (expected: true)`); bridgeValidationPassed = bridgeValidationPassed && ok; }
   console.log(`\nPASS bridge ordering validation: ${bridgeValidationPassed}`);
 
   // === Summary ===

@@ -20,8 +20,10 @@ import pytest
 # === Python imports (public API only — anti-cheat policy) ===
 from rcx_pi.selfhost.step_mu import (
     KERNEL_RESERVED_FIELDS,
+    RcxEngineError,
     run_engine_pipeline,
     validate_no_kernel_reserved_fields,
+    _validate_reentry_payload,  # ANTICHEAT_OK: testing fail-closed shape validation helper
 )
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.kernel import reset_step_budget
@@ -1701,3 +1703,154 @@ class TestRunEngineWithRoutingBoot1:
                 f"  false: {resp_false['result']}\n"
                 f"  true:  {resp_true['result']}"
             )
+
+
+# ============================================================================
+# Wave A3: Malformed re-entry payload fail-closed tests
+# ============================================================================
+
+
+class TestReentryPayloadValidation:
+    """Malformed _tail_call/_run_engine payloads fail typed, not raw TypeError."""
+
+    def test_string_payload_fails_typed(self):
+        """String payload raises RcxEngineError, not TypeError."""
+        with pytest.raises(RcxEngineError, match="re-entry payload must be dict"):
+            _validate_reentry_payload("not_a_dict", "test")
+
+    def test_none_payload_fails_typed(self):
+        """None payload raises RcxEngineError, not TypeError."""
+        with pytest.raises(RcxEngineError, match="re-entry payload must be dict"):
+            _validate_reentry_payload(None, "test")
+
+    def test_list_payload_fails_typed(self):
+        """List payload raises RcxEngineError, not TypeError."""
+        with pytest.raises(RcxEngineError, match="re-entry payload must be dict"):
+            _validate_reentry_payload([1, 2], "test")
+
+    def test_missing_projections_fails_typed(self):
+        """Dict missing 'projections' raises RcxEngineError."""
+        with pytest.raises(RcxEngineError, match="missing required key 'projections'"):
+            _validate_reentry_payload({"input": {}}, "test")
+
+    def test_missing_input_fails_typed(self):
+        """Dict missing 'input' raises RcxEngineError."""
+        with pytest.raises(RcxEngineError, match="missing required key 'input'"):
+            _validate_reentry_payload({"projections": []}, "test")
+
+    def test_projections_not_list_fails_typed(self):
+        """Non-list projections raises RcxEngineError."""
+        with pytest.raises(RcxEngineError, match="'projections' must be list"):
+            _validate_reentry_payload({"projections": "bad", "input": {}}, "test")
+
+    def test_valid_payload_passes(self):
+        """Well-formed payload passes validation."""
+        _validate_reentry_payload({"projections": [], "input": {}, "max_steps": 10}, "test")
+
+    def test_reserved_field_in_input_fails(self):
+        """Reserved field in input triggers validation error."""
+        with pytest.raises(ValueError, match="reserved"):
+            _validate_reentry_payload(
+                {"projections": [], "input": {"_mode": "evil"}}, "test"
+            )
+
+    def test_reserved_field_in_frozen_fails(self):
+        """Reserved field in frozen triggers validation error."""
+        with pytest.raises(ValueError, match="reserved"):
+            _validate_reentry_payload(
+                {"projections": [], "input": {}, "frozen": {"_mode": "evil"}}, "test"
+            )
+
+    def test_non_mu_input_fails_typed(self):
+        """Non-Mu input (e.g. lambda) raises RcxEngineError, not raw TypeError."""
+        with pytest.raises(RcxEngineError, match="not valid Mu"):
+            _validate_reentry_payload(
+                {"projections": [], "input": lambda: None}, "test"
+            )
+
+    def test_non_mu_frozen_fails_typed(self):
+        """Non-Mu frozen raises RcxEngineError, not raw TypeError."""
+        with pytest.raises(RcxEngineError, match="not valid Mu"):
+            _validate_reentry_payload(
+                {"projections": [], "input": {}, "frozen": lambda: None}, "test"
+            )
+
+
+class TestJsReentryPayloadValidation:
+    """JS validateReentryPayload runtime behavior (not just source-lock).
+
+    Exercises the exported validateReentryPayload function from pipeline.js
+    directly via node -e to prove it actually rejects malformed payloads
+    with the correct error code at runtime.
+    """
+
+    @staticmethod
+    def _run_js_validation(payload_js_expr: str, context: str = "test") -> dict:
+        """Call JS validateReentryPayload and return {ok, error_code, message}."""
+        script = (
+            "const p = require('./mu/host/js/engine/pipeline');\n"
+            "try {\n"
+            f"  p.validateReentryPayload({payload_js_expr}, '{context}');\n"
+            "  console.log(JSON.stringify({ok: true}));\n"
+            "} catch (e) {\n"
+            "  console.log(JSON.stringify({ok: false, error_code: e.error_code || 'unknown', message: e.message}));\n"
+            "}\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=ROOT, timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return json.loads(result.stdout.strip())
+
+    def test_js_rejects_string_payload(self):
+        """JS rejects string payload with input.shape_mismatch."""
+        r = self._run_js_validation('"not_a_dict"')
+        assert not r["ok"]
+        assert r["error_code"] == "input.shape_mismatch"
+        assert "re-entry payload must be dict" in r["message"]
+
+    def test_js_rejects_null_payload(self):
+        """JS rejects null payload with input.shape_mismatch."""
+        r = self._run_js_validation("null")
+        assert not r["ok"]
+        assert r["error_code"] == "input.shape_mismatch"
+
+    def test_js_rejects_array_payload(self):
+        """JS rejects array payload with input.shape_mismatch."""
+        r = self._run_js_validation("[1, 2]")
+        assert not r["ok"]
+        assert r["error_code"] == "input.shape_mismatch"
+
+    def test_js_rejects_missing_projections(self):
+        """JS rejects payload missing 'projections' key."""
+        r = self._run_js_validation('({input: {}})')
+        assert not r["ok"]
+        assert r["error_code"] == "input.shape_mismatch"
+        assert "missing required key 'projections'" in r["message"]
+
+    def test_js_rejects_missing_input(self):
+        """JS rejects payload missing 'input' key."""
+        r = self._run_js_validation('({projections: []})')
+        assert not r["ok"]
+        assert r["error_code"] == "input.shape_mismatch"
+        assert "missing required key 'input'" in r["message"]
+
+    def test_js_accepts_valid_payload(self):
+        """JS accepts well-formed payload."""
+        r = self._run_js_validation('({projections: [], input: {}})')
+        assert r["ok"]
+
+    def test_js_rejects_non_mu_input(self):
+        """JS rejects non-Mu input (function) with input.invalid_type."""
+        r = self._run_js_validation('({projections: [], input: function(){}})')
+        assert not r["ok"]
+        assert r["error_code"] == "input.invalid_type"
+        assert "not valid Mu" in r["message"]
+
+    def test_js_rejects_non_mu_frozen(self):
+        """JS rejects non-Mu frozen (function) with input.invalid_type."""
+        r = self._run_js_validation('({projections: [], input: {}, frozen: function(){}})')
+        assert not r["ok"]
+        assert r["error_code"] == "input.invalid_type"
+        assert "not valid Mu" in r["message"]
