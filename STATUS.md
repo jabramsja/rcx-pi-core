@@ -42,7 +42,7 @@ NAME: Gate 5 Meta-Circular Parity (COMPLETE)
 - [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 - [x] `step_kernel_mu()` wired to use structural kernel
-- [x] Security hardening complete (26 reserved fields: 24 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
+- [x] Security hardening complete (27 reserved fields: 25 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py` `step_kernel_mu`, see `@host_iteration` decorator)
 
 **Seed version note:** `match_mu()` now uses match.v2 + bridge projections directly for non-linear pattern conflict detection (B-structural approach, 2026-02-09). `subst_mu()` standalone function uses v1 seeds. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
@@ -73,7 +73,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
-| **Python Substrate** | ~2000 LOC, 3,690 tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~2000 LOC, ~4,736 tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~1970 LOC core + ~1010 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
@@ -333,7 +333,7 @@ The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match,
 - eval_step reclassified as BOOTSTRAP_PRIMITIVE (not debt)
 - **Security hardening (9-agent reviewed):**
   - Deep validation: recursive check prevents nested smuggling
-  - KERNEL_RESERVED_FIELDS: 24 fields (12 base + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge) + 2 ALGORITHM_ENTRYPOINT_KEYS = 26 total
+  - KERNEL_RESERVED_FIELDS: 25 fields (12 base + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge + 1 Boundary) + 2 ALGORITHM_ENTRYPOINT_KEYS = 27 total
   - Depth guard fails CLOSED (raises ValueError at depth > 100)
 - Net debt: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 
@@ -639,7 +639,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-17 (agent review findings: O(depth²) backtracking, host debt comments, SDK rate_limit_event patch)
+**Last updated:** 2026-02-25 (doc ground-truth fixes: test count, projection counts, seed counts, KERNEL_RESERVED_FIELDS count — all aligned to live tool output)
 **Next milestone:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. See TASKS.md for next VECTOR promotion candidate.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
@@ -709,8 +709,8 @@ New organized structure makes architecture visible:
 - [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] exhaustion.v1.json: 13 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] hemispheres.v1.json: 12 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
-- [x] Total: 49 core projections across 5 L3-complete seeds + 12 hemisphere projections
-- [x] `seed_police.sh`: 15 seeds valid, 110 projection IDs, 0 collisions
+- [x] Total: 61 projections across 6 listed seeds (see `mu/tests/structural/test_seed_counts.py::EXPECTED_COUNTS` for per-seed counts)
+- [x] Seed integrity: 17 seeds, 143 projection IDs, 0 intra-seed collisions (verified by `mu/tests/structural/test_seed_counts.py`)
 - [x] 5 Recurrence + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**

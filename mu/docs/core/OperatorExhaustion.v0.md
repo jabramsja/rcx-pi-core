@@ -563,8 +563,8 @@ is safe. We can relax later without breaking correctness.
   - 10 fuzzer tests in `tests/fuzz/test_exhaustion_fuzzer.py`
   - 6 test vectors in `tests/fixtures/exhaustion_vectors.json`
   - Cross-substrate parity: Python and JavaScript produce identical results
-  - JS loads exhaustion.v1.json (47 total projections across all seeds)
-  - KERNEL_RESERVED_FIELDS updated to 24 (12 kernel + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge)
+  - JS loads exhaustion.v1.json (projection counts verified by `mu/tests/structural/test_seed_counts.py::EXPECTED_COUNTS`)
+  - KERNEL_RESERVED_FIELDS updated to 25 (12 kernel + 2 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge + 1 Boundary)
   - Automated parity test verifies Python/JS reserved fields match
 - **v0.1 (2026-02-01):** Address open questions and agent review findings:
   - Q1 RESOLVED: Pass operator_ids explicitly in input
