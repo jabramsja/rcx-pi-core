@@ -3,7 +3,7 @@
   "repeat_run_speedup_ratio": 1.0,
   "parity_diff_count": 0,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.0,
+  "step_growth_slope": 0.001,
   "repeat_run_raw_seconds": [
     0.001,
     0.001
