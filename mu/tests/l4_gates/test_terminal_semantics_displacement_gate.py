@@ -246,11 +246,16 @@ class TestKernelDoneStaysHost:
 class TestBehaviorParity:
     """All known terminal shapes produce the same classification as before displacement."""
 
+    # Regression lock: this legacy wrapper shape is NOT a terminal output shape.
+    # It previously caused confusion in reviews and should stay non-terminal.
+    LEGACY_RECURRENCE_WRAPPER = {"recurrence_result": {}, "recurrence_trace": []}
+
     CASES = [
         (KERNEL_DONE, "kernel_done"),
         (RECURRENCE_SHAPE, "recurrence_terminal"),
         (EXHAUSTION_SHAPE, "exhaustion_terminal"),
         (ENGINE_SHAPE, "engine_terminal"),
+        (LEGACY_RECURRENCE_WRAPPER, "non_terminal"),
         (NON_TERMINAL, "non_terminal"),
         ("hello", "non_terminal"),
         (42, "non_terminal"),

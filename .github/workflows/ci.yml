@@ -15,6 +15,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       PYTHONHASHSEED: "0"  # Deterministic dict ordering
       RCX_CI: "1"  # Convert test skips to failures (skip hardening)
