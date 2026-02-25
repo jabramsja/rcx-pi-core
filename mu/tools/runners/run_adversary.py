@@ -57,7 +57,10 @@ async def main():
 
     print(result)
     print_standard_runner_footer()
-    exit_with_code(finalize_standard_result(CONFIG, result))
+    exit_code = finalize_standard_result(CONFIG, result)
+    if exit_code == 0:
+        Path("/tmp/.rcx_adversary_cooldown").touch()
+    exit_with_code(exit_code)
 
 
 if __name__ == "__main__":
