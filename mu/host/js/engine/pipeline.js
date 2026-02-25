@@ -155,6 +155,49 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
   return context;
 }
 
+/**
+ * Validate shape/type of _run_engine or _tail_call re-entry payload.
+ * Fail-closed: throws RcxError (not raw TypeError) on malformed payloads.
+ */
+function validateReentryPayload(payload, context) {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new RcxError('input.shape_mismatch',
+      `${context}: re-entry payload must be dict, got ${payload === null ? 'null' : Array.isArray(payload) ? 'array' : typeof payload}`
+    );
+  }
+  if (!('projections' in payload)) {
+    throw new RcxError('input.shape_mismatch',
+      `${context}: re-entry payload missing required key 'projections'`
+    );
+  }
+  if (!('input' in payload)) {
+    throw new RcxError('input.shape_mismatch',
+      `${context}: re-entry payload missing required key 'input'`
+    );
+  }
+  if (!Array.isArray(payload.projections)) {
+    throw new RcxError('input.shape_mismatch',
+      `${context}: re-entry payload 'projections' must be list, got ${typeof payload.projections}`
+    );
+  }
+  if (!isValidMu(payload.input)) {
+    throw new RcxError('input.invalid_type',
+      `${context}: re-entry payload 'input' is not valid Mu, got ${typeof payload.input}`
+    );
+  }
+  if (payload.frozen !== null && payload.frozen !== undefined) {
+    if (!isValidMu(payload.frozen)) {
+      throw new RcxError('input.invalid_type',
+        `${context}: re-entry payload 'frozen' is not valid Mu, got ${typeof payload.frozen}`
+      );
+    }
+  }
+  validateNoKernelReservedFields(payload.input, `${context} input`);
+  if (payload.frozen !== null && payload.frozen !== undefined) {
+    validateNoKernelReservedFields(payload.frozen, `${context} frozen`);
+  }
+}
+
 // Boot1 re-entry depth limit
 const BOOT1_MAX_REENTRY_DEPTH = 20;
 
@@ -248,9 +291,7 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
     if (typeof nextState === 'object' && nextState !== null
         && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
       const tailPayload = nextState._tail_call;
-      if (tailPayload && typeof tailPayload === 'object' && tailPayload.input) {
-        validateNoKernelReservedFields(tailPayload.input, 'tail_call re-entry input');
-      }
+      validateReentryPayload(tailPayload, 'trampoline _tail_call');
       state = { _run_engine: tailPayload };
       continue;
     }
@@ -392,12 +433,11 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
       if (typeof nextState === 'object' && nextState !== null
           && '_run_engine' in nextState && Object.keys(nextState).length === 1) {
         const payload = nextState._run_engine;
+        validateReentryPayload(payload, 'Boot1 _run_engine');
         curProjections = payload.projections;
         curInput = payload.input;
-        validateNoKernelReservedFields(curInput, 'Boot1 re-entry input');
         curMaxSteps = payload.max_steps ?? curMaxSteps;
         curFrozen = payload.frozen ?? null;
-        if (curFrozen !== null) validateNoKernelReservedFields(curFrozen, 'Boot1 re-entry frozen');
         remainingIterations = remainingIterations - iteration - 1;
         depth++;
         reentry = true;
@@ -407,12 +447,11 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
       if (typeof nextState === 'object' && nextState !== null
           && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
         const payload = nextState._tail_call;
+        validateReentryPayload(payload, 'Boot1 _tail_call');
         curProjections = payload.projections;
         curInput = payload.input;
-        validateNoKernelReservedFields(curInput, 'Boot1 tail_call input');
         curMaxSteps = payload.max_steps ?? curMaxSteps;
         curFrozen = payload.frozen ?? null;
-        if (curFrozen !== null) validateNoKernelReservedFields(curFrozen, 'Boot1 tail_call frozen');
         remainingIterations = remainingIterations - iteration - 1;
         depth++;
         reentry = true;
@@ -445,6 +484,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
 
 module.exports = {
   BOOT1_MAX_REENTRY_DEPTH,
+  validateReentryPayload,
   runAlgorithmWithBridge,
   runSubAlgorithm,
   hashTraceForRecurrence,

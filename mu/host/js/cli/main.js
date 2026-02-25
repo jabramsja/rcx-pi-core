@@ -144,8 +144,12 @@ function validateProjectionIds(seedName, seed) {
 function validateCombinedBridgeOrdering(projections) {
   const ids = [];
   for (const proj of projections) {
-    if (proj && typeof proj === 'object') {
+    if (proj && typeof proj === 'object' && !Array.isArray(proj)) {
       ids.push(proj.id);
+    } else {
+      throw new Error(
+        `SECURITY: Non-dict projection in bridge ordering validation: ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`
+      );
     }
   }
 

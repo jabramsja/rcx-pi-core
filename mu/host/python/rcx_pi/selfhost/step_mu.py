@@ -34,7 +34,7 @@ import json
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached
+from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached
 from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed
@@ -470,6 +470,52 @@ def validate_algorithm_runtime_fields(
     unknown underscore fields are rejected (fail closed).
     """
     _walk_and_validate(value, _check_algorithm_runtime, context, _depth)
+
+
+def _validate_reentry_payload(payload: object, context: str) -> None:
+    """Validate shape/type of _run_engine or _tail_call re-entry payload.
+
+    Fail-closed: raises RcxEngineError (not raw TypeError/KeyError) on
+    malformed payloads. Checks structure first, then reserved-field depth.
+    """
+    if not isinstance(payload, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context}: re-entry payload must be dict, got {type(payload).__name__}",
+        )
+    if "projections" not in payload:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context}: re-entry payload missing required key 'projections'",
+        )
+    if "input" not in payload:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context}: re-entry payload missing required key 'input'",
+        )
+    if not isinstance(payload["projections"], list):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context}: re-entry payload 'projections' must be list, "
+            f"got {type(payload['projections']).__name__}",
+        )
+    if not is_mu(payload["input"]):
+        raise RcxEngineError(
+            "input.invalid_type",
+            f"{context}: re-entry payload 'input' is not valid Mu, "
+            f"got {type(payload['input']).__name__}",
+        )
+    frozen = payload.get("frozen")
+    if frozen is not None:
+        if not is_mu(frozen):
+            raise RcxEngineError(
+                "input.invalid_type",
+                f"{context}: re-entry payload 'frozen' is not valid Mu, "
+                f"got {type(frozen).__name__}",
+            )
+    validate_no_kernel_reserved_fields(payload["input"], f"{context} input")
+    if frozen is not None:
+        validate_no_kernel_reserved_fields(frozen, f"{context} frozen")
 
 
 # =============================================================================
@@ -1717,13 +1763,11 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             # engine.exhaustion_done_freeze produces {_run_engine: {projections, input, max_steps, frozen}}.
             if isinstance(next_state, dict) and "_run_engine" in next_state and len(next_state) == 1:
                 payload = next_state["_run_engine"]
+                _validate_reentry_payload(payload, "Boot1 _run_engine")
                 cur_projections = payload["projections"]
                 cur_input = payload["input"]
-                validate_no_kernel_reserved_fields(cur_input, "Boot1 re-entry input")
                 cur_max_steps = payload.get("max_steps", cur_max_steps)
                 cur_frozen = payload.get("frozen")
-                if cur_frozen is not None:
-                    validate_no_kernel_reserved_fields(cur_frozen, "Boot1 re-entry frozen")
                 remaining_iterations = remaining_iterations - iteration - 1
                 depth += 1
                 reentry = True
@@ -1732,13 +1776,11 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             # Boot1: _tail_call recognition — update frame and restart outer loop
             if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
                 payload = next_state["_tail_call"]
+                _validate_reentry_payload(payload, "Boot1 _tail_call")
                 cur_projections = payload["projections"]
                 cur_input = payload["input"]
-                validate_no_kernel_reserved_fields(cur_input, "Boot1 tail_call input")
                 cur_max_steps = payload.get("max_steps", cur_max_steps)
                 cur_frozen = payload.get("frozen")
-                if cur_frozen is not None:
-                    validate_no_kernel_reserved_fields(cur_frozen, "Boot1 tail_call frozen")
                 remaining_iterations = remaining_iterations - iteration - 1
                 depth += 1
                 reentry = True
@@ -1963,14 +2005,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
         # See Boot1LoopContract.v0.md §3 Option A.
         if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
             tail_payload = next_state["_tail_call"]
-            # Validate reserved fields on re-entry (parity with Boot1 path, line ~1733)
-            if isinstance(tail_payload, dict):
-                tail_input = tail_payload.get("input")
-                if tail_input is not None:
-                    validate_no_kernel_reserved_fields(tail_input, "trampoline tail_call input")
-                tail_frozen = tail_payload.get("frozen")
-                if tail_frozen is not None:
-                    validate_no_kernel_reserved_fields(tail_frozen, "trampoline tail_call frozen")
+            _validate_reentry_payload(tail_payload, "trampoline _tail_call")
             state = {"_run_engine": tail_payload}
             continue
 

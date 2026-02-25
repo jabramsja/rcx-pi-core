@@ -1,6 +1,8 @@
-"""L4 gate tests for red-team hardening wave (substitute depth guard + Boot1 re-entry validation).
+"""L4 gate tests for red-team hardening (substitute depth guard + centralized re-entry validation).
 
-Evidence for: substitute() depth parity with JS, Boot1 reserved-field defense-in-depth.
+Evidence for: substitute() depth parity with JS, centralized _validate_reentry_payload /
+validateReentryPayload helpers covering all 3 re-entry paths (Boot1 _run_engine,
+Boot1 _tail_call, trampoline _tail_call) with shape + reserved-field checks.
 """
 from __future__ import annotations
 
@@ -55,62 +57,126 @@ class TestSubstituteDepthGuard:
         assert "_depth" in src, "substitute must track recursion depth"
 
 
-class TestBoot1ReentryValidation:
-    """Verify Boot1 re-entry validates reserved fields on new input."""
+class TestReentryPayloadHelperExists:
+    """Verify both substrates define a centralized re-entry payload validator.
 
-    def test_python_reentry_validates_reserved_fields(self):
-        """Python _run_engine_recursive must call validate_no_kernel_reserved_fields on re-entry."""
+    Wave A3 centralized inline validation into _validate_reentry_payload (Python)
+    and validateReentryPayload (JS). These helpers provide shape validation AND
+    reserved-field checks in one call, preventing raw TypeError/KeyError on
+    malformed payloads.
+    """
+
+    def test_python_helper_defined(self):
+        """Python must define _validate_reentry_payload."""
         src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
-        # Both re-entry paths must validate
-        assert 'validate_no_kernel_reserved_fields(cur_input, "Boot1 re-entry input")' in src
-        assert 'validate_no_kernel_reserved_fields(cur_input, "Boot1 tail_call input")' in src
+        assert "def _validate_reentry_payload(" in src
 
-    def test_js_reentry_validates_reserved_fields(self):
-        """JS runEnginePipelineRecursive must call validateNoKernelReservedFields on re-entry."""
+    def test_js_helper_defined(self):
+        """JS must define validateReentryPayload."""
         src = _read_all_js_source()
-        assert "validateNoKernelReservedFields(curInput, 'Boot1 re-entry input')" in src
-        assert "validateNoKernelReservedFields(curInput, 'Boot1 tail_call input')" in src
+        assert "function validateReentryPayload(" in src
 
-    def test_cross_substrate_reentry_validation_parity(self):
-        """Both substrates must validate reserved fields at both re-entry points."""
+    def test_python_helper_validates_input_reserved_fields(self):
+        """Python helper must call validate_no_kernel_reserved_fields on payload input."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert 'validate_no_kernel_reserved_fields(payload["input"]' in src
+
+    def test_python_helper_validates_frozen_reserved_fields(self):
+        """Python helper must call validate_no_kernel_reserved_fields on payload frozen."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert "validate_no_kernel_reserved_fields(frozen," in src
+
+    def test_js_helper_validates_input_reserved_fields(self):
+        """JS helper must call validateNoKernelReservedFields on payload.input."""
+        src = _read_all_js_source()
+        assert "validateNoKernelReservedFields(payload.input," in src
+
+    def test_js_helper_validates_frozen_reserved_fields(self):
+        """JS helper must call validateNoKernelReservedFields on payload.frozen,"""
+        src = _read_all_js_source()
+        assert "validateNoKernelReservedFields(payload.frozen," in src
+
+    def test_python_helper_validates_mu_type_input(self):
+        """Python helper must check is_mu on payload input."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert 'is_mu(payload["input"])' in src
+
+    def test_python_helper_validates_mu_type_frozen(self):
+        """Python helper must check is_mu on frozen."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert "is_mu(frozen)" in src
+
+    def test_js_helper_validates_mu_type_input(self):
+        """JS helper must check isValidMu on payload.input."""
+        src = _read_all_js_source()
+        assert "isValidMu(payload.input)" in src
+
+    def test_js_helper_validates_mu_type_frozen(self):
+        """JS helper must check isValidMu on payload.frozen."""
+        src = _read_all_js_source()
+        assert "isValidMu(payload.frozen)" in src
+
+
+class TestBoot1ReentryValidation:
+    """Verify Boot1 re-entry paths call centralized payload validator."""
+
+    def test_python_boot1_run_engine_calls_helper(self):
+        """Python Boot1 _run_engine path must call _validate_reentry_payload."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert '_validate_reentry_payload(payload, "Boot1 _run_engine")' in src
+
+    def test_python_boot1_tail_call_calls_helper(self):
+        """Python Boot1 _tail_call path must call _validate_reentry_payload."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert '_validate_reentry_payload(payload, "Boot1 _tail_call")' in src
+
+    def test_js_boot1_run_engine_calls_helper(self):
+        """JS Boot1 _run_engine path must call validateReentryPayload."""
+        src = _read_all_js_source()
+        assert "validateReentryPayload(payload, 'Boot1 _run_engine')" in src
+
+    def test_js_boot1_tail_call_calls_helper(self):
+        """JS Boot1 _tail_call path must call validateReentryPayload."""
+        src = _read_all_js_source()
+        assert "validateReentryPayload(payload, 'Boot1 _tail_call')" in src
+
+    def test_cross_substrate_boot1_validation_parity(self):
+        """Both substrates must have 2 Boot1 helper call sites (_run_engine + _tail_call)."""
         py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
         js_src = _read_all_js_source()
-        # Count validation sites — must be 2 in each substrate (re-entry + tail_call)
-        py_count = py_src.count("validate_no_kernel_reserved_fields(cur_input")
-        js_count = js_src.count("validateNoKernelReservedFields(curInput")
-        assert py_count == 2, f"Python must have 2 Boot1 re-entry validation sites, got {py_count}"
-        assert js_count == 2, f"JS must have 2 Boot1 re-entry validation sites, got {js_count}"
+        py_boot1 = py_src.count('_validate_reentry_payload(payload, "Boot1')
+        js_boot1 = js_src.count("validateReentryPayload(payload, 'Boot1")
+        assert py_boot1 == 2, f"Python must have 2 Boot1 helper calls, got {py_boot1}"
+        assert js_boot1 == 2, f"JS must have 2 Boot1 helper calls, got {js_boot1}"
 
 
 class TestTrampolineTailCallValidation:
-    """Verify trampoline _tail_call path validates reserved fields (D-02 hardening).
+    """Verify trampoline _tail_call path calls centralized payload validator.
 
-    The trampoline engine loop in run_engine_pipeline must validate both input
-    and frozen payloads on _tail_call re-entry, matching Boot1 path behavior.
+    The trampoline engine loop in run_engine_pipeline must validate payloads
+    via the centralized helper, matching Boot1 path behavior.
     """
 
-    def test_python_trampoline_validates_tail_call_input(self):
-        """Python trampoline must validate input for reserved fields."""
+    def test_python_trampoline_calls_helper(self):
+        """Python trampoline must call _validate_reentry_payload on tail_payload."""
         src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
-        assert 'validate_no_kernel_reserved_fields(tail_input, "trampoline tail_call input")' in src
+        assert '_validate_reentry_payload(tail_payload, "trampoline _tail_call")' in src
 
-    def test_python_trampoline_validates_tail_call_frozen(self):
-        """Python trampoline must validate frozen for reserved fields."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
-        assert 'validate_no_kernel_reserved_fields(tail_frozen, "trampoline tail_call frozen")' in src
-
-    def test_js_trampoline_validates_tail_call(self):
-        """JS trampoline must validate tail_call re-entry for reserved fields."""
+    def test_js_trampoline_calls_helper(self):
+        """JS trampoline must call validateReentryPayload on tailPayload."""
         src = _read_all_js_source()
-        assert "validateNoKernelReservedFields(tailPayload.input" in src
+        assert "validateReentryPayload(tailPayload, 'trampoline _tail_call')" in src
 
-    def test_all_tail_call_paths_validated(self):
-        """All _tail_call validation sites exist across both substrates."""
+    def test_all_reentry_paths_use_helper(self):
+        """All 3 re-entry paths in both substrates must use the centralized helper."""
         py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
         js_src = _read_all_js_source()
-        # Boot1 paths (pre-existing)
-        assert 'validate_no_kernel_reserved_fields(cur_input, "Boot1 tail_call input")' in py_src
-        assert "validateNoKernelReservedFields(curInput, 'Boot1 tail_call input')" in js_src
-        # Trampoline paths (D-02 hardening)
-        assert 'validate_no_kernel_reserved_fields(tail_input, "trampoline tail_call input")' in py_src
-        assert "validateNoKernelReservedFields(tailPayload.input" in js_src
+        # Count "helperName(" occurrences — includes definition + call sites.
+        # Python: 1 def + 3 calls = 4.  JS: 1 function def + 3 calls = 4.
+        py_total = py_src.count("_validate_reentry_payload(")
+        js_total = js_src.count("validateReentryPayload(")
+        # Subtract 1 for the function definition line in each
+        py_calls = py_total - 1  # def _validate_reentry_payload(
+        js_calls = js_total - 1  # function validateReentryPayload(
+        assert py_calls == 3, f"Python must have 3 helper call sites, got {py_calls}"
+        assert js_calls == 3, f"JS must have 3 helper call sites, got {js_calls}"
