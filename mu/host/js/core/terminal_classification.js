@@ -72,6 +72,14 @@ function classifyTerminalKind(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return 'non_terminal';
   // kernel_done: host-side (key-membership check, not exact-key-match)
   if (value._mode === 'done' && '_result' in value && '_stall' in value) return 'kernel_done';
+  // Key-set prefilter: only candidate shapes reach the seed path.
+  // Avoids step() (and its assertMu walk) on engine-internal state dicts.
+  const keys = new Set(Object.keys(value));
+  if (!setsEqual(keys, RECURRENCE_TERMINAL_KEYS) &&
+      !setsEqual(keys, EXHAUSTION_TERMINAL_KEYS) &&
+      !setsEqual(keys, ENGINE_TERMINAL_KEYS)) {
+    return 'non_terminal';
+  }
   // Structural seed classification via projection matching
   const projs = _loadTcProjections();
   const result = step(projs, { _tc: value });

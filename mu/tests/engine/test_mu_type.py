@@ -915,3 +915,53 @@ class TestNoGuardrailMocking:
             f"Found mock decorators for guardrail functions: {matches}. "
             f"Do not mock guardrail functions in tests."
         )
+
+
+# =============================================================================
+# is_mu Memoization Regression Tests (Wave 25 fix)
+# =============================================================================
+
+
+class TestIsMuMemoization:
+    """Verify is_mu per-call memoization preserves semantics."""
+
+    def test_cycle_still_rejected(self):
+        """Cycles must still return False (memo must not short-circuit cycles)."""
+        d = {"a": 1}
+        d["self"] = d
+        assert is_mu(d) is False
+
+    def test_shared_substructure_dag_valid(self):
+        """DAG with shared subtree must be accepted (not falsely rejected as cycle)."""
+        shared = {"x": 1, "y": [2, 3]}
+        root = {"left": shared, "right": shared}
+        assert is_mu(root) is True
+
+    def test_deep_shared_structure_terminates(self):
+        """Deep structure with shared nodes must terminate and return deterministically."""
+        import time
+        # Build a DAG: each level shares the same child
+        leaf = {"v": 1}
+        current = leaf
+        for i in range(100):
+            current = {"a": current, "b": current}
+        t0 = time.time()
+        result = is_mu(current)
+        elapsed = time.time() - t0
+        assert result is True
+        # With memoization this should be fast; without it, 2^100 nodes
+        assert elapsed < 2.0, f"is_mu on shared DAG took {elapsed:.2f}s (memoization broken?)"
+
+    def test_deep_nested_dict_still_valid(self):
+        """Deeply nested (but not shared) dict within depth limit is valid."""
+        d = {"v": 1}
+        for _ in range(250):  # Within MAX_MU_DEPTH=300
+            d = {"n": d}
+        assert is_mu(d) is True
+
+    def test_deep_nested_beyond_limit_rejected(self):
+        """Dict deeper than MAX_MU_DEPTH is rejected."""
+        d = {"v": 1}
+        for _ in range(350):  # Beyond MAX_MU_DEPTH=300
+            d = {"n": d}
+        assert is_mu(d) is False

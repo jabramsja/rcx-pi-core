@@ -89,12 +89,22 @@ def classify_terminal_kind(value) -> str:  # AST_OK: infra — unified terminal 
     Structural displacement (Wave 25): classification logic now delegated to
     terminal_classify.v1.json seed projections via eval_step(). kernel_done
     stays host-side (requires key-membership check, not exact-key-match).
+
+    Key-set prefilter (Wave 25 fix): only invoke eval_step when the dict's
+    key set matches a known terminal shape. Engine-internal state with deep
+    nesting never reaches eval_step/assert_mu, preventing pathological hangs.
     """
     if not isinstance(value, dict):
         return "non_terminal"
     # Kernel terminal: {_mode: "done", _result, _stall} — host-side (key-membership)
     if value.get("_mode") == "done" and "_result" in value and "_stall" in value:
         return "kernel_done"
+    # Key-set prefilter: only candidate shapes reach the seed path.
+    # This avoids eval_step (and its assert_mu walk) on engine-internal
+    # state dicts that can be deeply nested.
+    keys = frozenset(value.keys())
+    if keys not in (_RECURRENCE_TERMINAL_KEYS, _EXHAUSTION_TERMINAL_KEYS, _ENGINE_TERMINAL_KEYS):
+        return "non_terminal"
     # Structural seed classification via projection matching
     tc_projs = _load_tc_projections()
     result = eval_step(tc_projs, {"_tc": value})

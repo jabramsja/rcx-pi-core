@@ -304,7 +304,44 @@ class TestCompatConstantsMatchSeed:
 
 
 # ===========================================================================
-# Test 9: Source lock — terminal_classification.js does NOT import main.js
+# Test 9: Key-set prefilter short-circuits non-candidate dicts
+# ===========================================================================
+
+class TestPrefilterShortCircuit:
+    """Non-candidate dicts must return non_terminal without touching eval_step."""
+
+    def test_deep_nested_dict_is_non_terminal(self):
+        """Deeply nested engine-internal state must not hang classify_terminal_kind."""
+        import time
+        # Build a deeply nested dict that would hang if eval_step/assert_mu walked it
+        deep = {"x": 1}
+        for _ in range(200):
+            deep = {"nested": deep}
+        t0 = time.time()
+        assert classify_terminal_kind(deep) == "non_terminal"
+        elapsed = time.time() - t0
+        # Prefilter should make this near-instant (< 0.01s), not minutes
+        assert elapsed < 1.0, f"classify_terminal_kind took {elapsed:.2f}s on deep dict"
+
+    def test_extra_keys_beyond_terminal_shape(self):
+        """A dict with terminal keys PLUS extra keys is non_terminal."""
+        almost_recurrence = {"closure_detected": True, "final_result": 42, "tau_step": 1, "extra": True}
+        assert classify_terminal_kind(almost_recurrence) == "non_terminal"
+
+    def test_subset_of_terminal_keys(self):
+        """A dict with only some terminal keys is non_terminal."""
+        partial = {"closure_detected": True, "final_result": 42}
+        assert classify_terminal_kind(partial) == "non_terminal"
+
+    def test_empty_dict_is_non_terminal(self):
+        assert classify_terminal_kind({}) == "non_terminal"
+
+    def test_unrelated_keys_are_non_terminal(self):
+        assert classify_terminal_kind({"foo": 1, "bar": 2}) == "non_terminal"
+
+
+# ===========================================================================
+# Test 10: Source lock — terminal_classification.js does NOT import main.js
 # ===========================================================================
 
 class TestNoMainJsImport:
