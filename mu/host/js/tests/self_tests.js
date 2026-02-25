@@ -32,7 +32,7 @@ module.exports = function runSelfTests(seeds) {
   } = seeds;
 
   console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
-  console.log('Seed integrity: 11 seeds verified (checksum + structure + projection order)');
+  console.log('Seed integrity: 12 seeds verified (checksum + structure + projection order)');
   console.log(`Loaded projections from mu/ folder:`);
   console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
   console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
