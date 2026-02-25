@@ -177,7 +177,7 @@ echo "== 4) Core structural tests (parallel if available) =="
 # Run core algorithm tests - these are the most important for local iteration
 # Skip fuzzer tests (those run 500-1000 examples each, slow locally)
 # Core tests: match, subst, step, kernel, eval_seed, mu_type
-pytest $PARALLEL_FLAG -q \
+pytest $PARALLEL_FLAG -q -m "not slow and not fuzzer" \
     tests/structural/ \
     tests/tools/ \
     tests/l4_gates/ \
