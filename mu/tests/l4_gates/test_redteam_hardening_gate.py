@@ -80,3 +80,37 @@ class TestBoot1ReentryValidation:
         js_count = js_src.count("validateNoKernelReservedFields(curInput")
         assert py_count == 2, f"Python must have 2 Boot1 re-entry validation sites, got {py_count}"
         assert js_count == 2, f"JS must have 2 Boot1 re-entry validation sites, got {js_count}"
+
+
+class TestTrampolineTailCallValidation:
+    """Verify trampoline _tail_call path validates reserved fields (D-02 hardening).
+
+    The trampoline engine loop in run_engine_pipeline must validate both input
+    and frozen payloads on _tail_call re-entry, matching Boot1 path behavior.
+    """
+
+    def test_python_trampoline_validates_tail_call_input(self):
+        """Python trampoline must validate input for reserved fields."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert 'validate_no_kernel_reserved_fields(tail_input, "trampoline tail_call input")' in src
+
+    def test_python_trampoline_validates_tail_call_frozen(self):
+        """Python trampoline must validate frozen for reserved fields."""
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        assert 'validate_no_kernel_reserved_fields(tail_frozen, "trampoline tail_call frozen")' in src
+
+    def test_js_trampoline_validates_tail_call(self):
+        """JS trampoline must validate tail_call re-entry for reserved fields."""
+        src = _read_all_js_source()
+        assert "validateNoKernelReservedFields(tailPayload.input" in src
+
+    def test_all_tail_call_paths_validated(self):
+        """All _tail_call validation sites exist across both substrates."""
+        py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        js_src = _read_all_js_source()
+        # Boot1 paths (pre-existing)
+        assert 'validate_no_kernel_reserved_fields(cur_input, "Boot1 tail_call input")' in py_src
+        assert "validateNoKernelReservedFields(curInput, 'Boot1 tail_call input')" in js_src
+        # Trampoline paths (D-02 hardening)
+        assert 'validate_no_kernel_reserved_fields(tail_input, "trampoline tail_call input")' in py_src
+        assert "validateNoKernelReservedFields(tailPayload.input" in js_src

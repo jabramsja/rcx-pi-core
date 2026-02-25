@@ -128,6 +128,11 @@ const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
   '_type',
 ]);
 
+// Maximum iterations for linked-list denormalization (matches Python MAX_DENORM_ITER=10000)
+// Separate from MAX_DEPTH because wide structures (up to MAX_MU_WIDTH=1000 elements)
+// produce linked lists longer than MAX_DEPTH=300.
+const MAX_DENORM_ITER = 10000;
+
 // Maximum depth for validation traversal (fail closed)
 const MAX_VALIDATION_DEPTH = 100;
 
@@ -174,6 +179,7 @@ module.exports = {
   ALGORITHM_ENTRYPOINT_KEYS,
   ALGORITHM_INTERNAL_UNRESERVED_FIELDS,
   ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS,
+  MAX_DENORM_ITER,
   MAX_VALIDATION_DEPTH,
   RcxError,
   classifyError,

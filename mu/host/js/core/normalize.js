@@ -5,7 +5,7 @@
  * Depends on: core/constants.js, core/types.js
  */
 
-const { MAX_DEPTH, VALID_TYPE_TAGS, RcxError } = require('./constants');
+const { MAX_DEPTH, MAX_DENORM_ITER, VALID_TYPE_TAGS, RcxError } = require('./constants');
 const { isValidNumber, isVar, compareMuStringKeysByCodepoint } = require('./types');
 
 /**
@@ -264,8 +264,8 @@ function denormalize(value, _depth = 0) {
         let node = value;
         let nodeDepth = 0;
         while (node && 'head' in node) {
-          if (nodeDepth++ > MAX_DEPTH) {
-            throw new Error(`Max depth exceeded in list denormalization`);
+          if (nodeDepth++ > MAX_DENORM_ITER) {
+            throw new Error(`Max denorm iterations exceeded in list denormalization`);
           }
           result.push(denormalize(node.head, _depth + 1));
           node = node.tail;
@@ -278,8 +278,8 @@ function denormalize(value, _depth = 0) {
         let node = value;
         let nodeDepth = 0;
         while (node && 'head' in node) {
-          if (nodeDepth++ > MAX_DEPTH) {
-            throw new Error(`Max depth exceeded in dict denormalization`);
+          if (nodeDepth++ > MAX_DENORM_ITER) {
+            throw new Error(`Max denorm iterations exceeded in dict denormalization`);
           }
           const kv = node.head;
           if (kv && typeof kv === 'object' && 'head' in kv && kv.tail && 'head' in kv.tail) {
@@ -301,8 +301,8 @@ function denormalize(value, _depth = 0) {
       let node = value;
       let nodeDepth = 0;
       while (node && typeof node === 'object' && 'head' in node) {
-        if (nodeDepth++ > MAX_DEPTH) {
-          throw new Error(`Max depth exceeded in dict denormalization`);
+        if (nodeDepth++ > MAX_DENORM_ITER) {
+          throw new Error(`Max denorm iterations exceeded in dict denormalization`);
         }
         const kv = node.head;
         if (kv && typeof kv === 'object' && 'head' in kv && kv.tail && 'head' in kv.tail) {
@@ -316,8 +316,8 @@ function denormalize(value, _depth = 0) {
       let node = value;
       let nodeDepth = 0;
       while (node && typeof node === 'object' && 'head' in node) {
-        if (nodeDepth++ > MAX_DEPTH) {
-          throw new Error(`Max depth exceeded in list denormalization`);
+        if (nodeDepth++ > MAX_DENORM_ITER) {
+          throw new Error(`Max denorm iterations exceeded in list denormalization`);
         }
         result.push(denormalize(node.head, _depth + 1));
         node = node.tail;
