@@ -1399,6 +1399,67 @@ class TestBoot1BoundaryRequestSecurity:
         assert "reserved" in boot1_error.lower() or "kernel" in boot1_error.lower()
 
 
+class TestTrampolineTailCallReservedFieldRejection:
+    """Runtime tests: trampoline _tail_call path rejects reserved fields (D-02).
+
+    Since no seed currently produces _tail_call, these tests use monkeypatch
+    to inject a _tail_call response from the engine step, then verify that
+    the trampoline validation rejects reserved fields in input and frozen.
+    """
+
+    def test_trampoline_tail_call_rejects_reserved_in_input(self, monkeypatch):
+        """Trampoline rejects _tail_call with reserved field in input."""
+        import rcx_pi.selfhost.step_mu as step_mu_mod  # ANTICHEAT_OK: monkeypatch target
+
+        original_step = step_mu_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
+        call_count = [0]
+
+        def _injecting_step(projs, state):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First engine step: produce _tail_call with reserved field
+                return {"_tail_call": {
+                    "projections": [],
+                    "input": {"_mode": "forged_state"},
+                    "max_steps": 5,
+                }}
+            return original_step(projs, state)
+
+        monkeypatch.setattr(step_mu_mod, "_step_trusted", _injecting_step)  # ANTICHEAT_OK: monkeypatch
+        reset_step_budget()
+        with pytest.raises(ValueError, match="reserved"):
+            run_engine_pipeline(
+                [], {"clean": "input"},
+                max_steps=5, use_boot1_recursive=False,
+            )
+
+    def test_trampoline_tail_call_rejects_reserved_in_frozen(self, monkeypatch):
+        """Trampoline rejects _tail_call with reserved field in frozen."""
+        import rcx_pi.selfhost.step_mu as step_mu_mod  # ANTICHEAT_OK: monkeypatch target
+
+        original_step = step_mu_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
+        call_count = [0]
+
+        def _injecting_step(projs, state):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"_tail_call": {
+                    "projections": [],
+                    "input": {"clean": "ok"},
+                    "max_steps": 5,
+                    "frozen": {"_stall": True},
+                }}
+            return original_step(projs, state)
+
+        monkeypatch.setattr(step_mu_mod, "_step_trusted", _injecting_step)  # ANTICHEAT_OK: monkeypatch
+        reset_step_budget()
+        with pytest.raises(ValueError, match="reserved"):
+            run_engine_pipeline(
+                [], {"clean": "input"},
+                max_steps=5, use_boot1_recursive=False,
+            )
+
+
 class TestBoot1PrimitiveCountInvariant:
     """Non-vacuous bootstrap primitive count assertions."""
 

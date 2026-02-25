@@ -129,6 +129,22 @@ class TestPythonBridgeValidation:
         with pytest.raises(ValueError, match="must be before match.var"):
             _validate_combined_bridge_ordering(reordered)
 
+    def test_non_dict_projection_rejected(self):
+        """Non-dict entries in projection list must raise ValueError (D-04 fail-closed)."""
+        projs = load_combined_kernel_with_bridge_projections()
+        # Inject a non-dict element
+        poisoned = list(projs) + [None]
+        with pytest.raises(ValueError, match="Non-dict projection"):
+            _validate_combined_bridge_ordering(poisoned)
+
+    def test_non_dict_projection_types_rejected(self):
+        """Various non-dict types are all rejected fail-closed."""
+        projs = load_combined_kernel_with_bridge_projections()
+        for bad_value in [None, [1, 2], "not_a_dict", 42, True]:
+            poisoned = list(projs) + [bad_value]
+            with pytest.raises(ValueError, match="Non-dict projection"):
+                _validate_combined_bridge_ordering(poisoned)
+
 
 # ── Cross-substrate parity (via JS inline tests) ────────────────────────
 
