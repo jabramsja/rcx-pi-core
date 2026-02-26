@@ -1,24 +1,24 @@
 {
   "wave_id": "wave-a7b-terminal-key-cache-hardening",
-  "repeat_run_speedup_ratio": 0.859108,
+  "repeat_run_speedup_ratio": 1.252743,
   "parity_diff_count": 19,
   "net_host_semantic_delta": 5,
-  "step_growth_slope": 0.566362,
+  "step_growth_slope": 0.461074,
   "repeat_run_raw_seconds": [
-    0.486566,
-    0.566362
+    0.577607,
+    0.461074
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.486566
+      "elapsed_seconds": 0.577607
     },
     {
       "step": 2,
-      "elapsed_seconds": 1.052928
+      "elapsed_seconds": 1.038681
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-02-26T02:56:10Z",
+  "collection_timestamp_utc": "2026-02-26T02:57:11Z",
   "collector_version": "2.2.0"
 }
