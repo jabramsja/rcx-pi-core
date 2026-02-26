@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave-a5-nonlinear-binding-hash-parity",
+  "repeat_run_speedup_ratio": 0.972854,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.48836,
+  "repeat_run_raw_seconds": [
+    0.475103,
+    0.48836
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.475103
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.963463
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-26T01:15:09Z",
+  "collector_version": "2.2.0"
+}
