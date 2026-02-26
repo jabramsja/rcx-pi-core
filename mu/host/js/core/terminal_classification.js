@@ -5,6 +5,7 @@
  * Terminal shape checks, hemisphere keys, engine exit reasons.
  * Structural displacement (Wave 25): classify/exit-reason logic delegated
  * to terminal_classify.v1.json seed projections via step().
+ * A7: terminal key sets now seed-derived (not hardcoded Sets).
  * kernel_done stays host-side (key-membership check).
  *
  * Depends on: core/constants.js, core/bootstrap_core.js, core/seed_loader.js
@@ -12,14 +13,37 @@
 
 const { step } = require('./bootstrap_core');
 
-// Terminal shape key sets — concrete compatibility exports (kept this wave).
-// Mirrors Python step_mu.py frozenset constants.
-const RECURRENCE_TERMINAL_KEYS = new Set(['closure_detected', 'final_result', 'tau_step']);
-const EXHAUSTION_TERMINAL_KEYS = new Set(['action', 'exhaustion_detected', 'frozen', 'operator_to_freeze']);
-const ENGINE_TERMINAL_KEYS = new Set([
-  'value', 'closure_detected', 'tau_step', 'exhaustion_detected',
-  'operator_frozen', 'frozen_set', 'action', 'stall',
-]);
+// Terminal shape key sets — seed-derived from terminal_classify.v1.json (A7 displacement).
+// Authority lives in seed projections, not hardcoded Sets.
+// Mirrors Python _load_tc_key_sets() in step_mu.py.
+let _tcKeySets = null;
+function _loadTcKeySets() {
+  if (_tcKeySets) return _tcKeySets;
+  const { loadVerifiedSeed } = require('./seed_loader');
+  const seed = loadVerifiedSeed('terminal_classify.v1.json', 'utilities');
+  const result = {};
+  for (const p of seed.projections) {
+    const pat = p.pattern ?? {};
+    if ('_tc' in pat) {
+      result[p.id] = new Set(Object.keys(pat._tc));
+    }
+  }
+  _tcKeySets = result;
+  return result;
+}
+
+// Backward-compatible accessors (seed-derived, frozen on first access)
+let RECURRENCE_TERMINAL_KEYS = null;
+let EXHAUSTION_TERMINAL_KEYS = null;
+let ENGINE_TERMINAL_KEYS = null;
+
+function _ensureKeySets() {
+  if (RECURRENCE_TERMINAL_KEYS) return;
+  const sets = _loadTcKeySets();
+  RECURRENCE_TERMINAL_KEYS = sets['tc.recurrence'];
+  EXHAUSTION_TERMINAL_KEYS = sets['tc.exhaustion'];
+  ENGINE_TERMINAL_KEYS = sets['tc.engine'];
+}
 
 // Engine exit reason enum (mirrors Python ENGINE_EXIT_REASONS)
 const ENGINE_EXIT_REASONS = new Set(['closure', 'exhaustion', 'stall', 'completed']);
@@ -74,6 +98,7 @@ function classifyTerminalKind(value) {
   if (value._mode === 'done' && '_result' in value && '_stall' in value) return 'kernel_done';
   // Key-set prefilter: only candidate shapes reach the seed path.
   // Avoids step() (and its assertMu walk) on engine-internal state dicts.
+  _ensureKeySets();
   const keys = new Set(Object.keys(value));
   if (!setsEqual(keys, RECURRENCE_TERMINAL_KEYS) &&
       !setsEqual(keys, EXHAUSTION_TERMINAL_KEYS) &&
@@ -130,9 +155,9 @@ function defaultHemispheres() {
 }
 
 module.exports = {
-  RECURRENCE_TERMINAL_KEYS,
-  EXHAUSTION_TERMINAL_KEYS,
-  ENGINE_TERMINAL_KEYS,
+  get RECURRENCE_TERMINAL_KEYS() { _ensureKeySets(); return RECURRENCE_TERMINAL_KEYS; },
+  get EXHAUSTION_TERMINAL_KEYS() { _ensureKeySets(); return EXHAUSTION_TERMINAL_KEYS; },
+  get ENGINE_TERMINAL_KEYS() { _ensureKeySets(); return ENGINE_TERMINAL_KEYS; },
   ENGINE_EXIT_REASONS,
   TERMINAL_KINDS,
   HEMISPHERE_KEY_ORDER,

@@ -322,7 +322,7 @@ class TestSeedDerivedKeysets:
                     f"Derived keys for {p['id']} don't match seed"
                 )
 
-    def test_no_hardcoded_frozensets_in_source(self):
+    def test_no_hardcoded_frozensets_in_python_source(self):
         """step_mu.py must NOT contain hardcoded terminal key frozensets (A6 source lock)."""
         source = PY_STEP_MU.read_text(encoding="utf-8")
         assert "_RECURRENCE_TERMINAL_KEYS = frozenset(" not in source, (
@@ -333,6 +333,19 @@ class TestSeedDerivedKeysets:
         )
         assert "_ENGINE_TERMINAL_KEYS = frozenset(" not in source, (
             "Hardcoded _ENGINE_TERMINAL_KEYS found — must be seed-derived"
+        )
+
+    def test_no_hardcoded_sets_in_js_source(self):
+        """terminal_classification.js must NOT contain hardcoded terminal key Sets (A7 source lock)."""
+        source = (JS_CORE_DIR / "terminal_classification.js").read_text(encoding="utf-8")
+        assert "RECURRENCE_TERMINAL_KEYS = new Set([" not in source, (
+            "Hardcoded RECURRENCE_TERMINAL_KEYS Set found — must be seed-derived"
+        )
+        assert "EXHAUSTION_TERMINAL_KEYS = new Set([" not in source, (
+            "Hardcoded EXHAUSTION_TERMINAL_KEYS Set found — must be seed-derived"
+        )
+        assert "ENGINE_TERMINAL_KEYS = new Set([" not in source, (
+            "Hardcoded ENGINE_TERMINAL_KEYS Set found — must be seed-derived"
         )
 
 
