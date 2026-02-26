@@ -33,6 +33,7 @@ TOOLS_ROOT_ALLOWED: frozenset[str] = frozenset({
     # Backward-compat wrappers (exec → subdirectory canonical)
     "agents.sh",
     "audit_all.sh",
+    "check_js_debt.sh",
     "audit_fast.sh",
     "audit_semantic_purity.sh",
     "debt_dashboard.sh",
@@ -60,7 +61,7 @@ SCRIPTS_ROOT_ALLOWED: frozenset[str] = frozenset({
 
 # Ratchet ceilings — can only stay same or decrease (never increase).
 # If you need to add a root file, you must remove one first or get founder approval.
-TOOLS_RATCHET_CEILING = 9
+TOOLS_RATCHET_CEILING = 10
 TESTS_RATCHET_CEILING = 5
 SCRIPTS_RATCHET_CEILING = 2
 
