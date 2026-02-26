@@ -53,7 +53,7 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
-        if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) {
+        if (Object.hasOwn(bindings, k) && muHashControlCached(bindings[k]) !== muHashControlCached(v)) {
           return NO_MATCH;
         }
         bindings[k] = v;
@@ -87,7 +87,7 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
-        if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) {
+        if (Object.hasOwn(bindings, bk) && muHashControlCached(bindings[bk]) !== muHashControlCached(bv)) {
           return NO_MATCH;
         }
         bindings[bk] = bv;

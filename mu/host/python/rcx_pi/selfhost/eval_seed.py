@@ -14,7 +14,7 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH
+from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_control_cached, MAX_MU_DEPTH
 
 
 # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
@@ -313,7 +313,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
             for k, v in sub_bindings.items():
                 if k in bindings:
                     # Same variable bound twice - must be same value (non-linear pattern)
-                    if mu_hash_cached(bindings[k]) != mu_hash_cached(v):
+                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(v):
                         return NO_MATCH
                 bindings[k] = v
         return bindings
@@ -344,7 +344,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
             for k, v in sub_bindings.items():
                 if k in bindings:
                     # Same variable bound twice - must be same value (non-linear pattern)
-                    if mu_hash_cached(bindings[k]) != mu_hash_cached(v):
+                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(v):
                         return NO_MATCH
                 bindings[k] = v
         return bindings
