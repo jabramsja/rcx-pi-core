@@ -8,12 +8,15 @@
  * A7: terminal key sets now seed-derived (not hardcoded Sets).
  * A8: cache hardening — defensive copy getters, single seed loader,
  *     unified cache clear, muBool parity fix for exit-reason coercion.
+ * A9: hemisphere key authority displaced from hardcoded constants to
+ *     seed-derived (hemispheres.v1.json hemisphere.add.* projection IDs).
  * kernel_done stays host-side (key-membership check).
  *
  * Depends on: core/constants.js, core/bootstrap_core.js, core/seed_loader.js
  */
 
 const { step } = require('./bootstrap_core');
+const { RcxError } = require('./constants');
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -125,17 +128,57 @@ const _TERMINAL_KINDS = new Set([
   'non_terminal',
 ]);
 
-// Hemisphere constants (mirrors Python step_mu.py)
-const _HEMISPHERE_KEY_ORDER = ['r_null', 'r_inf', 'r_a', 'lobes', 'sink'];
-const _HEMISPHERE_KEYS = new Set(_HEMISPHERE_KEY_ORDER);
+// ---------------------------------------------------------------------------
+// Hemisphere key sets — seed-derived from hemispheres.v1.json (A9 displacement)
+// ---------------------------------------------------------------------------
+// Authority lives in hemisphere.add.* projection IDs, not hardcoded arrays.
+// _EXPECTED_HEMI_KEYS is a fail-closed safety guard (duplicate literals),
+// NOT authority-of-truth. Authority is seed-derived; expected set catches corruption.
+
+let _hemiSeed = null;
+function _loadHemiSeed() {
+  if (!_hemiSeed) {
+    const { loadVerifiedSeed } = require('./seed_loader');
+    _hemiSeed = loadVerifiedSeed('hemispheres.v1.json', 'programs');
+  }
+  return _hemiSeed;
+}
+
+const _EXPECTED_HEMI_KEYS = new Set(['r_null', 'r_inf', 'r_a', 'lobes', 'sink']);
+let _hemiKeyOrder = null;
+let _hemiKeySet = null;
+
+function _ensureHemiKeys() {
+  if (_hemiKeyOrder) return;
+  const seed = _loadHemiSeed();
+  const prefix = 'hemisphere.add.';
+  const keys = seed.projections.filter(p => p.id.startsWith(prefix))
+    .map(p => p.id.slice(prefix.length));
+  const keySet = new Set(keys);
+  // Fail-closed invariants (A9 Requirement A)
+  if (keys.length !== 5) {
+    throw new RcxError('input.shape_mismatch',
+      `hemisphere seed invariant: expected 5 keys, got ${keys.length}`);
+  }
+  if (keys.length !== keySet.size) {
+    throw new RcxError('input.shape_mismatch',
+      'hemisphere seed invariant: duplicate keys');
+  }
+  if (!setsEqual(keySet, _EXPECTED_HEMI_KEYS)) {
+    throw new RcxError('input.shape_mismatch',
+      'hemisphere seed invariant: unexpected key set');
+  }
+  _hemiKeyOrder = keys;
+  _hemiKeySet = keySet;
+}
 
 // ---------------------------------------------------------------------------
-// Cache clear (A8: clears all caches — exported for testing)
+// Cache clear (A8+A9: clears all caches including hemisphere — exported for testing)
 // ---------------------------------------------------------------------------
 
 /**
- * Clear all terminal classification caches (for testing).
- * Mirrors Python _clear_tc_cache() in step_mu.py.
+ * Clear all terminal classification and hemisphere caches (for testing).
+ * Mirrors Python _clear_tc_cache() + _clear_hemi_cache() in step_mu.py.
  */
 function _clearTcCache() {
   _tcSeed = null;
@@ -144,6 +187,9 @@ function _clearTcCache() {
   _RECURRENCE_TERMINAL_KEYS = null;
   _EXHAUSTION_TERMINAL_KEYS = null;
   _ENGINE_TERMINAL_KEYS = null;
+  _hemiSeed = null;
+  _hemiKeyOrder = null;
+  _hemiKeySet = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +279,10 @@ function deriveEngineExitReason(engineResult) {
 }
 
 function defaultHemispheres() {
-  return { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null };
+  _ensureHemiKeys();
+  const h = {};
+  for (const k of _hemiKeyOrder) h[k] = null;
+  return h;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,8 +298,8 @@ module.exports = {
   // Enum constants — defensive copies
   get ENGINE_EXIT_REASONS() { return new Set(_ENGINE_EXIT_REASONS); },
   get TERMINAL_KINDS() { return new Set(_TERMINAL_KINDS); },
-  get HEMISPHERE_KEY_ORDER() { return [..._HEMISPHERE_KEY_ORDER]; },
-  get HEMISPHERE_KEYS() { return new Set(_HEMISPHERE_KEYS); },
+  get HEMISPHERE_KEY_ORDER() { _ensureHemiKeys(); return [..._hemiKeyOrder]; },
+  get HEMISPHERE_KEYS() { _ensureHemiKeys(); return new Set(_hemiKeySet); },
   // Functions
   setsEqual,
   classifyTerminalKind,
