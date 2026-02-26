@@ -30,6 +30,7 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
+from types import MappingProxyType
 
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
@@ -41,7 +42,7 @@ from .seed_integrity import get_seed_path, load_verified_seed
 from .projection_loader import make_projection_loader
 
 # Cached loader for terminal classification seed (structural displacement of classify/exit-reason logic)
-_load_tc_projections, _clear_tc_cache = make_projection_loader("terminal_classify.v1.json")
+_load_tc_projections, _clear_tc_proj_cache = make_projection_loader("terminal_classify.v1.json")
 
 
 # =============================================================================
@@ -62,13 +63,13 @@ class RcxEngineError(RuntimeError):
 
 # Terminal shape key sets — seed-derived from terminal_classify.v1.json (A6 displacement).
 # Authority lives in seed projections, not hardcoded frozensets.
-_tc_key_sets_cache: dict | None = None
+_tc_key_sets_cache: MappingProxyType | None = None
 
 
-def _load_tc_key_sets() -> dict:  # AST_OK: infra — seed-derived terminal key sets
+def _load_tc_key_sets() -> MappingProxyType:  # AST_OK: infra — seed-derived terminal key sets
     """Derive terminal key sets from terminal_classify.v1.json seed (cached).
 
-    Returns dict mapping projection ID → frozenset of pattern keys.
+    Returns immutable mapping of projection ID → frozenset of pattern keys.
     Only includes projections using the ``_tc`` wrapper (tc.recurrence,
     tc.exhaustion, tc.engine).
     """
@@ -81,8 +82,15 @@ def _load_tc_key_sets() -> dict:  # AST_OK: infra — seed-derived terminal key 
         pat = p.get("pattern") or {}
         if "_tc" in pat:
             result[p["id"]] = frozenset(pat["_tc"].keys())
-    _tc_key_sets_cache = result
-    return result
+    _tc_key_sets_cache = MappingProxyType(result)
+    return _tc_key_sets_cache
+
+
+def _clear_tc_cache() -> None:
+    """Clear both projection and key-set caches (for testing)."""
+    global _tc_key_sets_cache
+    _clear_tc_proj_cache()
+    _tc_key_sets_cache = None
 
 # Terminal kind enum — unified classification of all terminal states.
 # Every dict result falls into exactly one kind. Pure structural check.
