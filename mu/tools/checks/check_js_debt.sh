@@ -8,9 +8,39 @@
 
 set -euo pipefail
 
+# Resolve to repo root so relative paths are stable from any cwd.
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$PROJECT_ROOT"
+
 JS_DIR="mu/host/js"
 # The DEBT SUMMARY header lives in core/constants.js
 JS_HEADER_FILE="$JS_DIR/core/constants.js"
+
+count_marker() {
+    local pattern="$1"
+    local count
+    count=$(grep -rE "$pattern" "$JS_DIR" --include='*.js' 2>/dev/null | wc -l | tr -d '[:space:]')
+    echo "${count:-0}"
+}
+
+count_loc() {
+    local mode="$1"
+    local count=0
+    local file
+    local lines
+    if [ "$mode" = "runtime" ]; then
+        while IFS= read -r -d '' file; do
+            lines=$(wc -l < "$file" | tr -d '[:space:]')
+            count=$((count + lines))
+        done < <(find "$JS_DIR" -type f -name '*.js' ! -path "$JS_DIR/tests/*" -print0)
+    else
+        while IFS= read -r -d '' file; do
+            lines=$(wc -l < "$file" | tr -d '[:space:]')
+            count=$((count + lines))
+        done < <(find "$JS_DIR/tests" -type f -name '*.js' -print0 2>/dev/null || true)
+    fi
+    echo "$count"
+}
 
 echo "=== Checking JavaScript Debt Markers ==="
 echo ""
@@ -26,16 +56,27 @@ if [ ! -f "$JS_HEADER_FILE" ]; then
 fi
 
 # Count debt markers across all JS module files
-HOST_ITERATION=$(grep -rc "@host_iteration" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
-HOST_RECURSION=$(grep -rc "@host_recursion" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
-HOST_BUILTIN=$(grep -rc "@host_builtin" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
-BOOTSTRAP_PRIMITIVE=$(grep -rc "BOOTSTRAP_PRIMITIVE" "$JS_DIR" --include='*.js' | awk -F: '{s+=$2} END {print s}')
+HOST_ITERATION=$(count_marker "@host_iteration")
+HOST_RECURSION=$(count_marker "@host_recursion")
+HOST_BUILTIN=$(count_marker "@host_builtin")
+BOOTSTRAP_PRIMITIVE=$(count_marker "BOOTSTRAP_PRIMITIVE")
+AST_OK_TOTAL_JS=$(count_marker "AST_OK_JS:")
+HOST_RUNTIME_LOC_JS=$(count_loc "runtime")
+HOST_TEST_LOC_JS=$(count_loc "tests")
+
+if [ "$HOST_RUNTIME_LOC_JS" -eq 0 ]; then
+    echo "ERROR: JS runtime LOC resolved to 0 (path/glob failure for $JS_DIR runtime files)"
+    exit 1
+fi
 
 echo "Debt markers found across $JS_DIR/**/*.js:"
 echo "  @host_iteration:    $HOST_ITERATION"
 echo "  @host_recursion:    $HOST_RECURSION"
 echo "  @host_builtin:      $HOST_BUILTIN"
 echo "  BOOTSTRAP_PRIMITIVE: $BOOTSTRAP_PRIMITIVE"
+echo "  AST_OK_JS:          $AST_OK_TOTAL_JS  (0 is expected baseline; no AST_OK_JS markers yet)"
+echo "  host_runtime_loc_js: $HOST_RUNTIME_LOC_JS"
+echo "  host_test_loc_js:    $HOST_TEST_LOC_JS"
 echo ""
 
 # Extract expected counts from DEBT SUMMARY header in core/constants.js
