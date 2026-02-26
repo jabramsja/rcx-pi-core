@@ -37,7 +37,7 @@ from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached
 from .kernel import get_step_budget
 from collections.abc import Callable
-from .seed_integrity import get_seed_path, load_verified_seed
+from .seed_integrity import get_seed_path, load_verified_seed, MU_SEED_LOCATIONS
 from .projection_loader import make_projection_loader
 
 # Cached loader for terminal classification seed (structural displacement of classify/exit-reason logic)
@@ -648,6 +648,247 @@ def _validate_reentry_payload(payload: object, context: str) -> None:
     validate_no_kernel_reserved_fields(payload["input"], f"{context} input")
     if frozen is not None:
         validate_no_kernel_reserved_fields(frozen, f"{context} frozen")
+
+
+# Ontology promotion fully-locked seed set (A12).
+# Must match JS isFullyLockedSeed(): seeds in BOTH CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS.
+# Python SEED_CHECKSUMS/EXPECTED_PROJECTION_IDS cover all 17 seeds; JS CORE covers only 3.
+# Cross-substrate parity requires both substrates to accept exactly this set.
+_OPROMO_FULLY_LOCKED_SEEDS = frozenset({  # AST_OK: infra — parity constant, not Mu data
+    "terminal_classify.v1.json",
+    "hemispheres.v1.json",
+    "rcx_engine.v1.json",
+})
+
+
+def _validate_ontology_promotion_record(record: dict, context_str: str) -> None:  # AST_OK: infra — A12 ontology promotion enforcement
+    """Validate an ontology promotion record against INV_OPROMO_1..4.
+
+    Fail-closed: raises RcxEngineError (not raw TypeError/KeyError) on
+    any invariant violation. Check order: INV_OPROMO_4 (shape) → 1 → 2 → 3.
+    """
+    # Entry guard: reject non-dict input before any key access
+    if not isinstance(record, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: record must be dict, got {type(record).__name__}",
+        )
+    # --- INV_OPROMO_4: shape/provenance (all required fields + types) ---
+    required_keys = (
+        "witness_traces", "seed_configs", "closure_structure",
+        "perturbation_log", "derivation_timestamp", "substrate_versions",
+        "tau_lineage", "authority",
+    )
+    for key in required_keys:
+        if key not in record:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_4 missing required field '{key}'",
+            )
+
+    witness_traces = record["witness_traces"]
+    seed_configs = record["seed_configs"]
+    closure_structure = record["closure_structure"]
+    perturbation_log = record["perturbation_log"]
+    derivation_timestamp = record["derivation_timestamp"]
+    substrate_versions = record["substrate_versions"]
+    tau_lineage = record["tau_lineage"]
+    authority = record["authority"]
+
+    if not isinstance(witness_traces, list):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'witness_traces' must be list, "
+            f"got {type(witness_traces).__name__}",
+        )
+    if not isinstance(seed_configs, list):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'seed_configs' must be list, "
+            f"got {type(seed_configs).__name__}",
+        )
+    if not isinstance(closure_structure, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'closure_structure' must be dict, "
+            f"got {type(closure_structure).__name__}",
+        )
+    if not isinstance(perturbation_log, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'perturbation_log' must be dict, "
+            f"got {type(perturbation_log).__name__}",
+        )
+    if not isinstance(derivation_timestamp, str) or not derivation_timestamp:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'derivation_timestamp' must be non-empty string",
+        )
+    if not isinstance(substrate_versions, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'substrate_versions' must be dict, "
+            f"got {type(substrate_versions).__name__}",
+        )
+    for sv_key in ("python", "js"):
+        if sv_key not in substrate_versions or not isinstance(substrate_versions[sv_key], str):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_4 'substrate_versions' must contain string key '{sv_key}'",
+            )
+    if not isinstance(tau_lineage, list) or len(tau_lineage) == 0:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'tau_lineage' must be non-empty list",
+        )
+    if not isinstance(authority, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'authority' must be dict, "
+            f"got {type(authority).__name__}",
+        )
+    for auth_key in ("source", "seed_file", "projection_ids"):
+        if auth_key not in authority:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_4 'authority' missing required field '{auth_key}'",
+            )
+    if not isinstance(authority["source"], str):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'authority.source' must be string",
+        )
+    if not isinstance(authority["seed_file"], str):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'authority.seed_file' must be string",
+        )
+    if not isinstance(authority["projection_ids"], list) or len(authority["projection_ids"]) == 0:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4 'authority.projection_ids' must be non-empty list",
+        )
+    for pid in authority["projection_ids"]:
+        if not isinstance(pid, str):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_4 'authority.projection_ids' entries must be strings",
+            )
+
+    # --- INV_OPROMO_1: recurrence witnesses ---
+    # Type-validate seed_configs entries before set()/sorted() to prevent raw TypeError
+    for i, sc in enumerate(seed_configs):
+        if not isinstance(sc, str):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_1 seed_configs[{i}] must be string, "
+                f"got {type(sc).__name__}",
+            )
+    if len(witness_traces) < 2:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_1 requires >= 2 witness_traces, got {len(witness_traces)}",
+        )
+    witness_pairs = set()
+    witness_seed_configs = set()
+    for i, w in enumerate(witness_traces):
+        if not isinstance(w, dict):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_1 witness_traces[{i}] must be dict",
+            )
+        if "trace_id" not in w or not isinstance(w["trace_id"], str):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_1 witness_traces[{i}] must have string 'trace_id'",
+            )
+        if "seed_config" not in w or not isinstance(w["seed_config"], str):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_1 witness_traces[{i}] must have string 'seed_config'",
+            )
+        pair = (w["seed_config"], w["trace_id"])
+        if pair in witness_pairs:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_1 duplicate (seed_config, trace_id) pair: {pair}",
+            )
+        witness_pairs.add(pair)
+        witness_seed_configs.add(w["seed_config"])
+
+    if len(witness_seed_configs) < 2:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_1 requires >= 2 distinct seed_configs in witnesses, "
+            f"got {len(witness_seed_configs)}",
+        )
+    seed_config_set = set(seed_configs)
+    if seed_config_set != witness_seed_configs:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_1 seed_configs field inconsistent with witness_traces",
+        )
+
+    # --- INV_OPROMO_2: perturbation stability ---
+    for plog_key in ("removals_tested", "additions_tested", "pattern_survived_all"):
+        if plog_key not in perturbation_log:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: INV_OPROMO_2 'perturbation_log' missing '{plog_key}'",
+            )
+    removals = perturbation_log["removals_tested"]
+    additions = perturbation_log["additions_tested"]
+    survived = perturbation_log["pattern_survived_all"]
+    if not isinstance(removals, list) or len(removals) == 0:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_2 'removals_tested' must be non-empty list",
+        )
+    if not isinstance(additions, list) or len(additions) == 0:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_2 'additions_tested' must be non-empty list",
+        )
+    if survived is not True:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_2 'pattern_survived_all' must be true, got {survived!r}",
+        )
+
+    # --- INV_OPROMO_3: host cannot mint (seed authority only) ---
+    if authority["source"] != "seed":
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_3 authority.source must be 'seed', "
+            f"got {authority['source']!r}",
+        )
+    seed_file = authority["seed_file"]
+    # Full-lock gate: restrict to seeds that are verification-locked in BOTH substrates.
+    # Must match JS isFullyLockedSeed() (intersection of CORE_SEED_CHECKSUMS ∩ CORE_SEED_PROJECTION_IDS).
+    # Python SEED_CHECKSUMS covers all 17 seeds; JS CORE only covers 3.
+    # Parity requires both substrates to accept the same set.
+    if seed_file not in _OPROMO_FULLY_LOCKED_SEEDS:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_3 seed not verification-locked: {seed_file}",
+        )
+    try:
+        seed_path = get_seed_path(seed_file)
+        seed = load_verified_seed(seed_path)
+        seed_proj_ids = {p["id"] for p in seed["projections"]}  # AST_OK: infra — set comp for O(1) lookup, not Mu data
+    except Exception as exc:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_3 seed resolution failed for "
+            f"'{seed_file}': {exc}",
+        ) from exc
+    missing_ids = [pid for pid in authority["projection_ids"] if pid not in seed_proj_ids]  # AST_OK: infra — filter for error reporting
+    if missing_ids:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_3 projection_ids not found in seed "
+            f"'{seed_file}': {missing_ids}",
+        )
 
 
 # =============================================================================
@@ -1838,6 +2079,20 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
 
     # SECURITY: validate boundary result before re-injection.
     validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
+
+    # Ontology promotion enforcement (A12): validate promotion records if present.
+    if isinstance(result, dict) and "ontology_promotion" in result:
+        promo = result["ontology_promotion"]
+        if not isinstance(promo, dict):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"boundary_result({operation}).ontology_promotion must be dict, "
+                f"got {type(promo).__name__}",
+            )
+        _validate_ontology_promotion_record(
+            promo,
+            f"boundary_result({operation}).ontology_promotion",
+        )
 
     context[inject_key] = result
     return context

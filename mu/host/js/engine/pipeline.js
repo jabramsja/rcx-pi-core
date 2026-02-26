@@ -15,6 +15,7 @@ const { validateNoKernelReservedFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
 const { isTerminalShape, isEngineTerminal, deriveEngineExitReason, setsEqual } = require('../core/terminal_classification');
 const { stepKernel, runStructural } = require('./kernel');
+const seedLoader = require('../core/seed_loader');
 
 // JS built-in property names that must never be used as inject_key.
 // Prevents prototype chain poisoning via boundary requests.
@@ -294,6 +295,20 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
 
   validateNoKernelReservedFields(result, `boundary_result(${operation})`);
 
+  // Ontology promotion enforcement (A12): validate promotion records if present.
+  if (result && typeof result === 'object' && 'ontology_promotion' in result) {
+    const promo = result.ontology_promotion;
+    if (typeof promo !== 'object' || promo === null || Array.isArray(promo)) {
+      throw new RcxError('input.shape_mismatch',
+        `boundary_result(${operation}).ontology_promotion must be object, ` +
+        `got ${promo === null ? 'null' : Array.isArray(promo) ? 'array' : typeof promo}`);
+    }
+    validateOntologyPromotionRecord(
+      promo,
+      `boundary_result(${operation}).ontology_promotion`
+    );
+  }
+
   context[injectKey] = result;
   return context;
 }
@@ -338,6 +353,196 @@ function validateReentryPayload(payload, context) {
   validateNoKernelReservedFields(payload.input, `${context} input`);
   if (payload.frozen !== null && payload.frozen !== undefined) {
     validateNoKernelReservedFields(payload.frozen, `${context} frozen`);
+  }
+}
+
+/**
+ * Validate an ontology promotion record against INV_OPROMO_1..4.
+ * Fail-closed: throws RcxError (not raw TypeError) on any invariant violation.
+ * Check order: INV_OPROMO_4 (shape) → 1 → 2 → 3.
+ */
+function validateOntologyPromotionRecord(record, contextStr) {
+  // Entry guard: reject null/non-object/array before any property access
+  if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: record must be object, got ${record === null ? 'null' : Array.isArray(record) ? 'array' : typeof record}`);
+  }
+  // --- INV_OPROMO_4: shape/provenance ---
+  const requiredKeys = [
+    'witness_traces', 'seed_configs', 'closure_structure',
+    'perturbation_log', 'derivation_timestamp', 'substrate_versions',
+    'tau_lineage', 'authority',
+  ];
+  for (const key of requiredKeys) {
+    if (!(key in record)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_4 missing required field '${key}'`);
+    }
+  }
+
+  const witnessTraces = record.witness_traces;
+  const seedConfigs = record.seed_configs;
+  const closureStructure = record.closure_structure;
+  const perturbationLog = record.perturbation_log;
+  const derivationTimestamp = record.derivation_timestamp;
+  const substrateVersions = record.substrate_versions;
+  const tauLineage = record.tau_lineage;
+  const authority = record.authority;
+
+  if (!Array.isArray(witnessTraces)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'witness_traces' must be array, got ${typeof witnessTraces}`);
+  }
+  if (!Array.isArray(seedConfigs)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'seed_configs' must be array, got ${typeof seedConfigs}`);
+  }
+  if (typeof closureStructure !== 'object' || closureStructure === null || Array.isArray(closureStructure)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'closure_structure' must be object`);
+  }
+  if (typeof perturbationLog !== 'object' || perturbationLog === null || Array.isArray(perturbationLog)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'perturbation_log' must be object`);
+  }
+  if (typeof derivationTimestamp !== 'string' || derivationTimestamp === '') {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'derivation_timestamp' must be non-empty string`);
+  }
+  if (typeof substrateVersions !== 'object' || substrateVersions === null || Array.isArray(substrateVersions)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'substrate_versions' must be object`);
+  }
+  for (const svKey of ['python', 'js']) {
+    if (!(svKey in substrateVersions) || typeof substrateVersions[svKey] !== 'string') {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_4 'substrate_versions' must contain string key '${svKey}'`);
+    }
+  }
+  if (!Array.isArray(tauLineage) || tauLineage.length === 0) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'tau_lineage' must be non-empty array`);
+  }
+  if (typeof authority !== 'object' || authority === null || Array.isArray(authority)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'authority' must be object`);
+  }
+  for (const authKey of ['source', 'seed_file', 'projection_ids']) {
+    if (!(authKey in authority)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_4 'authority' missing required field '${authKey}'`);
+    }
+  }
+  if (typeof authority.source !== 'string') {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'authority.source' must be string`);
+  }
+  if (typeof authority.seed_file !== 'string') {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'authority.seed_file' must be string`);
+  }
+  if (!Array.isArray(authority.projection_ids) || authority.projection_ids.length === 0) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4 'authority.projection_ids' must be non-empty array`);
+  }
+  for (const pid of authority.projection_ids) {
+    if (typeof pid !== 'string') {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_4 'authority.projection_ids' entries must be strings`);
+    }
+  }
+
+  // --- INV_OPROMO_1: recurrence witnesses ---
+  // Type-validate seed_configs entries before Set construction to prevent silent coercion
+  for (let i = 0; i < seedConfigs.length; i++) {
+    if (typeof seedConfigs[i] !== 'string') {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_1 seed_configs[${i}] must be string, got ${typeof seedConfigs[i]}`);
+    }
+  }
+  if (witnessTraces.length < 2) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_1 requires >= 2 witness_traces, got ${witnessTraces.length}`);
+  }
+  const witnessPairs = new Set();
+  const witnessSeedConfigs = new Set();
+  for (let i = 0; i < witnessTraces.length; i++) {
+    const w = witnessTraces[i];
+    if (typeof w !== 'object' || w === null || Array.isArray(w)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_1 witness_traces[${i}] must be object`);
+    }
+    if (!('trace_id' in w) || typeof w.trace_id !== 'string') {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_1 witness_traces[${i}] must have string 'trace_id'`);
+    }
+    if (!('seed_config' in w) || typeof w.seed_config !== 'string') {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_1 witness_traces[${i}] must have string 'seed_config'`);
+    }
+    const pairKey = `${w.seed_config}\0${w.trace_id}`;
+    if (witnessPairs.has(pairKey)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_1 duplicate (seed_config, trace_id) pair: (${w.seed_config}, ${w.trace_id})`);
+    }
+    witnessPairs.add(pairKey);
+    witnessSeedConfigs.add(w.seed_config);
+  }
+  if (witnessSeedConfigs.size < 2) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_1 requires >= 2 distinct seed_configs in witnesses, got ${witnessSeedConfigs.size}`);
+  }
+  const seedConfigSet = new Set(seedConfigs);
+  if (!setsEqual(seedConfigSet, witnessSeedConfigs)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_1 seed_configs field inconsistent with witness_traces`);
+  }
+
+  // --- INV_OPROMO_2: perturbation stability ---
+  for (const plogKey of ['removals_tested', 'additions_tested', 'pattern_survived_all']) {
+    if (!(plogKey in perturbationLog)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: INV_OPROMO_2 'perturbation_log' missing '${plogKey}'`);
+    }
+  }
+  if (!Array.isArray(perturbationLog.removals_tested) || perturbationLog.removals_tested.length === 0) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_2 'removals_tested' must be non-empty array`);
+  }
+  if (!Array.isArray(perturbationLog.additions_tested) || perturbationLog.additions_tested.length === 0) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_2 'additions_tested' must be non-empty array`);
+  }
+  if (perturbationLog.pattern_survived_all !== true) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_2 'pattern_survived_all' must be true, got ${perturbationLog.pattern_survived_all}`);
+  }
+
+  // --- INV_OPROMO_3: host cannot mint (seed authority only) ---
+  if (authority.source !== 'seed') {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_3 authority.source must be 'seed', got '${authority.source}'`);
+  }
+  const seedFile = authority.seed_file;
+  // Full-lock gate: only accept seeds with checksum + projection ID verification
+  if (!seedLoader.isFullyLockedSeed(seedFile)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_3 seed not verification-locked: ${seedFile}`);
+  }
+  let seedProjIds;
+  try {
+    const subdir = seedLoader.getSeedSubdir(seedFile);
+    const seed = seedLoader.loadVerifiedSeed(seedFile, subdir);
+    seedProjIds = new Set(seed.projections.map(p => p.id));
+  } catch (err) {
+    if (err instanceof RcxError) throw err;
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_3 seed resolution failed for '${seedFile}': ${err.message}`);
+  }
+  const missingIds = authority.projection_ids.filter(pid => !seedProjIds.has(pid));
+  if (missingIds.length > 0) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_3 projection_ids not found in seed '${seedFile}': ${JSON.stringify(missingIds)}`);
   }
 }
 
@@ -628,6 +833,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
 module.exports = {
   BOOT1_MAX_REENTRY_DEPTH,
   validateReentryPayload,
+  validateOntologyPromotionRecord,
   runAlgorithmWithBridge,
   runSubAlgorithm,
   hashTraceForRecurrence,

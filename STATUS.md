@@ -278,8 +278,8 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
-INFRA_CEILING: 55
-INFRA_CURRENT: 55
+INFRA_CEILING: 59
+INFRA_CURRENT: 59
 ```
 
 **Debt breakdown:**
