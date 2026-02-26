@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave-a7-terminal-key-authority-js",
+  "repeat_run_speedup_ratio": 0.890343,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 20,
+  "step_growth_slope": 0.487064,
+  "repeat_run_raw_seconds": [
+    0.433654,
+    0.487064
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.433654
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.920718
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-26T02:01:30Z",
+  "collector_version": "2.2.0"
+}
