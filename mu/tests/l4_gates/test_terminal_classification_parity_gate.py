@@ -54,23 +54,35 @@ def _extract_js_set(source: str, var_name: str) -> set[str]:
 # =============================================================================
 
 class TestTerminalKeySetParity:
-    """Terminal shape key sets must be identical across substrates."""
+    """Terminal shape key sets must be identical across substrates (A7: both seed-derived)."""
+
+    def _js_key_set(self, export_name):
+        """Get a JS terminal key Set via node -e evaluation."""
+        import json
+        import subprocess
+        script = (
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            f"console.log(JSON.stringify([...tc.{export_name}]));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return set(json.loads(result.stdout.strip()))
 
     def test_recurrence_terminal_keys_match(self):
-        js = _js_source()
-        js_keys = _extract_js_set(js, "RECURRENCE_TERMINAL_KEYS")
+        js_keys = self._js_key_set("RECURRENCE_TERMINAL_KEYS")
         tc_sets = _load_tc_key_sets()
         assert set(tc_sets["tc.recurrence"]) == js_keys
 
     def test_exhaustion_terminal_keys_match(self):
-        js = _js_source()
-        js_keys = _extract_js_set(js, "EXHAUSTION_TERMINAL_KEYS")
+        js_keys = self._js_key_set("EXHAUSTION_TERMINAL_KEYS")
         tc_sets = _load_tc_key_sets()
         assert set(tc_sets["tc.exhaustion"]) == js_keys
 
     def test_engine_terminal_keys_match(self):
-        js = _js_source()
-        js_keys = _extract_js_set(js, "ENGINE_TERMINAL_KEYS")
+        js_keys = self._js_key_set("ENGINE_TERMINAL_KEYS")
         tc_sets = _load_tc_key_sets()
         assert set(tc_sets["tc.engine"]) == js_keys
 

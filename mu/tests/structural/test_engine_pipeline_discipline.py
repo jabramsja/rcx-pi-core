@@ -308,10 +308,22 @@ class TestEngineResultShapeParity:
         )
 
     def test_js_engine_terminal_keys_match_python(self):
-        """JS ENGINE_TERMINAL_KEYS must match seed-derived Python keys."""
+        """JS ENGINE_TERMINAL_KEYS must match seed-derived Python keys (A7: both seed-derived)."""
+        import json as _json
+        import subprocess
         from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for engine shape contract
+        from tests.repo_root import REPO_ROOT
         engine_keys = _load_tc_key_sets()["tc.engine"]
-        js_keys = _extract_js_set_literal(_read_all_js_source(), "ENGINE_TERMINAL_KEYS")
+        script = (
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify([...tc.ENGINE_TERMINAL_KEYS]));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        js_keys = set(_json.loads(result.stdout.strip()))
         assert js_keys == engine_keys, (
             f"Engine terminal key drift!\n"
             f"  Python-only: {engine_keys - js_keys}\n"
