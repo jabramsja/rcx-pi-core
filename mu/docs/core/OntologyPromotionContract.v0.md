@@ -21,7 +21,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 Define the invariants governing ontology promotion in RCX: the conditions under which a structural pattern observed in Mu execution may be elevated to a first-class ontological token (a named entity in the system's vocabulary of structural operations).
 
-**Scope note:** v0 is contract-only; runtime enforcement deferred to A12. This document establishes the invariants that any future runtime implementation must satisfy. No runtime host files are changed by this wave.
+**Scope note:** v0 defines invariants; runtime enforcement added in A12. Both Python and JS substrates validate `ontology_promotion` records in boundary results against all 4 invariants with typed fail-closed behavior (`input.shape_mismatch`).
 
 ## Background
 
@@ -103,3 +103,4 @@ Without promotion discipline, the system risks:
 | Version | Date | Change |
 |---------|------|--------|
 | v0 | 2026-02-26 | Contract-only. 4 invariants defined. Runtime enforcement deferred to A12. |
+| v0+A12 | 2026-02-26 | Runtime enforcement in both substrates. Typed fail-closed validation. |

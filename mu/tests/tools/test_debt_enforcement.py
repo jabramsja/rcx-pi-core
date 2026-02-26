@@ -386,8 +386,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 55 (52 pre-A10 + 3 A10 boundary ops seed derivation: _load_boundary_ops, ops set, for-loop scan)
-    assert infra_count == 55, (
-        f"Expected 55 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 59 (55 pre-A12 + 3 A12 ontology promotion validator + 1 A12 locked-seed set)
+    assert infra_count == 59, (
+        f"Expected 59 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

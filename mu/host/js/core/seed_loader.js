@@ -60,6 +60,51 @@ const CORE_SEED_PROJECTION_IDS = {
   ],
 };
 
+// Map seed names to mu/ subfolders — mirrors MU_SEED_LOCATIONS in Python seed_integrity.py.
+const SEED_SUBDIRS = {
+  'kernel.v1.json': 'substrate',
+  'match.v1.json': 'substrate',
+  'match.v2.json': 'substrate',
+  'subst.v1.json': 'substrate',
+  'subst.v2.json': 'substrate',
+  'bootstrap_structural.v1.json': 'bridge',
+  'recurrence.v1.json': 'closures',
+  'recurrence.v2.json': 'closures',
+  'exhaustion.v1.json': 'closures',
+  'fix.v1.json': 'closures',
+  'classify.v1.json': 'utilities',
+  'eval.v1.json': 'utilities',
+  'terminal_classify.v1.json': 'utilities',
+  'rcx_engine.v1.json': 'programs',
+  'hemispheres.v1.json': 'programs',
+  'paxos_demo.v1.json': 'programs',
+  'metabolization.v1.json': 'programs',
+};
+
+/**
+ * Get the subdirectory for a seed file.
+ * @param {string} seedName - Seed filename
+ * @returns {string} Subdirectory under mu/
+ * @throws {Error} If seedName is not in SEED_SUBDIRS
+ */
+function getSeedSubdir(seedName) {
+  const subdir = SEED_SUBDIRS[seedName];
+  if (!subdir) {
+    throw new Error(`Unknown seed: ${seedName} (not in SEED_SUBDIRS registry)`);
+  }
+  return subdir;
+}
+
+/**
+ * Check if a seed is fully verification-locked (checksum + projection IDs).
+ * INV_OPROMO_3 only accepts fully-locked seeds in JS.
+ * @param {string} seedName - Seed filename
+ * @returns {boolean}
+ */
+function isFullyLockedSeed(seedName) {
+  return seedName in CORE_SEED_CHECKSUMS && seedName in CORE_SEED_PROJECTION_IDS;
+}
+
 /**
  * Load and verify a seed file.
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
@@ -94,4 +139,4 @@ function loadVerifiedSeed(seedName, subdir) {
   return seed;
 }
 
-module.exports = { loadVerifiedSeed };
+module.exports = { loadVerifiedSeed, getSeedSubdir, isFullyLockedSeed, SEED_SUBDIRS };
