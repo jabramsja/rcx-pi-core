@@ -41,7 +41,7 @@ from .seed_integrity import get_seed_path, load_verified_seed
 from .projection_loader import make_projection_loader
 
 # Cached loader for terminal classification seed (structural displacement of classify/exit-reason logic)
-_load_tc_projections, _clear_tc_cache = make_projection_loader("terminal_classify.v1.json")
+_load_tc_projections, _clear_tc_proj_cache = make_projection_loader("terminal_classify.v1.json")
 
 
 # =============================================================================
@@ -68,13 +68,15 @@ _tc_key_sets_cache: dict | None = None
 def _load_tc_key_sets() -> dict:  # AST_OK: infra — seed-derived terminal key sets
     """Derive terminal key sets from terminal_classify.v1.json seed (cached).
 
-    Returns dict mapping projection ID → frozenset of pattern keys.
+    Returns a fresh copy of {projection_id: frozenset(keys)} each call.
+    Callers cannot mutate the internal cache (defensive copy pattern,
+    same as projection_loader.py). Values are frozensets (already immutable).
     Only includes projections using the ``_tc`` wrapper (tc.recurrence,
     tc.exhaustion, tc.engine).
     """
     global _tc_key_sets_cache
     if _tc_key_sets_cache is not None:
-        return _tc_key_sets_cache
+        return dict(_tc_key_sets_cache)
     projs = _load_tc_projections()
     result = {}
     for p in projs:
@@ -82,7 +84,14 @@ def _load_tc_key_sets() -> dict:  # AST_OK: infra — seed-derived terminal key 
         if "_tc" in pat:
             result[p["id"]] = frozenset(pat["_tc"].keys())
     _tc_key_sets_cache = result
-    return result
+    return dict(_tc_key_sets_cache)
+
+
+def _clear_tc_cache() -> None:
+    """Clear both projection and key-set caches (for testing)."""
+    global _tc_key_sets_cache
+    _clear_tc_proj_cache()
+    _tc_key_sets_cache = None
 
 # Terminal kind enum — unified classification of all terminal states.
 # Every dict result falls into exactly one kind. Pure structural check.

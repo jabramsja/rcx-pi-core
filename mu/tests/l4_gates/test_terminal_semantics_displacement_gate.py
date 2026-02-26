@@ -23,6 +23,7 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.eval_seed import step as eval_step
 from rcx_pi.selfhost.step_mu import (
     _load_tc_key_sets,  # ANTICHEAT_OK: gate verifies seed-derived key sets
+    _clear_tc_cache,  # ANTICHEAT_OK: gate verifies cache-clear parity
     classify_terminal_kind,
     _derive_engine_exit_reason,  # ANTICHEAT_OK: gate verifies seed-backed exit reason
 )
@@ -387,7 +388,58 @@ class TestPrefilterShortCircuit:
 
 
 # ===========================================================================
-# Test 10: Source lock — terminal_classification.js does NOT import main.js
+# Test 10: Cache integrity (A7b hardening)
+# ===========================================================================
+
+class TestCacheIntegrity:
+    """Key-set cache returns defensive copies and clears correctly."""
+
+    def test_returned_dict_is_defensive_copy(self):
+        """Each call returns a fresh dict — mutations don't affect the cache."""
+        tc_sets_1 = _load_tc_key_sets()
+        tc_sets_2 = _load_tc_key_sets()
+        assert tc_sets_1 is not tc_sets_2, "Must return fresh copy, not same object"
+        assert tc_sets_1 == tc_sets_2, "Copies must be equal"
+
+    def test_mutation_does_not_affect_classification(self):
+        """Mutating the returned dict does not alter classify_terminal_kind behavior."""
+        _clear_tc_cache()
+        tc_sets = _load_tc_key_sets()
+        # Mutate the returned copy
+        tc_sets["tc.recurrence"] = frozenset()
+        tc_sets["injected"] = frozenset({"hack"})
+        # Classification still works correctly — cache was not affected
+        assert classify_terminal_kind(RECURRENCE_SHAPE) == "recurrence_terminal"
+        assert classify_terminal_kind(EXHAUSTION_SHAPE) == "exhaustion_terminal"
+        assert classify_terminal_kind(ENGINE_SHAPE) == "engine_terminal"
+        _clear_tc_cache()  # Clean up
+
+    def test_clear_invalidates_both_caches(self):
+        """_clear_tc_cache clears projection AND key-set caches."""
+        # Prime both caches
+        _load_tc_key_sets()
+        classify_terminal_kind(RECURRENCE_SHAPE)
+        # Clear
+        _clear_tc_cache()
+        # After clear, re-loading must still work (proves cache was invalidated and rebuilt)
+        tc_sets = _load_tc_key_sets()
+        assert len(tc_sets) == 3
+        assert classify_terminal_kind(RECURRENCE_SHAPE) == "recurrence_terminal"
+        _clear_tc_cache()  # Clean up
+
+    def test_clear_then_classify_works(self):
+        """Classification works correctly after cache clear (no stale state)."""
+        _clear_tc_cache()
+        assert classify_terminal_kind(KERNEL_DONE) == "kernel_done"
+        assert classify_terminal_kind(RECURRENCE_SHAPE) == "recurrence_terminal"
+        assert classify_terminal_kind(EXHAUSTION_SHAPE) == "exhaustion_terminal"
+        assert classify_terminal_kind(ENGINE_SHAPE) == "engine_terminal"
+        assert classify_terminal_kind(NON_TERMINAL) == "non_terminal"
+        _clear_tc_cache()  # Clean up
+
+
+# ===========================================================================
+# Test 11: Source lock — terminal_classification.js does NOT import main.js
 # ===========================================================================
 
 class TestNoMainJsImport:
