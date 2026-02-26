@@ -595,11 +595,9 @@ class TestRunMuCallsiteInventory:
 # ── run_mu_structural callsite inventory ──────────────────────────────────
 
 # All functions that call run_mu_structural() directly.
-# _service_boundary_effect: shared boundary effect handler (called by both paths below)
-# run_engine_pipeline: main engine loop (trampoline path, delegates boundary to shared helper)
-# _run_engine_recursive: Boot1 engine loop (recursive path, delegates boundary to shared helper)
+# _boundary_op_run_trace: handler for run_trace boundary op (A10: extracted from _service_boundary_effect)
 KNOWN_RUN_MU_STRUCTURAL_CALLERS = {
-    "_service_boundary_effect",
+    "_boundary_op_run_trace",
 }
 
 

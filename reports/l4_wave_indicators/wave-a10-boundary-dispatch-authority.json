@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave-a10-boundary-dispatch-authority",
+  "repeat_run_speedup_ratio": 1.066366,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 242,
+  "step_growth_slope": 0.448137,
+  "repeat_run_raw_seconds": [
+    0.477878,
+    0.448137
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.477878
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.926015
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-26T08:30:15Z",
+  "collector_version": "2.2.0"
+}

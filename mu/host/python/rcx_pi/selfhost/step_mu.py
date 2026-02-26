@@ -44,6 +44,8 @@ from .projection_loader import make_projection_loader
 _load_tc_projections, _clear_tc_proj_cache = make_projection_loader("terminal_classify.v1.json")
 # Cached loader for hemisphere seed (A9: hemisphere key authority displacement)
 _load_hemi_projections, _clear_hemi_proj_cache = make_projection_loader("hemispheres.v1.json")
+# Cached loader for engine seed (A10: boundary dispatch authority displacement)
+_load_engine_projections, _clear_engine_proj_cache = make_projection_loader("rcx_engine.v1.json")
 
 
 # =============================================================================
@@ -146,6 +148,56 @@ def _clear_hemi_cache() -> None:
     global _hemi_key_sets_cache
     _clear_hemi_proj_cache()
     _hemi_key_sets_cache = None
+
+
+# Boundary operation set — seed-derived from rcx_engine.v1.json (A10 displacement).
+# Authority lives in engine projection bodies (body._boundary_request.operation).
+# _EXPECTED_BOUNDARY_OPS is a fail-closed safety guard (duplicate literals),
+# NOT authority-of-truth. Authority is seed-derived; expected set catches corruption.
+_boundary_ops_cache: frozenset | None = None
+_EXPECTED_BOUNDARY_OPS = frozenset({"run_trace", "hash_trace", "run_algorithm"})  # AST_OK: constant — fail-closed guard
+
+
+def _load_boundary_ops() -> frozenset[str]:  # AST_OK: infra — seed-derived boundary ops
+    """Derive valid boundary operations from rcx_engine.v1.json (cached).
+
+    Scans projection bodies for _boundary_request.operation literal strings.
+    Fail-closed: raises RcxEngineError if seed yields unexpected op set.
+    """
+    global _boundary_ops_cache
+    if _boundary_ops_cache is not None:
+        return _boundary_ops_cache
+    projs = _load_engine_projections()
+    ops: set[str] = set()  # AST_OK: infra — seed-derived op collection
+    for p in projs:  # AST_OK: infra — seed projection scan
+        body = p.get("body")
+        if isinstance(body, dict):
+            br = body.get("_boundary_request")
+            if isinstance(br, dict):
+                if "operation" in br:
+                    op = br["operation"]
+                    if not isinstance(op, str):
+                        raise RcxEngineError("input.shape_mismatch",
+                            f"engine seed invariant: boundary op must be string, "
+                            f"got {type(op).__name__} in projection {p.get('id', '?')}")
+                    ops.add(op)
+    op_set = frozenset(ops)
+    # Fail-closed invariants (A10 Requirement A)
+    if len(op_set) != 3:
+        raise RcxEngineError("input.shape_mismatch",
+            f"engine seed invariant: expected 3 boundary ops, got {len(op_set)}")
+    if op_set != _EXPECTED_BOUNDARY_OPS:
+        raise RcxEngineError("input.shape_mismatch",
+            f"engine seed invariant: expected {sorted(_EXPECTED_BOUNDARY_OPS)}, got {sorted(op_set)}")
+    _boundary_ops_cache = op_set
+    return _boundary_ops_cache
+
+
+def _clear_boundary_ops_cache() -> None:
+    """Clear engine projection and boundary ops caches (for testing)."""
+    global _boundary_ops_cache
+    _clear_engine_proj_cache()
+    _boundary_ops_cache = None
 
 
 # Terminal kind enum — unified classification of all terminal states.
@@ -1636,18 +1688,83 @@ _BOOT1_MAX_REENTRY_DEPTH = 20  # AST_OK: infra — Boot1 recursive re-entry dept
 ENGINE_EXIT_REASONS = frozenset(["closure", "exhaustion", "stall", "completed"])
 
 
+def _boundary_op_run_trace(request, req_input, max_algorithm_iterations):
+    """Handler for 'run_trace' boundary operation."""
+    if not isinstance(req_input, dict):
+        raise RcxEngineError("api.bad_request",
+            f"run_trace input must be dict, got {type(req_input).__name__}")
+    if "projections" not in req_input or "value" not in req_input:
+        raise RcxEngineError("api.bad_request",
+            "run_trace input must include 'projections' and 'value'")
+    projs = req_input["projections"]
+    if not isinstance(projs, (list, tuple)):
+        raise RcxEngineError("api.bad_request",
+            f"run_trace input 'projections' must be list, got {type(projs).__name__}")
+    for i, p in enumerate(projs):
+        if not isinstance(p, dict):
+            raise RcxEngineError("api.bad_request",
+                f"run_trace projection[{i}] must be dict, got {type(p).__name__}")
+        if "pattern" not in p or "body" not in p:
+            raise RcxEngineError("api.bad_request",
+                f"run_trace projection[{i}] must have 'pattern' and 'body' keys")
+    # max_steps parity policy: normalize-fallback.
+    # Numeric finite → floor to int. Non-numeric/bool/NaN/±Inf → fallback to 100.
+    # Matches JS behavior (typeof !== 'number' || isNaN → 100, Math.floor) exactly.
+    import math
+    max_steps = req_input.get("max_steps", 100)
+    if isinstance(max_steps, bool) or not isinstance(max_steps, (int, float)):
+        max_steps = 100
+    elif math.isnan(max_steps) or math.isinf(max_steps):
+        max_steps = 100
+    else:
+        max_steps = int(max_steps)
+    if max_steps < 0:
+        max_steps = 100
+    raw = run_mu_structural(projs, req_input["value"], max_steps=max_steps)
+    return {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
+
+
+def _boundary_op_hash_trace(request, req_input, max_algorithm_iterations):
+    """Handler for 'hash_trace' boundary operation."""
+    return hash_trace_for_recurrence(req_input)
+
+
+def _boundary_op_run_algorithm(request, req_input, max_algorithm_iterations):
+    """Handler for 'run_algorithm' boundary operation."""
+    if "algorithm" not in request:
+        raise RcxEngineError("api.bad_request",
+            "run_algorithm request must include 'algorithm'")
+    algo_name = request["algorithm"]
+    if not isinstance(algo_name, str):
+        raise RcxEngineError("api.bad_request",
+            f"run_algorithm 'algorithm' must be string, got {type(algo_name).__name__}")
+    algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
+    return _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
+
+
+# Dispatch map: operation name → handler function (A10 structural displacement).
+# Operation names in keys are structurally paired with handlers; authority for
+# which operations are valid comes from seed-derived _load_boundary_ops().
+_BOUNDARY_DISPATCH = {
+    "run_trace": _boundary_op_run_trace,
+    "hash_trace": _boundary_op_hash_trace,
+    "run_algorithm": _boundary_op_run_algorithm,
+}
+
+
 def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handler
     request: dict,
     max_algorithm_iterations: int,
     emit_fn,
     iteration: int,
     state: Mu,
-) -> tuple[Mu, Mu]:
+) -> dict:
     """Service a boundary effect request from the engine state machine.
 
     Shared implementation for both Boot1 recursive and trampoline engine paths.
-    Handles the three generic boundary operations (run_trace, hash_trace,
-    run_algorithm) and validates the result before re-injection.
+    Dispatches via seed-derived operation authority (A10): handler-map lookup
+    replaces host if/elif dispatch. Validates request shape before any
+    field dereference.
 
     Args:
         request: The _boundary_request dict from engine output.
@@ -1657,16 +1774,40 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
         state: Current engine state (for error reporting).
 
     Returns:
-        (context, result) tuple — caller injects result into context.
+        context dict with result injected at inject_key.
 
     Raises:
-        ValueError: On reserved inject_key, unknown operation, or
-            reserved fields in boundary result.
+        RcxEngineError: On malformed request, reserved inject_key, unknown
+            operation, or reserved fields in boundary result.
+        ValueError: On reserved inject_key (legacy compatibility).
     """
+    # --- Request shape validation (typed fail-closed, no raw KeyError) ---
+    if not isinstance(request, dict):
+        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        raise RcxEngineError("api.bad_request",
+            f"boundary request must be dict, got {type(request).__name__}")
+    for key in ("operation", "input", "context", "inject_key"):
+        if key not in request:
+            emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+            raise RcxEngineError("api.bad_request",
+                f"boundary request missing required key: {key}")
     operation = request["operation"]
+    if not isinstance(operation, str):
+        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        raise RcxEngineError("api.bad_request",
+            f"boundary operation must be string, got {type(operation).__name__}")
+    if not isinstance(request["context"], dict):
+        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        raise RcxEngineError("api.bad_request",
+            f"boundary context must be dict, got {type(request['context']).__name__}")
+    inject_key = request["inject_key"]
+    if not isinstance(inject_key, str):
+        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        raise RcxEngineError("api.bad_request",
+            f"boundary inject_key must be string, got {type(inject_key).__name__}")
+
     req_input = request["input"]
     context = dict(request["context"])
-    inject_key = request["inject_key"]
 
     # SECURITY: inject_key must not be a kernel-reserved field.
     # Prevents boundary requests from forging kernel state.
@@ -1677,18 +1818,23 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
             f"Boundary requests cannot inject reserved fields."
         )
 
-    if operation == "run_trace":
-        raw = run_mu_structural(req_input["projections"], req_input["value"], max_steps=req_input.get("max_steps", 100))
-        result = {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
-    elif operation == "hash_trace":
-        result = hash_trace_for_recurrence(req_input)
-    elif operation == "run_algorithm":
-        algo_name = request["algorithm"]
-        algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
-        result = _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
-    else:
+    # --- Seed-derived operation authority (A10 displacement) ---
+    valid_ops = _load_boundary_ops()
+    if operation not in valid_ops:
         emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
         raise ValueError(f"Unknown boundary operation: {operation}")
+
+    # Dispatch coverage invariant: map keys must match seed-derived ops
+    if frozenset(_BOUNDARY_DISPATCH) != valid_ops:
+        raise RcxEngineError("input.shape_mismatch",
+            f"boundary dispatch/authority mismatch: dispatch={sorted(_BOUNDARY_DISPATCH)}, "
+            f"seed={sorted(valid_ops)}")
+
+    handler = _BOUNDARY_DISPATCH.get(operation)
+    if handler is None:
+        raise RcxEngineError("input.shape_mismatch",
+            f"boundary dispatch missing handler for validated op: {operation}")
+    result = handler(request, req_input, max_algorithm_iterations)
 
     # SECURITY: validate boundary result before re-injection.
     validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
