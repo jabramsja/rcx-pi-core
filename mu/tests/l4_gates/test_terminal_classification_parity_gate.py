@@ -428,3 +428,165 @@ console.log(result);
         assert "!!" not in body, (
             "deriveEngineExitReason must NOT use !! (diverges from Python bool())"
         )
+
+
+# ── A9: Hemisphere authority source-lock ──────────────────────────────────
+
+class TestHemisphereSourceLock:
+    """Hemisphere key authority must be seed-derived in both substrates (A9)."""
+
+    def _js_eval(self, script):
+        """Run a JS script via node -e and return stdout."""
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return result.stdout.strip()
+
+    def test_python_js_hemisphere_keys_parity(self):
+        """Both substrates must derive identical hemisphere key sets from seed."""
+        import json
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: A9 source-lock test
+        py_keys = _get_hemisphere_keys()
+        js_out = self._js_eval(
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify([...tc.HEMISPHERE_KEYS]));\n"
+        )
+        js_keys = set(json.loads(js_out))
+        assert py_keys == js_keys, (
+            f"Hemisphere key parity violation!\n"
+            f"  Python-only: {py_keys - js_keys}\n"
+            f"  JS-only: {js_keys - py_keys}"
+        )
+
+    def test_default_hemispheres_keys_match_derived(self):
+        """defaultHemispheres() keys must match seed-derived keys (both substrates)."""
+        import json
+        from rcx_pi.selfhost.step_mu import _default_hemispheres, _get_hemisphere_keys  # ANTICHEAT_OK: A9 source-lock test
+        py_keys = _get_hemisphere_keys()
+        assert set(_default_hemispheres().keys()) == py_keys, "Python _default_hemispheres() key drift"
+        js_out = self._js_eval(
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify(Object.keys(tc.defaultHemispheres())));\n"
+        )
+        js_default_keys = set(json.loads(js_out))
+        assert js_default_keys == py_keys, (
+            f"JS defaultHemispheres() key drift!\n"
+            f"  Expected: {sorted(py_keys)}\n"
+            f"  Got: {sorted(js_default_keys)}"
+        )
+
+    def test_cache_clear_re_derives_hemisphere_keys(self):
+        """After cache clear, hemisphere keys must re-derive from seed."""
+        from rcx_pi.selfhost.step_mu import _clear_hemi_cache, _get_hemisphere_keys  # ANTICHEAT_OK: A9 source-lock test
+        expected = _get_hemisphere_keys()
+        _clear_hemi_cache()
+        re_derived = _get_hemisphere_keys()
+        assert re_derived == expected, "Hemisphere key re-derivation after cache clear failed"
+        # JS: verify _clearTcCache also clears hemisphere caches
+        js_out = self._js_eval(
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "tc._clearTcCache(); // # ANTICHEAT_OK: A9 tests cache clear behavior\n"
+            "console.log(JSON.stringify([...tc.HEMISPHERE_KEYS]));\n"
+        )
+        import json
+        js_keys = set(json.loads(js_out))
+        assert js_keys == expected, "JS hemisphere key re-derivation after _clearTcCache failed"
+
+    def test_python_hemisphere_key_order_matches_seed_projection_order(self):
+        """Python _get_hemisphere_key_order() must match hemispheres.v1.json projection order."""
+        import json
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_key_order  # ANTICHEAT_OK: A9 order-lock test
+        seed_path = REPO_ROOT / "mu" / "programs" / "hemispheres.v1.json"
+        seed = json.loads(seed_path.read_text(encoding="utf-8"))
+        prefix = "hemisphere.add."
+        seed_order = tuple(
+            p["id"][len(prefix):] for p in seed["projections"] if p["id"].startswith(prefix)
+        )
+        assert _get_hemisphere_key_order() == seed_order, (
+            f"Python hemisphere key order does not match seed projection order!\n"
+            f"  Seed:   {seed_order}\n"
+            f"  Python: {_get_hemisphere_key_order()}"
+        )
+
+    def test_js_hemisphere_key_order_matches_seed_projection_order(self):
+        """JS HEMISPHERE_KEY_ORDER must match hemispheres.v1.json projection order."""
+        import json
+        seed_path = REPO_ROOT / "mu" / "programs" / "hemispheres.v1.json"
+        seed = json.loads(seed_path.read_text(encoding="utf-8"))
+        prefix = "hemisphere.add."
+        seed_order = [
+            p["id"][len(prefix):] for p in seed["projections"] if p["id"].startswith(prefix)
+        ]
+        js_out = self._js_eval(
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify(tc.HEMISPHERE_KEY_ORDER));\n"
+        )
+        js_order = json.loads(js_out)
+        assert js_order == seed_order, (
+            f"JS hemisphere key order does not match seed projection order!\n"
+            f"  Seed: {seed_order}\n"
+            f"  JS:   {js_order}"
+        )
+
+    def test_default_hemispheres_order_matches_key_order_both_substrates(self):
+        """defaultHemispheres() key iteration order must match derived key order (both substrates)."""
+        import json
+        from rcx_pi.selfhost.step_mu import _default_hemispheres, _get_hemisphere_key_order  # ANTICHEAT_OK: A9 order-lock test
+        py_default_order = list(_default_hemispheres().keys())
+        py_key_order = list(_get_hemisphere_key_order())
+        assert py_default_order == py_key_order, (
+            f"Python _default_hemispheres() order drift!\n"
+            f"  Key order: {py_key_order}\n"
+            f"  Default:   {py_default_order}"
+        )
+        js_out = self._js_eval(
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify({"
+            "  default_order: Object.keys(tc.defaultHemispheres()),"
+            "  key_order: tc.HEMISPHERE_KEY_ORDER"
+            "}));\n"
+        )
+        js_data = json.loads(js_out)
+        assert js_data["default_order"] == js_data["key_order"], (
+            f"JS defaultHemispheres() order drift!\n"
+            f"  Key order: {js_data['key_order']}\n"
+            f"  Default:   {js_data['default_order']}"
+        )
+
+    def test_no_hardcoded_hemisphere_constant_assignments(self):
+        """No module-level hardcoded _HEMISPHERE_KEY_ORDER/_HEMISPHERE_KEYS assignments in either substrate."""
+        py_source = PY_PATH.read_text(encoding="utf-8")
+        js_source = (JS_DIR / "core" / "terminal_classification.js").read_text(encoding="utf-8")
+        # Narrow assignment-only patterns (avoid comments/docs)
+        py_patterns = [
+            r'^_HEMISPHERE_KEY_ORDER\s*=',
+            r'^_HEMISPHERE_KEYS\s*=\s*frozenset',
+        ]
+        js_patterns = [
+            r'^const _HEMISPHERE_KEY_ORDER\s*=',
+            r'^const _HEMISPHERE_KEYS\s*=',
+        ]
+        for pat in py_patterns:
+            matches = re.findall(pat, py_source, re.MULTILINE)
+            assert not matches, (
+                f"Hardcoded hemisphere constant found in step_mu.py: {pat}"
+            )
+        for pat in js_patterns:
+            matches = re.findall(pat, js_source, re.MULTILINE)
+            assert not matches, (
+                f"Hardcoded hemisphere constant found in terminal_classification.js: {pat}"
+            )
+
+    def test_js_seed_registration_loads(self):
+        """hemispheres.v1.json must be registered in seed_loader.js and loadable."""
+        self._js_eval(
+            "const { loadVerifiedSeed } = require('./mu/host/js/core/seed_loader');\n"
+            "const seed = loadVerifiedSeed('hemispheres.v1.json', 'programs');\n"
+            "if (!seed.projections || seed.projections.length !== 12) {\n"
+            "  throw new Error('Expected 12 projections, got ' + (seed.projections ? seed.projections.length : 'none'));\n"
+            "}\n"
+            "console.log('OK');\n"
+        )

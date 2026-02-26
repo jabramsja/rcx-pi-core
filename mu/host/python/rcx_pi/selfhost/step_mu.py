@@ -42,6 +42,8 @@ from .projection_loader import make_projection_loader
 
 # Cached loader for terminal classification seed (structural displacement of classify/exit-reason logic)
 _load_tc_projections, _clear_tc_proj_cache = make_projection_loader("terminal_classify.v1.json")
+# Cached loader for hemisphere seed (A9: hemisphere key authority displacement)
+_load_hemi_projections, _clear_hemi_proj_cache = make_projection_loader("hemispheres.v1.json")
 
 
 # =============================================================================
@@ -92,6 +94,59 @@ def _clear_tc_cache() -> None:
     global _tc_key_sets_cache
     _clear_tc_proj_cache()
     _tc_key_sets_cache = None
+
+
+# Hemisphere key sets — seed-derived from hemispheres.v1.json (A9 displacement).
+# Authority lives in hemisphere.add.* projection IDs.
+# _EXPECTED_HEMISPHERE_KEYS is a fail-closed safety guard (duplicate literals),
+# NOT authority-of-truth. Authority is seed-derived; expected set catches corruption.
+_hemi_key_sets_cache: tuple | None = None
+_EXPECTED_HEMISPHERE_KEYS = frozenset({"r_null", "r_inf", "r_a", "lobes", "sink"})  # AST_OK: constant — fail-closed guard
+
+
+def _load_hemisphere_keys() -> tuple[tuple[str, ...], frozenset[str]]:  # AST_OK: infra — seed-derived hemisphere keys
+    """Derive hemisphere key order + frozenset from hemispheres.v1.json (cached).
+
+    Extracts keys from hemisphere.add.* projection IDs. Projection order = key order.
+    Fail-closed: raises RcxEngineError if seed yields unexpected key set.
+    """
+    global _hemi_key_sets_cache
+    if _hemi_key_sets_cache is not None:
+        return _hemi_key_sets_cache
+    projs = _load_hemi_projections()
+    prefix = "hemisphere.add."
+    key_order = tuple(p["id"][len(prefix):] for p in projs if p["id"].startswith(prefix))
+    key_set = frozenset(key_order)
+    # Fail-closed invariants (A9 Requirement A)
+    if len(key_order) != 5:
+        raise RcxEngineError("input.shape_mismatch",
+            f"hemisphere seed invariant: expected 5 keys, got {len(key_order)}")
+    if len(key_order) != len(key_set):
+        raise RcxEngineError("input.shape_mismatch",
+            f"hemisphere seed invariant: duplicate keys in {key_order}")
+    if key_set != _EXPECTED_HEMISPHERE_KEYS:
+        raise RcxEngineError("input.shape_mismatch",
+            f"hemisphere seed invariant: expected {sorted(_EXPECTED_HEMISPHERE_KEYS)}, got {sorted(key_set)}")
+    _hemi_key_sets_cache = (key_order, key_set)
+    return _hemi_key_sets_cache
+
+
+def _get_hemisphere_key_order() -> tuple[str, ...]:  # AST_OK: infra
+    """Return hemisphere key order tuple (seed-derived, cached)."""
+    return _load_hemisphere_keys()[0]
+
+
+def _get_hemisphere_keys() -> frozenset[str]:  # AST_OK: infra
+    """Return hemisphere key frozenset (seed-derived, cached)."""
+    return _load_hemisphere_keys()[1]
+
+
+def _clear_hemi_cache() -> None:
+    """Clear hemisphere projection and key caches (for testing)."""
+    global _hemi_key_sets_cache
+    _clear_hemi_proj_cache()
+    _hemi_key_sets_cache = None
+
 
 # Terminal kind enum — unified classification of all terminal states.
 # Every dict result falls into exactly one kind. Pure structural check.
@@ -2135,7 +2190,7 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
     result, _trace, stall = run_mu(projs, wrapped, max_steps=30)
     # Stall is the EXPECTED completion signal: init→classify→add→unwrap→stall
     # Verify the result looks like a completed hemisphere dict
-    if isinstance(result, dict) and set(result.keys()) == _HEMISPHERE_KEYS:
+    if isinstance(result, dict) and set(result.keys()) == _get_hemisphere_keys():
         return result
     raise RcxEngineError(
         "input.shape_mismatch",
@@ -2146,13 +2201,9 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
 
 # --- Engine → Hemisphere Integration ---
 
-_HEMISPHERE_KEY_ORDER = ("r_null", "r_inf", "r_a", "lobes", "sink")  # AST_OK: constant
-_HEMISPHERE_KEYS = frozenset(_HEMISPHERE_KEY_ORDER)  # AST_OK: constant — validation only
-
-
 def _default_hemispheres():  # AST_OK: infra
-    """Canonical empty hemisphere state. Single source of truth."""
-    return {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
+    """Canonical empty hemisphere state. Seed-derived key order (A9)."""
+    return {k: None for k in _get_hemisphere_key_order()}  # AST_OK: infra — seed-derived key iteration
 
 
 def run_engine_with_routing(projections, input_value, hemispheres=None, **engine_kwargs):
@@ -2180,9 +2231,10 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
         if not isinstance(hemispheres, dict):  # AST_OK: boundary
             raise TypeError(f"hemispheres must be dict, got {type(hemispheres).__name__}")
         actual = set(hemispheres.keys())
-        if actual != _HEMISPHERE_KEYS:
-            missing = sorted(_HEMISPHERE_KEYS - actual, key=str)
-            extra = sorted(actual - _HEMISPHERE_KEYS, key=str)
+        expected = _get_hemisphere_keys()
+        if actual != expected:
+            missing = sorted(expected - actual, key=str)
+            extra = sorted(actual - expected, key=str)
             raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
 
     use_boot1 = engine_kwargs.pop("use_boot1_recursive", True)
@@ -2204,7 +2256,7 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
     updated_hemispheres = run_hemisphere_routing(engine_result, hemispheres)
 
     # Fail-closed: validate output shape before returning
-    if not isinstance(updated_hemispheres, dict) or set(updated_hemispheres.keys()) != _HEMISPHERE_KEYS:  # AST_OK: boundary
+    if not isinstance(updated_hemispheres, dict) or set(updated_hemispheres.keys()) != _get_hemisphere_keys():  # AST_OK: boundary
         raise RcxEngineError("input.shape_mismatch", "run_hemisphere_routing returned unexpected shape")
 
     return {"engine_result": engine_result, "hemispheres": updated_hemispheres}

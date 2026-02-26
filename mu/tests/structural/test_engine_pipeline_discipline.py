@@ -335,28 +335,31 @@ class TestHemisphereKeysParity:
     """Hemisphere keys must match between Python and JS."""
 
     def test_python_hemisphere_keys_locked(self):
-        """Python _HEMISPHERE_KEYS must have exactly 5 keys."""
-        from rcx_pi.selfhost.step_mu import _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for hemisphere shape contract
-        assert len(_HEMISPHERE_KEYS) == 5, (
-            f"Expected 5 hemisphere keys, got {len(_HEMISPHERE_KEYS)}: "
-            f"{sorted(_HEMISPHERE_KEYS)}"
+        """Python hemisphere keys (seed-derived) must have exactly 5 keys."""
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for hemisphere shape contract
+        hemi_keys = _get_hemisphere_keys()
+        assert len(hemi_keys) == 5, (
+            f"Expected 5 hemisphere keys, got {len(hemi_keys)}: "
+            f"{sorted(hemi_keys)}"
         )
 
     def test_python_hemisphere_keys_content(self):
-        """Python _HEMISPHERE_KEYS must contain the expected keys."""
-        from rcx_pi.selfhost.step_mu import _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for hemisphere shape contract
+        """Python hemisphere keys (seed-derived) must contain the expected keys."""
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for hemisphere shape contract
+        hemi_keys = _get_hemisphere_keys()
         expected = {"r_null", "r_inf", "r_a", "lobes", "sink"}
-        assert _HEMISPHERE_KEYS == expected, (
+        assert hemi_keys == expected, (
             f"Hemisphere keys drift!\n"
-            f"  Missing: {expected - _HEMISPHERE_KEYS}\n"
-            f"  Extra: {_HEMISPHERE_KEYS - expected}"
+            f"  Missing: {expected - hemi_keys}\n"
+            f"  Extra: {hemi_keys - expected}"
         )
 
     def test_js_hemisphere_keys_match_python(self):
         """JS HEMISPHERE_KEYS must match Python exactly."""
         import json
         import subprocess
-        from rcx_pi.selfhost.step_mu import _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for hemisphere shape contract
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for hemisphere shape contract
+        py_keys = _get_hemisphere_keys()
         result = subprocess.run(
             ["node", "-e",
              "const tc = require('./mu/host/js/core/terminal_classification');\n"
@@ -367,10 +370,10 @@ class TestHemisphereKeysParity:
         )
         assert result.returncode == 0, f"JS error: {result.stderr}"
         js_keys = set(json.loads(result.stdout.strip()))
-        assert js_keys == _HEMISPHERE_KEYS, (
+        assert js_keys == py_keys, (
             f"Hemisphere key drift!\n"
-            f"  Python-only: {_HEMISPHERE_KEYS - js_keys}\n"
-            f"  JS-only: {js_keys - _HEMISPHERE_KEYS}"
+            f"  Python-only: {py_keys - js_keys}\n"
+            f"  JS-only: {js_keys - py_keys}"
         )
 
 
@@ -536,16 +539,17 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_hemispheres_has_hemisphere_keys(self):
         """hemispheres sub-dict must have exactly 5 hemisphere keys."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for return shape
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for return shape
+        hemi_keys = _get_hemisphere_keys()
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
             42,
             max_steps=3,
         )
-        assert set(result["hemispheres"].keys()) == _HEMISPHERE_KEYS, (
+        assert set(result["hemispheres"].keys()) == hemi_keys, (
             f"hemispheres sub-shape drift!\n"
-            f"  Missing: {_HEMISPHERE_KEYS - set(result['hemispheres'].keys())}\n"
-            f"  Extra: {set(result['hemispheres'].keys()) - _HEMISPHERE_KEYS}"
+            f"  Missing: {hemi_keys - set(result['hemispheres'].keys())}\n"
+            f"  Extra: {set(result['hemispheres'].keys()) - hemi_keys}"
         )
 
 # ── run_mu callsite inventory ─────────────────────────────────────────────

@@ -17,6 +17,7 @@ const crypto = require('crypto');
 // Must mirror entries in cli/main.js and Python seed_integrity.py.
 const CORE_SEED_CHECKSUMS = {
   'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
+  'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
 };
 
 const CORE_SEED_PROJECTION_IDS = {
@@ -28,6 +29,20 @@ const CORE_SEED_PROJECTION_IDS = {
     'tc.exit.exhaustion',
     'tc.exit.stall',
     'tc.exit.completed',
+  ],
+  'hemispheres.v1.json': [
+    'hemisphere.init',
+    'hemisphere.classify.exhaustion',
+    'hemisphere.classify.null',
+    'hemisphere.classify.closure',
+    'hemisphere.classify.stall',
+    'hemisphere.classify.default',
+    'hemisphere.add.r_null',
+    'hemisphere.add.r_inf',
+    'hemisphere.add.r_a',
+    'hemisphere.add.lobes',
+    'hemisphere.add.sink',
+    'hemisphere.unwrap',
   ],
 };
 
