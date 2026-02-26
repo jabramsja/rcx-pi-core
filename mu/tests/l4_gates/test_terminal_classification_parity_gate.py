@@ -20,6 +20,7 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import (
     ENGINE_EXIT_REASONS,
     TERMINAL_KINDS,
+    _derive_engine_exit_reason,  # ANTICHEAT_OK: parity gate tests coercion parity (muBool vs bool)
     _load_tc_key_sets,  # ANTICHEAT_OK: parity gate compares seed-derived key sets against JS source
     classify_terminal_kind,
 )
@@ -40,14 +41,6 @@ def _js_source() -> str:
     return "\n".join(parts)
 
 
-def _extract_js_set(source: str, var_name: str) -> set[str]:
-    """Extract a Set([...]) constant from JS source."""
-    pattern = rf"const\s+{re.escape(var_name)}\s*=\s*new\s+Set\(\[(.*?)\]\)"
-    m = re.search(pattern, source, re.DOTALL)
-    if not m:
-        pytest.fail(f"Could not find {var_name} in eval_step.js")
-    return set(re.findall(r"'([^']+)'", m.group(1)))
-
 
 # =============================================================================
 # Constant parity: terminal key sets
@@ -56,20 +49,24 @@ def _extract_js_set(source: str, var_name: str) -> set[str]:
 class TestTerminalKeySetParity:
     """Terminal shape key sets must be identical across substrates (A7: both seed-derived)."""
 
-    def _js_key_set(self, export_name):
-        """Get a JS terminal key Set via node -e evaluation."""
-        import json
+    def _js_eval(self, script):
+        """Run a JS script via node -e and return stdout."""
         import subprocess
-        script = (
-            "const tc = require('./mu/host/js/core/terminal_classification');\n"
-            f"console.log(JSON.stringify([...tc.{export_name}]));\n"
-        )
         result = subprocess.run(
             ["node", "-e", script], capture_output=True, text=True,
             cwd=str(REPO_ROOT), timeout=10,
         )
         assert result.returncode == 0, f"JS error: {result.stderr}"
-        return set(json.loads(result.stdout.strip()))
+        return result.stdout.strip()
+
+    def _js_key_set(self, export_name):
+        """Get a JS terminal key Set via node -e evaluation."""
+        import json
+        script = (
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            f"console.log(JSON.stringify([...tc.{export_name}]));\n"
+        )
+        return set(json.loads(self._js_eval(script)))
 
     def test_recurrence_terminal_keys_match(self):
         js_keys = self._js_key_set("RECURRENCE_TERMINAL_KEYS")
@@ -94,14 +91,32 @@ class TestTerminalKeySetParity:
 class TestEnumParity:
     """Terminal classification enums must be identical across substrates."""
 
+    def _js_eval(self, script):
+        """Run a JS script via node -e and return stdout."""
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return result.stdout.strip()
+
     def test_terminal_kinds_match(self):
-        js = _js_source()
-        js_kinds = _extract_js_set(js, "TERMINAL_KINDS")
+        import json
+        script = (
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify([...tc.TERMINAL_KINDS]));\n"
+        )
+        js_kinds = set(json.loads(self._js_eval(script)))
         assert set(TERMINAL_KINDS) == js_kinds
 
     def test_engine_exit_reasons_match(self):
-        js = _js_source()
-        js_reasons = _extract_js_set(js, "ENGINE_EXIT_REASONS")
+        import json
+        script = (
+            "const tc = require('./mu/host/js/core/terminal_classification');\n"
+            "console.log(JSON.stringify([...tc.ENGINE_EXIT_REASONS]));\n"
+        )
+        js_reasons = set(json.loads(self._js_eval(script)))
         assert set(ENGINE_EXIT_REASONS) == js_reasons
 
     def test_terminal_kinds_constant(self):
@@ -229,3 +244,187 @@ class TestClassifyTerminalKindBehavior:
             "extra_key": True,
         }
         assert classify_terminal_kind(val) == "non_terminal"
+
+
+# =============================================================================
+# JS cache hardening (A8): defensive copy exports + muBool parity
+# =============================================================================
+
+class TestJSCacheHardening:
+    """A8: JS exported Sets/Arrays are defensive copies — mutations don't corrupt internals."""
+
+    def _js_eval(self, script):
+        """Run a JS script via node -e and return stdout."""
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return result.stdout.strip()
+
+    def test_mutating_exported_set_does_not_affect_classification(self):
+        """Mutating tc.RECURRENCE_TERMINAL_KEYS does not alter classifyTerminalKind."""
+        script = """
+const tc = require('./mu/host/js/core/terminal_classification');
+const rec = tc.RECURRENCE_TERMINAL_KEYS;
+rec.add('injected');
+rec.clear();
+const result = tc.classifyTerminalKind(
+  {closure_detected: true, final_result: 42, tau_step: 1}
+);
+console.log(result);
+"""
+        assert self._js_eval(script) == "recurrence_terminal"
+
+    def test_refetch_after_mutation_returns_intact_set(self):
+        """Re-fetching key set after mutation returns original members."""
+        script = """
+const tc = require('./mu/host/js/core/terminal_classification');
+const rec1 = tc.RECURRENCE_TERMINAL_KEYS;
+rec1.clear();
+const rec2 = tc.RECURRENCE_TERMINAL_KEYS;
+console.log(JSON.stringify(rec2.size > 0 && rec1.size === 0));
+"""
+        assert self._js_eval(script) == "true"
+
+    def test_hemisphere_key_order_is_defensive_copy(self):
+        """Mutating HEMISPHERE_KEY_ORDER does not corrupt internal state."""
+        script = """
+const tc = require('./mu/host/js/core/terminal_classification');
+const hko = tc.HEMISPHERE_KEY_ORDER;
+hko.push('evil');
+const hko2 = tc.HEMISPHERE_KEY_ORDER;
+console.log(hko2.length);
+"""
+        assert self._js_eval(script) == "5"
+
+    def test_engine_exit_reasons_is_defensive_copy(self):
+        """Mutating ENGINE_EXIT_REASONS does not corrupt internal state."""
+        script = """
+const tc = require('./mu/host/js/core/terminal_classification');
+tc.ENGINE_EXIT_REASONS.clear();
+console.log(tc.ENGINE_EXIT_REASONS.size);
+"""
+        assert self._js_eval(script) == "4"
+
+    def test_clear_tc_cache_rebuilds_correctly(self):
+        """_clearTcCache clears and rebuilds without classification drift."""
+        script = """
+const tc = require('./mu/host/js/core/terminal_classification');
+tc.classifyTerminalKind({closure_detected: true, final_result: 42, tau_step: 1});
+tc._clearTcCache();  // # ANTICHEAT_OK: testing JS cache clear export
+const r1 = tc.classifyTerminalKind({closure_detected: true, final_result: 42, tau_step: 1});
+const r2 = tc.classifyTerminalKind({
+  value: 1, closure_detected: false, tau_step: 0,
+  exhaustion_detected: false, operator_frozen: false,
+  frozen_set: [], action: null, stall: false,
+});
+console.log(JSON.stringify([r1, r2]));
+"""
+        assert self._js_eval(script) == '["recurrence_terminal","engine_terminal"]'
+
+
+class TestExitReasonCoercionParity:
+    """A8: deriveEngineExitReason uses muBool (Python bool() parity) not JS !!."""
+
+    def _js_eval(self, script):
+        """Run a JS script via node -e and return stdout."""
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return result.stdout.strip()
+
+    def _derive_exit_reason_js(self, engine_result_js):
+        """Call JS deriveEngineExitReason and return result string."""
+        script = f"""
+const tc = require('./mu/host/js/core/terminal_classification');
+const result = tc.deriveEngineExitReason({engine_result_js});
+console.log(result);
+"""
+        return self._js_eval(script)
+
+    def test_empty_list_closure_detected_is_completed(self):
+        """closure_detected=[] should coerce to false (Python bool([])=False)."""
+        # Python: bool([]) = False => cd=False, completed
+
+        py_result = _derive_engine_exit_reason(
+            {"closure_detected": [], "exhaustion_detected": False, "stall": False}
+        )
+        js_result = self._derive_exit_reason_js(
+            "{closure_detected: [], exhaustion_detected: false, stall: false}"
+        )
+        assert py_result == "completed", f"Python got {py_result}"
+        assert js_result == "completed", f"JS got {js_result}"
+        assert py_result == js_result
+
+    def test_empty_dict_closure_detected_is_completed(self):
+        """closure_detected={} should coerce to false (Python bool({})=False)."""
+
+        py_result = _derive_engine_exit_reason(
+            {"closure_detected": {}, "exhaustion_detected": False, "stall": False}
+        )
+        js_result = self._derive_exit_reason_js(
+            "{closure_detected: {}, exhaustion_detected: false, stall: false}"
+        )
+        assert py_result == "completed", f"Python got {py_result}"
+        assert js_result == "completed", f"JS got {js_result}"
+        assert py_result == js_result
+
+    def test_nonempty_list_closure_detected_is_closure(self):
+        """closure_detected=[1] should coerce to true."""
+
+        py_result = _derive_engine_exit_reason(
+            {"closure_detected": [1], "exhaustion_detected": False, "stall": False}
+        )
+        js_result = self._derive_exit_reason_js(
+            "{closure_detected: [1], exhaustion_detected: false, stall: false}"
+        )
+        assert py_result == "closure", f"Python got {py_result}"
+        assert js_result == "closure", f"JS got {js_result}"
+        assert py_result == js_result
+
+    def test_nonempty_dict_exhaustion_detected_is_exhaustion(self):
+        """exhaustion_detected={a:1} should coerce to true."""
+
+        py_result = _derive_engine_exit_reason(
+            {"closure_detected": False, "exhaustion_detected": {"a": 1}, "stall": False}
+        )
+        js_result = self._derive_exit_reason_js(
+            '{closure_detected: false, exhaustion_detected: {a: 1}, stall: false}'
+        )
+        assert py_result == "exhaustion", f"Python got {py_result}"
+        assert js_result == "exhaustion", f"JS got {js_result}"
+        assert py_result == js_result
+
+    def test_boolean_coercion_unchanged_for_true_false(self):
+        """Standard boolean values still work correctly after muBool change."""
+
+        py_result = _derive_engine_exit_reason(
+            {"closure_detected": True, "exhaustion_detected": False, "stall": False}
+        )
+        js_result = self._derive_exit_reason_js(
+            "{closure_detected: true, exhaustion_detected: false, stall: false}"
+        )
+        assert py_result == "closure"
+        assert js_result == "closure"
+
+    def test_js_source_uses_muBool_not_double_bang(self):
+        """JS deriveEngineExitReason must use _muBool, not !! for coercion."""
+        source = (JS_DIR / "core" / "terminal_classification.js").read_text(encoding="utf-8")
+        # Find the function body
+        fn_match = re.search(
+            r'function deriveEngineExitReason\(.*?\)\s*\{(.*?)\n\}',
+            source, re.DOTALL
+        )
+        assert fn_match, "deriveEngineExitReason not found"
+        body = fn_match.group(1)
+        assert "_muBool(" in body, (
+            "deriveEngineExitReason must use _muBool() for Python bool() parity"
+        )
+        assert "!!" not in body, (
+            "deriveEngineExitReason must NOT use !! (diverges from Python bool())"
+        )

@@ -6,6 +6,8 @@
  * Structural displacement (Wave 25): classify/exit-reason logic delegated
  * to terminal_classify.v1.json seed projections via step().
  * A7: terminal key sets now seed-derived (not hardcoded Sets).
+ * A8: cache hardening — defensive copy getters, single seed loader,
+ *     unified cache clear, muBool parity fix for exit-reason coercion.
  * kernel_done stays host-side (key-membership check).
  *
  * Depends on: core/constants.js, core/bootstrap_core.js, core/seed_loader.js
@@ -13,14 +15,65 @@
 
 const { step } = require('./bootstrap_core');
 
-// Terminal shape key sets — seed-derived from terminal_classify.v1.json (A7 displacement).
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Deep-freeze an object tree (works on JSON-parsed Mu: no cycles, no Sets).
+ * Arrays and plain objects are frozen recursively.
+ */
+function _deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const v of Object.values(obj)) {
+    if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
+      _deepFreeze(v);
+    }
+  }
+  return obj;
+}
+
+/**
+ * Python-compatible boolean coercion for Mu values.
+ * Matches Python bool() semantics where JS !! diverges:
+ *   - empty array []  => false  (JS !! would give true)
+ *   - empty object {} => false  (JS !! would give true)
+ *   - all primitives use JS truthiness (matches Python bool())
+ */
+function _muBool(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value !== null && typeof value === 'object') return Object.keys(value).length > 0;
+  return !!value;
+}
+
+// ---------------------------------------------------------------------------
+// Single seed loader cache (A8: eliminates duplicate loadVerifiedSeed calls)
+// ---------------------------------------------------------------------------
+
+let _tcSeed = null;
+function _loadTcSeed() {
+  if (!_tcSeed) {
+    const { loadVerifiedSeed } = require('./seed_loader');
+    _tcSeed = loadVerifiedSeed('terminal_classify.v1.json', 'utilities');
+  }
+  return _tcSeed;
+}
+
+// ---------------------------------------------------------------------------
+// Terminal shape key sets — seed-derived from terminal_classify.v1.json
+// ---------------------------------------------------------------------------
 // Authority lives in seed projections, not hardcoded Sets.
 // Mirrors Python _load_tc_key_sets() in step_mu.py.
+// Internal Sets are private; exported getters return defensive copies (A8).
+
 let _tcKeySets = null;
+let _RECURRENCE_TERMINAL_KEYS = null;
+let _EXHAUSTION_TERMINAL_KEYS = null;
+let _ENGINE_TERMINAL_KEYS = null;
+
 function _loadTcKeySets() {
   if (_tcKeySets) return _tcKeySets;
-  const { loadVerifiedSeed } = require('./seed_loader');
-  const seed = loadVerifiedSeed('terminal_classify.v1.json', 'utilities');
+  const seed = _loadTcSeed();
   const result = {};
   for (const p of seed.projections) {
     const pat = p.pattern ?? {};
@@ -32,24 +85,39 @@ function _loadTcKeySets() {
   return result;
 }
 
-// Backward-compatible accessors (seed-derived, frozen on first access)
-let RECURRENCE_TERMINAL_KEYS = null;
-let EXHAUSTION_TERMINAL_KEYS = null;
-let ENGINE_TERMINAL_KEYS = null;
-
 function _ensureKeySets() {
-  if (RECURRENCE_TERMINAL_KEYS) return;
+  if (_RECURRENCE_TERMINAL_KEYS) return;
   const sets = _loadTcKeySets();
-  RECURRENCE_TERMINAL_KEYS = sets['tc.recurrence'];
-  EXHAUSTION_TERMINAL_KEYS = sets['tc.exhaustion'];
-  ENGINE_TERMINAL_KEYS = sets['tc.engine'];
+  _RECURRENCE_TERMINAL_KEYS = sets['tc.recurrence'];
+  _EXHAUSTION_TERMINAL_KEYS = sets['tc.exhaustion'];
+  _ENGINE_TERMINAL_KEYS = sets['tc.engine'];
 }
 
+// ---------------------------------------------------------------------------
+// Cached terminal classify seed projections (one-time deep-clone + freeze)
+// ---------------------------------------------------------------------------
+
+let _tcProjections = null;
+function _loadTcProjections() {
+  if (!_tcProjections) {
+    const seed = _loadTcSeed();
+    // One-time deep clone + deep freeze: closes mutation risk without
+    // per-call overhead. Mirrors Python projection_loader.py's adversary-
+    // hardened deep copy, but frozen instead of copied per call.
+    _tcProjections = _deepFreeze(JSON.parse(JSON.stringify(seed.projections)));
+  }
+  return _tcProjections;
+}
+
+// ---------------------------------------------------------------------------
+// Enum constants (internal — exported via defensive copy getters)
+// ---------------------------------------------------------------------------
+
 // Engine exit reason enum (mirrors Python ENGINE_EXIT_REASONS)
-const ENGINE_EXIT_REASONS = new Set(['closure', 'exhaustion', 'stall', 'completed']);
+const _ENGINE_EXIT_REASONS = new Set(['closure', 'exhaustion', 'stall', 'completed']);
 
 // Terminal kind enum — unified classification of all terminal states.
-const TERMINAL_KINDS = new Set([
+const _TERMINAL_KINDS = new Set([
   'kernel_done',
   'recurrence_terminal',
   'exhaustion_terminal',
@@ -58,8 +126,29 @@ const TERMINAL_KINDS = new Set([
 ]);
 
 // Hemisphere constants (mirrors Python step_mu.py)
-const HEMISPHERE_KEY_ORDER = ['r_null', 'r_inf', 'r_a', 'lobes', 'sink'];
-const HEMISPHERE_KEYS = new Set(HEMISPHERE_KEY_ORDER);
+const _HEMISPHERE_KEY_ORDER = ['r_null', 'r_inf', 'r_a', 'lobes', 'sink'];
+const _HEMISPHERE_KEYS = new Set(_HEMISPHERE_KEY_ORDER);
+
+// ---------------------------------------------------------------------------
+// Cache clear (A8: clears all caches — exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clear all terminal classification caches (for testing).
+ * Mirrors Python _clear_tc_cache() in step_mu.py.
+ */
+function _clearTcCache() {
+  _tcSeed = null;
+  _tcProjections = null;
+  _tcKeySets = null;
+  _RECURRENCE_TERMINAL_KEYS = null;
+  _EXHAUSTION_TERMINAL_KEYS = null;
+  _ENGINE_TERMINAL_KEYS = null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /**
  * Compare two Sets for equality.
@@ -70,17 +159,6 @@ function setsEqual(a, b) {
     if (!b.has(item)) return false;
   }
   return true;
-}
-
-// Cached terminal classify seed projections (lazy-loaded)
-let _tcProjections = null;
-function _loadTcProjections() {
-  if (!_tcProjections) {
-    const { loadVerifiedSeed } = require('./seed_loader');
-    const seed = loadVerifiedSeed('terminal_classify.v1.json', 'utilities');
-    _tcProjections = seed.projections;
-  }
-  return _tcProjections;
 }
 
 /**
@@ -100,9 +178,9 @@ function classifyTerminalKind(value) {
   // Avoids step() (and its assertMu walk) on engine-internal state dicts.
   _ensureKeySets();
   const keys = new Set(Object.keys(value));
-  if (!setsEqual(keys, RECURRENCE_TERMINAL_KEYS) &&
-      !setsEqual(keys, EXHAUSTION_TERMINAL_KEYS) &&
-      !setsEqual(keys, ENGINE_TERMINAL_KEYS)) {
+  if (!setsEqual(keys, _RECURRENCE_TERMINAL_KEYS) &&
+      !setsEqual(keys, _EXHAUSTION_TERMINAL_KEYS) &&
+      !setsEqual(keys, _ENGINE_TERMINAL_KEYS)) {
     return 'non_terminal';
   }
   // Structural seed classification via projection matching
@@ -134,6 +212,10 @@ function isEngineTerminal(value) {
  * Pure function — does NOT modify engine_result.
  * Mirrors Python _derive_engine_exit_reason().
  *
+ * A8 parity fix: uses _muBool() instead of !! for boolean coercion.
+ * Python uses bool() which returns False for empty containers ([], {}).
+ * JS !! returns true for all objects. _muBool matches Python semantics.
+ *
  * Structural displacement (Wave 25): delegates to terminal_classify.v1.json
  * seed projections via step().
  */
@@ -141,9 +223,9 @@ function deriveEngineExitReason(engineResult) {
   const projs = _loadTcProjections();
   const wrapped = {
     _tc_exit: {
-      cd: !!engineResult.closure_detected,
-      ed: !!engineResult.exhaustion_detected,
-      st: !!engineResult.stall,
+      cd: _muBool(engineResult.closure_detected),
+      ed: _muBool(engineResult.exhaustion_detected),
+      st: _muBool(engineResult.stall),
     },
   };
   const result = step(projs, wrapped);
@@ -154,18 +236,27 @@ function defaultHemispheres() {
   return { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null };
 }
 
+// ---------------------------------------------------------------------------
+// Exports — all Set/Array getters return defensive copies (A8 hardening).
+// Callers cannot mutate internal state.
+// ---------------------------------------------------------------------------
+
 module.exports = {
-  get RECURRENCE_TERMINAL_KEYS() { _ensureKeySets(); return RECURRENCE_TERMINAL_KEYS; },
-  get EXHAUSTION_TERMINAL_KEYS() { _ensureKeySets(); return EXHAUSTION_TERMINAL_KEYS; },
-  get ENGINE_TERMINAL_KEYS() { _ensureKeySets(); return ENGINE_TERMINAL_KEYS; },
-  ENGINE_EXIT_REASONS,
-  TERMINAL_KINDS,
-  HEMISPHERE_KEY_ORDER,
-  HEMISPHERE_KEYS,
+  // Seed-derived terminal key sets — defensive copies (new Set each call)
+  get RECURRENCE_TERMINAL_KEYS() { _ensureKeySets(); return new Set(_RECURRENCE_TERMINAL_KEYS); },
+  get EXHAUSTION_TERMINAL_KEYS() { _ensureKeySets(); return new Set(_EXHAUSTION_TERMINAL_KEYS); },
+  get ENGINE_TERMINAL_KEYS() { _ensureKeySets(); return new Set(_ENGINE_TERMINAL_KEYS); },
+  // Enum constants — defensive copies
+  get ENGINE_EXIT_REASONS() { return new Set(_ENGINE_EXIT_REASONS); },
+  get TERMINAL_KINDS() { return new Set(_TERMINAL_KINDS); },
+  get HEMISPHERE_KEY_ORDER() { return [..._HEMISPHERE_KEY_ORDER]; },
+  get HEMISPHERE_KEYS() { return new Set(_HEMISPHERE_KEYS); },
+  // Functions
   setsEqual,
   classifyTerminalKind,
   isTerminalShape,
   isEngineTerminal,
   deriveEngineExitReason,
   defaultHemispheres,
+  _clearTcCache,
 };

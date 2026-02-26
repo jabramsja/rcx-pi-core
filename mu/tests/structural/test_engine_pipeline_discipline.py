@@ -354,13 +354,19 @@ class TestHemisphereKeysParity:
 
     def test_js_hemisphere_keys_match_python(self):
         """JS HEMISPHERE_KEYS must match Python exactly."""
+        import json
+        import subprocess
         from rcx_pi.selfhost.step_mu import _HEMISPHERE_KEYS  # ANTICHEAT_OK: grounding test for hemisphere shape contract
-        js_source = _read_all_js_source()
-        # HEMISPHERE_KEYS derived from HEMISPHERE_KEY_ORDER array
-        pattern = r"const\s+HEMISPHERE_KEY_ORDER\s*=\s*\[(.*?)\]"
-        m = re.search(pattern, js_source, re.DOTALL)
-        assert m, "Could not find HEMISPHERE_KEY_ORDER in eval_step.js"
-        js_keys = set(re.findall(r"'([^']+)'", m.group(1)))
+        result = subprocess.run(
+            ["node", "-e",
+             "const tc = require('./mu/host/js/core/terminal_classification');\n"
+             "console.log(JSON.stringify([...tc.HEMISPHERE_KEYS]));"],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).resolve().parents[3]),
+            timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        js_keys = set(json.loads(result.stdout.strip()))
         assert js_keys == _HEMISPHERE_KEYS, (
             f"Hemisphere key drift!\n"
             f"  Python-only: {_HEMISPHERE_KEYS - js_keys}\n"
