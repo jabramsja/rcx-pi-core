@@ -229,9 +229,9 @@ class TestEdgeCases:
         # Same float
         assert match(pattern, [3.14, 3.14]) != NO_MATCH
 
-        # Float vs int with same value
-        # json.dumps(1.0) == "1.0", json.dumps(1) == "1" -> different
-        assert match(pattern, [1.0, 1]) is NO_MATCH
+        # Float vs int with same value — control hash canonicalizes (A5 reversal)
+        # mu_hash_control_cached(1.0) == mu_hash_control_cached(1)
+        assert match(pattern, [1.0, 1]) != NO_MATCH
 
     def test_dict_key_order_irrelevant(self):
         """Dict comparison must be key-order independent."""
