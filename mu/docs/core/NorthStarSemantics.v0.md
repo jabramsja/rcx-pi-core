@@ -74,7 +74,7 @@ This document is the single canonical source for these policies. If a design doc
 **Scope:**
 - **Control paths (use `mu_hash_control*`):** stall detection in `step_kernel_mu`/`stepKernel`, `run_mu`/`run`, `run_mu_structural`/`runStructural`, `run_hemisphere_routing`, `_resolve_trace_projection_id`/`resolveTraceProjectionId`, `projection_runner`, `runSubAlgorithm`, `hash_trace_for_recurrence`/`hashTraceForRecurrence`.
 - **Data paths (use `mu_hash`/`mu_hash_cached`):** observer event hashing, undefined motif output, `makeUndefinedMotif`.
-- **Explicitly excluded:** non-linear binding in `match()`/`_match_inner()` — changing those would alter matcher semantics (deferred).
+- **Non-linear binding (A5 truth-sync):** non-linear binding conflict checks in `match()`/`_match_inner()` now use `mu_hash_control_cached`/`muHashControlCached` (Wave A5). This supersedes the earlier Wave 24 exclusion.
 
 **Canonicalization rules:**
 1. Integer-valued floats → int: `1.0` → `1`, `-3.0` → `-3`
@@ -87,8 +87,9 @@ This document is the single canonical source for these policies. If a design doc
 2. Control wrappers MUST call `assert_mu`/`isValidMu` before canonicalization.
 3. `mu_hash_control(1.0)` MUST equal `mu_hash_control(1)` in both substrates.
 4. `muHashControl(1)` (JS) MUST equal `mu_hash_control(1.0)` (Python) — cross-substrate parity.
+5. Large integral floats at `>= 1e21` are not int-cast in Python control wrappers (to match JS scientific notation behavior); this boundary remains documented and explicit.
 
-**Gate test:** `tests/l4_gates/test_numeric_hash_safety_lock_gate.py` (27 tests)
+**Gate test:** `tests/l4_gates/test_numeric_hash_safety_lock_gate.py` (37 tests after A5 inclusion locks)
 
 ## C. Bounded Non-Closure Policy
 

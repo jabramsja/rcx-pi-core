@@ -285,34 +285,37 @@ class TestEngineResultShapeParity:
     """Engine terminal keys must match between Python and JS."""
 
     def test_python_engine_terminal_keys_locked(self):
-        """Python _ENGINE_TERMINAL_KEYS must have exactly 8 keys."""
-        from rcx_pi.selfhost.step_mu import _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for engine shape contract
-        assert len(_ENGINE_TERMINAL_KEYS) == 8, (
-            f"Expected 8 engine terminal keys, got {len(_ENGINE_TERMINAL_KEYS)}: "
-            f"{sorted(_ENGINE_TERMINAL_KEYS)}"
+        """Seed-derived engine terminal keys must have exactly 8 keys."""
+        from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for engine shape contract
+        engine_keys = _load_tc_key_sets()["tc.engine"]
+        assert len(engine_keys) == 8, (
+            f"Expected 8 engine terminal keys, got {len(engine_keys)}: "
+            f"{sorted(engine_keys)}"
         )
 
     def test_python_engine_terminal_keys_content(self):
-        """Python _ENGINE_TERMINAL_KEYS must contain the expected keys."""
-        from rcx_pi.selfhost.step_mu import _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for engine shape contract
+        """Seed-derived engine terminal keys must contain the expected keys."""
+        from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for engine shape contract
+        engine_keys = _load_tc_key_sets()["tc.engine"]
         expected = {
             "value", "closure_detected", "tau_step", "exhaustion_detected",
             "operator_frozen", "frozen_set", "action", "stall",
         }
-        assert _ENGINE_TERMINAL_KEYS == expected, (
+        assert engine_keys == expected, (
             f"Engine terminal keys drift!\n"
-            f"  Missing: {expected - _ENGINE_TERMINAL_KEYS}\n"
-            f"  Extra: {_ENGINE_TERMINAL_KEYS - expected}"
+            f"  Missing: {expected - engine_keys}\n"
+            f"  Extra: {engine_keys - expected}"
         )
 
     def test_js_engine_terminal_keys_match_python(self):
-        """JS ENGINE_TERMINAL_KEYS must match Python exactly."""
-        from rcx_pi.selfhost.step_mu import _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for engine shape contract
+        """JS ENGINE_TERMINAL_KEYS must match seed-derived Python keys."""
+        from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for engine shape contract
+        engine_keys = _load_tc_key_sets()["tc.engine"]
         js_keys = _extract_js_set_literal(_read_all_js_source(), "ENGINE_TERMINAL_KEYS")
-        assert js_keys == _ENGINE_TERMINAL_KEYS, (
+        assert js_keys == engine_keys, (
             f"Engine terminal key drift!\n"
-            f"  Python-only: {_ENGINE_TERMINAL_KEYS - js_keys}\n"
-            f"  JS-only: {js_keys - _ENGINE_TERMINAL_KEYS}"
+            f"  Python-only: {engine_keys - js_keys}\n"
+            f"  JS-only: {js_keys - engine_keys}"
         )
 
 
@@ -406,17 +409,18 @@ class TestPipelineReturnContract:
 
     @pytest.mark.slow
     def test_return_has_terminal_keys(self):
-        from rcx_pi.selfhost.step_mu import _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for return shape
+        from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for return shape
+        engine_keys = _load_tc_key_sets()["tc.engine"]
         result = run_engine_pipeline(
             projections=[{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
             input_value=42,
             max_steps=3,
             use_boot1_recursive=False,
         )
-        assert set(result.keys()) == _ENGINE_TERMINAL_KEYS, (
+        assert set(result.keys()) == engine_keys, (
             f"Return keys mismatch.\n"
-            f"  Missing: {_ENGINE_TERMINAL_KEYS - set(result.keys())}\n"
-            f"  Extra: {set(result.keys()) - _ENGINE_TERMINAL_KEYS}"
+            f"  Missing: {engine_keys - set(result.keys())}\n"
+            f"  Extra: {set(result.keys()) - engine_keys}"
         )
 
 
@@ -498,16 +502,17 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_engine_result_has_terminal_keys(self):
         """engine_result sub-dict must have exactly 8 terminal keys."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _ENGINE_TERMINAL_KEYS  # ANTICHEAT_OK: grounding test for return shape
+        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _load_tc_key_sets  # ANTICHEAT_OK: grounding test for return shape
+        engine_keys = _load_tc_key_sets()["tc.engine"]
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
             42,
             max_steps=3,
         )
-        assert set(result["engine_result"].keys()) == _ENGINE_TERMINAL_KEYS, (
+        assert set(result["engine_result"].keys()) == engine_keys, (
             f"engine_result sub-shape drift!\n"
-            f"  Missing: {_ENGINE_TERMINAL_KEYS - set(result['engine_result'].keys())}\n"
-            f"  Extra: {set(result['engine_result'].keys()) - _ENGINE_TERMINAL_KEYS}"
+            f"  Missing: {engine_keys - set(result['engine_result'].keys())}\n"
+            f"  Extra: {set(result['engine_result'].keys()) - engine_keys}"
         )
 
     @pytest.mark.slow
