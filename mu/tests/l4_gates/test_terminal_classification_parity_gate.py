@@ -20,9 +20,7 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import (
     ENGINE_EXIT_REASONS,
     TERMINAL_KINDS,
-    _ENGINE_TERMINAL_KEYS,  # ANTICHEAT_OK: parity gate compares Python key sets against JS source
-    _EXHAUSTION_TERMINAL_KEYS,  # ANTICHEAT_OK: parity gate compares Python key sets against JS source
-    _RECURRENCE_TERMINAL_KEYS,  # ANTICHEAT_OK: parity gate compares Python key sets against JS source
+    _load_tc_key_sets,  # ANTICHEAT_OK: parity gate compares seed-derived key sets against JS source
     classify_terminal_kind,
 )
 
@@ -61,17 +59,20 @@ class TestTerminalKeySetParity:
     def test_recurrence_terminal_keys_match(self):
         js = _js_source()
         js_keys = _extract_js_set(js, "RECURRENCE_TERMINAL_KEYS")
-        assert set(_RECURRENCE_TERMINAL_KEYS) == js_keys
+        tc_sets = _load_tc_key_sets()
+        assert set(tc_sets["tc.recurrence"]) == js_keys
 
     def test_exhaustion_terminal_keys_match(self):
         js = _js_source()
         js_keys = _extract_js_set(js, "EXHAUSTION_TERMINAL_KEYS")
-        assert set(_EXHAUSTION_TERMINAL_KEYS) == js_keys
+        tc_sets = _load_tc_key_sets()
+        assert set(tc_sets["tc.exhaustion"]) == js_keys
 
     def test_engine_terminal_keys_match(self):
         js = _js_source()
         js_keys = _extract_js_set(js, "ENGINE_TERMINAL_KEYS")
-        assert set(_ENGINE_TERMINAL_KEYS) == js_keys
+        tc_sets = _load_tc_key_sets()
+        assert set(tc_sets["tc.engine"]) == js_keys
 
 
 # =============================================================================

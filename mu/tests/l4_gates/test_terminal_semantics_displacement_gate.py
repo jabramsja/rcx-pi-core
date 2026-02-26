@@ -1,9 +1,10 @@
 """
-L4 Gate Test: Terminal Semantics Displacement (Wave 25).
+L4 Gate Test: Terminal Semantics Displacement (Wave 25 + A6 key-set authority).
 
 Proves that terminal classification and engine exit-reason decision logic
 has been structurally displaced from host if/else chains into the
-terminal_classify.v1.json seed projections.
+terminal_classify.v1.json seed projections. A6 additionally proves that
+terminal key sets are seed-derived, not hardcoded.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/l4_gates/test_terminal_semantics_displacement_gate.py -v
@@ -21,9 +22,7 @@ from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.eval_seed import step as eval_step
 from rcx_pi.selfhost.step_mu import (
-    _ENGINE_TERMINAL_KEYS,  # ANTICHEAT_OK: gate verifies compat constants match seed
-    _EXHAUSTION_TERMINAL_KEYS,  # ANTICHEAT_OK: gate verifies compat constants match seed
-    _RECURRENCE_TERMINAL_KEYS,  # ANTICHEAT_OK: gate verifies compat constants match seed
+    _load_tc_key_sets,  # ANTICHEAT_OK: gate verifies seed-derived key sets
     classify_terminal_kind,
     _derive_engine_exit_reason,  # ANTICHEAT_OK: gate verifies seed-backed exit reason
 )
@@ -280,27 +279,61 @@ class TestBehaviorParity:
 
 
 # ===========================================================================
-# Test 8: Compatibility constants match seed pattern key sets
+# Test 8: Terminal key sets are seed-derived (A6 displacement)
 # ===========================================================================
 
-class TestCompatConstantsMatchSeed:
-    def test_recurrence_keys_match_seed(self):
-        seed = _load_seed()
-        tc_rec = next(p for p in seed["projections"] if p["id"] == "tc.recurrence")
-        seed_keys = frozenset(tc_rec["pattern"]["_tc"].keys())
-        assert _RECURRENCE_TERMINAL_KEYS == seed_keys
+class TestSeedDerivedKeysets:
+    """Verify terminal key sets are derived from seed, not hardcoded."""
 
-    def test_exhaustion_keys_match_seed(self):
-        seed = _load_seed()
-        tc_exh = next(p for p in seed["projections"] if p["id"] == "tc.exhaustion")
-        seed_keys = frozenset(tc_exh["pattern"]["_tc"].keys())
-        assert _EXHAUSTION_TERMINAL_KEYS == seed_keys
+    def test_derivation_returns_three_key_sets(self):
+        """_load_tc_key_sets extracts exactly 3 terminal key sets from seed."""
+        tc_sets = _load_tc_key_sets()
+        assert len(tc_sets) == 3
 
-    def test_engine_keys_match_seed(self):
+    def test_derivation_ids_correct(self):
+        """Derived key set IDs match expected projection IDs."""
+        tc_sets = _load_tc_key_sets()
+        assert set(tc_sets.keys()) == {"tc.recurrence", "tc.exhaustion", "tc.engine"}
+
+    def test_recurrence_keys_cardinality(self):
+        """Recurrence terminal has 3 keys."""
+        tc_sets = _load_tc_key_sets()
+        assert len(tc_sets["tc.recurrence"]) == 3
+
+    def test_exhaustion_keys_cardinality(self):
+        """Exhaustion terminal has 4 keys."""
+        tc_sets = _load_tc_key_sets()
+        assert len(tc_sets["tc.exhaustion"]) == 4
+
+    def test_engine_keys_cardinality(self):
+        """Engine terminal has 8 keys."""
+        tc_sets = _load_tc_key_sets()
+        assert len(tc_sets["tc.engine"]) == 8
+
+    def test_derived_keys_match_seed_directly(self):
+        """Derived key sets match raw seed projection patterns."""
         seed = _load_seed()
-        tc_eng = next(p for p in seed["projections"] if p["id"] == "tc.engine")
-        seed_keys = frozenset(tc_eng["pattern"]["_tc"].keys())
-        assert _ENGINE_TERMINAL_KEYS == seed_keys
+        tc_sets = _load_tc_key_sets()
+        for p in seed["projections"]:
+            pat = p.get("pattern") or {}
+            if "_tc" in pat:
+                seed_keys = frozenset(pat["_tc"].keys())
+                assert tc_sets[p["id"]] == seed_keys, (
+                    f"Derived keys for {p['id']} don't match seed"
+                )
+
+    def test_no_hardcoded_frozensets_in_source(self):
+        """step_mu.py must NOT contain hardcoded terminal key frozensets (A6 source lock)."""
+        source = PY_STEP_MU.read_text(encoding="utf-8")
+        assert "_RECURRENCE_TERMINAL_KEYS = frozenset(" not in source, (
+            "Hardcoded _RECURRENCE_TERMINAL_KEYS found — must be seed-derived"
+        )
+        assert "_EXHAUSTION_TERMINAL_KEYS = frozenset(" not in source, (
+            "Hardcoded _EXHAUSTION_TERMINAL_KEYS found — must be seed-derived"
+        )
+        assert "_ENGINE_TERMINAL_KEYS = frozenset(" not in source, (
+            "Hardcoded _ENGINE_TERMINAL_KEYS found — must be seed-derived"
+        )
 
 
 # ===========================================================================

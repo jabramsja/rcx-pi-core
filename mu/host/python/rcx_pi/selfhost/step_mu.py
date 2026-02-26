@@ -60,13 +60,29 @@ class RcxEngineError(RuntimeError):
         self.error_code = error_code
 
 
-# Terminal shape key sets (module-level constants, avoids repeated construction)
-_RECURRENCE_TERMINAL_KEYS = frozenset({"closure_detected", "final_result", "tau_step"})  # AST_OK: constant — recurrence output shape
-_EXHAUSTION_TERMINAL_KEYS = frozenset({"action", "exhaustion_detected", "frozen", "operator_to_freeze"})  # AST_OK: constant — exhaustion output shape
-_ENGINE_TERMINAL_KEYS = frozenset({  # AST_OK: constant — engine unwrapped output shape
-    "value", "closure_detected", "tau_step", "exhaustion_detected",
-    "operator_frozen", "frozen_set", "action", "stall",
-})
+# Terminal shape key sets — seed-derived from terminal_classify.v1.json (A6 displacement).
+# Authority lives in seed projections, not hardcoded frozensets.
+_tc_key_sets_cache: dict | None = None
+
+
+def _load_tc_key_sets() -> dict:  # AST_OK: infra — seed-derived terminal key sets
+    """Derive terminal key sets from terminal_classify.v1.json seed (cached).
+
+    Returns dict mapping projection ID → frozenset of pattern keys.
+    Only includes projections using the ``_tc`` wrapper (tc.recurrence,
+    tc.exhaustion, tc.engine).
+    """
+    global _tc_key_sets_cache
+    if _tc_key_sets_cache is not None:
+        return _tc_key_sets_cache
+    projs = _load_tc_projections()
+    result = {}
+    for p in projs:
+        pat = p.get("pattern") or {}
+        if "_tc" in pat:
+            result[p["id"]] = frozenset(pat["_tc"].keys())
+    _tc_key_sets_cache = result
+    return result
 
 # Terminal kind enum — unified classification of all terminal states.
 # Every dict result falls into exactly one kind. Pure structural check.
@@ -103,7 +119,7 @@ def classify_terminal_kind(value) -> str:  # AST_OK: infra — unified terminal 
     # This avoids eval_step (and its assert_mu walk) on engine-internal
     # state dicts that can be deeply nested.
     keys = frozenset(value.keys())
-    if keys not in (_RECURRENCE_TERMINAL_KEYS, _EXHAUSTION_TERMINAL_KEYS, _ENGINE_TERMINAL_KEYS):
+    if keys not in _load_tc_key_sets().values():
         return "non_terminal"
     # Structural seed classification via projection matching
     tc_projs = _load_tc_projections()
