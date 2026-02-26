@@ -13,7 +13,7 @@ const { isValidMu, muHash, muEqual, muHashCached, muHashControl, muHashControlCa
 const { denormalize } = require('../core/normalize');
 const { validateNoKernelReservedFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
-const { isTerminalShape, isEngineTerminal, deriveEngineExitReason } = require('../core/terminal_classification');
+const { isTerminalShape, isEngineTerminal, deriveEngineExitReason, setsEqual } = require('../core/terminal_classification');
 const { stepKernel, runStructural } = require('./kernel');
 
 // JS built-in property names that must never be used as inject_key.
@@ -24,6 +24,56 @@ const FORBIDDEN_INJECT_KEYS = new Set([
   'toLocaleString', '__defineGetter__', '__defineSetter__',
   '__lookupGetter__', '__lookupSetter__',
 ]);
+
+// --- Engine seed boundary-ops derivation (A10: boundary dispatch authority) ---
+let _engineSeed = null;
+let _boundaryOps = null;
+const _EXPECTED_BOUNDARY_OPS = new Set(['run_trace', 'hash_trace', 'run_algorithm']);
+
+function _loadEngineSeed() {
+  if (_engineSeed !== null) return _engineSeed;
+  _engineSeed = require('../core/seed_loader').loadVerifiedSeed('rcx_engine.v1.json', 'programs');
+  return _engineSeed;
+}
+
+function _ensureBoundaryOps() {
+  if (_boundaryOps !== null) return _boundaryOps;
+  const seed = _loadEngineSeed();
+  const ops = new Set();
+  for (const p of seed.projections) {
+    const body = p.body;
+    if (body !== null && typeof body === 'object' && !Array.isArray(body)) {
+      const br = body._boundary_request;
+      if (br !== null && typeof br === 'object' && !Array.isArray(br)) {
+        if ('operation' in br) {
+          const op = br.operation;
+          if (typeof op !== 'string') {
+            throw new RcxError('input.shape_mismatch',
+              `engine seed invariant: boundary op must be string, ` +
+              `got ${typeof op} in projection ${p.id || '?'}`);
+          }
+          ops.add(op);
+        }
+      }
+    }
+  }
+  if (ops.size !== 3) {
+    throw new RcxError('input.shape_mismatch',
+      `engine seed invariant: expected 3 boundary ops, got ${ops.size}`);
+  }
+  if (!setsEqual(ops, _EXPECTED_BOUNDARY_OPS)) {
+    throw new RcxError('input.shape_mismatch',
+      `engine seed invariant: expected ${JSON.stringify([..._EXPECTED_BOUNDARY_OPS].sort())}, ` +
+      `got ${JSON.stringify([...ops].sort())}`);
+  }
+  _boundaryOps = ops;
+  return _boundaryOps;
+}
+
+function _clearBoundaryOpsCache() {
+  _engineSeed = null;
+  _boundaryOps = null;
+}
 
 /**
  * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
@@ -102,22 +152,116 @@ function hashTraceForRecurrence(trace, maxEntries) {
   return result;
 }
 
+// --- Boundary operation handlers (A10: seed-derived dispatch) ---
+const MAX_BOUNDARY_TRACE_STEPS = 10000;
+
+function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations) {
+  if (typeof reqInput !== 'object' || reqInput === null || Array.isArray(reqInput)) {
+    throw new RcxError('api.bad_request',
+      `run_trace input must be object, got ${reqInput === null ? 'null' : Array.isArray(reqInput) ? 'array' : typeof reqInput}`);
+  }
+  if (!('projections' in reqInput) || !('value' in reqInput)) {
+    throw new RcxError('api.bad_request',
+      "run_trace input must include 'projections' and 'value'");
+  }
+  const projs = reqInput.projections;
+  if (!Array.isArray(projs)) {
+    throw new RcxError('api.bad_request',
+      `run_trace input 'projections' must be array, got ${typeof projs}`);
+  }
+  for (let i = 0; i < projs.length; i++) {
+    if (typeof projs[i] !== 'object' || projs[i] === null || Array.isArray(projs[i])) {
+      throw new RcxError('api.bad_request',
+        `run_trace projection[${i}] must be object, got ${projs[i] === null ? 'null' : Array.isArray(projs[i]) ? 'array' : typeof projs[i]}`);
+    }
+    if (!('pattern' in projs[i]) || !('body' in projs[i])) {
+      throw new RcxError('api.bad_request',
+        `run_trace projection[${i}] must have 'pattern' and 'body' keys`);
+    }
+  }
+  // max_steps parity policy: normalize-fallback.
+  // Numeric finite → floor to int. Non-numeric/boolean/NaN/±Infinity → fallback to 100.
+  // Matches Python parity exactly.
+  let traceMaxSteps = reqInput.max_steps ?? 100;
+  if (typeof traceMaxSteps !== 'number' || traceMaxSteps !== traceMaxSteps || !isFinite(traceMaxSteps)) traceMaxSteps = 100;
+  traceMaxSteps = Math.floor(traceMaxSteps);
+  if (traceMaxSteps < 0) traceMaxSteps = 100;
+  if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) traceMaxSteps = MAX_BOUNDARY_TRACE_STEPS;
+  const raw = runStructural(kernelProjections, projs, reqInput.value, traceMaxSteps);
+  return { result: raw.result, trace: raw.trace, stall: raw.stall };
+}
+
+function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations) {
+  return hashTraceForRecurrence(reqInput);
+}
+
+function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations) {
+  if (!('algorithm' in request)) {
+    throw new RcxError('api.bad_request',
+      "run_algorithm request must include 'algorithm'");
+  }
+  const algoName = request.algorithm;
+  if (typeof algoName !== 'string') {
+    throw new RcxError('api.bad_request',
+      `run_algorithm 'algorithm' must be string, got ${typeof algoName}`);
+  }
+  const algoProjs = seedProjectionMap[algoName];
+  if (!algoProjs) {
+    throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
+  }
+  return runSubAlgorithm(kernelProjections, seedProjectionMap, algoProjs, reqInput, maxAlgorithmIterations);
+}
+
+// Dispatch map: operation name → handler function (A10 structural displacement).
+// Authority for valid operations comes from seed-derived _ensureBoundaryOps().
+const BOUNDARY_DISPATCH = Object.freeze({
+  run_trace: boundaryOpRunTrace,
+  hash_trace: boundaryOpHashTrace,
+  run_algorithm: boundaryOpRunAlgorithm,
+});
+
 /**
  * Service a boundary effect request from the engine state machine.
  * Parameterized: takes kernelProjections and seedProjectionMap.
+ * Dispatches via seed-derived operation authority (A10): handler-map lookup
+ * replaces host if/elif dispatch. Validates request shape before any
+ * field dereference.
  */
 function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, maxAlgorithmIterations, emitFn, iteration, state) {
+  // --- Request shape validation (typed fail-closed, no raw TypeError) ---
+  if (typeof request !== 'object' || request === null || Array.isArray(request)) {
+    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    throw new RcxError('api.bad_request',
+      `boundary request must be object, got ${request === null ? 'null' : Array.isArray(request) ? 'array' : typeof request}`);
+  }
+  for (const key of ['operation', 'input', 'context', 'inject_key']) {
+    if (!(key in request)) {
+      emitFn('fail_closed', iteration, state, 'api.bad_request');
+      throw new RcxError('api.bad_request',
+        `boundary request missing required key: ${key}`);
+    }
+  }
   const operation = request.operation;
+  if (typeof operation !== 'string') {
+    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    throw new RcxError('api.bad_request',
+      `boundary operation must be string, got ${typeof operation}`);
+  }
+  if (typeof request.context !== 'object' || request.context === null || Array.isArray(request.context)) {
+    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    throw new RcxError('api.bad_request',
+      `boundary context must be object, got ${request.context === null ? 'null' : Array.isArray(request.context) ? 'array' : typeof request.context}`);
+  }
+  const injectKey = request.inject_key;
+  if (typeof injectKey !== 'string') {
+    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    throw new RcxError('api.bad_request',
+      `boundary inject_key must be string, got ${typeof injectKey}`);
+  }
   const reqInput = request.input;
   const context = Object.assign(Object.create(null), request.context);
-  const injectKey = request.inject_key;
 
-  if (typeof injectKey !== 'string') {
-    emitFn('fail_closed', iteration, state, 'input.reserved_field');
-    throw new RcxError('input.reserved_field',
-      `SECURITY: inject_key must be a string, got ${typeof injectKey}.`
-    );
-  }
+  // SECURITY: inject_key must not be kernel-reserved or JS built-in.
   if (KERNEL_RESERVED_FIELDS.has(injectKey) || FORBIDDEN_INJECT_KEYS.has(injectKey)) {
     emitFn('fail_closed', iteration, state, 'input.reserved_field');
     throw new RcxError('input.reserved_field',
@@ -126,28 +270,27 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
     );
   }
 
-  const MAX_BOUNDARY_TRACE_STEPS = 10000;
-
-  let result;
-  if (operation === 'run_trace') {
-    let traceMaxSteps = reqInput.max_steps ?? 100;
-    if (typeof traceMaxSteps !== 'number' || traceMaxSteps < 0) traceMaxSteps = 100;
-    if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) traceMaxSteps = MAX_BOUNDARY_TRACE_STEPS;
-    const raw = runStructural(kernelProjections, reqInput.projections, reqInput.value, traceMaxSteps);
-    result = { result: raw.result, trace: raw.trace, stall: raw.stall };
-  } else if (operation === 'hash_trace') {
-    result = hashTraceForRecurrence(reqInput);
-  } else if (operation === 'run_algorithm') {
-    const algoName = request.algorithm;
-    const algoProjs = seedProjectionMap[algoName];
-    if (!algoProjs) {
-      throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
-    }
-    result = runSubAlgorithm(kernelProjections, seedProjectionMap, algoProjs, reqInput, maxAlgorithmIterations);
-  } else {
+  // --- Seed-derived operation authority (A10 displacement) ---
+  const validOps = _ensureBoundaryOps();
+  if (!validOps.has(operation)) {
     emitFn('fail_closed', iteration, state, 'api.bad_request');
     throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
   }
+
+  // Dispatch coverage invariant: map keys must match seed-derived ops
+  const dispatchKeys = new Set(Object.keys(BOUNDARY_DISPATCH));
+  if (!setsEqual(dispatchKeys, validOps)) {
+    throw new RcxError('input.shape_mismatch',
+      `boundary dispatch/authority mismatch: dispatch=${JSON.stringify(Object.keys(BOUNDARY_DISPATCH).sort())}, ` +
+      `seed=${JSON.stringify([...validOps].sort())}`);
+  }
+
+  const handler = BOUNDARY_DISPATCH[operation];
+  if (!handler) {
+    throw new RcxError('input.shape_mismatch',
+      `boundary dispatch missing handler for validated op: ${operation}`);
+  }
+  const result = handler(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations);
 
   validateNoKernelReservedFields(result, `boundary_result(${operation})`);
 
@@ -491,4 +634,6 @@ module.exports = {
   serviceBoundaryEffect,
   runEnginePipeline,
   runEnginePipelineRecursive,
+  _clearBoundaryOpsCache,
+  _ensureBoundaryOps,
 };

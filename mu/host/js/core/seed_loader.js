@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const CORE_SEED_CHECKSUMS = {
   'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
+  'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
 };
 
 const CORE_SEED_PROJECTION_IDS = {
@@ -43,6 +44,19 @@ const CORE_SEED_PROJECTION_IDS = {
     'hemisphere.add.lobes',
     'hemisphere.add.sink',
     'hemisphere.unwrap',
+  ],
+  'rcx_engine.v1.json': [
+    'engine.init',
+    'engine.init_config',
+    'engine.trace_done',
+    'engine.hash_done_fix',
+    'engine.hash_done',
+    'engine.fix_done_applied',
+    'engine.fix_done_none',
+    'engine.recurrence_done',
+    'engine.exhaustion_done_freeze',
+    'engine.exhaustion_done_terminal',
+    'engine.unwrap',
   ],
 };
 

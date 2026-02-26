@@ -386,8 +386,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 52 (48 pre-A9 + 4 A9 hemisphere seed derivation: _load_hemisphere_keys, _get_hemisphere_key_order, _get_hemisphere_keys, _default_hemispheres dict comp)
-    assert infra_count == 52, (
-        f"Expected 52 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 55 (52 pre-A10 + 3 A10 boundary ops seed derivation: _load_boundary_ops, ops set, for-loop scan)
+    assert infra_count == 55, (
+        f"Expected 55 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

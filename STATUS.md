@@ -276,8 +276,8 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
-INFRA_CEILING: 52
-INFRA_CURRENT: 52
+INFRA_CEILING: 55
+INFRA_CURRENT: 55
 ```
 
 **Debt breakdown:**
@@ -316,7 +316,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 48 (current 42)
+- AST_OK:infra ceiling: 55 (current 55)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
