@@ -18,6 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = ROOT.parent  # mu/ → repo root (for STATUS.md etc.)
 DEBT_DASHBOARD = ROOT / "tools" / "util" / "debt_dashboard.sh"
+CHECK_JS_DEBT = ROOT / "tools" / "checks" / "check_js_debt.sh"
 AUDIT_SCRIPT = ROOT / "tools" / "audits" / "audit_semantic_purity.sh"
 
 
@@ -92,13 +93,65 @@ def test_debt_dashboard_json_format():
     # Check new fields
     assert "ast_ok_bootstrap" in debt, "JSON debt should include ast_ok_bootstrap"
     assert "total_semantic" in debt, "JSON debt should include total_semantic"
+    assert "host_runtime_loc_py" in debt, "JSON debt should include host_runtime_loc_py"
+    assert "host_runtime_loc_js" in debt, "JSON debt should include host_runtime_loc_js"
+    assert "host_test_loc_js" in debt, "JSON debt should include host_test_loc_js"
+    assert "host_runtime_loc_total" in debt, "JSON debt should include host_runtime_loc_total"
+    assert "ast_ok_total_py" in debt, "JSON debt should include ast_ok_total_py"
+    assert "ast_ok_total_js" in debt, "JSON debt should include ast_ok_total_js"
+    assert "ast_ok_total_host" in debt, "JSON debt should include ast_ok_total_host"
 
     # Verify values are integers
     assert isinstance(debt["ast_ok_bootstrap"], int)
     assert isinstance(debt["total_semantic"], int)
+    assert isinstance(debt["host_runtime_loc_py"], int)
+    assert isinstance(debt["host_runtime_loc_js"], int)
+    assert isinstance(debt["host_test_loc_js"], int)
+    assert isinstance(debt["host_runtime_loc_total"], int)
+    assert isinstance(debt["ast_ok_total_py"], int)
+    assert isinstance(debt["ast_ok_total_js"], int)
+    assert isinstance(debt["ast_ok_total_host"], int)
 
     # Verify calculation: total_semantic = total_tracked + ast_ok_bootstrap
     assert debt["total_semantic"] == debt["total_tracked"] + debt["ast_ok_bootstrap"]
+    assert debt["host_runtime_loc_total"] == debt["host_runtime_loc_py"] + debt["host_runtime_loc_js"]
+    assert debt["ast_ok_total_host"] == debt["ast_ok_total_py"] + debt["ast_ok_total_js"]
+
+
+def test_debt_dashboard_human_output_includes_host_surface_metrics():
+    """Human dashboard output must expose additive host-surface metrics."""
+    result = _run(["bash", str(DEBT_DASHBOARD)])
+
+    assert result.returncode == 0
+    expected_lines = [
+        "Host Surface Visibility (Additive Metrics)",
+        "host_runtime_loc_py:",
+        "host_runtime_loc_js:",
+        "host_test_loc_js:",
+        "host_runtime_loc_total:",
+        "ast_ok_total_py:",
+        "ast_ok_total_js:",
+        "ast_ok_total_host:",
+    ]
+    for line in expected_lines:
+        assert line in result.stdout, (
+            f"Missing '{line}' in debt_dashboard.sh output.\n"
+            f"stdout:\n{result.stdout}"
+        )
+
+
+def test_check_js_debt_reports_runtime_loc_and_ast_ok_metrics():
+    """check_js_debt.sh should emit additive host-surface metrics."""
+    result = _run(["bash", str(CHECK_JS_DEBT)])
+
+    assert result.returncode == 0, (
+        f"check_js_debt.sh failed:\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+    assert "AST_OK_JS:" in result.stdout
+    assert "host_runtime_loc_js:" in result.stdout
+    assert "host_test_loc_js:" in result.stdout
 
 
 def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
