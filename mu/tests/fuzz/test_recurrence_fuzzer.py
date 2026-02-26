@@ -348,7 +348,7 @@ class TestRecurrenceTypeDistinctness:
         ("", False, "empty string vs false"),
         (0, "0", "int 0 vs string '0'"),
         ([], {}, "empty list vs empty dict"),
-        (1, 1.0, "int 1 vs float 1.0"),
+        # (1, 1.0) removed: A5 control hash canonicalization makes int/float equivalent
     ])
     def test_type_distinctness(self, state1, state2, desc):
         """Different types are distinct states (no closure)."""

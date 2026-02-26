@@ -1,5 +1,5 @@
 """
-Gate test: Numeric Hash Safety Lock (Wave 24)
+Gate test: Numeric Hash Safety Lock (Wave 24 + A5 reversal)
 
 Enforces:
 1. Python mu_hash_control/mu_hash_control_cached exist and canonicalize
@@ -8,7 +8,7 @@ Enforces:
 4. Zero canonicalization (0.0 → 0)
 5. Global mu_hash/muHash NOT modified (data-flow paths unchanged)
 6. Control wrappers wired at control-flow callsites (source locks)
-7. Match non-linear binding NOT wired (explicit exclusion)
+7. Match non-linear binding uses control wrappers (A5: cross-substrate parity closure)
 """
 
 import json
@@ -257,32 +257,29 @@ class TestSourceLocks:
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
         assert "muHashControlCached(" in source
 
-    def test_match_nonlinear_binding_excluded(self):
-        """match() in bootstrap_core.js still uses muHashCached, NOT control."""
+    def test_match_nonlinear_binding_uses_control(self):
+        """match() in bootstrap_core.js uses muHashControlCached for non-linear binding (A5 reversal)."""
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
-        # Find match function lines with muHashCached (non-linear binding)
+        # Find match function lines with muHashControlCached (non-linear binding)
         in_match = False
-        match_hash_lines = []
+        match_control_lines = []
         for i, line in enumerate(source.splitlines(), 1):
             if "function match(" in line:
                 in_match = True
             elif in_match and line.startswith("function "):
                 break
-            if in_match and "muHashCached(" in line:
-                match_hash_lines.append(line.strip())
-        assert len(match_hash_lines) >= 2, "match() should have muHashCached for non-linear binding"
-        for line in match_hash_lines:
-            assert "muHashControlCached" not in line, (
-                f"match() non-linear binding should NOT use control wrapper: {line}"
-            )
+            if in_match and "muHashControlCached(" in line:
+                match_control_lines.append(line.strip())
+        assert len(match_control_lines) >= 2, (
+            "match() should have >=2 muHashControlCached calls for non-linear binding"
+        )
 
-    def test_python_eval_seed_match_excluded(self):
-        """eval_seed.py match uses mu_hash_cached, NOT control."""
+    def test_python_eval_seed_match_uses_control(self):
+        """eval_seed.py match uses mu_hash_control_cached for non-linear binding (A5 reversal)."""
         source = (PY_DIR / "eval_seed.py").read_text()
-        # eval_seed uses mu_hash_cached for non-linear binding in _match_inner
-        assert "mu_hash_cached(" in source
-        # Should NOT import mu_hash_control
-        assert "mu_hash_control" not in source
+        assert "mu_hash_control_cached(" in source, (
+            "eval_seed.py must use mu_hash_control_cached for non-linear binding"
+        )
 
     def test_global_mu_hash_not_modified(self):
         """mu_hash and mu_hash_cached in mu_type.py don't call canonicalize."""
@@ -298,3 +295,70 @@ class TestSourceLocks:
                 if line.startswith("def ") or (line and not line[0].isspace()):
                     break
                 assert "_canonicalize" not in line, "mu_hash must NOT call canonicalize"
+
+
+class TestNonLinearBindingControlParity:
+    """A5: Non-linear binding conflict checks use control hash for cross-substrate parity.
+
+    With control wrappers, 1.0 and 1 canonicalize to the same hash,
+    so a non-linear pattern binding x=1.0 then seeing x=1 should NOT conflict.
+    """
+
+    def test_python_nonlinear_float_int_no_conflict(self):
+        """Python: {var:x} matched against 1.0 then 1 should not conflict."""
+        from rcx_pi.selfhost.eval_seed import match, NO_MATCH
+        pattern = [{"var": "x"}, {"var": "x"}]
+        input_val = [1.0, 1]
+        result = match(pattern, input_val)
+        assert result is not NO_MATCH, (
+            "Non-linear pattern [x, x] with [1.0, 1] should match (control hash parity)"
+        )
+        assert "x" in result
+
+    def test_python_nonlinear_true_conflict_still_fails(self):
+        """Python: {var:x} matched against 1 then 2 must still conflict."""
+        from rcx_pi.selfhost.eval_seed import match, NO_MATCH
+        pattern = [{"var": "x"}, {"var": "x"}]
+        input_val = [1, 2]
+        result = match(pattern, input_val)
+        assert result is NO_MATCH, (
+            "Non-linear pattern [x, x] with [1, 2] must conflict"
+        )
+
+    def test_python_nonlinear_neg_zero_no_conflict(self):
+        """Python: -0.0 and 0 should not conflict (control hash canonicalizes)."""
+        from rcx_pi.selfhost.eval_seed import match, NO_MATCH
+        pattern = [{"var": "x"}, {"var": "x"}]
+        input_val = [-0.0, 0]
+        result = match(pattern, input_val)
+        assert result is not NO_MATCH, (
+            "Non-linear pattern [x, x] with [-0.0, 0] should match (±0 canonicalization)"
+        )
+
+    def test_js_nonlinear_float_int_no_conflict(self):
+        """JS: match([{var:x},{var:x}], [1.0, 1]) should not conflict."""
+        script = (
+            "const bc = require('./mu/host/js/core/bootstrap_core');\n"
+            "const result = bc.match([{var:'x'},{var:'x'}], [1.0, 1]);\n"
+            "console.log(JSON.stringify({matched: result !== bc.NO_MATCH, bindings: result}));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert data["matched"], "JS non-linear [x,x] with [1.0, 1] should match"
+
+    def test_js_nonlinear_true_conflict_still_fails(self):
+        """JS: match([{var:x},{var:x}], [1, 2]) must still conflict."""
+        script = (
+            "const bc = require('./mu/host/js/core/bootstrap_core');\n"
+            "const result = bc.match([{var:'x'},{var:'x'}], [1, 2]);\n"
+            "console.log(JSON.stringify({matched: result !== bc.NO_MATCH}));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert not data["matched"], "JS non-linear [x,x] with [1, 2] must conflict"
