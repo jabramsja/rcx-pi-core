@@ -1,10 +1,15 @@
-"""L4 gate tests for red-team hardening (substitute depth guard + centralized re-entry validation).
+"""L4 gate tests for red-team hardening.
 
-Evidence for: substitute() depth parity with JS, centralized _validate_reentry_payload /
-validateReentryPayload helpers covering all 3 re-entry paths (Boot1 _run_engine,
-Boot1 _tail_call, trampoline _tail_call) with shape + reserved-field checks.
+Evidence for:
+- substitute() depth parity with JS
+- Centralized _validate_reentry_payload / validateReentryPayload helpers
+- RT-001: denormalize() typed-path typeof guard (A18-P0)
+- RT-002: match()/substitute() isValidMu entry validation (A18-P0)
 """
 from __future__ import annotations
+
+import json
+import subprocess
 
 import pytest
 
@@ -180,3 +185,112 @@ class TestTrampolineTailCallValidation:
         js_calls = js_total - 1  # function validateReentryPayload(
         assert py_calls == 3, f"Python must have 3 helper call sites, got {py_calls}"
         assert js_calls == 3, f"JS must have 3 helper call sites, got {js_calls}"
+
+
+# ---------------------------------------------------------------------------
+# Helper — run JS via node -e (A18-P0 behavioral tests)
+# ---------------------------------------------------------------------------
+
+def _js_eval(script: str) -> str:
+    """Run a JS script via node -e and return stdout."""
+    result = subprocess.run(
+        ["node", "-e", script],
+        capture_output=True, text=True,
+        cwd=str(REPO_ROOT), timeout=10,
+    )
+    assert result.returncode == 0, f"JS error: {result.stderr}"
+    return result.stdout.strip()
+
+
+# =============================================================================
+# RT-001: denormalize() typed-path typeof guard (A18-P0)
+# =============================================================================
+
+class TestDenormalizeTypedPathGuard:
+    """Typed denormalize paths must not crash on non-object tail (RT-001)."""
+
+    def test_list_typed_path_primitive_tail(self):
+        """Typed list denormalize with primitive tail returns partial result."""
+        script = """
+const { denormalize } = require('./mu/host/js/core/normalize');
+const malformed = { _type: 'list', head: 42, tail: 'not_an_object' };
+const result = denormalize(malformed);
+console.log(JSON.stringify(result));
+"""
+        parsed = json.loads(_js_eval(script))
+        assert parsed == [42], f"Expected [42], got {parsed}"
+
+    def test_dict_typed_path_primitive_tail(self):
+        """Typed dict denormalize with primitive tail returns partial result."""
+        script = """
+const { denormalize } = require('./mu/host/js/core/normalize');
+const malformed = {
+    _type: 'dict',
+    head: { head: 'key1', tail: { head: 'val1', tail: null } },
+    tail: 99
+};
+const result = denormalize(malformed);
+console.log(JSON.stringify(result));
+"""
+        parsed = json.loads(_js_eval(script))
+        assert parsed == {"key1": "val1"}, f"Expected {{key1: val1}}, got {parsed}"
+
+
+# =============================================================================
+# RT-002: match()/substitute() isValidMu entry validation (A18-P0)
+# =============================================================================
+
+class TestMatchSubstituteEntryValidation:
+    """match() and substitute() must reject non-Mu inputs with typed error (RT-002)."""
+
+    def test_match_rejects_undefined_pattern(self):
+        """match() with undefined pattern throws input.invalid_type."""
+        script = """
+const bc = require('./mu/host/js/core/bootstrap_core');
+try {
+    bc.match(undefined, {a: 1});
+    console.log(JSON.stringify({error_code: null}));
+} catch (e) {
+    console.log(JSON.stringify({error_code: e.error_code || null}));
+}
+"""
+        parsed = json.loads(_js_eval(script))
+        assert parsed["error_code"] == "input.invalid_type"
+
+    def test_match_rejects_function_input(self):
+        """match() with function input throws input.invalid_type."""
+        script = """
+const bc = require('./mu/host/js/core/bootstrap_core');
+try {
+    bc.match({a: 1}, function() {});
+    console.log(JSON.stringify({error_code: null}));
+} catch (e) {
+    console.log(JSON.stringify({error_code: e.error_code || null}));
+}
+"""
+        parsed = json.loads(_js_eval(script))
+        assert parsed["error_code"] == "input.invalid_type"
+
+    def test_substitute_rejects_undefined_body(self):
+        """substitute() with undefined body throws input.invalid_type."""
+        script = """
+const bc = require('./mu/host/js/core/bootstrap_core');
+try {
+    bc.substitute(undefined, {x: 1});
+    console.log(JSON.stringify({error_code: null}));
+} catch (e) {
+    console.log(JSON.stringify({error_code: e.error_code || null}));
+}
+"""
+        parsed = json.loads(_js_eval(script))
+        assert parsed["error_code"] == "input.invalid_type"
+
+    def test_match_accepts_valid_mu(self):
+        """match() with valid Mu inputs succeeds (no regression)."""
+        script = """
+const bc = require('./mu/host/js/core/bootstrap_core');
+const result = bc.match({a: 1}, {a: 1});
+console.log(JSON.stringify(result));
+"""
+        parsed = json.loads(_js_eval(script))
+        assert parsed == {}

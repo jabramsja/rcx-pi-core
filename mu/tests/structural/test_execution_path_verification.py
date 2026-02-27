@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 
 from rcx_pi.selfhost.eval_seed import step
+from rcx_pi.selfhost.mu_type import mu_equal
 from tests.repo_root import REPO_ROOT as _REPO_ROOT
 
 pytestmark = [pytest.mark.slow]
@@ -81,7 +82,7 @@ def run_with_trace(projections: list[dict], initial_state: dict, max_steps: int 
 
     for _ in range(max_steps):
         new_state = step_with_trace(projections, state, trace)
-        if new_state == state:
+        if mu_equal(new_state, state):
             break
         state = new_state
         # Check for terminal state

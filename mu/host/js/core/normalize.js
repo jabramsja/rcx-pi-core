@@ -263,7 +263,7 @@ function denormalize(value, _depth = 0) {
         const result = [];
         let node = value;
         let nodeDepth = 0;
-        while (node && 'head' in node) {
+        while (node && typeof node === 'object' && 'head' in node) {
           if (nodeDepth++ > MAX_DENORM_ITER) {
             throw new Error(`Max denorm iterations exceeded in list denormalization`);
           }
@@ -277,7 +277,7 @@ function denormalize(value, _depth = 0) {
         const result = Object.create(null);
         let node = value;
         let nodeDepth = 0;
-        while (node && 'head' in node) {
+        while (node && typeof node === 'object' && 'head' in node) {
           if (nodeDepth++ > MAX_DENORM_ITER) {
             throw new Error(`Max denorm iterations exceeded in dict denormalization`);
           }

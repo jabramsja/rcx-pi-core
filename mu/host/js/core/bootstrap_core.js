@@ -26,6 +26,16 @@ function match(pattern, input, _depth = 0) {
     throw new Error(`Max depth exceeded in match (${MAX_DEPTH})`);
   }
 
+  // Entry validation — validate once at depth 0, not on every recursive call.
+  if (_depth === 0) {
+    if (!isValidMu(pattern)) {
+      throw new RcxError('input.invalid_type', 'Invalid Mu pattern in match()');
+    }
+    if (!isValidMu(input)) {
+      throw new RcxError('input.invalid_type', 'Invalid Mu input in match()');
+    }
+  }
+
   // Gate 3: Auto-normalize input when pattern uses normalized dict format.
   if (_depth === 0 && typeof pattern === 'object' && pattern !== null &&
       !Array.isArray(pattern) && pattern._type === 'dict') {
@@ -108,6 +118,13 @@ function match(pattern, input, _depth = 0) {
 function substitute(body, bindings, _depth = 0) {
   if (_depth > MAX_DEPTH) {
     throw new Error(`Max depth exceeded in substitute (${MAX_DEPTH})`);
+  }
+
+  // Entry validation — validate once at depth 0, not on every recursive call.
+  if (_depth === 0) {
+    if (!isValidMu(body)) {
+      throw new RcxError('input.invalid_type', 'Invalid Mu body in substitute()');
+    }
   }
 
   if (isVar(body)) {
