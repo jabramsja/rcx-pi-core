@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave-a16-test-dispatch-seam-gate",
+  "repeat_run_speedup_ratio": 1.050384,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 26,
+  "step_growth_slope": 0.467228,
+  "repeat_run_raw_seconds": [
+    0.490769,
+    0.467228
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.490769
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.957997
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-02-27T07:57:52Z",
+  "collector_version": "2.2.0"
+}
