@@ -1688,19 +1688,34 @@ def _has_nonlinear_vars(pattern: Mu) -> bool:
     Used as fail-closed guard: step_mu/run_mu use core kernel which does NOT
     detect binding conflicts. Non-linear patterns must use apply_mu (bridge path)
     or run_algorithm_meta_circular.
+
+    Bounded: iteration counter (MAX_MU_DEPTH * MAX_MU_WIDTH) and id-based cycle
+    detection prevent OOM on circular references or pathologically deep inputs.
     """
     var_counts: dict[str, int] = {}
+    max_iterations = 300_000  # MAX_MU_DEPTH(300) * MAX_MU_WIDTH(1000)
+    seen: set[int] = set()
+    iterations = 0
 
     stack: list[Mu] = [pattern]
     while stack:
+        iterations += 1
+        if iterations > max_iterations:
+            # Fail-closed: pathological input, treat as non-linear to force bridge path.
+            return True
         current = stack.pop()
+        obj_id = id(current)
+        if obj_id in seen:
+            continue
         if isinstance(current, dict):
+            seen.add(obj_id)
             if set(current.keys()) == {"var"} and isinstance(current["var"], str):
                 name = current["var"]
                 var_counts[name] = var_counts.get(name, 0) + 1
             else:
                 stack.extend(current.values())
         elif isinstance(current, list):
+            seen.add(obj_id)
             stack.extend(current)
 
     return any(count > 1 for count in var_counts.values())
@@ -2061,6 +2076,10 @@ def _boundary_op_run_trace(request, req_input, max_algorithm_iterations):
         max_steps = int(max_steps)
     if max_steps < 0:
         max_steps = 100
+    # HF2 parity: clamp max_steps to prevent unbounded trace (matches JS MAX_BOUNDARY_TRACE_STEPS).
+    _MAX_BOUNDARY_TRACE_STEPS = 10000
+    if max_steps > _MAX_BOUNDARY_TRACE_STEPS:
+        max_steps = _MAX_BOUNDARY_TRACE_STEPS
     raw = run_mu_structural(projs, req_input["value"], max_steps=max_steps)
     return {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
 
