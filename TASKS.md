@@ -540,6 +540,8 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 Current Recurrence Layer: META_CIRCULAR
 Current Exhaustion Layer: META_CIRCULAR
 
+**Tracker sync note (A15/T1, 2026-02-27):** HF2 Python max_steps clamp parity (step_mu.py), _has_nonlinear_vars DoS guard (step_mu.py), JS testability seam for overwrite guard (pipeline.js). No new operations, no routing changes. Test-integrity sweep: 664 L4 gate tests, 0 theater-risk remaining. See `reports/test_integrity_sweep_2026-02-27/`.
+
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
 

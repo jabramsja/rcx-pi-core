@@ -224,6 +224,12 @@ const BOUNDARY_DISPATCH = Object.freeze({
   run_algorithm: boundaryOpRunAlgorithm,
 });
 
+// Test-only dispatch override. No production path sets this; null falls through
+// to frozen BOUNDARY_DISPATCH. Allows tests to inject a handler that returns
+// pre-existing ontology_promotion to exercise the overwrite guard.
+let testDispatchOverride = null;
+function setTestDispatchOverride(override) { testDispatchOverride = override; }
+
 /**
  * Service a boundary effect request from the engine state machine.
  * Parameterized: takes kernelProjections and seedProjectionMap.
@@ -289,7 +295,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
       `seed=${JSON.stringify([...validOps].sort())}`);
   }
 
-  const handler = BOUNDARY_DISPATCH[operation];
+  const handler = (testDispatchOverride ?? BOUNDARY_DISPATCH)[operation];
   if (!handler) {
     throw new RcxError('input.shape_mismatch',
       `boundary dispatch missing handler for validated op: ${operation}`);
@@ -936,4 +942,5 @@ module.exports = {
   runEnginePipelineRecursive,
   _clearBoundaryOpsCache,
   _ensureBoundaryOps,
+  setTestDispatchOverride,
 };

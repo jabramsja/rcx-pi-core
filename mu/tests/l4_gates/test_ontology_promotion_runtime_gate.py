@@ -14,6 +14,7 @@ Tests verify:
 """
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import subprocess
@@ -36,6 +37,7 @@ from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_CHECKSUMS_KEYS  # ANTICHEAT_OK
 from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_PROJECTION_IDS_KEYS  # ANTICHEAT_OK: A13 registry mirror test
 from rcx_pi.selfhost.step_mu import _build_ontology_promotion_candidate  # ANTICHEAT_OK: A14 builder unit test
 from rcx_pi.selfhost.step_mu import _service_boundary_effect  # ANTICHEAT_OK: A14 behavioral integration test
+from rcx_pi.selfhost.step_mu import _BOUNDARY_DISPATCH  # ANTICHEAT_OK: A15 monkeypatch target for overwrite guard test
 from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields  # ANTICHEAT_OK: A14 reserved-field re-validation check
 from rcx_pi.selfhost.seed_integrity import MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
 
@@ -407,36 +409,85 @@ class TestWiring:
 class TestEnvelopeTypeValidation:
     """Envelope value type is validated early (before full validator)."""
 
-    def test_non_dict_envelope_python(self):
-        """ontology_promotion value that's not a dict raises typed error."""
-        # We test the wiring code path by directly calling the validator
-        # with a non-dict. The wiring in _service_boundary_effect does this check.
+    @staticmethod
+    def _noop_emit(*args, **kwargs):
+        """No-op observer emit callback for testing."""
+
+    def test_non_dict_envelope_python(self, monkeypatch):
+        """ontology_promotion value that's not a dict raises typed error.
+
+        Monkeypatches _BOUNDARY_DISPATCH["run_trace"] to return a result whose
+        ontology_promotion is a string, then calls _service_boundary_effect.
+        The A12 wiring type check must fire and raise typed input.shape_mismatch.
+        """
+        def fake_handler(request, req_input, max_iters):
+            return {
+                "result": "hello",
+                "trace": [],
+                "stall": True,
+                "ontology_promotion": "not_a_dict",
+            }
+
+        monkeypatch.setitem(_BOUNDARY_DISPATCH, "run_trace", fake_handler)
+        request = {
+            "operation": "run_trace",
+            "input": {
+                "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
+                "value": "hello",
+                "max_steps": 3,
+            },
+            "context": {},
+            "inject_key": "boundary_result",
+        }
         with pytest.raises(RcxEngineError) as exc_info:
-            # Simulate what the wiring does: check type then call validator
-            promo = "not_a_dict"
-            if not isinstance(promo, dict):
-                raise RcxEngineError(
-                    "input.shape_mismatch",
-                    f"test.ontology_promotion must be dict, got {type(promo).__name__}",
-                )
+            _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=self._noop_emit, iteration=0, state="test_state",
+            )
         assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "ontology_promotion must be dict" in str(exc_info.value)
 
     def test_non_dict_envelope_js(self):
-        """JS: ontology_promotion as string/array/null raises typed error."""
-        for bad_value in ['"string"', '[]', 'null']:
+        """JS: ontology_promotion as string/array/null raises typed error.
+
+        Uses setTestDispatchOverride to inject a handler that returns a result
+        with non-dict ontology_promotion, then calls serviceBoundaryEffect.
+        The A12 wiring type check must fire for each bad value.
+        """
+        for bad_value, bad_label in [("'string'", "string"), ("[]", "array"), ("null", "null")]:
             js_code = textwrap.dedent(f"""\
-                const {{ RcxError }} = require('./mu/host/js/core/constants');
-                const result = {{ ontology_promotion: {bad_value} }};
-                const promo = result.ontology_promotion;
-                if (typeof promo !== 'object' || promo === null || Array.isArray(promo)) {{
-                    process.stdout.write('TYPED_ERROR');
-                }} else {{
+                const pipeline = require('./mu/host/js/engine/pipeline');
+                pipeline.setTestDispatchOverride({{
+                    run_trace: (kp, spm, req, inp, maxIters) => ({{
+                        result: 'hello',
+                        trace: [],
+                        stall: true,
+                        ontology_promotion: {bad_value},
+                    }}),
+                }});
+                const request = {{
+                    operation: 'run_trace',
+                    input: {{
+                        projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
+                        value: 'hello',
+                        max_steps: 3,
+                    }},
+                    context: {{}},
+                    inject_key: 'boundary_result',
+                }};
+                const noop = () => {{}};
+                try {{
+                    pipeline.serviceBoundaryEffect([], {{}}, request, 50, noop, 0, 'test');
                     process.stdout.write('NO_ERROR');
+                }} catch (err) {{
+                    process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+                }} finally {{
+                    pipeline.setTestDispatchOverride(null);
                 }}
             """)
             result = _run_js_expr(js_code)
-            assert result.stdout == "TYPED_ERROR", (
-                f"Expected type error for {bad_value}, got: {result.stdout}"
+            assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+                f"Expected typed error for {bad_label}, got: {result.stdout} {result.stderr}"
             )
 
 
@@ -973,106 +1024,194 @@ class TestWiringA14:
 # ===========================================================================
 
 class TestBoundaryPathEmission:
-    """A14: Behavioral integration tests calling _service_boundary_effect directly."""
+    """A14: Behavioral integration tests calling _service_boundary_effect directly.
 
-    def _make_boundary_request(self, *, emit=False, evidence=None, result_override=None):
-        """Build a minimal boundary request + context + handler for testing.
+    These tests construct real boundary requests and call _service_boundary_effect
+    (Python) and serviceBoundaryEffect (JS via node -e) to exercise the actual
+    production wiring path for ontology promotion candidate emission.
+    """
 
-        Returns (request, context, mock_handler_result) where context is the
-        dict that _service_boundary_effect receives as request["context"].
+    @staticmethod
+    def _noop_emit(*args, **kwargs):
+        """No-op observer emit callback for testing."""
+
+    @staticmethod
+    def _make_run_trace_request(*, context_extra=None):
+        """Build a minimal valid run_trace boundary request.
+
+        Uses a trivial identity projection so run_mu_structural returns quickly.  # SPEED_OK: docstring reference, not call
         """
         ctx = {}
-        if emit:
-            ctx["emit_ontology_candidate"] = True
-            ctx["ontology_candidate_evidence"] = evidence if evidence is not None else _make_valid_evidence()
-        if result_override is not None:
-            ctx["_test_result_override"] = result_override
-        return ctx
+        if context_extra:
+            ctx.update(context_extra)
+        return {
+            "operation": "run_trace",
+            "input": {
+                "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
+                "value": "hello",
+                "max_steps": 3,
+            },
+            "context": ctx,
+            "inject_key": "boundary_result",
+        }
 
     def test_python_boundary_emission_valid_evidence(self):
-        """Call _service_boundary_effect with opt-in → result has ontology_promotion."""
+        """Call _service_boundary_effect with emit flag + valid evidence → result has ontology_promotion."""
         evidence = _make_valid_evidence()
-        # We need to construct a minimal boundary request and call _service_boundary_effect.
-        # The function expects: request, req_input, max_algorithm_iterations are pre-validated.
-        # We need to mock the handler. Let's use a simpler approach: call the builder directly
-        # and then verify the wiring path by checking the source contains the call.
-        # For a true behavioral test, we need a valid engine context.
-        # Alternative: test the wiring code path by simulating what _service_boundary_effect does.
-        record = _build_ontology_promotion_candidate(evidence, "test")
-        # Verify it has all 8 fields and passes A12 validator
-        _validate_ontology_promotion_record(record, "test")
-        assert record["authority"]["source"] == "seed"
-        assert "derivation_timestamp" in record
-        assert "substrate_versions" in record
+        request = self._make_run_trace_request(context_extra={
+            "emit_ontology_candidate": True,
+            "ontology_candidate_evidence": evidence,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=self._noop_emit, iteration=0, state="test_state",
+        )
+        # Result should be injected at inject_key
+        assert "boundary_result" in returned_ctx
+        result = returned_ctx["boundary_result"]
+        # ontology_promotion must have been attached by the wiring
+        assert "ontology_promotion" in result, "A14 wiring did not attach ontology_promotion"
+        promo = result["ontology_promotion"]
+        assert promo["authority"]["source"] == "seed"
+        assert "derivation_timestamp" in promo
+        assert "substrate_versions" in promo
+        # Passes A12 validator
+        _validate_ontology_promotion_record(promo, "behavioral_test")
 
     def test_python_boundary_no_flag_no_emission(self):
-        """Without emit_ontology_candidate flag, builder is not called."""
-        # Simulate the wiring check
-        context = {}  # no flag
-        assert context.get("emit_ontology_candidate") is not True
+        """Without emit_ontology_candidate flag, result has no ontology_promotion."""
+        request = self._make_run_trace_request()  # no emit flag
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=self._noop_emit, iteration=0, state="test_state",
+        )
+        result = returned_ctx["boundary_result"]
+        assert "ontology_promotion" not in result, (
+            "ontology_promotion should not be attached without emit flag"
+        )
 
-    def test_python_boundary_overwrite_guard(self):
-        """C3: result already has ontology_promotion + flag → typed error."""
-        # Simulate the wiring guard
-        result = {"ontology_promotion": {"existing": True}}
-        context = {"emit_ontology_candidate": True, "ontology_candidate_evidence": _make_valid_evidence()}
-        if context.get("emit_ontology_candidate") is True:
-            if "ontology_promotion" in result:
-                with pytest.raises(RcxEngineError) as exc_info:
-                    raise RcxEngineError(
-                        "input.shape_mismatch",
-                        "boundary_result(test): emit_ontology_candidate requested "
-                        "but result already contains ontology_promotion",
-                    )
-                assert exc_info.value.error_code == "input.shape_mismatch"
+    def test_python_boundary_overwrite_guard(self, monkeypatch):
+        """C3: emit flag + handler result already has ontology_promotion → typed error.
+
+        Monkeypatches _BOUNDARY_DISPATCH["run_trace"] with a handler that returns
+        a result already containing ontology_promotion, then calls
+        _service_boundary_effect with the emit flag set. The production overwrite
+        guard must fire and raise typed input.shape_mismatch.
+        """
+        evidence = _make_valid_evidence()
+        promo_record = _build_ontology_promotion_candidate(evidence, "test")
+
+        def fake_run_trace_handler(request, req_input, max_iters):
+            """Handler that returns a result with ontology_promotion already set."""
+            return {
+                "result": "hello",
+                "trace": [],
+                "stall": True,
+                "ontology_promotion": promo_record,
+            }
+
+        monkeypatch.setitem(_BOUNDARY_DISPATCH, "run_trace", fake_run_trace_handler)
+        request = self._make_run_trace_request(context_extra={
+            "emit_ontology_candidate": True,
+            "ontology_candidate_evidence": evidence,
+        })
+        with pytest.raises(RcxEngineError) as exc_info:
+            _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=self._noop_emit, iteration=0, state="test_state",
+            )
+        assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "already contains ontology_promotion" in str(exc_info.value)
 
     def test_js_boundary_emission_valid_evidence(self):
-        """JS: serviceBoundaryEffect with opt-in emits ontology_promotion."""
+        """JS: serviceBoundaryEffect with emit flag + valid evidence → ontology_promotion attached."""
         evidence = _make_valid_evidence()
         js_code = textwrap.dedent(f"""\
-            const {{ buildOntologyPromotionCandidate, validateOntologyPromotionRecord }} = require('./mu/host/js/engine/pipeline');
+            const pipeline = require('./mu/host/js/engine/pipeline');
             const evidence = {json.dumps(evidence)};
+            const request = {{
+                operation: 'run_trace',
+                input: {{
+                    projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
+                    value: 'hello',
+                    max_steps: 3,
+                }},
+                context: {{
+                    emit_ontology_candidate: true,
+                    ontology_candidate_evidence: evidence,
+                }},
+                inject_key: 'boundary_result',
+            }};
+            const noop = () => {{}};
             try {{
-                const record = buildOntologyPromotionCandidate(evidence, 'test');
-                validateOntologyPromotionRecord(record, 'test');
-                process.stdout.write('PASS:' + record.authority.source);
+                const kernelProjections = [];  // run_trace uses its own projections
+                const seedProjectionMap = {{}};
+                const ctx = pipeline.serviceBoundaryEffect(
+                    kernelProjections, seedProjectionMap, request, 50, noop, 0, 'test'
+                );
+                const result = ctx.boundary_result;
+                if (!result.ontology_promotion) {{
+                    process.stdout.write('FAIL:no_promo');
+                }} else {{
+                    pipeline.validateOntologyPromotionRecord(result.ontology_promotion, 'test');
+                    process.stdout.write('PASS:' + result.ontology_promotion.authority.source);
+                }}
             }} catch (err) {{
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }}
         """)
         result = _run_js_expr(js_code)
-        assert result.stdout.startswith("PASS:"), f"JS emission test failed: {result.stdout} {result.stderr}"
+        assert result.stdout.startswith("PASS:"), f"JS boundary emission failed: {result.stdout} {result.stderr}"
         assert result.stdout == "PASS:seed"
 
-    def test_js_boundary_overwrite_guard(self):
-        """JS: result with pre-existing ontology_promotion + flag → typed error."""
+    def test_js_boundary_no_flag_no_emission(self):
+        """JS: serviceBoundaryEffect without emit flag → no ontology_promotion."""
         js_code = textwrap.dedent("""\
-            const { RcxError } = require('./mu/host/js/core/constants');
-            // Simulate the overwrite guard from serviceBoundaryEffect wiring
-            const result = { ontology_promotion: { existing: true } };
-            if ('ontology_promotion' in result) {
-                process.stdout.write('FAIL:input.shape_mismatch:overwrite_guard_triggered');
-            } else {
-                process.stdout.write('NO_GUARD');
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.passthrough' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: {},
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                const result = ctx.boundary_result;
+                if (result.ontology_promotion) {
+                    process.stdout.write('FAIL:unexpected_promo');
+                } else {
+                    process.stdout.write('PASS:no_promo');
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
         result = _run_js_expr(js_code)
-        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
-            f"Expected overwrite guard, got: {result.stdout}"
-        )
+        assert result.stdout == "PASS:no_promo", f"Expected no emission: {result.stdout} {result.stderr}"
 
     def test_python_boundary_flag_consumed_one_shot(self):
-        """After emission, context no longer has flag or evidence keys."""
-        context = {
+        """After emission via _service_boundary_effect, context no longer has flag/evidence keys."""
+        evidence = _make_valid_evidence()
+        request = self._make_run_trace_request(context_extra={
             "emit_ontology_candidate": True,
-            "ontology_candidate_evidence": _make_valid_evidence(),
-        }
-        # Simulate one-shot consumption
-        if context.get("emit_ontology_candidate") is True:
-            del context["emit_ontology_candidate"]
-            context.pop("ontology_candidate_evidence", None)
-        assert "emit_ontology_candidate" not in context
-        assert "ontology_candidate_evidence" not in context
+            "ontology_candidate_evidence": evidence,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=self._noop_emit, iteration=0, state="test_state",
+        )
+        # One-shot: flag and evidence must have been consumed
+        assert "emit_ontology_candidate" not in returned_ctx, (
+            "emit_ontology_candidate should be consumed (one-shot)"
+        )
+        assert "ontology_candidate_evidence" not in returned_ctx, (
+            "ontology_candidate_evidence should be consumed (one-shot)"
+        )
 
 
 # ===========================================================================
@@ -1082,12 +1221,35 @@ class TestBoundaryPathEmission:
 class TestEmissionEdgeCases:
     """A14: Edge cases for the opt-in emission mechanism."""
 
+    @staticmethod
+    def _noop_emit(*args, **kwargs):
+        """No-op observer emit callback for testing."""
+
     def test_truthy_non_true_no_emission(self):
-        """Truthy non-True values (1, 'yes') do not trigger emission."""
-        for truthy_val in [1, "yes", "true", [], {}]:
-            context = {"emit_ontology_candidate": truthy_val}
-            # The strict `is True` check means these are all skipped
-            assert context.get("emit_ontology_candidate") is not True
+        """Truthy non-True values (1, 'yes') do not trigger emission.
+
+        Calls _service_boundary_effect with each truthy-non-True value for
+        emit_ontology_candidate. The strict `is True` check must skip emission.
+        """
+        for truthy_val in [1, "yes", "true", [1], {"x": 1}]:
+            request = {
+                "operation": "run_trace",
+                "input": {
+                    "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
+                    "value": "hello",
+                    "max_steps": 3,
+                },
+                "context": {"emit_ontology_candidate": truthy_val},
+                "inject_key": "boundary_result",
+            }
+            returned_ctx = _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=self._noop_emit, iteration=0, state="test_state",
+            )
+            result = returned_ctx["boundary_result"]
+            assert "ontology_promotion" not in result, (
+                f"Truthy non-True value {truthy_val!r} should not trigger emission"
+            )
 
     def test_producer_passes_reserved_field_check(self):
         """C2: Producer output does not contain reserved fields."""
@@ -1219,32 +1381,151 @@ class TestCrossSubstrateMalformedEvidence:
         result = self._run_js_builder(json.dumps(evidence))
         assert result.stdout.startswith("FAIL:input.shape_mismatch:")
 
-    def test_overwrite_attempt_both(self):
-        """Result already has ontology_promotion + flag → typed error in both."""
-        # Python: simulate wiring guard
-        with pytest.raises(RcxEngineError) as exc_info:
-            result = {"ontology_promotion": {"existing": True}}
-            if "ontology_promotion" in result:
-                raise RcxEngineError(
-                    "input.shape_mismatch",
-                    "boundary_result(test): emit_ontology_candidate requested "
-                    "but result already contains ontology_promotion",
-                )
-        assert exc_info.value.error_code == "input.shape_mismatch"
-        # JS: simulate wiring guard
-        js_code = textwrap.dedent("""\
-            const { RcxError } = require('./mu/host/js/core/constants');
-            const result = { ontology_promotion: { existing: true } };
-            try {
-                if ('ontology_promotion' in result) {
-                    throw new RcxError('input.shape_mismatch',
-                        'boundary_result(test): emit_ontology_candidate requested ' +
-                        'but result already contains ontology_promotion');
-                }
-                process.stdout.write('NO_GUARD');
-            } catch (err) {
-                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+    def test_overwrite_attempt_both(self, monkeypatch):
+        """Result already has ontology_promotion + flag → typed error in both substrates.
+
+        Python: monkeypatches _BOUNDARY_DISPATCH["run_trace"] to return a result
+        with ontology_promotion, then calls _service_boundary_effect with emit flag.
+        JS: uses setTestDispatchOverride seam to inject a handler that returns
+        a result with ontology_promotion, then calls serviceBoundaryEffect.
+        """
+        evidence = _make_valid_evidence()
+        promo_record = _build_ontology_promotion_candidate(evidence, "test")
+
+        # --- Python: monkeypatch boundary dispatch ---
+        def fake_handler(request, req_input, max_iters):
+            return {
+                "result": "hello",
+                "trace": [],
+                "stall": True,
+                "ontology_promotion": promo_record,
             }
+
+        monkeypatch.setitem(_BOUNDARY_DISPATCH, "run_trace", fake_handler)
+        request = {
+            "operation": "run_trace",
+            "input": {
+                "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
+                "value": "hello",
+                "max_steps": 3,
+            },
+            "context": {
+                "emit_ontology_candidate": True,
+                "ontology_candidate_evidence": evidence,
+            },
+            "inject_key": "boundary_result",
+        }
+        with pytest.raises(RcxEngineError) as exc_info:
+            _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=lambda *a, **kw: None, iteration=0, state="test_state",
+            )
+        assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "already contains ontology_promotion" in str(exc_info.value)
+
+        # --- JS: testability seam via setTestDispatchOverride ---
+        js_code = textwrap.dedent(f"""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const evidence = {json.dumps(evidence)};
+            // Override run_trace handler to return result with ontology_promotion
+            pipeline.setTestDispatchOverride({{
+                run_trace: (input, context, emitFn, iteration, state) => ({{
+                    result: 'hello',
+                    trace: [],
+                    stall: true,
+                    ontology_promotion: {{ existing: true }},
+                }}),
+            }});
+            const request = {{
+                operation: 'run_trace',
+                input: {{
+                    projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
+                    value: 'hello',
+                    max_steps: 3,
+                }},
+                context: {{
+                    emit_ontology_candidate: true,
+                    ontology_candidate_evidence: evidence,
+                }},
+                inject_key: 'boundary_result',
+            }};
+            const noop = () => {{}};
+            try {{
+                pipeline.serviceBoundaryEffect([], {{}}, request, 50, noop, 0, 'test');
+                process.stdout.write('NO_GUARD');
+            }} catch (err) {{
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }} finally {{
+                pipeline.setTestDispatchOverride(null);
+            }}
         """)
         js_result = _run_js_expr(js_code)
-        assert js_result.stdout.startswith("FAIL:input.shape_mismatch:")
+        assert js_result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"JS overwrite guard did not fire: {js_result.stdout} {js_result.stderr}"
+        )
+
+
+# ===========================================================================
+# TestAntiTheaterLock
+# ===========================================================================
+
+class TestAntiTheaterLock:
+    """A15: Structural lock preventing regression to simulated test theater.
+
+    Inspects source of specific behavioral tests to ensure they invoke
+    production entrypoints rather than simulating logic locally.
+    Narrow scope: only the tests that were previously theater.
+    """
+
+    def test_envelope_python_calls_production_path(self):
+        """test_non_dict_envelope_python must call _service_boundary_effect, not raise locally."""
+        src = inspect.getsource(TestEnvelopeTypeValidation.test_non_dict_envelope_python)
+        assert "_service_boundary_effect(" in src, (
+            "test_non_dict_envelope_python must invoke _service_boundary_effect"
+        )
+        assert "raise RcxEngineError(" not in src, (
+            "test_non_dict_envelope_python must not simulate raises locally"
+        )
+
+    def test_envelope_js_calls_production_path(self):
+        """test_non_dict_envelope_js must call serviceBoundaryEffect, not simulate checks."""
+        src = inspect.getsource(TestEnvelopeTypeValidation.test_non_dict_envelope_js)
+        assert "serviceBoundaryEffect(" in src, (
+            "test_non_dict_envelope_js must invoke serviceBoundaryEffect"
+        )
+        assert "TYPED_ERROR" not in src, (
+            "test_non_dict_envelope_js must not use synthetic TYPED_ERROR simulation"
+        )
+
+    def test_overwrite_guard_python_calls_production_path(self):
+        """test_python_boundary_overwrite_guard must call _service_boundary_effect."""
+        src = inspect.getsource(TestBoundaryPathEmission.test_python_boundary_overwrite_guard)
+        assert "_service_boundary_effect(" in src, (
+            "test_python_boundary_overwrite_guard must invoke _service_boundary_effect"
+        )
+        assert "raise RcxEngineError(" not in src, (
+            "test_python_boundary_overwrite_guard must not simulate raises locally"
+        )
+
+    def test_overwrite_both_calls_production_paths(self):
+        """test_overwrite_attempt_both must call both production entrypoints."""
+        src = inspect.getsource(TestCrossSubstrateMalformedEvidence.test_overwrite_attempt_both)
+        assert "_service_boundary_effect(" in src, (
+            "test_overwrite_attempt_both must invoke _service_boundary_effect (Python)"
+        )
+        assert "serviceBoundaryEffect(" in src, (
+            "test_overwrite_attempt_both must invoke serviceBoundaryEffect (JS)"
+        )
+        assert "raise RcxEngineError(" not in src, (
+            "test_overwrite_attempt_both must not simulate raises locally"
+        )
+
+    def test_truthy_non_true_calls_production_path(self):
+        """test_truthy_non_true_no_emission must call _service_boundary_effect."""
+        src = inspect.getsource(TestEmissionEdgeCases.test_truthy_non_true_no_emission)
+        assert "_service_boundary_effect(" in src, (
+            "test_truthy_non_true_no_emission must invoke _service_boundary_effect"
+        )
+        assert "is not True" not in src, (
+            "test_truthy_non_true_no_emission must not use tautology assertion"
+        )
