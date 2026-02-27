@@ -2239,8 +2239,65 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
             f"boundary_result({operation}).ontology_promotion",
         )
 
+    # Evidence collector (A17): one-shot, opt-in only.
+    if context.get("collect_ontology_candidate_evidence") is True:
+        del context["collect_ontology_candidate_evidence"]
+        # C1: no-overwrite guard — reject if observation already exists.
+        if "ontology_candidate_observation" in context:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"boundary_result({operation}): collect_ontology_candidate_evidence "
+                f"requested but context already contains ontology_candidate_observation",
+            )
+        context["ontology_candidate_observation"] = _collect_ontology_evidence(
+            result, operation,
+        )
+
     context[inject_key] = result
     return context
+
+
+def _collect_ontology_evidence(  # AST_OK: infra — evidence collection from boundary result
+    result,
+    operation: str,
+) -> dict:
+    """Build an observation record from a boundary result.
+
+    Extracts trace metadata (trace_len, stall, projection_ids) when available,
+    computes control_hash, and timestamps the observation. Returns a 6-field dict.
+    """
+    # Control hash of the boundary result.
+    control_hash = mu_hash_control_cached(result, "evidence_collector")
+
+    trace_len = None
+    stall = None
+    projection_ids = None
+
+    if isinstance(result, dict) and "trace" in result:
+        trace_len = 0
+        pids = []
+        node = result["trace"]
+        while isinstance(node, dict) and "head" in node:
+            trace_len += 1
+            entry = node["head"]
+            if isinstance(entry, dict):
+                pid = entry.get("projection")
+                # C4: only collect string IDs — skip int/dict/None to avoid
+                # TypeError on sorted() and maintain parity with JS.
+                if isinstance(pid, str):
+                    pids.append(pid)
+            node = node.get("tail")
+        projection_ids = sorted(set(pids))
+        stall = result.get("stall")
+
+    return {
+        "operation": operation,
+        "trace_len": trace_len,
+        "stall": stall,
+        "projection_ids": projection_ids,
+        "control_hash": control_hash,
+        "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
 
 
 def _derive_engine_exit_reason(engine_result: dict) -> str:  # AST_OK: infra — pure derivation from terminal flags

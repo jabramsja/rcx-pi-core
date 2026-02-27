@@ -368,6 +368,18 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
     );
   }
 
+  // Evidence collector (A17): one-shot, opt-in only.
+  if (context.collect_ontology_candidate_evidence === true) {
+    delete context.collect_ontology_candidate_evidence;
+    // C1: no-overwrite guard — reject if observation already exists.
+    if ('ontology_candidate_observation' in context) {
+      throw new RcxError('input.shape_mismatch',
+        `boundary_result(${operation}): collect_ontology_candidate_evidence ` +
+        `requested but context already contains ontology_candidate_observation`);
+    }
+    context.ontology_candidate_observation = collectOntologyEvidence(result, operation);
+  }
+
   context[injectKey] = result;
   return context;
 }
@@ -672,6 +684,44 @@ function buildOntologyPromotionCandidate(evidence, contextStr) {
   };
 }
 
+/**
+ * Build an observation record from a boundary result (A17).
+ * Extracts trace metadata when available, computes control_hash.
+ */
+function collectOntologyEvidence(result, operation) {
+  const controlHash = muHashControlCached(result, 'evidence_collector');
+
+  let traceLen = null;
+  let stall = null;
+  let projectionIds = null;
+
+  if (result !== null && typeof result === 'object' && !Array.isArray(result) && 'trace' in result) {
+    traceLen = 0;
+    const projSet = new Set();
+    let node = result.trace;
+    while (node !== null && typeof node === 'object' && 'head' in node) {
+      traceLen++;
+      const entry = node.head;
+      // C4: only collect string IDs — skip int/dict/null for parity with Python.
+      if (entry !== null && typeof entry === 'object' && typeof entry.projection === 'string') {
+        projSet.add(entry.projection);
+      }
+      node = ('tail' in node) ? node.tail : null;
+    }
+    projectionIds = [...projSet].sort();
+    stall = result.stall ?? null;
+  }
+
+  return {
+    operation: operation,
+    trace_len: traceLen,
+    stall: stall,
+    projection_ids: projectionIds,
+    control_hash: controlHash,
+    collected_at: new Date().toISOString(),
+  };
+}
+
 // Boot1 re-entry depth limit
 const BOOT1_MAX_REENTRY_DEPTH = 20;
 
@@ -961,6 +1011,7 @@ module.exports = {
   validateReentryPayload,
   validateOntologyPromotionRecord,
   buildOntologyPromotionCandidate,
+  collectOntologyEvidence,
   runAlgorithmWithBridge,
   runSubAlgorithm,
   hashTraceForRecurrence,
