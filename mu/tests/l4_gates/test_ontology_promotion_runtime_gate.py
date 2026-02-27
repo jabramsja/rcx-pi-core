@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 import subprocess
 import textwrap
@@ -90,12 +91,20 @@ def _run_js_validator(record_json: str, *, expect_pass: bool = True) -> subproce
     )
 
 
-def _run_js_expr(js_code: str) -> subprocess.CompletedProcess:
-    """Run arbitrary JS expression via node -e."""
+def _run_js_expr(js_code: str, *, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run arbitrary JS expression via node -e.
+
+    Args:
+        env: Optional extra env vars merged into os.environ (e.g. RCX_TEST_MODE).
+    """
+    run_env = None
+    if env is not None:
+        run_env = {**os.environ, **env}
     return subprocess.run(
         ["node", "-e", js_code],
         cwd=str(REPO_ROOT),
         capture_output=True, text=True, check=False,
+        env=run_env,
     )
 
 
@@ -485,7 +494,7 @@ class TestEnvelopeTypeValidation:
                     pipeline.setTestDispatchOverride(null);
                 }}
             """)
-            result = _run_js_expr(js_code)
+            result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
             assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
                 f"Expected typed error for {bad_label}, got: {result.stdout} {result.stderr}"
             )
@@ -1459,7 +1468,7 @@ class TestCrossSubstrateMalformedEvidence:
                 pipeline.setTestDispatchOverride(null);
             }}
         """)
-        js_result = _run_js_expr(js_code)
+        js_result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
         assert js_result.stdout.startswith("FAIL:input.shape_mismatch:"), (
             f"JS overwrite guard did not fire: {js_result.stdout} {js_result.stderr}"
         )
@@ -1529,3 +1538,140 @@ class TestAntiTheaterLock:
         assert "is not True" not in src, (
             "test_truthy_non_true_no_emission must not use tautology assertion"
         )
+
+
+# ===========================================================================
+# TestSetterGateA16
+# ===========================================================================
+
+class TestSetterGateA16:
+    """A16: setTestDispatchOverride is gated behind RCX_TEST_MODE=1.
+
+    Verifies:
+    - Setter blocked outside test mode (api.bad_request)
+    - Setter allowed with RCX_TEST_MODE=1
+    - Invalid override types rejected (input.shape_mismatch)
+    - Unknown operation keys rejected (input.shape_mismatch)
+    - null reset accepted in test mode
+    """
+
+    def test_setter_blocked_without_test_mode(self):
+        """setTestDispatchOverride without RCX_TEST_MODE=1 raises api.bad_request."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride({});
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)  # no env → no RCX_TEST_MODE
+        assert result.stdout.startswith("FAIL:api.bad_request:"), (
+            f"Expected api.bad_request without test mode, got: {result.stdout} {result.stderr}"
+        )
+        assert "RCX_TEST_MODE" in result.stdout
+
+    def test_setter_allowed_with_test_mode(self):
+        """setTestDispatchOverride with RCX_TEST_MODE=1 succeeds."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride({
+                    run_trace: () => ({ result: 'ok', trace: [], stall: false }),
+                });
+                pipeline.setTestDispatchOverride(null);
+                process.stdout.write('PASS');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        assert result.stdout == "PASS", (
+            f"Expected setter to succeed in test mode, got: {result.stdout} {result.stderr}"
+        )
+
+    def test_setter_rejects_array_override(self):
+        """Array override → input.shape_mismatch."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride([1, 2, 3]);
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"Expected input.shape_mismatch for array, got: {result.stdout} {result.stderr}"
+        )
+
+    def test_setter_rejects_string_override(self):
+        """String override → input.shape_mismatch."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride('bad');
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"Expected input.shape_mismatch for string, got: {result.stdout} {result.stderr}"
+        )
+
+    def test_setter_rejects_unknown_op_key(self):
+        """Unknown operation key in override → input.shape_mismatch."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride({
+                    fake_op: () => ({}),
+                });
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"Expected input.shape_mismatch for unknown key, got: {result.stdout} {result.stderr}"
+        )
+        assert "fake_op" in result.stdout
+
+    def test_setter_accepts_null_reset(self):
+        """null override (reset) succeeds in test mode."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride(null);
+                process.stdout.write('PASS');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        assert result.stdout == "PASS", (
+            f"Expected null override to succeed, got: {result.stdout} {result.stderr}"
+        )
+
+    def test_setter_rejects_non_function_handler(self):
+        """Non-function handler value → input.shape_mismatch at setter time."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                pipeline.setTestDispatchOverride({ run_trace: 3 });
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"Expected input.shape_mismatch for non-function handler, got: {result.stdout} {result.stderr}"
+        )
+        assert "run_trace" in result.stdout
+        assert "function" in result.stdout

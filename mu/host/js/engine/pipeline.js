@@ -228,7 +228,34 @@ const BOUNDARY_DISPATCH = Object.freeze({
 // to frozen BOUNDARY_DISPATCH. Allows tests to inject a handler that returns
 // pre-existing ontology_promotion to exercise the overwrite guard.
 let testDispatchOverride = null;
-function setTestDispatchOverride(override) { testDispatchOverride = override; }
+function setTestDispatchOverride(override) {
+  // A16: gate behind explicit test mode — fail-closed outside tests.
+  if (process.env.RCX_TEST_MODE !== '1') {
+    throw new RcxError('api.bad_request',
+      'setTestDispatchOverride is test-only (RCX_TEST_MODE=1 required)');
+  }
+  if (override !== null) {
+    if (typeof override !== 'object' || Array.isArray(override)) {
+      throw new RcxError('input.shape_mismatch',
+        `setTestDispatchOverride: override must be null or plain object, ` +
+        `got ${Array.isArray(override) ? 'array' : typeof override}`);
+    }
+    const validKeys = new Set(Object.keys(BOUNDARY_DISPATCH));
+    for (const key of Object.keys(override)) {
+      if (!validKeys.has(key)) {
+        throw new RcxError('input.shape_mismatch',
+          `setTestDispatchOverride: unknown operation key '${key}', ` +
+          `valid keys: ${JSON.stringify([...validKeys].sort())}`);
+      }
+      if (typeof override[key] !== 'function') {
+        throw new RcxError('input.shape_mismatch',
+          `setTestDispatchOverride: handler for '${key}' must be function, ` +
+          `got ${typeof override[key]}`);
+      }
+    }
+  }
+  testDispatchOverride = override;
+}
 
 /**
  * Service a boundary effect request from the engine state machine.
