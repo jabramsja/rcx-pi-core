@@ -104,7 +104,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization: ✅ | Engine orchestration + hemisphere routing + metabolization L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
-- JS file has DEBT SUMMARY header with counts: 16 total (9 iteration + 4 recursion + 3 builtin)
+- JS file has DEBT SUMMARY header with counts: 19 total (10 iteration + 5 recursion + 4 builtin)
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
 - These are AST-level host loop markers, analogous to Python's AST_OK:infra (42), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 12 Python host-debt decorator sites implementing them — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
@@ -168,7 +168,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Semantic Policy Lock:** See [`mu/docs/core/NorthStarSemantics.v0.md`](mu/docs/core/NorthStarSemantics.v0.md) for canonical policies on undefined-as-structure, zero canonicalization, bounded non-closure, and routing tie-break deferral.
 
-**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). Runtime enforcement active since A12 (PR #436, merged 2026-02-26). A13 displaced hardcoded lock-set authority to registry-derived rule.
+**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). Runtime enforcement active since A12 (PR #436, merged 2026-02-26). A13 displaced hardcoded lock-set authority to registry-derived rule. A14 added producer-side candidate emission with opt-in flag, typed fail-closed guards, and overwrite protection (PR #438, merged 2026-02-27). A15/T1 hardened boundary parity (HF2 max_steps clamp, `_has_nonlinear_vars` bounded guard) and completed full L4 gate theater sweep (664 tests, 0 theater-risk remaining) (PR #440, merged 2026-02-27).
 
 **L4 Status:** G8 evidence loop closed (D001-D007). D008 recommendation: DEFER. Awaiting founder verdict.
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
@@ -318,7 +318,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 63 (current 63)
+- AST_OK:infra ceiling: 64 (current 64)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -641,7 +641,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-26 (P0 remediation: infra ceiling prose truth-sync, Gate 5 projection count, runAlgorithmWithBridge stall-hash parity fix)
+**Last updated:** 2026-02-27 (A15/T1 merge: boundary parity hardening + OPROMO gate theater sweep, PR #440 squash 18d7028)
 **Next milestone:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. See TASKS.md for next VECTOR promotion candidate.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
