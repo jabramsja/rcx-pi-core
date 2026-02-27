@@ -168,7 +168,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Semantic Policy Lock:** See [`mu/docs/core/NorthStarSemantics.v0.md`](mu/docs/core/NorthStarSemantics.v0.md) for canonical policies on undefined-as-structure, zero canonicalization, bounded non-closure, and routing tie-break deferral.
 
-**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). v0 is contract-only; runtime enforcement deferred to A12.
+**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). Runtime enforcement active since A12 (PR #436, merged 2026-02-26). A13 displaced hardcoded lock-set authority to registry-derived rule.
 
 **L4 Status:** G8 evidence loop closed (D001-D007). D008 recommendation: DEFER. Awaiting founder verdict.
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
@@ -278,8 +278,8 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
-INFRA_CEILING: 59
-INFRA_CURRENT: 59
+INFRA_CEILING: 63
+INFRA_CURRENT: 63
 ```
 
 **Debt breakdown:**

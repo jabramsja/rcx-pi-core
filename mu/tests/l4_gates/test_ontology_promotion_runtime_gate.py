@@ -31,7 +31,10 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import RcxEngineError
 from rcx_pi.selfhost.step_mu import _validate_ontology_promotion_record  # ANTICHEAT_OK: A12 gate test requires direct validator access
 from rcx_pi.selfhost.step_mu import _OPROMO_FULLY_LOCKED_SEEDS  # ANTICHEAT_OK: A12 parity test for locked seed set
-from rcx_pi.selfhost.seed_integrity import MU_SEED_LOCATIONS
+from rcx_pi.selfhost.step_mu import _derive_opromo_fully_locked_seeds  # ANTICHEAT_OK: A13 derivation rule test
+from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_CHECKSUMS_KEYS  # ANTICHEAT_OK: A13 registry mirror test
+from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_PROJECTION_IDS_KEYS  # ANTICHEAT_OK: A13 registry mirror test
+from rcx_pi.selfhost.seed_integrity import MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +629,52 @@ class TestFullLockConsistency:
         assert _OPROMO_FULLY_LOCKED_SEEDS == js_locked, (
             f"Parity mismatch: Python={_OPROMO_FULLY_LOCKED_SEEDS}, JS={js_locked}"
         )
+
+    def test_derivation_produces_same_set_as_cached_constant(self):
+        """_derive_opromo_fully_locked_seeds() must equal _OPROMO_FULLY_LOCKED_SEEDS."""
+        derived = _derive_opromo_fully_locked_seeds()
+        assert derived == _OPROMO_FULLY_LOCKED_SEEDS, (
+            f"Derivation drift: derived={derived}, cached={_OPROMO_FULLY_LOCKED_SEEDS}"
+        )
+
+    def test_derivation_uses_4way_intersection(self):
+        """Derived set is subset of all 4 registries."""
+        derived = _derive_opromo_fully_locked_seeds()
+        assert derived <= _JS_CORE_SEED_CHECKSUMS_KEYS
+        assert derived <= _JS_CORE_SEED_PROJECTION_IDS_KEYS
+        assert derived <= frozenset(SEED_CHECKSUMS.keys())
+        assert derived <= frozenset(EXPECTED_PROJECTION_IDS.keys())
+
+    def test_js_core_mirrors_match_js_runtime(self):
+        """Python JS CORE mirrors must match actual JS CORE registry keys."""
+        # Get JS CORE_SEED_CHECKSUMS keys at runtime
+        js_code = textwrap.dedent("""\
+            const sl = require('./mu/host/js/core/seed_loader');
+            // Access CORE keys via isFullyLockedSeed filter on SEED_SUBDIRS
+            const allSeeds = Object.keys(sl.SEED_SUBDIRS);
+            const locked = allSeeds.filter(s => sl.isFullyLockedSeed(s));
+            process.stdout.write(JSON.stringify(locked.sort()));
+        """)
+        result = _run_js_expr(js_code)
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        js_locked = set(json.loads(result.stdout))
+        # Python mirrors must match
+        assert _JS_CORE_SEED_CHECKSUMS_KEYS == js_locked, (
+            f"JS CORE checksums mirror drift: Python={_JS_CORE_SEED_CHECKSUMS_KEYS}, JS={js_locked}"
+        )
+        assert _JS_CORE_SEED_PROJECTION_IDS_KEYS == js_locked, (
+            f"JS CORE projIDs mirror drift: Python={_JS_CORE_SEED_PROJECTION_IDS_KEYS}, JS={js_locked}"
+        )
+
+    def test_unlocked_seed_still_rejected_after_displacement(self):
+        """kernel.v1.json still rejected typed after A13 displacement (no behavior change)."""
+        record = _make_valid_record()
+        record["authority"]["seed_file"] = "kernel.v1.json"
+        record["authority"]["projection_ids"] = ["step"]
+        with pytest.raises(RcxEngineError) as exc_info:
+            _validate_ontology_promotion_record(record, "test")
+        assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "verification-locked" in str(exc_info.value)
 
 
 # ===========================================================================
