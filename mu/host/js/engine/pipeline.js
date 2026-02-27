@@ -82,6 +82,7 @@ function _clearBoundaryOpsCache() {
  */
 function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
   let current = input;
+  let currentHash = muHashControlCached(current, 'runAlgorithmWithBridge');
   let steps = 0;
   const limit = maxSteps ?? 200;
   while (steps < limit) {
@@ -90,8 +91,10 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
       { validationMode: 'algorithm_runtime' }
     );
     const next = denormalize(wrapped.result);
-    if (muEqual(current, next)) break;
+    const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');
+    if (nextHash === currentHash) break;
     current = next;
+    currentHash = nextHash;
     steps++;
   }
   return current;

@@ -168,7 +168,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Semantic Policy Lock:** See [`mu/docs/core/NorthStarSemantics.v0.md`](mu/docs/core/NorthStarSemantics.v0.md) for canonical policies on undefined-as-structure, zero canonicalization, bounded non-closure, and routing tie-break deferral.
 
-**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). v0 is contract-only; runtime enforcement deferred to A12.
+**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). Runtime enforcement active since A12 (PR #436, merged 2026-02-26). A13 displaced hardcoded lock-set authority to registry-derived rule.
 
 **L4 Status:** G8 evidence loop closed (D001-D007). D008 recommendation: DEFER. Awaiting founder verdict.
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
@@ -278,8 +278,8 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 THRESHOLD: 12
 CURRENT: 12 (10 tracked decorators + 2 AST_OK bootstrap)
 L2 FLOOR: 12 (see explanation below)
-INFRA_CEILING: 59
-INFRA_CURRENT: 59
+INFRA_CEILING: 63
+INFRA_CURRENT: 63
 ```
 
 **Debt breakdown:**
@@ -318,7 +318,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 55 (current 55)
+- AST_OK:infra ceiling: 63 (current 63)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -641,7 +641,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-25 (doc ground-truth fixes: test count, projection counts, seed counts, KERNEL_RESERVED_FIELDS count — all aligned to live tool output)
+**Last updated:** 2026-02-26 (P0 remediation: infra ceiling prose truth-sync, Gate 5 projection count, runAlgorithmWithBridge stall-hash parity fix)
 **Next milestone:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. See TASKS.md for next VECTOR promotion candidate.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
@@ -663,7 +663,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - Gate 5: COMPLETE (2026-02-09 meta-circular parity verified)
   - 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
   - Structural execution is default; bootstrap is explicit fallback only
-  - Cross-substrate parity intact (Python + JS, all 49 core projections)
+  - Cross-substrate parity intact (Python + JS, all L3 seed projections — see `test_seed_counts.py`)
   - B-structural match_mu (match.v2 + bridge) provides non-linear pattern support
 
 Current Recurrence Layer: META_CIRCULAR

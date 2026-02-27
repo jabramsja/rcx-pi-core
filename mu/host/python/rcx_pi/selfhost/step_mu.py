@@ -37,7 +37,7 @@ from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached
 from .kernel import get_step_budget
 from collections.abc import Callable
-from .seed_integrity import get_seed_path, load_verified_seed, MU_SEED_LOCATIONS
+from .seed_integrity import get_seed_path, load_verified_seed, MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
 from .projection_loader import make_projection_loader
 
 # Cached loader for terminal classification seed (structural displacement of classify/exit-reason logic)
@@ -650,15 +650,39 @@ def _validate_reentry_payload(payload: object, context: str) -> None:
         validate_no_kernel_reserved_fields(frozen, f"{context} frozen")
 
 
-# Ontology promotion fully-locked seed set (A12).
-# Must match JS isFullyLockedSeed(): seeds in BOTH CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS.
-# Python SEED_CHECKSUMS/EXPECTED_PROJECTION_IDS cover all 17 seeds; JS CORE covers only 3.
-# Cross-substrate parity requires both substrates to accept exactly this set.
-_OPROMO_FULLY_LOCKED_SEEDS = frozenset({  # AST_OK: infra — parity constant, not Mu data
+# JS CORE seed registries — mirrors CORE_SEED_CHECKSUMS / CORE_SEED_PROJECTION_IDS
+# keys in seed_loader.js. When JS expands its CORE registries, update here and the
+# parity test (test_python_locked_set_matches_js_locked_set) will verify consistency.
+_JS_CORE_SEED_CHECKSUMS_KEYS = frozenset({  # AST_OK: infra — JS CORE registry mirror
     "terminal_classify.v1.json",
     "hemispheres.v1.json",
     "rcx_engine.v1.json",
 })
+_JS_CORE_SEED_PROJECTION_IDS_KEYS = frozenset({  # AST_OK: infra — JS CORE registry mirror
+    "terminal_classify.v1.json",
+    "hemispheres.v1.json",
+    "rcx_engine.v1.json",
+})
+
+
+def _derive_opromo_fully_locked_seeds() -> frozenset:  # AST_OK: infra — A13 lock derivation
+    """Derive OPROMO fully-locked seed set by registry intersection.
+
+    Rule (same shape as JS isFullyLockedSeed):
+        locked = JS_CORE_checksums ∩ JS_CORE_projection_ids ∩ PY_checksums ∩ PY_projection_ids
+
+    This ensures a seed is accepted only if it is verification-locked in BOTH substrates.
+    Returns frozenset of seed names.
+    """
+    return (
+        _JS_CORE_SEED_CHECKSUMS_KEYS
+        & _JS_CORE_SEED_PROJECTION_IDS_KEYS
+        & frozenset(SEED_CHECKSUMS.keys())  # AST_OK: infra — registry key extraction
+        & frozenset(EXPECTED_PROJECTION_IDS.keys())  # AST_OK: infra — registry key extraction
+    )
+
+
+_OPROMO_FULLY_LOCKED_SEEDS = _derive_opromo_fully_locked_seeds()
 
 
 def _validate_ontology_promotion_record(record: dict, context_str: str) -> None:  # AST_OK: infra — A12 ontology promotion enforcement

@@ -252,6 +252,40 @@ class TestSourceLocks:
         assert "muHashControlCached(" in source
         assert "muHashControl(" in source  # hashTraceForRecurrence
 
+    def test_js_runAlgorithmWithBridge_uses_control_hash_not_muEqual(self):
+        """F01 regression: runAlgorithmWithBridge must use muHashControlCached, not muEqual.
+
+        NorthStarSemantics §B.1: control-flow stall detection paths must use
+        muHashControlCached to canonicalize numerics and prevent cross-substrate
+        divergence on -0 and integral floats.
+        """
+        source = (JS_DIR / "engine" / "pipeline.js").read_text()
+        # Extract runAlgorithmWithBridge function body
+        lines = source.splitlines()
+        in_func = False
+        func_lines = []
+        brace_depth = 0
+        for line in lines:
+            if "function runAlgorithmWithBridge(" in line:
+                in_func = True
+                brace_depth = 0
+            if in_func:
+                func_lines.append(line)
+                brace_depth += line.count("{") - line.count("}")
+                if brace_depth == 0 and len(func_lines) > 1:
+                    break
+        func_body = "\n".join(func_lines)
+        # Must use muHashControlCached for stall detection
+        assert "muHashControlCached(" in func_body, (
+            "runAlgorithmWithBridge must use muHashControlCached for stall detection "
+            "(NorthStarSemantics §B.1)"
+        )
+        # Must NOT use muEqual for stall detection
+        assert "muEqual(" not in func_body, (
+            "runAlgorithmWithBridge must NOT use muEqual for stall detection — "
+            "muEqual wraps muHashCached (content hash), not control hash"
+        )
+
     def test_js_run_uses_control_wrappers(self):
         """bootstrap_core.js run() uses muHashControlCached."""
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
@@ -295,6 +329,65 @@ class TestSourceLocks:
                 if line.startswith("def ") or (line and not line[0].isspace()):
                     break
                 assert "_canonicalize" not in line, "mu_hash must NOT call canonicalize"
+
+
+class TestRunAlgorithmWithBridgeControlHashParity:
+    """F01 regression: runAlgorithmWithBridge stall detection must use control hash.
+
+    Verifies the fix from P0 remediation 2026-02-26. The inner stall loop
+    must detect convergence using muHashControlCached (not muEqual/muHashCached)
+    to prevent cross-substrate divergence on -0 and integral floats.
+    """
+
+    def test_js_control_hash_neg_zero_stall_detection(self):
+        """JS runAlgorithmWithBridge stall path: -0 and 0 must hash identically.
+
+        If the function used muEqual (content hash), -0 and 0 would hash
+        differently and stall detection would fail. Control hash canonicalizes
+        both to 0.
+        """
+        script = (
+            "const t = require('./mu/host/js/core/types');\n"
+            "const h1 = t.muHashControlCached(-0, 'runAlgorithmWithBridge');\n"
+            "const h2 = t.muHashControlCached(0, 'runAlgorithmWithBridge.stall');\n"
+            "console.log(JSON.stringify({same: h1 === h2}));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert data["same"], (
+            "Control hash must canonicalize -0 and 0 to same hash "
+            "(stall detection parity with Python)"
+        )
+
+    def test_python_control_hash_neg_zero_stall_detection(self):
+        """Python counterpart: -0.0 and 0 must hash identically for stall detection."""
+        h1 = mu_hash_control_cached(-0.0, "run_sub_algorithm")
+        h2 = mu_hash_control_cached(0, "run_sub_algorithm.stall")
+        assert h1 == h2, (
+            "Python control hash must canonicalize -0.0 and 0 to same hash"
+        )
+
+    def test_cross_substrate_control_hash_integral_float_parity(self):
+        """1.0 and 1 must hash identically in both substrates for stall detection."""
+        py_hash = mu_hash_control_cached(1.0, "runAlgorithmWithBridge")
+        script = (
+            "const t = require('./mu/host/js/core/types');\n"
+            "console.log(t.muHashControlCached(1, 'runAlgorithmWithBridge'));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        js_hash = result.stdout.strip()
+        assert py_hash == js_hash, (
+            f"Cross-substrate stall detection hash divergence: "
+            f"Python(1.0)={py_hash}, JS(1)={js_hash}"
+        )
 
 
 class TestNonLinearBindingControlParity:
