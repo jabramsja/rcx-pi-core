@@ -39,6 +39,7 @@ from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_PROJECTION_IDS_KEYS  # ANTICHE
 from rcx_pi.selfhost.step_mu import _build_ontology_promotion_candidate  # ANTICHEAT_OK: A14 builder unit test
 from rcx_pi.selfhost.step_mu import _service_boundary_effect  # ANTICHEAT_OK: A14 behavioral integration test
 from rcx_pi.selfhost.step_mu import _BOUNDARY_DISPATCH  # ANTICHEAT_OK: A15 monkeypatch target for overwrite guard test
+from rcx_pi.selfhost.step_mu import _collect_ontology_evidence  # ANTICHEAT_OK: A17 evidence collector unit test
 from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields  # ANTICHEAT_OK: A14 reserved-field re-validation check
 from rcx_pi.selfhost.seed_integrity import MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
 
@@ -418,10 +419,6 @@ class TestWiring:
 class TestEnvelopeTypeValidation:
     """Envelope value type is validated early (before full validator)."""
 
-    @staticmethod
-    def _noop_emit(*args, **kwargs):
-        """No-op observer emit callback for testing."""
-
     def test_non_dict_envelope_python(self, monkeypatch):
         """ontology_promotion value that's not a dict raises typed error.
 
@@ -451,7 +448,7 @@ class TestEnvelopeTypeValidation:
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=self._noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, iteration=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "ontology_promotion must be dict" in str(exc_info.value)
@@ -1040,40 +1037,16 @@ class TestBoundaryPathEmission:
     production wiring path for ontology promotion candidate emission.
     """
 
-    @staticmethod
-    def _noop_emit(*args, **kwargs):
-        """No-op observer emit callback for testing."""
-
-    @staticmethod
-    def _make_run_trace_request(*, context_extra=None):
-        """Build a minimal valid run_trace boundary request.
-
-        Uses a trivial identity projection so run_mu_structural returns quickly.  # SPEED_OK: docstring reference, not call
-        """
-        ctx = {}
-        if context_extra:
-            ctx.update(context_extra)
-        return {
-            "operation": "run_trace",
-            "input": {
-                "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
-                "value": "hello",
-                "max_steps": 3,
-            },
-            "context": ctx,
-            "inject_key": "boundary_result",
-        }
-
     def test_python_boundary_emission_valid_evidence(self):
         """Call _service_boundary_effect with emit flag + valid evidence → result has ontology_promotion."""
         evidence = _make_valid_evidence()
-        request = self._make_run_trace_request(context_extra={
+        request = _make_boundary_request(context_extra={
             "emit_ontology_candidate": True,
             "ontology_candidate_evidence": evidence,
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=self._noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, iteration=0, state="test_state",
         )
         # Result should be injected at inject_key
         assert "boundary_result" in returned_ctx
@@ -1089,10 +1062,10 @@ class TestBoundaryPathEmission:
 
     def test_python_boundary_no_flag_no_emission(self):
         """Without emit_ontology_candidate flag, result has no ontology_promotion."""
-        request = self._make_run_trace_request()  # no emit flag
+        request = _make_boundary_request()  # no emit flag
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=self._noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, iteration=0, state="test_state",
         )
         result = returned_ctx["boundary_result"]
         assert "ontology_promotion" not in result, (
@@ -1120,14 +1093,14 @@ class TestBoundaryPathEmission:
             }
 
         monkeypatch.setitem(_BOUNDARY_DISPATCH, "run_trace", fake_run_trace_handler)
-        request = self._make_run_trace_request(context_extra={
+        request = _make_boundary_request(context_extra={
             "emit_ontology_candidate": True,
             "ontology_candidate_evidence": evidence,
         })
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=self._noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, iteration=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "already contains ontology_promotion" in str(exc_info.value)
@@ -1206,13 +1179,13 @@ class TestBoundaryPathEmission:
     def test_python_boundary_flag_consumed_one_shot(self):
         """After emission via _service_boundary_effect, context no longer has flag/evidence keys."""
         evidence = _make_valid_evidence()
-        request = self._make_run_trace_request(context_extra={
+        request = _make_boundary_request(context_extra={
             "emit_ontology_candidate": True,
             "ontology_candidate_evidence": evidence,
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=self._noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, iteration=0, state="test_state",
         )
         # One-shot: flag and evidence must have been consumed
         assert "emit_ontology_candidate" not in returned_ctx, (
@@ -1229,10 +1202,6 @@ class TestBoundaryPathEmission:
 
 class TestEmissionEdgeCases:
     """A14: Edge cases for the opt-in emission mechanism."""
-
-    @staticmethod
-    def _noop_emit(*args, **kwargs):
-        """No-op observer emit callback for testing."""
 
     def test_truthy_non_true_no_emission(self):
         """Truthy non-True values (1, 'yes') do not trigger emission.
@@ -1253,7 +1222,7 @@ class TestEmissionEdgeCases:
             }
             returned_ctx = _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=self._noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, iteration=0, state="test_state",
             )
             result = returned_ctx["boundary_result"]
             assert "ontology_promotion" not in result, (
@@ -1675,3 +1644,601 @@ class TestSetterGateA16:
         )
         assert "run_trace" in result.stdout
         assert "function" in result.stdout
+
+
+# ===========================================================================
+# A17: Evidence Collector Tests
+# ===========================================================================
+
+def _noop_emit(*args, **kwargs):
+    """No-op observer emit callback for testing."""
+
+
+def _make_boundary_request(*, context_extra=None):
+    """Build a minimal valid run_trace boundary request.
+
+    Uses a trivial identity projection so run_mu_structural returns quickly.  # SPEED_OK: docstring reference, not call
+    """
+    ctx = {}
+    if context_extra:
+        ctx.update(context_extra)
+    return {
+        "operation": "run_trace",
+        "input": {
+            "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
+            "value": "hello",
+            "max_steps": 3,
+        },
+        "context": ctx,
+        "inject_key": "boundary_result",
+    }
+
+
+def _make_linked_trace(entries):
+    """Build a linked-list trace from a list of entry dicts."""
+    node = None
+    for entry in reversed(entries):
+        node = {"head": entry, "tail": node}
+    return node
+
+
+def _make_run_trace_result(*, stall=True, projection_ids=None):
+    """Build a fake run_trace-shaped result with trace."""
+    entries = []
+    pids = projection_ids or ["proj_a", "proj_b"]
+    for i, pid in enumerate(pids):
+        entries.append({"step": i, "state": f"s{i}", "projection": pid})
+    # Add stall/terminal entry
+    entries.append({"step": len(pids), "state": f"s{len(pids)}", "projection": None, "stall": stall})
+    return {
+        "result": "final_state",
+        "trace": _make_linked_trace(entries),
+        "stall": stall,
+        "steps": len(pids),
+    }
+
+
+class TestEvidenceCollectorPython:
+    """A17: Unit tests for _collect_ontology_evidence (Python)."""
+
+    def test_valid_run_trace_result(self):
+        """Valid run_trace result with trace → complete 6-field record."""
+        result = _make_run_trace_result(stall=True, projection_ids=["proj_b", "proj_a"])
+        obs = _collect_ontology_evidence(result, "run_trace")
+        assert obs["operation"] == "run_trace"
+        assert isinstance(obs["trace_len"], int)
+        assert obs["trace_len"] == 3  # 2 projections + 1 stall entry
+        assert obs["stall"] is True
+        assert obs["projection_ids"] == ["proj_a", "proj_b"]  # sorted, deduped
+        assert isinstance(obs["control_hash"], str)
+        assert len(obs["control_hash"]) > 0
+        assert isinstance(obs["collected_at"], str)
+        assert len(obs["collected_at"]) > 0
+
+    def test_collected_at_is_iso_string(self):
+        """collected_at auto-generated non-empty ISO timestamp."""
+        obs = _collect_ontology_evidence({"result": "x"}, "run_algorithm")
+        assert isinstance(obs["collected_at"], str)
+        assert "T" in obs["collected_at"]
+
+    def test_control_hash_is_string(self):
+        """control_hash auto-generated non-empty string."""
+        obs = _collect_ontology_evidence("simple_value", "hash_trace")
+        assert isinstance(obs["control_hash"], str)
+        assert len(obs["control_hash"]) > 0
+
+    def test_non_trace_result_null_fields(self):
+        """Non-run_trace result (no trace key) → trace_len/stall/projection_ids are null."""
+        obs = _collect_ontology_evidence({"result": "algo_output"}, "run_algorithm")
+        assert obs["trace_len"] is None
+        assert obs["stall"] is None
+        assert obs["projection_ids"] is None
+        assert obs["operation"] == "run_algorithm"
+
+    def test_flag_consumed_one_shot(self):
+        """Flag consumed after collection (one-shot) — tested via wiring context."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        assert "collect_ontology_candidate_evidence" not in returned_ctx
+
+    def test_truthy_non_true_no_collection(self):
+        """Truthy non-True (e.g. 1, 'yes') → no collection."""
+        for truthy_val in [1, "yes", [], {}]:
+            request = _make_boundary_request(context_extra={
+                "collect_ontology_candidate_evidence": truthy_val,
+            })
+            returned_ctx = _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=_noop_emit, iteration=0, state="test_state",
+            )
+            assert "ontology_candidate_observation" not in returned_ctx, (
+                f"Truthy non-True value {truthy_val!r} should not trigger collection"
+            )
+
+    def test_collector_does_not_interfere_with_a14(self):
+        """Collector path does not interfere with A14 emission path."""
+        evidence = _make_valid_evidence()
+        request = _make_boundary_request(context_extra={
+            "emit_ontology_candidate": True,
+            "ontology_candidate_evidence": evidence,
+            "collect_ontology_candidate_evidence": True,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        result = returned_ctx["boundary_result"]
+        # A14 should have attached ontology_promotion
+        assert "ontology_promotion" in result
+        # A17 should have collected observation
+        assert "ontology_candidate_observation" in returned_ctx
+
+    def test_overwrite_guard(self):
+        """C1: context already has ontology_candidate_observation + flag → typed error."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+            "ontology_candidate_observation": {"old": "obs"},
+        })
+        with pytest.raises(RcxEngineError) as exc_info:
+            _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=_noop_emit, iteration=0, state="test_state",
+            )
+        assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "already contains ontology_candidate_observation" in str(exc_info.value)
+
+    def test_no_auto_promotion_side_effect(self):
+        """C2: Collector path does NOT add ontology_promotion to result."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        result = returned_ctx["boundary_result"]
+        assert "ontology_promotion" not in result, (
+            "Collector path must not add ontology_promotion — observation only"
+        )
+
+
+class TestEvidenceCollectorJS:
+    """A17: JS evidence collector tests via node -e."""
+
+    def test_valid_run_trace_result(self):
+        """Valid run_trace result with trace → 6-field record."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const trace = {
+                head: { step: 0, state: 's0', projection: 'proj_b' },
+                tail: {
+                    head: { step: 1, state: 's1', projection: 'proj_a' },
+                    tail: {
+                        head: { step: 2, state: 's2', projection: null, stall: true },
+                        tail: null
+                    }
+                }
+            };
+            const result = { result: 'final', trace: trace, stall: true, steps: 2 };
+            try {
+                const obs = pipeline.collectOntologyEvidence(result, 'run_trace');
+                const checks = [
+                    obs.operation === 'run_trace',
+                    obs.trace_len === 3,
+                    obs.stall === true,
+                    JSON.stringify(obs.projection_ids) === JSON.stringify(['proj_a', 'proj_b']),
+                    typeof obs.control_hash === 'string' && obs.control_hash.length > 0,
+                    typeof obs.collected_at === 'string' && obs.collected_at.length > 0,
+                ];
+                if (checks.every(Boolean)) {
+                    process.stdout.write('PASS');
+                } else {
+                    process.stdout.write('FAIL:checks:' + JSON.stringify(checks));
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS collector failed: {result.stdout} {result.stderr}"
+
+    def test_non_trace_result_null_fields(self):
+        """Non-trace result → null trace fields."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const result = { result: 'algo_output' };
+            try {
+                const obs = pipeline.collectOntologyEvidence(result, 'run_algorithm');
+                const checks = [
+                    obs.trace_len === null,
+                    obs.stall === null,
+                    obs.projection_ids === null,
+                    obs.operation === 'run_algorithm',
+                ];
+                process.stdout.write(checks.every(Boolean) ? 'PASS' : 'FAIL:' + JSON.stringify(checks));
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS null fields failed: {result.stdout} {result.stderr}"
+
+    def test_flag_consumed_one_shot(self):
+        """JS: Flag consumed after collection (one-shot)."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: { collect_ontology_candidate_evidence: true },
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                if ('collect_ontology_candidate_evidence' in ctx) {
+                    process.stdout.write('FAIL:flag_not_consumed');
+                } else if (!('ontology_candidate_observation' in ctx)) {
+                    process.stdout.write('FAIL:no_observation');
+                } else {
+                    process.stdout.write('PASS');
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS one-shot failed: {result.stdout} {result.stderr}"
+
+    def test_strict_boolean_check(self):
+        """Truthy non-true (1) → no collection."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: { collect_ontology_candidate_evidence: 1 },
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                if ('ontology_candidate_observation' in ctx) {
+                    process.stdout.write('FAIL:collected_on_truthy');
+                } else {
+                    process.stdout.write('PASS');
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS strict bool failed: {result.stdout} {result.stderr}"
+
+    def test_control_hash_present(self):
+        """control_hash present and non-empty string."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                const obs = pipeline.collectOntologyEvidence('simple_value', 'hash_trace');
+                if (typeof obs.control_hash === 'string' && obs.control_hash.length > 0) {
+                    process.stdout.write('PASS');
+                } else {
+                    process.stdout.write('FAIL:bad_hash:' + typeof obs.control_hash);
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS hash failed: {result.stdout} {result.stderr}"
+
+    def test_overwrite_guard(self):
+        """C1: context already has ontology_candidate_observation → typed error."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: {
+                    collect_ontology_candidate_evidence: true,
+                    ontology_candidate_observation: { old: 'obs' },
+                },
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"Expected overwrite guard, got: {result.stdout} {result.stderr}"
+        )
+        assert "already contains ontology_candidate_observation" in result.stdout
+
+    def test_no_auto_promotion_side_effect(self):
+        """C2: Collector path does NOT add ontology_promotion to result."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: { collect_ontology_candidate_evidence: true },
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                const result = ctx.boundary_result;
+                if ('ontology_promotion' in result) {
+                    process.stdout.write('FAIL:has_ontology_promotion');
+                } else {
+                    process.stdout.write('PASS');
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS auto-promo side effect: {result.stdout} {result.stderr}"
+
+
+class TestEvidenceCollectorWiring:
+    """A17: Source-inspection tests for evidence collector wiring."""
+
+    @staticmethod
+    def _get_python_boundary_effect_source():
+        src = inspect.getsource(_service_boundary_effect)
+        return src
+
+    @staticmethod
+    def _get_js_boundary_effect_source():
+        js_path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js"
+        return js_path.read_text()
+
+    def test_python_wiring_contains_flag(self):
+        """Python wiring contains collect_ontology_candidate_evidence."""
+        src = self._get_python_boundary_effect_source()
+        assert "collect_ontology_candidate_evidence" in src
+
+    def test_js_wiring_contains_flag(self):
+        """JS wiring contains collect_ontology_candidate_evidence."""
+        src = self._get_js_boundary_effect_source()
+        assert "collect_ontology_candidate_evidence" in src
+
+    def test_python_uses_strict_is_true(self):
+        """Python uses strict 'is True' check."""
+        src = self._get_python_boundary_effect_source()
+        # Find the A17 block specifically
+        assert re.search(
+            r'collect_ontology_candidate_evidence.*is True', src
+        ), "Python A17 wiring must use 'is True' (strict boolean check)"
+
+    def test_js_uses_strict_triple_equals(self):
+        """JS uses strict === true check."""
+        src = self._get_js_boundary_effect_source()
+        assert re.search(
+            r'collect_ontology_candidate_evidence\s*===\s*true', src
+        ), "JS A17 wiring must use '=== true' (strict boolean check)"
+
+
+class TestEvidenceCollectorMalformedTrace:
+    """A17 C4: Malformed projection IDs in trace entries — string-only filtering."""
+
+    def test_python_non_string_projection_ids_filtered(self):
+        """Python: int/dict projection IDs skipped, only strings collected."""
+        entries = [
+            {"step": 0, "state": "s0", "projection": "valid_id"},
+            {"step": 1, "state": "s1", "projection": 42},       # int → skip
+            {"step": 2, "state": "s2", "projection": {"x": 1}}, # dict → skip
+            {"step": 3, "state": "s3", "projection": None},     # None → skip
+            {"step": 4, "state": "s4", "projection": "another_id"},
+        ]
+        result = {
+            "result": "final",
+            "trace": _make_linked_trace(entries),
+            "stall": False,
+        }
+        obs = _collect_ontology_evidence(result, "run_trace")
+        assert obs["trace_len"] == 5
+        assert obs["projection_ids"] == ["another_id", "valid_id"]  # sorted, strings only
+
+    def test_js_non_string_projection_ids_filtered(self):
+        """JS: int/dict projection IDs skipped, only strings collected."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const trace = {
+                head: { step: 0, state: 's0', projection: 'valid_id' },
+                tail: {
+                    head: { step: 1, state: 's1', projection: 42 },
+                    tail: {
+                        head: { step: 2, state: 's2', projection: { x: 1 } },
+                        tail: {
+                            head: { step: 3, state: 's3', projection: null },
+                            tail: {
+                                head: { step: 4, state: 's4', projection: 'another_id' },
+                                tail: null
+                            }
+                        }
+                    }
+                }
+            };
+            const result = { result: 'final', trace: trace, stall: false };
+            try {
+                const obs = pipeline.collectOntologyEvidence(result, 'run_trace');
+                const checks = [
+                    obs.trace_len === 5,
+                    JSON.stringify(obs.projection_ids) === JSON.stringify(['another_id', 'valid_id']),
+                ];
+                process.stdout.write(checks.every(Boolean) ? 'PASS' : 'FAIL:' + JSON.stringify(obs));
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS C4 filter failed: {result.stdout} {result.stderr}"
+
+
+class TestEvidenceCollectorBoundaryPath:
+    """A17: Behavioral integration tests calling _service_boundary_effect for collection."""
+
+    def test_python_boundary_collection_valid(self):
+        """Call _service_boundary_effect with collect flag → context has observation."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        assert "ontology_candidate_observation" in returned_ctx
+        obs = returned_ctx["ontology_candidate_observation"]
+        assert obs["operation"] == "run_trace"
+        assert isinstance(obs["trace_len"], int)
+        assert obs["trace_len"] > 0
+        assert isinstance(obs["projection_ids"], list)
+        assert isinstance(obs["control_hash"], str)
+        assert isinstance(obs["collected_at"], str)
+
+    def test_python_boundary_no_flag_no_collection(self):
+        """Without collect flag, no observation in context."""
+        request = _make_boundary_request()
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        assert "ontology_candidate_observation" not in returned_ctx
+
+    def test_js_boundary_collection_valid(self):
+        """JS: serviceBoundaryEffect with collect flag → observation attached."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: { collect_ontology_candidate_evidence: true },
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                const obs = ctx.ontology_candidate_observation;
+                if (!obs) {
+                    process.stdout.write('FAIL:no_observation');
+                } else {
+                    const checks = [
+                        obs.operation === 'run_trace',
+                        typeof obs.trace_len === 'number' && obs.trace_len > 0,
+                        Array.isArray(obs.projection_ids),
+                        typeof obs.control_hash === 'string',
+                        typeof obs.collected_at === 'string',
+                    ];
+                    process.stdout.write(checks.every(Boolean) ? 'PASS' : 'FAIL:' + JSON.stringify(checks));
+                }
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS boundary collection failed: {result.stdout} {result.stderr}"
+
+    def test_python_collection_flag_consumed_one_shot(self):
+        """After collection, context no longer has flag."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        assert "collect_ontology_candidate_evidence" not in returned_ctx, (
+            "collect_ontology_candidate_evidence should be consumed (one-shot)"
+        )
+
+    def test_python_boundary_overwrite_guard(self):
+        """C1: collect flag + context already has observation → typed error."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+            "ontology_candidate_observation": {"existing": True},
+        })
+        with pytest.raises(RcxEngineError) as exc_info:
+            _service_boundary_effect(
+                request, max_algorithm_iterations=50,
+                emit_fn=_noop_emit, iteration=0, state="test_state",
+            )
+        assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "already contains ontology_candidate_observation" in str(exc_info.value)
+
+    def test_js_boundary_overwrite_guard(self):
+        """C1: JS overwrite guard — pre-existing observation + flag → typed error."""
+        js_code = textwrap.dedent("""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const request = {
+                operation: 'run_trace',
+                input: {
+                    projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
+                    value: 'hello',
+                    max_steps: 3,
+                },
+                context: {
+                    collect_ontology_candidate_evidence: true,
+                    ontology_candidate_observation: { existing: true },
+                },
+                inject_key: 'boundary_result',
+            };
+            const noop = () => {};
+            try {
+                pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
+                process.stdout.write('NO_ERROR');
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
+            f"Expected overwrite guard, got: {result.stdout} {result.stderr}"
+        )
+        assert "already contains ontology_candidate_observation" in result.stdout
+
+    def test_python_boundary_no_auto_promotion(self):
+        """C2: Collector path does NOT add ontology_promotion to result."""
+        request = _make_boundary_request(context_extra={
+            "collect_ontology_candidate_evidence": True,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        result = returned_ctx["boundary_result"]
+        assert "ontology_promotion" not in result, (
+            "Collector path must not add ontology_promotion — observation only"
+        )
