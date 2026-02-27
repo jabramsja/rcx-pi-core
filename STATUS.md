@@ -318,7 +318,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 55 (current 55)
+- AST_OK:infra ceiling: 63 (current 63)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -641,7 +641,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-25 (doc ground-truth fixes: test count, projection counts, seed counts, KERNEL_RESERVED_FIELDS count — all aligned to live tool output)
+**Last updated:** 2026-02-26 (P0 remediation: infra ceiling prose truth-sync, Gate 5 projection count, runAlgorithmWithBridge stall-hash parity fix)
 **Next milestone:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. See TASKS.md for next VECTOR promotion candidate.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
@@ -663,7 +663,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - Gate 5: COMPLETE (2026-02-09 meta-circular parity verified)
   - 56 exit criteria tests pass: 9 gate5 parity + 17 execution path + 30 JS parity
   - Structural execution is default; bootstrap is explicit fallback only
-  - Cross-substrate parity intact (Python + JS, all 49 core projections)
+  - Cross-substrate parity intact (Python + JS, all L3 seed projections — see `test_seed_counts.py`)
   - B-structural match_mu (match.v2 + bridge) provides non-linear pattern support
 
 Current Recurrence Layer: META_CIRCULAR

@@ -588,7 +588,7 @@ Current Exhaustion Layer: META_CIRCULAR
 ## SINK (ideas parked; may not advance without explicit promotion decision)
 
 **Items (priority-ordered):**
-- **[S1]** L4 Full Self-Hosting Rewrite — long-horizon goal: eliminate all 4 bootstrap primitives entirely. Depends on G8 resolution (active decision path in VECTOR P2, D008 DEFER recommended) + Boot1 completion (in NEXT). G1-G7 already PASS; only G8 is UNPROVEN. See `mu/docs/core/L4ExitChecklist.v0.md` for gate definitions. This is the full rewrite scope — not the bounded G8 decision path (which is VECTOR P2).
+- **[S1]** L4 Full Self-Hosting Rewrite — long-horizon goal: eliminate all 4 bootstrap primitives entirely. Depends on G8 resolution (active decision path in VECTOR P1, D008 DEFER recommended) + Boot1 completion (in NEXT). G1-G7 already PASS; only G8 is UNPROVEN. See `mu/docs/core/L4ExitChecklist.v0.md` for gate definitions. This is the full rewrite scope — not the bounded G8 decision path (which is VECTOR P1).
 - **[S2]** Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
 - **[S3]** Multi-value/concurrent execution
 - **[S4]** Performance-first optimizations
