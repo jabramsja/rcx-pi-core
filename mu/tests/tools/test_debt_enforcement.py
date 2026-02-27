@@ -386,8 +386,8 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 63 (59 pre-A13 + 4 A13 lock derivation: 2 JS CORE mirrors + 1 derivation fn + 2 registry key extractions - 1 removed literal)
-    assert infra_count == 63, (
-        f"Expected 63 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 64 (63 pre-A14 + 1 A14 producer-side record assembly builder)
+    assert infra_count == 64, (
+        f"Expected 64 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

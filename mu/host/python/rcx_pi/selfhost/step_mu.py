@@ -30,6 +30,7 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
+import time
 
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
@@ -913,6 +914,81 @@ def _validate_ontology_promotion_record(record: dict, context_str: str) -> None:
             f"{context_str}: INV_OPROMO_3 projection_ids not found in seed "
             f"'{seed_file}': {missing_ids}",
         )
+
+
+def _build_ontology_promotion_candidate(  # AST_OK: infra — producer-side record assembly
+    evidence: dict | None,
+    context_str: str,
+) -> dict:
+    """Build an ontology promotion candidate record from runtime evidence.
+
+    Assembles the 8-field record required by the A12 validator.
+    Auto-generates derivation_timestamp and substrate_versions.
+    Enforces authority.source = "seed" regardless of evidence input.
+    """
+    if not isinstance(evidence, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: evidence must be dict, "
+            f"got {type(evidence).__name__}",
+        )
+    required_keys = (
+        "witness_traces", "seed_configs", "closure_structure",
+        "perturbation_log", "tau_lineage", "authority",
+    )
+    for key in required_keys:
+        if key not in evidence:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: evidence missing required key '{key}'",
+            )
+    authority = evidence["authority"]
+    if not isinstance(authority, dict):
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: evidence 'authority' must be dict, "
+            f"got {type(authority).__name__}",
+        )
+    for auth_key in ("seed_file", "projection_ids"):
+        if auth_key not in authority:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"{context_str}: evidence 'authority' missing '{auth_key}'",
+            )
+
+    seed_file = authority["seed_file"]
+
+    # Correction #5: full-lock gate (early reject, before checksum lookup).
+    if seed_file not in _OPROMO_FULLY_LOCKED_SEEDS:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_3/producer seed not verification-locked: "
+            f"'{seed_file}'",
+        )
+
+    # Correction #1: typed fail-closed for seed checksum resolution.
+    checksum = SEED_CHECKSUMS.get(seed_file)
+    if checksum is None:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            f"{context_str}: INV_OPROMO_4/producer seed checksum not found "
+            f"for '{seed_file}' — seed not in SEED_CHECKSUMS registry",
+        )
+
+    return {
+        "witness_traces": evidence["witness_traces"],
+        "seed_configs": evidence["seed_configs"],
+        "closure_structure": evidence["closure_structure"],
+        "perturbation_log": evidence["perturbation_log"],
+        "tau_lineage": evidence["tau_lineage"],
+        "derivation_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "substrate_versions": {"python": checksum, "js": checksum},
+        "authority": {
+            "source": "seed",
+            "seed_file": authority["seed_file"],
+            "projection_ids": authority["projection_ids"],
+        },
+    }
 
 
 # =============================================================================
@@ -2103,6 +2179,32 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
 
     # SECURITY: validate boundary result before re-injection.
     validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
+
+    # Producer-side ontology promotion candidate (A14): one-shot, opt-in only.
+    if context.get("emit_ontology_candidate") is True:
+        del context["emit_ontology_candidate"]
+        evidence = context.pop("ontology_candidate_evidence", None)
+        if not isinstance(result, dict):
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"boundary_result({operation}): emit_ontology_candidate requested "
+                f"but result is not dict (got {type(result).__name__})",
+            )
+        # Correction #3: reject overwrite of handler-originated record.
+        if "ontology_promotion" in result:
+            raise RcxEngineError(
+                "input.shape_mismatch",
+                f"boundary_result({operation}): emit_ontology_candidate requested "
+                f"but result already contains ontology_promotion",
+            )
+        result["ontology_promotion"] = _build_ontology_promotion_candidate(
+            evidence,
+            f"boundary_result({operation}).ontology_candidate_evidence",
+        )
+        # Correction #2: re-validate reserved fields after producer attach.
+        validate_no_kernel_reserved_fields(
+            result, context=f"boundary_result({operation}).post_producer",
+        )
 
     # Ontology promotion enforcement (A12): validate promotion records if present.
     if isinstance(result, dict) and "ontology_promotion" in result:

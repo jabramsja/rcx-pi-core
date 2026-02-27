@@ -298,6 +298,29 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
 
   validateNoKernelReservedFields(result, `boundary_result(${operation})`);
 
+  // Producer-side ontology promotion candidate (A14): one-shot, opt-in only.
+  if (context.emit_ontology_candidate === true) {
+    delete context.emit_ontology_candidate;
+    const evidence = context.ontology_candidate_evidence;
+    delete context.ontology_candidate_evidence;
+    if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+      throw new RcxError('input.shape_mismatch',
+        `boundary_result(${operation}): emit_ontology_candidate requested ` +
+        `but result is not object`);
+    }
+    // Correction #3: reject overwrite of handler-originated record.
+    if ('ontology_promotion' in result) {
+      throw new RcxError('input.shape_mismatch',
+        `boundary_result(${operation}): emit_ontology_candidate requested ` +
+        `but result already contains ontology_promotion`);
+    }
+    result.ontology_promotion = buildOntologyPromotionCandidate(
+      evidence, `boundary_result(${operation}).ontology_candidate_evidence`
+    );
+    // Correction #2: re-validate reserved fields after producer attach.
+    validateNoKernelReservedFields(result, `boundary_result(${operation}).post_producer`);
+  }
+
   // Ontology promotion enforcement (A12): validate promotion records if present.
   if (result && typeof result === 'object' && 'ontology_promotion' in result) {
     const promo = result.ontology_promotion;
@@ -547,6 +570,73 @@ function validateOntologyPromotionRecord(record, contextStr) {
     throw new RcxError('input.shape_mismatch',
       `${contextStr}: INV_OPROMO_3 projection_ids not found in seed '${seedFile}': ${JSON.stringify(missingIds)}`);
   }
+}
+
+/**
+ * Build an ontology promotion candidate record from runtime evidence.
+ * Assembles the 8-field record required by the A12 validator.
+ * Auto-generates derivation_timestamp and substrate_versions.
+ * Enforces authority.source = 'seed' regardless of evidence input.
+ */
+function buildOntologyPromotionCandidate(evidence, contextStr) {
+  if (typeof evidence !== 'object' || evidence === null || Array.isArray(evidence)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: evidence must be object, ` +
+      `got ${evidence === null ? 'null' : Array.isArray(evidence) ? 'array' : typeof evidence}`);
+  }
+  const requiredKeys = [
+    'witness_traces', 'seed_configs', 'closure_structure',
+    'perturbation_log', 'tau_lineage', 'authority',
+  ];
+  for (const key of requiredKeys) {
+    if (!(key in evidence)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: evidence missing required key '${key}'`);
+    }
+  }
+  const authority = evidence.authority;
+  if (typeof authority !== 'object' || authority === null || Array.isArray(authority)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: evidence 'authority' must be object, ` +
+      `got ${authority === null ? 'null' : Array.isArray(authority) ? 'array' : typeof authority}`);
+  }
+  for (const authKey of ['seed_file', 'projection_ids']) {
+    if (!(authKey in authority)) {
+      throw new RcxError('input.shape_mismatch',
+        `${contextStr}: evidence 'authority' missing '${authKey}'`);
+    }
+  }
+
+  const seedFile = authority.seed_file;
+
+  // Correction #5: full-lock gate (early reject, before checksum lookup).
+  if (!seedLoader.isFullyLockedSeed(seedFile)) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_3/producer seed not verification-locked: '${seedFile}'`);
+  }
+
+  // Correction #1: typed fail-closed for seed checksum resolution.
+  const checksum = seedLoader.getSeedChecksum(seedFile);
+  if (checksum === null) {
+    throw new RcxError('input.shape_mismatch',
+      `${contextStr}: INV_OPROMO_4/producer seed checksum not found ` +
+      `for '${seedFile}' — seed not in CORE_SEED_CHECKSUMS registry`);
+  }
+
+  return {
+    witness_traces: evidence.witness_traces,
+    seed_configs: evidence.seed_configs,
+    closure_structure: evidence.closure_structure,
+    perturbation_log: evidence.perturbation_log,
+    tau_lineage: evidence.tau_lineage,
+    derivation_timestamp: new Date().toISOString(),
+    substrate_versions: { python: checksum, js: checksum },
+    authority: {
+      source: 'seed',
+      seed_file: authority.seed_file,
+      projection_ids: authority.projection_ids,
+    },
+  };
 }
 
 // Boot1 re-entry depth limit
@@ -837,6 +927,7 @@ module.exports = {
   BOOT1_MAX_REENTRY_DEPTH,
   validateReentryPayload,
   validateOntologyPromotionRecord,
+  buildOntologyPromotionCandidate,
   runAlgorithmWithBridge,
   runSubAlgorithm,
   hashTraceForRecurrence,
