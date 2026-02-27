@@ -12,6 +12,7 @@ from pathlib import Path
 
 from rcx_pi.selfhost.eval_seed import match, step
 from rcx_pi.selfhost.match_mu import normalize_for_match, denormalize_from_match, bindings_to_dict
+from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed
 
 
@@ -60,7 +61,7 @@ def run_match_with_bridge(pattern, value, projections):
     max_steps = 1000
     for _ in range(max_steps):
         new_state = step(projections, state)  # NOTE: projections first, then state
-        if new_state == state:
+        if mu_equal(new_state, state):
             # Stalled
             break
         state = new_state
