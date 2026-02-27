@@ -139,4 +139,8 @@ function loadVerifiedSeed(seedName, subdir) {
   return seed;
 }
 
-module.exports = { loadVerifiedSeed, getSeedSubdir, isFullyLockedSeed, SEED_SUBDIRS };
+function getSeedChecksum(seedName) {
+  return CORE_SEED_CHECKSUMS[seedName] ?? null;
+}
+
+module.exports = { loadVerifiedSeed, getSeedSubdir, isFullyLockedSeed, getSeedChecksum, SEED_SUBDIRS };
