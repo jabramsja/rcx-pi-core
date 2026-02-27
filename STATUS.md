@@ -100,13 +100,13 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Substrate (Core)** | kernel.v1, match.v2, subst.v2 | ✅ | Required for L3 |
 | **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1 | ✅ | v1 is POC; v2 is hash-accelerated production; fix.v1 is edge/vertex repair |
 | **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
-| **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
+| **Utilities** | classify.v1, eval.v1, terminal_classify.v1 | classify/eval: Python-only; terminal_classify: ✅ | classify/eval optional helpers; terminal_classify drives terminal key-set authority (A6/A7) |
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization: ✅ | Engine orchestration + hemisphere routing + metabolization L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
 - JS file has DEBT SUMMARY header with counts: 16 total (9 iteration + 4 recursion + 3 builtin)
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
-- These are AST-level host loop markers, analogous to Python's AST_OK:infra (42), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 12 Python host-debt decorator sites implementing them — these are distinct concepts.
+- These are AST-level host loop markers, analogous to Python's AST_OK:infra (64), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 12 Python host-debt decorator sites implementing them — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
 - `tools/checks/check_js_debt.sh` validates markers are present
 - `tools/checks/linters/contraband_js.sh` validates no forbidden patterns (determinism, purity)
@@ -318,7 +318,7 @@ The debt of 12 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 63 (current 63)
+- AST_OK:infra ceiling: 64 (current 64)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
