@@ -188,6 +188,7 @@ VALID_WORKLOAD_TARGETS = frozenset({
     "seed_auto_execution",
     "execution_layer_truth",
     "recurrence_exhaustion",
+    "host_debt_reduction",
 })
 
 # Proof binding: workload target → required contract test files.
@@ -208,6 +209,7 @@ WORKLOAD_TARGET_EVIDENCE = {
     ],
     "ontology_promotion": [],
     "recurrence_exhaustion": [],
+    "host_debt_reduction": [],
 }
 
 # Gate scripts that run contract tests (proof binding alternative to changed scope).

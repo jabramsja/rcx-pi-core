@@ -16,7 +16,7 @@ A projection-based computational substrate where **structure is the primitive**.
 > **Current reality:** L1-L3 are complete and gate-enforced. L4 (full meta-circularity / bootstrap primitive elimination) is a research goal with open feasibility questions — see `mu/docs/core/G8CpsFeasibility.v0.md`. Hemispheres v0 is structural routing; hemisphere metabolization (NEXT) is in contract-test phase.
 
 - **3,690+ tests** across 180+ test files
-- **12 semantic debt** (irreducible bootstrap floor)
+- **11 semantic debt** (irreducible bootstrap floor)
 - **43 CRITICAL_TEST_FILES** protected from silent skipping
 - **49 core projections** across 5 L3-complete seeds + 12 hemisphere projections
 

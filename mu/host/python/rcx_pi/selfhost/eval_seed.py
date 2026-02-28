@@ -218,7 +218,6 @@ def get_var_name(mu: Mu) -> str:
     "len() for size, zip() for pairing, set() for key comparison, "
     "any() for aggregation, 'in' for membership, .items()/.keys() for iteration"
 )
-@host_mutation("bindings[k] = v to accumulate variable bindings")
 def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """
     Match pattern against input, returning bindings or NO_MATCH.
@@ -309,13 +308,12 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
             sub_bindings = _match_inner(p_elem, i_elem, _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
-            # Merge bindings (check for conflicts)
-            for k, v in sub_bindings.items():
+            # Non-linear conflict check (same variable, different value)
+            for k in sub_bindings:
                 if k in bindings:
-                    # Same variable bound twice - must be same value (non-linear pattern)
-                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(v):
+                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(sub_bindings[k]):
                         return NO_MATCH
-                bindings[k] = v
+            bindings = {**bindings, **sub_bindings}  # pure merge, no dict mutation
         return bindings
 
     # Dict
@@ -340,13 +338,12 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
             sub_bindings = _match_inner(pattern[key], input_value[key], _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
-            # Merge bindings
-            for k, v in sub_bindings.items():
+            # Non-linear conflict check (same variable, different value)
+            for k in sub_bindings:
                 if k in bindings:
-                    # Same variable bound twice - must be same value (non-linear pattern)
-                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(v):
+                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(sub_bindings[k]):
                         return NO_MATCH
-                bindings[k] = v
+            bindings = {**bindings, **sub_bindings}  # pure merge, no dict mutation
         return bindings
 
     # Should not reach here if input is valid Mu
