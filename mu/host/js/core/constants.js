@@ -28,18 +28,16 @@
  *     - runEnginePipeline()       - engine state machine effect handler loop
  *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
  *
- *   @host_recursion: 4
+ *   @host_recursion: 2
  *     - match()             - recursive pattern matching
  *     - substitute()        - recursive substitution
- *     - normalize()         - recursive normalization
- *     - denormalize()       - recursive denormalization
  *
  *   @host_builtin: 3
  *     - muEqual()           - structural equality (convenience wrapper, delegates to muHashCached)
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 16 (9 iteration + 4 recursion + 3 builtin)
+ * TOTAL DEBT: 14 (9 iteration + 2 recursion + 3 builtin)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
  * exist in Python. Both substrates have identical bootstrap footprint.

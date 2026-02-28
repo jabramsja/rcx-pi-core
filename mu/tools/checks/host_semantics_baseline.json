@@ -4,7 +4,7 @@
       "host_builtin": 4,
       "host_iteration": 10,
       "host_mutation": 0,
-      "host_recursion": 5
+      "host_recursion": 3
     },
     "python": {
       "host_builtin": 1,
@@ -13,9 +13,9 @@
       "host_recursion": 2
     }
   },
-  "generated_at": "2026-02-28T05:47:55.506515Z",
+  "generated_at": "2026-02-28T08:10:26.242390Z",
   "schema_version": 1,
-  "total": 33,
-  "total_javascript": 19,
+  "total": 31,
+  "total_javascript": 17,
   "total_python": 14
 }
