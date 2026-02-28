@@ -15,12 +15,62 @@ cd "$PROJECT_ROOT"
 JS_DIR="mu/host/js"
 # The DEBT SUMMARY header lives in core/constants.js
 JS_HEADER_FILE="$JS_DIR/core/constants.js"
+# Canonical bootstrap primitive named set (single source of truth)
+JS_PRIMITIVE_SET_FILE="tools/checks/bootstrap_primitive_set.json"
 
 count_marker() {
     local pattern="$1"
     local count
     count=$(grep -rE "$pattern" "$JS_DIR" --include='*.js' 2>/dev/null | wc -l | tr -d '[:space:]')
     echo "${count:-0}"
+}
+
+extract_bootstrap_primitive_names() {
+    # Extract unique primitive names from BOOTSTRAP_PRIMITIVE: <name> markers.
+    # Returns sorted unique set (one name per line).
+    grep -roE 'BOOTSTRAP_PRIMITIVE:[[:space:]]*[a-zA-Z_]+' "$JS_DIR" --include='*.js' 2>/dev/null \
+        | sed 's/.*BOOTSTRAP_PRIMITIVE:[[:space:]]*//' \
+        | sort -u
+}
+
+load_expected_primitive_set() {
+    local set_file="$1"
+    python3 - "$set_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.is_file():
+    print(f"ERROR: primitive set file not found: {path}", file=sys.stderr)
+    sys.exit(2)
+
+try:
+    data = json.loads(path.read_text())
+except Exception as exc:
+    print(f"ERROR: failed to parse primitive set file: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+if data.get("schema_version") != 1:
+    print(
+        f"ERROR: primitive set schema_version must be 1, got {data.get('schema_version')}",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+vals = data.get("expected_named_set")
+if not isinstance(vals, list) or not vals:
+    print("ERROR: expected_named_set must be non-empty list", file=sys.stderr)
+    sys.exit(2)
+if not all(isinstance(v, str) and v.strip() for v in vals):
+    print("ERROR: expected_named_set entries must be non-empty strings", file=sys.stderr)
+    sys.exit(2)
+if len(vals) != len(set(vals)):
+    print("ERROR: expected_named_set contains duplicates", file=sys.stderr)
+    sys.exit(2)
+
+print(" ".join(sorted(vals)))
+PY
 }
 
 count_loc() {
@@ -54,12 +104,19 @@ if [ ! -f "$JS_HEADER_FILE" ]; then
     echo "ERROR: $JS_HEADER_FILE not found (DEBT SUMMARY header expected here)"
     exit 1
 fi
+if [ ! -f "$JS_PRIMITIVE_SET_FILE" ]; then
+    echo "ERROR: $JS_PRIMITIVE_SET_FILE not found (canonical primitive set required)"
+    exit 1
+fi
 
 # Count debt markers across all JS module files
 HOST_ITERATION=$(count_marker "@host_iteration")
 HOST_RECURSION=$(count_marker "@host_recursion")
 HOST_BUILTIN=$(count_marker "@host_builtin")
-BOOTSTRAP_PRIMITIVE=$(count_marker "BOOTSTRAP_PRIMITIVE")
+BOOTSTRAP_PRIMITIVE_RAW=$(count_marker "BOOTSTRAP_PRIMITIVE")
+BOOTSTRAP_PRIMITIVE_NAMES=$(extract_bootstrap_primitive_names)
+BOOTSTRAP_PRIMITIVE_COUNT=$(echo "$BOOTSTRAP_PRIMITIVE_NAMES" | grep -c . 2>/dev/null || echo 0)
+BOOTSTRAP_PRIMITIVE_SET=$(echo "$BOOTSTRAP_PRIMITIVE_NAMES" | tr '\n' ', ' | sed 's/,$//' | sed 's/,/, /g')
 AST_OK_TOTAL_JS=$(count_marker "AST_OK_JS:")
 HOST_RUNTIME_LOC_JS=$(count_loc "runtime")
 HOST_TEST_LOC_JS=$(count_loc "tests")
@@ -73,7 +130,8 @@ echo "Debt markers found across $JS_DIR/**/*.js:"
 echo "  @host_iteration:    $HOST_ITERATION"
 echo "  @host_recursion:    $HOST_RECURSION"
 echo "  @host_builtin:      $HOST_BUILTIN"
-echo "  BOOTSTRAP_PRIMITIVE: $BOOTSTRAP_PRIMITIVE"
+echo "  BOOTSTRAP_PRIMITIVE (named set): $BOOTSTRAP_PRIMITIVE_COUNT  ($BOOTSTRAP_PRIMITIVE_SET)"
+echo "  BOOTSTRAP_PRIMITIVE (raw tokens): $BOOTSTRAP_PRIMITIVE_RAW  (diagnostic — includes prose mentions)"
 echo "  AST_OK_JS:          $AST_OK_TOTAL_JS  (0 is expected baseline; no AST_OK_JS markers yet)"
 echo "  host_runtime_loc_js: $HOST_RUNTIME_LOC_JS"
 echo "  host_test_loc_js:    $HOST_TEST_LOC_JS"
@@ -84,6 +142,7 @@ EXPECTED_ITERATION=$(grep -o '@host_iteration: [0-9]*' "$JS_HEADER_FILE" | head 
 EXPECTED_RECURSION=$(grep -o '@host_recursion: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
 EXPECTED_BUILTIN=$(grep -o '@host_builtin: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
 EXPECTED_BOOTSTRAP=$(grep -o 'BOOTSTRAP PRIMITIVES ([0-9]*' "$JS_HEADER_FILE" | head -1 | grep -o '[0-9]*')
+EXPECTED_PRIMITIVE_SET=$(load_expected_primitive_set "$JS_PRIMITIVE_SET_FILE")
 
 # Validate we extracted the counts (fail if header is missing/malformed)
 if [ -z "$EXPECTED_ITERATION" ] || [ -z "$EXPECTED_RECURSION" ] || [ -z "$EXPECTED_BUILTIN" ] || [ -z "$EXPECTED_BOOTSTRAP" ]; then
@@ -92,6 +151,10 @@ if [ -z "$EXPECTED_ITERATION" ] || [ -z "$EXPECTED_RECURSION" ] || [ -z "$EXPECT
     echo "  EXPECTED_RECURSION: ${EXPECTED_RECURSION:-MISSING}"
     echo "  EXPECTED_BUILTIN: ${EXPECTED_BUILTIN:-MISSING}"
     echo "  EXPECTED_BOOTSTRAP: ${EXPECTED_BOOTSTRAP:-MISSING}"
+    exit 1
+fi
+if [ -z "$EXPECTED_PRIMITIVE_SET" ]; then
+    echo "ERROR: Expected primitive named set resolved empty from $JS_PRIMITIVE_SET_FILE"
     exit 1
 fi
 
@@ -113,8 +176,12 @@ if [ "$HOST_BUILTIN" -lt "$EXPECTED_BUILTIN" ]; then
     ERRORS=$((ERRORS + 1))
 fi
 
-if [ "$BOOTSTRAP_PRIMITIVE" -lt "$EXPECTED_BOOTSTRAP" ]; then
-    echo "WARNING: BOOTSTRAP_PRIMITIVE count ($BOOTSTRAP_PRIMITIVE) < expected ($EXPECTED_BOOTSTRAP)"
+# Bootstrap primitive gate: pass/fail on exact named set (raw count is diagnostic only)
+ACTUAL_PRIMITIVE_SET=$(echo "$BOOTSTRAP_PRIMITIVE_NAMES" | tr '\n' ' ' | sed 's/ $//')
+if [ "$ACTUAL_PRIMITIVE_SET" != "$EXPECTED_PRIMITIVE_SET" ]; then
+    echo "ERROR: BOOTSTRAP_PRIMITIVE named set mismatch"
+    echo "  Expected: {$EXPECTED_PRIMITIVE_SET}"
+    echo "  Actual:   {$ACTUAL_PRIMITIVE_SET}"
     ERRORS=$((ERRORS + 1))
 fi
 

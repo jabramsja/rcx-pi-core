@@ -78,6 +78,9 @@ echo "== 1a) Contraband check =="
 echo "== 1b) Test theater check =="
 ./tools/checks/check_test_theater.sh tests
 
+echo "== 1b2) L4 gate theater risk ratchet =="
+python3 tools/checks/check_theater_risk_ratchet.py
+
 echo "== 1c) JS contraband check =="
 ./tools/checks/linters/contraband_js.sh
 
@@ -124,6 +127,12 @@ pytest tests/docs/test_root_files.py -q
 
 echo "== 1l) Roadmap governance check =="
 pytest tests/docs/test_roadmap_governance.py -q
+
+echo "== 1n) Seed-auto execution contract check =="
+python3 tools/checks/check_seed_auto_execution_contract.py
+
+echo "== 1o) Host-semantics ratchet check =="
+python3 tools/checks/check_host_semantics_ratchet.py
 
 echo "== 1m) L4 execution contract check =="
 # Derive wave-id from codex branch name only when TASKS.md is in the scope

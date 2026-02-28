@@ -96,6 +96,11 @@ _INDICATOR_CMD_RE = re.compile(r"indicator_collection_command:\s*(.+?)(?:\.\s|$)
 _BOOTSTRAP_POLICY_RE = re.compile(r"(?<!`)bootstrap_endgame_policy:\s*([A-Z_]+)")
 _BOOT0_TRACK_RE = re.compile(r"(?<!`)boot0_track_id:\s*([A-Za-z0-9]+)")
 _BOOT0_PROGRESS_RE = re.compile(r"(?<!`)boot0_progress_state:\s*([A-Z]+)")
+_UNBLOCKS_WAVE_RE = re.compile(r"unblocks_wave_id:\s*([A-Za-z0-9_-]+)")
+_UNBLOCKS_BLOCKER_RE = re.compile(r"unblocks_runtime_blocker:\s*(.+?)(?:\.\s|$)")
+_WORKLOAD_TARGET_RE = re.compile(r"(?<!`)workload_target:\s*([A-Za-z0-9_/-]+)")
+_WAVE_ID_TOKEN_RE = re.compile(r"^wave-[a-z0-9][a-z0-9_-]*$")
+_RUNTIME_BLOCKER_TOKEN_RE = re.compile(r"^(RT-[A-Za-z0-9][A-Za-z0-9_-]*|INV_[A-Z0-9_]+)$")
 
 # Rolling window size
 ROLLING_WINDOW = 3
@@ -141,6 +146,42 @@ VALID_BOOT0_TRACK_IDS = frozenset({
 # Valid Boot0 progress states
 VALID_BOOT0_PROGRESS_STATES = frozenset({"ADVANCE", "HOLD", "DEFER"})
 
+# Required workload target for L4_STRUCTURAL notes (RCX-first semantic destination).
+VALID_WORKLOAD_TARGETS = frozenset({
+    "ontology_promotion",
+    "rcx_engine_cycle",
+    "seed_auto_execution",
+    "execution_layer_truth",
+    "recurrence_exhaustion",
+})
+
+# Proof binding: workload target → required contract test files.
+# If a file list is non-empty, enforce() checks:
+#   1. Files exist on disk (hard fail if missing)
+#   2. At least one is in changed scope OR referenced in gate scripts
+#   3. evidence_command references at least one test module name
+WORKLOAD_TARGET_EVIDENCE = {
+    "seed_auto_execution": [
+        "mu/tests/structural/test_seed_auto_execution_contract.py",
+        "mu/tests/tools/test_check_seed_auto_execution_contract.py",
+    ],
+    "rcx_engine_cycle": [
+        "mu/tests/structural/test_rcx_engine_workload_contract.py",
+    ],
+    "execution_layer_truth": [
+        "mu/tests/structural/test_execution_layer_truth_contract.py",
+    ],
+    "ontology_promotion": [],
+    "recurrence_exhaustion": [],
+}
+
+# Gate scripts that run contract tests (proof binding alternative to changed scope).
+GATE_SCRIPTS = (
+    "tools/audits/audit_fast.sh",
+    "tools/audits/audit_all.sh",
+    "scripts/green_gate.sh",
+)
+
 # Required provenance keys in indicator JSON (Wave 18+)
 INDICATOR_PROVENANCE_KEYS = {
     "repeat_run_raw_seconds": list,
@@ -171,6 +212,72 @@ def is_runtime_file(filepath: str) -> bool:
 def is_l4_gate_test(filepath: str) -> bool:
     """Check if a file is under tests/l4_gates/ (canonical or physical mu/ path)."""
     return filepath.startswith("tests/l4_gates/") or filepath.startswith("mu/tests/l4_gates/")
+
+
+def _is_evidence_in_gate_scripts(evidence_files: list[str]) -> bool:
+    """Check if any evidence file path/module appears in gate scripts."""
+    for script_rel in GATE_SCRIPTS:
+        script_path = Path(script_rel)
+        if not script_path.exists():
+            continue
+        try:
+            content = script_path.read_text()
+        except OSError:
+            continue
+        for ef in evidence_files:
+            module_name = Path(ef).stem
+            if module_name in content or ef in content:
+                return True
+    return False
+
+
+def _check_proof_binding(
+    workload_target: str,
+    evidence_command: str | None,
+    changed_files: list[str],
+) -> list[str]:
+    """Check proof binding for a workload target.
+
+    Returns list of errors (empty = valid).
+    """
+    evidence_files = WORKLOAD_TARGET_EVIDENCE.get(workload_target, [])
+    if not evidence_files:
+        return []
+
+    errors: list[str] = []
+
+    # 1. Contract test files must exist on disk
+    for ef in evidence_files:
+        if not Path(ef).exists():
+            errors.append(
+                f"Workload target '{workload_target}' proof binding: "
+                f"contract test file missing on disk: {ef}"
+            )
+
+    # 2. At least one evidence file in changed scope OR in gate scripts
+    # Normalize paths: changed_files may use mu/ prefix or not
+    in_scope = any(
+        ef in changed_files or ef.replace("mu/", "", 1) in changed_files
+        for ef in evidence_files
+    )
+    gate_bound = _is_evidence_in_gate_scripts(evidence_files)
+    if not in_scope and not gate_bound:
+        errors.append(
+            f"Workload target '{workload_target}' proof binding: "
+            f"none of {evidence_files} appear in changed files or gate scripts"
+        )
+
+    # 3. evidence_command must reference at least one test module name
+    if evidence_command:
+        module_names = [Path(ef).stem for ef in evidence_files]
+        if not any(mn in evidence_command for mn in module_names):
+            errors.append(
+                f"Workload target '{workload_target}' proof binding: "
+                f"evidence_command must reference one of {module_names}. "
+                f"Got: {evidence_command!r}"
+            )
+
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +423,9 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
         bootstrap_policy_match = _BOOTSTRAP_POLICY_RE.search(body_text)
         boot0_track_match = _BOOT0_TRACK_RE.search(body_text)
         boot0_progress_match = _BOOT0_PROGRESS_RE.search(body_text)
+        unblocks_wave_match = _UNBLOCKS_WAVE_RE.search(body_text)
+        unblocks_blocker_match = _UNBLOCKS_BLOCKER_RE.search(body_text)
+        workload_target_match = _WORKLOAD_TARGET_RE.search(body_text)
 
         notes.append({
             "wave_id": wave_id,
@@ -340,6 +450,9 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "bootstrap_endgame_policy": bootstrap_policy_match.group(1).strip() if bootstrap_policy_match else None,
             "boot0_track_id": boot0_track_match.group(1).strip() if boot0_track_match else None,
             "boot0_progress_state": boot0_progress_match.group(1).strip() if boot0_progress_match else None,
+            "unblocks_wave_id": unblocks_wave_match.group(1).strip() if unblocks_wave_match else None,
+            "unblocks_runtime_blocker": unblocks_blocker_match.group(1).strip() if unblocks_blocker_match else None,
+            "workload_target": workload_target_match.group(1).strip() if workload_target_match else None,
             "date": date_str,
             "raw": body,
         })
@@ -351,11 +464,83 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
 # Anti-stagnation checks
 # ---------------------------------------------------------------------------
 
-def check_consecutive_maintenance(notes: list[dict]) -> bool:
-    """Check if the two most recent Class-marked waves are both MAINTENANCE."""
+def check_consecutive_maintenance(notes: list[dict]) -> tuple[bool, list[str]]:
+    """Check consecutive MAINTENANCE cadence rule.
+
+    Two consecutive MAINTENANCE waves are allowed ONLY if the current wave
+    provides both:
+      - unblocks_wave_id: <id>
+      - unblocks_runtime_blocker: <finding-id or invariant>
+
+    Returns (passed, errors).
+    """
     if len(notes) < 2:
-        return False
-    return notes[0]["wave_class"] == "MAINTENANCE" and notes[1]["wave_class"] == "MAINTENANCE"
+        return True, []
+    if not (notes[0]["wave_class"] == "MAINTENANCE" and notes[1]["wave_class"] == "MAINTENANCE"):
+        return True, []
+
+    # Consecutive MAINTENANCE detected — check for bypass fields
+    current = notes[0]
+    has_unblocks_wave = current.get("unblocks_wave_id") is not None
+    has_unblocks_blocker = current.get("unblocks_runtime_blocker") is not None
+
+    if not (has_unblocks_wave and has_unblocks_blocker):
+        missing = []
+        if not has_unblocks_wave:
+            missing.append("unblocks_wave_id")
+        if not has_unblocks_blocker:
+            missing.append("unblocks_runtime_blocker")
+        return False, [
+            "Consecutive MAINTENANCE cap exceeded. "
+            "Max 1 consecutive MAINTENANCE without L4_STRUCTURAL or L4_ENABLER. "
+            f"To bypass, add: {', '.join(missing)} to the tracker note."
+        ]
+
+    # Bypass fields are present; enforce runtime-blocker quality and linkage.
+    errors: list[str] = []
+    unblocks_wave_id = str(current.get("unblocks_wave_id") or "").strip()
+    runtime_blocker = str(current.get("unblocks_runtime_blocker") or "").strip()
+
+    if not _WAVE_ID_TOKEN_RE.match(unblocks_wave_id):
+        errors.append(
+            "Consecutive MAINTENANCE bypass requires unblocks_wave_id in canonical form "
+            "'wave-<id>'."
+        )
+    if unblocks_wave_id == current.get("wave_id"):
+        errors.append(
+            "Consecutive MAINTENANCE bypass cannot self-reference unblocks_wave_id."
+        )
+
+    # If referenced wave is already present in tracker history, it must not be MAINTENANCE.
+    referenced = next((n for n in notes[1:] if n.get("wave_id") == unblocks_wave_id), None)
+    if referenced and referenced.get("wave_class") == "MAINTENANCE":
+        errors.append(
+            "Consecutive MAINTENANCE bypass requires unblocks_wave_id to reference a non-"
+            "MAINTENANCE wave when the target wave exists in tracker history."
+        )
+
+    blocker_class = current.get("primary_blocker_class")
+    if blocker_class not in {"INTEGRATION", "PERFORMANCE"}:
+        errors.append(
+            "Consecutive MAINTENANCE bypass requires primary_blocker_class to be "
+            "INTEGRATION or PERFORMANCE (runtime blocker), not DESIGN."
+        )
+
+    blocker_token_valid = bool(_RUNTIME_BLOCKER_TOKEN_RE.match(runtime_blocker))
+    if not blocker_token_valid and _is_low_signal_proof(runtime_blocker):
+        errors.append(
+            "Consecutive MAINTENANCE bypass requires a non-placeholder "
+            "unblocks_runtime_blocker token."
+        )
+    elif not blocker_token_valid:
+        errors.append(
+            "Consecutive MAINTENANCE bypass requires unblocks_runtime_blocker to use "
+            "runtime/invariant token form (e.g., RT-005 or INV_CROSS_SUBSTRATE_PARITY)."
+        )
+
+    if errors:
+        return False, errors
+    return True, []
 
 
 def check_rolling_window(notes: list[dict]) -> tuple[bool, list[str]]:
@@ -793,12 +978,11 @@ def enforce(
         if not alias_ok:
             errors.extend(alias_errors)
 
-        # Consecutive maintenance cap
-        if wave_class == "MAINTENANCE" and check_consecutive_maintenance(notes):
-            errors.append(
-                "Consecutive MAINTENANCE cap exceeded. "
-                "Max 1 consecutive MAINTENANCE without L4_STRUCTURAL or L4_ENABLER."
-            )
+        # Consecutive maintenance cadence rule
+        if wave_class == "MAINTENANCE":
+            cm_ok, cm_errors = check_consecutive_maintenance(notes)
+            if not cm_ok:
+                errors.extend(cm_errors)
 
         # MAINTENANCE metadata
         if wave_class == "MAINTENANCE":
@@ -831,6 +1015,28 @@ def enforce(
                 f"Invalid primary_invariant_id: '{invariant_id}'. "
                 f"Must be one of: {sorted(VALID_INVARIANT_IDS)}"
             )
+
+        # Workload target (STRUCTURAL only): bind wave to RCX semantic destination.
+        if wave_class == "L4_STRUCTURAL":
+            workload_target = current.get("workload_target")
+            if workload_target is None:
+                errors.append(
+                    "L4_STRUCTURAL missing workload_target in tracker note "
+                    "(required for RCX-first semantic destination binding)"
+                )
+            elif workload_target not in VALID_WORKLOAD_TARGETS:
+                errors.append(
+                    f"Invalid workload_target: '{workload_target}'. "
+                    f"Must be one of: {sorted(VALID_WORKLOAD_TARGETS)}"
+                )
+            else:
+                # Proof binding: workload target evidence files
+                pb_errors = _check_proof_binding(
+                    workload_target,
+                    current.get("evidence_command"),
+                    changed_files,
+                )
+                errors.extend(pb_errors)
 
         # Progress proof (required for STRUCTURAL + ENABLER)
         if wave_class in ("L4_STRUCTURAL", "L4_ENABLER"):
