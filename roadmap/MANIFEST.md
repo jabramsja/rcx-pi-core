@@ -83,6 +83,26 @@ Governance lane status (SINK or VECTOR) does not remove active evidence docs fro
 | [`mu/docs/core/G8CpsFeasibility.v0.md`](../mu/docs/core/G8CpsFeasibility.v0.md) | H1-H3 hypotheses and experimental results (D001-D003) |
 | [`mu/docs/core/L4DecisionCard.v0.md`](../mu/docs/core/L4DecisionCard.v0.md) | Decision cards (D001-D004) with evidence and outcomes |
 
+## Active Core Specifications
+
+These `mu/docs/core/` documents have DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTATION and must remain listed here for discoverability. Enforced by `tests/docs/test_manifest_discoverability.py`.
+
+| Document | TYPE | Domain |
+|----------|------|--------|
+| [`mu/docs/core/BootstrapStructuralBridge.v0.md`](../mu/docs/core/BootstrapStructuralBridge.v0.md) | DESIGN_SPEC | Structural bridge bootstrap |
+| [`mu/docs/core/EVAL_SEED.v0.md`](../mu/docs/core/EVAL_SEED.v0.md) | DESIGN_SPEC | Seed evaluation |
+| [`mu/docs/core/EngineNewFixContract.v0.md`](../mu/docs/core/EngineNewFixContract.v0.md) | IMPLEMENTATION | Engine fix contract |
+| [`mu/docs/core/EngineNewsStructural.v0.md`](../mu/docs/core/EngineNewsStructural.v0.md) | IMPLEMENTATION | Engine news (structural) |
+| [`mu/docs/core/MetaCircularKernel.v0.md`](../mu/docs/core/MetaCircularKernel.v0.md) | IMPLEMENTATION | Meta-circular kernel |
+| [`mu/docs/core/MuDagAbiSpike.v0.md`](../mu/docs/core/MuDagAbiSpike.v0.md) | DESIGN_SPEC | DAG ABI spike |
+| [`mu/docs/core/ObserverEventContract.v0.md`](../mu/docs/core/ObserverEventContract.v0.md) | DESIGN_SPEC | Observer events |
+| [`mu/docs/core/OntologyPromotionContract.v0.md`](../mu/docs/core/OntologyPromotionContract.v0.md) | DESIGN_SPEC | Ontology promotion |
+| [`mu/docs/core/OperatorExhaustion.v0.md`](../mu/docs/core/OperatorExhaustion.v0.md) | IMPLEMENTATION | Operator exhaustion |
+| [`mu/docs/core/RCXEngine.v0.md`](../mu/docs/core/RCXEngine.v0.md) | DESIGN_SPEC | Engine pipeline |
+| [`mu/docs/core/RCXKernel.v0.md`](../mu/docs/core/RCXKernel.v0.md) | DESIGN_SPEC | Kernel architecture |
+| [`mu/docs/core/RecursiveKernel.v0.md`](../mu/docs/core/RecursiveKernel.v0.md) | DESIGN_SPEC | Recursive kernel |
+| [`mu/docs/core/recurrence_v2_design.md`](../mu/docs/core/recurrence_v2_design.md) | IMPLEMENTATION | Recurrence v2 |
+
 ## Why This Architecture
 
 - **Single source of truth**: State in STATUS.md, authorization in TASKS.md

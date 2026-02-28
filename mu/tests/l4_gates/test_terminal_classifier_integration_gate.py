@@ -22,6 +22,8 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.step_mu import (  # noqa: E402
+    ENGINE_EXIT_REASONS,
+    TERMINAL_KINDS,
     _is_terminal_shape,  # ANTICHEAT_OK: gate tests verify runtime predicate delegation
     _is_engine_terminal,  # ANTICHEAT_OK: gate tests verify runtime predicate delegation
     classify_terminal_kind,
@@ -170,16 +172,27 @@ class TestBehavioralParityUnchanged:
 
 
 class TestNoRegressionToExistingGates:
-    """Verify existing gate tests still importable and not broken by refactoring."""
+    """Behavioral regression: each test exercises a production entrypoint from its gate domain."""
 
-    def test_classification_parity_gate_importable(self):
-        import tests.l4_gates.test_terminal_classification_parity_gate  # noqa: F401
+    def test_classification_parity_gate_behavioral(self):
+        """Parity gate domain: classifier produces valid terminal kinds."""
+        value = {"closure_detected": True, "final_result": 42, "tau_step": 3}
+        kind = classify_terminal_kind(value)
+        assert kind in TERMINAL_KINDS, f"Unknown terminal kind: {kind}"
 
-    def test_engine_exit_reason_gate_importable(self):
-        import tests.l4_gates.test_engine_exit_reason_gate  # noqa: F401
+    def test_engine_exit_reason_gate_behavioral(self):
+        """Exit reason gate domain: ENGINE_EXIT_REASONS has expected members."""
+        expected = {"closure", "exhaustion", "stall", "completed"}
+        assert ENGINE_EXIT_REASONS == frozenset(expected)
 
-    def test_engine_terminal_event_gate_importable(self):
-        import tests.l4_gates.test_engine_terminal_event_gate  # noqa: F401
+    def test_engine_terminal_event_gate_behavioral(self):
+        """Terminal event gate domain: only engine terminals trigger observer events."""
+        engine = {"value": 1, "closure_detected": True, "tau_step": 3,
+                  "exhaustion_detected": False, "operator_frozen": None,
+                  "frozen_set": [], "action": "none", "stall": False}
+        assert _is_engine_terminal(engine) is True
+        recurrence = {"closure_detected": True, "final_result": 42, "tau_step": 3}
+        assert _is_engine_terminal(recurrence) is False
 
     def test_js_parity_suite_passes(self):
         """JS substrate still passes all its internal tests."""
