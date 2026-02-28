@@ -19,7 +19,16 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parents[2]
+def _find_repo_root() -> Path:
+    """Find repo root by searching upward for pyproject.toml."""
+    d = Path(__file__).resolve().parent
+    while d != d.parent:
+        if (d / "pyproject.toml").exists():
+            return d
+        d = d.parent
+    return Path(__file__).resolve().parents[2]
+
+REPO_ROOT = _find_repo_root()
 L4_GATES_DIR = REPO_ROOT / "mu" / "tests" / "l4_gates"
 
 # ---------------------------------------------------------------------------

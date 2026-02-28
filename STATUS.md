@@ -168,7 +168,25 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Semantic Policy Lock:** See [`mu/docs/core/NorthStarSemantics.v0.md`](mu/docs/core/NorthStarSemantics.v0.md) for canonical policies on undefined-as-structure, zero canonicalization, bounded non-closure, and routing tie-break deferral.
 
-**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). Runtime enforcement active since A12 (PR #436, merged 2026-02-26). A13 displaced hardcoded lock-set authority to registry-derived rule. A14 added producer-side candidate emission with opt-in flag, typed fail-closed guards, and overwrite protection (PR #438, merged 2026-02-27). A15/T1 hardened boundary parity (HF2 max_steps clamp, `_has_nonlinear_vars` bounded guard) and completed full L4 gate theater sweep (664 tests, 0 theater-risk remaining) (PR #440, merged 2026-02-27).
+**Ontology Promotion Contract:** See [`mu/docs/core/OntologyPromotionContract.v0.md`](mu/docs/core/OntologyPromotionContract.v0.md) for invariants governing ontology promotion (INV_OPROMO_1 through INV_OPROMO_4). Runtime enforcement active since A12 (PR #436, merged 2026-02-26). A13 displaced hardcoded lock-set authority to registry-derived rule. A14 added producer-side candidate emission with opt-in flag, typed fail-closed guards, and overwrite protection (PR #438, merged 2026-02-27). A15/T1 hardened boundary parity (HF2 max_steps clamp, `_has_nonlinear_vars` bounded guard) and completed full L4 gate theater sweep (PR #440, merged 2026-02-27). A16 gated the JS test-dispatch seam behind `RCX_TEST_MODE` with typed override validation (PR #442, merged 2026-02-27). A17 added opt-in boundary evidence collection with strict one-shot semantics and no-overwrite guard (PR #443, merged 2026-02-27). A18-P0 closed P0 JS parity/stall-proof gaps (typed denormalize guard, `isValidMu` entry checks, `mu_equal` stall checks) (PR #445, merged 2026-02-27).
+
+### RCX-First Semantic Destination (Truth-Sync)
+
+**What is real right now:**
+- Wave contract/gate enforcement exists (`tools/checks/enforce_l4_execution_contract.py`) and blocks many process regressions.
+- EngineNew cycle is mapped to runtime evidence (`mu/tests/structural/test_engine_cycle_mapping.py`), with explicit note that host loop primitive handling remains for step 10.
+- Canonical workload/program references exist: `RCXEngineNew.pdf`, `mu/docs/core/RCXEngine.v0.md`, `mu/docs/core/UniversalEval.v0.md`.
+
+**Core gap to close:**
+- Current compliance strongly enforces process shape; it is weaker at enforcing semantic destination (host semantics reduction and workload-level execution truth).
+- Structural waves can report deltas without proving a monotonic host-semantics reduction trend.
+- UniversalEval is design/symbolic and must remain VECTOR-only unless explicitly promoted with runtime evidence.
+
+**Ontology Automation Staging Policy (research safety lock):**
+- Stage 1 (active baseline): collect-only evidence/candidate emission; no automatic ontology commit side effects.
+- Stage 2 (gated proposals): candidate proposals require typed invariant checks + explicit review gate.
+- Stage 3 (conditional auto-promote): allowlist-only classes with rollback/quarantine and measured false-lock threshold.
+- Any wave that exceeds the currently approved stage must fail L4 contract unless founder override is explicitly declared.
 
 **L4 Status:** G8 evidence loop closed (D001-D007). D008 recommendation: DEFER. Awaiting founder verdict.
 H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN pending production-pilot outcome. See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
@@ -228,6 +246,32 @@ ln -sf ../../tools/pre-commit-doc-check .git/hooks/pre-commit
 ```
 
 The pre-commit hook checks doc consistency, debt ceiling, targeted staged-file checks, and tracker sync. See `CLAUDE.md` for full workflow details.
+
+### Anti-Theater Protocol
+
+**Definition:** Theater-risk tests have no meaningful assertions — import-only checks, vacuous assertions, tautologies. The AST classifier (`check_gate_behavioral_pairs.py`) identifies these; the ratchet (`check_theater_risk_ratchet.py`) prevents regressions.
+
+**Ratchet pass criteria:**
+- No new theater_risk methods outside allowlist
+- No expired allowlist entries
+- No `real`-classified entries in allowlist (must be fixed)
+
+**Allowlist governance:**
+- Location: `tools/checks/theater_allowlist.json`
+- Every entry requires: `classification`, `defer_reason`, `owner`, `expires_on`, `target_wave`
+- `heuristic_false_positive` and `uncertain` may be allowlisted with expiry
+- `real` must be fixed, never allowlisted
+
+**How to triage theater_risk:**
+1. Read the flagged test method source
+2. Classify: **Real** (no production call, no assertion), **Heuristic false-positive** (classifier limitation — test actually validates via implicit exception, subprocess exit code, mock assertion), or **Uncertain**
+3. Real → fix now (convert to behavioral test calling production entrypoint)
+4. Uncertain → fix now or defer with explicit `defer_reason` + `target_wave`
+5. False-positive → allowlist with justification
+
+### Manifest Discoverability Ratchet
+
+Every `mu/docs/core/*.md` with DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTATION must appear in `roadmap/MANIFEST.md`. Enforced fail-closed by `tests/docs/test_manifest_discoverability.py`. Adding a new active core spec without a MANIFEST entry will fail the test suite.
 
 ## Testing Tiers
 
@@ -641,8 +685,8 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-27 (A15/T1 merge: boundary parity hardening + OPROMO gate theater sweep, PR #440 squash 18d7028)
-**Next milestone:** Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both NEXT contracts closed. See TASKS.md for next VECTOR promotion candidate.
+**Last updated:** 2026-02-27 (truth-sync through A18-P0 plus MAINT-M2/M3 protocol/docs updates; see TASKS.md Ra tracker notes)
+**Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET, 2026-02-20); post-closure execution continues on L4_STRUCTURAL promotion-path work (post A18-P0), with explicit workload targets `rcx_engine.v1` (RCXEngineNew cycle) and UniversalEval/UniversalRecursion path evidence. Canonical authorization remains TASKS.md.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
 - rcx_pi_rust → ARCHIVED, rcx_omega → ARCHIVED, worlds_json → MAINTAIN (at `mu/worlds_json/`)

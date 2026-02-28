@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-02-27T12:00:00Z",
+  "total_theater_risk": 11,
+  "entries": [
+    {
+      "file": "mu/tests/l4_gates/test_boot1_default_routing_gate.py",
+      "class": "TestPythonBoot1Default",
+      "method": "test_explicit_false_routes_trampoline",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Classifier does not detect mock.patch + assert_called_once_with as meaningful assertion",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_boot1_default_routing_gate.py",
+      "class": "TestPythonBoot1Default",
+      "method": "test_explicit_true_matches_default",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Classifier does not detect mock.patch + assert_called_once_with as meaningful assertion",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_boot1_default_routing_gate.py",
+      "class": "TestPythonBoot1Default",
+      "method": "test_omitted_flag_routes_boot1",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Classifier does not detect mock.patch + assert_called_once_with as meaningful assertion",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+      "class": "TestBuilderPython",
+      "method": "test_builder_output_passes_a12_validator",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; production validator raises on failure",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+      "class": "TestEmissionEdgeCases",
+      "method": "test_producer_passes_reserved_field_check",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; production validator raises on failure",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+      "class": "TestINV_OPROMO_3",
+      "method": "test_valid_seed_and_projection_passes",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; production validator raises on failure",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+      "class": "TestPythonValidRecord",
+      "method": "test_valid_record_passes",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; production validator raises on failure",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_terminal_classification_parity_gate.py",
+      "class": "TestHemisphereSourceLock",
+      "method": "test_js_seed_registration_loads",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Subprocess assertion in _js_eval() helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_terminal_classifier_integration_gate.py",
+      "class": "TestNoRegressionToExistingGates",
+      "method": "test_classification_parity_gate_importable",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Import-check pattern; no-exception-is-pass verifies module is loadable",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A19"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_terminal_classifier_integration_gate.py",
+      "class": "TestNoRegressionToExistingGates",
+      "method": "test_engine_exit_reason_gate_importable",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Import-check pattern; no-exception-is-pass verifies module is loadable",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A19"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_terminal_classifier_integration_gate.py",
+      "class": "TestNoRegressionToExistingGates",
+      "method": "test_engine_terminal_event_gate_importable",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Import-check pattern; no-exception-is-pass verifies module is loadable",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A19"
+    }
+  ]
+}

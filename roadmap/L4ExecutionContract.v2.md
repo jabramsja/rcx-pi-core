@@ -51,7 +51,7 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 1. **Rolling structural quota:** In every rolling window of the last 3 class-marked waves, ≥1 must be `L4_STRUCTURAL`. Violation fails the checker.
 
-2. **Consecutive MAINTENANCE cap:** Max 1 consecutive MAINTENANCE without an L4_STRUCTURAL or L4_ENABLER wave.
+2. **Consecutive MAINTENANCE cap:** Max 1 consecutive MAINTENANCE without an L4_STRUCTURAL or L4_ENABLER wave. Bypass is allowed only when the current MAINTENANCE note declares both `unblocks_wave_id` and `unblocks_runtime_blocker`, with runtime blocker provenance (`primary_blocker_class` must be `INTEGRATION` or `PERFORMANCE`, and blocker token must be runtime/invariant form such as `RT-*` or `INV_*`).
 
 3. **NO_OP throttling:** Same `target_gate_id` cannot use `no_op_proof` twice in the last 3 class-marked waves. Only bypass: `FOUNDER_OVERRIDE:<id>` token.
 
@@ -81,6 +81,10 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 16. **Collector fail-closed policy:** The canonical indicator collector (`tools/metrics/collect_l4_wave_indicators.py`) must exit non-zero if any probe command fails (non-zero exit code) or if parity-diff output cannot be parsed. Silent coercion of failures to zero/default values is prohibited. Collector version ≥2.1.0 enforces this.
 
+17. **RCX-first semantic destination binding (L4_STRUCTURAL):** Every L4_STRUCTURAL wave must declare `workload_target` (enum) to bind runtime changes to an RCX semantic objective, not generic process churn. Valid values: `ontology_promotion`, `rcx_engine_cycle`, `seed_auto_execution`, `execution_layer_truth`, `recurrence_exhaustion`.
+
+18. **Workload target proof binding (L4_STRUCTURAL):** When a `workload_target` has registered evidence files in `WORKLOAD_TARGET_EVIDENCE`, the enforcer checks: (a) contract test files exist on disk (hard fail if missing), (b) at least one evidence file appears in the wave's changed files or is referenced in gate scripts (`audit_fast.sh`, `audit_all.sh`, `green_gate.sh`), (c) `evidence_command` references at least one evidence test module name. Targets with empty evidence lists are exempt (proof binding not yet established).
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
@@ -109,8 +113,11 @@ Required fields by class (machine-parseable `key: value` format):
 | `primary_invariant_id` | required | required | required |
 | `progress_proof_before` | required | required | — |
 | `progress_proof_after` | required | required | — |
+| `workload_target` | required (enum) | — | — |
 | `no_op_proof` | — | — | required |
 | `defer_reason_code` | — | — | required |
+| `unblocks_wave_id` | — | — | required for consecutive MAINTENANCE bypass |
+| `unblocks_runtime_blocker` | — | — | required for consecutive MAINTENANCE bypass |
 | `indicator_artifact_ref` | required | required | required |
 | `indicator_collection_command` | required | required | required |
 | `bootstrap_endgame_policy` | required | required | required |

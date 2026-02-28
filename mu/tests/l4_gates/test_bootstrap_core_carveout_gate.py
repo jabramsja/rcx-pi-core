@@ -12,6 +12,7 @@ Enforces:
 
 import re
 import subprocess
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from tests.repo_root import REPO_ROOT
 JS_DIR = REPO_ROOT / "mu" / "host" / "js"
 BOOTSTRAP_CORE = JS_DIR / "core" / "bootstrap_core.js"
 EVAL_STEP_SHIM = JS_DIR / "eval_step.js"
+PRIMITIVE_SET_FILE = REPO_ROOT / "tools" / "checks" / "bootstrap_primitive_set.json"
 
 
 def _read_all_js_source() -> str:
@@ -120,17 +122,33 @@ class TestNoInlineTestsInRuntime:
 # 4. Primitive marker named set
 # ---------------------------------------------------------------------------
 
-EXPECTED_PRIMITIVES = {"eval_step", "max_steps", "stack_guard", "projection_loader"}
+def _expected_primitives() -> set[str]:
+    data = json.loads(PRIMITIVE_SET_FILE.read_text())
+    assert data.get("schema_version") == 1, (
+        f"Unexpected schema_version in {PRIMITIVE_SET_FILE}: {data.get('schema_version')}"
+    )
+    vals = data.get("expected_named_set")
+    assert isinstance(vals, list) and vals, (
+        f"expected_named_set missing/empty in {PRIMITIVE_SET_FILE}"
+    )
+    assert all(isinstance(v, str) and v for v in vals), (
+        f"expected_named_set must contain non-empty strings in {PRIMITIVE_SET_FILE}"
+    )
+    assert len(vals) == len(set(vals)), (
+        f"expected_named_set has duplicates in {PRIMITIVE_SET_FILE}"
+    )
+    return set(vals)
 
 class TestPrimitiveMarkerNamedSet:
     """BOOTSTRAP_PRIMITIVE markers exist for exactly the named set."""
 
     def test_primitive_markers_exact_set(self):
+        expected_primitives = _expected_primitives()
         source = _read_all_js_source()
         # Find all BOOTSTRAP_PRIMITIVE: <name> markers
         markers = set(re.findall(r"BOOTSTRAP_PRIMITIVE:\s*(\w+)", source))
-        missing = EXPECTED_PRIMITIVES - markers
-        extra = markers - EXPECTED_PRIMITIVES
+        missing = expected_primitives - markers
+        extra = markers - expected_primitives
         assert not missing, f"Missing BOOTSTRAP_PRIMITIVE markers: {missing}"
         assert not extra, f"Extra BOOTSTRAP_PRIMITIVE markers: {extra}"
 

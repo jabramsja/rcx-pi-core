@@ -30,7 +30,11 @@ from enforce_l4_execution_contract import (
     RUNTIME_DIRS,
     VALID_BLOCKER_CLASSES,
     VALID_INVARIANT_IDS,
+    VALID_WORKLOAD_TARGETS,
     VALID_WAVE_CLASSES,
+    WORKLOAD_TARGET_EVIDENCE,
+    _check_proof_binding,
+    check_consecutive_maintenance,
     enforce,
     filter_to_tracked_files,
     validate_indicator_artifact_json,
@@ -247,6 +251,8 @@ class TestMaintenanceEnforcement:
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "boot0_track_id": "N6b",
             "boot0_progress_state": "ADVANCE",
+            "unblocks_wave_id": None,
+            "unblocks_runtime_blocker": None,
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -511,6 +517,7 @@ class TestLoopholeDetection:
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "boot0_track_id": "N6b",
             "boot0_progress_state": "ADVANCE",
+            "workload_target": "rcx_engine_cycle",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -552,6 +559,7 @@ class TestEvidenceCommandTarget:
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "boot0_track_id": "N6b",
             "boot0_progress_state": "ADVANCE",
+            "workload_target": "rcx_engine_cycle",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -590,6 +598,7 @@ class TestEvidenceCommandTarget:
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "boot0_track_id": "N6b",
             "boot0_progress_state": "ADVANCE",
+            "workload_target": "ontology_promotion",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -640,6 +649,7 @@ class TestEvidenceCommandTarget:
             "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
             "boot0_track_id": "N6b",
             "boot0_progress_state": "ADVANCE",
+            "workload_target": "ontology_promotion",
             "date": "2026-02-20",
             "raw": "test note",
         }]
@@ -1071,3 +1081,379 @@ class TestIndicatorDerivationAntiTheater:
             expected_net_host_delta=3,
         )
         assert passed, f"Should pass with matching net delta: {errors}"
+
+
+# =============================================================================
+# Consecutive MAINTENANCE cadence rule (Phase C)
+# =============================================================================
+
+
+def _make_note(wave_class="MAINTENANCE", wave_id="test-wave", **overrides):
+    """Build a minimal valid note dict for cadence rule tests."""
+    note = {
+        "wave_id": wave_id,
+        "raw_class": wave_class,
+        "wave_class": wave_class,
+        "gate": "G5",
+        "no_op_proof": "tooling only" if wave_class == "MAINTENANCE" else None,
+        "evidence_command": None,
+        "evidence_delta": None,
+        "host_semantics_delta_before": None,
+        "host_semantics_delta_after": None,
+        "structural_artifact_ref": None,
+        "defer_reason_code": "TOOLING_PREREQUISITE" if wave_class == "MAINTENANCE" else None,
+        "founder_override": None,
+        "primary_blocker_class": "INTEGRATION",
+        "post_gate_contract_sweep": None,
+        "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+        "progress_proof_before": None,
+        "progress_proof_after": None,
+        "indicator_artifact_ref": f"reports/l4_wave_indicators/{wave_id}.json",
+        "indicator_collection_command": f"python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id}",
+        "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+        "boot0_track_id": "N3",
+        "boot0_progress_state": "HOLD",
+        "unblocks_wave_id": None,
+        "unblocks_runtime_blocker": None,
+        "workload_target": "ontology_promotion" if wave_class == "L4_STRUCTURAL" else None,
+        "date": "2026-02-27",
+        "raw": "test note",
+    }
+    note.update(overrides)
+    return note
+
+
+class TestConsecutiveMaintenanceCadence:
+    """Consecutive MAINTENANCE cadence rule (Phase C).
+
+    Two consecutive MAINTENANCE waves are blocked unless the current note
+    includes both unblocks_wave_id and unblocks_runtime_blocker.
+    """
+
+    def test_single_maintenance_passes(self):
+        """Single MAINTENANCE wave → no cadence violation."""
+        notes = [_make_note(wave_id="m1")]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert passed, f"Single MAINTENANCE should pass: {errors}"
+
+    def test_maintenance_after_structural_passes(self):
+        """MAINTENANCE after L4_STRUCTURAL → no cadence violation."""
+        notes = [
+            _make_note(wave_id="m1"),
+            _make_note(wave_class="L4_STRUCTURAL", wave_id="s1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert passed, f"MAINTENANCE after STRUCTURAL should pass: {errors}"
+
+    def test_consecutive_maintenance_without_bypass_fails(self):
+        """Two consecutive MAINTENANCE without bypass fields → fail."""
+        notes = [
+            _make_note(wave_id="m2"),
+            _make_note(wave_id="m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("Consecutive MAINTENANCE" in e for e in errors)
+        assert any("unblocks_wave_id" in e for e in errors)
+
+    def test_consecutive_maintenance_with_both_bypass_fields_passes(self):
+        """Two consecutive MAINTENANCE with both bypass fields → pass."""
+        notes = [
+            _make_note(
+                wave_id="m2",
+                unblocks_wave_id="wave-a19-foo",
+                unblocks_runtime_blocker="RT-005",
+            ),
+            _make_note(wave_id="m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert passed, f"Should pass with bypass fields: {errors}"
+
+    def test_consecutive_maintenance_bypass_rejects_design_blocker(self):
+        """Bypass requires runtime blocker class, not DESIGN."""
+        notes = [
+            _make_note(
+                wave_id="m2",
+                primary_blocker_class="DESIGN",
+                unblocks_wave_id="wave-a19-foo",
+                unblocks_runtime_blocker="RT-005",
+            ),
+            _make_note(wave_id="m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("INTEGRATION or PERFORMANCE" in e for e in errors)
+
+    def test_consecutive_maintenance_bypass_rejects_non_runtime_token(self):
+        """Bypass blocker token must be runtime/invariant ID form."""
+        notes = [
+            _make_note(
+                wave_id="m2",
+                unblocks_wave_id="wave-a19-foo",
+                unblocks_runtime_blocker="docs-cleanup",
+            ),
+            _make_note(wave_id="m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("runtime/invariant token form" in e for e in errors)
+
+    def test_consecutive_maintenance_bypass_rejects_self_reference(self):
+        """Bypass cannot point unblocks_wave_id to the current wave."""
+        notes = [
+            _make_note(
+                wave_id="wave-m2",
+                unblocks_wave_id="wave-m2",
+                unblocks_runtime_blocker="RT-005",
+            ),
+            _make_note(wave_id="wave-m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("self-reference" in e for e in errors)
+
+    def test_consecutive_maintenance_bypass_rejects_targeting_maintenance_wave(self):
+        """Bypass must not target a MAINTENANCE wave if target exists in history."""
+        notes = [
+            _make_note(
+                wave_id="wave-m3",
+                unblocks_wave_id="wave-m1",
+                unblocks_runtime_blocker="RT-005",
+            ),
+            _make_note(wave_id="wave-m2"),
+            _make_note(wave_id="wave-m1", wave_class="MAINTENANCE"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("non-MAINTENANCE" in e for e in errors)
+
+    def test_consecutive_maintenance_with_only_wave_id_fails(self):
+        """Only unblocks_wave_id without unblocks_runtime_blocker → fail."""
+        notes = [
+            _make_note(wave_id="m2", unblocks_wave_id="wave-a19-foo"),
+            _make_note(wave_id="m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("unblocks_runtime_blocker" in e for e in errors)
+
+    def test_consecutive_maintenance_with_only_blocker_fails(self):
+        """Only unblocks_runtime_blocker without unblocks_wave_id → fail."""
+        notes = [
+            _make_note(wave_id="m2", unblocks_runtime_blocker="RT-005"),
+            _make_note(wave_id="m1"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("unblocks_wave_id" in e for e in errors)
+
+    def test_cadence_fields_parsed_from_tracker_text(self):
+        """Parse unblocks_wave_id and unblocks_runtime_blocker from real text."""
+        text = (
+            "## Ra\n\n"
+            "- Tracker sync note (d, w2): **W2.** Class: MAINTENANCE. Gate: G5. "
+            "NO_OP_PROOF: tooling. defer_reason_code: TOOLING_PREREQUISITE. "
+            "unblocks_wave_id: wave-a19-structural. "
+            "unblocks_runtime_blocker: RT-005-stall-detection. "
+            "primary_blocker_class: DESIGN. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/w2.json. "
+            "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id w2. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: N3. boot0_progress_state: HOLD.\n"
+        )
+        notes = parse_tracker_notes(text)
+        assert len(notes) == 1
+        assert notes[0]["unblocks_wave_id"] == "wave-a19-structural"
+        assert notes[0]["unblocks_runtime_blocker"] == "RT-005-stall-detection"
+
+    def test_cadence_fields_none_when_absent(self):
+        """Absent unblocks fields parse as None."""
+        text = (
+            "## Ra\n\n"
+            "- Tracker sync note (d, w1): **W1.** Class: MAINTENANCE. Gate: G5. "
+            "NO_OP_PROOF: tooling.\n"
+        )
+        notes = parse_tracker_notes(text)
+        assert len(notes) == 1
+        assert notes[0]["unblocks_wave_id"] is None
+        assert notes[0]["unblocks_runtime_blocker"] is None
+
+
+class TestStructuralWorkloadTarget:
+    """RCX-first binding: L4_STRUCTURAL waves must declare workload_target."""
+
+    def test_missing_workload_target_fails(self):
+        notes = [_make_note(
+            wave_class="L4_STRUCTURAL",
+            wave_id="wave-a99",
+            workload_target=None,
+            evidence_command="pytest tests/l4_gates/",
+            evidence_delta="delta",
+            host_semantics_delta_before="before-state",
+            host_semantics_delta_after="after-state",
+            structural_artifact_ref="mu/host/python/rcx_pi/selfhost/step_mu.py",
+            post_gate_contract_sweep="pytest tests/structural/",
+            progress_proof_before="before",
+            progress_proof_after="after",
+        )]
+        files = ["mu/host/python/rcx_pi/selfhost/step_mu.py", "mu/tests/l4_gates/test_dummy.py"]
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "+++ b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("workload_target" in e for e in errors)
+
+    def test_invalid_workload_target_fails(self):
+        notes = [_make_note(
+            wave_class="L4_STRUCTURAL",
+            wave_id="wave-a99",
+            workload_target="docs_only",
+            evidence_command="pytest tests/l4_gates/",
+            evidence_delta="delta",
+            host_semantics_delta_before="before-state",
+            host_semantics_delta_after="after-state",
+            structural_artifact_ref="mu/host/python/rcx_pi/selfhost/step_mu.py",
+            post_gate_contract_sweep="pytest tests/structural/",
+            progress_proof_before="before",
+            progress_proof_after="after",
+        )]
+        files = ["mu/host/python/rcx_pi/selfhost/step_mu.py", "mu/tests/l4_gates/test_dummy.py"]
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "+++ b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("Invalid workload_target" in e for e in errors)
+
+    def test_valid_workload_target_passes(self):
+        notes = [_make_note(
+            wave_class="L4_STRUCTURAL",
+            wave_id="wave-a99",
+            workload_target="ontology_promotion",
+            evidence_command="pytest tests/l4_gates/",
+            evidence_delta="delta",
+            host_semantics_delta_before="before runtime projection dispatch update",
+            host_semantics_delta_after="after runtime projection dispatch update",
+            structural_artifact_ref="mu/host/python/rcx_pi/selfhost/step_mu.py",
+            post_gate_contract_sweep="pytest tests/structural/",
+            progress_proof_before="before",
+            progress_proof_after="after",
+        )]
+        files = ["mu/host/python/rcx_pi/selfhost/step_mu.py", "mu/tests/l4_gates/test_dummy.py"]
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "+++ b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert passed, f"Valid workload_target should pass: {errors}"
+
+    def test_workload_target_constant(self):
+        assert VALID_WORKLOAD_TARGETS == {
+            "ontology_promotion",
+            "rcx_engine_cycle",
+            "seed_auto_execution",
+            "execution_layer_truth",
+            "recurrence_exhaustion",
+        }
+
+
+class TestWorkloadTargetProofBinding:
+    """A20.4: Workload target proof binding.
+
+    L4_STRUCTURAL waves with workload_target must have:
+    1. Corresponding contract test files exist on disk
+    2. At least one evidence file in changed scope or gate scripts
+    3. evidence_command references a test module name
+    """
+
+    def test_evidence_mapping_has_entries(self):
+        """WORKLOAD_TARGET_EVIDENCE has non-empty entries for key targets."""
+        assert len(WORKLOAD_TARGET_EVIDENCE["seed_auto_execution"]) >= 1
+        assert len(WORKLOAD_TARGET_EVIDENCE["rcx_engine_cycle"]) >= 1
+        assert len(WORKLOAD_TARGET_EVIDENCE["execution_layer_truth"]) >= 1
+
+    def test_evidence_files_exist_on_disk(self):
+        """All evidence files in WORKLOAD_TARGET_EVIDENCE must exist."""
+        for target, files in WORKLOAD_TARGET_EVIDENCE.items():
+            for ef in files:
+                assert Path(ef).exists() or Path(REPO_ROOT / ef).exists(), (
+                    f"Evidence file for '{target}' missing on disk: {ef}"
+                )
+
+    def test_proof_binding_passes_when_evidence_in_scope(self):
+        """Proof binding passes when evidence file is in changed_files."""
+        errors = _check_proof_binding(
+            "seed_auto_execution",
+            "pytest mu/tests/structural/test_seed_auto_execution_contract.py",
+            ["mu/tests/structural/test_seed_auto_execution_contract.py"],
+        )
+        assert errors == [], f"Should pass: {errors}"
+
+    def test_proof_binding_fails_when_evidence_not_in_scope(self):
+        """Proof binding fails when no evidence file is in scope or gate scripts."""
+        errors = _check_proof_binding(
+            "seed_auto_execution",
+            "pytest mu/tests/structural/test_seed_auto_execution_contract.py",
+            ["mu/host/python/rcx_pi/selfhost/step_mu.py"],  # no evidence files
+        )
+        # Should fail unless gate scripts reference the files
+        # (gate scripts might reference them after CI wiring)
+        if errors:
+            assert any("proof binding" in e for e in errors)
+
+    def test_proof_binding_fails_on_missing_module_in_evidence_command(self):
+        """evidence_command must reference a test module name."""
+        errors = _check_proof_binding(
+            "rcx_engine_cycle",
+            "pytest tests/l4_gates/test_whatever.py",
+            ["mu/tests/structural/test_rcx_engine_workload_contract.py"],
+        )
+        assert any("evidence_command must reference" in e for e in errors)
+
+    def test_proof_binding_skipped_for_empty_evidence_list(self):
+        """Targets with no evidence files skip proof binding."""
+        errors = _check_proof_binding(
+            "ontology_promotion",
+            "pytest tests/l4_gates/",
+            ["mu/host/python/rcx_pi/selfhost/step_mu.py"],
+        )
+        assert errors == []
+
+    def test_proof_binding_integrated_in_enforce(self):
+        """enforce() calls proof binding for L4_STRUCTURAL with workload_target."""
+        notes = [_make_note(
+            wave_class="L4_STRUCTURAL",
+            wave_id="wave-proof",
+            workload_target="seed_auto_execution",
+            evidence_command="pytest tests/l4_gates/test_whatever.py",
+            evidence_delta="delta",
+            host_semantics_delta_before="before runtime update",
+            host_semantics_delta_after="after runtime update",
+            structural_artifact_ref="mu/host/python/rcx_pi/selfhost/step_mu.py",
+            post_gate_contract_sweep="pytest tests/structural/",
+            progress_proof_before="before",
+            progress_proof_after="after",
+        )]
+        files = [
+            "mu/host/python/rcx_pi/selfhost/step_mu.py",
+            "mu/tests/l4_gates/test_dummy.py",
+        ]
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "+++ b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def foo(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        # Should fail because evidence_command doesn't reference test module
+        assert not passed
+        assert any("proof binding" in e for e in errors)

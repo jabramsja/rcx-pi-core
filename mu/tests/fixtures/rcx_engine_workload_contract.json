@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "description": "Workload accuracy contract vectors (A20.1) — deterministic terminal invariants",
+    "created": "2026-02-28",
+    "seed": "rcx_engine.v1.json",
+    "version": "1.0.0"
+  },
+  "vectors": [
+    {
+      "id": "workload.identity_stall",
+      "description": "Identity projection stalls immediately; engine produces terminal with stall=true",
+      "input": {
+        "_run_engine": {
+          "projections": [{"id": "identity", "pattern": {"x": "x"}, "body": {"x": "x"}}],
+          "input": {"value": 1}
+        }
+      },
+      "expected_terminal_keys": ["value", "closure_detected", "tau_step", "exhaustion_detected", "operator_frozen", "frozen_set", "action", "stall"],
+      "expected_invariants": {
+        "stall": true,
+        "closure_detected": true,
+        "exhaustion_detected": false,
+        "action": "continue",
+        "tau_step": 1
+      }
+    },
+    {
+      "id": "workload.constant_closure",
+      "description": "Constant projection converges to fixed point; engine detects closure and stall",
+      "input": {
+        "_run_engine": {
+          "projections": [{"id": "const", "pattern": {"x": "x"}, "body": {"value": "fixed"}}],
+          "input": {"value": "start"}
+        }
+      },
+      "expected_terminal_keys": ["value", "closure_detected", "tau_step", "exhaustion_detected", "operator_frozen", "frozen_set", "action", "stall"],
+      "expected_invariants": {
+        "closure_detected": true,
+        "stall": true,
+        "action": "continue",
+        "tau_step": 1
+      }
+    },
+    {
+      "id": "workload.no_match_stall",
+      "description": "No-match projection stalls on input; engine detects closure from stall",
+      "input": {
+        "_run_engine": {
+          "projections": [{"id": "noop", "pattern": {"impossible": true}, "body": {"never": true}}],
+          "input": {"value": 1}
+        }
+      },
+      "expected_terminal_keys": ["value", "closure_detected", "tau_step", "exhaustion_detected", "operator_frozen", "frozen_set", "action", "stall"],
+      "expected_invariants": {
+        "stall": true,
+        "closure_detected": true,
+        "exhaustion_detected": false,
+        "action": "continue",
+        "tau_step": 1
+      }
+    }
+  ]
+}

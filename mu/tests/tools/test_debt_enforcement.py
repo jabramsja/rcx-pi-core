@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = ROOT.parent  # mu/ → repo root (for STATUS.md etc.)
 DEBT_DASHBOARD = ROOT / "tools" / "util" / "debt_dashboard.sh"
 CHECK_JS_DEBT = ROOT / "tools" / "checks" / "check_js_debt.sh"
+PRIMITIVE_SET_FILE = ROOT / "tools" / "checks" / "bootstrap_primitive_set.json"
 AUDIT_SCRIPT = ROOT / "tools" / "audits" / "audit_semantic_purity.sh"
 
 
@@ -38,6 +39,16 @@ def _run(args: list[str], cwd: Path | None = None, timeout: int = 60) -> subproc
         check=False,
         timeout=timeout,
     )
+
+
+def _expected_bootstrap_primitives() -> list[str]:
+    data = json.loads(PRIMITIVE_SET_FILE.read_text(encoding="utf-8"))
+    assert data.get("schema_version") == 1
+    vals = data.get("expected_named_set")
+    assert isinstance(vals, list) and vals
+    assert all(isinstance(v, str) and v for v in vals)
+    assert len(vals) == len(set(vals))
+    return sorted(vals)
 
 
 # -----------------------------------------------------------------------------
@@ -152,6 +163,69 @@ def test_check_js_debt_reports_runtime_loc_and_ast_ok_metrics():
     assert "AST_OK_JS:" in result.stdout
     assert "host_runtime_loc_js:" in result.stdout
     assert "host_test_loc_js:" in result.stdout
+
+
+# -----------------------------------------------------------------------------
+# Bootstrap Primitive Named-Set Tests (Phase 0 truth fix)
+# -----------------------------------------------------------------------------
+
+
+def test_check_js_debt_reports_bootstrap_named_set():
+    """check_js_debt.sh must report named-set metric, not raw token count."""
+    result = _run(["bash", str(CHECK_JS_DEBT)])
+    assert result.returncode == 0, (
+        f"check_js_debt.sh failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "BOOTSTRAP_PRIMITIVE (named set):" in result.stdout, (
+        f"Expected 'BOOTSTRAP_PRIMITIVE (named set):' in output.\n"
+        f"stdout:\n{result.stdout}"
+    )
+
+
+def test_check_js_debt_bootstrap_named_count_matches_canonical_set():
+    """Bootstrap primitive named set count must match canonical set size."""
+    expected_count = len(_expected_bootstrap_primitives())
+    result = _run(["bash", str(CHECK_JS_DEBT)])
+    assert result.returncode == 0
+    assert f"BOOTSTRAP_PRIMITIVE (named set): {expected_count}" in result.stdout, (
+        f"Expected named set count of {expected_count}.\nstdout:\n{result.stdout}"
+    )
+
+
+def test_check_js_debt_reports_raw_token_diagnostic():
+    """Raw token count reported as diagnostic (not a gate — must be >= named count)."""
+    expected_count = len(_expected_bootstrap_primitives())
+    result = _run(["bash", str(CHECK_JS_DEBT)])
+    assert result.returncode == 0
+    assert "BOOTSTRAP_PRIMITIVE (raw tokens):" in result.stdout, (
+        f"Expected raw token diagnostic line.\nstdout:\n{result.stdout}"
+    )
+    # Extract raw count — must be >= named count (4)
+    import re
+    match = re.search(r"BOOTSTRAP_PRIMITIVE \(raw tokens\):\s*(\d+)", result.stdout)
+    assert match, f"Could not parse raw token count from output.\nstdout:\n{result.stdout}"
+    raw_count = int(match.group(1))
+    assert raw_count >= expected_count, (
+        f"Raw token count ({raw_count}) must be >= named set count ({expected_count})"
+    )
+
+
+def test_check_js_debt_named_set_exact_members():
+    """Named set must contain all canonical primitive names."""
+    expected_primitives = _expected_bootstrap_primitives()
+    result = _run(["bash", str(CHECK_JS_DEBT)])
+    assert result.returncode == 0
+    # The named set line format: "BOOTSTRAP_PRIMITIVE (named set): 4  (eval_step, max_steps, ...)"
+    named_set_line = [
+        line for line in result.stdout.splitlines()
+        if "BOOTSTRAP_PRIMITIVE (named set):" in line
+    ]
+    assert len(named_set_line) == 1, f"Expected exactly one named-set line.\nstdout:\n{result.stdout}"
+    line = named_set_line[0]
+    for name in expected_primitives:
+        assert name in line, (
+            f"Missing primitive '{name}' in named-set line: {line}"
+        )
 
 
 def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():

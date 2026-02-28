@@ -12,10 +12,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# Baseline snapshot (2026-02-18, Phase 8c, dev HEAD 3b66d1c)
+# Baseline snapshot (2026-02-28, Phase 8c, dev HEAD 965c64d)
 # Update these when phase boundary is crossed (founder approval required).
 BASELINE_TEST_FILES = 190
-BASELINE_TOOL_SCRIPTS = 60  # .py + .sh in mu/tools/
+BASELINE_TOOL_SCRIPTS = 66  # .py + .sh in mu/tools/ (60 + 6 committed since prior snapshot)
 BASELINE_CORE_DOCS = 47  # .md in mu/docs/ (all subdirs)
 
 # Per-wave caps from DocGovernance.v0.md

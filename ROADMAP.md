@@ -23,17 +23,13 @@ Read first (canonical order defined in `roadmap/MANIFEST.md`):
 See `TASKS.md` NOW section for active items.
 
 **Next**
-1. Boot1 Recursive Loop Contract — Shadow-merge recursive kernel loop alongside trampoline. See `TASKS.md` NEXT.
+See `TASKS.md` NEXT section. Boot1 and Hemisphere contracts are already complete and archived in `TASKS.md` Ra.
 
 **Vector (Design Only)**
-1. Content-Addressed Mu (`roadmap/ContentAddressedMu.md`) — Hash-identity as substrate property. Levels 2-3 design only.
-2. Projection indexing design (existing in `TASKS.md`). Promote only if profiling shows projection matching is the dominant runtime cost.
+See `TASKS.md` VECTOR section for the active design lane and promotion criteria.
 
 **Sink (Parked)**
-1. Gates 6-8 (L4 Boot Chain) - per 9-agent advisor recommendation. Revisit when third substrate needed.
-2. Multi-value or concurrent execution.
-3. Performance-first optimizations.
-4. Projection caching optimization.
+See `TASKS.md` SINK section for parked items and explicit promotion rules.
 
 **Execution Contracts**
 - [`roadmap/L4ExecutionContract.v2.md`](roadmap/L4ExecutionContract.v2.md) — Wave classification policy v2 (L4_STRUCTURAL / L4_ENABLER / MAINTENANCE)

@@ -26,6 +26,7 @@ from enforce_l4_execution_contract import (
     NON_GATE_TEST_DOMAINS,
     VALID_BLOCKER_CLASSES,
     VALID_INVARIANT_IDS,
+    VALID_WORKLOAD_TARGETS,
     VALID_WAVE_CLASSES,
     check_consecutive_maintenance,
     check_founder_override_replay,
@@ -54,8 +55,12 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
           indicator_ref="reports/l4_wave_indicators/test-wave.json",
           indicator_cmd="python3 tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave",
           bootstrap_policy="SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
-          boot0_track="N6b", boot0_progress="ADVANCE"):
+          boot0_track="N6b", boot0_progress="ADVANCE",
+          unblocks_wave_id=None, unblocks_runtime_blocker=None,
+          workload_target=None):
     """Build a mock tracker note dict."""
+    if workload_target is None and wave_class == "L4_STRUCTURAL":
+        workload_target = "ontology_promotion"
     return {
         "wave_id": wave_id,
         "raw_class": raw_class or wave_class,
@@ -79,6 +84,9 @@ def _note(wave_class, gate="G8", raw_class=None, no_op_proof=None,
         "bootstrap_endgame_policy": bootstrap_policy,
         "boot0_track_id": boot0_track,
         "boot0_progress_state": boot0_progress,
+        "unblocks_wave_id": unblocks_wave_id,
+        "unblocks_runtime_blocker": unblocks_runtime_blocker,
+        "workload_target": workload_target,
         "date": "2026-02-20",
         "raw": f"Class: {raw_class or wave_class}",
     }
@@ -365,6 +373,56 @@ class TestStrictValidation:
     def test_valid_gate_id_accepted(self, gate_id):
         assert GATE_ID_RE.match(gate_id)
 
+    def test_structural_missing_workload_target_fails(self):
+        n = _note(
+            "L4_STRUCTURAL",
+            hd_before="pre structural runtime state",
+            hd_after="post structural runtime state",
+            sa_ref="ref",
+            sweep="pytest tests/structural/",
+        )
+        n["workload_target"] = None
+        notes = [n]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("workload_target" in e for e in errors)
+
+    def test_structural_invalid_workload_target_fails(self):
+        notes = [_note(
+            "L4_STRUCTURAL",
+            hd_before="pre structural runtime state",
+            hd_after="post structural runtime state",
+            sa_ref="ref",
+            sweep="pytest tests/structural/",
+            workload_target="docs_only",
+        )]
+        files = ["rcx_pi/selfhost/eval_seed.py", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/rcx_pi/selfhost/eval_seed.py b/rcx_pi/selfhost/eval_seed.py\n"
+            "+++ b/rcx_pi/selfhost/eval_seed.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            "+def new_func(): pass\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("Invalid workload_target" in e for e in errors)
+
+    def test_workload_targets_constant(self):
+        assert VALID_WORKLOAD_TARGETS == {
+            "ontology_promotion",
+            "rcx_engine_cycle",
+            "seed_auto_execution",
+            "execution_layer_truth",
+            "recurrence_exhaustion",
+        }
+
     def test_maintenance_runtime_touch_fails(self):
         passed, errors = enforce("MAINTENANCE", ["mu/host/js/eval_step.js"])
         assert not passed
@@ -375,7 +433,42 @@ class TestStrictValidation:
             _note("MAINTENANCE", no_op_proof="r1", defer_reason="d1"),
             _note("MAINTENANCE", no_op_proof="r2", defer_reason="d2"),
         ]
-        assert check_consecutive_maintenance(notes) is True
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed, "Consecutive MAINTENANCE without bypass should fail"
+        assert any("Consecutive MAINTENANCE" in e for e in errors)
+
+    def test_consecutive_maintenance_bypass_with_unblocks(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="r1", defer_reason="d1",
+                  unblocks_wave_id="wave-a19-foo",
+                  unblocks_runtime_blocker="RT-005"),
+            _note("MAINTENANCE", no_op_proof="r2", defer_reason="d2"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert passed, f"Consecutive MAINTENANCE with bypass fields should pass: {errors}"
+
+    def test_consecutive_maintenance_bypass_requires_runtime_blocker_class(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="r1", defer_reason="d1",
+                  blocker_class="DESIGN",
+                  unblocks_wave_id="wave-a19-foo",
+                  unblocks_runtime_blocker="RT-005"),
+            _note("MAINTENANCE", no_op_proof="r2", defer_reason="d2"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("INTEGRATION or PERFORMANCE" in e for e in errors)
+
+    def test_consecutive_maintenance_bypass_requires_runtime_token(self):
+        notes = [
+            _note("MAINTENANCE", no_op_proof="r1", defer_reason="d1",
+                  unblocks_wave_id="wave-a19-foo",
+                  unblocks_runtime_blocker="docs-cleanup"),
+            _note("MAINTENANCE", no_op_proof="r2", defer_reason="d2"),
+        ]
+        passed, errors = check_consecutive_maintenance(notes)
+        assert not passed
+        assert any("runtime/invariant token form" in e for e in errors)
 
 
 # =============================================================================
