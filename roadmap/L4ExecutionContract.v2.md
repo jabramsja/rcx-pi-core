@@ -85,6 +85,12 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 18. **Workload target proof binding (L4_STRUCTURAL):** When a `workload_target` has registered evidence files in `WORKLOAD_TARGET_EVIDENCE`, the enforcer checks: (a) contract test files exist on disk (hard fail if missing), (b) at least one evidence file appears in the wave's changed files or is referenced in gate scripts (`audit_fast.sh`, `audit_all.sh`, `green_gate.sh`), (c) `evidence_command` references at least one evidence test module name. Targets with empty evidence lists are exempt (proof binding not yet established).
 
+19. **Debt-removal integrity (marker-touch structural waves):** If an `L4_STRUCTURAL` wave changes runtime `@host_*` markers in diff scope, the checker runs `check_host_semantics_ratchet.py --json` and enforces: (a) strict total host-semantics decrease (`current_total < baseline_total`), and (b) zero per-category increases across both substrates (no category swaps such as recursion→iteration or builtin→iteration).
+
+20. **Baseline split-wave requirement (marker-touch structural waves):** If an `L4_STRUCTURAL` wave changes runtime `@host_*` markers, it MUST NOT modify `tools/checks/host_semantics_baseline.json` (or the `mu/`-prefixed equivalent) in the same wave. Baseline updates are bookkeeping and must run as a separate `MAINTENANCE` wave after structural proof is captured.
+
+21. **Semantic marker-removal proof (Rule A4):** For marker-touch `L4_STRUCTURAL` waves, each removed function-level marker must be backed by construct removal in the same function body (deterministic textual extraction): removing `@host_recursion` requires no self-call (A4.1), removing `@host_iteration` requires no loop constructs (A4.2), and removing `@host_builtin` requires no host-builtin call patterns (A4.3). Marker-only removals (marker deleted while construct remains) fail (A4.4).
+
 ## Founder Override
 
 Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02-20-boot1-exception`).
