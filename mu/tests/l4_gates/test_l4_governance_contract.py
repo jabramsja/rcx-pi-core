@@ -16,6 +16,7 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT / "tools" / "checks"))
+import enforce_l4_execution_contract as l4_contract
 
 from enforce_l4_execution_contract import (
     CANONICAL_BOOTSTRAP_POLICY,
@@ -293,6 +294,205 @@ class TestStructuralAntiTheater:
         )
         passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
         assert passed, f"Should pass with l4_gates ref: {errors}"
+
+
+# =============================================================================
+# Constraint 6b: Debt-removal integrity for marker-touch structural waves
+# =============================================================================
+
+class TestStructuralDebtRemovalIntegrity:
+    """Marker-touch structural waves must prove debt removal (no category movement)."""
+
+    @staticmethod
+    def _ratchet_payload(
+        *,
+        baseline_iteration: int = 10,
+        baseline_recursion: int = 5,
+        baseline_builtin: int = 2,
+        baseline_mutation: int = 0,
+        current_iteration: int = 10,
+        current_recursion: int = 4,
+        current_builtin: int = 2,
+        current_mutation: int = 0,
+    ) -> dict:
+        def _counts(it, rec, built, mut) -> dict:
+            return {
+                "python": {
+                    "host_iteration": 0,
+                    "host_recursion": 0,
+                    "host_builtin": 0,
+                    "host_mutation": 0,
+                },
+                "javascript": {
+                    "host_iteration": it,
+                    "host_recursion": rec,
+                    "host_builtin": built,
+                    "host_mutation": mut,
+                },
+            }
+
+        return {
+            "current": _counts(current_iteration, current_recursion, current_builtin, current_mutation),
+            "baseline_counts": _counts(baseline_iteration, baseline_recursion, baseline_builtin, baseline_mutation),
+            "passed": True,
+        }
+
+    @staticmethod
+    def _semantic_free_fn() -> list[dict[str, object]]:
+        return [{
+            "name": "markerTarget",
+            "start_line": 24,
+            "end_line": 80,
+            "markers": set(),
+            "body": "const z = 1;\nreturn z;",
+            "language": "javascript",
+        }]
+
+    def test_marker_touch_requires_strict_total_decrease(self, monkeypatch):
+        notes = [_note(
+            "L4_STRUCTURAL",
+            hd_before="before runtime host marker state",
+            hd_after="after runtime host marker state",
+            sa_ref="mu/host/js/eval_step.js",
+            evidence_command="pytest tests/l4_gates/",
+            sweep="pytest tests/structural/",
+        )]
+        files = ["mu/host/js/eval_step.js", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "-// @host_recursion old marker text\n"
+            "+// @host_recursion updated marker text\n"
+            "+const debt_integrity_probe = true;\n"
+        )
+        payload = self._ratchet_payload(
+            baseline_iteration=10, baseline_recursion=5,
+            current_iteration=10, current_recursion=5,
+        )
+        monkeypatch.setattr(l4_contract, "probe_host_semantics_ratchet", lambda: (payload, []))
+        monkeypatch.setattr(l4_contract, "_extract_functions_for_file", lambda _f, _s: self._semantic_free_fn())
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("strict debt reduction" in e for e in errors)
+
+    def test_governance_category_swap_rejected(self, monkeypatch):
+        notes = [_note(
+            "L4_STRUCTURAL",
+            hd_before="before runtime host marker state",
+            hd_after="after runtime host marker state",
+            sa_ref="mu/host/js/eval_step.js",
+            evidence_command="pytest tests/l4_gates/",
+            sweep="pytest tests/structural/",
+        )]
+        files = ["mu/host/js/eval_step.js", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "-// @host_recursion old marker text\n"
+            "+const governance_category_swap_probe = true;\n"
+        )
+        payload = self._ratchet_payload(
+            baseline_iteration=10, baseline_recursion=5,
+            current_iteration=11, current_recursion=3,
+        )  # total decreases, category swap forbidden
+        monkeypatch.setattr(l4_contract, "probe_host_semantics_ratchet", lambda: (payload, []))
+        monkeypatch.setattr(l4_contract, "_extract_functions_for_file", lambda _f, _s: self._semantic_free_fn())
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("cannot increase any host category" in e for e in errors)
+
+    def test_governance_flat_total_rejected(self, monkeypatch):
+        notes = [_note(
+            "L4_STRUCTURAL",
+            hd_before="before runtime host marker state",
+            hd_after="after runtime host marker state",
+            sa_ref="mu/host/js/eval_step.js",
+            evidence_command="pytest tests/l4_gates/",
+            sweep="pytest tests/structural/",
+        )]
+        files = ["mu/host/js/eval_step.js", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "-// @host_recursion old marker text\n"
+            "+const governance_flat_total_probe = true;\n"
+        )
+        payload = self._ratchet_payload(
+            baseline_iteration=10, baseline_recursion=4,
+            current_iteration=10, current_recursion=4,
+        )
+        monkeypatch.setattr(l4_contract, "probe_host_semantics_ratchet", lambda: (payload, []))
+        monkeypatch.setattr(l4_contract, "_extract_functions_for_file", lambda _f, _s: self._semantic_free_fn())
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("strict debt reduction" in e for e in errors)
+
+    def test_governance_baseline_edit_rejected(self):
+        notes = [_note(
+            "L4_STRUCTURAL",
+            hd_before="before runtime host marker state",
+            hd_after="after runtime host marker state",
+            sa_ref="mu/host/js/eval_step.js",
+            evidence_command="pytest tests/l4_gates/",
+            sweep="pytest tests/structural/",
+        )]
+        files = [
+            "mu/host/js/eval_step.js",
+            "mu/tools/checks/host_semantics_baseline.json",
+            "tests/l4_gates/test_gate.py",
+        ]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "-// @host_recursion old marker text\n"
+            "+// @host_recursion updated marker text\n"
+            "+const debt_integrity_probe = true;\n"
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("cannot modify tools/checks/host_semantics_baseline.json" in e for e in errors)
+
+    def test_governance_marker_only_removal_rejected(self, monkeypatch):
+        notes = [_note(
+            "L4_STRUCTURAL",
+            hd_before="before runtime host marker state",
+            hd_after="after runtime host marker state",
+            sa_ref="mu/host/js/eval_step.js",
+            evidence_command="pytest tests/l4_gates/",
+            sweep="pytest tests/structural/",
+        )]
+        files = ["mu/host/js/eval_step.js", "tests/l4_gates/test_gate.py"]
+        diff = (
+            "diff --git a/mu/host/js/eval_step.js b/mu/host/js/eval_step.js\n"
+            "+++ b/mu/host/js/eval_step.js\n"
+            "@@ -1,3 +1,4 @@\n"
+            "-// @host_recursion old marker text\n"
+            "+const governance_marker_only_probe = true;\n"
+        )
+        payload = self._ratchet_payload(
+            baseline_iteration=10, baseline_recursion=5,
+            current_iteration=10, current_recursion=4,
+        )
+        monkeypatch.setattr(l4_contract, "probe_host_semantics_ratchet", lambda: (payload, []))
+        monkeypatch.setattr(
+            l4_contract,
+            "_extract_functions_for_file",
+            lambda _f, _s: [{
+                "name": "markerTarget",
+                "start_line": 2,
+                "end_line": 40,
+                "markers": set(),
+                "body": "return markerTarget(x - 1);",
+                "language": "javascript",
+            }],
+        )
+        passed, errors = enforce("L4_STRUCTURAL", files, diff, notes)
+        assert not passed
+        assert any("Rule A4.1 violation" in e for e in errors)
 
 
 # =============================================================================

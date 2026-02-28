@@ -20,6 +20,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -47,6 +48,40 @@ RUNTIME_DIRS = (
     "rcx_pi/selfhost/",
     "tools/compilers/",
 )
+
+# Host-semantics debt categories (shared with ratchet checker).
+HOST_SEMANTIC_CATEGORIES = frozenset({
+    "host_iteration", "host_recursion", "host_builtin", "host_mutation",
+})
+
+# Baseline file is bookkeeping-only and cannot be changed in L4_STRUCTURAL waves.
+HOST_SEMANTICS_BASELINE_CANONICAL = "tools/checks/host_semantics_baseline.json"
+
+# Marker token matcher used for diff-level debt-movement detection.
+HOST_MARKER_RE = re.compile(
+    r"@(host_iteration|host_recursion|host_builtin|host_mutation)\b"
+)
+
+# Function extraction + construct detection patterns for semantic-removal proof (Rule A4).
+PY_DEF_RE = re.compile(r"^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PY_TOPLEVEL_BOUNDARY_RE = re.compile(r"^(def|class)\s+[A-Za-z_][A-Za-z0-9_]*\s*[\(:]")
+PY_LOOP_RE = re.compile(r"^\s*(for|while)\b", re.MULTILINE)
+PY_HOST_BUILTIN_CALL_RE = re.compile(
+    r"\b(isinstance|len|zip|set|any|all|sum|min|max|sorted|dict|list|tuple)\s*\("
+)
+
+JS_DEF_RE = re.compile(r"^function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+JS_LOOP_RE = re.compile(r"\b(for|while)\s*\(|\bdo\b")
+JS_HOST_BUILTIN_CALL_RE = re.compile(
+    r"\b(Array\.isArray|Object\.(?:keys|values|entries|hasOwn)|JSON\.(?:stringify|parse)|Math\.[A-Za-z0-9_]+|crypto\.[A-Za-z0-9_]+)\s*\("
+)
+JS_COMMENT_BLOCK_LINE_RE = re.compile(r"^\s*(/\*\*?|/?\*|//)")
+DIFF_HUNK_RE = re.compile(
+    r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@"
+)
+
+# Marker-to-function association tolerance: removed marker line must be close to function start.
+FUNCTION_MARKER_LINE_DISTANCE = 12
 
 # Comment-only patterns (Python and JS)
 COMMENT_ONLY_PATTERNS = [
@@ -214,6 +249,229 @@ def is_l4_gate_test(filepath: str) -> bool:
     return filepath.startswith("tests/l4_gates/") or filepath.startswith("mu/tests/l4_gates/")
 
 
+def _extract_python_functions(source: str) -> list[dict[str, object]]:
+    """Extract top-level Python function metadata (name, lines, markers, body)."""
+    lines = source.splitlines()
+    funcs: list[dict[str, object]] = []
+
+    for idx, line in enumerate(lines):
+        m = PY_DEF_RE.match(line)
+        if not m:
+            continue
+
+        name = m.group(1)
+        start = idx + 1  # 1-based
+
+        # Decorator stack immediately above function declaration.
+        markers: set[str] = set()
+        j = idx - 1
+        while j >= 0 and lines[j].strip().startswith("@"):
+            for cat in HOST_MARKER_RE.findall(lines[j]):
+                markers.add(cat)
+            j -= 1
+
+        end_idx = len(lines)
+        k = idx + 1
+        while k < len(lines):
+            if PY_TOPLEVEL_BOUNDARY_RE.match(lines[k]):
+                end_idx = k
+                break
+            k += 1
+        end = end_idx  # 1-based end-exclusive already converted by indexing usage below
+        body = "\n".join(lines[idx + 1:end_idx])
+
+        funcs.append({
+            "name": name,
+            "start_line": start,
+            "end_line": end,
+            "markers": markers,
+            "body": body,
+            "language": "python",
+        })
+
+    return funcs
+
+
+def _extract_js_functions(source: str) -> list[dict[str, object]]:
+    """Extract top-level JS function metadata (name, lines, markers, body)."""
+    lines = source.splitlines()
+    funcs: list[dict[str, object]] = []
+    fn_indices = [i for i, ln in enumerate(lines) if JS_DEF_RE.match(ln)]
+
+    for pos, idx in enumerate(fn_indices):
+        line = lines[idx]
+        m = JS_DEF_RE.match(line)
+        if not m:
+            continue
+        name = m.group(1)
+        start = idx + 1
+
+        markers: set[str] = set()
+        j = idx - 1
+        while j >= 0:
+            prev = lines[j].strip()
+            if not prev:
+                break
+            if not JS_COMMENT_BLOCK_LINE_RE.match(prev):
+                break
+            for cat in HOST_MARKER_RE.findall(lines[j]):
+                markers.add(cat)
+            j -= 1
+
+        next_idx = fn_indices[pos + 1] if pos + 1 < len(fn_indices) else len(lines)
+        end = next_idx
+        body = "\n".join(lines[idx + 1:next_idx])
+
+        funcs.append({
+            "name": name,
+            "start_line": start,
+            "end_line": end,
+            "markers": markers,
+            "body": body,
+            "language": "javascript",
+        })
+
+    return funcs
+
+
+def _extract_functions_for_file(filepath: str, source: str) -> list[dict[str, object]]:
+    """Extract function metadata for supported runtime languages."""
+    if filepath.endswith(".py"):
+        return _extract_python_functions(source)
+    if filepath.endswith(".js"):
+        return _extract_js_functions(source)
+    return []
+
+
+def _find_function_for_marker_anchor(
+    functions: list[dict[str, object]],
+    anchor_line: int,
+) -> dict[str, object] | None:
+    """Map a removed marker event to nearest function declaration in current file."""
+    if not functions:
+        return None
+
+    nearest_forward = None
+    nearest_delta = None
+    for fn in functions:
+        start = int(fn["start_line"])
+        delta = start - anchor_line
+        if delta < 0:
+            continue
+        if nearest_delta is None or delta < nearest_delta:
+            nearest_delta = delta
+            nearest_forward = fn
+
+    if nearest_forward is not None and nearest_delta is not None and nearest_delta <= FUNCTION_MARKER_LINE_DISTANCE:
+        return nearest_forward
+
+    # Fallback: if anchor falls within function span, use containing function.
+    for fn in functions:
+        start = int(fn["start_line"])
+        end = int(fn["end_line"])
+        if start <= anchor_line <= end:
+            return fn
+
+    return None
+
+
+def _function_has_self_call(function_meta: dict[str, object]) -> bool:
+    """Detect recursive self-call inside function body (declaration line excluded)."""
+    name = str(function_meta["name"])
+    body = str(function_meta["body"])
+    return bool(re.search(rf"\b{re.escape(name)}\s*\(", body))
+
+
+def _function_has_loop_construct(function_meta: dict[str, object]) -> bool:
+    """Detect host loop constructs in function body."""
+    body = str(function_meta["body"])
+    lang = str(function_meta["language"])
+    if lang == "python":
+        return bool(PY_LOOP_RE.search(body))
+    return bool(JS_LOOP_RE.search(body))
+
+
+def _function_has_host_builtin_calls(function_meta: dict[str, object]) -> bool:
+    """Detect host builtin calls in function body (textual heuristic)."""
+    body = str(function_meta["body"])
+    lang = str(function_meta["language"])
+    if lang == "python":
+        return bool(PY_HOST_BUILTIN_CALL_RE.search(body))
+    return bool(JS_HOST_BUILTIN_CALL_RE.search(body))
+
+
+def collect_runtime_marker_events(
+    diff_text: str,
+    runtime_files: list[str],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Collect added/removed @host_* marker events with file + anchor line."""
+    removed: list[dict[str, object]] = []
+    added: list[dict[str, object]] = []
+
+    current_file = None
+    new_line = 0
+
+    for line in diff_text.split("\n"):
+        if line.startswith("diff --git"):
+            parts = line.split(" b/")
+            current_file = parts[-1] if len(parts) >= 2 else None
+            new_line = 0
+            continue
+
+        if not current_file or current_file not in runtime_files:
+            continue
+
+        hunk = DIFF_HUNK_RE.match(line)
+        if hunk:
+            new_line = int(hunk.group(2))
+            continue
+
+        if line.startswith("+") and not line.startswith("+++"):
+            cats = HOST_MARKER_RE.findall(line)
+            for cat in cats:
+                added.append({
+                    "file": current_file,
+                    "category": cat,
+                    "anchor_line": new_line,
+                })
+            new_line += 1
+            continue
+
+        if line.startswith("-") and not line.startswith("---"):
+            cats = HOST_MARKER_RE.findall(line)
+            for cat in cats:
+                removed.append({
+                    "file": current_file,
+                    "category": cat,
+                    "anchor_line": new_line,
+                })
+            continue
+
+        if line.startswith(" "):
+            new_line += 1
+
+    return removed, added
+
+
+def _marker_event_has_added_counterpart(
+    removed_event: dict[str, object],
+    added_events: list[dict[str, object]],
+) -> bool:
+    """Return True if a removed marker is likely a same-category marker rewrite."""
+    rf = str(removed_event["file"])
+    rc = str(removed_event["category"])
+    ra = int(removed_event["anchor_line"])
+    for ev in added_events:
+        if str(ev["file"]) != rf:
+            continue
+        if str(ev["category"]) != rc:
+            continue
+        aa = int(ev["anchor_line"])
+        if abs(aa - ra) <= FUNCTION_MARKER_LINE_DISTANCE:
+            return True
+    return False
+
+
 def _is_evidence_in_gate_scripts(evidence_files: list[str]) -> bool:
     """Check if any evidence file path/module appears in gate scripts."""
     for script_rel in GATE_SCRIPTS:
@@ -370,6 +628,137 @@ def compute_runtime_exec_delta(diff_text: str, runtime_files: list[str]) -> tupl
                 if not is_comment_line(line):
                     deleted += 1
     return added, deleted, (added - deleted)
+
+
+def _canonical_repo_path(filepath: str) -> str:
+    """Canonicalize path for policy checks across root/mu symlink layouts."""
+    p = filepath.lstrip("./")
+    if p.startswith("mu/"):
+        p = p[3:]
+    return p
+
+
+def _touches_host_semantics_baseline(changed_files: list[str]) -> bool:
+    """Return True if host-semantics baseline file is modified."""
+    return any(
+        _canonical_repo_path(f) == HOST_SEMANTICS_BASELINE_CANONICAL
+        for f in changed_files
+    )
+
+
+def compute_runtime_host_marker_delta(
+    diff_text: str,
+    runtime_files: list[str],
+) -> tuple[dict[str, int], dict[str, int], int, int]:
+    """Compute added/removed @host_* markers in runtime files from a diff."""
+    added = {cat: 0 for cat in sorted(HOST_SEMANTIC_CATEGORIES)}
+    removed = {cat: 0 for cat in sorted(HOST_SEMANTIC_CATEGORIES)}
+
+    current_file = None
+    for line in diff_text.split("\n"):
+        if line.startswith("diff --git"):
+            parts = line.split(" b/")
+            current_file = parts[-1] if len(parts) >= 2 else None
+            continue
+        if not current_file or current_file not in runtime_files:
+            continue
+
+        if line.startswith("+") and not line.startswith("+++"):
+            matches = HOST_MARKER_RE.findall(line)
+            for cat in matches:
+                if cat in added:
+                    added[cat] += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            matches = HOST_MARKER_RE.findall(line)
+            for cat in matches:
+                if cat in removed:
+                    removed[cat] += 1
+
+    total_added = sum(added.values())
+    total_removed = sum(removed.values())
+    return added, removed, total_added, total_removed
+
+
+def probe_host_semantics_ratchet() -> tuple[dict | None, list[str]]:
+    """Run host-semantics ratchet checker in JSON mode (fail-closed helper)."""
+    checker = Path(__file__).resolve().with_name("check_host_semantics_ratchet.py")
+    if not checker.exists():
+        return None, [
+            f"Host-semantics ratchet probe unavailable: missing script at '{checker}'"
+        ]
+
+    proc = subprocess.run(
+        [sys.executable, str(checker), "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode not in (0, 1):
+        stderr = proc.stderr.strip() or "(no stderr)"
+        return None, [
+            "Host-semantics ratchet probe failed unexpectedly "
+            f"(exit {proc.returncode}): {stderr}"
+        ]
+
+    stdout = proc.stdout.strip()
+    if not stdout:
+        return None, ["Host-semantics ratchet probe returned empty JSON output"]
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        snippet = stdout[:220].replace("\n", " ")
+        return None, [
+            f"Host-semantics ratchet probe JSON parse failed: {exc}. Output: {snippet!r}"
+        ]
+
+    if not isinstance(data, dict):
+        return None, ["Host-semantics ratchet probe output must be a JSON object"]
+    if "current" not in data or "baseline_counts" not in data:
+        return None, [
+            "Host-semantics ratchet probe missing required keys: "
+            "'current' and/or 'baseline_counts'"
+        ]
+
+    return data, []
+
+
+def summarize_host_semantics_delta(ratchet_json: dict) -> tuple[int, int, list[dict[str, int | str]]]:
+    """Summarize baseline/current host debt totals and per-category increases."""
+    current = ratchet_json.get("current", {})
+    baseline = ratchet_json.get("baseline_counts", {})
+    increases: list[dict[str, int | str]] = []
+
+    baseline_total = 0
+    current_total = 0
+
+    for substrate in ("python", "javascript"):
+        base_sub = baseline.get(substrate, {}) if isinstance(baseline, dict) else {}
+        curr_sub = current.get(substrate, {}) if isinstance(current, dict) else {}
+        for cat in sorted(HOST_SEMANTIC_CATEGORIES):
+            b_raw = base_sub.get(cat, 0) if isinstance(base_sub, dict) else 0
+            c_raw = curr_sub.get(cat, 0) if isinstance(curr_sub, dict) else 0
+            try:
+                b_val = int(b_raw)
+                c_val = int(c_raw)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Non-integer host-semantics value for {substrate}.{cat}: "
+                    f"baseline={b_raw!r}, current={c_raw!r}"
+                ) from None
+
+            baseline_total += b_val
+            current_total += c_val
+            if c_val > b_val:
+                increases.append({
+                    "substrate": substrate,
+                    "category": cat,
+                    "baseline": b_val,
+                    "current": c_val,
+                    "delta": c_val - b_val,
+                })
+
+    return baseline_total, current_total, increases
 
 
 # ---------------------------------------------------------------------------
@@ -934,6 +1323,133 @@ def enforce(
                         "non-gate test domain (tests/engine/, tests/structural/, etc.). "
                         f"Got: {sweep_cmd!r}"
                     )
+
+        # Debt-removal integrity checks (marker-touch path):
+        # If a structural wave touches @host_* markers in runtime files,
+        # it must prove strict debt reduction without category movement.
+        if diff_text and runtime_files:
+            _, _, added_total, removed_total = compute_runtime_host_marker_delta(
+                diff_text,
+                runtime_files,
+            )
+            marker_touched = (added_total + removed_total) > 0
+            if marker_touched:
+                if _touches_host_semantics_baseline(changed_files):
+                    errors.append(
+                        "L4_STRUCTURAL with runtime @host_* marker changes cannot modify "
+                        "tools/checks/host_semantics_baseline.json in the same wave. "
+                        "Baseline ratchet updates must be a separate MAINTENANCE wave."
+                    )
+
+                if removed_total <= 0:
+                    errors.append(
+                        "L4_STRUCTURAL touched runtime @host_* markers but removed none. "
+                        "Debt movement/addition without removals is forbidden."
+                    )
+
+                ratchet_json, probe_errors = probe_host_semantics_ratchet()
+                if probe_errors:
+                    errors.extend(
+                        "FAIL-CLOSED debt-removal integrity: " + e for e in probe_errors
+                    )
+                elif ratchet_json is not None:
+                    try:
+                        baseline_total, current_total, increases = summarize_host_semantics_delta(
+                            ratchet_json
+                        )
+                    except ValueError as exc:
+                        errors.append(
+                            "FAIL-CLOSED debt-removal integrity: "
+                            f"invalid host-semantics probe data ({exc})"
+                        )
+                    else:
+                        if current_total >= baseline_total:
+                            errors.append(
+                                "L4_STRUCTURAL runtime @host_* marker change requires strict "
+                                f"debt reduction. Current total={current_total}, "
+                                f"baseline total={baseline_total}."
+                            )
+                        for inc in increases:
+                            errors.append(
+                                "L4_STRUCTURAL runtime @host_* marker change cannot increase "
+                                "any host category (no debt-category movement). "
+                                f"Found increase: {inc['substrate']}.{inc['category']} "
+                                f"{inc['baseline']}→{inc['current']} (+{inc['delta']})."
+                            )
+
+                # Rule A4 semantic-removal proof:
+                # marker removal must correspond to construct removal in function body.
+                removed_events, added_events = collect_runtime_marker_events(
+                    diff_text,
+                    runtime_files,
+                )
+                semantic_categories = {"host_recursion", "host_iteration", "host_builtin"}
+                function_cache: dict[str, list[dict[str, object]]] = {}
+                checked_pairs: set[tuple[str, str, str]] = set()
+
+                for ev in removed_events:
+                    category = str(ev["category"])
+                    if category not in semantic_categories:
+                        continue
+                    if _marker_event_has_added_counterpart(ev, added_events):
+                        continue  # marker text rewrite, not semantic removal
+
+                    filepath = str(ev["file"])
+                    if filepath not in function_cache:
+                        path = Path(filepath)
+                        if not path.exists():
+                            errors.append(
+                                "FAIL-CLOSED semantic removal proof: changed runtime file "
+                                f"missing on disk: {filepath}"
+                            )
+                            function_cache[filepath] = []
+                        else:
+                            try:
+                                source = path.read_text(encoding="utf-8")
+                            except OSError as exc:
+                                errors.append(
+                                    "FAIL-CLOSED semantic removal proof: cannot read runtime file "
+                                    f"{filepath}: {exc}"
+                                )
+                                function_cache[filepath] = []
+                            else:
+                                function_cache[filepath] = _extract_functions_for_file(filepath, source)
+
+                    functions = function_cache.get(filepath, [])
+                    if not functions:
+                        continue
+
+                    fn = _find_function_for_marker_anchor(functions, int(ev["anchor_line"]))
+                    if fn is None:
+                        # Marker likely from non-function summary comments (e.g., debt summary blocks).
+                        continue
+
+                    fn_name = str(fn["name"])
+                    pair_key = (filepath, fn_name, category)
+                    if pair_key in checked_pairs:
+                        continue
+                    checked_pairs.add(pair_key)
+
+                    # If marker still present for this function in current file, skip.
+                    fn_markers = fn.get("markers", set())
+                    if isinstance(fn_markers, set) and category in fn_markers:
+                        continue
+
+                    if category == "host_recursion" and _function_has_self_call(fn):
+                        errors.append(
+                            "Rule A4.1 violation: @host_recursion removed but function still "
+                            f"contains self-call ({filepath}:{fn_name})."
+                        )
+                    elif category == "host_iteration" and _function_has_loop_construct(fn):
+                        errors.append(
+                            "Rule A4.2 violation: @host_iteration removed but function still "
+                            f"contains loop constructs ({filepath}:{fn_name})."
+                        )
+                    elif category == "host_builtin" and _function_has_host_builtin_calls(fn):
+                        errors.append(
+                            "Rule A4.3/A4.4 violation: @host_builtin removed but function still "
+                            f"contains host builtin calls ({filepath}:{fn_name})."
+                        )
 
     # --- L4_ENABLER ---
     elif wave_class == "L4_ENABLER":
