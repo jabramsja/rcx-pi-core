@@ -154,11 +154,16 @@ function substitute(body, bindings, _depth = 0) {
  * Apply a single projection to input.
  */
 function applyProjection(projection, input) {
-  const bindings = match(projection.pattern, input);
+  // D005 Stage 0 pilot routing (default OFF — zero behavior change at rest)
+  const bindings = _stage0Pilot
+    ? stage0Match(projection.pattern, input)
+    : match(projection.pattern, input);
   if (bindings === NO_MATCH) {
     return NO_MATCH;
   }
-  let result = substitute(projection.body, bindings);
+  let result = _stage0Pilot
+    ? stage0Substitute(projection.body, bindings)
+    : substitute(projection.body, bindings);
 
   // Gate 3: Auto-denormalize output when body uses normalized dict format.
   if (typeof projection.body === 'object' && projection.body !== null &&
@@ -273,6 +278,122 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
   return { result: current, steps: maxSteps, stalled: false, trace };
 }
 
+// ---------------------------------------------------------------------------
+// Stage 0 micro-kernel (D005 production pilot)
+// Pure-merge match + substitute. Parallel path to match/substitute.
+// See L4DecisionCard.v0.md D005.
+// ---------------------------------------------------------------------------
+
+let _stage0Pilot = false; // Module-level pilot flag (default OFF)
+
+function setStage0Pilot(value) {
+  _stage0Pilot = !!value;
+}
+
+/**
+ * Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure.
+ */
+function stage0Match(pattern, input, bindings, _depth = 0) {
+  if (_depth > MAX_DEPTH) {
+    return NO_MATCH;
+  }
+  const current = bindings ?? Object.create(null);
+
+  // Variable site
+  if (isVar(pattern)) {
+    const name = pattern.var;
+    if (Object.hasOwn(current, name)) {
+      if (muHashControlCached(current[name]) !== muHashControlCached(input)) {
+        return NO_MATCH;
+      }
+      return current;
+    }
+    const merged = Object.create(null);
+    for (const [k, v] of Object.entries(current)) { merged[k] = v; }
+    merged[name] = input;
+    return merged;
+  }
+
+  // Null
+  if (pattern === null) {
+    return input === null ? current : NO_MATCH;
+  }
+
+  // Primitives (=== handles bool/int distinction in JS)
+  if (typeof pattern !== 'object') {
+    return pattern === input ? current : NO_MATCH;
+  }
+
+  // Array
+  if (Array.isArray(pattern)) {
+    if (!Array.isArray(input) || pattern.length !== input.length) {
+      return NO_MATCH;
+    }
+    let merged = current;
+    for (let i = 0; i < pattern.length; i++) {
+      merged = stage0Match(pattern[i], input[i], merged, _depth + 1);
+      if (merged === NO_MATCH) return NO_MATCH;
+    }
+    return merged;
+  }
+
+  // Object (Gate-3: allow pattern to omit _type when input has _type="list")
+  if (typeof pattern === 'object') {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      return NO_MATCH;
+    }
+    const pKeys = new Set(Object.keys(pattern));
+    const iKeys = new Set(Object.keys(input));
+    if (pKeys.size !== iKeys.size) {
+      const inputExtra = [...iKeys].filter(k => !pKeys.has(k));
+      const patternExtra = [...pKeys].filter(k => !iKeys.has(k));
+      const typeIsList = (input._type === 'list');
+      if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) {
+        return NO_MATCH;
+      }
+    } else {
+      for (const k of pKeys) {
+        if (!iKeys.has(k)) return NO_MATCH;
+      }
+    }
+    let merged = current;
+    for (const k of pKeys) {
+      merged = stage0Match(pattern[k], input[k], merged, _depth + 1);
+      if (merged === NO_MATCH) return NO_MATCH;
+    }
+    return merged;
+  }
+
+  return NO_MATCH;
+}
+
+/**
+ * Stage 0 substitute: recursive tree walk. Throws on unbound variable.
+ */
+function stage0Substitute(body, bindings, _depth = 0) {
+  if (_depth > MAX_DEPTH) {
+    throw new Error(`Stage 0 substitute depth exceeded ${MAX_DEPTH}`);
+  }
+  if (body === null || typeof body !== 'object') {
+    return body;
+  }
+  if (isVar(body)) {
+    const name = body.var;
+    if (!Object.hasOwn(bindings, name)) {
+      throw new Error(`Unbound variable: ${name}`);
+    }
+    return bindings[name];
+  }
+  if (Array.isArray(body)) {
+    return body.map(elem => stage0Substitute(elem, bindings, _depth + 1));
+  }
+  const result = Object.create(null);
+  for (const [k, v] of Object.entries(body)) {
+    result[k] = stage0Substitute(v, bindings, _depth + 1);
+  }
+  return result;
+}
+
 module.exports = {
   match,
   substitute,
@@ -283,4 +404,7 @@ module.exports = {
   isKernelIntermediate,
   makeUndefinedMotif,
   NO_MATCH,
+  stage0Match,
+  stage0Substitute,
+  setStage0Pilot,
 };

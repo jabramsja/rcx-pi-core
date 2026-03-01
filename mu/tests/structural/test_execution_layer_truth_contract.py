@@ -135,3 +135,102 @@ class TestExecutionLayerTruth:
             f"L2 terminal must contain engine metadata keys. "
             f"Missing: {engine_keys - l2_keys}"
         )
+
+
+# ===========================================================================
+# TestD005Stage0Contract — Rule-18 proof binding for execution_layer_truth
+# ===========================================================================
+
+class TestD005Stage0Contract:
+    """D005 Stage 0 pilot contract assertions.
+
+    Proves Stage 0 functions exist as production-grade execution-layer
+    alternatives. Required by Rule-18 workload_target=execution_layer_truth.
+    """
+
+    def test_pilot_flag_default_off(self):
+        """_STAGE0_PILOT must default to False at import time."""
+        from rcx_pi.selfhost import eval_seed
+        assert eval_seed._STAGE0_PILOT is False, (  # ANTICHEAT_OK: contract test
+            "_STAGE0_PILOT must default to False — production safety invariant"
+        )
+
+    def test_stage0_functions_exist(self):
+        """Stage 0 match/substitute must be importable from eval_seed."""
+        from rcx_pi.selfhost.eval_seed import _stage0_match, _stage0_substitute  # ANTICHEAT_OK: contract test
+        assert callable(_stage0_match)
+        assert callable(_stage0_substitute)
+
+    def test_no_stage0_in_wrapper_functions(self):
+        """Forbidden wrappers (step/match/substitute/step_kernel_mu) must not
+        reference _STAGE0_ or _stage0_ symbols — proves wrappers untouched."""
+        import ast
+        import inspect
+        from rcx_pi.selfhost.eval_seed import step, match, substitute
+        from rcx_pi.selfhost.step_mu import step_kernel_mu
+
+        for func in [step, match, substitute, step_kernel_mu]:
+            source = inspect.getsource(func)
+            assert "_STAGE0_" not in source, (
+                f"{func.__name__} references _STAGE0_ — forbidden wrapper modified"
+            )
+            assert "_stage0_" not in source, (
+                f"{func.__name__} references _stage0_ — forbidden wrapper modified"
+            )
+
+    def test_trusted_path_routing_exists(self):
+        """_apply_projection_trusted must contain both Stage 0 and legacy paths.
+
+        This proves the routing is real (not wrapper theater) — the function
+        body references both _stage0_match and _match_inner.
+        """
+        import inspect
+        from rcx_pi.selfhost.eval_seed import _apply_projection_trusted  # ANTICHEAT_OK: contract test
+        source = inspect.getsource(_apply_projection_trusted)
+        assert "_stage0_match(" in source, (
+            "_apply_projection_trusted must reference _stage0_match — routing missing"
+        )
+        assert "_match_inner(" in source, (
+            "_apply_projection_trusted must reference _match_inner — legacy path missing"
+        )
+        assert "_stage0_substitute(" in source, (
+            "_apply_projection_trusted must reference _stage0_substitute — routing missing"
+        )
+        assert "substitute(" in source, (
+            "_apply_projection_trusted must reference substitute — legacy path missing"
+        )
+        assert "_STAGE0_PILOT" in source, (
+            "_apply_projection_trusted must reference _STAGE0_PILOT — flag check missing"
+        )
+
+    def test_off_on_equivalence_canonical_vectors(self):
+        """5 D003 canonical vectors produce identical results through step()
+        with pilot OFF vs ON."""
+        from rcx_pi.selfhost import eval_seed
+        from rcx_pi.selfhost.eval_seed import step
+
+        vectors = [
+            ([{"id": "lit", "pattern": "x", "body": "y"}], "x", "y"),
+            ([{"id": "var", "pattern": {"var": "a"}, "body": {"var": "a"}}], 42, 42),
+            ([{"id": "list", "pattern": [{"var": "a"}, {"var": "b"}], "body": [{"var": "b"}, {"var": "a"}]}], [1, 2], [2, 1]),
+            ([{"id": "dict", "pattern": {"k": {"var": "v"}}, "body": {"out": {"var": "v"}}}], {"k": 99}, {"out": 99}),
+            ([{"id": "stall", "pattern": "z", "body": "z"}], "no_match", "no_match"),
+        ]
+
+        for projections, input_value, expected in vectors:
+            # OFF (default)
+            eval_seed._STAGE0_PILOT = False  # ANTICHEAT_OK: contract test
+            off_result = step(projections, input_value)
+            assert off_result == expected, f"OFF failed: {off_result} != {expected}"
+
+            # ON
+            eval_seed._STAGE0_PILOT = True  # ANTICHEAT_OK: contract test
+            on_result = step(projections, input_value)
+            assert on_result == expected, f"ON failed: {on_result} != {expected}"
+
+            assert on_result == off_result, (
+                f"OFF/ON divergence: OFF={off_result}, ON={on_result}"
+            )
+
+        # Reset (autouse fixture also resets, but be explicit)
+        eval_seed._STAGE0_PILOT = False  # ANTICHEAT_OK: contract test

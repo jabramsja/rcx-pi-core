@@ -350,6 +350,109 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
     return NO_MATCH
 
 
+# ---------------------------------------------------------------------------
+# Stage 0 micro-kernel (D005 production pilot)
+# Pure-merge match + substitute. Parallel path to _match_inner/substitute.
+# Proves circular dependency is breakable. See L4DecisionCard.v0.md D005.
+# ---------------------------------------------------------------------------
+
+_STAGE0_PILOT = False  # Module-level pilot flag (default OFF, Slice C routing)
+
+
+def _stage0_match(pattern, input_value, bindings=None, _depth=0):
+    """Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure."""
+    if _depth > MAX_MU_DEPTH:
+        return NO_MATCH
+    current = bindings if bindings is not None else {}
+    # Variable site
+    if is_var(pattern):
+        name = get_var_name(pattern)
+        if name in current:
+            if mu_hash_control_cached(current[name]) != mu_hash_control_cached(input_value):
+                return NO_MATCH
+            return current
+        return {**current, name: input_value}
+    # None
+    if pattern is None:
+        return current if input_value is None else NO_MATCH
+    # Bool (before int — bool is subclass of int)
+    if isinstance(pattern, bool):
+        if isinstance(input_value, bool) and pattern == input_value:
+            return current
+        return NO_MATCH
+    # Int
+    if isinstance(pattern, int):
+        if isinstance(input_value, int) and not isinstance(input_value, bool):
+            if pattern == input_value:
+                return current
+        return NO_MATCH
+    # Float
+    if isinstance(pattern, float):
+        if isinstance(input_value, float) and pattern == input_value:
+            return current
+        return NO_MATCH
+    # String
+    if isinstance(pattern, str):
+        if isinstance(input_value, str) and pattern == input_value:
+            return current
+        return NO_MATCH
+    # List
+    if isinstance(pattern, list):
+        if not isinstance(input_value, list) or len(pattern) != len(input_value):
+            return NO_MATCH
+        merged = current
+        for p_elem, i_elem in zip(pattern, input_value):
+            merged = _stage0_match(p_elem, i_elem, merged, _depth + 1)
+            if merged is NO_MATCH:
+                return NO_MATCH
+        return merged
+    # Dict (Gate-3: allow pattern to omit _type when input has _type="list")
+    if isinstance(pattern, dict):
+        if not isinstance(input_value, dict):
+            return NO_MATCH
+        pattern_keys = set(pattern.keys())
+        input_keys = set(input_value.keys())
+        if pattern_keys != input_keys:
+            extra_is_type = (input_keys - pattern_keys == {"_type"})
+            no_pattern_extra = (len(pattern_keys - input_keys) == 0)
+            type_is_list = (input_value.get("_type") == "list")
+            if not (extra_is_type and no_pattern_extra and type_is_list):
+                return NO_MATCH
+        merged = current
+        for key in pattern:
+            merged = _stage0_match(pattern[key], input_value[key], merged, _depth + 1)
+            if merged is NO_MATCH:
+                return NO_MATCH
+        return merged
+    return NO_MATCH
+
+
+def _stage0_substitute(body, bindings, _depth=0):
+    """Stage 0 substitute: recursive tree walk. Raises on unbound variable."""
+    if _depth > MAX_MU_DEPTH:
+        raise RecursionError(f"Stage 0 substitute depth exceeded {MAX_MU_DEPTH}")
+    if body is None:
+        return None
+    if isinstance(body, (bool, int, float, str)):
+        return body
+    if isinstance(body, dict):
+        if is_var(body):
+            name = get_var_name(body)
+            if name not in bindings:
+                raise KeyError(f"Unbound variable: {name}")
+            return bindings[name]
+        pairs = []
+        for k, v in body.items():
+            pairs.append((k, _stage0_substitute(v, bindings, _depth + 1)))
+        return dict(pairs)
+    if isinstance(body, list):
+        result = []
+        for item in body:
+            result.append(_stage0_substitute(item, bindings, _depth + 1))
+        return result
+    return body
+
+
 @host_recursion(
     "Recursive tree traversal for variable substitution. "
     "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
@@ -537,12 +640,20 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     if isinstance(pattern, dict) and pattern.get("_type") == "dict":
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
-    bindings = _match_inner(pattern, input_value)
+
+    # D005 Stage 0 pilot routing (default OFF — zero behavior change at rest)
+    if _STAGE0_PILOT:
+        bindings = _stage0_match(pattern, input_value)
+    else:
+        bindings = _match_inner(pattern, input_value)
 
     if bindings is NO_MATCH:
         return NO_MATCH
 
-    result = substitute(body, bindings)
+    if _STAGE0_PILOT:
+        result = _stage0_substitute(body, bindings)
+    else:
+        result = substitute(body, bindings)
 
     if isinstance(body, dict) and body.get("_type") == "dict":
         from rcx_pi.selfhost.match_mu import denormalize_from_match
