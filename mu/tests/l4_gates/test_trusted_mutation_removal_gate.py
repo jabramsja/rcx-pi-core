@@ -293,23 +293,35 @@ class TestRatchetEvidence:
 # ===========================================================================
 
 class TestBaselineUntouched:
-    """Verify baseline file is not modified in this structural wave."""
+    """Verify baseline file is not co-staged with runtime files (Rule 20)."""
 
-    def test_baseline_file_not_staged(self):
-        """host_semantics_baseline.json must not be in staged files (Rule 20)."""
-        result = subprocess.run(
+    def test_baseline_not_co_staged_with_runtime(self):
+        """Rule 20: baseline + runtime in same commit is a structural violation."""
+        staged = set(subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        staged_files = result.stdout.strip().splitlines()
-        baseline_paths = [
+            capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.strip().splitlines())
+
+        baseline_paths = {
             "mu/tools/checks/host_semantics_baseline.json",
             "tools/checks/host_semantics_baseline.json",
-        ]
-        for bp in baseline_paths:
-            assert bp not in staged_files, (
-                f"{bp} is staged — baseline updates must be a separate "
-                f"MAINTENANCE wave (L4ExecutionContract.v2.md Rule 20)"
-            )
+        }
+        runtime_prefixes = (
+            "rcx_pi/selfhost/",
+            "mu/host/",
+            "mu/substrate/",
+            "mu/closures/",
+            "mu/bridge/",
+            "mu/programs/",
+            "mu/tools/compilers/",
+        )
+
+        baseline_staged = any(p in staged for p in baseline_paths)
+        runtime_staged = any(
+            any(f.startswith(pref) for pref in runtime_prefixes) for f in staged
+        )
+
+        assert not (baseline_staged and runtime_staged), (
+            "Rule 20 violation: baseline file co-staged with runtime/substrate files — "
+            "baseline updates must be a separate MAINTENANCE wave"
+        )

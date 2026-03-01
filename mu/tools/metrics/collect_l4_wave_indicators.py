@@ -37,7 +37,7 @@ class CollectorError(RuntimeError):
 
 RUNTIME_DIRS = (
     "mu/host/", "mu/substrate/", "mu/closures/", "mu/bridge/",
-    "mu/programs/", "rcx_pi/selfhost/", "tools/compilers/",
+    "mu/programs/", "rcx_pi/selfhost/", "mu/tools/compilers/",
 )
 
 COMMENT_ONLY_PATTERNS = [
