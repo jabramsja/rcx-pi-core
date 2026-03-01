@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # Update these when phase boundary is crossed (founder approval required).
 BASELINE_TEST_FILES = 190
 BASELINE_TOOL_SCRIPTS = 66  # .py + .sh in mu/tools/ (60 + 6 committed since prior snapshot)
-BASELINE_CORE_DOCS = 47  # .md in mu/docs/ (all subdirs)
+BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 TypedNumericEnvelopes.v0.md
 
 # Per-wave caps from DocGovernance.v0.md
 CAP_TEST_FILES = 70  # 40 core + 30 fuzzer
