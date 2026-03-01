@@ -295,11 +295,11 @@ def test_audit_semantic_purity_threshold_matches_status_md():
     dynamically from STATUS.md rather than hardcoding it, ensuring a single
     source of truth.
 
-    Current threshold: 12 (L2 floor - irreducible bootstrap substrate)
+    Current threshold: 11 (L2 floor - irreducible bootstrap substrate)
     - @host_recursion: 2 (eval_seed match/substitute)
     - @host_builtin: 3 (eval_seed, deep_eval)
     - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural)
-    - @host_mutation: 2 (eval_seed, deep_eval)
+    - @host_mutation: 1 (deep_eval only — eval_seed mutation removed via pure merge in CP-S1A)
     - AST_OK bootstrap: 2 (eval_seed comprehensions)
     """
     # Verify STATUS.md has the threshold line
