@@ -3,7 +3,7 @@ DOC_STATUS
 TYPE: DESIGN_SPEC
 LAST_VERIFIED: 2026-03-01
 OWNER: RCX Core Team
-FOR_CURRENT_STATE: See STATUS.md and TASKS.md VECTOR [P6]
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md Ra [P6 decided]
 GROUNDING_TESTS: tests/l4_gates/test_numeric_hash_safety_lock_gate.py
 
 This header enables automated doc drift detection.
@@ -12,10 +12,31 @@ Scope: P6 VECTOR decision packet — typed numeric envelopes for cross-substrate
 
 # P6: Typed Numeric Envelopes — Decision Packet
 
-> **Status:** VECTOR (design-only, no implementation)
-> **Decision required:** YES/NO on strict cross-substrate int/float lexical parity
+> **Status:** DECIDED — Option A (NO strict lexical parity) with containment discipline
+> **Decision date:** 2026-03-01 (founder)
 > **Policy lock:** `TestNumericNonLinearPolicyLock` in `tests/l4_gates/test_numeric_hash_safety_lock_gate.py`
-> **Tracker:** TASKS.md VECTOR section `[P6]`
+> **Tracker:** TASKS.md Ra section `[P6]`
+
+---
+
+## Decision Record
+
+**Decision:** Option A — NO strict cross-substrate int/float lexical parity. Accept current substrate-model difference as intentional and permanent unless evidence triggers re-evaluation.
+
+**Rationale (founder):** Lowest-regret choice. Preserves current correctness, keeps runtime/debt stable. Option B is a large semantic migration with no current workload demand. No real seed or production vector requires mixed numeric forms in non-linear matching today.
+
+**Containment discipline (mandatory with Option A):**
+
+1. **Policy lock tests remain enforced.** `TestNumericNonLinearPolicyLock` in `test_numeric_hash_safety_lock_gate.py` documents and locks the exact substrate-model difference. These tests must not be deleted or weakened.
+
+2. **Canonical seeds remain integer-only.** No float literals in seed files (`mu/substrate/`, `mu/closures/`, `mu/bridge/`, `mu/programs/`) unless explicitly promoted with founder sign-off and P6 re-evaluation.
+
+3. **Hard promotion triggers for P6 re-evaluation (any one suffices):**
+   - First real workload requiring mixed numeric forms (int + float) in non-linear pattern matching.
+   - Observed closure/routing divergence from numeric lexical mismatch in production vectors.
+   - New seed file that requires float literals for correctness.
+
+4. **If triggered:** Re-open P6 as NEXT with this design packet as baseline. Option B envelope schema candidates (Section 4) are ready for implementation.
 
 ---
 
