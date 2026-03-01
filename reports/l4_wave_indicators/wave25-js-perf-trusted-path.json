@@ -1,24 +1,24 @@
 {
   "wave_id": "wave25-js-perf-trusted-path",
-  "repeat_run_speedup_ratio": 1.22467,
+  "repeat_run_speedup_ratio": 1.181288,
   "parity_diff_count": 19,
-  "net_host_semantic_delta": 7,
-  "step_growth_slope": 0.46567,
+  "net_host_semantic_delta": 99,
+  "step_growth_slope": 0.479613,
   "repeat_run_raw_seconds": [
-    0.570292,
-    0.46567
+    0.566561,
+    0.479613
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.570292
+      "elapsed_seconds": 0.566561
     },
     {
       "step": 2,
-      "elapsed_seconds": 1.035962
+      "elapsed_seconds": 1.046174
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-03-01T07:57:45Z",
+  "collection_timestamp_utc": "2026-03-01T08:01:51Z",
   "collector_version": "2.2.0"
 }

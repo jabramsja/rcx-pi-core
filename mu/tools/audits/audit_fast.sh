@@ -146,13 +146,16 @@ if git diff --cached --name-only | grep -q .; then
     fi
     python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
 else
-    # No staged files — use committed range (matches pre-push-fast logic).
-    # NEVER include untracked files — they are not part of any wave scope.
+    # No staged files — use committed range.
+    # L4 contract must evaluate the FULL wave diff from dev, not per-push
+    # incremental (@{upstream}...HEAD).  Incremental ranges miss runtime
+    # files committed in earlier pushes, causing indicator delta mismatches
+    # with CI (which always uses origin/dev...HEAD).  Matches pre-push-fast.
     L4_RANGE=""
-    if git rev-parse --verify --quiet "@{upstream}" >/dev/null 2>&1; then
-        L4_RANGE="@{upstream}...HEAD"
-    elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+    if git show-ref --verify --quiet refs/remotes/origin/dev; then
         L4_RANGE="origin/dev...HEAD"
+    elif git rev-parse --verify --quiet "@{upstream}" >/dev/null 2>&1; then
+        L4_RANGE="@{upstream}...HEAD"
     fi
     if [ -n "$L4_RANGE" ]; then
         L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
