@@ -189,10 +189,10 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 - Any wave that exceeds the currently approved stage must fail L4 contract unless founder override is explicitly declared.
 
 **L4 Status:** G8 evidence loop closed (D001-D007). D008 GO (founder-rendered, 2026-03-01; supersedes prior DEFER).
-H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN until D005 execution evidence lands (do not prematurely mark PASS). D005 production pilot in NEXT (authorized under D004 constraints). See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
-See TASKS.md NEXT (D005) and VECTOR/SINK for priority ordering.
+H1 PARTIALLY CONFIRMED, H2 ALL 4 CRITERIA MET, H3 FALSIFIED (expected). G8 remains UNPROVEN (D005 pilot executed via PR #452, evidence captured, not yet sufficient for PASS). See `mu/docs/core/G8CpsFeasibility.v0.md` and `mu/docs/core/L4DecisionCard.v0.md` (D008).
+See TASKS.md Ra (D005 complete) and VECTOR/SINK for priority ordering.
 
-**Post-D008 Operating Mode:** D008 GO rendered (founder, 2026-03-01; supersedes prior DEFER). D005 production pilot authorized for NEXT execution under D004 constraints (≤100 LOC/substrate, 4 primitives invariant, zero test regression, L3 parity required). Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). Both prior NEXT contracts closed. Next L4 action: D005 execution (bounded pilot targeting G8). G8 remains UNPROVEN until D005 evidence lands.
+**Post-D008 Operating Mode:** D008 GO rendered (founder, 2026-03-01; supersedes prior DEFER). D005 production pilot COMPLETE (PR #452 merged, 2026-03-01). Stage 0 micro-kernel integrated with pilot flag (default OFF), 90 gate tests + 9 contract tests. G8 remains UNPROVEN (pilot evidence captured, further evaluation needed for PASS). Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). All prior NEXT contracts closed. Wave 25 JS perf fix merged (PR #453, 42x speedup + non-linear hash fix + policy lock).
 
 **Conjecture Parking:** Non-Euclidean geometry / structural linear algebra hypotheses are PARKED (not active). See TASKS.md SINK "Conjecture Parking (NOT ACTIVE)" for re-evaluation trigger and promotion rules.
 
