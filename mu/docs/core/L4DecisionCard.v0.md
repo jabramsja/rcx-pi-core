@@ -654,11 +654,17 @@ Decision Deadline: 2026-03-12 (wave8 heartbeat)
    Metabolization reaches NEXT, revisit D005 production pilot.
 
 6. Decision Outcome
-   Outcome: DEFER (recommended) — pending founder verdict
-   no_op_proof_ref: D001-D007 evidence is preserved in tests/research/ and
-   mu/docs/core/G8CpsFeasibility.v0.md. No production changes needed.
-   Rationale: Evidence loop closed. Higher-priority items take precedence.
-   Founder may override to GO or NO-GO with recorded rationale.
+   Outcome: GO (founder-rendered, 2026-03-01; supersedes prior DEFER render on 2026-03-01)
+   Rationale: Re-evaluation trigger already satisfied (Boot1 complete 2026-02-19,
+   Hemisphere Metabolization complete 2026-02-20). Evidence loop closed (D001-D007,
+   all 3 hypotheses tested). Founder now prioritizes resolving G8 with bounded
+   production evidence over continued deferral. G8 is the only UNPROVEN L4 gate;
+   evidence is durable but deferral leaves G8 unresolved indefinitely.
+   Authorization: D005 production pilot authorized for NEXT execution under D004
+   constraints (≤100 LOC/substrate, 4 primitives invariant, zero test regression,
+   L3 parity required, stop conditions per D004 §4).
+   Prior state: DEFER (founder-rendered, 2026-03-01) — superseded same day after
+   founder re-evaluation of priority ordering.
 ```
 
 ---
