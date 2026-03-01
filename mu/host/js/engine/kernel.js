@@ -231,6 +231,14 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
       if ('body' in proj) {
         validateNoKernelReservedFields(proj.body, `runStructural projection[${idx}].body`);
       }
+      // SECURITY: Reject kernel-prefixed projection IDs (parity with stepKernel guard).
+      const projId = (typeof proj.id === 'string') ? proj.id : '';
+      if (projId.startsWith('kernel.')) {
+        throw new Error(
+          `SECURITY: runStructural expects DOMAIN projections only, ` +
+          `got kernel projection at index ${idx}: ${projId}`
+        );
+      }
     }
   }
 

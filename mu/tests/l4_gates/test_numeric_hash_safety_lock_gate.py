@@ -8,7 +8,7 @@ Enforces:
 4. Zero canonicalization (0.0 → 0)
 5. Global mu_hash/muHash NOT modified (data-flow paths unchanged)
 6. Control wrappers wired at control-flow callsites (source locks)
-7. Match non-linear binding uses control wrappers (A5: cross-substrate parity closure)
+7. Match non-linear binding uses content hash (type-preserving; control hash breaks int/float distinction)
 """
 
 import json
@@ -291,28 +291,37 @@ class TestSourceLocks:
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
         assert "muHashControlCached(" in source
 
-    def test_match_nonlinear_binding_uses_control(self):
-        """match() in bootstrap_core.js uses muHashControlCached for non-linear binding (A5 reversal)."""
+    def test_match_nonlinear_binding_uses_content_hash(self):
+        """match() in bootstrap_core.js uses muHashCached for non-linear binding.
+
+        Content hash (muHashCached) preserves int/float type distinction.
+        Control hash (muHashControlCached) canonicalizes 0.0→0, breaking
+        non-linear conflict detection for type-distinct values.
+        """
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
-        # Find match function lines with muHashControlCached (non-linear binding)
+        # Find match function lines with muHashCached (non-linear binding)
         in_match = False
-        match_control_lines = []
+        match_content_lines = []
         for i, line in enumerate(source.splitlines(), 1):
             if "function match(" in line:
                 in_match = True
             elif in_match and line.startswith("function "):
                 break
-            if in_match and "muHashControlCached(" in line:
-                match_control_lines.append(line.strip())
-        assert len(match_control_lines) >= 2, (
-            "match() should have >=2 muHashControlCached calls for non-linear binding"
+            if in_match and "muHashCached(" in line and "muHashControlCached(" not in line:
+                match_content_lines.append(line.strip())
+        assert len(match_content_lines) >= 2, (
+            "match() should have >=2 muHashCached calls for non-linear binding"
         )
 
-    def test_python_eval_seed_match_uses_control(self):
-        """eval_seed.py match uses mu_hash_control_cached for non-linear binding (A5 reversal)."""
+    def test_python_eval_seed_match_uses_content_hash(self):
+        """eval_seed.py match uses mu_hash_cached for non-linear binding.
+
+        Content hash preserves int/float type distinction. Control hash
+        canonicalizes 0.0→0, causing false matches in non-linear patterns.
+        """
         source = (PY_DIR / "eval_seed.py").read_text()
-        assert "mu_hash_control_cached(" in source, (
-            "eval_seed.py must use mu_hash_control_cached for non-linear binding"
+        assert "mu_hash_cached(" in source, (
+            "eval_seed.py must use mu_hash_cached for non-linear binding"
         )
 
     def test_global_mu_hash_not_modified(self):
@@ -390,23 +399,25 @@ class TestRunAlgorithmWithBridgeControlHashParity:
         )
 
 
-class TestNonLinearBindingControlParity:
-    """A5: Non-linear binding conflict checks use control hash for cross-substrate parity.
+class TestNonLinearBindingContentHashParity:
+    """Non-linear binding conflict checks use content hash (type-preserving).
 
-    With control wrappers, 1.0 and 1 canonicalize to the same hash,
-    so a non-linear pattern binding x=1.0 then seeing x=1 should NOT conflict.
+    Content hash (mu_hash_cached) preserves int/float type distinction:
+    1.0 and 1 hash differently, so a non-linear pattern binding x=1.0
+    then seeing x=1 correctly detects a conflict. Control hash was wrong
+    here — it canonicalized 0.0→0, causing false matches in non-linear patterns
+    (caught by weekly deep fuzz: test_distinct_states_no_closure, test_dict_non_linear_conflict).
     """
 
-    def test_python_nonlinear_float_int_no_conflict(self):
-        """Python: {var:x} matched against 1.0 then 1 should not conflict."""
+    def test_python_nonlinear_float_int_conflict(self):
+        """Python: {var:x} matched against 1.0 then 1 must conflict (different types)."""
         from rcx_pi.selfhost.eval_seed import match, NO_MATCH
         pattern = [{"var": "x"}, {"var": "x"}]
         input_val = [1.0, 1]
         result = match(pattern, input_val)
-        assert result is not NO_MATCH, (
-            "Non-linear pattern [x, x] with [1.0, 1] should match (control hash parity)"
+        assert result is NO_MATCH, (
+            "Non-linear pattern [x, x] with [1.0, 1] must conflict (int ≠ float)"
         )
-        assert "x" in result
 
     def test_python_nonlinear_true_conflict_still_fails(self):
         """Python: {var:x} matched against 1 then 2 must still conflict."""
@@ -418,14 +429,14 @@ class TestNonLinearBindingControlParity:
             "Non-linear pattern [x, x] with [1, 2] must conflict"
         )
 
-    def test_python_nonlinear_neg_zero_no_conflict(self):
-        """Python: -0.0 and 0 should not conflict (control hash canonicalizes)."""
+    def test_python_nonlinear_neg_zero_conflict(self):
+        """Python: -0.0 and 0 must conflict (content hash distinguishes)."""
         from rcx_pi.selfhost.eval_seed import match, NO_MATCH
         pattern = [{"var": "x"}, {"var": "x"}]
         input_val = [-0.0, 0]
         result = match(pattern, input_val)
-        assert result is not NO_MATCH, (
-            "Non-linear pattern [x, x] with [-0.0, 0] should match (±0 canonicalization)"
+        assert result is NO_MATCH, (
+            "Non-linear pattern [x, x] with [-0.0, 0] must conflict (content hash)"
         )
 
     def test_js_nonlinear_float_int_no_conflict(self):

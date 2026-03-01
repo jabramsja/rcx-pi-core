@@ -63,7 +63,9 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
-        if (Object.hasOwn(bindings, k) && muHashControlCached(bindings[k]) !== muHashControlCached(v)) {
+        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) {
           return NO_MATCH;
         }
         bindings[k] = v;
@@ -97,7 +99,9 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
-        if (Object.hasOwn(bindings, bk) && muHashControlCached(bindings[bk]) !== muHashControlCached(bv)) {
+        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) {
           return NO_MATCH;
         }
         bindings[bk] = bv;
@@ -337,7 +341,9 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
   if (isVar(pattern)) {
     const name = pattern.var;
     if (Object.hasOwn(current, name)) {
-      if (muHashControlCached(current[name]) !== muHashControlCached(input)) {
+      // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+      // control hash canonicalizes 0.0→0, breaking int/float distinction).
+      if (muHashCached(current[name]) !== muHashCached(input)) {
         return NO_MATCH;
       }
       return current;
