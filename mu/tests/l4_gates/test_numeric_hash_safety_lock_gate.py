@@ -1,14 +1,30 @@
 """
-Gate test: Numeric Hash Safety Lock (Wave 24 + A5 reversal)
+Gate test: Numeric Hash Safety Lock
 
-Enforces:
+Enforces two hash domains:
+  Control hash (mu_hash_control / muHashControl): canonicalizes integral
+    floats to ints for stall/convergence detection. 1.0->1, -0.0->0.
+    Cross-substrate parity required.
+  Content hash (mu_hash / muHash / mu_hash_cached / muHashCached):
+    type-preserving for data equality. Used in non-linear pattern
+    binding conflict checks.
+
+Non-linear binding policy (cross-substrate):
+  Python: content hash preserves int/float type distinction (1.0 != 1).
+  JS: content hash operates over JS Number (1.0 === 1, no int/float
+    lexical distinction available at the language level).
+  This is an intentional substrate-model difference, not a bug.
+  Strict cross-substrate int/float lexical parity would require typed
+  numeric envelopes (future work).
+
+Specific invariants:
 1. Python mu_hash_control/mu_hash_control_cached exist and canonicalize
 2. JS muHashControl/muHashControlCached exist and canonicalize
-3. Cross-substrate canonicalization parity (1.0 and 1 hash identically)
-4. Zero canonicalization (0.0 → 0)
+3. Cross-substrate control hash parity (1.0 and 1 hash identically)
+4. Zero canonicalization (0.0 -> 0) in control hash
 5. Global mu_hash/muHash NOT modified (data-flow paths unchanged)
 6. Control wrappers wired at control-flow callsites (source locks)
-7. Match non-linear binding uses content hash (type-preserving; control hash breaks int/float distinction)
+7. Non-linear binding uses content hash (not control hash)
 """
 
 import json
@@ -399,18 +415,25 @@ class TestRunAlgorithmWithBridgeControlHashParity:
         )
 
 
-class TestNonLinearBindingContentHashParity:
-    """Non-linear binding conflict checks use content hash (type-preserving).
+class TestNonLinearBindingContentHash:
+    """Non-linear binding conflict checks use content hash per substrate.
 
-    Content hash (mu_hash_cached) preserves int/float type distinction:
-    1.0 and 1 hash differently, so a non-linear pattern binding x=1.0
-    then seeing x=1 correctly detects a conflict. Control hash was wrong
-    here — it canonicalized 0.0→0, causing false matches in non-linear patterns
-    (caught by weekly deep fuzz: test_distinct_states_no_closure, test_dict_non_linear_conflict).
+    Both substrates use content hash (not control hash) for non-linear
+    binding conflict detection. The behavioral difference between them
+    is an inherent property of each substrate's numeric model:
+
+    Python: content hash (mu_hash_cached) preserves int/float type
+      distinction. 1.0 and 1 hash differently, so non-linear [x,x]
+      with [1.0, 1] correctly detects a conflict.
+    JS: content hash (muHashCached) operates over JS Number semantics.
+      1.0 === 1 in JS, so non-linear [x,x] with [1.0, 1] does NOT
+      conflict. This is correct JS behavior, not a bug.
+
+    See TestNumericNonLinearPolicyLock for the canonical policy statement.
     """
 
     def test_python_nonlinear_float_int_conflict(self):
-        """Python: {var:x} matched against 1.0 then 1 must conflict (different types)."""
+        """Python: [x,x] with [1.0, 1] conflicts (int and float are distinct types)."""
         from rcx_pi.selfhost.eval_seed import match, NO_MATCH
         pattern = [{"var": "x"}, {"var": "x"}]
         input_val = [1.0, 1]
@@ -430,7 +453,7 @@ class TestNonLinearBindingContentHashParity:
         )
 
     def test_python_nonlinear_neg_zero_conflict(self):
-        """Python: -0.0 and 0 must conflict (content hash distinguishes)."""
+        """Python: [x,x] with [-0.0, 0] conflicts (content hash preserves sign)."""
         from rcx_pi.selfhost.eval_seed import match, NO_MATCH
         pattern = [{"var": "x"}, {"var": "x"}]
         input_val = [-0.0, 0]
@@ -440,7 +463,7 @@ class TestNonLinearBindingContentHashParity:
         )
 
     def test_js_nonlinear_float_int_no_conflict(self):
-        """JS: match([{var:x},{var:x}], [1.0, 1]) should not conflict."""
+        """JS: [x,x] with [1.0, 1] does not conflict (Number model: 1.0 === 1)."""
         script = (
             "const bc = require('./mu/host/js/core/bootstrap_core');\n"
             "const result = bc.match([{var:'x'},{var:'x'}], [1.0, 1]);\n"
@@ -466,3 +489,46 @@ class TestNonLinearBindingContentHashParity:
         assert result.returncode == 0, f"JS failed: {result.stderr}"
         data = json.loads(result.stdout)
         assert not data["matched"], "JS non-linear [x,x] with [1, 2] must conflict"
+
+
+class TestNumericNonLinearPolicyLock:
+    """Policy lock: non-linear numeric matching substrate-model differences.
+
+    Canonical policy statement:
+    - Non-linear conflict checks use content hash (mu_hash_cached / muHashCached),
+      NOT control hash.
+    - Python: int and float are distinct types; content hash preserves this.
+      [x,x] with [1.0, 1] -> NO_MATCH.
+    - JS: Number is a single type; 1.0 === 1 at the language level.
+      [x,x] with [1.0, 1] -> match.
+    - This substrate-model difference is intentional and accepted.
+    - Strict cross-substrate int/float lexical parity would require typed
+      numeric envelopes (future work, not a current requirement).
+    """
+
+    def test_policy_python_int_float_nonlinear_conflict(self):
+        """POLICY: Python [x,x] with [1.0, 1] must conflict (int != float)."""
+        from rcx_pi.selfhost.eval_seed import match, NO_MATCH
+        result = match([{"var": "x"}, {"var": "x"}], [1.0, 1])
+        assert result is NO_MATCH, (
+            "POLICY VIOLATION: Python non-linear [x,x] with [1.0, 1] must "
+            "conflict — content hash preserves int/float type distinction"
+        )
+
+    def test_policy_js_number_model_nonlinear_no_conflict(self):
+        """POLICY: JS [x,x] with [1.0, 1] must not conflict (Number model)."""
+        script = (
+            "const bc = require('./mu/host/js/core/bootstrap_core');\n"
+            "const r = bc.match([{var:'x'},{var:'x'}], [1.0, 1]);\n"
+            "console.log(JSON.stringify({matched: r !== bc.NO_MATCH}));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        data = json.loads(result.stdout)
+        assert data["matched"], (
+            "POLICY VIOLATION: JS non-linear [x,x] with [1.0, 1] must not "
+            "conflict — JS Number model collapses 1.0 and 1"
+        )
