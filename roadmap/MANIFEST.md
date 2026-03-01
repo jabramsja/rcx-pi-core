@@ -101,6 +101,7 @@ These `mu/docs/core/` documents have DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTA
 | [`mu/docs/core/RCXEngine.v0.md`](../mu/docs/core/RCXEngine.v0.md) | DESIGN_SPEC | Engine pipeline |
 | [`mu/docs/core/RCXKernel.v0.md`](../mu/docs/core/RCXKernel.v0.md) | DESIGN_SPEC | Kernel architecture |
 | [`mu/docs/core/RecursiveKernel.v0.md`](../mu/docs/core/RecursiveKernel.v0.md) | DESIGN_SPEC | Recursive kernel |
+| [`mu/docs/core/TypedNumericEnvelopes.v0.md`](../mu/docs/core/TypedNumericEnvelopes.v0.md) | DESIGN_SPEC | P6 VECTOR: cross-substrate int/float lexical parity decision |
 | [`mu/docs/core/recurrence_v2_design.md`](../mu/docs/core/recurrence_v2_design.md) | IMPLEMENTATION | Recurrence v2 |
 
 ## Why This Architecture
