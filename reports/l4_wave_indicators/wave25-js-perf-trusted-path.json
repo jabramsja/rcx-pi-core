@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave25-js-perf-trusted-path",
+  "repeat_run_speedup_ratio": 1.191196,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 92,
+  "step_growth_slope": 0.482087,
+  "repeat_run_raw_seconds": [
+    0.57426,
+    0.482087
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.57426
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.056347
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-01T07:21:34Z",
+  "collector_version": "2.2.0"
+}
