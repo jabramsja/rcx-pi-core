@@ -76,6 +76,8 @@ ALLOWED_EXPORTS = {
     "match", "substitute", "applyProjection", "step", "run",
     "isKernelTerminal", "isKernelIntermediate", "makeUndefinedMotif",
     "NO_MATCH",
+    # D005 Stage 0 pilot exports
+    "stage0Match", "stage0Substitute", "setStage0Pilot",
 }
 
 class TestBootstrapCoreExportAllowlist:

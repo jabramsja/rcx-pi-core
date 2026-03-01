@@ -265,11 +265,14 @@ def reset_state_between_tests():
     9-agent round 2 (Expert finding): Also clear kernel projection cache
     to prevent stale cache pollution when tests mock projections.
     """
+    from rcx_pi.selfhost import eval_seed
     reset_step_budget()
     clear_combined_kernel_cache()
+    eval_seed._STAGE0_PILOT = False  # ANTICHEAT_OK: autouse fixture reset
     yield
     reset_step_budget()
     clear_combined_kernel_cache()
+    eval_seed._STAGE0_PILOT = False  # ANTICHEAT_OK: autouse fixture reset
 
 
 # =============================================================================
