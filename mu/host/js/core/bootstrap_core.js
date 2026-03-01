@@ -196,6 +196,40 @@ function step(projections, input) {
 }
 
 /**
+ * Internal: apply projection without validating input.
+ * ONLY for use by kernel loops that have already validated at the boundary.
+ * Matches Python _apply_projection_trusted() parity.
+ */
+function _applyProjectionTrusted(projection, input) {
+  // depth=1 skips depth-0 isValidMu + auto-normalize checks in match/substitute
+  const bindings = _stage0Pilot
+    ? stage0Match(projection.pattern, input)
+    : match(projection.pattern, input, 1);
+  if (bindings === NO_MATCH) return NO_MATCH;
+  let result = _stage0Pilot
+    ? stage0Substitute(projection.body, bindings)
+    : substitute(projection.body, bindings, 1);
+  if (typeof projection.body === 'object' && projection.body !== null &&
+      !Array.isArray(projection.body) && projection.body._type === 'dict') {
+    result = denormalize(result);
+  }
+  return result;
+}
+
+/**
+ * Internal: step without validating input.
+ * ONLY for use by kernel loops that have already validated at the boundary.
+ * Matches Python _step_trusted() parity.
+ */
+function _stepTrusted(projections, input) {
+  for (const proj of projections) {
+    const result = _applyProjectionTrusted(proj, input);
+    if (result !== NO_MATCH) return result;
+  }
+  return input;
+}
+
+/**
  * Check if result is a kernel terminal state {_mode:"done", _result:..., _stall:...}.
  * Parity with Python is_kernel_terminal() in step_mu.py.
  */
@@ -407,4 +441,6 @@ module.exports = {
   stage0Match,
   stage0Substitute,
   setStage0Pilot,
+  _applyProjectionTrusted,
+  _stepTrusted,
 };
