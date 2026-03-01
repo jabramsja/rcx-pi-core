@@ -10,11 +10,11 @@
 
 const { KERNEL_RESERVED_FIELDS, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muEqual, muHashCached, muHashControl, muHashControlCached } = require('../core/types');
-const { denormalize } = require('../core/normalize');
-const { validateNoKernelReservedFields } = require('../core/security');
+const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
+const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
 const { isTerminalShape, isEngineTerminal, deriveEngineExitReason, setsEqual } = require('../core/terminal_classification');
-const { stepKernel, runStructural } = require('./kernel');
+const { stepKernel, runStructural, _stepKernelCoreNonMeta } = require('./kernel');
 const seedLoader = require('../core/seed_loader');
 
 // JS built-in property names that must never be used as inject_key.
@@ -78,18 +78,60 @@ function _clearBoundaryOpsCache() {
 
 /**
  * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
+ * Pre-validates and pre-normalizes projections once (constant across all iterations).
+ * Only current input is re-normalized per iteration.
  * @host_iteration (bridge-backed algorithm execution loop)
  */
 function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
+  // Validate input and projections once at entry (same checks as stepKernel).
+  const validator = validateAlgorithmRuntimeFields;
+  validator(input, 'domainInput');
+  for (let i = 0; i < domainProjs.length; i++) {
+    const proj = domainProjs[i];
+    if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) {
+      throw new Error(
+        `SECURITY: domainProjections[${i}] must be an object, got ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`
+      );
+    }
+    if (!('pattern' in proj)) {
+      throw new Error(`SECURITY: domainProjections[${i}] missing required 'pattern' key`);
+    }
+    if (!('body' in proj)) {
+      throw new Error(`SECURITY: domainProjections[${i}] missing required 'body' key`);
+    }
+    if (!isValidMu(proj.pattern)) {
+      throw new Error(`SECURITY: domainProjections[${i}].pattern is not valid Mu`);
+    }
+    if (!isValidMu(proj.body)) {
+      throw new Error(`SECURITY: domainProjections[${i}].body is not valid Mu`);
+    }
+    validator(proj.pattern, `domainProjections[${i}].pattern`);
+    validator(proj.body, `domainProjections[${i}].body`);
+    const projId = (typeof proj.id === 'string') ? proj.id : '';
+    if (projId.startsWith('kernel.')) {
+      throw new Error(
+        `SECURITY: stepKernel expects DOMAIN projections only, ` +
+        `got kernel projection at index ${i}: ${projId}`
+      );
+    }
+  }
+
+  // Pre-normalize projections once (constant across all iterations).
+  const normalizedProjs = domainProjs.map(normalizeProjection);
+  const kernelDomainProjs = normalizedProjs.map(proj => ({
+    pattern: proj.pattern,
+    body: proj.body
+  }));
+  const linkedProjs = listToLinked(kernelDomainProjs);
+
   let current = input;
   let currentHash = muHashControlCached(current, 'runAlgorithmWithBridge');
   let steps = 0;
   const limit = maxSteps ?? 200;
   while (steps < limit) {
-    const wrapped = stepKernel(
-      allProjs, current, domainProjs,
-      { validationMode: 'algorithm_runtime' }
-    );
+    const normalizedInput = normalize(current);
+    const kernelInput = { _step: normalizedInput, _projs: linkedProjs };
+    const wrapped = _stepKernelCoreNonMeta(allProjs, kernelInput, 10000);
     const next = denormalize(wrapped.result);
     const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');
     if (nextHash === currentHash) break;

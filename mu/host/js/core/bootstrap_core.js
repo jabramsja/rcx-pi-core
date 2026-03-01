@@ -63,7 +63,9 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
-        if (Object.hasOwn(bindings, k) && muHashControlCached(bindings[k]) !== muHashControlCached(v)) {
+        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) {
           return NO_MATCH;
         }
         bindings[k] = v;
@@ -97,7 +99,9 @@ function match(pattern, input, _depth = 0) {
       const sub = match(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
-        if (Object.hasOwn(bindings, bk) && muHashControlCached(bindings[bk]) !== muHashControlCached(bv)) {
+        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) {
           return NO_MATCH;
         }
         bindings[bk] = bv;
@@ -191,6 +195,40 @@ function step(projections, input) {
     if (result !== NO_MATCH) {
       return result;
     }
+  }
+  return input;
+}
+
+/**
+ * Internal: apply projection without validating input.
+ * ONLY for use by kernel loops that have already validated at the boundary.
+ * Matches Python _apply_projection_trusted() parity.
+ */
+function _applyProjectionTrusted(projection, input) {
+  // depth=1 skips depth-0 isValidMu + auto-normalize checks in match/substitute
+  const bindings = _stage0Pilot
+    ? stage0Match(projection.pattern, input)
+    : match(projection.pattern, input, 1);
+  if (bindings === NO_MATCH) return NO_MATCH;
+  let result = _stage0Pilot
+    ? stage0Substitute(projection.body, bindings)
+    : substitute(projection.body, bindings, 1);
+  if (typeof projection.body === 'object' && projection.body !== null &&
+      !Array.isArray(projection.body) && projection.body._type === 'dict') {
+    result = denormalize(result);
+  }
+  return result;
+}
+
+/**
+ * Internal: step without validating input.
+ * ONLY for use by kernel loops that have already validated at the boundary.
+ * Matches Python _step_trusted() parity.
+ */
+function _stepTrusted(projections, input) {
+  for (const proj of projections) {
+    const result = _applyProjectionTrusted(proj, input);
+    if (result !== NO_MATCH) return result;
   }
   return input;
 }
@@ -303,7 +341,9 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
   if (isVar(pattern)) {
     const name = pattern.var;
     if (Object.hasOwn(current, name)) {
-      if (muHashControlCached(current[name]) !== muHashControlCached(input)) {
+      // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+      // control hash canonicalizes 0.0→0, breaking int/float distinction).
+      if (muHashCached(current[name]) !== muHashCached(input)) {
         return NO_MATCH;
       }
       return current;
@@ -407,4 +447,6 @@ module.exports = {
   stage0Match,
   stage0Substitute,
   setStage0Pilot,
+  _applyProjectionTrusted,
+  _stepTrusted,
 };

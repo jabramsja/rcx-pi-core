@@ -14,7 +14,7 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_control_cached, MAX_MU_DEPTH
+from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH
 
 
 # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
@@ -309,9 +309,11 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
             # Non-linear conflict check (same variable, different value)
+            # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
+            # canonicalizes 0.0→0 which breaks int/float type distinction.
             for k in sub_bindings:
                 if k in bindings:
-                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(sub_bindings[k]):
+                    if mu_hash_cached(bindings[k]) != mu_hash_cached(sub_bindings[k]):
                         return NO_MATCH
             bindings = {**bindings, **sub_bindings}  # pure merge, no dict mutation
         return bindings
@@ -339,9 +341,11 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
             # Non-linear conflict check (same variable, different value)
+            # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
+            # canonicalizes 0.0→0 which breaks int/float type distinction.
             for k in sub_bindings:
                 if k in bindings:
-                    if mu_hash_control_cached(bindings[k]) != mu_hash_control_cached(sub_bindings[k]):
+                    if mu_hash_cached(bindings[k]) != mu_hash_cached(sub_bindings[k]):
                         return NO_MATCH
             bindings = {**bindings, **sub_bindings}  # pure merge, no dict mutation
         return bindings
@@ -368,7 +372,9 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     if is_var(pattern):
         name = get_var_name(pattern)
         if name in current:
-            if mu_hash_control_cached(current[name]) != mu_hash_control_cached(input_value):
+            # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
+            # canonicalizes 0.0→0 which breaks int/float type distinction.
+            if mu_hash_cached(current[name]) != mu_hash_cached(input_value):
                 return NO_MATCH
             return current
         return {**current, name: input_value}

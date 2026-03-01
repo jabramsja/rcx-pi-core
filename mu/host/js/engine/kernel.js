@@ -12,7 +12,78 @@ const { NO_MATCH, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
-const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif } = require('../core/bootstrap_core');
+const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted } = require('../core/bootstrap_core');
+
+/**
+ * Internal: kernel loop only (returnMeta path).
+ * Caller must provide pre-validated, pre-normalized kernelInput.
+ * No validation, no normalization — just the state machine.
+ */
+function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps) {
+  let current = kernelInput;
+  let currentHash = muHashControlCached(kernelInput, 'stepKernel');
+  for (let i = 0; i < maxSteps; i++) {
+    const result = _stepTrusted(kernelProjections, current);
+
+    if (isKernelTerminal(result)) {
+      const stall = result._stall === true;
+      const reason = stall ? 'kernel_stall' : 'projection_applied';
+      if (stall) {
+        validator(domainInput, 'stepKernel output');
+        return {
+          output: domainInput,
+          stall: true,
+          termination_reason: reason,
+          steps_used: i + 1,
+          max_steps: maxSteps,
+          undefined_motif: makeUndefinedMotif('kernel', domainInput, null, 'no_matching_projection'),
+        };
+      }
+      const output = denormalize(result._result);
+      validator(output, 'stepKernel output');
+      return { output, stall: false, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
+    }
+
+    if (!isKernelIntermediate(result)) {
+      const resultHash = muHashControlCached(result, 'stepKernel.stall');
+      if (resultHash === currentHash) {
+        validator(domainInput, 'stepKernel output');
+        return { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
+      }
+      currentHash = resultHash;
+    }
+
+    current = result;
+  }
+  validator(domainInput, 'stepKernel output');
+  return { output: domainInput, stall: true, termination_reason: 'max_steps_exhausted', steps_used: maxSteps, max_steps: maxSteps };
+}
+
+/**
+ * Internal: kernel loop only (non-meta path).
+ * Caller must provide pre-validated, pre-normalized kernelInput.
+ * No validation, no normalization — just the state machine.
+ * Returns { result, steps, stalled, trace } (non-meta shape).
+ */
+function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps) {
+  let current = kernelInput;
+  let currentHash = muHashControlCached(kernelInput, 'stepKernel.nonmeta');
+  const trace = [];
+  for (let i = 0; i < maxSteps; i++) {
+    const next = _stepTrusted(kernelProjections, current);
+
+    if (!isKernelIntermediate(next)) {
+      const nextHash = muHashControlCached(next, 'stepKernel.nonmeta.stall');
+      if (nextHash === currentHash) {
+        return { result: current, steps: i, stalled: true, trace };
+      }
+      currentHash = nextHash;
+    }
+
+    current = next;
+  }
+  return { result: current, steps: maxSteps, stalled: false, trace };
+}
 
 /**
  * BOOTSTRAP PRIMITIVE: Kernel entry point with security validation.
@@ -86,63 +157,11 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   };
 
   if (returnMeta) {
-    let current = kernelInput;
-    let currentHash = muHashControlCached(kernelInput, 'stepKernel');
-    for (let i = 0; i < maxSteps; i++) {
-      const result = step(projections, current);
-
-      if (isKernelTerminal(result)) {
-        const stall = result._stall === true;
-        const reason = stall ? 'kernel_stall' : 'projection_applied';
-        if (stall) {
-          validator(domainInput, 'stepKernel output');
-          return {
-            output: domainInput,
-            stall: true,
-            termination_reason: reason,
-            steps_used: i + 1,
-            max_steps: maxSteps,
-            undefined_motif: makeUndefinedMotif('kernel', domainInput, null, 'no_matching_projection'),
-          };
-        }
-        const output = denormalize(result._result);
-        validator(output, 'stepKernel output');
-        return { output, stall: false, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
-      }
-
-      if (!isKernelIntermediate(result)) {
-        const resultHash = muHashControlCached(result, 'stepKernel.stall');
-        if (resultHash === currentHash) {
-          validator(domainInput, 'stepKernel output');
-          return { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
-        }
-        currentHash = resultHash;
-      }
-
-      current = result;
-    }
-    validator(domainInput, 'stepKernel output');
-    return { output: domainInput, stall: true, termination_reason: 'max_steps_exhausted', steps_used: maxSteps, max_steps: maxSteps };
+    return _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps);
   }
 
   // Non-meta mode
-  let current = kernelInput;
-  let currentHash = muHashControlCached(kernelInput, 'stepKernel.nonmeta');
-  const trace = [];
-  for (let i = 0; i < maxSteps; i++) {
-    const next = step(projections, current);
-
-    if (!isKernelIntermediate(next)) {
-      const nextHash = muHashControlCached(next, 'stepKernel.nonmeta.stall');
-      if (nextHash === currentHash) {
-        return { result: current, steps: i, stalled: true, trace };
-      }
-      currentHash = nextHash;
-    }
-
-    current = next;
-  }
-  return { result: current, steps: maxSteps, stalled: false, trace };
+  return _stepKernelCoreNonMeta(projections, kernelInput, maxSteps);
 }
 
 /**
@@ -161,6 +180,31 @@ function resolveTraceProjectionId(kernelProjections, domainProjections, current,
     if (candidate.stall) continue;
     if (muHashControlCached(candidate.output, 'resolveTraceProjectionId.match') === nextValueHash) {
       return proj.id ?? null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Internal: resolve projection ID using pre-validated, pre-normalized state.
+ * Same algorithm as resolveTraceProjectionId but skips redundant
+ * validation/normalization/linking that was already done in runStructural.
+ * Gate 5 parity: still probes each projection through the full kernel loop.
+ */
+function _resolveIdFast(kernelProjections, domainProjections, normalizedProjs, singleLinkedProjs,
+                        normalizedCurrent, rawCurrent, nextValue, validator) {
+  const nextValueHash = muHashControlCached(nextValue, 'resolveTraceProjectionId');
+  for (let j = 0; j < normalizedProjs.length; j++) {
+    const proj = normalizedProjs[j];
+    if (typeof proj !== 'object' || proj === null) continue;
+    if (!('pattern' in proj) || !('body' in proj)) continue;
+
+    const kernelInput = { _step: normalizedCurrent, _projs: singleLinkedProjs[j] };
+    const candidate = _stepKernelCore(kernelProjections, kernelInput, rawCurrent, validator, 10000);
+
+    if (candidate.stall) continue;
+    if (muHashControlCached(candidate.output, 'resolveTraceProjectionId.match') === nextValueHash) {
+      return domainProjections[j].id ?? null;
     }
   }
   return null;
@@ -187,20 +231,41 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
       if ('body' in proj) {
         validateNoKernelReservedFields(proj.body, `runStructural projection[${idx}].body`);
       }
+      // SECURITY: Reject kernel-prefixed projection IDs (parity with stepKernel guard).
+      const projId = (typeof proj.id === 'string') ? proj.id : '';
+      if (projId.startsWith('kernel.')) {
+        throw new Error(
+          `SECURITY: runStructural expects DOMAIN projections only, ` +
+          `got kernel projection at index ${idx}: ${projId}`
+        );
+      }
     }
   }
+
+  // Pre-normalize projections once (constant across all trace steps).
+  // Eliminates redundant normalize/validate/link per stepKernel + resolveId call.
+  const validator = validateNoKernelReservedFields;
+  const normalizedProjs = domainProjections.map(normalizeProjection);
+  const kernelDomainProjs = normalizedProjs.map(proj => ({
+    pattern: proj.pattern,
+    body: proj.body
+  }));
+  const linkedProjs = listToLinked(kernelDomainProjs);
+  const singleLinkedProjs = kernelDomainProjs.map(proj => listToLinked([proj]));
 
   const traceEntries = [];
   let current = input;
   let currentHash = muHashControlCached(input, 'runStructural');
 
   for (let i = 0; i < maxSteps; i++) {
-    const meta = stepKernel(kernelProjections, current, domainProjections, {
-      validationMode: 'domain',
-      returnMeta: true,
-    });
+    const normalizedCurrent = normalize(current);
+    const kernelInput = { _step: normalizedCurrent, _projs: linkedProjs };
+    const meta = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000);
     const result = meta.output;
-    const matchedId = resolveTraceProjectionId(kernelProjections, domainProjections, current, result);
+    const matchedId = _resolveIdFast(
+      kernelProjections, domainProjections, normalizedProjs, singleLinkedProjs,
+      normalizedCurrent, current, result, validator
+    );
 
     validateNoKernelReservedFields(result, 'runStructural output');
     traceEntries.push({
@@ -257,4 +322,6 @@ module.exports = {
   resolveTraceProjectionId,
   runStructural,
   stepKernelStructural,
+  // Internal: exported for pipeline.js pre-validation optimization
+  _stepKernelCoreNonMeta,
 };

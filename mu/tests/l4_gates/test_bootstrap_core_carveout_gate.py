@@ -78,6 +78,8 @@ ALLOWED_EXPORTS = {
     "NO_MATCH",
     # D005 Stage 0 pilot exports
     "stage0Match", "stage0Substitute", "setStage0Pilot",
+    # Trusted fast path (parity with Python _step_trusted/_apply_projection_trusted)
+    "_applyProjectionTrusted", "_stepTrusted",
 }
 
 class TestBootstrapCoreExportAllowlist:
