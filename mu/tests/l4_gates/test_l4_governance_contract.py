@@ -621,6 +621,7 @@ class TestStrictValidation:
             "seed_auto_execution",
             "execution_layer_truth",
             "recurrence_exhaustion",
+            "host_debt_reduction",
         }
 
     def test_maintenance_runtime_touch_fails(self):

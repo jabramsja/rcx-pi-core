@@ -1658,6 +1658,7 @@ class TestStructuralWorkloadTarget:
             "seed_auto_execution",
             "execution_layer_truth",
             "recurrence_exhaustion",
+            "host_debt_reduction",
         }
 
 
