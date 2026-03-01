@@ -79,7 +79,7 @@ class TestIsRuntimeFile:
         "mu/bridge/bootstrap_structural.v1.json",
         "mu/programs/hemispheres.v1.json",
         "rcx_pi/selfhost/eval_seed.py",
-        "tools/compilers/compile_seed.py",
+        "mu/tools/compilers/compile_seed.py",
     ])
     def test_runtime_files_detected(self, path: str) -> None:
         assert is_runtime_file(path), f"{path} should be classified as runtime"
@@ -308,7 +308,7 @@ class TestEnforceEdgeCases:
             "mu/bridge/",
             "mu/programs/",
             "rcx_pi/selfhost/",
-            "tools/compilers/",
+            "mu/tools/compilers/",
         }
         assert set(RUNTIME_DIRS) == expected_prefixes
 

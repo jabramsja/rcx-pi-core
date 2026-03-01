@@ -46,7 +46,7 @@ RUNTIME_DIRS = (
     "mu/bridge/",
     "mu/programs/",
     "rcx_pi/selfhost/",
-    "tools/compilers/",
+    "mu/tools/compilers/",
 )
 
 # Host-semantics debt categories (shared with ratchet checker).

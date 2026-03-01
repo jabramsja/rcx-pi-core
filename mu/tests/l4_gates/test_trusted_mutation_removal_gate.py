@@ -313,7 +313,7 @@ class TestBaselineUntouched:
             "mu/closures/",
             "mu/bridge/",
             "mu/programs/",
-            "tools/compilers/",
+            "mu/tools/compilers/",
         )
 
         baseline_staged = any(p in staged for p in baseline_paths)
