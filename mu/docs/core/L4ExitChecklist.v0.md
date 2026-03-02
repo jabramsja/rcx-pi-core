@@ -175,16 +175,16 @@ grep -n "def step\|step(" rcx_pi/selfhost/eval_seed.py
 
 **Fail condition:** Any primitive lacks explicit classification with evidence.
 
-**Current classification:**
+**Current classification (adjudicated 2026-03-02):**
 
-| Primitive | Classification | Evidence |
-|-----------|---------------|----------|
-| `eval_step` | IRREDUCIBLE | Circular dependency: projections need eval_step to run, eval_step needs match/subst which are projections |
-| `max_steps` | REDUCIBLE_WITH CPS fuel threading | Integer could become Mu linked-list, but requires CPS transform of engine loop |
-| `stack_guard` | REDUCIBLE_WITH depth parameter | Depth counter could be Mu data threaded through eval_step, but changes eval_step signature |
-| `projection_loader` | REDUCIBLE_WITH binary format | JSON parsing could be replaced by minimal binary loader, but requires seed format redesign |
+| Primitive | Classification | Evidence | Executable Proof |
+|-----------|---------------|----------|-----------------|
+| `eval_step` | REDUCIBLE_WITH staged bootstrap | D001-D003: 52-LOC Stage 0 kernel breaks circular dependency. D005: production pilot (90 gate tests, PR #452). | `pytest tests/research/test_d002_micro_matcher.py tests/research/test_d003_staged_bootstrap.py mu/tests/l4_gates/test_stage0_production_pilot_gate.py -q` |
+| `max_steps` | REDUCIBLE_WITH CPS fuel threading | D006: fuel as Mu linked-list, iteration remains host. | `pytest tests/research/test_d006_h1_fuel_threading.py -q` |
+| `stack_guard` | REDUCIBLE_WITH depth parameter (UNPROVEN) | Architectural reasoning only. No research artifact demonstrates depth counter as Mu data. | None — requires D009-class research experiment |
+| `projection_loader` | REDUCIBLE_WITH binary format (UNPROVEN) | Architectural reasoning only. No research artifact demonstrates minimal binary loader. | None — requires D010-class research experiment |
 
-**Status:** UNPROVEN — Research evidence (D001-D007) confirms feasibility: H2 ALL 4 CRITERIA MET (circular dependency breakable, 52-LOC Stage 0 kernel), H1 PARTIALLY CONFIRMED (fuel data = Mu, iteration = host), H3 FALSIFIED (iteration irreducible, methodology validated). However, G8 requires a **production-pilot outcome**, not just research feasibility. See D008 (`mu/docs/core/L4DecisionCard.v0.md`) for founder decision packet (GO/DEFER/NO-GO). G8 remains UNPROVEN until production evidence exists.
+**Status:** UNPROVEN (2/4 executable evidence, 2026-03-02 adjudication). D008 GO (founder-rendered 2026-03-01) authorized D005 production pilot. `eval_step` reclassified from IRREDUCIBLE to REDUCIBLE_WITH (D001-D003 + D005 production pilot). `max_steps` confirmed REDUCIBLE_WITH (D006). `stack_guard` and `projection_loader` retain REDUCIBLE_WITH classifications but lack executable evidence — prose reasoning alone does not satisfy gate evidence bar. See `mu/docs/core/L4DecisionCard.v0.md` (D001-D008). Next proof targets: D009 (stack_guard depth threading experiment), D010 (projection_loader binary format experiment).
 
 ---
 
@@ -192,7 +192,7 @@ grep -n "def step\|step(" rcx_pi/selfhost/eval_seed.py
 
 L4 is blocked under current architecture when:
 
-1. **Circular dependency:** eval_step must apply projections using match/subst; structural match/subst ARE projections requiring eval_step. No known resolution without meta-level substrate or staged bootstrap (Boot0 v0.4 §Stage 0).
+1. ~~**Circular dependency:**~~ **RESOLVED** (D001-D003, D005). Staged bootstrap breaks the cycle: 52-LOC Stage 0 kernel bootstraps match.v2 + subst.v2 without eval_step. Production pilot integrated (PR #452). Evidence: `pytest tests/research/test_d003_staged_bootstrap.py mu/tests/l4_gates/test_stage0_production_pilot_gate.py -q`.
 
 2. **JSON format dependency:** Seeds are JSON. projection_loader must parse JSON. Binary/minimal format is a prerequisite for Hex0-style bootstrap. No implementation planned.
 
@@ -200,7 +200,7 @@ L4 is blocked under current architecture when:
 
 4. **L3-to-L4 gap:** L3 proves projections are substrate-portable. L4 requires bootstrap primitives to be eliminated or substrate-independent. The gap cannot be closed by porting alone — it requires reducing or eliminating the primitives themselves.
 
-**UNPROVEN:** Whether the circular dependency is truly irreducible or whether CPS transformation could break it. This is the core L4 research question.
+**RESOLVED (circular dependency):** D001-D003 proved the circular dependency is breakable via staged bootstrap. D005 pilot confirmed in production. **REMAINING:** `stack_guard` and `projection_loader` lack executable reducibility evidence (D009, D010 needed).
 
 ---
 
