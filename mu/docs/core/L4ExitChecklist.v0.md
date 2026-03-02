@@ -168,23 +168,23 @@ grep -n "def step\|step(" rcx_pi/selfhost/eval_seed.py
 
 **Objective:** Formal determination of which primitives are truly irreducible under current architecture vs. which could be eliminated with architectural changes.
 
-**Pass condition:** Each of the 4 primitives has an explicit classification:
+**Pass condition:** Each of the 4 primitives has an explicit classification with executable evidence (runnable test artifact + evidence command):
 - IRREDUCIBLE: Cannot be eliminated without changing the computational model
 - REDUCIBLE_WITH: Can be eliminated if [specific architectural change] is made
 - ELIMINATED: Already removed (e.g., mu_equal)
 
-**Fail condition:** Any primitive lacks explicit classification with evidence.
+**Fail condition:** Any primitive lacks explicit classification, or has classification supported only by architectural reasoning without executable evidence.
 
 **Current classification (adjudicated 2026-03-02):**
 
 | Primitive | Classification | Evidence | Executable Proof |
 |-----------|---------------|----------|-----------------|
-| `eval_step` | REDUCIBLE_WITH staged bootstrap | D001-D003: 52-LOC Stage 0 kernel breaks circular dependency. D005: production pilot (90 gate tests, PR #452). | `pytest tests/research/test_d002_micro_matcher.py tests/research/test_d003_staged_bootstrap.py mu/tests/l4_gates/test_stage0_production_pilot_gate.py -q` |
+| `eval_step` | REDUCIBLE_WITH staged bootstrap | D001: analytical (pattern enumeration). D002-D003: 52-LOC Stage 0 kernel breaks circular dependency (77 tests). D005: production pilot (90 gate tests, PR #452). | `pytest tests/research/test_d002_micro_matcher.py tests/research/test_d003_staged_bootstrap.py mu/tests/l4_gates/test_stage0_production_pilot_gate.py -q` |
 | `max_steps` | REDUCIBLE_WITH CPS fuel threading | D006: fuel as Mu linked-list, iteration remains host. | `pytest tests/research/test_d006_h1_fuel_threading.py -q` |
 | `stack_guard` | REDUCIBLE_WITH depth parameter (UNPROVEN) | Architectural reasoning only. No research artifact demonstrates depth counter as Mu data. | None — requires D009-class research experiment |
 | `projection_loader` | REDUCIBLE_WITH binary format (UNPROVEN) | Architectural reasoning only. No research artifact demonstrates minimal binary loader. | None — requires D010-class research experiment |
 
-**Status:** UNPROVEN (2/4 executable evidence, 2026-03-02 adjudication). D008 GO (founder-rendered 2026-03-01) authorized D005 production pilot. `eval_step` reclassified from IRREDUCIBLE to REDUCIBLE_WITH (D001-D003 + D005 production pilot). `max_steps` confirmed REDUCIBLE_WITH (D006). `stack_guard` and `projection_loader` retain REDUCIBLE_WITH classifications but lack executable evidence — prose reasoning alone does not satisfy gate evidence bar. See `mu/docs/core/L4DecisionCard.v0.md` (D001-D008). Next proof targets: D009 (stack_guard depth threading experiment), D010 (projection_loader binary format experiment).
+**Status:** UNPROVEN (2/4 executable evidence, 2026-03-02 adjudication). D008 GO (founder-rendered 2026-03-01) authorized D005 production pilot. `eval_step` reclassified from IRREDUCIBLE to REDUCIBLE_WITH (D001 analytical + D002-D003 + D005 executable; see evidence command above). `max_steps` confirmed REDUCIBLE_WITH (D006). `stack_guard` and `projection_loader` retain REDUCIBLE_WITH classifications but lack executable evidence — prose reasoning alone does not satisfy gate evidence bar. See `mu/docs/core/L4DecisionCard.v0.md` (D001-D008). Next proof targets: D009 (stack_guard depth threading experiment), D010 (projection_loader binary format experiment).
 
 ---
 
