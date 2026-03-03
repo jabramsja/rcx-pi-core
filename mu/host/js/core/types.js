@@ -54,7 +54,7 @@ function isValidMu(value, _depth = 0, _seen) {
 
   // Cycle detection for objects and arrays (matches Python is_mu's _seen set with backtracking).
   // Backtracking (delete after subtree check) allows DAGs (shared references) while catching cycles.
-  if (!_seen) _seen = new WeakSet();
+  if (!_seen) _seen = new WeakSet();  // AST_OK_JS: cycle detection for is_mu (matches Python _seen set)
   if (_seen.has(value)) return false;
   _seen.add(value);
 
