@@ -667,6 +667,102 @@ Decision Deadline: 2026-03-12 (wave8 heartbeat)
    founder re-evaluation of priority ordering.
 ```
 
+### D009: H4 Structural Depth Threading Experiment
+
+```
+Decision ID: D009
+Date: 2026-03-02
+Owner: RCX Core Team
+Scope: Test H4 — can stack_guard (MAX_MU_DEPTH) be expressed as Mu-data depth budget?
+Decision Deadline: 2026-03-09 (wave d009 heartbeat)
+
+1. Target L4 Gate(s)
+   target_gate_id: G8
+   Gate: G8 (Irreducible Primitive Consensus)
+   Why now: G8 adjudicated UNPROVEN (2/4, 2026-03-02). eval_step and max_steps
+   have executable evidence. stack_guard is the next primitive without executable
+   reducibility evidence — only prose classification exists.
+
+2. Proposed Change (Least-Lazy Path)
+   Write standalone depth-threading research analogs in tests/research/ (research
+   artifact only). Reimplement is_mu, _match_inner, substitute with Mu linked-list
+   depth budget instead of integer _depth. Validate against 5+ canonical vectors.
+   Verify off-by-one boundary parity and asymmetric failure-mode parity.
+
+3. Pass/Fail Evidence Commands
+   evidence_command: PYTHONHASHSEED=0 pytest tests/research/test_d009_h4_depth_threading.py -v
+   Pass: All 36 tests pass (5 success + 12 parity + 6 boundary + 4 primitive + 3 failure + 6 structural)
+   Fail: Boundary lock fails OR parity diverges OR new primitive required
+   evidence_delta_vs_previous: First stack_guard executable evidence. D006 was max_steps (H1).
+
+4. Risks and Rollback Trigger
+   Risk: None (research artifact in tests/research/, not production import).
+   Rollback: Delete file if falsified.
+
+5. Not-in-Scope
+   - Production code changes to mu_type.py, eval_seed.py, bootstrap_core.js
+   - JS research artifact (Python-only)
+   - D010 (projection_loader)
+   - Stage 0 variant reimplementation (identical depth pattern)
+   - Failure mode unification across enforcement sites
+
+6. Decision Outcome
+   Outcome: GO
+   Rationale: Zero risk, directly produces G8 evidence for stack_guard.
+   Advances G8 from 2/4 to 3/4 executable evidence.
+
+7. Execution Result (2026-03-02)
+   Status: EXECUTED — H4 PARTIALLY CONFIRMED
+
+   Evidence command run:
+     PYTHONHASHSEED=0 pytest tests/research/test_d009_h4_depth_threading.py -v
+     36 tests pass
+
+   Success criteria results:
+   - C1 (5 canonical vectors): MET
+     V1: shallow dict — is_mu true, match succeeds
+     V2: 5-level nested dict — is_mu true, match succeeds
+     V3: boundary depth — pass at budget, fail at budget-1
+     V4: substitute with 3-level body — correct result
+     V5: seed-like match + substitute cycle — correct bindings + result
+   - C2 (parity with production): MET
+     4 is_mu vectors, 4 match vectors, 4 substitute vectors all produce
+     identical results to production functions with budget=301
+   - C3 (no new primitive): MET
+     No BOOTSTRAP_PRIMITIVE markers in research artifact.
+     Total markers unchanged: Py:4, JS:7, total 11.
+
+   Boundary lock results:
+   - B1 (off-by-one): MET — depth 300 with budget 301 passes, budget 300 fails.
+     Strict > parity confirmed for all 3 surfaces.
+   - B2 (failure mode): MET — is_mu returns False, match returns NO_MATCH,
+     substitute raises TypeError. Matches production asymmetric behavior.
+
+   Failure criteria results:
+   - F1 (isinstance in analogs): HIT — all 3 research analogs use isinstance.
+     Type dispatch remains host code.
+   - F2 (host loop in budget construction): HIT — make_depth_budget uses for-loop.
+     Same limitation as D006's make_fuel.
+   - F3 (budget check is host operation): HIT — if budget is None is host code.
+     Mechanism is host, only data (budget linked-list) is structural Mu.
+
+   LOC: 145 total (threshold 150). ~3x D006's 50 LOC, reflecting that depth
+   threading is intra-recursive (reimplement type dispatch + traversal) vs
+   D006's outer-loop wrapper (call step_mu unchanged).
+
+   Classification: H4 PARTIALLY CONFIRMED
+   - What H4 achieves: depth budget becomes inspectable Mu data (linked-list
+     instead of opaque integer compared against host constant). Off-by-one
+     parity and failure-mode parity verified across 3 primary enforcement
+     surfaces (is_mu, match, substitute).
+   - What H4 does NOT achieve: the mechanism checking budget exhaustion
+     (if budget is None) remains host code. Budget construction requires a
+     host loop. Type dispatch (isinstance) remains host code.
+   - What this means for G8: stack_guard has executable reducibility evidence
+     in research analogs (Python). Classification REDUCIBLE_WITH is now
+     backed by test artifact, not prose alone.
+```
+
 ---
 
 ## Normative Lock
