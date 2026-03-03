@@ -41,7 +41,9 @@ Boundary lock criteria:
   B2: Type coverage: all 6 Mu types present in production seeds are supported
       (NoneType, bool, int, str, list, dict). Float supported for completeness.
   B3: Failure modes: truncated data, bad tag, length overflow, non-string
-      dict key, NaN/Inf all raise specific errors.
+      dict key all raise specific errors. NaN/Inf round-trip via IEEE 754
+      float encoding (research context; production seeds reject non-finite
+      via seed_integrity.py parse_constant guard).
 
 Coverage: 1 enforcement surface (JSON parsing in load_verified_seed).
 The other 3 components (I/O, integrity, validation) are out of scope.

@@ -121,6 +121,9 @@ function validateSeedStructure(seedName, seed) {
   }
   for (let i = 0; i < seed.projections.length; i++) {
     const proj = seed.projections[i];
+    if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) {
+      throw new Error(`Seed ${seedName}: projection[${i}] must be a plain object, got ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`);
+    }
     if (!('id' in proj) || !('pattern' in proj) || !('body' in proj)) {
       throw new Error(`Seed ${seedName}: projection ${i} missing required field (id/pattern/body)`);
     }

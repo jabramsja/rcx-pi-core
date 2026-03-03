@@ -123,7 +123,7 @@ def analyze_diff(pr_number: int | None = None) -> DiffAnalysis:
     files = [f for f in result.stdout.strip().split('\n') if f]
 
     # Filter to relevant files
-    relevant_files = [f for f in files if f.endswith(('.py', '.json', '.js'))]
+    relevant_files = [f for f in files if f.endswith(('.py', '.json', '.js', '.sh', '.md', '.yml', '.yaml', '.toml'))]
 
     # Get line counts
     if pr_number:
