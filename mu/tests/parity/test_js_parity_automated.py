@@ -135,7 +135,7 @@ class TestCrossSubstrateParity:
         """Load shared parity vectors."""
         vectors_file = ROOT / "tests" / "fixtures" / "parity_vectors.json"
         if not vectors_file.exists():
-            pytest.skip("parity_vectors.json not found")
+            pytest.fail("parity_vectors.json not found — parity suite requires this fixture (fail-closed)")
         with open(vectors_file) as f:
             return json.load(f)
 
@@ -428,6 +428,57 @@ class TestCrossSubstrateParity:
                 f"  JS:     {js_denorm}\n"
                 f"  Policy: Both should treat head/tail as linked-list (classify policy)"
             )
+
+
+def test_parity_canary():
+    """Fast cross-substrate canary: single run_vector through both Python and JS.
+
+    Runs one kernel vector through Python, one through JS JSON API, compares results.
+    Designed for green gate inclusion (<10s). Verifies that cross-substrate parity
+    is not broken at merge-time. Full parity suite runs in audit_fast/nightly.
+    """
+    from rcx_pi.selfhost.step_mu import (
+        load_combined_kernel_projections, normalize_projection, list_to_linked,
+    )
+    from rcx_pi.selfhost.match_mu import normalize_for_match
+    from rcx_pi.selfhost.subst_mu import denormalize_from_match
+    from tests.conftest import run_until_done
+
+    kernel_projections = load_combined_kernel_projections()
+
+    # Use a simple identity-like projection: match any value, return it
+    test_input = 42
+    test_projection = {"pattern": {"var": "x"}, "body": {"var": "x"}}
+
+    # Python path
+    norm_input = normalize_for_match(test_input)
+    norm_proj = normalize_projection(test_projection)
+    kernel_entry = {"_step": norm_input, "_projs": list_to_linked([norm_proj])}
+    py_result, _, _ = run_until_done(kernel_projections, kernel_entry, max_steps=100)
+    py_denorm = denormalize_from_match(py_result)
+
+    # JS path via JSON API
+    request = {"action": "run_vector", "input": test_input, "projection": test_projection}
+    js_proc = subprocess.run(
+        ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request)],
+        capture_output=True, text=True, cwd=ROOT, timeout=30
+    )
+    js_response = None
+    for line in js_proc.stdout.split('\n'):
+        if line.startswith('JSON_API_RESPONSE:'):
+            js_response = json.loads(line[len('JSON_API_RESPONSE:'):])
+            break
+
+    assert js_response is not None, "No JSON API response from JS"
+    assert js_response.get('success'), f"JS run_vector failed: {js_response.get('error')}"
+
+    # Compare results (normalize for int/float cross-substrate difference)
+    assert _cross_substrate_equal(py_denorm, js_response['result']), (
+        f"Cross-substrate parity BROKEN:\n"
+        f"  Input:  {test_input}\n"
+        f"  Python: {py_denorm}\n"
+        f"  JS:     {js_response['result']}"
+    )
 
 
 class TestJSReservedFieldValidationParity:

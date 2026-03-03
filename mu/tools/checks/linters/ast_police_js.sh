@@ -2,8 +2,11 @@
 # RCX JavaScript AST Police
 # Catches patterns that grep-based contraband check misses
 #
-# Usage: ./tools/ast_police_js.sh [file]
-#        Default: mu/host/js/eval_step.js
+# Usage: ./tools/checks/linters/ast_police_js.sh [file_or_dir]
+#        Default: mu/host/js/ (scans all *.js recursively)
+#        Single file: ./tools/checks/linters/ast_police_js.sh path/to/file.js
+#
+# Marker: AST_OK_JS on the same line suppresses that match.
 #
 # This catches sneaky patterns like:
 #   - Indirect eval: window['eval'], globalThis.eval, (0,eval)
@@ -16,14 +19,27 @@
 
 set -euo pipefail
 
-JS_FILE="${1:-mu/host/js/eval_step.js}"
+TARGET="${1:-mu/host/js/}"
+JS_FILES=()
 
-if [ ! -f "$JS_FILE" ]; then
-    echo "ERROR: $JS_FILE not found"
+if [ -d "$TARGET" ]; then
+    while IFS= read -r f; do
+        JS_FILES+=("$f")
+    done < <(find "$TARGET" -name '*.js' -not -path '*/node_modules/*' | sort)
+elif [ -f "$TARGET" ]; then
+    JS_FILES=("$TARGET")
+else
+    echo "ERROR: $TARGET not found (not a file or directory)"
     exit 1
 fi
 
-echo "AST Police inspecting $JS_FILE..."
+FILE_COUNT=${#JS_FILES[@]}
+if [ "$FILE_COUNT" -eq 0 ]; then
+    echo "ERROR: No .js files found in $TARGET"
+    exit 1
+fi
+
+echo "AST Police inspecting $FILE_COUNT JS file(s) under $TARGET..."
 echo "   Catching: indirect eval, dynamic access, obfuscation, scope manipulation"
 echo ""
 
@@ -32,16 +48,23 @@ ERRORS=0
 check_pattern() {
     local pattern="$1"
     local reason="$2"
-    local matches
 
-    # Exclude comments (lines starting with //, *, or containing /* */)
-    matches=$(grep -nE "$pattern" "$JS_FILE" 2>/dev/null | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*/\*' || true)
+    for js_file in "${JS_FILES[@]}"; do
+        local matches
+        # Exclude comment lines and lines with AST_OK_JS marker
+        matches=$(grep -nE "$pattern" "$js_file" 2>/dev/null \
+            | grep -v '^\s*//' \
+            | grep -v '^\s*\*' \
+            | grep -v '^\s*/\*' \
+            | grep -v 'AST_OK_JS' \
+            || true)
 
-    if [ -n "$matches" ]; then
-        echo "  ✗ AST VIOLATION: $reason"
-        echo "$matches" | head -5 | sed 's/^/      /'
-        ERRORS=$((ERRORS + 1))
-    fi
+        if [ -n "$matches" ]; then
+            echo "  ✗ AST VIOLATION in $js_file: $reason"
+            echo "$matches" | head -5 | sed 's/^/      /'
+            ERRORS=$((ERRORS + 1))
+        fi
+    done
 }
 
 # Indirect eval patterns (bypass direct 'eval(' check)
@@ -118,7 +141,7 @@ check_pattern "\[Symbol\." "Symbol as object key - hidden properties"
 if [ $ERRORS -gt 0 ]; then
     echo ""
     echo "------------------------------------------------------------"
-    echo "❌ AST Police found $ERRORS violation(s)"
+    echo "❌ AST Police found $ERRORS violation(s) in $FILE_COUNT file(s)"
     echo ""
     echo "These patterns can bypass grep-based contraband checks."
     echo "Fix the violations or mark with // AST_OK_JS: <reason>"
@@ -126,4 +149,4 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 echo "------------------------------------------------------------"
-echo "✅ AST Police: No violations found"
+echo "✅ AST Police: No violations found in $FILE_COUNT file(s)"

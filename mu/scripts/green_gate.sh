@@ -24,7 +24,7 @@ echo "mode: $MODE"
 echo
 
 run_python() {
-  echo "[PY 1/13] Repo clean check"
+  echo "[PY 1/14] Repo clean check"
   if [ -n "$(git status --porcelain)" ]; then
     echo "ERROR: Repo not clean"
     git status --porcelain
@@ -33,31 +33,31 @@ run_python() {
   echo "OK: Repo is clean"
   echo
 
-  echo "[PY 2/13] Contraband check (grep-based lint)"
+  echo "[PY 2/14] Contraband check (grep-based lint)"
   ./tools/checks/linters/contraband.sh rcx_pi
   echo
 
-  echo "[PY 3/13] Test theater check (assert True)"
+  echo "[PY 3/14] Test theater check (assert True)"
   ./tools/checks/check_test_theater.sh tests
   echo
 
-  echo "[PY 4/13] L4 gate theater risk ratchet"
+  echo "[PY 4/14] L4 gate theater risk ratchet"
   python3 tools/checks/check_theater_risk_ratchet.py
   echo
 
-  echo "[PY 5/13] Seed-auto execution contract check"
+  echo "[PY 5/14] Seed-auto execution contract check"
   python3 tools/checks/check_seed_auto_execution_contract.py
   echo
 
-  echo "[PY 6/13] Host-semantics ratchet check"
+  echo "[PY 6/14] Host-semantics ratchet check"
   python3 tools/checks/check_host_semantics_ratchet.py
   echo
 
-  echo "[PY 7/13] AST police (catches what grep misses)"
+  echo "[PY 7/14] AST police (catches what grep misses)"
   python3 tools/checks/linters/ast_police.py
   echo
 
-  echo "[PY 8/13] Anti-cheat scans (test integrity)"
+  echo "[PY 8/14] Anti-cheat scans (test integrity)"
   # No private attr access in tests/
   echo "-- no private attr access in tests/"
   if grep -RInE '\._[a-zA-Z0-9]+' tests/ 2>/dev/null | \
@@ -105,21 +105,21 @@ run_python() {
   echo "OK"
   echo
 
-  echo "[PY 9/13] Semantic purity audit (host debt, smuggling detection)"
+  echo "[PY 9/14] Semantic purity audit (host debt, smuggling detection)"
   ./tools/audit_semantic_purity.sh
   echo
 
   # Nightly (ci_full) runs ALL tests including fuzzers, slow, and JS parity;
   # push/PR excludes fuzzers and slow (JS parity verified via node run in step 11)
   if [ "${HYPOTHESIS_PROFILE:-}" = "ci_full" ]; then
-    echo "[PY 10/13] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
+    echo "[PY 10/14] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
     python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --timeout="$PYTEST_TIMEOUT"
   else
-    echo "[PY 10/13] Python test suite (excludes stress, slow, fuzzer, and JS parity tests)"
+    echo "[PY 10/14] Python test suite (excludes stress, slow, fuzzer)"
     # Fuzzer tests run 50+ hypothesis examples each, consuming ~22 min on CI
     # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
     # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
-    # JS parity tests spawn node subprocesses — nightly only; fast path has step 11
+    # Note: test_js_parity_automated.py is no longer fully ignored — see step 10b
     python3 -m pytest $PARALLEL_FLAG -m "not slow and not fuzzer" \
       --ignore=tests/stress/ \
       --ignore=tests/parity/test_js_parity_automated.py \
@@ -127,7 +127,15 @@ run_python() {
   fi
   echo
 
-  echo "[PY 11/13] Fixture v2 validation"
+  echo "[PY 10b/14] Cross-substrate parity canary (F-01: fast behavioral check)"
+  # Single cross-substrate comparison via run_vector JSON API.
+  # Full parity suite (150+ tests, ~54s) runs in audit_fast.sh and nightly.
+  # This canary catches parity regressions at merge-time in <2s.
+  python3 -m pytest tests/parity/test_js_parity_automated.py::test_parity_canary \
+    --timeout="$PYTEST_TIMEOUT" -q
+  echo
+
+  echo "[PY 11/14] Fixture v2 validation"
   FIXTURE_COUNT=0
   EMPTY_COUNT=0
   for f in $(find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 2>/dev/null | sort); do
@@ -150,11 +158,11 @@ run_python() {
   echo "OK"
   echo
 
-  echo "[PY 12/13] CLI smoke (end-to-end entrypoints)"
+  echo "[PY 12/14] CLI smoke (end-to-end entrypoints)"
   python3 scripts/utils/cli_smoke.py
   echo
 
-  echo "[PY 13/13] JavaScript L3 parity (same projections, same semantics)"
+  echo "[PY 13/14] JavaScript L3 parity (same projections, same semantics)"
   ./tools/checks/check_js_debt.sh
   ./tools/checks/linters/contraband_js.sh
   ./tools/checks/linters/ast_police_js.sh

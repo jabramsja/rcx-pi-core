@@ -295,3 +295,53 @@ const reduced = values.reduce((a, b) => a + b, 0);
 '''
         result = run_ast_police_on_code(code)
         assert result.returncode == 0, f"Allowed patterns should pass: {result.stdout}"
+
+
+class TestAstPoliceDirectoryScan:
+    """Verify ast_police_js.sh can scan directories (F-20)."""
+
+    def test_scans_full_js_substrate(self):
+        """ast_police_js.sh must scan all JS files when given a directory."""
+        result = subprocess.run(
+            ["bash", str(SCRIPT), str(REPO_ROOT / "host" / "js")],
+            capture_output=True, text=True, check=False, timeout=60,
+        )
+        assert result.returncode == 0, f"Full JS substrate scan failed: {result.stdout}"
+        assert "15 JS file(s)" in result.stdout or "file(s)" in result.stdout, (
+            f"Script must report file count: {result.stdout}"
+        )
+
+    def test_catches_violation_in_any_file(self):
+        """ast_police_js.sh must catch violations in files other than eval_step.js."""
+        import tempfile, os
+        tmpdir = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(tmpdir, "clean.js"), "w") as f:
+                f.write("const x = 1;\n")
+            with open(os.path.join(tmpdir, "bad.js"), "w") as f:
+                f.write("const fn = window['eval'];\n")
+            result = subprocess.run(
+                ["bash", str(SCRIPT), tmpdir],
+                capture_output=True, text=True, check=False, timeout=30,
+            )
+            assert result.returncode != 0, "Should fail when any file has violation"
+            assert "bad.js" in result.stdout, "Should identify the offending file"
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+
+class TestAstPoliceMarkerBypass:
+    """Verify AST_OK_JS marker suppresses matches (F-20)."""
+
+    def test_marker_suppresses_match(self):
+        """AST_OK_JS on same line should prevent failure."""
+        code = "obj.__proto__ = null; // AST_OK_JS: intentional reset\n"
+        result = run_ast_police_on_code(code)
+        assert result.returncode == 0, f"AST_OK_JS should suppress: {result.stdout}"
+
+    def test_marker_only_suppresses_same_line(self):
+        """AST_OK_JS on different line must not suppress."""
+        code = "// AST_OK_JS: this is a comment\nobj.__proto__ = null;\n"
+        result = run_ast_police_on_code(code)
+        assert result.returncode != 0, "AST_OK_JS on different line should not suppress"

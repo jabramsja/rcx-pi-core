@@ -66,14 +66,18 @@ EXEMPT_PATTERNS = [
     r"^tests/golden/",             # Golden test files
 ]
 
-# Root files that are exempt (they ARE the source of truth)
-EXEMPT_ROOT_FILES = {
+# Root canonical files — governed but DOC_STATUS header-exempt.
+# These ARE the source of truth; they express governance through
+# edit-control rules (TASKS.md promotion criteria, STATUS.md update
+# protocol) rather than DOC_STATUS headers.
+ROOT_CANONICAL_FILES = {
     "STATUS.md",
     "TASKS.md",
     "ROADMAP.md",
     "README.md",
     "CLAUDE.md",
     "CHANGELOG.md",
+    "FOUNDER_SESSION_BOOTSTRAP.md",
 }
 
 # Valid DOC_STATUS types
@@ -130,9 +134,8 @@ def is_exempt(doc_path: Path) -> bool:
     """Check if a doc is exempt from governance."""
     rel_path = str(doc_path.relative_to(REPO_ROOT))
 
-    # Root exempt files
-    if doc_path.parent == REPO_ROOT and doc_path.name in EXEMPT_ROOT_FILES:
-        return True
+    # Root canonical files are NOT exempt — they are governed.
+    # (They skip DOC_STATUS header checks via needs_doc_header().)
 
     # Exempt patterns
     for pattern in EXEMPT_PATTERNS:
@@ -142,12 +145,27 @@ def is_exempt(doc_path: Path) -> bool:
     return False
 
 
+def needs_doc_header(doc_path: Path) -> bool:
+    """Check if a governed doc needs a DOC_STATUS header.
+
+    Root canonical files express governance through edit-control rules
+    rather than DOC_STATUS headers, so they are governed but header-exempt.
+    """
+    if doc_path.parent == REPO_ROOT and doc_path.name in ROOT_CANONICAL_FILES:
+        return False
+    return True
+
+
 def is_governed(doc_path: Path) -> bool:
     """Check if a doc is under governance (not exempt)."""
     if is_exempt(doc_path):
         return False
 
     rel_path = str(doc_path.relative_to(REPO_ROOT))
+
+    # Root canonical files are governed
+    if doc_path.parent == REPO_ROOT and doc_path.name in ROOT_CANONICAL_FILES:
+        return True
 
     # Check governed folders
     for folder in GOVERNED_FOLDERS:
@@ -173,6 +191,15 @@ def get_all_md_files() -> list[Path]:
 def get_governed_docs() -> list[Path]:
     """Get all docs under governance."""
     return [doc for doc in get_all_md_files() if is_governed(doc)]
+
+
+def get_header_governed_docs() -> list[Path]:
+    """Get governed docs that require DOC_STATUS headers.
+
+    Excludes root canonical files which express governance through
+    edit-control rules rather than DOC_STATUS headers.
+    """
+    return [doc for doc in get_governed_docs() if needs_doc_header(doc)]
 
 
 def get_exempt_docs() -> list[Path]:
@@ -244,7 +271,7 @@ class TestLaw2DocLifecycle:
         """ALL governed docs must have DOC_STATUS headers (no exceptions)."""
         missing = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header is None:
@@ -263,7 +290,7 @@ class TestLaw2DocLifecycle:
         """DOC_STATUS TYPE must be valid."""
         invalid = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and header.doc_type and header.doc_type not in VALID_DOC_TYPES:
@@ -279,7 +306,7 @@ class TestLaw2DocLifecycle:
         """ALL governed docs must have LAST_VERIFIED."""
         missing = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and not header.last_verified:
@@ -296,7 +323,7 @@ class TestLaw2DocLifecycle:
         """ALL governed docs must have OWNER."""
         missing = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and not header.owner:
@@ -313,7 +340,7 @@ class TestLaw2DocLifecycle:
         """ALL governed docs must have FOR_CURRENT_STATE."""
         missing = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and not header.for_current_state:
@@ -331,7 +358,7 @@ class TestLaw2DocLifecycle:
         """ALL governed docs must have GROUNDING_TESTS (can be 'none')."""
         missing = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and not header.grounding_tests:
@@ -349,7 +376,7 @@ class TestLaw2DocLifecycle:
         """LAST_VERIFIED must be valid YYYY-MM-DD format."""
         invalid = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and header.last_verified:
@@ -368,7 +395,7 @@ class TestLaw2DocLifecycle:
         """SUPERSEDED docs must have SUPERSEDED_BY."""
         missing = []
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and header.doc_type == "SUPERSEDED" and not header.superseded_by:
@@ -385,7 +412,7 @@ class TestLaw2DocLifecycle:
         stale = []
         threshold = datetime.now() - timedelta(days=STALE_THRESHOLD_DAYS)
 
-        for doc_path in get_governed_docs():
+        for doc_path in get_header_governed_docs():
             content = doc_path.read_text()
             header = parse_doc_header(content)
             if header and header.last_verified:

@@ -20,7 +20,7 @@ const seedLoader = require('../core/seed_loader');
 // JS built-in property names that must never be used as inject_key.
 // Prevents prototype chain poisoning via boundary requests.
 const FORBIDDEN_INJECT_KEYS = new Set([
-  '__proto__', 'constructor', 'toString', 'valueOf',
+  '__proto__', 'constructor', 'toString', 'valueOf',  // AST_OK_JS: string literal in security blocklist, not prototype access
   'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable',
   'toLocaleString', '__defineGetter__', '__defineSetter__',
   '__lookupGetter__', '__lookupSetter__',
@@ -272,7 +272,7 @@ const BOUNDARY_DISPATCH = Object.freeze({
 let testDispatchOverride = null;
 function setTestDispatchOverride(override) {
   // A16: gate behind explicit test mode — fail-closed outside tests.
-  if (process.env.RCX_TEST_MODE !== '1') {
+  if (process.env.RCX_TEST_MODE !== '1') {  // CONTRABAND_OK: test-only gate (P-04 policy-bound)
     throw new RcxError('api.bad_request',
       'setTestDispatchOverride is test-only (RCX_TEST_MODE=1 required)');
   }
@@ -716,7 +716,7 @@ function buildOntologyPromotionCandidate(evidence, contextStr) {
     closure_structure: evidence.closure_structure,
     perturbation_log: evidence.perturbation_log,
     tau_lineage: evidence.tau_lineage,
-    derivation_timestamp: new Date().toISOString(),
+    derivation_timestamp: 'derived:' + checksum,  // CONTRABAND_OK: deterministic derivation from seed checksum (replaces wall-clock new Date())
     substrate_versions: { python: checksum, js: checksum },
     authority: {
       source: 'seed',
@@ -760,7 +760,7 @@ function collectOntologyEvidence(result, operation) {
     stall: stall,
     projection_ids: projectionIds,
     control_hash: controlHash,
-    collected_at: new Date().toISOString(),
+    collected_at: 'derived:' + controlHash,  // CONTRABAND_OK: deterministic derivation from control hash (replaces wall-clock new Date())
   };
 }
 

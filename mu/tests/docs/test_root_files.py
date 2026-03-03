@@ -63,6 +63,11 @@ ROOT_FILES = {
         "must_contain": ["## Rules", "## Round Format"],
         "must_link_to": [],
     },
+    "FOUNDER_SESSION_BOOTSTRAP.md": {
+        "required": False,  # GPT session bootstrap prompt
+        "must_contain": ["## 0) Session Contract"],
+        "must_link_to": [],
+    },
 }
 
 # Paths that should exist if referenced in root files

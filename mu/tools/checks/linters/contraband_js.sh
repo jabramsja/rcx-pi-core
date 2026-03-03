@@ -2,8 +2,11 @@
 # RCX JavaScript Contraband Check
 # Blocks forbidden patterns that would break L3 parity guarantees
 #
-# Usage: ./tools/contraband_js.sh [file]
-#        Default: mu/host/js/eval_step.js
+# Usage: ./tools/checks/linters/contraband_js.sh [file_or_dir]
+#        Default: mu/host/js/ (scans all *.js recursively)
+#        Single file: ./tools/checks/linters/contraband_js.sh path/to/file.js
+#
+# Marker: CONTRABAND_OK on the same line suppresses that match.
 #
 # Forbidden patterns (break determinism or purity):
 #   eval(           - Code injection
@@ -22,33 +25,50 @@
 
 set -euo pipefail
 
-JS_FILE="${1:-mu/host/js/eval_step.js}"
+TARGET="${1:-mu/host/js/}"
+JS_FILES=()
 
-if [ ! -f "$JS_FILE" ]; then
-    echo "ERROR: $JS_FILE not found"
+if [ -d "$TARGET" ]; then
+    while IFS= read -r f; do
+        JS_FILES+=("$f")
+    done < <(find "$TARGET" -name '*.js' -not -path '*/node_modules/*' | sort)
+elif [ -f "$TARGET" ]; then
+    JS_FILES=("$TARGET")
+else
+    echo "ERROR: $TARGET not found (not a file or directory)"
     exit 1
 fi
 
-echo "Checking $JS_FILE for contraband patterns..."
+FILE_COUNT=${#JS_FILES[@]}
+if [ "$FILE_COUNT" -eq 0 ]; then
+    echo "ERROR: No .js files found in $TARGET"
+    exit 1
+fi
+
+echo "Scanning $FILE_COUNT JS file(s) under $TARGET for contraband patterns..."
 
 ERRORS=0
-
-# Check for forbidden patterns
-# Each pattern has a reason why it's forbidden
 
 check_pattern() {
     local pattern="$1"
     local reason="$2"
-    local matches
 
-    # Use grep -n to show line numbers, exclude comments (lines starting with //, *, or whitespace+*)
-    matches=$(grep -n "$pattern" "$JS_FILE" 2>/dev/null | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '/\*.*\*/' || true)
+    for js_file in "${JS_FILES[@]}"; do
+        local matches
+        # Exclude comment lines and lines with CONTRABAND_OK marker
+        matches=$(grep -n "$pattern" "$js_file" 2>/dev/null \
+            | grep -v '^\s*//' \
+            | grep -v '^\s*\*' \
+            | grep -v '/\*.*\*/' \
+            | grep -v 'CONTRABAND_OK' \
+            || true)
 
-    if [ -n "$matches" ]; then
-        echo "  ✗ CONTRABAND: '$pattern' - $reason"
-        echo "$matches" | head -5 | sed 's/^/      /'
-        ERRORS=$((ERRORS + 1))
-    fi
+        if [ -n "$matches" ]; then
+            echo "  ✗ CONTRABAND: '$pattern' in $js_file - $reason"
+            echo "$matches" | head -5 | sed 's/^/      /'
+            ERRORS=$((ERRORS + 1))
+        fi
+    done
 }
 
 # Determinism breakers
@@ -115,12 +135,13 @@ check_pattern "Promise\." "Promise API enables async execution"
 
 if [ $ERRORS -gt 0 ]; then
     echo ""
-    echo "❌ JS contraband check FAILED: $ERRORS forbidden pattern(s) found"
+    echo "❌ JS contraband check FAILED: $ERRORS forbidden pattern(s) found in $FILE_COUNT file(s)"
     echo ""
     echo "These patterns break L3 parity guarantees (determinism, purity, isolation)."
+    echo "Mark intentional exceptions with // CONTRABAND_OK: <reason> on the same line."
     echo "See mu/docs/core/SelfHosting.v0.md for allowed bootstrap patterns."
     exit 1
 fi
 
-echo "✓ No contraband patterns found"
+echo "✓ No contraband patterns found in $FILE_COUNT file(s)"
 echo "OK: JS contraband check passed"
