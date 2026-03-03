@@ -647,6 +647,133 @@ class TestRequestValidation:
 
 
 # ===========================================================================
+# Test 3b: JS seed loader malformed projection fail-closed (F2 hardening)
+# ===========================================================================
+
+
+class TestJsSeedLoaderMalformedProjection:
+    """JS seed loader must reject null/array/scalar projection entries.
+
+    Tests call production loadVerifiedSeed from seed_loader.js directly via
+    temp seed files written to mu/utilities/. Unknown seed names bypass
+    checksum/projection-ID checks, isolating the type guard.
+    """
+
+    @staticmethod
+    def _run_seed_loader_test(projections_json, expect_index, expect_type):
+        """Write a temp seed with malformed projections, call production loadVerifiedSeed."""
+        js_code = f"""
+        const fs = require('fs');
+        const path = require('path');
+        const {{ loadVerifiedSeed }} = require('./mu/host/js/core/seed_loader');
+        const tmpName = '_test_malformed_' + process.pid + '.json';
+        const seedPath = path.join('mu', 'utilities', tmpName);
+        fs.writeFileSync(seedPath, JSON.stringify({{
+            meta: {{name: "TEST", version: "1.0", description: "test"}},
+            projections: {projections_json}
+        }}));
+        try {{
+            loadVerifiedSeed(tmpName, 'utilities');
+            console.log('ERROR: no throw');
+        }} catch(e) {{
+            if (e.message.includes('projection[{expect_index}]') &&
+                e.message.includes('{expect_type}')) {{
+                console.log('OK');
+            }} else {{
+                console.log('WRONG: ' + e.message);
+            }}
+        }} finally {{
+            try {{ fs.unlinkSync(seedPath); }} catch(_) {{}}
+        }}
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        return result.stdout.strip()
+
+    def test_seed_loader_rejects_null_projection(self):
+        """Production loadVerifiedSeed rejects null projection entry."""
+        out = self._run_seed_loader_test(
+            '[{"id":"ok","pattern":{},"body":{}}, null]',
+            expect_index=1, expect_type="null",
+        )
+        assert out == "OK", f"seed_loader null projection: {out}"
+
+    def test_seed_loader_rejects_array_projection(self):
+        """Production loadVerifiedSeed rejects array projection entry."""
+        out = self._run_seed_loader_test(
+            '[[1,2,3]]',
+            expect_index=0, expect_type="array",
+        )
+        assert out == "OK", f"seed_loader array projection: {out}"
+
+    def test_seed_loader_rejects_scalar_projection(self):
+        """Production loadVerifiedSeed rejects scalar (number) projection entry."""
+        out = self._run_seed_loader_test(
+            '[42]',
+            expect_index=0, expect_type="number",
+        )
+        assert out == "OK", f"seed_loader scalar projection: {out}"
+
+    def test_main_validate_seed_structure_type_guard_source_lock(self):
+        """main.js validateSeedStructure contains type guard before 'id' in proj check.
+
+        Source-lock: validateSeedStructure is not exported, so we verify the
+        guard predicate exists in the source and precedes the 'id' in proj check.
+        If the guard is removed or reordered, this test fails.
+        """
+        main_js = (REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js").read_text()
+        guard = "proj === null || typeof proj !== 'object' || Array.isArray(proj)"
+        id_check = "'id' in proj"
+        assert guard in main_js, (
+            "main.js missing type guard predicate in validateSeedStructure"
+        )
+        assert id_check in main_js, (
+            "main.js missing 'id' in proj check in validateSeedStructure"
+        )
+        guard_pos = main_js.index(guard)
+        id_pos = main_js.index(id_check)
+        assert guard_pos < id_pos, (
+            f"Type guard (pos {guard_pos}) must appear before "
+            f"'id' in proj check (pos {id_pos})"
+        )
+
+
+
+# ===========================================================================
+# Test 3c: F2 production-binding lock (anti-theater)
+# ===========================================================================
+
+
+class TestF2ProductionBindingLock:
+    """Lock: F2 tests must use production code paths, not inline simulation."""
+
+    def test_f2_tests_require_production_seed_loader(self):
+        """TestJsSeedLoaderMalformedProjection must call production seed_loader."""
+        test_file = REPO_ROOT / "mu" / "tests" / "l4_gates" / "test_boundary_dispatch_authority_gate.py"
+        source = test_file.read_text()
+        # Extract TestJsSeedLoaderMalformedProjection class body
+        class_start = source.index("class TestJsSeedLoaderMalformedProjection")
+        next_class = source.find("\nclass ", class_start + 1)
+        class_source = source[class_start:next_class] if next_class != -1 else source[class_start:]
+        # Must contain production binding
+        assert "require('./mu/host/js/core/seed_loader')" in class_source, (
+            "TestJsSeedLoaderMalformedProjection must invoke production seed_loader "
+            "via require(), not simulate guard logic inline"
+        )
+        # Must NOT contain inline JS function definitions (simulation).
+        # Build search strings programmatically to avoid self-referential match.
+        for fn_name in ["validateSeedStructure", "loadVerifiedSeed"]:
+            needle = f"function {fn_name}("
+            assert needle not in class_source, (
+                f"TestJsSeedLoaderMalformedProjection must not define inline "
+                f"{fn_name} — use production code"
+            )
+
+
+# ===========================================================================
 # Test 4: Behavior preservation (slow — uses engine)
 # ===========================================================================
 

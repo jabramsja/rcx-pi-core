@@ -104,10 +104,13 @@ echo "== 3b) Test theater check (assert True) =="
 echo "== 3b2) L4 gate theater risk ratchet =="
 python3 tools/checks/check_theater_risk_ratchet.py
 
-echo "== 3b3) Seed-auto execution contract check =="
+echo "== 3b3) Simulated production logic check =="
+python3 tools/checks/check_simulated_production_logic.py
+
+echo "== 3b4) Seed-auto execution contract check =="
 python3 tools/checks/check_seed_auto_execution_contract.py
 
-echo "== 3b4) Host-semantics ratchet check =="
+echo "== 3b5) Host-semantics ratchet check =="
 python3 tools/checks/check_host_semantics_ratchet.py
 
 echo "== 3c) JS contraband check (L3 parity) =="

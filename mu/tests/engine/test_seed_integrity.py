@@ -430,3 +430,67 @@ class TestChecksumsMatchReality:
             f"  Expected: {expected}\n"
             f"  Update SEED_CHECKSUMS if seed was intentionally changed."
         )
+
+
+# =============================================================================
+# Test: Non-Finite Numeric Rejection (F1 hardening)
+# =============================================================================
+
+
+class TestNonFiniteNumericRejection:
+    """Seed loader must reject NaN/Infinity for cross-substrate parity."""
+
+    def test_nan_rejected(self, tmp_path):
+        """JSON containing NaN is rejected deterministically."""
+        seed_file = tmp_path / "nan_test.json"
+        seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": NaN, "body": {}}]}')
+        with pytest.raises(ValueError, match="NaN"):
+            load_verified_seed(seed_file, verify=False)
+
+    def test_infinity_rejected(self, tmp_path):
+        """JSON containing Infinity is rejected deterministically."""
+        seed_file = tmp_path / "inf_test.json"
+        seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": Infinity, "body": {}}]}')
+        with pytest.raises(ValueError, match="Infinity"):
+            load_verified_seed(seed_file, verify=False)
+
+    def test_neg_infinity_rejected(self, tmp_path):
+        """JSON containing -Infinity is rejected deterministically."""
+        seed_file = tmp_path / "neginf_test.json"
+        seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": -Infinity, "body": {}}]}')
+        with pytest.raises(ValueError, match="Infinity"):
+            load_verified_seed(seed_file, verify=False)
+
+    def test_normal_json_still_loads(self, tmp_path):
+        """Normal JSON with standard types loads without error."""
+        seed_file = tmp_path / "normal_test.json"
+        seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": {"a": 1}, "body": {"b": 2.5}}]}')
+        seed = load_verified_seed(seed_file, verify=False)
+        assert seed["projections"][0]["pattern"] == {"a": 1}
+
+
+# =============================================================================
+# Test: Seed Projection Mu Validity Invariant (test-time, not runtime)
+# =============================================================================
+
+
+class TestSeedProjectionMuValidity:
+    """All registered seeds must have valid Mu in pattern and body fields."""
+
+    def test_all_seed_projections_are_valid_mu(self):
+        """Every projection pattern and body in checksummed seeds passes is_mu()."""
+        from rcx_pi.selfhost.mu_type import is_mu
+
+        for seed_name in SEED_CHECKSUMS:
+            seed_path = get_seed_path(seed_name)
+            seed = load_verified_seed(seed_path)
+            for proj in seed["projections"]:
+                proj_id = proj.get("id", "<unknown>")
+                assert is_mu(proj["pattern"]), (
+                    f"Seed {seed_name} projection {proj_id}: "
+                    f"pattern is not valid Mu: {proj['pattern']!r}"
+                )
+                assert is_mu(proj["body"]), (
+                    f"Seed {seed_name} projection {proj_id}: "
+                    f"body is not valid Mu: {proj['body']!r}"
+                )

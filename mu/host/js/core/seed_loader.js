@@ -124,6 +124,19 @@ function loadVerifiedSeed(seedName, subdir) {
 
   const seed = JSON.parse(raw);
 
+  // Projection entry type guard (fail-closed — reject null/array/scalar before .id access)
+  if (Array.isArray(seed.projections)) {
+    for (let i = 0; i < seed.projections.length; i++) {
+      const p = seed.projections[i];
+      if (p === null || typeof p !== 'object' || Array.isArray(p)) {
+        throw new Error(
+          `Seed ${seedName}: projection[${i}] must be a plain object, ` +
+          `got ${p === null ? 'null' : Array.isArray(p) ? 'array' : typeof p}`
+        );
+      }
+    }
+  }
+
   // Projection ID verification (fail-closed)
   const expectedIds = CORE_SEED_PROJECTION_IDS[seedName];
   if (expectedIds) {

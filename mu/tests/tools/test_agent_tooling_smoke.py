@@ -760,3 +760,17 @@ VERIFIED: Yes
         assert blocks_merge("VULNERABLE", proof_output, is_compliant=True) is True
         assert blocks_merge("VULNERABLE", proof_output, is_compliant=False) is False
         assert blocks_merge("SECURE", proof_output, is_compliant=True) is False
+
+
+class TestCiReviewExtensionFilter:
+    """Lock test: run_ci_review.py filters all reviewable file extensions."""
+
+    def test_ci_review_extension_filter_covers_all_types(self):
+        """Extension filter must include .sh, .md, .yml, .yaml, .toml (RT1-F3)."""
+        ci_review_path = TOOLS_DIR / "runners" / "run_ci_review.py"
+        source = ci_review_path.read_text()
+        for ext in (".py", ".json", ".js", ".sh", ".md", ".yml", ".yaml", ".toml"):
+            assert f"'{ext}'" in source, (
+                f"run_ci_review.py extension filter missing {ext!r} — "
+                f"CI agent review will skip {ext} files silently"
+            )

@@ -476,8 +476,13 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
     if verify:
         verify_checksum(seed_name, content)
 
-    # Parse JSON
-    seed = json.loads(content.decode("utf-8"))
+    # Parse JSON (reject non-finite numeric literals for cross-substrate parity)
+    def _reject_non_finite(token: str) -> None:
+        raise ValueError(
+            f"Seed {seed_name}: non-finite numeric literal rejected: {token}"
+        )
+
+    seed = json.loads(content.decode("utf-8"), parse_constant=_reject_non_finite)
 
     # Validate structure and projection IDs
     if verify:

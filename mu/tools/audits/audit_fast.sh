@@ -81,6 +81,9 @@ echo "== 1b) Test theater check =="
 echo "== 1b2) L4 gate theater risk ratchet =="
 python3 tools/checks/check_theater_risk_ratchet.py
 
+echo "== 1b3) Simulated production logic check =="
+python3 tools/checks/check_simulated_production_logic.py
+
 echo "== 1c) JS contraband check =="
 ./tools/checks/linters/contraband_js.sh
 
