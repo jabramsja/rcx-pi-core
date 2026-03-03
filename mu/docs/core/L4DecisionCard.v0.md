@@ -778,6 +778,121 @@ Decision Deadline: 2026-03-09 (wave d009 heartbeat)
 
 ---
 
+### D010: H5 Projection Loader Binary Format (projection_loader)
+
+```
+Decision: D010
+Gate: G8 (Irreducible Primitive Consensus)
+Primitive: projection_loader
+Hypothesis: H5 — JSON parsing dependency in projection_loader can be replaced
+  with a custom recursive TLV (tag-length-value) decoder, reducing host
+  parsing surface from full recursive-descent JSON grammar to minimal
+  tag-dispatch decoder.
+
+Type: Research experiment (L4_ENABLER)
+Date opened: 2026-03-02
+Decision deadline: 2026-03-09
+Status: EXECUTED
+Outcome: GO — H5 PARTIALLY CONFIRMED
+
+Evidence:
+  pytest mu/tests/research/test_d010_h5_projection_loader_binary.py -q
+
+Evidence delta vs D009:
+  D009 provided 3/4 executable evidence. D010 provides 4/4. All four
+  bootstrap primitives now have executable reducibility evidence.
+  projection_loader reclassified from prose-only to test-backed.
+
+Scope:
+  - ALLOWED: Custom recursive TLV encoder/decoder in tests/research/,
+    golden byte fixtures, round-trip fidelity on 2 canonical seeds,
+    engine-level behavioral parity proof, failure-mode tests.
+  - FORBIDDEN: Production code changes, seed format migration, JS
+    cross-substrate decoder, I/O or SHA256 reducibility claims.
+
+Experiment design:
+  MuBinary TLV format with 8 tag bytes (null, true, false, int64, float64,
+  string, list, dict). 4-byte big-endian length for variable-length types.
+  Custom recursive decoder — nested dicts/lists recurse through tag-dispatch
+  loop (honest about recursive nature, not flat sequential).
+
+Success criteria results:
+  - C1 (round-trip fidelity): MET
+    bootstrap_structural.v1.json (5 projections) and kernel.v1.json
+    (7 projections) survive encode→decode with exact structural equality.
+  - C2 (golden byte fixtures): MET
+    17 decode-only tests with hand-constructed byte blobs, including:
+    primitives (null, true, false, int, float, string), containers
+    (empty/populated list, empty/nested dict), Mu-specific shapes
+    (var node, projection-like dict). All independent of encoder.
+  - C3 (engine-level behavioral parity): MET
+    2 step_kernel_mu tests: (a) stall path — domain projection that
+    doesn't match input, identical stall from JSON vs binary-decoded
+    projections; (b) match path — A→B projection, identical output
+    {"state": "B"} from both paths. Same termination_reason in both.
+  - C4 (no new primitive): MET
+    BOOTSTRAP_PRIMITIVE markers unchanged: Py:4, JS:7, total 11.
+
+Boundary lock results:
+  - B1 (round-trip all Mu types): MET — 16 parametrized cases covering
+    all 6 production seed types (NoneType, bool, int, str, list, dict)
+    plus float for completeness. Type identity verified.
+  - B2 (all seed types covered): MET — recursive walk of all seed files
+    confirms exactly {NoneType, bool, int, str, list, dict}. No float.
+  - B3 (failure modes): MET — 12 error tests: truncated data (empty,
+    int, float, string data, string length), bad tag (0xFF, 0x08),
+    length overflow (list), non-string dict key (encode + decode),
+    NaN/Inf round-trip, trailing data.
+
+Failure criteria results:
+  - F1 (isinstance in encoder): HIT — type dispatch uses isinstance.
+  - F2 (isinstance in decoder): HIT — dict key validation uses isinstance.
+  - F3 (struct.pack/unpack): HIT — numeric serialization is host code.
+  - F4 (UTF-8 encode/decode): HIT — string handling is host code.
+  - F5 (dict iteration order): HIT — encoder follows host dict order.
+  - F6 (recursive decoder): HIT — nested structures recurse through
+    mu_decode. Host call stack depth limits apply.
+  - F7 (I/O irreducible): acknowledged — reading bytes from disk is host.
+  - F8 (SHA256 irreducible): acknowledged — integrity check is host.
+  - F9 (validation irreducible): acknowledged — meta/projections check
+    remains host code.
+
+LOC: encode ~30, decode ~65, decode_value ~5. Total codec ~100 LOC
+  (threshold 200). Significantly smaller than Python json module (~2500 LOC).
+
+Classification: H5 PARTIALLY CONFIRMED
+  - What H5 achieves: JSON parsing (the largest single host-dependency
+    component of projection_loader) can be replaced with a ~100 LOC custom
+    recursive TLV decoder that handles all 6 Mu types present in production
+    seeds. Engine-level behavioral parity confirmed — projections decoded
+    from binary produce identical step_kernel_mu results.
+  - What H5 does NOT achieve: I/O (read bytes), integrity (SHA256), and
+    structure validation remain irreducible host operations. The TLV decoder
+    still uses host isinstance, struct.pack/unpack, and UTF-8 encoding.
+    The decoder is recursive (host stack depth applies).
+  - What this means for G8: projection_loader now has executable reducibility
+    evidence (research artifact, 59 tests). Classification REDUCIBLE_WITH
+    is backed by test artifact, not prose alone. G8 advances to 4/4
+    executable evidence. G8 status remains UNPROVEN pending formal
+    consensus — all primitives now have evidence, but the gate requires
+    adjudication to move to PROVEN.
+
+Explicit caveats (D010 scope boundary):
+  - D010 is research-only. Production projection_loader (seed_integrity.py,
+    main.js) is unchanged. No seed format migration.
+  - D010 proves PARSING-COMPONENT reducibility only. The other three
+    components (I/O, integrity, validation) are out of scope.
+  - No JS cross-substrate binary decoder. D010 evidence is Python-only.
+  - If binary format is ever promoted to production, a future wave must
+    address: cross-substrate (JS) decoder, migration tooling, integrity
+    chain (SHA256 of binary vs JSON), and seed structure validation.
+
+  Bootstrap endgame policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP
+  (per L4ExecutionContract.v2.md rule 13).
+```
+
+---
+
 ## Normative Lock
 
 **Bootstrap endgame policy:** The canonical bootstrap endgame policy is `SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP`, as locked by `roadmap/L4ExecutionContract.v2.md` (anti-stagnation rule 13). This resolves the design split between "eliminate bootstrap entirely" and "irreducible bootstrap forever" — the canonical position is: minimize bootstrap to substrate-independent irreducible primitives. All future L4 decision cards must declare this policy in their tracker sync notes.
