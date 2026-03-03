@@ -122,7 +122,7 @@ Any full prompt should include:
 `Questions? Concerns? Thoughts? -- Think hard`
 
 ## 11) First 5 Minutes Playbook For New Session
-1. Read `AGENTS.md` and honor skill/trigger rules.
+1. Read `mu/docs/agents/AgentRunbook.v0.md` and honor skill/trigger rules.
 2. Run `git status --short`.
 3. Run L4 contract check on actual candidate diff.
 4. Decide if wave must be split by class.
