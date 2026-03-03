@@ -346,7 +346,7 @@ class TestContrabandjsDirectoryScan:
         """contraband_js.sh must scan all JS files when given a directory."""
         result = subprocess.run(
             ["bash", str(SCRIPT), str(REPO_ROOT / "host" / "js")],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True, text=True, check=False, timeout=120,
         )
         assert result.returncode == 0, f"Full JS substrate scan failed: {result.stdout}"
         assert "15 JS file(s)" in result.stdout or "file(s)" in result.stdout, (

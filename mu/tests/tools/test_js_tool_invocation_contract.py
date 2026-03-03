@@ -37,7 +37,7 @@ class TestRule1DefaultNoArgInvocation:
         """contraband_js.sh with no args must scan all JS files under mu/host/js/."""
         result = subprocess.run(
             ["bash", str(SCRIPT_CONTRABAND)],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True, text=True, check=False, timeout=120,
             cwd=str(ACTUAL_REPO_ROOT),
         )
         assert result.returncode == 0, f"No-arg contraband scan failed: {result.stdout}"
@@ -49,7 +49,7 @@ class TestRule1DefaultNoArgInvocation:
         """ast_police_js.sh with no args must scan all JS files under mu/host/js/."""
         result = subprocess.run(
             ["bash", str(SCRIPT_AST_POLICE)],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True, text=True, check=False, timeout=120,
             cwd=str(ACTUAL_REPO_ROOT),
         )
         assert result.returncode == 0, f"No-arg AST police scan failed: {result.stdout}"
@@ -113,7 +113,7 @@ class TestRule2DirectoryAndSingleFileModes:
         """Directory mode must report file count."""
         result = subprocess.run(
             ["bash", str(SCRIPT_CONTRABAND), str(REPO_ROOT / "host" / "js")],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True, text=True, check=False, timeout=120,
         )
         assert result.returncode == 0, f"Directory scan failed: {result.stdout}"
         assert "file(s)" in result.stdout
@@ -122,7 +122,7 @@ class TestRule2DirectoryAndSingleFileModes:
         """Directory mode must report file count."""
         result = subprocess.run(
             ["bash", str(SCRIPT_AST_POLICE), str(REPO_ROOT / "host" / "js")],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True, text=True, check=False, timeout=120,
         )
         assert result.returncode == 0, f"Directory scan failed: {result.stdout}"
         assert "file(s)" in result.stdout

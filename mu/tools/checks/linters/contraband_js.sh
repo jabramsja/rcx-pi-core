@@ -53,22 +53,36 @@ check_pattern() {
     local pattern="$1"
     local reason="$2"
 
-    for js_file in "${JS_FILES[@]}"; do
-        local matches
-        # Exclude comment lines and lines with CONTRABAND_OK marker
-        matches=$(grep -n "$pattern" "$js_file" 2>/dev/null \
-            | grep -v '^\s*//' \
-            | grep -v '^\s*\*' \
-            | grep -v '/\*.*\*/' \
-            | grep -v 'CONTRABAND_OK' \
-            || true)
+    # Batch all files into one grep call (15x fewer subprocesses)
+    local all_matches
+    all_matches=$(grep -Hn "$pattern" "${JS_FILES[@]}" 2>/dev/null \
+        | grep -v ':[0-9]*:\s*//' \
+        | grep -v ':[0-9]*:\s*\*' \
+        | grep -v '/\*.*\*/' \
+        | grep -v 'CONTRABAND_OK' \
+        || true)
 
-        if [ -n "$matches" ]; then
-            echo "  ✗ CONTRABAND: '$pattern' in $js_file - $reason"
-            echo "$matches" | head -5 | sed 's/^/      /'
+    if [ -z "$all_matches" ]; then
+        return
+    fi
+
+    # Group matches by file for per-file reporting
+    local prev_file=""
+    local file_lines=0
+    while IFS= read -r line; do
+        local file="${line%%:*}"
+        if [ "$file" != "$prev_file" ]; then
+            prev_file="$file"
+            file_lines=0
+            echo "  ✗ CONTRABAND: '$pattern' in $file - $reason"
             ERRORS=$((ERRORS + 1))
         fi
-    done
+        file_lines=$((file_lines + 1))
+        if [ "$file_lines" -le 5 ]; then
+            local rest="${line#*:}"
+            echo "      $rest"
+        fi
+    done <<< "$all_matches"
 }
 
 # Determinism breakers
