@@ -286,6 +286,81 @@ class TestRT3BypassFixtures:
         assert violations == [], f"Expected no violations, got: {violations}"
 
 
+class TestRT4QuotePairingRegression:
+    """RT4: Tests for quote-pairing bug in concatenated-string extraction."""
+
+    def test_mixed_quotes_guard_loop_detected(self, tmp_path):
+        """FAIL: Guard loop in concat strings with JS single quotes inside Python double quotes.
+
+        Pre-RT4 bug: ['\"](.+?)['\"] allowed mismatched pairing, splitting
+        typeof p !== 'object' across fragments and losing the guard-loop match.
+        """
+        f = tmp_path / "test_mixed_quotes.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = (\n'
+            '        "const seed = {projections: [null]};\\n"\n'
+            '        "for (let i = 0; i < seed.projections.length; i++) {\\n"\n'
+            '        "    const p = seed.projections[i];\\n"\n'
+            "        \"    if (p === null || typeof p !== 'object') {\\n\"\n"
+            '        "        console.log(\'rejected\');\\n"\n'
+            '        "    }\\n"\n'
+            '        "}\\n"\n'
+            '    )\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected guard loop violation, got: {violations}"
+        descs = ' '.join(v['desc'] for v in violations)
+        assert 'guard loop' in descs
+
+    def test_escaped_quotes_in_concat_detected(self, tmp_path):
+        """FAIL: Inline helper in concat strings with escaped quotes still detected."""
+        f = tmp_path / "test_escaped_quotes.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = (\n'
+            "        'function validateSeedStructure(name, seed) {\\n'\n"
+            "        '    if (!seed.projections) throw new Error(\"missing\");\\n'\n"
+            "        '    console.log(\\'validated\\');\\n'\n"
+            "        '}\\n'\n"
+            '    )\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected violation, got: {violations}"
+        descs = ' '.join(v['desc'] for v in violations)
+        assert 'validateSeedStructure' in descs
+
+    def test_double_quoted_concat_with_js_singles_detected(self, tmp_path):
+        """FAIL: Double-quoted Python strings containing JS single-quoted literals."""
+        f = tmp_path / "test_dq_with_js_sq.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = (\n'
+            '        "function loadVerifiedSeed(name) {\\n"\n'
+            "        \"    return require('./mu/host/js/fake');\\n\"\n"
+            '        "}\\n"\n'
+            '    )\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected violation, got: {violations}"
+        descs = ' '.join(v['desc'] for v in violations)
+        assert 'loadVerifiedSeed' in descs
+
+    def test_paired_quotes_preserve_content(self, tmp_path):
+        """PASS: Production-bound concat with mixed quotes is not false-flagged."""
+        f = tmp_path / "test_paired_pass.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = (\n'
+            "        \"const { loadVerifiedSeed } = require('./mu/host/js/core/seed_loader');\\n\"\n"
+            "        \"const seed = loadVerifiedSeed('test.json', 'utilities');\\n\"\n"
+            '        "console.log(seed);\\n"\n'
+            '    )\n'
+        )
+        violations = check_file(f)
+        assert violations == [], f"Expected no violations, got: {violations}"
+
+
 class TestRT3CIPathLock:
     """RT3: Verify checker is wired into audit scripts."""
 

@@ -126,16 +126,18 @@ def extract_js_snippets(content: str) -> list[tuple[int, int, str]]:
     # Look for patterns like: js_code = (\n  'line1\n'\n  'line2\n'\n)
     # or: subprocess.run([..., '-e', 'line1' + 'line2'])
     # Strategy: find node -e or similar invocations with concatenated strings
+    # RT4: Use paired-delimiter matching to avoid splitting on inner quotes
+    _QUOTED_LINE = r"""(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""
     for m in re.finditer(
         r"(?:node\s.*?-e['\",\s]+|js_code\s*=\s*\(?\s*\n)"
-        r"((?:\s*['\"].*?['\"]\s*\+?\s*\n?)+)",
+        r"((?:\s*" + _QUOTED_LINE + r"\s*\+?\s*\n?)+)",
         content,
     ):
-        # Combine the concatenated string parts
+        # Combine the concatenated string parts (RT4: paired quote delimiters)
         raw = m.group(1)
         combined = ''
-        for part in re.finditer(r"['\"](.+?)['\"]", raw):
-            combined += part.group(1) + '\n'
+        for part in re.finditer(r"(['\"])(.+?)\1", raw):
+            combined += part.group(2) + '\n'
         if re.search(r'\b(?:function|const|let|var|require)\b', combined):
             blocks.append((m.start(), m.end(), combined))
 
