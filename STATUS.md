@@ -73,8 +73,8 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
-| **Python Substrate** | ~2000 LOC, ~4,736 tests, production-ready | ✅ PRIMARY | - |
-| **JS Substrate** | ~1970 LOC core + ~1010 LOC inline tests, auditable, portability proof | - | ✅ COMPLETE |
+| **Python Substrate** | ~6250 LOC, ~5,458 tests, production-ready | ✅ PRIMARY | - |
+| **JS Substrate** | ~4200 LOC core + ~470 LOC inline tests (15 JS modules), auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
 **What L3 proves:**
@@ -104,9 +104,9 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization: ✅ | Engine orchestration + hemisphere routing + metabolization L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
-- JS file has DEBT SUMMARY header with counts: 19 total (10 iteration + 5 recursion + 4 builtin)
+- JS file has DEBT SUMMARY header with counts: 16 total (9 iteration + 4 recursion + 3 builtin) — per `constants.js` canonical header. Note: `debt_dashboard.sh` grep reports 10+5+4=19 because it counts header listing lines as token hits; the actual distinct host-operation count is 16.
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
-- These are AST-level host loop markers, analogous to Python's AST_OK:infra (42), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 12 Python host-debt decorator sites implementing them — these are distinct concepts.
+- These are AST-level host loop markers, analogous to Python's AST_OK:infra (65), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 9 Python host-debt decorator sites (ceiling: 12) — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
 - `tools/checks/check_js_debt.sh` validates markers are present
 - `tools/checks/linters/contraband_js.sh` validates no forbidden patterns (determinism, purity)
@@ -149,7 +149,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `mu/host/js/eval_step.js` (~1970 LOC core + ~1010 LOC inline tests)
+**JS POC location:** `mu/host/js/` (~4200 LOC core + ~470 LOC inline tests across 15 JS modules; `eval_step.js` is compatibility shim)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -202,9 +202,9 @@ Boot1 is a **host-side loop policy alternative**, not a seed-defined structural 
 - **Recursive shadow:** `_run_engine_recursive()` recursive call stack (`step_mu.py:_run_engine_recursive()`, `eval_step.js:runEnginePipelineRecursive()`)
 Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); default remains trampoline. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec.
 
-**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~1300 LOC core in JS), we know exactly what would need to change.
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~4200 LOC core in JS across 15 modules), we know exactly what would need to change.
 
-**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS POC at ~1300 LOC core is our current answer - auditable, portable, mechanical.
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS substrate at ~4200 LOC core is our current answer - auditable, portable, mechanical.
 
 ### Cross-Substrate Testing Strategy
 
@@ -362,7 +362,7 @@ The debt of 11 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths a
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 64 (current 64)
+- AST_OK:infra ceiling: 65 (current 65)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
