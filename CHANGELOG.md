@@ -2,6 +2,26 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-03
+
+### W1-GATE: Gate Blindness Remediation (PR #468)
+
+- Green gate now includes parity canary (`test_parity_canary`) for cross-substrate coverage
+- JS linters (`contraband_js.sh`, `ast_police_js.sh`) scan full `mu/host/js/` directory by default
+- `pytest.fail` replaces `pytest.skip` for missing parity vectors (fail-closed)
+- `new Date()` removed from `pipeline.js` (determinism fix)
+- Governance fix: root canonical files counted as governed (coverage 28%→31%)
+- `FOUNDER_SESSION_BOOTSTRAP.md` tracked and registered
+
+### W2 Docs Truth Alignment (unbound patch)
+
+- NorthStarSemantics.v0.md §B.1: corrected non-linear binding hash from `mu_hash_control_cached` to `mu_hash_cached` (Wave 25 revert was undocumented)
+- STATUS.md: JS debt count corrected 19→16 (dashboard grep-token inflation documented)
+- STATUS.md: AST_OK:infra references corrected 42→65, ceiling 64→65
+- STATUS.md: all LOC/test counts updated (Py ~6250 LOC / ~5458 tests, JS ~4200 core + ~470 tests)
+- NorthStarSemantics.v0.md: removed hardcoded "37 tests" gate count (actual is 43; now non-numeric)
+- 5 runtime-file findings (F-06, F-31, F-32, F-33, F-34) deferred as POLICY_BOUND (require L4_STRUCTURAL wave)
+
 ## 2026-02-17
 
 ### Denormalization KeyError Hardening (PR #315)

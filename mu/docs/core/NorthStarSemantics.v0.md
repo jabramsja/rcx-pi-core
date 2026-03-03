@@ -74,7 +74,7 @@ This document is the single canonical source for these policies. If a design doc
 **Scope:**
 - **Control paths (use `mu_hash_control*`):** stall detection in `step_kernel_mu`/`stepKernel`, `run_mu`/`run`, `run_mu_structural`/`runStructural`, `run_hemisphere_routing`, `_resolve_trace_projection_id`/`resolveTraceProjectionId`, `projection_runner`, `runSubAlgorithm`, `hash_trace_for_recurrence`/`hashTraceForRecurrence`.
 - **Data paths (use `mu_hash`/`mu_hash_cached`):** observer event hashing, undefined motif output, `makeUndefinedMotif`.
-- **Non-linear binding (A5→Wave 25 revert):** non-linear binding conflict checks in `match()`/`_match_inner()` use `mu_hash_cached`/`muHashCached` (content hash, NOT control hash). Wave A5 initially switched to control hash, but Wave 25 reverted: control hash canonicalizes `0.0→0`, which collapses int/float type distinction needed for correct non-linear conflict detection. See `eval_seed.py:312` comment.
+- **Non-linear binding (A5→Wave 25 revert):** non-linear binding conflict checks in `match()`/`_match_inner()` use `mu_hash_cached`/`muHashCached` (content hash, NOT control hash). Wave A5 initially switched to control hash, but Wave 25 reverted: control hash canonicalizes `0.0→0`, which collapses int/float type distinction needed for correct non-linear conflict detection. See `_match_inner()` non-linear conflict check comments in `eval_seed.py`.
 
 **Canonicalization rules:**
 1. Integer-valued floats → int: `1.0` → `1`, `-3.0` → `-3`
