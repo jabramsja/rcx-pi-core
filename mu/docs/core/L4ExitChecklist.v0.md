@@ -229,6 +229,12 @@ L4 is blocked under current architecture when:
 
 ---
 
+## Anti-Theater Test Guardrail (RT2+RT3, 2026-03-03)
+
+L4 gate evidence depends on JS boundary tests invoking production code paths. RT2 introduced `tools/checks/check_simulated_production_logic.py` to detect inline JS helper simulation in `l4_gates/` test files. RT3 hardened the checker against 5 bypass vectors: arrow function aliases, concatenated/f-string snippets, require-without-call, expanded scan targets with inode dedup, and line-based THEATER_OK proximity. 18 checker tests. Wired into `tools/audits/audit_fast.sh` and `tools/audits/audit_all.sh`. See `mu/docs/core/L4DecisionCard.v0.md` Anti-Theater Testing Precedent for canonical policy.
+
+---
+
 ## References
 
 - `STATUS.md` L4 section — Current L4 status and primitive table

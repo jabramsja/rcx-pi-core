@@ -987,6 +987,16 @@ Scope: Formal G8 gate verdict based on D001-D010 executable evidence
 
 **Research-evidence precedent (locked, 2026-03-03):** Research analog evidence is sufficient for **classification gates** (e.g., G8 Irreducible Primitive Consensus). Production claims — that a primitive is actually reduced or eliminated in production — require separate **productionization gates** with cross-substrate parity, performance profiling, migration tooling, and domain-specific prerequisites (see G8-ADJ §7 above). This distinction prevents classification evidence from being mistakenly cited as production-readiness evidence.
 
+## Anti-Theater Testing Precedent (locked, RT2+RT3, 2026-03-03)
+
+**Policy:** JS boundary tests in `tests/l4_gates/` and `mu/tests/l4_gates/` must invoke production code paths, not simulate them inline. Enforced by `tools/checks/check_simulated_production_logic.py` (wired into `tools/audits/audit_fast.sh` and `tools/audits/audit_all.sh`).
+
+**Disallowed:** Inline JS function definitions (`function validateSeedStructure`, `function loadVerifiedSeed`, arrow function aliases) or manual projection guard loops within test snippets that do not also `require()` AND call the production module entry point.
+
+**Allowed exceptions:** Source-lock-only tests that verify predicate presence in production source (not runtime behavior) may use `# THEATER_OK: source-lock-only <reason>` within 5 lines preceding the JS snippet. The reason text is mandatory — bare markers without reason are flagged as malformed.
+
+**Production-binding proof (RT3):** A bare `require('./mu/host/js/...')` import is insufficient. The imported symbol must appear as a call expression (e.g., `loadVerifiedSeed('test.json', 'utilities')`) — not just a function definition or dead import.
+
 ## References
 
 - `mu/docs/core/L4ExitChecklist.v0.md` — Gate definitions (G1-G8)
