@@ -1,0 +1,24 @@
+{
+  "wave_id": "rt1-rt2-redteam-hardening",
+  "repeat_run_speedup_ratio": 0.99419,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 18,
+  "step_growth_slope": 0.489809,
+  "repeat_run_raw_seconds": [
+    0.486963,
+    0.489809
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.486963
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.976772
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-03T06:12:16Z",
+  "collector_version": "2.2.0"
+}
