@@ -346,6 +346,30 @@ class TestRT4QuotePairingRegression:
         descs = ' '.join(v['desc'] for v in violations)
         assert 'loadVerifiedSeed' in descs
 
+    def test_escaped_delimiter_does_not_truncate(self, tmp_path):
+        """FAIL: Escaped quote inside literal must not truncate extraction.
+
+        Pre-RT4.1 bug: (['\"])(.+?)\\1 truncated at escaped delimiter.
+        The old inner regex saw \\' as end-of-string, losing the inline
+        helper definition after it.
+        On disk the line is: 'const s = "\\'"; function loadVerifiedSeed(n) ...'
+        """
+        f = tmp_path / "test_escaped_delim.py"
+        # Build file with escaped single-quote inside a single-quoted concat line.
+        # On disk: 'const s = "\'"; function loadVerifiedSeed(n) { return {}; }\n'
+        file_lines = [
+            "def test_example(self):",
+            "    js_code = (",
+            """        'const s = "\\'"; function loadVerifiedSeed(n) { return {}; }\\n'""",
+            "    )",
+            "",
+        ]
+        f.write_text("\n".join(file_lines))
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected violation, got: {violations}"
+        descs = ' '.join(v['desc'] for v in violations)
+        assert 'loadVerifiedSeed' in descs
+
     def test_paired_quotes_preserve_content(self, tmp_path):
         """PASS: Production-bound concat with mixed quotes is not false-flagged."""
         f = tmp_path / "test_paired_pass.py"

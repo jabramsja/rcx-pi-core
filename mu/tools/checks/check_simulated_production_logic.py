@@ -133,11 +133,13 @@ def extract_js_snippets(content: str) -> list[tuple[int, int, str]]:
         r"((?:\s*" + _QUOTED_LINE + r"\s*\+?\s*\n?)+)",
         content,
     ):
-        # Combine the concatenated string parts (RT4: paired quote delimiters)
+        # Combine the concatenated string parts (RT4.1: reuse escape-aware pattern)
         raw = m.group(1)
         combined = ''
-        for part in re.finditer(r"(['\"])(.+?)\1", raw):
-            combined += part.group(2) + '\n'
+        for part in re.finditer(_QUOTED_LINE, raw):
+            literal = part.group(0)
+            # Strip outer quotes; inner escaped chars are preserved as-is
+            combined += literal[1:-1] + '\n'
         if re.search(r'\b(?:function|const|let|var|require)\b', combined):
             blocks.append((m.start(), m.end(), combined))
 
