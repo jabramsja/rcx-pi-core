@@ -891,11 +891,101 @@ Explicit caveats (D010 scope boundary):
   (per L4ExecutionContract.v2.md rule 13).
 ```
 
+### G8 Adjudication: Irreducible Primitive Consensus — PASS (caveated)
+
+```
+Decision ID: G8-ADJ
+Date: 2026-03-03
+Owner: Proposed adjudication packet (RCX Core Team); founder confirmation recorded in TASKS.md tracker wording
+Scope: Formal G8 gate verdict based on D001-D010 executable evidence
+
+1. Gate Definition
+   Gate: G8 (Irreducible Primitive Consensus)
+   Pass condition: Each of the 4 primitives has an explicit classification
+   with executable evidence (runnable test artifact + evidence command).
+   Fail condition: Any primitive lacks explicit classification, or has
+   classification supported only by architectural reasoning without
+   executable evidence.
+
+2. Evidence Matrix (4/4)
+
+   | Primitive | Classification | Evidence Chain | Test Count | Executable Proof |
+   |-----------|---------------|----------------|------------|-----------------|
+   | eval_step | REDUCIBLE_WITH staged bootstrap | D001 (analytical) + D002-D003 (research, 77 tests) + D005 (production pilot, 90 gate tests, PR #452) | 167+ | pytest tests/research/test_d002_micro_matcher.py tests/research/test_d003_staged_bootstrap.py mu/tests/l4_gates/test_stage0_production_pilot_gate.py -q |
+   | max_steps | REDUCIBLE_WITH CPS fuel threading | D006 (research, 20 tests) | 20 | pytest tests/research/test_d006_h1_fuel_threading.py -q |
+   | stack_guard | REDUCIBLE_WITH depth parameter | D009 (research-only Python analogs, 36 tests) | 36 | pytest tests/research/test_d009_h4_depth_threading.py -q |
+   | projection_loader | REDUCIBLE_WITH binary format | D010 (research-only TLV decoder, 59 tests) | 59 | pytest mu/tests/research/test_d010_h5_projection_loader_binary.py -q |
+
+   Aggregate evidence command:
+   pytest tests/research/test_d002_micro_matcher.py tests/research/test_d003_staged_bootstrap.py mu/tests/l4_gates/test_stage0_production_pilot_gate.py tests/research/test_d006_h1_fuel_threading.py tests/research/test_d007_h3_negative_control.py tests/research/test_d009_h4_depth_threading.py mu/tests/research/test_d010_h5_projection_loader_binary.py -q
+
+   Supporting negative control: D007 (H3 FALSIFIED, 16 tests) — validates
+   falsification methodology. Iteration confirmed irreducible in some form.
+
+3. Verdict
+   G8 PASS (classification gate, caveated).
+   All four primitives have explicit classification backed by executable
+   evidence. The pass condition is met.
+
+4. What G8 PASS Means
+   - Primitive classification evidence is complete (4/4 executable evidence).
+   - Each primitive has a clear REDUCIBLE_WITH classification with a
+     named architectural change and a runnable test artifact.
+   - The hypothesis matrix is complete: H1 PARTIALLY CONFIRMED, H2 ALL
+     4 CRITERIA MET, H3 FALSIFIED (expected), H4 PARTIALLY CONFIRMED,
+     H5 PARTIALLY CONFIRMED.
+
+5. What G8 PASS Does NOT Mean
+   - No production reduction claim. All four primitives remain in
+     production code unchanged.
+   - No production elimination claim. REDUCIBLE_WITH means "can be
+     reduced IF [specific change] is made" — no such change has been made
+     (except D005 pilot, which is flag-gated OFF by default).
+   - No L4-complete claim. L4 remains blocked by stop conditions #3
+     (host for-loop in effect handler) and #4 (L3-to-L4 gap).
+   - G8 PASS closes primitive classification evidence, not L4 completion.
+
+6. Research-Evidence Precedent (locked)
+   Research analog evidence is sufficient for classification gates (G8).
+   Production claims (primitives actually reduced or eliminated in
+   production) require separate productionization gates with:
+   - Cross-substrate (JS) parity implementation
+   - Performance profiling under production workloads
+   - Migration tooling and rollback path
+   - Memoization/cycle-detection parity (where applicable)
+
+7. Productionization Gate Lock
+
+   Any claim that a primitive is "reduced in production" requires ALL
+   prerequisites for that primitive. Failing these blocks any production
+   reduction claim.
+
+   stack_guard (D009) prerequisites:
+   - Memoization parity (production is_mu uses per-call memo)
+   - Cycle-detection parity (production is_mu uses _seen set with backtracking)
+   - Cross-substrate (JS) implementation
+   - Node-count vs per-level budget semantics reconciliation (D009 threads
+     budget sequentially through siblings as node-count; production is_mu
+     passes _depth+1 independently per sibling as depth-only;
+     productionization requires budget forking at sibling boundaries)
+   - Performance profiling
+
+   projection_loader (D010) prerequisites:
+   - Int-range policy (D010 uses int64 via struct.pack(">q"), not full
+     unbounded Python int)
+   - NaN/Inf round-trip policy (D010 explicitly allows NaN/Inf)
+   - Cross-substrate (JS) TLV decoder
+   - Seed migration tooling (JSON-to-binary converter + validation)
+   - Integrity-chain policy (SHA256 of binary format vs current JSON checksums)
+```
+
 ---
 
 ## Normative Lock
 
 **Bootstrap endgame policy:** The canonical bootstrap endgame policy is `SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP`, as locked by `roadmap/L4ExecutionContract.v2.md` (anti-stagnation rule 13). This resolves the design split between "eliminate bootstrap entirely" and "irreducible bootstrap forever" — the canonical position is: minimize bootstrap to substrate-independent irreducible primitives. All future L4 decision cards must declare this policy in their tracker sync notes.
+
+**Research-evidence precedent (locked, 2026-03-03):** Research analog evidence is sufficient for **classification gates** (e.g., G8 Irreducible Primitive Consensus). Production claims — that a primitive is actually reduced or eliminated in production — require separate **productionization gates** with cross-substrate parity, performance profiling, migration tooling, and domain-specific prerequisites (see G8-ADJ §7 above). This distinction prevents classification evidence from being mistakenly cited as production-readiness evidence.
 
 ## References
 

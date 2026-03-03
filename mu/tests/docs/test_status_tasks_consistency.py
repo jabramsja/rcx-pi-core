@@ -352,8 +352,8 @@ def test_g8_feasibility_has_evidence_closure() -> None:
 
 def test_l4_exit_checklist_g8_references_d008() -> None:
     """
-    L4ExitChecklist.v0.md G8 status must reference D008 as the decision packet
-    and must remain UNPROVEN.
+    L4ExitChecklist.v0.md G8 section must reference D008 decision packet
+    and reflect G8 PASS (classification gate, caveated).
     """
     text = L4_EXIT_CHECKLIST_PATH.read_text(encoding="utf-8")
     # Find the G8 section
@@ -363,8 +363,12 @@ def test_l4_exit_checklist_g8_references_d008() -> None:
     assert "D008" in g8_section, (
         "L4ExitChecklist.v0.md G8 section must reference D008 decision packet."
     )
-    assert "UNPROVEN" in g8_section, (
-        "G8 must remain UNPROVEN until production evidence exists."
+    assert "G8 PASS" in g8_section, (
+        "G8 must reflect PASS (classification gate, caveated) verdict."
+    )
+    # G8 PASS does NOT imply L4 completion
+    assert "not L4 completion" in g8_section, (
+        "G8 section must explicitly state G8 PASS does not imply L4 completion."
     )
 
 
