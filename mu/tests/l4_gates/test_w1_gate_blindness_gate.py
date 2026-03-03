@@ -7,9 +7,7 @@ Verifies:
 - F-21: no new Date() in pipeline.js.
 - F-04: missing parity vectors causes test failure, not skip.
 """
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+from tests.repo_root import REPO_ROOT
 
 
 class TestF01GreenGateParityCanary:
