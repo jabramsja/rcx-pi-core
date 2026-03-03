@@ -28,6 +28,7 @@ Usage:
 """
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -133,13 +134,17 @@ def extract_js_snippets(content: str) -> list[tuple[int, int, str]]:
         r"((?:\s*" + _QUOTED_LINE + r"\s*\+?\s*\n?)+)",
         content,
     ):
-        # Combine the concatenated string parts (RT4.1: reuse escape-aware pattern)
+        # Combine the concatenated string parts (RT4.2: decode Python literals)
         raw = m.group(1)
         combined = ''
         for part in re.finditer(_QUOTED_LINE, raw):
             literal = part.group(0)
-            # Strip outer quotes; inner escaped chars are preserved as-is
-            combined += literal[1:-1] + '\n'
+            # RT4.2: Decode Python string literal so escapes become real chars
+            # e.g., \'object\' → 'object', \n → newline
+            try:
+                combined += ast.literal_eval(literal)
+            except (ValueError, SyntaxError):
+                combined += literal[1:-1] + '\n'
         if re.search(r'\b(?:function|const|let|var|require)\b', combined):
             blocks.append((m.start(), m.end(), combined))
 

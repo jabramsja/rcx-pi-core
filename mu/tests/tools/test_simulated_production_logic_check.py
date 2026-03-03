@@ -370,6 +370,31 @@ class TestRT4QuotePairingRegression:
         descs = ' '.join(v['desc'] for v in violations)
         assert 'loadVerifiedSeed' in descs
 
+    def test_escaped_quote_guard_loop_detected(self, tmp_path):
+        """FAIL: Guard loop with escaped-quote object literal in concat strings.
+
+        Pre-RT4.2 bug: literal[1:-1] preserved \'object\' as backslash-quote,
+        so GUARD_LOOP_RE (expecting ['"] around object) never matched.
+        Fix: ast.literal_eval decodes escapes so pattern sees 'object'.
+        """
+        f = tmp_path / "test_escaped_guard.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = (\n'
+            "        'const seed = {projections: [null]};\\n'\n"
+            "        'for (let i = 0; i < seed.projections.length; i++) {\\n'\n"
+            "        '    const p = seed.projections[i];\\n'\n"
+            "        '    if (p === null || typeof p !== \\'object\\') {\\n'\n"
+            "        '        console.log(\\'rejected\\');\\n'\n"
+            "        '    }\\n'\n"
+            "        '}\\n'\n"
+            '    )\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected guard loop violation, got: {violations}"
+        descs = ' '.join(v['desc'] for v in violations)
+        assert 'guard loop' in descs
+
     def test_paired_quotes_preserve_content(self, tmp_path):
         """PASS: Production-bound concat with mixed quotes is not false-flagged."""
         f = tmp_path / "test_paired_pass.py"
