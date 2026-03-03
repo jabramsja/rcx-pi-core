@@ -761,6 +761,19 @@ Decision Deadline: 2026-03-09 (wave d009 heartbeat)
    - What this means for G8: stack_guard has executable reducibility evidence
      in research analogs (Python). Classification REDUCIBLE_WITH is now
      backed by test artifact, not prose alone.
+
+   Explicit caveats (D009 scope boundary):
+   - D009 is research-only. Production stack_guard (MAX_MU_DEPTH) is unchanged.
+   - Research analogs omit memoization (production is_mu uses per-call memo)
+     and cycle-detection (production is_mu uses _seen set with backtracking).
+     Budget exhaustion provides fail-closed termination on cyclic inputs
+     (verified by test_cyclic_input_fails_closed).
+   - No JS cross-substrate analog. D009 evidence is Python-only.
+   - If depth-threading is ever promoted to production, a future wave must
+     address: memoization parity, cycle-detection parity, cross-substrate
+     (JS) implementation, and performance profiling.
+
+   Next proof target: D010 (projection_loader binary format experiment).
 ```
 
 ---

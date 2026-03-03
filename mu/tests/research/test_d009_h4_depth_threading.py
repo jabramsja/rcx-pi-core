@@ -1,5 +1,9 @@
 """D009: H4 Structural Depth Threading — Research Artifact
 
+RESEARCH ANALOG ONLY. This file demonstrates that stack_guard depth can be
+expressed as Mu data (linked-list budget). It does NOT reduce or eliminate
+stack_guard in production. Production mu_type.py / eval_seed.py are unchanged.
+
 Tests H4 hypothesis: can stack_guard (MAX_MU_DEPTH) be expressed as Mu data
 (linked-list depth budget) threaded through recursive traversal functions,
 instead of compared against a hardcoded host integer constant?
@@ -25,6 +29,15 @@ Coverage: 3 primary enforcement surfaces (is_mu, match, substitute).
 Stage 0 variants (_stage0_match, _stage0_substitute) use the identical depth
 pattern and are not separately reimplemented — the primary 3 provide
 sufficient G8 evidence.
+
+Explicit non-goals for D009:
+  - Memoization parity (production is_mu uses per-call memo; research analog omits it)
+  - Cycle-detection parity (production is_mu uses _seen set with backtracking;
+    research analog relies on budget exhaustion for termination on cyclic inputs)
+  - JS cross-substrate analog
+  - Production code changes of any kind
+  If depth-threading is ever promoted to production, memoization, cycle-detection,
+  and cross-substrate parity must be addressed in that future wave.
 
 NOT production code. This file lives in tests/research/ and is never
 imported by rcx_pi/.
@@ -713,6 +726,30 @@ class TestH4StructuralProperties:
                 f"Budget node has unexpected keys: {set(current.keys())}"
             )
             current = current.get("tail")
+
+    def test_cyclic_input_fails_closed(self):
+        """Cyclic Python object must fail-closed quickly, not hang.
+
+        Research analogs omit cycle-detection (_seen set) — this is an
+        explicit D009 non-goal. Budget exhaustion serves as the termination
+        bound: a cyclic reference recurses until budget is None, then
+        returns False. This test verifies fail-closed behavior (no hang,
+        no stack overflow) with a small budget.
+        """
+        import time
+
+        cyclic = {}
+        cyclic["self"] = cyclic  # True Python cycle
+
+        budget = make_depth_budget(10)
+        start = time.monotonic()
+        ok, _ = guarded_is_mu(cyclic, budget)
+        elapsed = time.monotonic() - start
+
+        assert ok is False, "Cyclic input must return False (fail-closed)"
+        assert elapsed < 1.0, (
+            f"Cyclic input took {elapsed:.2f}s — budget should terminate instantly"
+        )
 
     def test_research_functions_loc(self):
         """Research functions must be ≤150 LOC total (stop condition).
