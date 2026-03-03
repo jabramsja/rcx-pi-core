@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Check for simulated production logic in JS boundary tests (RT2).
+"""Check for simulated production logic in JS boundary tests (RT2+RT3).
 
 Detects inline JS code within Python test files that recreates production
 helper functions instead of invoking production modules via require().
 
-Scans: mu/tests/l4_gates/**/*.py
+Scans: mu/tests/l4_gates/**/*.py, tests/l4_gates/**/*.py (deduplicated)
 
-Suspicious patterns (within triple-quoted JS snippets):
+Suspicious patterns (within JS snippets — triple-quoted, concatenated, f-string):
   - function validateSeedStructure  — recreating production helper
   - function loadVerifiedSeed       — recreating production helper
+  - const/let validateSeedStructure = (...) => — arrow function alias
+  - const/let loadVerifiedSeed = (...) =>      — arrow function alias
   - Manual projection guard loop: for (...projections.length...) with
     proj === null || typeof proj !== 'object' — recreating production guard
 
 Rule:
   FAIL if simulated helper logic appears in a JS snippet that does NOT
-  also invoke production module entry points via require('./mu/host/js/...').
+  also invoke AND CALL production module entry points via require('./mu/host/js/...').
+  A bare require() without a call expression using the imported symbol is NOT sufficient.
 
 Exception marker (on a line within 5 lines before the snippet):
   # THEATER_OK: source-lock-only <reason text>
@@ -42,20 +45,26 @@ def _find_repo_root() -> Path:
 
 REPO_ROOT = _find_repo_root()
 
+# RT3: Scan both paths; dedup by resolved path handles hardlinks/symlinks
 SCAN_DIRS = [
     REPO_ROOT / "mu" / "tests" / "l4_gates",
+    REPO_ROOT / "tests" / "l4_gates",
 ]
 
 # ---------------------------------------------------------------------------
 # Detection patterns
 # ---------------------------------------------------------------------------
 
-# Suspicious inline JS function definitions
+# Suspicious inline JS function definitions (RT2 originals + RT3 arrow aliases)
 SIMULATED_FUNCTION_PATTERNS = [
     (re.compile(r'function\s+validateSeedStructure\b'),
      'inline function validateSeedStructure'),
     (re.compile(r'function\s+loadVerifiedSeed\b'),
      'inline function loadVerifiedSeed'),
+    (re.compile(r'(?:const|let)\s+validateSeedStructure\s*=\s*\(.*?\)\s*=>'),
+     'inline arrow function validateSeedStructure'),
+    (re.compile(r'(?:const|let)\s+loadVerifiedSeed\s*=\s*\(.*?\)\s*=>'),
+     'inline arrow function loadVerifiedSeed'),
 ]
 
 # Manual projection guard loop (multi-line pattern within a JS snippet).
@@ -69,8 +78,18 @@ GUARD_LOOP_RE = re.compile(
     re.DOTALL,
 )
 
-# Production binding (exempts a snippet from simulation detection)
-PRODUCTION_BINDING_RE = re.compile(r"""require\s*\(\s*['"]\.\/mu\/host\/js\/""")
+# Production binding: require('./mu/host/js/...')
+PRODUCTION_REQUIRE_RE = re.compile(r"""require\s*\(\s*['"]\.\/mu\/host\/js\/""")
+
+# RT3: Production call expression — symbol imported via require must be called.
+# Matches: loadVerifiedSeed( or seed_loader.loadVerifiedSeed( etc.
+# We extract the symbol name from the require and check for its usage as a call.
+PRODUCTION_CALL_PATTERNS = [
+    # Destructured: const { loadVerifiedSeed } = require(...)  →  loadVerifiedSeed(
+    re.compile(r'(?:loadVerifiedSeed|validateSeedStructure|_ensureBoundaryOps)\s*\('),
+    # Module-level: const mod = require(...)  →  mod.something(
+    re.compile(r'(?:seed_loader|pipeline|kernel)\s*\.\s*\w+\s*\('),
+]
 
 # Exception marker: must have reason text on the SAME LINE after the marker
 # Uses [ \t] (horizontal whitespace) to avoid matching across newlines
@@ -85,22 +104,93 @@ THEATER_OK_MALFORMED_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 def extract_js_snippets(content: str) -> list[tuple[int, int, str]]:
-    """Extract triple-quoted string blocks that look like JS snippets.
+    """Extract string blocks that look like JS snippets.
+
+    Detects:
+    - Triple-quoted blocks (existing)
+    - Concatenated single/double-quoted Python strings used for node -e
+    - f-strings used for node -e
 
     Returns list of (start_pos, end_pos, block_text).
     """
     blocks = []
+
+    # 1) Triple-quoted blocks
     for m in re.finditer(r'"""(.*?)"""|\'\'\'(.*?)\'\'\'', content, re.DOTALL):
         text = m.group(1) if m.group(1) is not None else m.group(2)
         # Only consider blocks that look like JS (have JS keywords)
         if re.search(r'\b(?:function|const|let|var|require)\b', text):
             blocks.append((m.start(), m.end(), text))
+
+    # 2) Concatenated string blocks: lines of 'string' + 'string' or "string"
+    # Look for patterns like: js_code = (\n  'line1\n'\n  'line2\n'\n)
+    # or: subprocess.run([..., '-e', 'line1' + 'line2'])
+    # Strategy: find node -e or similar invocations with concatenated strings
+    for m in re.finditer(
+        r"(?:node\s.*?-e['\",\s]+|js_code\s*=\s*\(?\s*\n)"
+        r"((?:\s*['\"].*?['\"]\s*\+?\s*\n?)+)",
+        content,
+    ):
+        # Combine the concatenated string parts
+        raw = m.group(1)
+        combined = ''
+        for part in re.finditer(r"['\"](.+?)['\"]", raw):
+            combined += part.group(1) + '\n'
+        if re.search(r'\b(?:function|const|let|var|require)\b', combined):
+            blocks.append((m.start(), m.end(), combined))
+
+    # 3) f-strings with JS content (f""" or f''')
+    for m in re.finditer(r'f"""(.*?)"""|f\'\'\'(.*?)\'\'\'', content, re.DOTALL):
+        text = m.group(1) if m.group(1) is not None else m.group(2)
+        if re.search(r'\b(?:function|const|let|var|require)\b', text):
+            # Only add if not already captured by triple-quote pass
+            already = any(m.start() == b[0] for b in blocks)
+            if not already:
+                blocks.append((m.start(), m.end(), text))
+
     return blocks
 
 
 def line_number_at(content: str, pos: int) -> int:
     """Return 1-based line number for character position."""
     return content[:pos].count('\n') + 1
+
+
+def _has_production_call(block_text: str) -> bool:
+    """Check if block has both a production require AND a call using the import.
+
+    A call expression is distinguished from a function definition:
+    - `loadVerifiedSeed('test.json')` is a CALL (good)
+    - `function loadVerifiedSeed(name)` is a DEFINITION (not a call)
+    - `const loadVerifiedSeed = (name) =>` is a DEFINITION (not a call)
+    """
+    if not PRODUCTION_REQUIRE_RE.search(block_text):
+        return False
+    # Check for call expressions, excluding function definitions
+    for line in block_text.split('\n'):
+        stripped = line.strip()
+        for p in PRODUCTION_CALL_PATTERNS:
+            if not p.search(stripped):
+                continue
+            # Exclude function definitions (function foo( or const foo = (...) =>)
+            if re.match(r'\s*function\s+\w+\s*\(', stripped):
+                continue
+            if re.match(r'\s*(?:const|let|var)\s+\w+\s*=\s*\(.*?\)\s*=>', stripped):
+                continue
+            return True
+    return False
+
+
+def _has_theater_ok_within_5_lines(content: str, block_start: int) -> bool:
+    """Check for THEATER_OK marker within 5 lines before block_start."""
+    block_line = line_number_at(content, block_start)
+    # Search the 5 lines before the block
+    search_start_line = max(1, block_line - 5)
+    lines = content.split('\n')
+    for i in range(search_start_line - 1, block_line - 1):
+        if i < len(lines) and THEATER_OK_RE.search(lines[i]):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -129,23 +219,24 @@ def check_file(filepath: Path) -> list[dict]:
                 'snippet_preview': line_text[:80],
             })
 
-    # Extract all triple-quoted blocks that look like JS
+    # Extract all blocks that look like JS
     blocks = extract_js_snippets(content)
 
     for block_start, block_end, block_text in blocks:
-        # Check for production binding in this block
-        has_production_binding = bool(PRODUCTION_BINDING_RE.search(block_text))
+        # RT3: Require production require + call (not just require)
+        has_production_binding = _has_production_call(block_text)
 
-        # Check for THEATER_OK near the block start (within 200 chars before)
-        context_before_start = max(0, block_start - 200)
-        context_before = content[context_before_start:block_start]
-        has_theater_ok = bool(THEATER_OK_RE.search(context_before))
+        # RT3/Codex P2: Use line-based proximity (5 lines) not char-based
+        has_theater_ok = _has_theater_ok_within_5_lines(content, block_start)
 
         # Check each suspicious function pattern
         for pattern, desc in SIMULATED_FUNCTION_PATTERNS:
             if pattern.search(block_text):
                 if has_production_binding or has_theater_ok:
                     continue
+                # RT3: If snippet has require but no call, flag specifically
+                if PRODUCTION_REQUIRE_RE.search(block_text):
+                    desc = f'{desc} (require present but never called)'
                 violations.append({
                     'line': line_number_at(content, block_start),
                     'desc': desc,
@@ -156,9 +247,12 @@ def check_file(filepath: Path) -> list[dict]:
         if GUARD_LOOP_RE.search(block_text):
             if has_production_binding or has_theater_ok:
                 continue
+            desc = 'inline projection guard loop (simulated production logic)'
+            if PRODUCTION_REQUIRE_RE.search(block_text):
+                desc = f'{desc} (require present but never called)'
             violations.append({
                 'line': line_number_at(content, block_start),
-                'desc': 'inline projection guard loop (simulated production logic)',
+                'desc': desc,
                 'snippet_preview': block_text[:100].strip(),
             })
 
@@ -181,6 +275,7 @@ def main() -> None:
         files = [Path(args[idx + 1])]
     else:
         files = []
+        seen_inodes: set[int] = set()
         seen_dirs: set[Path] = set()
         for scan_dir in SCAN_DIRS:
             resolved = scan_dir.resolve()
@@ -188,12 +283,21 @@ def main() -> None:
                 continue
             seen_dirs.add(resolved)
             if resolved.is_dir():
-                files.extend(sorted(resolved.glob('**/*.py')))
+                for f in sorted(resolved.glob('**/*.py')):
+                    # RT3: Deduplicate by inode (handles hardlinks)
+                    try:
+                        inode = f.stat().st_ino
+                    except OSError:
+                        continue
+                    if inode in seen_inodes:
+                        continue
+                    seen_inodes.add(inode)
+                    files.append(f)
 
     total_violations = 0
     scanned = 0
 
-    print("=== Simulated Production Logic Check (RT2) ===")
+    print("=== Simulated Production Logic Check (RT2+RT3) ===")
     print()
 
     for filepath in files:
@@ -214,7 +318,7 @@ def main() -> None:
 
     if total_violations > 0:
         print(f"\nFAIL: {total_violations} simulated production logic violation(s) found.")
-        print("Fix: Replace inline JS helpers with require('./mu/host/js/...') calls")
+        print("Fix: Replace inline JS helpers with require('./mu/host/js/...') + call")
         print("     or add # THEATER_OK: source-lock-only <reason> if source-lock test.")
         sys.exit(1)
     else:
