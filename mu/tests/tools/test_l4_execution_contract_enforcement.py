@@ -2220,3 +2220,17 @@ class TestDeriveOldRefFromRange:
         from enforce_l4_execution_contract import _derive_old_ref_from_range
         ref = _derive_old_ref_from_range("..HEAD")
         assert ref == "HEAD"
+
+    def test_empty_string_raises_value_error(self) -> None:
+        """Empty string must fail closed with ValueError."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        import pytest
+        with pytest.raises(ValueError, match="Empty git range is invalid"):
+            _derive_old_ref_from_range("")
+
+    def test_whitespace_only_raises_value_error(self) -> None:
+        """Whitespace-only string must fail closed with ValueError."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        import pytest
+        with pytest.raises(ValueError, match="Empty git range is invalid"):
+            _derive_old_ref_from_range("   ")

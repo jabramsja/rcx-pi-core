@@ -43,6 +43,13 @@ echo "Checking $FILE_COUNT JS file(s) under $TARGET for test theater..."
 ERRORS=0
 
 # check_pattern: detect theater in executable code (filters out comment lines)
+#
+# Known limitation: line-based grep may false-positive on multiline block-comment
+# bodies without leading * (e.g. /*\n  assert(true)\n */) and inline /* ... */
+# comments containing theater tokens (e.g. code(); /* assert(true) */).
+# Workaround: place THEATER_OK on the matched line, or avoid theater-token
+# examples inside block comments.  A proper fix requires a stateful parser
+# beyond what line-oriented grep can provide.
 check_pattern() {
     local pattern="$1"
     local reason="$2"
