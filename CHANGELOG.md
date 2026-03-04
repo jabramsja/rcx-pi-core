@@ -2,6 +2,18 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-04
+
+### W2 Enforcer/Theater Hardening (PRs #472, #473)
+
+- PR #472: `is_comment_only_runtime_diff` now accepts `old_ref` parameter (was hardcoded `HEAD`, broke range-based enforcement)
+- PR #472: founder override bypass requires explicit wave binding (`override_wave_bound=True`); unbound stale overrides fail-closed
+- PR #472: `L4ExecutionContract.v2.md` updated with condition 6 (wave-binding requirement)
+- PR #472: `check_test_theater_js.sh` default target changed from single file to `mu/host/js/` directory scan with THEATER_OK suppression
+- PR #473: boundary gate malformed-seed tests relocated temp files from `mu/utilities/` to `os.tmpdir()` (eliminates parallel race with `test_seed_counts.py`)
+- PR #473: `_derive_old_ref_from_range` normalizes empty endpoints to HEAD (`rev...` → `rev...HEAD`, `..rev` → `HEAD..rev`)
+- PR #473: 3 regression tests for empty-endpoint normalization
+
 ## 2026-03-03
 
 ### W1-GATE: Gate Blindness Remediation (PR #468)
