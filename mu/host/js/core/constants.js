@@ -42,7 +42,7 @@
  * TOTAL DEBT: 16 (9 iteration + 4 recursion + 3 builtin)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
- * exist in Python. Both substrates have identical bootstrap footprint.
+ * exist in Python (JS requires additional normalize/denormalize; see STATUS.md for canonical counts).
  * =============================================================================
  */
 

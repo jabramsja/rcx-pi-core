@@ -14,7 +14,8 @@ This file is read by Claude Code at session start.
 4. **NEVER use --no-verify or bypass gates.** If pre-push-fast fails, fix the failures. If pre-commit fails, fix the failures. Gates exist for a reason. Bypassing is laziness.
 5. **NEVER be lazy.** Don't add headroom to mask performance issues — find and fix root causes. Don't defer issues you can fix now. Don't classify findings as "out of scope" to avoid work.
 6. **Founder IS the override authority.** If something is "POLICY_BOUND" or needs "FOUNDER_OVERRIDE," ASK the founder directly. Don't passively defer — present the issue and ask for the decision.
-7. **At the bottom of EVERY summary/deliverable:** Ask "Ready to commit?" / "Ready to push?" / "Ready to create PR?" / "Ready to merge?" — NEVER proceed without explicit user GO.
+7. **ALWAYS prove your work.** Every finding, fix, addition, or claim must be backed by evidence — show the diff, run the test, grep the output, demonstrate before/after. Never say "it's fixed" without proof. If you can't prove it, it's not done.
+8. **At the bottom of EVERY summary/deliverable:** Ask "Ready to commit?" / "Ready to push?" / "Ready to create PR?" / "Ready to merge?" — NEVER proceed without explicit user GO.
 
 ---
 

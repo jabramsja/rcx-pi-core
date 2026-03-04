@@ -1753,3 +1753,247 @@ class TestWorkloadTargetProofBinding:
         # Should fail because evidence_command doesn't reference test module
         assert not passed
         assert any("proof binding" in e for e in errors)
+
+
+# =============================================================================
+# FOUNDER_OVERRIDE comment-only runtime bypass
+# =============================================================================
+
+# Shared diff fixtures for override tests
+_COMMENT_ONLY_DIFF = (
+    "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py "
+    "b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+    "@@ -1,3 +1,3 @@\n"
+    "-# Old comment\n"
+    "+# New comment\n"
+)
+
+_EXECUTABLE_DIFF = (
+    "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py "
+    "b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+    "@@ -31,3 +31,3 @@\n"
+    "-import json\n"
+    "+import os\n"
+)
+
+_RUNTIME_FILES = ["mu/host/python/rcx_pi/selfhost/step_mu.py"]
+
+
+class TestFounderOverrideCommentOnlyBypass:
+    """FOUNDER_OVERRIDE for comment/docstring-only runtime edits."""
+
+    def test_comment_only_with_valid_override_passes(self) -> None:
+        """Positive: comment-only runtime + valid FOUNDER_OVERRIDE + metadata → PASS."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-001-test",
+            no_op_proof="comment/docstring cleanup only",
+            gate="G5",
+        )]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert passed, f"Should pass with valid override: {errors}"
+
+    def test_no_override_fails(self) -> None:
+        """Negative: runtime files without FOUNDER_OVERRIDE → FAIL-CLOSED."""
+        notes = [_make_note(wave_class="")]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert not passed
+        assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_executable_change_with_override_fails(self) -> None:
+        """Negative: executable runtime delta + FOUNDER_OVERRIDE → rejected."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-002-exec",
+            no_op_proof="this has executable changes",
+            gate="G5",
+        )]
+        passed, errors = enforce(None, _RUNTIME_FILES, _EXECUTABLE_DIFF, notes)
+        assert not passed
+        assert any("executable changes" in e for e in errors)
+
+    def test_malformed_override_id_fails(self) -> None:
+        """Negative: empty FOUNDER_OVERRIDE → treated as no override → FAIL-CLOSED."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="",
+            no_op_proof="comment cleanup",
+            gate="G5",
+        )]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert not passed
+        assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_missing_metadata_fails(self) -> None:
+        """Negative: valid override but missing no_op_proof → rejected."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-003-nometa",
+            no_op_proof=None,
+            gate="G5",
+        )]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert not passed
+        assert any("missing required metadata" in e for e in errors)
+
+    def test_missing_gate_fails(self) -> None:
+        """Negative: valid override but missing target_gate_id → rejected."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-004-nogate",
+            no_op_proof="comment cleanup",
+            gate=None,
+        )]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert not passed
+        assert any("missing required metadata" in e for e in errors)
+
+    def test_no_notes_fails(self) -> None:
+        """Negative: no tracker notes at all → FAIL-CLOSED."""
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, None)
+        assert not passed
+        assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_no_diff_text_fails(self) -> None:
+        """Negative: runtime files but no diff text available → FAIL-CLOSED."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-005-nodiff",
+            no_op_proof="comment cleanup",
+            gate="G5",
+        )]
+        passed, errors = enforce(None, _RUNTIME_FILES, None, notes)
+        assert not passed
+        assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_duplicate_override_id_fails_replay(self) -> None:
+        """Negative: same FOUNDER_OVERRIDE ID in window → replay rejection."""
+        notes = [
+            _make_note(
+                wave_class="",
+                wave_id="w2-current",
+                founder_override="FO-DUP-replay",
+                no_op_proof="comment cleanup",
+                gate="G5",
+            ),
+            _make_note(
+                wave_class="MAINTENANCE",
+                wave_id="w1-prior",
+                founder_override="FO-DUP-replay",  # DUPLICATE
+            ),
+        ]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert not passed
+        assert any("replay" in e.lower() for e in errors)
+
+    def test_unique_override_id_passes_replay(self) -> None:
+        """Positive: unique override ID with prior wave → passes replay check."""
+        notes = [
+            _make_note(
+                wave_class="",
+                wave_id="w2-current",
+                founder_override="FO-UNIQUE-a",
+                no_op_proof="comment cleanup",
+                gate="G5",
+            ),
+            _make_note(
+                wave_class="MAINTENANCE",
+                wave_id="w1-prior",
+                founder_override="FO-UNIQUE-b",  # Different ID
+            ),
+        ]
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert passed, f"Unique override IDs should pass: {errors}"
+
+
+class TestClasslessNoteParserBinding:
+    """Classless notes with FOUNDER_OVERRIDE must be parseable by wave-id."""
+
+    def test_classless_override_note_is_parsed(self) -> None:
+        """Parser must include notes without Class: when FOUNDER_OVERRIDE is present."""
+        from enforce_l4_execution_contract import parse_tracker_notes
+        text = (
+            "- Tracker sync note (2026-03-03, w2-test-classless): "
+            "**W2 test.** FOUNDER_OVERRIDE:FO-TEST-classless. "
+            "no_op_proof: comment-only. target_gate_id: G5. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_CROSS_SUBSTRATE_PARITY. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/w2-test-classless.json. "
+            "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id w2-test-classless. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: N3. boot0_progress_state: HOLD."
+        )
+        notes = parse_tracker_notes(text)
+        wave_ids = [n["wave_id"] for n in notes]
+        assert "w2-test-classless" in wave_ids, (
+            f"Classless FOUNDER_OVERRIDE note not parsed. Found: {wave_ids}"
+        )
+        note = [n for n in notes if n["wave_id"] == "w2-test-classless"][0]
+        assert note["wave_class"] is None
+        assert note["founder_override"] == "FO-TEST-classless"
+
+    def test_classless_note_without_override_skipped(self) -> None:
+        """Parser must skip notes without Class: AND without FOUNDER_OVERRIDE."""
+        from enforce_l4_execution_contract import parse_tracker_notes
+        text = (
+            "- Tracker sync note (2026-03-03, w2-no-class-no-override): "
+            "**W2 nothing.** target_gate_id: G5."
+        )
+        notes = parse_tracker_notes(text)
+        wave_ids = [n["wave_id"] for n in notes]
+        assert "w2-no-class-no-override" not in wave_ids
+
+
+class TestIsCommentOnlyRuntimeDiff:
+    """Unit tests for the enhanced comment-only diff classifier."""
+
+    def test_pure_comment_change(self) -> None:
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        diff = (
+            "diff --git a/mu/host/js/core/constants.js b/mu/host/js/core/constants.js\n"
+            "@@ -1,3 +1,3 @@\n"
+            "- * old JS comment\n"
+            "+ * new JS comment\n"
+        )
+        ok, violations = is_comment_only_runtime_diff(diff, ["mu/host/js/core/constants.js"])
+        assert ok, f"JS comment change should pass: {violations}"
+
+    def test_executable_change_detected(self) -> None:
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        diff = (
+            "diff --git a/mu/host/js/core/constants.js b/mu/host/js/core/constants.js\n"
+            "@@ -1,3 +1,3 @@\n"
+            "-const X = 1;\n"
+            "+const X = 2;\n"
+        )
+        ok, violations = is_comment_only_runtime_diff(diff, ["mu/host/js/core/constants.js"])
+        assert not ok
+        assert len(violations) >= 1
+
+    def test_inline_comment_addition_passes(self) -> None:
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py "
+            "b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -30,3 +30,3 @@\n"
+            "-import time\n"
+            "+import time  # CONTRABAND_OK: debug timestamps\n"
+        )
+        ok, violations = is_comment_only_runtime_diff(
+            diff, ["mu/host/python/rcx_pi/selfhost/step_mu.py"],
+        )
+        assert ok, f"Inline comment addition should pass: {violations}"
+
+    def test_python_comment_change(self) -> None:
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py "
+            "b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -1,3 +1,3 @@\n"
+            "-# old Python comment\n"
+            "+# new Python comment\n"
+        )
+        ok, violations = is_comment_only_runtime_diff(
+            diff, ["mu/host/python/rcx_pi/selfhost/step_mu.py"],
+        )
+        assert ok, f"Python comment change should pass: {violations}"

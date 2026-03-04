@@ -15,9 +15,8 @@ TERMINOLOGY NOTE:
 - Kernel class (kernel.py) = Python scaffolding (hash, trace, dispatch)
 
 This module uses kernel.v1.json projections for structural iteration.
-The Kernel class is NOT involved in self-hosting - it's boundary scaffolding.
-step_kernel_mu() correctly uses the structural kernel; it is NOT "bypassing"
-the kernel architecture.
+The Kernel class provides boundary scaffolding (hash, trace, dispatch)
+while step_kernel_mu() drives the structural kernel.
 
 SECURITY: Projection order is security-critical. When combining kernel
 projections with domain projections (Phase 7+), kernel projections MUST
@@ -30,7 +29,7 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
-import time
+import time  # CONTRABAND_OK: debug timestamps in derivation metadata
 
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
