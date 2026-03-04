@@ -1877,7 +1877,10 @@ def _derive_old_ref_from_range(git_range: str) -> str:
     --range A..B  (2 dots, linear)    => A
 
     Fail-closed: if merge-base cannot be resolved, raises ValueError.
+    Empty/whitespace-only input raises ValueError (fail-closed).
     """
+    if not git_range or not git_range.strip():
+        raise ValueError("Empty git range is invalid")
     if "..." in git_range:
         # Symmetric diff: A...B => preimage is merge-base(A, B)
         parts = git_range.split("...", 1)
