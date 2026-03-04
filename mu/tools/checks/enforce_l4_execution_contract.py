@@ -284,6 +284,7 @@ def _strip_inline_comment(line: str) -> str:
 def is_comment_only_runtime_diff(
     diff_text: str,
     runtime_files: list[str],
+    old_ref: str = "HEAD",
 ) -> tuple[bool, list[str]]:
     """Check if ALL changes to runtime files are comment/docstring/marker-only.
 
@@ -291,8 +292,14 @@ def is_comment_only_runtime_diff(
     inline comment additions (executable portion unchanged), and JS block
     comment content.
 
+    Args:
+        old_ref: Git ref for the diff preimage (old version). Must be derived
+            from invocation mode: --staged => "HEAD", --range A...B =>
+            merge-base(A,B). Hardcoding HEAD is WRONG for --range mode.
+
     Returns (is_comment_only, violations) where violations list executable changes.
-    Fail-closed: if analysis fails, reports as non-comment.
+    Fail-closed: if preimage cannot be resolved, removed non-comment Python
+    lines are treated as violations.
     """
     violations: list[str] = []
 
@@ -319,15 +326,20 @@ def is_comment_only_runtime_diff(
             fpath = Path(filepath)
             if fpath.exists():
                 new_docstring_lines = _get_docstring_lines(fpath.read_text(encoding="utf-8"))
-            # Old file from HEAD
+            # Old file from diff preimage (old_ref, NOT hardcoded HEAD)
+            old_preimage_resolved = False
             try:
                 old_src = subprocess.check_output(
-                    ["git", "show", f"HEAD:{filepath}"],
+                    ["git", "show", f"{old_ref}:{filepath}"],
                     text=True, stderr=subprocess.DEVNULL,
                 )
                 old_docstring_lines = _get_docstring_lines(old_src)
+                old_preimage_resolved = True
             except (subprocess.CalledProcessError, FileNotFoundError):
-                pass  # new file or error → empty set (fail-closed for removals)
+                # Preimage unresolvable (new file or ref error).
+                # Fail-closed: old_docstring_lines stays empty, so ALL removed
+                # non-comment Python lines will be flagged as violations.
+                old_preimage_resolved = False
 
         # Collect added and removed lines with their line numbers
         added_lines: list[tuple[int, str]] = []
@@ -1389,9 +1401,16 @@ def enforce(
     changed_files: list[str],
     diff_text: str | None = None,
     notes: list[dict] | None = None,
+    old_ref: str = "HEAD",
+    override_wave_bound: bool = False,
 ) -> tuple[bool, list[str]]:
     """
     Enforce L4 execution contract v2.
+
+    Args:
+        old_ref: Git ref for diff preimage (threaded to comment-only classifier).
+        override_wave_bound: True only when notes[0] was explicitly bound via
+            --wave-id. Stale top-note overrides are rejected when False.
 
     Returns (passed, errors).
     """
@@ -1407,8 +1426,9 @@ def enforce(
             #   b) Runtime diff is comment/docstring/marker-only (zero executable delta)
             #   c) Tracker note has no_op_proof + target_gate_id
             #   d) Override ID not replayed (existing replay protection)
+            #   e) Override must be wave-bound (--wave-id), not stale top-note
             override_id = None
-            if notes:
+            if notes and override_wave_bound:
                 for n in notes[:1]:  # only check bound note (position 0)
                     oid = n.get("founder_override")
                     if oid:
@@ -1417,7 +1437,7 @@ def enforce(
 
             if override_id and diff_text:
                 comment_only, violations = is_comment_only_runtime_diff(
-                    diff_text, runtime_files,
+                    diff_text, runtime_files, old_ref=old_ref,
                 )
                 if not comment_only:
                     errors.append(
@@ -1847,6 +1867,42 @@ def enforce(
 
 
 # ---------------------------------------------------------------------------
+# CLI helpers
+# ---------------------------------------------------------------------------
+
+def _derive_old_ref_from_range(git_range: str) -> str:
+    """Derive the diff preimage ref from a git range string.
+
+    --range A...B (3 dots, symmetric) => merge-base(A, B)
+    --range A..B  (2 dots, linear)    => A
+
+    Fail-closed: if merge-base cannot be resolved, raises ValueError.
+    """
+    if "..." in git_range:
+        # Symmetric diff: A...B => preimage is merge-base(A, B)
+        parts = git_range.split("...", 1)
+        left, right = parts[0], parts[1]
+        try:
+            result = subprocess.run(
+                ["git", "merge-base", left, right],
+                capture_output=True, text=True, check=True,
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            raise ValueError(
+                f"Cannot resolve merge-base({left}, {right}) "
+                f"for range '{git_range}': {e}"
+            ) from e
+    elif ".." in git_range:
+        # Linear diff: A..B => preimage is A
+        left = git_range.split("..", 1)[0]
+        return left
+    else:
+        # Single ref (e.g. "HEAD~1") — preimage IS that ref
+        return git_range
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1954,11 +2010,31 @@ def main() -> int:
 
     runtime_count = sum(1 for f in changed_files if is_runtime_file(f))
 
+    # Derive old_ref for preimage resolution (P1 #1 fix).
+    # Context-driven: --staged => HEAD, --range => parsed, --files => HEAD.
+    if args.staged:
+        old_ref = "HEAD"
+    elif args.range:
+        try:
+            old_ref = _derive_old_ref_from_range(args.range)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return 1
+    else:
+        old_ref = "HEAD"  # --files mode, no diff context
+
+    # Override wave binding (P1 #2 fix).
+    # Stale top-note overrides are rejected unless --wave-id resolved.
+    override_wave_bound = bound_note is not None
+
     print(f"Wave class: {wave_class or '(none)'}")
     print(f"Changed files: {len(changed_files)}")
     print(f"Runtime files: {runtime_count}")
 
-    passed, errors = enforce(wave_class, changed_files, diff_text, notes)
+    passed, errors = enforce(
+        wave_class, changed_files, diff_text, notes,
+        old_ref=old_ref, override_wave_bound=override_wave_bound,
+    )
 
     # Indicator artifact file-level validation (CLI only)
     # Only validate when wave_class is active (skip for non-wave PRs)

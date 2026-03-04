@@ -1790,7 +1790,10 @@ class TestFounderOverrideCommentOnlyBypass:
             no_op_proof="comment/docstring cleanup only",
             gate="G5",
         )]
-        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert passed, f"Should pass with valid override: {errors}"
 
     def test_no_override_fails(self) -> None:
@@ -1808,7 +1811,10 @@ class TestFounderOverrideCommentOnlyBypass:
             no_op_proof="this has executable changes",
             gate="G5",
         )]
-        passed, errors = enforce(None, _RUNTIME_FILES, _EXECUTABLE_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _EXECUTABLE_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert not passed
         assert any("executable changes" in e for e in errors)
 
@@ -1820,7 +1826,10 @@ class TestFounderOverrideCommentOnlyBypass:
             no_op_proof="comment cleanup",
             gate="G5",
         )]
-        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert not passed
         assert any("FAIL-CLOSED" in e for e in errors)
 
@@ -1832,7 +1841,10 @@ class TestFounderOverrideCommentOnlyBypass:
             no_op_proof=None,
             gate="G5",
         )]
-        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert not passed
         assert any("missing required metadata" in e for e in errors)
 
@@ -1844,7 +1856,10 @@ class TestFounderOverrideCommentOnlyBypass:
             no_op_proof="comment cleanup",
             gate=None,
         )]
-        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert not passed
         assert any("missing required metadata" in e for e in errors)
 
@@ -1862,7 +1877,10 @@ class TestFounderOverrideCommentOnlyBypass:
             no_op_proof="comment cleanup",
             gate="G5",
         )]
-        passed, errors = enforce(None, _RUNTIME_FILES, None, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, None, notes,
+            override_wave_bound=True,
+        )
         assert not passed
         assert any("FAIL-CLOSED" in e for e in errors)
 
@@ -1882,7 +1900,10 @@ class TestFounderOverrideCommentOnlyBypass:
                 founder_override="FO-DUP-replay",  # DUPLICATE
             ),
         ]
-        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert not passed
         assert any("replay" in e.lower() for e in errors)
 
@@ -1902,7 +1923,10 @@ class TestFounderOverrideCommentOnlyBypass:
                 founder_override="FO-UNIQUE-b",  # Different ID
             ),
         ]
-        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
         assert passed, f"Unique override IDs should pass: {errors}"
 
 
@@ -1997,3 +2021,181 @@ class TestIsCommentOnlyRuntimeDiff:
             diff, ["mu/host/python/rcx_pi/selfhost/step_mu.py"],
         )
         assert ok, f"Python comment change should pass: {violations}"
+
+
+# =============================================================================
+# P1 #1: is_comment_only_runtime_diff must use caller-supplied old_ref
+# =============================================================================
+
+class TestCommentOnlyPreimageRef:
+    """P1 regression: old_ref must be threaded, not hardcoded to HEAD."""
+
+    def test_old_ref_parameter_exists(self) -> None:
+        """is_comment_only_runtime_diff must accept old_ref parameter."""
+        import inspect
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        sig = inspect.signature(is_comment_only_runtime_diff)
+        assert "old_ref" in sig.parameters, (
+            "is_comment_only_runtime_diff must accept old_ref parameter"
+        )
+
+    def test_old_ref_default_is_HEAD(self) -> None:
+        """Default old_ref must be HEAD (safe default for --staged mode)."""
+        import inspect
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        sig = inspect.signature(is_comment_only_runtime_diff)
+        param = sig.parameters["old_ref"]
+        assert param.default == "HEAD", (
+            f"old_ref default must be HEAD, got {param.default!r}"
+        )
+
+    def test_source_has_no_hardcoded_HEAD_in_git_show(self) -> None:
+        """Source must use old_ref variable, not hardcoded 'HEAD:' in git show."""
+        from tests.repo_root import REPO_ROOT
+        src = (REPO_ROOT / "tools" / "checks" / "enforce_l4_execution_contract.py").read_text()
+        # Find the is_comment_only_runtime_diff function body
+        start = src.index("def is_comment_only_runtime_diff(")
+        # Find the next top-level def (not indented)
+        import re
+        next_def = re.search(r"\ndef [a-z_]", src[start + 10:])
+        body = src[start:start + 10 + next_def.start()] if next_def else src[start:]
+        # Must NOT contain hardcoded HEAD in git show
+        assert 'f"HEAD:{' not in body, (
+            "git show must use old_ref variable, not hardcoded HEAD"
+        )
+        # Must contain parameterized old_ref
+        assert 'f"{old_ref}:{' in body, (
+            "git show must use f\"{old_ref}:{{filepath}}\" pattern"
+        )
+
+    def test_old_ref_is_threaded_at_runtime(self, monkeypatch) -> None:
+        """Behavioral: old_ref value must reach the subprocess.check_output call."""
+        from enforce_l4_execution_contract import is_comment_only_runtime_diff
+        import subprocess
+
+        captured_cmds: list[list[str]] = []
+        original_check_output = subprocess.check_output
+
+        def spy_check_output(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            return original_check_output(cmd, **kwargs)
+
+        monkeypatch.setattr(subprocess, "check_output", spy_check_output)
+
+        # Use a Python runtime file diff so the function attempts git show
+        diff = (
+            "diff --git a/mu/host/python/rcx_pi/selfhost/step_mu.py "
+            "b/mu/host/python/rcx_pi/selfhost/step_mu.py\n"
+            "@@ -1,3 +1,3 @@\n"
+            "-# old comment\n"
+            "+# new comment\n"
+        )
+        runtime_files = ["mu/host/python/rcx_pi/selfhost/step_mu.py"]
+        custom_ref = "abc123fake"
+
+        # Call with a distinctive old_ref — may fail (ref doesn't exist),
+        # but subprocess.check_output will be called with it first
+        is_comment_only_runtime_diff(diff, runtime_files, old_ref=custom_ref)
+
+        # Verify the custom old_ref was threaded to the git show call
+        git_show_cmds = [c for c in captured_cmds if "git" in c and "show" in c]
+        assert len(git_show_cmds) >= 1, (
+            f"Expected git show call, got: {captured_cmds}"
+        )
+        show_arg = git_show_cmds[0][-1]  # last arg is "ref:filepath"
+        assert show_arg.startswith(f"{custom_ref}:"), (
+            f"git show must use old_ref={custom_ref!r}, got arg: {show_arg!r}"
+        )
+
+
+# =============================================================================
+# P1 #2: FOUNDER_OVERRIDE must require explicit wave binding
+# =============================================================================
+
+class TestOverrideWaveBinding:
+    """P1 regression: stale top-note overrides must be rejected when unbound."""
+
+    def test_unbound_override_fails_closed(self) -> None:
+        """Override in notes[0] WITHOUT override_wave_bound → FAIL-CLOSED."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-STALE-001",
+            no_op_proof="comment cleanup",
+            gate="G5",
+        )]
+        # override_wave_bound defaults to False → must reject
+        passed, errors = enforce(None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes)
+        assert not passed, "Unbound override must fail-closed"
+        assert any("FAIL-CLOSED" in e for e in errors), (
+            f"Error must be FAIL-CLOSED (not specific override error): {errors}"
+        )
+
+    def test_bound_override_passes(self) -> None:
+        """Override with override_wave_bound=True → uses override path."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-BOUND-001",
+            no_op_proof="comment cleanup",
+            gate="G5",
+        )]
+        passed, errors = enforce(
+            None, _RUNTIME_FILES, _COMMENT_ONLY_DIFF, notes,
+            override_wave_bound=True,
+        )
+        assert passed, f"Bound override with comment-only diff should pass: {errors}"
+
+    def test_enforce_signature_has_override_wave_bound(self) -> None:
+        """enforce() must accept override_wave_bound parameter."""
+        import inspect
+        sig = inspect.signature(enforce)
+        assert "override_wave_bound" in sig.parameters, (
+            "enforce() must accept override_wave_bound parameter"
+        )
+        param = sig.parameters["override_wave_bound"]
+        assert param.default is False, (
+            f"override_wave_bound default must be False (fail-closed), got {param.default!r}"
+        )
+
+    def test_enforce_signature_has_old_ref(self) -> None:
+        """enforce() must accept old_ref parameter and thread it."""
+        import inspect
+        sig = inspect.signature(enforce)
+        assert "old_ref" in sig.parameters, (
+            "enforce() must accept old_ref parameter"
+        )
+
+
+# =============================================================================
+# _derive_old_ref_from_range: CLI helper for preimage derivation
+# =============================================================================
+
+class TestDeriveOldRefFromRange:
+    """Unit tests for range-to-preimage derivation helper."""
+
+    def test_three_dot_uses_merge_base(self) -> None:
+        """A...B (symmetric diff) must call git merge-base(A, B)."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        # HEAD...HEAD always has merge-base = HEAD
+        ref = _derive_old_ref_from_range("HEAD...HEAD")
+        assert ref, "merge-base(HEAD, HEAD) must return a commit hash"
+        # Must be a valid commit hash (40 hex chars)
+        assert len(ref) >= 7, f"Expected commit hash, got {ref!r}"
+
+    def test_two_dot_extracts_left_side(self) -> None:
+        """A..B (linear diff) must return A as old_ref."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("abc123..HEAD")
+        assert ref == "abc123"
+
+    def test_single_ref_returns_itself(self) -> None:
+        """Single ref (no dots) must return itself."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("HEAD~3")
+        assert ref == "HEAD~3"
+
+    def test_unresolvable_merge_base_raises(self) -> None:
+        """Unresolvable merge-base must raise ValueError (fail-closed)."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        import pytest
+        with pytest.raises(ValueError, match="Cannot resolve merge-base"):
+            _derive_old_ref_from_range("nonexistent_ref_abc...HEAD")
