@@ -655,25 +655,34 @@ class TestJsSeedLoaderMalformedProjection:
     """JS seed loader must reject null/array/scalar projection entries.
 
     Tests call production loadVerifiedSeed from seed_loader.js directly via
-    temp seed files written to mu/utilities/. Unknown seed names bypass
-    checksum/projection-ID checks, isolating the type guard.
+    temp seed files written to os.tmpdir() (NOT mu/utilities/, to avoid race
+    conditions with test_seed_counts.py during parallel execution). Unknown
+    seed names bypass checksum/projection-ID checks, isolating the type guard.
     """
 
     @staticmethod
     def _run_seed_loader_test(projections_json, expect_index, expect_type):
-        """Write a temp seed with malformed projections, call production loadVerifiedSeed."""
+        """Write a temp seed with malformed projections, call production loadVerifiedSeed.
+
+        Temp files are written to os.tmpdir() (not mu/utilities/) to avoid
+        race conditions with test_seed_counts.py during parallel execution.
+        """
         js_code = f"""
         const fs = require('fs');
         const path = require('path');
+        const os = require('os');
         const {{ loadVerifiedSeed }} = require('./mu/host/js/core/seed_loader');
+        const tmpDir = os.tmpdir();
         const tmpName = '_test_malformed_' + process.pid + '.json';
-        const seedPath = path.join('mu', 'utilities', tmpName);
+        const seedPath = path.join(tmpDir, tmpName);
+        const muRoot = path.resolve('mu');
+        const relSubdir = path.relative(muRoot, tmpDir);
         fs.writeFileSync(seedPath, JSON.stringify({{
             meta: {{name: "TEST", version: "1.0", description: "test"}},
             projections: {projections_json}
         }}));
         try {{
-            loadVerifiedSeed(tmpName, 'utilities');
+            loadVerifiedSeed(tmpName, relSubdir);
             console.log('ERROR: no throw');
         }} catch(e) {{
             if (e.message.includes('projection[{expect_index}]') &&

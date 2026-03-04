@@ -1881,7 +1881,7 @@ def _derive_old_ref_from_range(git_range: str) -> str:
     if "..." in git_range:
         # Symmetric diff: A...B => preimage is merge-base(A, B)
         parts = git_range.split("...", 1)
-        left, right = parts[0], parts[1]
+        left, right = parts[0] or "HEAD", parts[1] or "HEAD"
         try:
             result = subprocess.run(
                 ["git", "merge-base", left, right],
@@ -1894,9 +1894,9 @@ def _derive_old_ref_from_range(git_range: str) -> str:
                 f"for range '{git_range}': {e}"
             ) from e
     elif ".." in git_range:
-        # Linear diff: A..B => preimage is A
+        # Linear diff: A..B => preimage is A (empty left => HEAD)
         left = git_range.split("..", 1)[0]
-        return left
+        return left or "HEAD"
     else:
         # Single ref (e.g. "HEAD~1") — preimage IS that ref
         return git_range
