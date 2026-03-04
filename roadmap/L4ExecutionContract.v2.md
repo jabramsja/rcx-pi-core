@@ -109,6 +109,7 @@ When ALL of the following conditions hold, `FOUNDER_OVERRIDE` bypasses the fail-
 3. Tracker note includes `no_op_proof` (explains why the change is non-functional).
 4. Tracker note includes `target_gate_id` (which gate the work relates to).
 5. Override ID has not been replayed (existing replay protection).
+6. Override note is **explicitly wave-bound** — resolved via `--wave-id` (CLI) or equivalent bound-note context. Unbound top-note overrides (stale notes[0] from a prior wave) are fail-closed.
 
 If any condition fails, the checker emits the specific rejection reason and returns FAIL. The classifier handles: Python `#` comments, Python docstring interiors (via `ast` module), inline comment additions (executable portion unchanged), JS `//`/`*`/`/* */` comment lines.
 
