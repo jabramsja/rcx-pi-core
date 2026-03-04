@@ -70,7 +70,7 @@ _strip_block_comments() {
         for (i = length(s); i > 0; i--) {
             ch = substr(s, i, 1)
             if (ch == " " || ch == "\t") { if (w != "") break; continue }
-            if (w == "" && index("=([{,;!&|^~+-*%<>?:)", ch) > 0) return 1
+            if (w == "" && index("=([{,;!&|^~+-*%<>?:/)", ch) > 0) return 1
             if (ch ~ /[a-zA-Z_$0-9]/) { w = ch w }
             else { if (w != "") break; return 0 }
         }

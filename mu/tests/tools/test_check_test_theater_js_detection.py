@@ -436,3 +436,23 @@ class TestTheaterControlFlowRegexContext:
         assert result.returncode != 0, (
             f"assert(true) after for-paren regex must be caught: {result.stdout}"
         )
+
+
+class TestTheaterDivisionThenRegexContext:
+    """Verify regex after division operator is not misclassified."""
+
+    def test_division_then_regex_with_slash_star(self):
+        """x / /[/*]/.test(y) must not enter block-comment mode."""
+        code = 'var z = x / /[/*]/.test(y); assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after division-then-regex must be caught: {result.stdout}"
+        )
+
+    def test_division_then_regex_clean(self):
+        """Division followed by regex without theater should pass."""
+        code = 'var z = x / /[/*]/.test(y);\nassert(z === expected);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Clean division-then-regex flagged as theater: {result.stdout}"
+        )
