@@ -100,6 +100,18 @@ Format: `FOUNDER_OVERRIDE:<id>` in tracker note (e.g., `FOUNDER_OVERRIDE:2026-02
 - Replay protection: duplicate override ID in the active window must fail.
 - No silent bypass.
 
+### Comment-Only Runtime Edit Bypass
+
+When ALL of the following conditions hold, `FOUNDER_OVERRIDE` bypasses the fail-closed gate for runtime file changes without a wave class:
+
+1. Tracker note contains valid `FOUNDER_OVERRIDE:<id>`.
+2. Runtime diff is **comment/docstring/marker-only** — zero executable delta (verified by AST-aware diff classifier).
+3. Tracker note includes `no_op_proof` (explains why the change is non-functional).
+4. Tracker note includes `target_gate_id` (which gate the work relates to).
+5. Override ID has not been replayed (existing replay protection).
+
+If any condition fails, the checker emits the specific rejection reason and returns FAIL. The classifier handles: Python `#` comments, Python docstring interiors (via `ast` module), inline comment additions (executable portion unchanged), JS `//`/`*`/`/* */` comment lines.
+
 ## Tracker Sync Note Schema
 
 Required fields by class (machine-parseable `key: value` format):

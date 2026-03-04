@@ -1,9 +1,9 @@
 """
-Match as Mu Projections - Phase 4a Self-Hosting
+Match as Mu Projections - Self-Hosting
 
 This module implements pattern matching using Mu projections instead of
-Python recursion. It achieves parity with eval_seed.match() but uses
-the kernel loop for iteration.
+Python recursion. Uses the kernel loop for iteration, with L3 parity
+against the JS substrate.
 
 See mu/docs/core/SelfHosting.v0.md for design.
 """
@@ -272,7 +272,7 @@ def normalize_for_match(value: Mu) -> Mu:
     # Path-based cycle detection: track current ancestors, not all visited nodes.
     # This allows shared references (DAGs) while detecting true back-edges (cycles).
     # BOUNDARY SCAFFOLDING: Normalization converts Python list/dict to Mu head/tail
-    # at API boundary. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
+    # at API boundary. See STATUS.md "Note on boundary scaffolding".
     path: set[int] = set()
     stack: list = [("eval", value)]
     result: Mu = None
@@ -541,7 +541,7 @@ def denormalize_from_match(value: Mu) -> Mu:
     # Path-based cycle detection: track current ancestors, not all visited nodes.
     # This allows shared references (DAGs) while detecting true back-edges (cycles).
     # BOUNDARY SCAFFOLDING: Denormalization converts Mu head/tail to Python list/dict
-    # at API boundary. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
+    # at API boundary. See STATUS.md "Note on boundary scaffolding".
     path: set[int] = set()
     stack: list = [("eval", value)]
     result: Mu = None
@@ -781,7 +781,7 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
 
     Note: This is a boundary conversion function (Python API scaffolding),
     not semantic debt. The projections work on linked lists; this converts
-    the result for Python callers. See STATUS.md "Boundary Scaffolding vs Semantic Debt".
+    the result for Python callers. See STATUS.md "Note on boundary scaffolding".
     """
     MAX_BINDINGS = 10000  # AST_OK: infra - iteration guard (adversary finding #1031)
     result: dict[str, Mu] = {}

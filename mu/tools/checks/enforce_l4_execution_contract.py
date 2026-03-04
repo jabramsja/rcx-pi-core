@@ -20,6 +20,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -239,6 +240,151 @@ def is_comment_line(line: str) -> bool:
     if not content.strip():
         return True
     return any(p.match(content) for p in COMMENT_ONLY_PATTERNS)
+
+
+def _get_docstring_lines(source: str) -> set[int]:
+    """Return 1-based line numbers that fall inside docstrings (ast.Expr string nodes)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()  # fail-closed: can't parse → no docstring detection
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            if isinstance(node.value.value, str) and node.end_lineno is not None:
+                for n in range(node.lineno, node.end_lineno + 1):
+                    lines.add(n)
+    return lines
+
+
+def _strip_inline_comment(line: str) -> str:
+    """Return the executable portion of a Python line (before inline #).
+
+    Handles string literals containing '#' by tracking quote state.
+    """
+    in_single = False
+    in_double = False
+    escaped = False
+    for i, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if ch == '\\':
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == '#' and not in_single and not in_double:
+            return line[:i].rstrip()
+    return line.rstrip()
+
+
+def is_comment_only_runtime_diff(
+    diff_text: str,
+    runtime_files: list[str],
+) -> tuple[bool, list[str]]:
+    """Check if ALL changes to runtime files are comment/docstring/marker-only.
+
+    Enhanced beyond is_comment_line(): handles docstring interiors (via AST),
+    inline comment additions (executable portion unchanged), and JS block
+    comment content.
+
+    Returns (is_comment_only, violations) where violations list executable changes.
+    Fail-closed: if analysis fails, reports as non-comment.
+    """
+    violations: list[str] = []
+
+    # Parse diff into per-file sections
+    file_sections: dict[str, list[str]] = {}
+    current_file: str | None = None
+    for line in diff_text.split("\n"):
+        if line.startswith("diff --git"):
+            parts = line.split(" b/")
+            current_file = parts[-1] if len(parts) >= 2 else None
+        elif current_file and current_file in runtime_files:
+            file_sections.setdefault(current_file, []).append(line)
+
+    for filepath in runtime_files:
+        lines = file_sections.get(filepath, [])
+        if not lines:
+            continue
+
+        # For Python: build docstring line sets for old and new versions
+        new_docstring_lines: set[int] = set()
+        old_docstring_lines: set[int] = set()
+        if filepath.endswith(".py"):
+            # Current (new) file
+            fpath = Path(filepath)
+            if fpath.exists():
+                new_docstring_lines = _get_docstring_lines(fpath.read_text(encoding="utf-8"))
+            # Old file from HEAD
+            try:
+                old_src = subprocess.check_output(
+                    ["git", "show", f"HEAD:{filepath}"],
+                    text=True, stderr=subprocess.DEVNULL,
+                )
+                old_docstring_lines = _get_docstring_lines(old_src)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass  # new file or error → empty set (fail-closed for removals)
+
+        # Collect added and removed lines with their line numbers
+        added_lines: list[tuple[int, str]] = []
+        removed_lines: list[tuple[int, str]] = []
+        new_lineno = 0
+        old_lineno = 0
+        for line in lines:
+            if line.startswith("@@"):
+                # Parse hunk header: @@ -old_start,count +new_start,count @@
+                m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+                if m:
+                    old_lineno = int(m.group(1)) - 1
+                    new_lineno = int(m.group(2)) - 1
+            elif line.startswith("+") and not line.startswith("+++"):
+                new_lineno += 1
+                added_lines.append((new_lineno, line[1:]))  # strip +
+            elif line.startswith("-") and not line.startswith("---"):
+                old_lineno += 1
+                removed_lines.append((old_lineno, line[1:]))  # strip -
+            else:
+                # Context line
+                new_lineno += 1
+                old_lineno += 1
+
+        # Check each added line
+        for lineno, content in added_lines:
+            if not content.strip():
+                continue
+            # Standard comment patterns
+            if is_comment_line("+" + content):
+                continue
+            # Python docstring interior
+            if filepath.endswith(".py") and lineno in new_docstring_lines:
+                continue
+            # Inline comment-only change: executable portion matches a removed line
+            if filepath.endswith(".py"):
+                exec_part = _strip_inline_comment(content)
+                if any(_strip_inline_comment(rc) == exec_part for _, rc in removed_lines):
+                    continue
+            violations.append(f"{filepath}:{lineno}: added executable: {content.rstrip()[:80]}")
+
+        # Check each removed line
+        for lineno, content in removed_lines:
+            if not content.strip():
+                continue
+            if is_comment_line("-" + content):
+                continue
+            if filepath.endswith(".py") and lineno in old_docstring_lines:
+                continue
+            # Inline comment-only change: executable portion matches an added line
+            if filepath.endswith(".py"):
+                exec_part = _strip_inline_comment(content)
+                if any(_strip_inline_comment(ac) == exec_part for _, ac in added_lines):
+                    continue
+            violations.append(f"{filepath}:{lineno}: removed executable: {content.rstrip()[:80]}")
+
+    return len(violations) == 0, violations
 
 
 def is_runtime_file(filepath: str) -> bool:
@@ -789,10 +935,11 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
         body = body_m.group(0)      # full match for raw storage
 
         cls_match = _CLASS_RE.search(body_text)
-        if not cls_match:
+        override_present = _FOUNDER_OVERRIDE_RE.search(body_text)
+        if not cls_match and not override_present:
             continue
 
-        raw_class = cls_match.group(1)
+        raw_class = cls_match.group(1) if cls_match else None
         wave_class = LEGACY_CLASS_ALIAS.get(raw_class, raw_class)
 
         gate_match = _GATE_RE.search(body_text)
@@ -830,7 +977,7 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "host_semantics_delta_after": hd_after_match.group(1).strip() if hd_after_match else None,
             "structural_artifact_ref": sa_match.group(1).strip() if sa_match else None,
             "defer_reason_code": defer_match.group(1).strip() if defer_match else None,
-            "founder_override": override_match.group(1).strip() if override_match else None,
+            "founder_override": override_match.group(1).strip().rstrip(".,;") if override_match else None,
             "primary_blocker_class": blocker_match.group(1).strip() if blocker_match else None,
             "post_gate_contract_sweep": sweep_match.group(1).strip() if sweep_match else None,
             "primary_invariant_id": invariant_match.group(1).strip() if invariant_match else None,
@@ -1254,6 +1401,56 @@ def enforce(
     # Fail-closed: runtime changes without class marker
     if not wave_class:
         if runtime_files:
+            # FOUNDER_OVERRIDE bypass for comment/docstring-only runtime edits.
+            # Conditions (ALL must hold, fail-closed):
+            #   a) FOUNDER_OVERRIDE:<id> in tracker note
+            #   b) Runtime diff is comment/docstring/marker-only (zero executable delta)
+            #   c) Tracker note has no_op_proof + target_gate_id
+            #   d) Override ID not replayed (existing replay protection)
+            override_id = None
+            if notes:
+                for n in notes[:1]:  # only check bound note (position 0)
+                    oid = n.get("founder_override")
+                    if oid:
+                        override_id = oid
+                        break
+
+            if override_id and diff_text:
+                comment_only, violations = is_comment_only_runtime_diff(
+                    diff_text, runtime_files,
+                )
+                if not comment_only:
+                    errors.append(
+                        f"FOUNDER_OVERRIDE:{override_id} rejected — "
+                        f"runtime diff contains executable changes: "
+                        f"{violations[:3]}"
+                    )
+                    return False, errors
+                # Require no_op_proof and target_gate_id in the note
+                note = notes[0]
+                missing_meta: list[str] = []
+                if not note.get("no_op_proof"):
+                    missing_meta.append("no_op_proof")
+                if not note.get("gate"):
+                    missing_meta.append("target_gate_id")
+                if missing_meta:
+                    errors.append(
+                        f"FOUNDER_OVERRIDE:{override_id} rejected — "
+                        f"missing required metadata: {', '.join(missing_meta)}"
+                    )
+                    return False, errors
+                # Replay protection — must run BEFORE early return
+                replay_ok, replay_errors = check_founder_override_replay(notes)
+                if not replay_ok:
+                    errors.extend(replay_errors)
+                    return False, errors
+                print(
+                    f"  FOUNDER_OVERRIDE:{override_id} active — "
+                    f"allowing comment-only runtime edit "
+                    f"({len(runtime_files)} runtime file(s))"
+                )
+                return True, []
+
             errors.append(
                 f"FAIL-CLOSED: Runtime/core files changed but no wave class marker found. "
                 f"Runtime files: {runtime_files[:5]}"
