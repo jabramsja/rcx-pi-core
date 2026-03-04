@@ -270,3 +270,189 @@ class TestTheaterOkSuppression:
         assert "THEATER_OK" in script_text, (
             "Script must support THEATER_OK suppression marker"
         )
+
+
+class TestTheaterBlockCommentHandling:
+    """Verify check_test_theater_js.sh correctly handles /* ... */ block comments."""
+
+    def test_multiline_block_comment_not_flagged(self):
+        """Theater tokens inside multiline /* ... */ must NOT be flagged."""
+        code = "/*\n  assert(true)\n */\nvar x = 1;\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Block comment body should not trigger theater: {result.stdout}"
+        )
+
+    def test_inline_block_comment_not_flagged(self):
+        """Theater tokens inside inline /* ... */ must NOT be flagged."""
+        code = "code(); /* assert(true) */\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Inline block comment should not trigger theater: {result.stdout}"
+        )
+
+    def test_code_theater_with_block_comment_nearby(self):
+        """Real theater in code must still be caught with block comments nearby."""
+        code = "/* safe comment */\nassert(true);\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Real theater should still be caught"
+
+    def test_block_comment_spanning_many_lines(self):
+        """Multi-line block comment without * prefix must NOT be flagged."""
+        code = "/*\nassert(true)\nassert(1)\nassert(!false)\n*/\nvar y = 2;\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Multi-line block comment should not trigger theater: {result.stdout}"
+        )
+
+    def test_line_comment_with_block_comment_marker_inside(self):
+        """// comment containing /* must NOT start a block comment."""
+        code = "// example: /* assert(true) */\nvar z = 3;\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"/* inside // comment should not affect parsing: {result.stdout}"
+        )
+
+    def test_theater_ok_in_block_comment_suppresses_same_line(self):
+        """THEATER_OK inside /* ... */ on same line must suppress that match."""
+        code = "assert(true); /* THEATER_OK: intentional */\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"THEATER_OK in block comment should suppress same line: {result.stdout}"
+        )
+
+    def test_theater_ok_in_block_comment_does_not_suppress_other_line(self):
+        """THEATER_OK in block comment on line N must NOT suppress line N+1."""
+        code = "/* THEATER_OK: wrong line */\nassert(true);\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            "THEATER_OK in block comment on different line must NOT suppress"
+        )
+
+
+class TestTheaterStringLiteralHandling:
+    """Verify _strip_block_comments does not misinterpret /* inside string literals."""
+
+    def test_double_quoted_string_with_block_comment_token(self):
+        """'/*' inside double-quoted string must NOT start a block comment."""
+        code = 'const s = "/*"; assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after string containing /* must be caught: {result.stdout}"
+        )
+
+    def test_single_quoted_string_with_block_comment_token(self):
+        """'/*' inside single-quoted string must NOT start a block comment."""
+        code = "const s = '/*'; assert(true);\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after string containing /* must be caught: {result.stdout}"
+        )
+
+    def test_template_literal_with_block_comment_token(self):
+        """'/*' inside template literal must NOT start a block comment."""
+        code = "const s = `/*`; assert(true);\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after template literal containing /* must be caught: {result.stdout}"
+        )
+
+    def test_escaped_quote_inside_string(self):
+        r"""Escaped \" inside string must not prematurely close the string."""
+        code = r'const s = "he\"llo/*"; assert(true);' + "\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after escaped-quote string must be caught: {result.stdout}"
+        )
+
+    def test_string_with_block_comment_token_clean_code_passes(self):
+        """String containing /* with real assertions should pass."""
+        code = 'const s = "/*"; assert(result === 42);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Real assertion after string with /* should pass: {result.stdout}"
+        )
+
+
+class TestTheaterRegexLiteralHandling:
+    """Verify _strip_block_comments does not misinterpret /* inside regex literals."""
+
+    def test_regex_char_class_with_slash_star(self):
+        """/* inside regex character class [/*] must NOT start a block comment."""
+        code = 'const r = /[/*]/; assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after regex containing [/*] must be caught: {result.stdout}"
+        )
+
+    def test_regex_escaped_slash_before_star(self):
+        r"""Escaped \/ before * in regex must NOT start a block comment."""
+        code = 'const r = /foo\\/*bar/; assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after regex with \\/* must be caught: {result.stdout}"
+        )
+
+    def test_regex_with_block_comment_nearby(self):
+        """Real block comment after regex must still be stripped."""
+        code = 'const r = /pattern/g; /* comment */ assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            "assert(true) after block comment should still be caught"
+        )
+
+    def test_regex_clean_code_passes(self):
+        """Regex with real assertion after it should pass."""
+        code = 'const r = /[/*]/; assert(result === 42);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Real assertion after regex with /* should pass: {result.stdout}"
+        )
+
+
+class TestTheaterControlFlowRegexContext:
+    """Verify regex literals after control-flow close-parens are handled."""
+
+    def test_if_paren_regex_with_slash_star(self):
+        """Regex after if (...) with [/*] must not trigger false block comment."""
+        code = 'if (cond) /[/*]/.test(x); assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after if-paren regex must be caught: {result.stdout}"
+        )
+
+    def test_while_paren_regex_with_slash_star(self):
+        """Regex after while (...) with [/*] must not trigger false block comment."""
+        code = 'while (cond) /[/*]/.test(x); assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after while-paren regex must be caught: {result.stdout}"
+        )
+
+    def test_for_paren_regex_with_slash_star(self):
+        """Regex after for (...) with [/*] must not trigger false block comment."""
+        code = 'for (;cond;) /[/*]/.test(x); assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after for-paren regex must be caught: {result.stdout}"
+        )
+
+
+class TestTheaterDivisionThenRegexContext:
+    """Verify regex after division operator is not misclassified."""
+
+    def test_division_then_regex_with_slash_star(self):
+        """x / /[/*]/.test(y) must not enter block-comment mode."""
+        code = 'var z = x / /[/*]/.test(y); assert(true);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            f"assert(true) after division-then-regex must be caught: {result.stdout}"
+        )
+
+    def test_division_then_regex_clean(self):
+        """Division followed by regex without theater should pass."""
+        code = 'var z = x / /[/*]/.test(y);\nassert(z === expected);\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"Clean division-then-regex flagged as theater: {result.stdout}"
+        )

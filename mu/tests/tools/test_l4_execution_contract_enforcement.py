@@ -2234,3 +2234,22 @@ class TestDeriveOldRefFromRange:
         import pytest
         with pytest.raises(ValueError, match="Empty git range is invalid"):
             _derive_old_ref_from_range("   ")
+
+    def test_whitespace_padded_range_is_stripped(self) -> None:
+        """Whitespace-padded range must be normalized via strip()."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("  abc123..HEAD  ")
+        assert ref == "abc123", f"Expected 'abc123' after strip, got {ref!r}"
+
+    def test_whitespace_padded_three_dot_is_stripped(self) -> None:
+        """Whitespace-padded three-dot range must be normalized via strip()."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("  HEAD...HEAD  ")
+        assert ref, "Should resolve merge-base after stripping whitespace"
+        assert len(ref) >= 7, f"Expected commit hash, got {ref!r}"
+
+    def test_whitespace_padded_single_ref_is_stripped(self) -> None:
+        """Whitespace-padded single ref must be normalized via strip()."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("  HEAD~3  ")
+        assert ref == "HEAD~3", f"Expected 'HEAD~3' after strip, got {ref!r}"

@@ -1881,6 +1881,7 @@ def _derive_old_ref_from_range(git_range: str) -> str:
     """
     if not git_range or not git_range.strip():
         raise ValueError("Empty git range is invalid")
+    git_range = git_range.strip()
     if "..." in git_range:
         # Symmetric diff: A...B => preimage is merge-base(A, B)
         parts = git_range.split("...", 1)
