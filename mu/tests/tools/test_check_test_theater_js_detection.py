@@ -170,3 +170,103 @@ function testDeepEqual() {
 '''
         result = run_theater_check_on_code(code)
         assert result.returncode == 0, f"Structural equality should pass: {result.stdout}"
+
+
+class TestTheaterDefaultDirectoryScan:
+    """P2 regression lock: no-arg invocation must scan mu/host/js/ directory."""
+
+    def test_no_arg_scans_directory_not_single_file(self):
+        """No-arg default must scan mu/host/js/ (all files), not eval_step.js alone."""
+        result = subprocess.run(
+            ["bash", str(SCRIPT)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"Default scan should pass: {result.stdout}"
+        # Must report scanning multiple files, not just 1
+        assert "mu/host/js/" in result.stdout, "Should report scanning mu/host/js/ directory"
+        import re
+        m = re.search(r"(\d+) JS file\(s\)", result.stdout)
+        assert m, f"Should report file count in output: {result.stdout}"
+        file_count = int(m.group(1))
+        assert file_count > 1, f"Must scan >1 file (got {file_count}), not just eval_step.js shim"
+
+    def test_default_target_is_mu_host_js(self):
+        """Script source must default to mu/host/js/, not eval_step.js."""
+        script_text = SCRIPT.read_text()
+        assert 'TARGET="${1:-mu/host/js/}"' in script_text, (
+            "Default TARGET must be mu/host/js/ directory"
+        )
+        # Must NOT default to the old single-file target
+        assert 'JS_FILE="${1:-mu/host/js/eval_step.js}"' not in script_text, (
+            "Must not default to eval_step.js (old single-file behavior)"
+        )
+
+    def test_directory_mode_catches_theater_in_subdir(self):
+        """Directory scan must catch theater in nested files, not just top-level."""
+        import os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subdir = os.path.join(tmpdir, "nested")
+            os.makedirs(subdir)
+            # Clean file at top level
+            with open(os.path.join(tmpdir, "clean.js"), "w") as f:
+                f.write("assert(result === 42);\n")
+            # Theater in nested file
+            with open(os.path.join(subdir, "bad.js"), "w") as f:
+                f.write("assert(true);\n")
+            result = subprocess.run(
+                ["bash", str(SCRIPT), tmpdir],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            assert result.returncode != 0, "Should catch theater in nested subdir"
+            assert "2 JS file(s)" in result.stdout, "Should scan both files"
+
+
+class TestTheaterOkSuppression:
+    """P2 regression lock: THEATER_OK marker suppression semantics."""
+
+    def test_theater_ok_suppresses_same_line(self):
+        """THEATER_OK on same line must suppress that match."""
+        code = "assert(true); // THEATER_OK: intentional vacuous check for test harness\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            f"THEATER_OK on same line should suppress: {result.stdout}"
+        )
+
+    def test_theater_ok_does_not_suppress_different_line(self):
+        """THEATER_OK on line N must NOT suppress theater on line N+1."""
+        code = "// THEATER_OK: this marker is on the wrong line\nassert(true);\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, (
+            "THEATER_OK on different line must NOT suppress theater"
+        )
+
+    def test_theater_ok_in_directory_mode(self):
+        """THEATER_OK suppression must work in directory scan mode too."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # File with suppressed theater
+            with open(Path(tmpdir) / "suppressed.js", "w") as f:
+                f.write("assert(true); // THEATER_OK: intentional\n")
+            result = subprocess.run(
+                ["bash", str(SCRIPT), tmpdir],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            assert result.returncode == 0, (
+                f"THEATER_OK should suppress in directory mode: {result.stdout}"
+            )
+
+    def test_theater_ok_marker_must_appear_in_script(self):
+        """Script source must reference THEATER_OK as its suppression marker."""
+        script_text = SCRIPT.read_text()
+        assert "THEATER_OK" in script_text, (
+            "Script must support THEATER_OK suppression marker"
+        )
