@@ -2199,3 +2199,24 @@ class TestDeriveOldRefFromRange:
         import pytest
         with pytest.raises(ValueError, match="Cannot resolve merge-base"):
             _derive_old_ref_from_range("nonexistent_ref_abc...HEAD")
+
+    def test_three_dot_empty_right_normalizes_to_head(self) -> None:
+        """A... (omitted right side) must normalize to A...HEAD."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        # HEAD... should resolve same as HEAD...HEAD
+        ref = _derive_old_ref_from_range("HEAD...")
+        assert ref, "HEAD... must resolve (empty right normalized to HEAD)"
+        assert len(ref) >= 7, f"Expected commit hash, got {ref!r}"
+
+    def test_three_dot_empty_left_normalizes_to_head(self) -> None:
+        """...B (omitted left side) must normalize to HEAD...B."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("...HEAD")
+        assert ref, "...HEAD must resolve (empty left normalized to HEAD)"
+        assert len(ref) >= 7, f"Expected commit hash, got {ref!r}"
+
+    def test_two_dot_empty_left_normalizes_to_head(self) -> None:
+        """..B (omitted left side) must normalize to HEAD."""
+        from enforce_l4_execution_contract import _derive_old_ref_from_range
+        ref = _derive_old_ref_from_range("..HEAD")
+        assert ref == "HEAD"
