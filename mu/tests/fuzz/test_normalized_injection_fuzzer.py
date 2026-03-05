@@ -20,7 +20,7 @@ from rcx_pi.selfhost.step_mu import (
     _iter_normalized_dict_pairs,  # ANTICHEAT_OK: fuzzer grounding test
     _looks_like_normalized_dict_candidate,  # ANTICHEAT_OK: fuzzer grounding test
 )
-from rcx_pi.selfhost.mu_type import is_mu, mu_equal
+from rcx_pi.selfhost.mu_type import is_mu, mu_equal, MAX_MU_WIDTH
 
 
 # =============================================================================
@@ -160,13 +160,13 @@ class TestNormalizedDictPairIteration:
 
     def test_cyclic_structure_protection(self):
         """Iteration stops on excessive steps (cycle protection)."""
-        # Build a chain longer than max_steps (100)
+        # Build a chain longer than MAX_MU_WIDTH (1000)
         current = None
-        for i in range(105):
+        for i in range(MAX_MU_WIDTH + 5):
             kv = make_normalized_kv(f"key_{i}", i)
             current = {"head": kv, "tail": current}
         pairs = _iter_normalized_dict_pairs(current)
-        # Should return None when exceeding max_steps
+        # Should return None when exceeding MAX_MU_WIDTH
         assert pairs is None
 
 

@@ -665,24 +665,29 @@ class TestJSReservedFieldValidationParity:
         SECURITY/PARITY: normalized dict width boundary must match in Python and JS.
 
         Python validator fails closed once normalized dict chain exceeds the
-        validation-depth cap. JS must fail at the same boundary.
+        validation-depth cap (MAX_MU_WIDTH). JS must fail at the same boundary.
+
+        W3-CRASH F-13: cap raised from 100 to MAX_MU_WIDTH (1000).
         """
         from rcx_pi.selfhost.match_mu import normalize_for_match
         from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields
+        from rcx_pi.selfhost.mu_type import MAX_MU_WIDTH
 
-        width_100 = normalize_for_match({f"k{i}": i for i in range(100)})
-        validate_no_kernel_reserved_fields(width_100, "test")
-        valid_100, error_100 = self._run_js_validation(width_100)
-        assert valid_100, f"JS should allow normalized dict width 100, got error: {error_100}"
+        # Width at MAX_MU_WIDTH should be accepted
+        width_max = normalize_for_match({f"k{i}": i for i in range(MAX_MU_WIDTH)})
+        validate_no_kernel_reserved_fields(width_max, "test")
+        valid_max, error_max = self._run_js_validation(width_max)
+        assert valid_max, f"JS should allow normalized dict width {MAX_MU_WIDTH}, got error: {error_max}"
 
-        width_101 = normalize_for_match({f"k{i}": i for i in range(101)})
+        # Width at MAX_MU_WIDTH+1 should be rejected
+        width_over = normalize_for_match({f"k{i}": i for i in range(MAX_MU_WIDTH + 1)})
         with pytest.raises(ValueError, match="malformed normalized dict encoding"):
-            validate_no_kernel_reserved_fields(width_101, "test")
-        valid_101, error_101 = self._run_js_validation(width_101)
-        assert not valid_101, "JS should reject normalized dict width 101 to match Python"
+            validate_no_kernel_reserved_fields(width_over, "test")
+        valid_over, error_over = self._run_js_validation(width_over)
+        assert not valid_over, f"JS should reject normalized dict width {MAX_MU_WIDTH + 1} to match Python"
         assert (
-            "Malformed normalized dict encoding" in error_101
-            or "malformed normalized dict encoding" in error_101
+            "Malformed normalized dict encoding" in error_over
+            or "malformed normalized dict encoding" in error_over
         )
 
 

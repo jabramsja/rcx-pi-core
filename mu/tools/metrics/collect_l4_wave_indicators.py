@@ -3,11 +3,13 @@
 Collect L4 wave indicator metrics (v2.2.0).
 
 Generates a JSON artifact with required indicator and provenance fields for
-L4 contract enforcement.  All values are deterministically computed from
-repo state using cheap, fixed-scope probes.
+L4 contract enforcement.  Repo-state metrics (parity_diff_count,
+net_host_semantic_delta) are deterministically computed from repo state.
+Timing provenance metrics (repeat_run_speedup_ratio, step_growth_slope)
+are environment-dependent but fail-closed.
 
-Fail-closed policy: probe failures and unparseable outputs abort with
-exit code 1 instead of silently coercing to zero/default values.
+Fail-closed policy: probe failures, timeouts, and unparseable outputs
+abort with exit code 1 instead of silently coercing to zero/default values.
 
 Usage:
     python tools/metrics/collect_l4_wave_indicators.py --wave-id <id> --output <path>
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -34,21 +37,6 @@ COLLECTOR_VERSION = "2.2.0"
 
 class CollectorError(RuntimeError):
     """Raised when a probe or measurement fails (fail-closed)."""
-
-RUNTIME_DIRS = (
-    "mu/host/", "mu/substrate/", "mu/closures/", "mu/bridge/",
-    "mu/programs/", "rcx_pi/selfhost/", "mu/tools/compilers/",
-)
-
-COMMENT_ONLY_PATTERNS = [
-    re.compile(r"^\s*#"),          # Python comment
-    re.compile(r"^\s*//"),         # JS comment
-    re.compile(r"^\s*\*(?!\w)"),   # JS block comment line (not star-expr)
-    re.compile(r"^\s*/\*"),        # JS block comment start
-    re.compile(r"^\s*\*/"),        # JS block comment end
-    re.compile(r'^\s*"""'),        # Python docstring delimiter
-    re.compile(r"^\s*'''"),        # Python docstring delimiter
-]
 
 METRIC_KEYS = {
     "repeat_run_speedup_ratio": (int, float),
@@ -67,60 +55,73 @@ PROBE_CMD = [
 
 
 def get_changed_files(git_range: str | None) -> list[str]:
-    """Get changed files from git range or staged."""
+    """Get changed files from git range or staged.
+
+    Fail-closed: raises CollectorError if git command fails.
+    """
     if git_range:
         cmd = ["git", "diff", "--name-only", git_range]
     else:
         cmd = ["git", "diff", "--cached", "--name-only"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        return []
+        snippet = (result.stderr or result.stdout or "")[:200]
+        raise CollectorError(
+            f"git diff failed (exit {result.returncode}): {snippet}"
+        )
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
-def get_diff_text(git_range: str | None) -> str:
-    """Get diff text for range or staged scope."""
-    if git_range:
-        cmd = ["git", "diff", "-U0", git_range]
-    else:
-        cmd = ["git", "diff", "-U0", "--cached"]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        return ""
-    return result.stdout
+def compute_ratchet_net_delta() -> int:
+    """Compute net host-semantics delta from ratchet probe (marker footprint).
 
+    Runs check_host_semantics_ratchet.py --json and computes
+    current_total - baseline_total. Fail-closed on probe errors.
+    """
+    checker = Path(__file__).resolve().parent.parent / "checks" / "check_host_semantics_ratchet.py"
+    if not checker.exists():
+        raise CollectorError(
+            f"Host-semantics ratchet probe unavailable: missing script at '{checker}'"
+        )
 
-def is_comment_line(line: str) -> bool:
-    """Check whether a diff +/- line is comment-only content."""
-    content = line.lstrip("+").lstrip("-")
-    if not content.strip():
-        return True
-    return any(p.match(content) for p in COMMENT_ONLY_PATTERNS)
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(checker), "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        raise CollectorError(
+            "Host-semantics ratchet probe timed out after 30s"
+        ) from None
+    if proc.returncode not in (0, 1):
+        stderr = proc.stderr.strip() or "(no stderr)"
+        raise CollectorError(
+            f"Host-semantics ratchet probe failed (exit {proc.returncode}): {stderr}"
+        )
 
+    stdout = proc.stdout.strip()
+    if not stdout:
+        raise CollectorError("Host-semantics ratchet probe returned empty JSON output")
 
-def count_runtime_executable_delta(git_range: str | None) -> int:
-    """Compute net executable runtime delta (added - deleted non-comment lines)."""
-    files = get_changed_files(git_range)
-    runtime_files = {f for f in files if any(f.startswith(d) for d in RUNTIME_DIRS)}
-    if not runtime_files:
-        return 0
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise CollectorError(f"Ratchet probe JSON parse failed: {exc}") from None
 
-    diff_text = get_diff_text(git_range)
-    current_file = None
-    added = 0
-    deleted = 0
-    for line in diff_text.split("\n"):
-        if line.startswith("diff --git"):
-            parts = line.split(" b/")
-            current_file = parts[-1] if len(parts) >= 2 else None
-        elif current_file and current_file in runtime_files:
-            if line.startswith("+") and not line.startswith("+++"):
-                if not is_comment_line(line):
-                    added += 1
-            elif line.startswith("-") and not line.startswith("---"):
-                if not is_comment_line(line):
-                    deleted += 1
-    return added - deleted
+    if not isinstance(data, dict) or "current" not in data or "baseline_counts" not in data:
+        raise CollectorError("Ratchet probe missing required keys: 'current' and/or 'baseline_counts'")
+
+    categories = ("host_iteration", "host_recursion", "host_builtin", "host_mutation")
+    baseline_total = 0
+    current_total = 0
+    for substrate in ("python", "javascript"):
+        base_sub = data.get("baseline_counts", {}).get(substrate, {})
+        curr_sub = data.get("current", {}).get(substrate, {})
+        for cat in categories:
+            baseline_total += int(base_sub.get(cat, 0))
+            current_total += int(curr_sub.get(cat, 0))
+
+    return current_total - baseline_total
 
 
 def count_parity_diffs() -> int:
@@ -129,10 +130,15 @@ def count_parity_diffs() -> int:
     Fail-closed: raises CollectorError if the debt script fails or its
     output cannot be parsed for a JS debt count.
     """
-    result = subprocess.run(
-        ["bash", "tools/checks/check_js_debt.sh"],
-        capture_output=True, text=True, timeout=30,
-    )
+    try:
+        result = subprocess.run(
+            ["bash", "tools/checks/check_js_debt.sh"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        raise CollectorError(
+            "check_js_debt.sh timed out after 30s"
+        ) from None
     if result.returncode != 0:
         snippet = (result.stderr or result.stdout or "")[:200]
         raise CollectorError(
@@ -154,10 +160,15 @@ def timed_probe() -> float:
     Fail-closed: raises CollectorError if the probe command exits non-zero.
     """
     start = time.monotonic()
-    result = subprocess.run(
-        PROBE_CMD, capture_output=True, text=True, timeout=60,
-        env={**__import__("os").environ, "PYTHONHASHSEED": "0"},
-    )
+    try:
+        result = subprocess.run(
+            PROBE_CMD, capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PYTHONHASHSEED": "0"},
+        )
+    except subprocess.TimeoutExpired:
+        raise CollectorError(
+            "Probe command timed out after 60s"
+        ) from None
     elapsed = round(time.monotonic() - start, 6)
     if result.returncode != 0:
         snippet = (result.stderr or result.stdout or "")[:200]
@@ -198,7 +209,11 @@ def main() -> int:
     parser.add_argument("--range", type=str, help="Git range for diff analysis")
     args = parser.parse_args()
 
-    scoped_files = get_changed_files(args.range)
+    try:
+        scoped_files = get_changed_files(args.range)
+    except CollectorError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     if not scoped_files:
         scope_hint = f"--range {args.range}" if args.range else "staged files"
         print(
@@ -208,7 +223,11 @@ def main() -> int:
         )
         return 1
 
-    net_host_delta = count_runtime_executable_delta(args.range)
+    try:
+        net_host_delta = compute_ratchet_net_delta()
+    except CollectorError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     try:
         parity_diffs = count_parity_diffs()
@@ -221,6 +240,13 @@ def main() -> int:
         raw_seconds = collect_repeat_run_raw()
     except CollectorError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if raw_seconds[1] <= 0:
+        print(
+            "ERROR: Second probe returned non-positive elapsed time "
+            f"({raw_seconds[1]}); cannot compute speedup ratio.",
+            file=sys.stderr,
+        )
         return 1
     speedup_ratio = round(raw_seconds[0] / raw_seconds[1], 6)
 

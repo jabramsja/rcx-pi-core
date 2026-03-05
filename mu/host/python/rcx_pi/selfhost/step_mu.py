@@ -34,7 +34,7 @@ import time  # CONTRABAND_OK: debug timestamps in derivation metadata
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached
+from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached, MAX_MU_WIDTH
 from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed, MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
@@ -422,7 +422,7 @@ def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
     pairs: list[tuple[str, Mu]] = []
     current: Mu = value
     visited_nodes: set[int] = set()
-    max_steps = 100
+    max_steps = MAX_MU_WIDTH
     steps = 0
     while True:
         steps += 1

@@ -354,18 +354,18 @@ class TestApplyMuAdversarialEdgeCases:
         assert py_result == mu_result == {"wrapped": deep_value}
 
     def test_empty_string_variable_name_rejected(self):
-        """Empty variable names are rejected (security hardening).
+        """Empty variable names are rejected.
 
-        HARDENED: Empty variable names cause confusing error messages.
-        Both Python and Mu paths now reject them with ValueError.
+        apply_projection: match path returns NO_MATCH (W3-CRASH F-11).
+        apply_mu: pre-validation raises ValueError (security hardening).
         """
         proj = {
             "pattern": {"var": ""},
             "body": {"result": {"var": ""}}
         }
 
-        with pytest.raises(ValueError, match="cannot be empty"):
-            apply_projection(proj, "value")
+        result = apply_projection(proj, "value")
+        assert result is NO_MATCH
 
         with pytest.raises(ValueError, match="cannot be empty"):
             apply_mu(proj, "value")

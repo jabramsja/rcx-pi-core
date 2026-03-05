@@ -265,8 +265,10 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
 
     # Variable site - matches anything
     if is_var(pattern):
-        name = get_var_name(pattern)
-        return {name: input_value}
+        var_name = pattern["var"]
+        if not var_name:
+            return NO_MATCH
+        return {var_name: input_value}
 
     # None
     if pattern is None:
@@ -370,7 +372,9 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     current = bindings if bindings is not None else {}
     # Variable site
     if is_var(pattern):
-        name = get_var_name(pattern)
+        name = pattern["var"]
+        if not name:
+            return NO_MATCH
         if name in current:
             # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
             # canonicalizes 0.0→0 which breaks int/float type distinction.

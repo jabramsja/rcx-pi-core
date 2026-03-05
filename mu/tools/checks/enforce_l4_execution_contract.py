@@ -1386,7 +1386,7 @@ def validate_indicator_artifact_json(
             if int(actual_net) != int(expected_net_host_delta):
                 errors.append(
                     "Indicator mismatch: net_host_semantic_delta="
-                    f"{actual_net} but executable runtime diff net={expected_net_host_delta}"
+                    f"{actual_net} but host-semantics ratchet net delta={expected_net_host_delta}"
                 )
 
     return len(errors) == 0, errors
@@ -1906,6 +1906,56 @@ def _derive_old_ref_from_range(git_range: str) -> str:
         return git_range
 
 
+def validate_indicator_with_ratchet(
+    indicator_ref: str,
+    changed_files: list[str],
+) -> tuple[bool, list[str]]:
+    """Validate indicator artifact using ratchet-derived host-semantics delta.
+
+    Derives expected net_host_semantic_delta from probe_host_semantics_ratchet()
+    (marker footprint delta), not raw executable line diff.
+    Fail-closed on probe errors.
+    """
+    errors: list[str] = []
+    passed = True
+
+    if indicator_ref not in changed_files:
+        passed = False
+        errors.append(
+            f"indicator_artifact_ref '{indicator_ref}' not in changed files. "
+            f"Artifact must be committed as part of the wave."
+        )
+
+    expected_net_delta = None
+    ratchet_json, ratchet_errors = probe_host_semantics_ratchet()
+    if ratchet_errors:
+        passed = False
+        errors.extend(
+            "FAIL-CLOSED indicator delta: " + e for e in ratchet_errors
+        )
+    elif ratchet_json is not None:
+        try:
+            baseline_total, current_total, _ = summarize_host_semantics_delta(
+                ratchet_json
+            )
+            expected_net_delta = current_total - baseline_total
+        except ValueError as exc:
+            passed = False
+            errors.append(
+                f"FAIL-CLOSED indicator delta: invalid ratchet data ({exc})"
+            )
+
+    art_ok, art_errors = validate_indicator_artifact_json(
+        indicator_ref,
+        expected_net_host_delta=expected_net_delta,
+    )
+    if not art_ok:
+        passed = False
+        errors.extend(art_errors)
+
+    return passed, errors
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -2045,24 +2095,12 @@ def main() -> int:
     if notes and wave_class:
         indicator_ref = notes[0].get("indicator_artifact_ref")
         if indicator_ref:
-            if indicator_ref not in changed_files:
-                passed = False
-                errors.append(
-                    f"indicator_artifact_ref '{indicator_ref}' not in changed files. "
-                    f"Artifact must be committed as part of the wave."
-                )
-            expected_net_delta = None
-            if diff_text is not None:
-                runtime_files = [f for f in changed_files if is_runtime_file(f)]
-                _, _, expected_net_delta = compute_runtime_exec_delta(diff_text, runtime_files)
-
-            art_ok, art_errors = validate_indicator_artifact_json(
-                indicator_ref,
-                expected_net_host_delta=expected_net_delta,
+            ind_ok, ind_errors = validate_indicator_with_ratchet(
+                indicator_ref, changed_files,
             )
-            if not art_ok:
+            if not ind_ok:
                 passed = False
-                errors.extend(art_errors)
+                errors.extend(ind_errors)
 
     if passed:
         print(f"✅ L4 Execution Contract v2: {wave_class or 'no-class'} compliant")
