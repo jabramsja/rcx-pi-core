@@ -98,29 +98,51 @@ def is_comment_line(line: str) -> bool:
     return any(p.match(content) for p in COMMENT_ONLY_PATTERNS)
 
 
-def count_runtime_executable_delta(git_range: str | None) -> int:
-    """Compute net executable runtime delta (added - deleted non-comment lines)."""
-    files = get_changed_files(git_range)
-    runtime_files = {f for f in files if any(f.startswith(d) for d in RUNTIME_DIRS)}
-    if not runtime_files:
-        return 0
+def compute_ratchet_net_delta() -> int:
+    """Compute net host-semantics delta from ratchet probe (marker footprint).
 
-    diff_text = get_diff_text(git_range)
-    current_file = None
-    added = 0
-    deleted = 0
-    for line in diff_text.split("\n"):
-        if line.startswith("diff --git"):
-            parts = line.split(" b/")
-            current_file = parts[-1] if len(parts) >= 2 else None
-        elif current_file and current_file in runtime_files:
-            if line.startswith("+") and not line.startswith("+++"):
-                if not is_comment_line(line):
-                    added += 1
-            elif line.startswith("-") and not line.startswith("---"):
-                if not is_comment_line(line):
-                    deleted += 1
-    return added - deleted
+    Runs check_host_semantics_ratchet.py --json and computes
+    current_total - baseline_total. Fail-closed on probe errors.
+    """
+    checker = Path(__file__).resolve().parent.parent / "checks" / "check_host_semantics_ratchet.py"
+    if not checker.exists():
+        raise CollectorError(
+            f"Host-semantics ratchet probe unavailable: missing script at '{checker}'"
+        )
+
+    proc = subprocess.run(
+        [sys.executable, str(checker), "--json"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if proc.returncode not in (0, 1):
+        stderr = proc.stderr.strip() or "(no stderr)"
+        raise CollectorError(
+            f"Host-semantics ratchet probe failed (exit {proc.returncode}): {stderr}"
+        )
+
+    stdout = proc.stdout.strip()
+    if not stdout:
+        raise CollectorError("Host-semantics ratchet probe returned empty JSON output")
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise CollectorError(f"Ratchet probe JSON parse failed: {exc}") from None
+
+    if not isinstance(data, dict) or "current" not in data or "baseline_counts" not in data:
+        raise CollectorError("Ratchet probe missing required keys: 'current' and/or 'baseline_counts'")
+
+    categories = ("host_iteration", "host_recursion", "host_builtin", "host_mutation")
+    baseline_total = 0
+    current_total = 0
+    for substrate in ("python", "javascript"):
+        base_sub = data.get("baseline_counts", {}).get(substrate, {})
+        curr_sub = data.get("current", {}).get(substrate, {})
+        for cat in categories:
+            baseline_total += int(base_sub.get(cat, 0))
+            current_total += int(curr_sub.get(cat, 0))
+
+    return current_total - baseline_total
 
 
 def count_parity_diffs() -> int:
@@ -208,7 +230,11 @@ def main() -> int:
         )
         return 1
 
-    net_host_delta = count_runtime_executable_delta(args.range)
+    try:
+        net_host_delta = compute_ratchet_net_delta()
+    except CollectorError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     try:
         parity_diffs = count_parity_diffs()
