@@ -1547,3 +1547,89 @@ class TestCollectorFailClosed:
         monkeypatch.setattr(mod, "get_changed_files", lambda _range: [])
         rc = mod.main()
         assert rc == 1
+
+    # --- Hardening regression tests (agent review findings #1-6) ---
+
+    def test_timed_probe_timeout_raises_collector_error(self, monkeypatch):
+        """timed_probe catches TimeoutExpired and raises CollectorError."""
+        import subprocess as sp
+        mod = _import_collector()
+
+        def fake_run(*args, **kwargs):
+            raise sp.TimeoutExpired(cmd=args[0], timeout=60)
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(mod.CollectorError, match="timed out"):
+            mod.timed_probe()
+
+    def test_count_parity_diffs_timeout_raises_collector_error(self, monkeypatch):
+        """count_parity_diffs catches TimeoutExpired and raises CollectorError."""
+        import subprocess as sp
+        mod = _import_collector()
+
+        def fake_run(*args, **kwargs):
+            raise sp.TimeoutExpired(cmd=args[0], timeout=30)
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(mod.CollectorError, match="timed out"):
+            mod.count_parity_diffs()
+
+    def test_compute_ratchet_timeout_raises_collector_error(self, monkeypatch):
+        """compute_ratchet_net_delta catches TimeoutExpired and raises CollectorError."""
+        import subprocess as sp
+        mod = _import_collector()
+
+        def fake_run(*args, **kwargs):
+            raise sp.TimeoutExpired(cmd=args[0], timeout=30)
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(mod.CollectorError, match="timed out"):
+            mod.compute_ratchet_net_delta()
+
+    def test_get_changed_files_git_failure_raises_collector_error(self, monkeypatch):
+        """get_changed_files raises CollectorError on non-zero git exit."""
+        import subprocess as sp
+        mod = _import_collector()
+
+        def fake_run(*args, **kwargs):
+            return sp.CompletedProcess(
+                args=args[0], returncode=128,
+                stdout="", stderr="fatal: bad revision 'bogus...HEAD'",
+            )
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        with pytest.raises(mod.CollectorError, match="git diff failed"):
+            mod.get_changed_files("bogus...HEAD")
+
+    def test_main_fails_closed_when_git_errors(self, monkeypatch):
+        """main() exits 1 when get_changed_files raises CollectorError."""
+        mod = _import_collector()
+        monkeypatch.setattr(sys, "argv", [
+            "collect_l4_wave_indicators.py",
+            "--wave-id", "test-wave",
+            "--output", "/tmp/ignored.json",
+            "--range", "bogus...HEAD",
+        ])
+
+        def raise_git_error(_range):
+            raise mod.CollectorError("git diff failed (exit 128): fatal")
+
+        monkeypatch.setattr(mod, "get_changed_files", raise_git_error)
+        rc = mod.main()
+        assert rc == 1
+
+    def test_main_fails_closed_on_zero_elapsed_ratio(self, monkeypatch):
+        """main() exits 1 when second probe returns 0.0 elapsed (ratio guard)."""
+        mod = _import_collector()
+        monkeypatch.setattr(sys, "argv", [
+            "collect_l4_wave_indicators.py",
+            "--wave-id", "test-wave",
+            "--output", "/tmp/ignored.json",
+            "--range", "HEAD~1...HEAD",
+        ])
+        monkeypatch.setattr(mod, "get_changed_files", lambda _r: ["file.py"])
+        monkeypatch.setattr(mod, "compute_ratchet_net_delta", lambda: 0)
+        monkeypatch.setattr(mod, "count_parity_diffs", lambda: 5)
+        monkeypatch.setattr(mod, "collect_repeat_run_raw", lambda: [1.5, 0.0])
+        rc = mod.main()
+        assert rc == 1
