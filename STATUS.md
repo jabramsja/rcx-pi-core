@@ -73,7 +73,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
-| **Python Substrate** | ~6250 LOC, ~5,458 tests, production-ready | ✅ PRIMARY | - |
+| **Python Substrate** | ~6,274 LOC, ~5,556 tests, production-ready | ✅ PRIMARY | - |
 | **JS Substrate** | ~4200 LOC core + ~470 LOC inline tests (15 JS modules), auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
@@ -284,22 +284,22 @@ Tier 5: CI Weekly     weekly_deep_fuzz.yml          ~60 min  Deep fuzz (500 exam
 | Tier | What It Tests | When to Run |
 |------|---------------|-------------|
 | Tier 1 | Core algorithms, syntax, contraband, security tool grounding | Local iteration |
-| Tier 2 | All tests including 450+ hypothesis fuzzers + 168 slow tests | Before push (local) |
-| Tier 3 | ~2,500 core tests (no fuzzers, no slow) | CI push/PR gate (~2 min) |
+| Tier 2 | All tests including ~498 hypothesis fuzzers + 658 slow tests | Before push (local) |
+| Tier 3 | ~4,250 core tests (no fuzzers, no slow, excludes stress + full JS parity) | CI push/PR gate (~2 min) |
 | Tier 4 | Everything including fuzzers + slow (ci_full profile) | Nightly CI schedule |
 
 **CI Green Gate Optimization (2026-02-11):**
-- Hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` in `conftest.py` (452 tests)
-- Slow tests (meta-circular, paxos e2e, hemispheres, engine pipeline) deselected (168 tests)
-- Green gate `-m "not slow and not fuzzer"` runs ~2,500 core tests in ~50s on CI
+- Hypothesis fuzzers auto-marked via `pytest_collection_modifyitems` in `conftest.py` (498 tests)
+- Slow tests (meta-circular, paxos e2e, hemispheres, engine pipeline) deselected (658 tests)
+- Green gate `-m "not slow and not fuzzer" --ignore=tests/stress/ --ignore=tests/parity/test_js_parity_automated.py` runs ~4,250 core tests + 1 parity canary in ~50s on CI (marker-only deselection yields ~4,400; green gate additionally excludes stress and full JS parity suite)
 - Total green gate wall time: **~2 min** (down from ~28 min)
 - Nightly (`HYPOTHESIS_PROFILE=ci_full`) runs everything including fuzzers and slow
 
 **Tier 1 includes (2026-02-01):**
-- `tests/structural/` (17 files) - structural claims grounding
-- `tests/tools/` (4 files) - security tool grounding tests (including validator)
+- `tests/structural/` (45 files) - structural claims grounding
+- `tests/tools/` (27 files) - security tool grounding tests (including validator)
 - 20 core test files including adversarial and self-hosting tests
-- 43 CRITICAL_TEST_FILES protected from silent skipping
+- 44 CRITICAL_TEST_FILES protected from silent skipping
 
 **Fuzzer Settings (standardized 2026-01-28):**
 - `max_depth=3` in ALL test generators (prevents pathological nesting after normalization)
@@ -685,7 +685,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-02-27 (truth-sync through A18-P0 plus MAINT-M2/M3 protocol/docs updates; see TASKS.md Ra tracker notes)
+**Last updated:** 2026-03-05 (docs-truth-sync: test counts, directory file counts, CRITICAL_TEST_FILES updated to match reproduced ground truth; W1-W3 redteam waves landed since last sync)
 **Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET, 2026-02-20); post-closure execution continues on L4_STRUCTURAL promotion-path work (post A18-P0), with explicit workload targets `rcx_engine.v1` (RCXEngineNew cycle) and UniversalEval/UniversalRecursion path evidence. Canonical authorization remains TASKS.md.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
