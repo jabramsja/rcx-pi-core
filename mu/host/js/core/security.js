@@ -12,6 +12,7 @@ const {
   MAX_VALIDATION_DEPTH,
   RcxError,
 } = require('./constants');
+const { MAX_MU_WIDTH } = require('./types');
 
 /**
  * If value is a normalized dict encoding, return list of [key, value] pairs.
@@ -62,10 +63,11 @@ function iterNormalizedDictPairs(value) {
     current = current.tail;
     steps++;
     // Parity with Python _iter_normalized_dict_pairs: both substrates process
-    // exactly 100 pairs max. Python increments steps at loop top and checks
-    // steps > 100; JS increments after push and checks steps >= 100. Both
-    // return null when a 101st pair would be processed.
-    if (steps >= MAX_VALIDATION_DEPTH) return null;
+    // exactly MAX_MU_WIDTH pairs max. Python increments steps at loop top
+    // and checks steps > MAX_MU_WIDTH; JS increments after push and checks
+    // steps >= MAX_MU_WIDTH. Both return null when a (MAX_MU_WIDTH+1)th pair
+    // would be processed. W3-CRASH F-13: raised from 100 to MAX_MU_WIDTH.
+    if (steps >= MAX_MU_WIDTH) return null;
   }
   return pairs;
 }

@@ -631,8 +631,15 @@ def denormalize_from_match(value: Mu) -> Mu:
                             if not isinstance(current, dict) or "head" not in current:
                                 break
                             kv = current["head"]
+                            if not isinstance(kv, dict) or "head" not in kv:
+                                current = current.get("tail")
+                                continue
                             key = kv["head"]
-                            val_to_process = kv["tail"]["head"]
+                            kv_tail = kv.get("tail")
+                            if not isinstance(kv_tail, dict) or "head" not in kv_tail:
+                                current = current.get("tail")
+                                continue
+                            val_to_process = kv_tail["head"]
                             kv_pairs.append((key, val_to_process))
                             current = current.get("tail")
 
@@ -692,9 +699,18 @@ def denormalize_from_match(value: Mu) -> Mu:
                             if node_id in visited:
                                 raise ValueError("Circular reference in linked list during denormalization")
                             visited.add(node_id)
+                            if not isinstance(current, dict) or "head" not in current:
+                                break
                             kv = current["head"]
+                            if not isinstance(kv, dict) or "head" not in kv:
+                                current = current.get("tail")
+                                continue
                             key = kv["head"]
-                            val_to_process = kv["tail"]["head"]
+                            kv_tail = kv.get("tail")
+                            if not isinstance(kv_tail, dict) or "head" not in kv_tail:
+                                current = current.get("tail")
+                                continue
+                            val_to_process = kv_tail["head"]
                             kv_pairs.append((key, val_to_process))
                             current = current.get("tail")
 
@@ -722,6 +738,8 @@ def denormalize_from_match(value: Mu) -> Mu:
                             if node_id in visited:
                                 raise ValueError("Circular reference in linked list during denormalization")
                             visited.add(node_id)
+                            if not isinstance(current, dict) or "head" not in current:
+                                break
                             elements.append(current["head"])
                             current = current.get("tail")
 
@@ -800,6 +818,10 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
         value = current.get("value")
         if name is None:
             raise ValueError(f"Binding missing 'name': {current}")
+        if not isinstance(name, str):
+            raise ValueError(
+                f"Binding 'name' must be a string, got {type(name).__name__}: {name!r}"
+            )
         result[name] = value
         current = current.get("rest")
     return result

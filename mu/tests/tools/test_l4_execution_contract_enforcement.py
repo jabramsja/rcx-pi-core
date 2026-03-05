@@ -40,6 +40,7 @@ from enforce_l4_execution_contract import (
     enforce,
     filter_to_tracked_files,
     validate_indicator_artifact_json,
+    validate_indicator_with_ratchet,
     has_non_comment_runtime_delta,
     is_comment_line,
     is_runtime_file,
@@ -1376,6 +1377,81 @@ class TestIndicatorDerivationAntiTheater:
             expected_net_host_delta=3,
         )
         assert passed, f"Should pass with matching net delta: {errors}"
+
+    def test_ratchet_derived_delta_mismatch_rejects(self, tmp_path, monkeypatch) -> None:
+        """End-to-end: ratchet-derived delta=0 rejects indicator with delta=999."""
+        import json
+        ratchet_payload = {
+            "current": {"python": {"host_builtin": 1, "host_iteration": 10, "host_mutation": 0, "host_recursion": 2},
+                        "javascript": {"host_builtin": 4, "host_iteration": 10, "host_mutation": 0, "host_recursion": 5}},
+            "baseline_counts": {"python": {"host_builtin": 1, "host_iteration": 10, "host_mutation": 0, "host_recursion": 2},
+                                "javascript": {"host_builtin": 4, "host_iteration": 10, "host_mutation": 0, "host_recursion": 5}},
+            "passed": True,
+        }
+        monkeypatch.setattr(l4_contract, "probe_host_semantics_ratchet", lambda: (ratchet_payload, []))
+
+        artifact = tmp_path / "ind.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test", "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 0, "net_host_semantic_delta": 999,
+            "step_growth_slope": 1.5, "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [{"step": 1, "elapsed_seconds": 1.5}, {"step": 2, "elapsed_seconds": 3.0}],
+            "parity_diff_source": "test", "collection_timestamp_utc": "2026-01-01T00:00:00Z",
+            "collector_version": "2.0.0",
+        }))
+
+        # Test through validate_indicator_with_ratchet (main path helper)
+        passed, errors = validate_indicator_with_ratchet(str(artifact), [str(artifact)])
+        assert not passed, "Should reject indicator with delta=999 when ratchet says 0"
+        assert any("net_host_semantic_delta" in e for e in errors)
+
+    def test_ratchet_derived_delta_match_accepts(self, tmp_path, monkeypatch) -> None:
+        """End-to-end: ratchet-derived delta=0 accepts indicator with delta=0."""
+        import json
+        ratchet_payload = {
+            "current": {"python": {"host_builtin": 1, "host_iteration": 10, "host_mutation": 0, "host_recursion": 2},
+                        "javascript": {"host_builtin": 4, "host_iteration": 10, "host_mutation": 0, "host_recursion": 5}},
+            "baseline_counts": {"python": {"host_builtin": 1, "host_iteration": 10, "host_mutation": 0, "host_recursion": 2},
+                                "javascript": {"host_builtin": 4, "host_iteration": 10, "host_mutation": 0, "host_recursion": 5}},
+            "passed": True,
+        }
+        monkeypatch.setattr(l4_contract, "probe_host_semantics_ratchet", lambda: (ratchet_payload, []))
+
+        artifact = tmp_path / "ind.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test", "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 0, "net_host_semantic_delta": 0,
+            "step_growth_slope": 1.5, "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [{"step": 1, "elapsed_seconds": 1.5}, {"step": 2, "elapsed_seconds": 3.0}],
+            "parity_diff_source": "test", "collection_timestamp_utc": "2026-01-01T00:00:00Z",
+            "collector_version": "2.0.0",
+        }))
+
+        passed, errors = validate_indicator_with_ratchet(str(artifact), [str(artifact)])
+        assert passed, f"Should accept indicator matching ratchet delta: {errors}"
+
+    def test_ratchet_probe_failure_fails_closed(self, tmp_path, monkeypatch) -> None:
+        """End-to-end: probe failure propagates FAIL-CLOSED through main path."""
+        import json
+        monkeypatch.setattr(
+            l4_contract, "probe_host_semantics_ratchet",
+            lambda: (None, ["probe script not found"]),
+        )
+
+        # Valid artifact — but probe failure must still cause rejection
+        artifact = tmp_path / "ind.json"
+        artifact.write_text(json.dumps({
+            "wave_id": "test", "repeat_run_speedup_ratio": 1.0,
+            "parity_diff_count": 0, "net_host_semantic_delta": 0,
+            "step_growth_slope": 1.5, "repeat_run_raw_seconds": [1.5, 1.5],
+            "step_growth_points": [{"step": 1, "elapsed_seconds": 1.5}, {"step": 2, "elapsed_seconds": 3.0}],
+            "parity_diff_source": "test", "collection_timestamp_utc": "2026-01-01T00:00:00Z",
+            "collector_version": "2.0.0",
+        }))
+
+        passed, errors = validate_indicator_with_ratchet(str(artifact), [str(artifact)])
+        assert not passed, "Probe failure must reject (fail-closed)"
+        assert any("FAIL-CLOSED" in e for e in errors)
 
 
 # =============================================================================

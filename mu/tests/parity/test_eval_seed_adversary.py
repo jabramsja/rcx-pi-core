@@ -523,14 +523,15 @@ class TestBoolIntCoercionPrevention:
 class TestSpecialVariableNames:
     """Tests for edge case variable names."""
 
-    def test_empty_string_var_name_rejected(self):
-        """Empty string variable name is rejected.
+    def test_empty_string_var_name_no_match(self):
+        """Empty string variable name returns NO_MATCH.
 
-        HARDENED: Empty variable names cause confusing error messages and
-        debugging difficulty. They are now rejected with ValueError.
+        W3-CRASH F-11: Empty var-name in match paths returns NO_MATCH
+        instead of raising ValueError. is_var() still accepts {"var": ""}
+        as a structural variable site, but match refuses to bind to it.
         """
-        with pytest.raises(ValueError, match="cannot be empty"):
-            match({'var': ''}, 42)
+        result = match({'var': ''}, 42)
+        assert result is NO_MATCH
 
     def test_var_named_var(self):
         """'var' is a valid variable name (no collision)."""
