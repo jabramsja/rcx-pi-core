@@ -104,7 +104,7 @@ This follows the same E1-E5 pattern used for Boot1 (shadow-merge scope) and GAP-
 
 **Evidence command:** `pytest tests/structural/ -k "metabolization or hemisphere" -v`
 
-**Status:** E4 MET (2026-02-20). Test file `tests/structural/test_hemisphere_e4_security_invariants.py` created with 15 tests. S1-S5 sink-safety invariants verified against canonical synthesized engine_result shape (both exhaustion and stall variants). S4 cross-substrate parity verified via `_is_engine_terminal()` (Python) and `run_hemisphere` JSON API (JS). S5 terminal shape check verified in both substrates. 4 bootstrap primitives locked (no new). 24 KERNEL_RESERVED_FIELDS locked (no new). Hemisphere classify projection priority order locked (exhaustion first). Metabolization seed has zero underscore keys. Option B shadow-only verified: `exception_sink` absent from all runtime code and seed files. 15/15 pass.
+**Status:** E4 MET (2026-02-20). Test file `tests/structural/test_hemisphere_e4_security_invariants.py` created with 15 tests. S1-S5 sink-safety invariants verified against canonical synthesized engine_result shape (both exhaustion and stall variants). S4 cross-substrate parity verified via `_is_engine_terminal()` (Python) and `run_hemisphere` JSON API (JS). S5 terminal shape check verified in both substrates. 4 bootstrap primitives locked (no new). 25 KERNEL_RESERVED_FIELDS locked (_boundary_request added 2026-02-24). Hemisphere classify projection priority order locked (exhaustion first). Metabolization seed has zero underscore keys. Option B shadow-only verified: `exception_sink` absent from all runtime code and seed files. 15/15 pass.
 
 ### E5: Governance Closure
 

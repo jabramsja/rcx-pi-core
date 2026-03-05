@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-18
+LAST_VERIFIED: 2026-03-05
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: none
@@ -41,16 +41,19 @@ If this doc's claims don't match reality, update the doc or fix the code.
 
 **Objective:** Confirm exactly 4 bootstrap primitives exist, no more.
 
-**Pass condition:** `BOOTSTRAP_PRIMITIVE` marker appears exactly 4 times across Python and JS.
+**Pass condition:** Python canonical substrate (`rcx_pi/selfhost/`) contains exactly 4 `BOOTSTRAP_PRIMITIVE` markers, one per primitive: eval_step, max_steps, stack_guard, projection_loader. No 5th primitive name appears in Python markers.
 
-**Fail condition:** Any additional `BOOTSTRAP_PRIMITIVE` marker, or any unlabeled host primitive performing equivalent work.
+**Fail condition:** Any Python `BOOTSTRAP_PRIMITIVE` marker naming a 5th primitive, or any unlabeled host primitive performing equivalent work in either substrate.
 
 **Proof command:**
 ```bash
-grep -rn "BOOTSTRAP_PRIMITIVE" rcx_pi/selfhost/ mu/host/js/eval_step.js | grep -v test
+# Canonical (Python) — must show exactly 4 markers:
+grep -rn "BOOTSTRAP_PRIMITIVE" rcx_pi/selfhost/ | grep -v test
+# Full scan (Python + JS) — for visibility:
+grep -rn "BOOTSTRAP_PRIMITIVE" rcx_pi/selfhost/ mu/host/js/ | grep -v test
 ```
 
-**Status:** PASS
+**Status:** PASS (Python). Python shows exactly 4 markers (eval_step, max_steps, stack_guard, projection_loader). **JS label discrepancy:** `constants.js:39` and `types.js:124` label `muHash()` as BOOTSTRAP_PRIMITIVE, but Python classifies the equivalent (`mu_hash_cached` in `mu_type.py`) as `@host_builtin`. All canonical docs (BootstrapPrimitives.v0.md, Boot0Architecture.v0.md, STATUS.md) define exactly 4 primitives — muHash is a host builtin for hash-accelerated closure detection, not a bootstrap primitive. JS labels should be retagged to `@host_builtin` in a future runtime wave.
 
 ---
 

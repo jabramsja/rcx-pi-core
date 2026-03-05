@@ -13,12 +13,14 @@ A projection-based computational substrate where **structure is the primitive**.
 | **Hemispheres v0** | Native structural routing (12 projections) | ✅ DONE |
 | **L4** | True self-hosting (bootstrap primitive elimination) | DEFERRED — see `mu/docs/core/L4ExitChecklist.v0.md` |
 
-> **Current reality:** L1-L3 are complete and gate-enforced. L4 (full meta-circularity / bootstrap primitive elimination) is a research goal with open feasibility questions — see `mu/docs/core/G8CpsFeasibility.v0.md`. Hemispheres v0 is structural routing; hemisphere metabolization (NEXT) is in contract-test phase.
+> **Current reality:** L1-L3 are complete and gate-enforced. L4 (full meta-circularity / bootstrap primitive elimination) is a research goal with open feasibility questions — see `mu/docs/core/G8CpsFeasibility.v0.md`.
+>
+> Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
-- **3,690+ tests** across 180+ test files
+- **~5,500+ tests** across 260+ test files
 - **11 semantic debt** (irreducible bootstrap floor)
-- **43 CRITICAL_TEST_FILES** protected from silent skipping
-- **49 core projections** across 5 L3-complete seeds + 12 hemisphere projections
+- **44 CRITICAL_TEST_FILES** protected from silent skipping
+- **143 projections** across 17 seed files
 
 **Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
 Three automatic routes: null→r_null, closure→r_a, default→lobes. Cross-substrate parity verified.
@@ -95,8 +97,13 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/programs/hemispheres.v1.json` | Hemisphere routing (12 projections) - native structural routing |
 | `mu/programs/paxos_demo.v1.json` | Paxos deadlock demo (6 projections) - application |
 | `mu/programs/rcx_engine.v1.json` | Engine orchestration (11 projections) - structural specification |
-| `mu/utilities/classify.v1.json` | Type classification (~6 projections) |
-| `mu/utilities/eval.v1.json` | Evaluation (~7 projections) |
+| `mu/substrate/match.v1.json` | Pattern matching (7 projections) - legacy standalone |
+| `mu/substrate/subst.v1.json` | Substitution (12 projections) - legacy standalone |
+| `mu/closures/fix.v1.json` | Fixed-point combinator (6 projections) - Rule 4.1 |
+| `mu/programs/metabolization.v1.json` | Hemisphere metabolization (6 projections) - structural metabolism |
+| `mu/utilities/classify.v1.json` | Type classification (6 projections) |
+| `mu/utilities/eval.v1.json` | Evaluation (7 projections) |
+| `mu/utilities/terminal_classify.v1.json` | Terminal classification (7 projections) - engine terminal detection |
 
 ### Core Modules
 
@@ -189,4 +196,4 @@ See `mu/docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-
 
 ---
 
-*Last updated: 2026-02-16*
+*Last updated: 2026-03-05*
