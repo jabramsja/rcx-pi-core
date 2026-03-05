@@ -2,6 +2,19 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-05
+
+### W3-CRASH Runtime Crash Guards + Collector Hardening (PR #477)
+
+- F-10: `denormalize_from_match` typed-dict and legacy-dict loops now have 3-layer guards (structural, kv shape, kv_tail shape); malformed kv nodes skipped instead of crashing (JS parity)
+- F-11: `_match_inner` and `_stage0_match` return NO_MATCH for empty var-name `{"var": ""}` instead of raising ValueError
+- F-12: `bindings_to_dict` rejects non-string binding names with diagnostic ValueError (type + repr)
+- F-13: `_iter_normalized_dict_pairs` cap raised from hardcoded 100 to `MAX_MU_WIDTH` (1000); JS `iterNormalizedDictPairs` updated to match
+- Enforcer: `net_host_semantic_delta` aligned to ratchet-derived delta (runs `check_host_semantics_ratchet.py --json`)
+- Collector hardening (#1-6): zero-division guard on speedup ratio, `subprocess.TimeoutExpired` fail-closed on 3 probe functions, `get_changed_files` raises `CollectorError` on git failure, dead code removed (`RUNTIME_DIRS`, `COMMENT_ONLY_PATTERNS`, `get_diff_text`, `is_comment_line`), top-level `import os` replaces inline `__import__("os")`, docstring corrected (timing metrics are environment-dependent, not deterministic)
+- 25 gate tests in `test_w3_crash_guards_gate.py` + 6 collector regression tests in `test_l4_governance_contract.py`
+- Merge commit `735dfea`. No phase/debt change.
+
 ## 2026-03-04
 
 ### W2 Enforcer/Theater Hardening (PRs #472, #473)
