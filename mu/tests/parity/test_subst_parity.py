@@ -371,3 +371,41 @@ class TestSubstEmptyVarNameRejection:
         # Unicode
         result = subst_mu({"var": "变量"}, {"变量": 123})
         assert result == 123
+
+
+class TestF41BindingEntryValidation:
+    """F-41: subst_mu must validate binding names and values at entry."""
+
+    def test_rejects_non_string_binding_name(self):
+        """Non-string binding name raises ValueError at entry, not deep crash."""
+        with pytest.raises(ValueError, match="binding name must be non-empty string"):
+            subst_mu({"var": "x"}, {123: 42, "x": 1})
+
+    def test_rejects_empty_binding_name(self):
+        """Empty string binding name raises ValueError at entry."""
+        with pytest.raises(ValueError, match="binding name must be non-empty string"):
+            subst_mu({"var": "x"}, {"": 42, "x": 1})
+
+    def test_rejects_none_binding_name(self):
+        """None binding name raises ValueError at entry."""
+        with pytest.raises(ValueError, match="binding name must be non-empty string"):
+            subst_mu({"var": "x"}, {None: 42, "x": 1})
+
+    def test_rejects_non_mu_binding_value(self):
+        """Non-Mu binding value raises TypeError at entry, not deep runner crash."""
+        with pytest.raises(TypeError, match="must be a Mu"):
+            subst_mu({"var": "x"}, {"x": object()})
+
+    def test_rejects_function_binding_value(self):
+        """Function binding value raises TypeError at entry."""
+        with pytest.raises(TypeError, match="must be a Mu"):
+            subst_mu({"var": "x"}, {"x": lambda: None})
+
+    def test_valid_bindings_still_work(self):
+        """Valid bindings with all Mu types still pass."""
+        assert subst_mu({"var": "a"}, {"a": 42}) == 42
+        assert subst_mu({"var": "a"}, {"a": "hello"}) == "hello"
+        assert subst_mu({"var": "a"}, {"a": None}) is None
+        assert subst_mu({"var": "a"}, {"a": True}) is True
+        assert subst_mu({"var": "a"}, {"a": [1, 2]}) == [1, 2]
+        assert subst_mu({"var": "a"}, {"a": {"key": "val"}}) == {"key": "val"}

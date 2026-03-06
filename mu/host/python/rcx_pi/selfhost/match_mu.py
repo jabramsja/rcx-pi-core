@@ -329,10 +329,14 @@ def normalize_for_match(value: Mu) -> Mu:
                         continue
 
                 # Type-tagged structure - preserve _type, normalize head/tail
+                # F-43: Only treat as typed linked list if _type is valid
                 if keys == {"_type", "head", "tail"}:  # AST_OK: key comparison
-                    stack.append(("ht_typed", val["_type"], val["tail"]))
-                    stack.append(("eval", val["head"]))
-                    continue
+                    _type = val["_type"]
+                    if isinstance(_type, str) and _type in VALID_TYPE_TAGS:
+                        stack.append(("ht_typed", _type, val["tail"]))
+                        stack.append(("eval", val["head"]))
+                        continue
+                    # Invalid _type: fall through to regular dict normalization
 
                 if keys == {"head", "tail"}:
                     # Already head/tail structure - normalize both parts

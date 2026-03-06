@@ -2242,3 +2242,45 @@ class TestEvidenceCollectorBoundaryPath:
         assert "ontology_promotion" not in result, (
             "Collector path must not add ontology_promotion — observation only"
         )
+
+
+class TestF44HandlerResultImmutability:
+    """F-44: _service_boundary_effect must not mutate the handler-returned dict."""
+
+    def test_handler_result_not_mutated_by_emission(self, monkeypatch):
+        """Ontology promotion attachment must not pollute the handler's original dict."""
+        handler_result = {
+            "result": "hello",
+            "trace": [],
+            "stall": True,
+        }
+        original_keys = set(handler_result.keys())
+
+        def fake_handler(request, req_input, max_iters):
+            return handler_result
+
+        monkeypatch.setitem(_BOUNDARY_DISPATCH, "run_trace", fake_handler)
+        evidence = _make_valid_evidence()
+        request = _make_boundary_request(context_extra={
+            "emit_ontology_candidate": True,
+            "ontology_candidate_evidence": evidence,
+        })
+        returned_ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=50,
+            emit_fn=_noop_emit, iteration=0, state="test_state",
+        )
+        injected = returned_ctx["boundary_result"]
+
+        # The injected result must have ontology_promotion
+        assert "ontology_promotion" in injected
+
+        # The handler's ORIGINAL dict must NOT have been mutated
+        assert set(handler_result.keys()) == original_keys, (
+            f"Handler result was mutated in place: gained {set(handler_result.keys()) - original_keys}"
+        )
+        assert "ontology_promotion" not in handler_result
+
+        # The injected result must be a DIFFERENT object
+        assert injected is not handler_result, (
+            "Injected result should be a copy, not the same object as handler return"
+        )

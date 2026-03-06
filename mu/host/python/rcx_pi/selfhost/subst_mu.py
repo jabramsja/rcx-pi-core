@@ -67,6 +67,12 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Validate no empty variable names (parity with eval_seed.py)
     _check_empty_var_names(body, "body")
 
+    # F-41: Validate binding names and values at entry (fail-closed)
+    for k, v in bindings.items():
+        if not isinstance(k, str) or not k:
+            raise ValueError(f"subst_mu: binding name must be non-empty string, got {k!r}")
+        assert_mu(v, f"subst_mu.bindings[{k!r}]")
+
     # Check if body is already in head/tail form (structural dict)
     # If so, we shouldn't denormalize it back to a list
     body_was_head_tail = is_head_tail_structure(body)

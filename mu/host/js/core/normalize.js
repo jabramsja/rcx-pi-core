@@ -190,17 +190,22 @@ function normalize(value, _depth = 0) {
     }
 
     if (isLinkedListNode(value)) {
-      if ('_type' in value) {
+      // F-43: Only treat as typed linked list if _type is valid
+      if ('_type' in value && VALID_TYPE_TAGS.has(value._type)) {
         return {
           _type: value._type,
           head: normalize(value.head, _depth + 1),
           tail: normalize(value.tail, _depth + 1)
         };
       }
-      return {
-        head: normalize(value.head, _depth + 1),
-        tail: normalize(value.tail, _depth + 1)
-      };
+      // Untyped head/tail — normalize both parts
+      if (!('_type' in value)) {
+        return {
+          head: normalize(value.head, _depth + 1),
+          tail: normalize(value.tail, _depth + 1)
+        };
+      }
+      // Invalid _type: fall through to regular dict normalization
     }
 
     // Regular dict - convert to sorted kv linked list

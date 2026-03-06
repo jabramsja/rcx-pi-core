@@ -2215,6 +2215,8 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
                 f"boundary_result({operation}): emit_ontology_candidate requested "
                 f"but result already contains ontology_promotion",
             )
+        # F-44: Copy result before mutation to avoid poisoning handler return value
+        result = {**result}
         result["ontology_promotion"] = _build_ontology_promotion_candidate(
             evidence,
             f"boundary_result({operation}).ontology_candidate_evidence",
