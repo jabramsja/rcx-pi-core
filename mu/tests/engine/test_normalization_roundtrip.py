@@ -725,3 +725,102 @@ class TestMalformedLinkedListEdgeCases:
         assert result["true"] is True
         assert result["false"] is False
         assert result["none"] is None
+
+
+class TestF43InvalidTypeTagFallthrough:
+    """F-43: Invalid exact-key {_type, head, tail} must be treated as regular dict."""
+
+    def test_invalid_type_tag_normalizes_as_dict(self):
+        """{'_type': 'lambda', 'head': 1, 'tail': None} normalizes as 3-key dict."""
+        value = {"_type": "lambda", "head": 1, "tail": None}
+        norm = normalize_for_match(value)
+        # Must be type-tagged dict structure, NOT a typed linked list passthrough
+        assert norm.get("_type") == "dict"
+        # Must NOT be the original dict passed through unchanged
+        assert norm != value
+
+    def test_invalid_type_tag_roundtrips(self):
+        """Invalid _type dict roundtrips through normalize/denormalize."""
+        value = {"_type": "lambda", "head": 1, "tail": None}
+        result = denormalize_from_match(normalize_for_match(value))
+        assert result == value
+
+    def test_invalid_type_tag_no_late_crash(self):
+        """Invalid _type does not cause late crash in denormalize."""
+        value = {"_type": "unknown", "head": "data", "tail": [1, 2]}
+        norm = normalize_for_match(value)
+        result = denormalize_from_match(norm)
+        assert result == value
+
+    def test_valid_type_tags_still_work(self):
+        """Valid _type tags (list, dict) still normalize as typed linked lists."""
+        list_val = {"_type": "list", "head": 1, "tail": None}
+        norm = normalize_for_match(list_val)
+        assert norm.get("_type") == "list"
+        assert norm.get("head") == 1
+
+        dict_val = {"_type": "dict", "head": {"head": "k", "tail": {"head": "v", "tail": None}}, "tail": None}
+        norm = normalize_for_match(dict_val)
+        assert norm.get("_type") == "dict"
+
+    def test_non_string_type_tag_normalizes_as_dict(self):
+        """Non-string _type (e.g. int) falls through to dict normalization."""
+        value = {"_type": 42, "head": 1, "tail": None}
+        norm = normalize_for_match(value)
+        assert norm.get("_type") == "dict"
+        result = denormalize_from_match(norm)
+        assert result == value
+
+
+class TestF43JsNormalizeParity:
+    """F-43: JS normalize must also fall through on invalid _type."""
+
+    def test_js_invalid_type_tag_roundtrips(self):
+        """JS: {'_type': 'lambda', 'head': 1, 'tail': null} roundtrips as regular dict."""
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e", """
+const { normalize, denormalize } = require('./mu/host/js/core/normalize');
+const val = {_type: 'lambda', head: 1, tail: null};
+const norm = normalize(val);
+const rt = denormalize(norm);
+// Must be treated as regular dict, not typed linked list
+if (norm['_type'] !== 'dict') {
+    console.error('FAIL: normalized _type should be dict, got ' + norm['_type']);
+    process.exit(1);
+}
+// Roundtrip must match original
+if (rt['_type'] !== 'lambda' || rt.head !== 1 || rt.tail !== null) {
+    console.error('FAIL: roundtrip mismatch: ' + JSON.stringify(rt));
+    process.exit(1);
+}
+console.log('PASS');
+"""],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        assert result.returncode == 0, f"JS F-43 test failed: {result.stderr}"
+        assert "PASS" in result.stdout
+
+    def test_js_valid_type_tags_still_work(self):
+        """JS: Valid _type tags (list, dict) still normalize as typed linked lists."""
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e", """
+const { normalize, denormalize } = require('./mu/host/js/core/normalize');
+const listVal = {_type: 'list', head: 1, tail: null};
+const norm = normalize(listVal);
+if (norm['_type'] !== 'list') {
+    console.error('FAIL: list _type not preserved');
+    process.exit(1);
+}
+const rt = denormalize(norm);
+if (!Array.isArray(rt) || rt[0] !== 1) {
+    console.error('FAIL: list roundtrip: ' + JSON.stringify(rt));
+    process.exit(1);
+}
+console.log('PASS');
+"""],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        assert result.returncode == 0, f"JS valid type test failed: {result.stderr}"
+        assert "PASS" in result.stdout
