@@ -37,16 +37,20 @@ if [ -n "$RANGE" ]; then
         # with CI (which always uses origin/dev...HEAD).
         L4_RANGE="origin/dev...HEAD"
         L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
-        # Derive wave-id from codex branch name only when the full wave
-        # diff includes TASKS.md.  This avoids forcing structural-wave
-        # validation on follow-up CI/tooling commits that happen to be on
-        # a codex/l4-* branch but do not carry tracker-note updates.
+        # Derive wave-id from branch name when the full wave diff includes
+        # TASKS.md.  Supports codex/* and jabramsja/* naming conventions.
+        # This avoids forcing structural-wave validation on follow-up
+        # CI/tooling commits that don't carry tracker-note updates.
         BRANCH="$(git rev-parse --abbrev-ref HEAD)"
         WAVE_ID_FLAG=""
+        WAVE_ID_SUFFIX=""
         if [[ "$BRANCH" == codex/* ]]; then
-            if echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
-                WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
-            fi
+            WAVE_ID_SUFFIX="${BRANCH#codex/}"
+        elif [[ "$BRANCH" == jabramsja/* ]]; then
+            WAVE_ID_SUFFIX="${BRANCH#jabramsja/}"
+        fi
+        if [ -n "$WAVE_ID_SUFFIX" ] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
+            WAVE_ID_FLAG="--wave-id $WAVE_ID_SUFFIX"
         fi
         if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$L4_RANGE" $WAVE_ID_FLAG; then
             echo ""
