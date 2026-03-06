@@ -43,6 +43,7 @@ function match(pattern, input, _depth = 0) {
   }
 
   if (isVar(pattern)) {
+    if (!pattern.var) return NO_MATCH;  // F-25: parity with Python _match_inner:269-270
     return { [pattern.var]: input };
   }
 
@@ -340,6 +341,7 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
   // Variable site
   if (isVar(pattern)) {
     const name = pattern.var;
+    if (!name) return NO_MATCH;  // F-25: parity with Python _stage0_match:376-377
     if (Object.hasOwn(current, name)) {
       // Non-linear conflict: use muHashCached (NOT muHashControlCached —
       // control hash canonicalizes 0.0→0, breaking int/float distinction).

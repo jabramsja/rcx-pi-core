@@ -21,6 +21,7 @@ What this checker does NOT prove:
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -172,3 +173,42 @@ class TestSeedLocationCoverage:
         valid_dirs = {"substrate", "closures", "bridge", "programs", "utilities"}
         for seed, loc in MU_SEED_LOCATIONS.items():
             assert loc in valid_dirs, f"{seed} has invalid location '{loc}'"
+
+
+# ---------------------------------------------------------------------------
+# F-46: Seed checksum verification fail-closed parity
+# ---------------------------------------------------------------------------
+
+class TestSeedChecksumFailClosed:
+    """F-46: JS loadVerifiedSeed is fail-closed on unknown seeds (parity with Python)."""
+
+    def test_js_rejects_unknown_seed_name(self):
+        """loadVerifiedSeed with unregistered name must throw, not silently load."""
+        js_script = (
+            "const { loadVerifiedSeed } = require('./mu/host/js/core/seed_loader');\n"
+            "try {\n"
+            "  loadVerifiedSeed('classify.v1.json', 'utilities');\n"
+            "  process.stderr.write('FAIL: loaded unregistered seed');\n"
+            "  process.exit(1);\n"
+            "} catch(e) {\n"
+            "  if (e.message.includes('Unknown seed') || e.message.includes('no checksum')) {\n"
+            "    console.log('PASS');\n"
+            "  } else {\n"
+            "    process.stderr.write('WRONG ERROR: ' + e.message);\n"
+            "    process.exit(1);\n"
+            "  }\n"
+            "}\n"
+        )
+        proc = subprocess.run(
+            ["node", "-e", js_script],
+            capture_output=True, text=True,
+            cwd=str(_REPO), timeout=10,
+        )
+        assert proc.returncode == 0, f"JS seed fail-closed test failed: {proc.stderr}"
+        assert proc.stdout.strip() == "PASS"
+
+    def test_python_rejects_unknown_seed_name(self):
+        """Python verify_checksum rejects unknown seeds (regression lock)."""
+        from rcx_pi.selfhost.seed_integrity import verify_checksum
+        with pytest.raises(ValueError, match="Unknown seed"):
+            verify_checksum("nonexistent_seed.v99.json", b"any content")

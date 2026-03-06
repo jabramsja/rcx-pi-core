@@ -202,6 +202,34 @@ class TestF11EmptyVarNameNoMatch:
 
 
 # ---------------------------------------------------------------------------
+# F-25 JS parity: stage0Match rejects empty var name
+# ---------------------------------------------------------------------------
+
+class TestF25JsStage0MatchEmptyVar:
+    """F-25: JS stage0Match({var: ""}, x) returns NO_MATCH — direct call proof."""
+
+    def test_js_stage0_match_empty_var(self):
+        """stage0Match({var: ""}, 42) must return NO_MATCH, not bind {"": 42}."""
+        js_script = (
+            "const { stage0Match } = require('./mu/host/js/core/bootstrap_core');\n"
+            "const { NO_MATCH } = require('./mu/host/js/core/constants');\n"
+            "const r = stage0Match({var: ''}, 42);\n"
+            "if (r !== NO_MATCH) {\n"
+            "  process.stderr.write('FAIL: got ' + JSON.stringify(r));\n"
+            "  process.exit(1);\n"
+            "}\n"
+            "console.log('PASS');\n"
+        )
+        proc = subprocess.run(
+            ["node", "-e", js_script],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert proc.returncode == 0, f"JS stage0Match empty-var failed: {proc.stderr}"
+        assert proc.stdout.strip() == "PASS"
+
+
+# ---------------------------------------------------------------------------
 # F-12: bindings_to_dict non-string name guard
 # ---------------------------------------------------------------------------
 
