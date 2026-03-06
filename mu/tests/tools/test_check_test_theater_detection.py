@@ -170,6 +170,42 @@ class TestTheaterDetectsEmptyTests:
         result = run_theater_check_on_code(code)
         assert result.returncode != 0, "Should fail on empty test body with ellipsis"
 
+    def test_detects_multiline_pass_body(self):
+        """F-07: def test_foo():\\n    pass is theater (multiline)."""
+        code = "def test_something():\n    pass\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on multiline empty test body with pass"
+
+    def test_detects_multiline_ellipsis_body(self):
+        """F-07: def test_foo():\\n    ... is theater (multiline)."""
+        code = "def test_something():\n    ...\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on multiline empty test body with ellipsis"
+
+    def test_detects_multiline_docstring_plus_pass(self):
+        """F-07: def test_foo():\\n    '''doc'''\\n    pass is theater."""
+        code = 'def test_something():\n    """Docstring."""\n    pass\n'
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "Should fail on docstring-only + pass test"
+
+    def test_multiline_empty_with_theater_ok_on_def_line_passes(self):
+        """F-07: THEATER_OK on def line whitelists multiline empty test."""
+        code = "def test_something():  # THEATER_OK: placeholder\n    pass\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, "THEATER_OK on def line should whitelist"
+
+    def test_multiline_empty_with_theater_ok_preceding_line_passes(self):
+        """F-07: THEATER_OK on immediately preceding line whitelists."""
+        code = "# THEATER_OK: placeholder for future\ndef test_something():\n    pass\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, "THEATER_OK on preceding line should whitelist"
+
+    def test_real_test_body_not_flagged(self):
+        """F-07: Test with real assertions is not flagged by multiline check."""
+        code = "def test_something():\n    result = 1 + 1\n    assert result == 2\n"
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, "Real test body should not be flagged"
+
 
 class TestTheaterDetectsSkipWithoutReason:
     """Verify check_test_theater.sh catches skip decorators without reasons."""

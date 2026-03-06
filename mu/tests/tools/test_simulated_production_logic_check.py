@@ -123,7 +123,7 @@ class TestSimulatedProductionLogicChecker:
         # Should have at least 2 violations: malformed marker + simulated logic
         assert len(violations) >= 2, f"Expected >=2 violations, got: {violations}"
         descs = [v['desc'] for v in violations]
-        assert any('missing reason' in d for d in descs), (
+        assert any('missing' in d or 'too-short' in d for d in descs), (
             f"Expected malformed marker violation, got: {descs}"
         )
         assert any('validateSeedStructure' in d for d in descs), (
@@ -169,6 +169,120 @@ class TestSimulatedProductionLogicChecker:
         )
         violations = check_file(f)
         assert violations == []
+
+
+class TestF05ShadowDetection:
+    """F-05: Import shadowing bypass detection."""
+
+    def test_shadowed_import_with_call_fails(self, tmp_path):
+        """F-05: require + function shadow + call to shadow must fail."""
+        f = tmp_path / "test_shadow.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = """\n'
+            "    const { loadVerifiedSeed } = require('./mu/host/js/core/seed_loader');\n"
+            "    function loadVerifiedSeed(x) { return {}; }\n"
+            "    loadVerifiedSeed('kernel.v1.json');\n"
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected violation for shadowed call, got: {violations}"
+        descs = ' '.join(v['desc'] for v in violations)
+        assert 'loadVerifiedSeed' in descs
+
+    def test_shadowed_arrow_alias_with_call_fails(self, tmp_path):
+        """F-05: require + arrow shadow + call to shadow must fail."""
+        f = tmp_path / "test_arrow_shadow.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = """\n'
+            "    const { validateSeedStructure } = require('./mu/host/js/cli/main');\n"
+            "    const validateSeedStructure = (name, seed) => { return true; };\n"
+            "    validateSeedStructure('test', {});\n"
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected violation for shadowed arrow, got: {violations}"
+
+    def test_unshadowed_call_still_passes(self, tmp_path):
+        """F-05: require + call without shadow still passes."""
+        f = tmp_path / "test_no_shadow.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    js_code = """\n'
+            "    const { loadVerifiedSeed } = require('./mu/host/js/core/seed_loader');\n"
+            "    const seed = loadVerifiedSeed('test.json', 'utilities');\n"
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert violations == [], f"Expected no violations, got: {violations}"
+
+
+class TestF08ReasonLength:
+    """F-08: THEATER_OK reason minimum length enforcement."""
+
+    def test_single_char_reason_fails(self, tmp_path):
+        """F-08: THEATER_OK with single-char reason must be flagged."""
+        f = tmp_path / "test_short_reason.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    # THEATER_OK: source-lock-only x\n'
+            '    js_code = """\n'
+            '    function validateSeedStructure(seedName, seed) {\n'
+            '        // simulated logic\n'
+            '    }\n'
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 2, f"Expected >=2 violations (malformed + simulated), got: {violations}"
+        descs = [v['desc'] for v in violations]
+        assert any('too-short' in d for d in descs), f"Expected too-short reason, got: {descs}"
+        assert any('validateSeedStructure' in d for d in descs), (
+            f"Expected simulated logic not exempted, got: {descs}"
+        )
+
+    def test_two_char_reason_fails(self, tmp_path):
+        """F-08: THEATER_OK with two-char reason must be flagged."""
+        f = tmp_path / "test_two_char.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    # THEATER_OK: source-lock-only ok\n'
+            '    js_code = """\n'
+            '    function validateSeedStructure(seedName, seed) {}\n'
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert len(violations) >= 1, f"Expected violation for 2-char reason, got: {violations}"
+
+    def test_three_char_reason_passes(self, tmp_path):
+        """F-08: THEATER_OK with three-char reason passes."""
+        f = tmp_path / "test_three_char.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    # THEATER_OK: source-lock-only yes\n'
+            '    js_code = """\n'
+            '    function validateSeedStructure(seedName, seed) {\n'
+            '        // simulated logic\n'
+            '    }\n'
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert violations == [], f"Expected no violations for 3-char reason, got: {violations}"
+
+    def test_adequate_reason_still_passes(self, tmp_path):
+        """F-08: Existing adequate reasons still pass."""
+        f = tmp_path / "test_good_reason.py"
+        f.write_text(
+            'def test_example(self):\n'
+            '    # THEATER_OK: source-lock-only validates guard predicate presence\n'
+            '    js_code = """\n'
+            '    function validateSeedStructure(seedName, seed) {\n'
+            '        // simulated logic\n'
+            '    }\n'
+            '    """\n'
+        )
+        violations = check_file(f)
+        assert violations == [], f"Expected no violations, got: {violations}"
 
 
 class TestRT3BypassFixtures:
