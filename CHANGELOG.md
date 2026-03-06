@@ -4,6 +4,15 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-05
 
+### Docs Truth Sync (PR #480)
+
+- README.md: test counts (~5,500+ across 260+), CRITICAL_TEST_FILES (44), projections (143 across 17 seeds), seed table (+5 missing seeds), metabolization status → COMPLETE
+- STATUS.md: Python test count (~5,556), Tier 2/3 counts corrected, green gate selection semantics documented, tests/structural (45) and tests/tools (27) counts, CRITICAL_TEST_FILES (44)
+- L4ExitChecklist.v0.md: G1 pass condition scoped to Python canonical substrate, G1 proof command fixed, muHash JS label discrepancy documented
+- Boot1LoopContract.v0.md: status → COMPLETE (shadow-merge implemented 2026-02-19)
+- HemisphereExecutionChecklist.v0.md: KERNEL_RESERVED_FIELDS 24→25 (_boundary_request)
+- MAINTENANCE wave. No phase/debt change. Merge commit `3d19180`.
+
 ### W3-CRASH Runtime Crash Guards + Collector Hardening (PR #477)
 
 - F-10: `denormalize_from_match` typed-dict and legacy-dict loops now have 3-layer guards (structural, kv shape, kv_tail shape); malformed kv nodes skipped instead of crashing (JS parity)

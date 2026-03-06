@@ -248,6 +248,39 @@ class TestCrossSubstrateParity:
             "\n".join(f"  {m['id']}: PY={m['python']} JS={m['javascript']}" for m in mismatches[:5])
         )
 
+    def test_f25_empty_var_match_parity(self):
+        """F-25: bootstrap match({var: ""}, x) returns NO_MATCH in both substrates.
+
+        Targeted proof: calls bootstrap match() directly in both Python and JS.
+        The kernel path uses seed-based match.v2 (which does NOT hit the bootstrap
+        guard), so this test exercises the bootstrap function directly via node -e.
+        """
+        from rcx_pi.selfhost.eval_seed import match, NO_MATCH
+
+        # Python: bootstrap match() rejects empty var
+        assert match({"var": ""}, 42) is NO_MATCH, "Python match({var:''}, 42) should be NO_MATCH"
+        assert match({"var": ""}, "hello") is NO_MATCH, "Python match({var:''}, 'hello') should be NO_MATCH"
+
+        # JS: bootstrap match() rejects empty var (direct call)
+        js_script = (
+            "const { match } = require('./mu/host/js/core/bootstrap_core');\n"
+            "const { NO_MATCH } = require('./mu/host/js/core/constants');\n"
+            "const r1 = match({var: ''}, 42);\n"
+            "const r2 = match({var: ''}, 'hello');\n"
+            "if (r1 !== NO_MATCH || r2 !== NO_MATCH) {\n"
+            "  process.stderr.write('FAIL: r1=' + JSON.stringify(r1) + ' r2=' + JSON.stringify(r2));\n"
+            "  process.exit(1);\n"
+            "}\n"
+            "console.log('PASS');\n"
+        )
+        proc = subprocess.run(
+            ["node", "-e", js_script],
+            capture_output=True, text=True,
+            cwd=ROOT, timeout=10,
+        )
+        assert proc.returncode == 0, f"JS match empty-var failed: {proc.stderr}"
+        assert proc.stdout.strip() == "PASS"
+
     def test_python_js_constants_match(self):
         """Verify Python and JS have matching security constants.
 

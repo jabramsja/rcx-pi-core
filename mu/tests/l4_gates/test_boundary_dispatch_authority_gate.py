@@ -657,7 +657,8 @@ class TestJsSeedLoaderMalformedProjection:
     Tests call production loadVerifiedSeed from seed_loader.js directly via
     temp seed files written to os.tmpdir() (NOT mu/utilities/, to avoid race
     conditions with test_seed_counts.py during parallel execution). Unknown
-    seed names bypass checksum/projection-ID checks, isolating the type guard.
+    seed names hit the projection-entry type guard before checksum/projection-ID
+    checks, so malformed projections are caught regardless of registry status.
     """
 
     @staticmethod

@@ -1,0 +1,24 @@
+{
+  "wave_id": "w4b-parity-guards",
+  "repeat_run_speedup_ratio": 1.073717,
+  "parity_diff_count": 19,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.694087,
+  "repeat_run_raw_seconds": [
+    0.745253,
+    0.694087
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.745253
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.43934
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-06T00:00:00Z",
+  "collector_version": "2.2.0"
+}
