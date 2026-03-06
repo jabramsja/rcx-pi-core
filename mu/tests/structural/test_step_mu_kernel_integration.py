@@ -56,8 +56,8 @@ class TestStepMuUsesKernelProjections:
             assert result == 42
 
     def test_step_kernel_mu_loads_combined_projections(self):
-        """step_kernel_mu loads kernel + match.v2 + subst.v2 projections."""
-        with patch('rcx_pi.selfhost.step_mu.load_combined_kernel_projections') as mock_load:
+        """step_kernel_mu loads kernel + match.v2 + subst.v2 projections via private shared helper."""
+        with patch('rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared') as mock_load:  # ANTICHEAT_OK: F-39 internal path proof
             # Return minimal valid projections
             mock_load.return_value = []
 

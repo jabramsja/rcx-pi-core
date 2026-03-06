@@ -1041,25 +1041,19 @@ def normalize_projection(proj: dict) -> dict:
     }
 
 
-def load_combined_kernel_projections(*, _copy: bool = True) -> list[Mu]:
+def _load_combined_kernel_projections_shared() -> list[Mu]:
     """
-    Load and cache combined kernel + match.v2 + subst.v2 projections.
+    Private: populate and return the shared kernel projection cache.
 
-    SECURITY: Kernel projections MUST come first to prevent domain
-    projections from forging kernel state.
+    Internal trusted-path only. The returned list is the live module-level
+    cache — callers MUST NOT mutate it. Used by step_kernel_mu where
+    eval_step is verified read-only (no projection mutation).
 
-    By default returns a deep copy to prevent callers from mutating the cache.
-    (Adversary finding: shallow copy allows cache poisoning via dict mutation)
-    Internal callers (step_kernel_mu) pass _copy=False since eval_step never
-    mutates projections, avoiding the JSON round-trip hot-path cost.
-
-    Returns:
-        Combined list of kernel, match, and subst projections.
+    F-39: This helper restricts shared-cache access to private internal use.
+    Public callers use load_combined_kernel_projections() which returns copies.
     """
     global _combined_kernel_cache
     if _combined_kernel_cache is not None:
-        if _copy:
-            return json.loads(json.dumps(_combined_kernel_cache))
         return _combined_kernel_cache
 
     # Use mu/ as canonical location via get_seed_path()
@@ -1073,9 +1067,23 @@ def load_combined_kernel_projections(*, _copy: bool = True) -> list[Mu]:
         match_seed["projections"] +
         subst_seed["projections"]
     )
-    if _copy:
-        return json.loads(json.dumps(_combined_kernel_cache))
     return _combined_kernel_cache
+
+
+def load_combined_kernel_projections() -> list[Mu]:
+    """
+    Load and cache combined kernel + match.v2 + subst.v2 projections.
+
+    SECURITY: Kernel projections MUST come first to prevent domain
+    projections from forging kernel state.
+
+    Returns a deep copy. Callers may freely mutate the returned list
+    without affecting the internal cache or other callers.
+
+    Returns:
+        Combined list of kernel, match, and subst projections.
+    """
+    return json.loads(json.dumps(_load_combined_kernel_projections_shared()))
 
 
 def clear_combined_kernel_cache() -> None:
@@ -1151,32 +1159,20 @@ def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
         )
 
 
-def load_combined_kernel_with_bridge_projections(*, _copy: bool = True) -> list[Mu]:
+def _load_combined_kernel_with_bridge_projections_shared() -> list[Mu]:
     """
-    Load and cache combined kernel + match.v2 + bootstrap_structural + subst.v2 projections.
+    Private: populate and return the shared bridge kernel projection cache.
 
-    This variant uses bootstrap_structural.v1 which provides non-linear pattern
-    support (binding conflict detection) as structural projections.
+    Internal trusted-path only. The returned list is the live module-level
+    cache — callers MUST NOT mutate it. Used by step_kernel_mu where
+    eval_step is verified read-only (no projection mutation).
 
-    SECURITY: Kernel projections MUST come first to prevent domain
-    projections from forging kernel state.
-
-    By default returns a deep copy to prevent callers from mutating the cache.
-    (Adversary finding: shallow copy allows cache poisoning via dict mutation)
-    Internal callers (step_kernel_mu) pass _copy=False since eval_step never
-    mutates projections, avoiding the JSON round-trip hot-path cost.
-
-    Required for META_CIRCULAR seeds:
-    - recurrence.v1.json (uses non-linear patterns for state equality)
-    - exhaustion.v1.json (uses non-linear patterns for operator equality)
-
-    Returns:
-        Combined list of kernel, match.v2, bootstrap_structural, and subst projections.
+    F-39: This helper restricts shared-cache access to private internal use.
+    Public callers use load_combined_kernel_with_bridge_projections() which
+    returns copies.
     """
     global _combined_kernel_bridge_cache
     if _combined_kernel_bridge_cache is not None:
-        if _copy:
-            return json.loads(json.dumps(_combined_kernel_bridge_cache))
         return _combined_kernel_bridge_cache
 
     # Use mu/ as canonical location via get_seed_path()
@@ -1197,9 +1193,30 @@ def load_combined_kernel_with_bridge_projections(*, _copy: bool = True) -> list[
         subst_seed["projections"]
     )
     _validate_combined_bridge_ordering(_combined_kernel_bridge_cache)
-    if _copy:
-        return json.loads(json.dumps(_combined_kernel_bridge_cache))
     return _combined_kernel_bridge_cache
+
+
+def load_combined_kernel_with_bridge_projections() -> list[Mu]:
+    """
+    Load and cache combined kernel + match.v2 + bootstrap_structural + subst.v2 projections.
+
+    This variant uses bootstrap_structural.v1 which provides non-linear pattern
+    support (binding conflict detection) as structural projections.
+
+    SECURITY: Kernel projections MUST come first to prevent domain
+    projections from forging kernel state.
+
+    Returns a deep copy. Callers may freely mutate the returned list
+    without affecting the internal cache or other callers.
+
+    Required for META_CIRCULAR seeds:
+    - recurrence.v1.json (uses non-linear patterns for state equality)
+    - exhaustion.v1.json (uses non-linear patterns for operator equality)
+
+    Returns:
+        Combined list of kernel, match.v2, bootstrap_structural, and subst projections.
+    """
+    return json.loads(json.dumps(_load_combined_kernel_with_bridge_projections_shared()))
 
 
 # =============================================================================
@@ -1403,11 +1420,12 @@ def step_kernel_mu(
         validator(proj["pattern"], f"projection[{i}].pattern")
         validator(proj["body"], f"projection[{i}].body")
 
-    # Load combined kernel projections (skip deep copy — eval_step never mutates)
+    # Load combined kernel projections via private shared helpers
+    # (no deep copy — eval_step never mutates projections; F-39)
     if kernel_mode == "core":
-        kernel_projs = load_combined_kernel_projections(_copy=False)
+        kernel_projs = _load_combined_kernel_projections_shared()
     elif kernel_mode == "bridge":
-        kernel_projs = load_combined_kernel_with_bridge_projections(_copy=False)
+        kernel_projs = _load_combined_kernel_with_bridge_projections_shared()
     else:
         raise ValueError(
             "SECURITY: invalid kernel_mode. Expected 'core' or 'bridge', "

@@ -132,7 +132,7 @@ jobs:
             echo "Non-push/PR event (${{ github.event_name }}) — using HEAD~1...HEAD as L4 contract range"
             RANGE="HEAD~1...HEAD"
           fi
-          # Derive wave-id from codex branch name (if applicable)
+          # Derive wave-id from branch name (supports codex/* and jabramsja/*)
           # PR: github.head_ref gives source branch; push: github.ref_name
           if [ -n "${{ github.head_ref }}" ]; then
             BRANCH="${{ github.head_ref }}"
@@ -142,6 +142,8 @@ jobs:
           WAVE_ID_FLAG=""
           if [[ "$BRANCH" == codex/* ]]; then
             WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+          elif [[ "$BRANCH" == jabramsja/* ]]; then
+            WAVE_ID_FLAG="--wave-id ${BRANCH#jabramsja/}"
           fi
           python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 

@@ -138,14 +138,24 @@ echo "== 1o) Host-semantics ratchet check =="
 python3 tools/checks/check_host_semantics_ratchet.py
 
 echo "== 1m) L4 execution contract check =="
-# Derive wave-id from codex branch name only when TASKS.md is in the scope
-# being checked.  Follow-up CI/tooling commits on codex/* branches skip
-# wave-class enforcement (same logic as pre-push-fast).
+# Derive wave-id from branch name when TASKS.md is in the scope being checked.
+# Supports codex/* and jabramsja/* branch naming conventions.
+# Follow-up CI/tooling commits that don't change TASKS.md skip wave-class enforcement.
 L4_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+# Extract wave-id suffix from known branch prefixes
+_l4_extract_wave_id() {
+    local branch="$1"
+    if [[ "$branch" == codex/* ]]; then
+        echo "${branch#codex/}"
+    elif [[ "$branch" == jabramsja/* ]]; then
+        echo "${branch#jabramsja/}"
+    fi
+}
+L4_WAVE_ID_SUFFIX="$(_l4_extract_wave_id "$L4_BRANCH")"
 if git diff --cached --name-only | grep -q .; then
     L4_WAVE_ID_FLAG=""
-    if [[ "$L4_BRANCH" == codex/* ]] && git diff --cached --name-only | grep -qx "TASKS.md"; then
-        L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+    if [ -n "$L4_WAVE_ID_SUFFIX" ] && git diff --cached --name-only | grep -qx "TASKS.md"; then
+        L4_WAVE_ID_FLAG="--wave-id $L4_WAVE_ID_SUFFIX"
     fi
     python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
 else
@@ -165,8 +175,8 @@ else
         if [ -n "$L4_RANGE_FILES" ]; then
             echo "No staged files — using committed range $L4_RANGE"
             L4_WAVE_ID_FLAG=""
-            if [[ "$L4_BRANCH" == codex/* ]] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
-                L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+            if [ -n "$L4_WAVE_ID_SUFFIX" ] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
+                L4_WAVE_ID_FLAG="--wave-id $L4_WAVE_ID_SUFFIX"
             fi
             python3 tools/checks/enforce_l4_execution_contract.py --range "$L4_RANGE" $L4_WAVE_ID_FLAG
         else
@@ -178,8 +188,8 @@ else
         if [ -n "$L4_DIRTY_FILES" ]; then
             echo "No staged files, no upstream — checking dirty tracked files only"
             L4_WAVE_ID_FLAG=""
-            if [[ "$L4_BRANCH" == codex/* ]] && echo "$L4_DIRTY_FILES" | grep -qx "TASKS.md"; then
-                L4_WAVE_ID_FLAG="--wave-id ${L4_BRANCH#codex/}"
+            if [ -n "$L4_WAVE_ID_SUFFIX" ] && echo "$L4_DIRTY_FILES" | grep -qx "TASKS.md"; then
+                L4_WAVE_ID_FLAG="--wave-id $L4_WAVE_ID_SUFFIX"
             fi
             # shellcheck disable=SC2086
             python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
