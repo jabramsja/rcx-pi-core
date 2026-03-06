@@ -92,12 +92,19 @@ PRODUCTION_CALL_PATTERNS = [
     re.compile(r'(?:seed_loader|pipeline|kernel)\s*\.\s*\w+\s*\('),
 ]
 
-# Exception marker: must have reason text on the SAME LINE after the marker
-# Uses [ \t] (horizontal whitespace) to avoid matching across newlines
-THEATER_OK_RE = re.compile(r'#\s*THEATER_OK:\s*source-lock-only[ \t]+\S')
-THEATER_OK_MALFORMED_RE = re.compile(
-    r'#\s*THEATER_OK:\s*source-lock-only[ \t]*$', re.MULTILINE
-)
+# Exception marker: any THEATER_OK marker (valid or not)
+_THEATER_OK_ANY_RE = re.compile(r'#\s*THEATER_OK:\s*source-lock-only')
+# F-08: Minimum reason length (3 chars) — prevents trivial single-char bypasses
+_MIN_THEATER_OK_REASON_LEN = 3
+
+
+def _is_valid_theater_ok(line: str) -> bool:
+    """Check if line has a valid THEATER_OK marker with sufficient reason (>=3 chars)."""
+    m = re.search(r'#\s*THEATER_OK:\s*source-lock-only[ \t]+(.*)', line)
+    if not m:
+        return False
+    reason = m.group(1).strip()
+    return len(reason) >= _MIN_THEATER_OK_REASON_LEN
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +172,17 @@ def line_number_at(content: str, pos: int) -> int:
     return content[:pos].count('\n') + 1
 
 
+def _shadowed_symbols(block_text: str) -> set[str]:
+    """Return symbol names redefined in the block (F-05 shadow detection)."""
+    shadowed: set[str] = set()
+    for pattern, _ in SIMULATED_FUNCTION_PATTERNS:
+        for m in pattern.finditer(block_text):
+            name_m = re.search(r'(?:function\s+|(?:const|let)\s+)(\w+)', m.group())
+            if name_m:
+                shadowed.add(name_m.group(1))
+    return shadowed
+
+
 def _has_production_call(block_text: str) -> bool:
     """Check if block has both a production require AND a call using the import.
 
@@ -172,9 +190,13 @@ def _has_production_call(block_text: str) -> bool:
     - `loadVerifiedSeed('test.json')` is a CALL (good)
     - `function loadVerifiedSeed(name)` is a DEFINITION (not a call)
     - `const loadVerifiedSeed = (name) =>` is a DEFINITION (not a call)
+
+    F-05: Calls to locally shadowed symbols don't count as production calls.
     """
     if not PRODUCTION_REQUIRE_RE.search(block_text):
         return False
+    # F-05: Collect locally defined helper names
+    shadowed = _shadowed_symbols(block_text)
     # Check for call expressions, excluding function definitions
     for line in block_text.split('\n'):
         stripped = line.strip()
@@ -186,18 +208,25 @@ def _has_production_call(block_text: str) -> bool:
                 continue
             if re.match(r'\s*(?:const|let|var)\s+\w+\s*=\s*\(.*?\)\s*=>', stripped):
                 continue
+            # F-05: Reject calls to shadowed symbols
+            if shadowed:
+                call_m = p.search(stripped)
+                if call_m:
+                    called = re.match(r'(\w+)', call_m.group())
+                    if called and called.group(1) in shadowed:
+                        continue
             return True
     return False
 
 
 def _has_theater_ok_within_5_lines(content: str, block_start: int) -> bool:
-    """Check for THEATER_OK marker within 5 lines before block_start."""
+    """Check for valid THEATER_OK marker within 5 lines before block_start."""
     block_line = line_number_at(content, block_start)
     # Search the 5 lines before the block
     search_start_line = max(1, block_line - 5)
     lines = content.split('\n')
     for i in range(search_start_line - 1, block_line - 1):
-        if i < len(lines) and THEATER_OK_RE.search(lines[i]):
+        if i < len(lines) and _is_valid_theater_ok(lines[i]):
             return True
     return False
 
@@ -214,18 +243,13 @@ def check_file(filepath: Path) -> list[dict]:
     content = filepath.read_text()
     violations = []
 
-    # Check for malformed THEATER_OK markers (missing reason text)
-    for m in THEATER_OK_MALFORMED_RE.finditer(content):
-        line_start = content.rfind('\n', 0, m.start()) + 1
-        line_end = content.find('\n', m.end())
-        if line_end == -1:
-            line_end = len(content)
-        line_text = content[line_start:line_end].strip()
-        if not THEATER_OK_RE.search(line_text):
+    # F-08: Check for malformed THEATER_OK markers (missing or too-short reason)
+    for i, line in enumerate(content.split('\n'), 1):
+        if _THEATER_OK_ANY_RE.search(line) and not _is_valid_theater_ok(line):
             violations.append({
-                'line': line_number_at(content, m.start()),
-                'desc': 'THEATER_OK marker missing reason text',
-                'snippet_preview': line_text[:80],
+                'line': i,
+                'desc': f'THEATER_OK marker missing or too-short reason (min {_MIN_THEATER_OK_REASON_LEN} chars)',
+                'snippet_preview': line.strip()[:80],
             })
 
     # Extract all blocks that look like JS

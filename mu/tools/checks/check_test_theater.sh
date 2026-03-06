@@ -62,8 +62,71 @@ check_pattern "assert\s+(\w+)\s*==\s*\1\s*$" "assert x == x - self-comparison"
 # =============================================================================
 # Empty or trivial test bodies
 # =============================================================================
+# Single-line forms (grep-based)
 check_pattern "def test_\w+\s*\([^)]*\)\s*:\s*pass\s*$" "Empty test body (pass)"
 check_pattern "def test_\w+\s*\([^)]*\)\s*:\s*\.\.\.\s*$" "Empty test body (...)"
+
+# F-07: Multiline empty test bodies (AST-based — catches standard two-line form)
+# THEATER_OK on the def line or immediately preceding line whitelists the test.
+_multiline_empty=$(python3 -c "
+import ast, sys, os
+tests_dir = sys.argv[1]
+found = []
+for root, dirs, files in os.walk(tests_dir):
+    for fname in sorted(files):
+        if not fname.endswith('.py'):
+            continue
+        path = os.path.join(root, fname)
+        try:
+            source = open(path).read()
+            tree = ast.parse(source)
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        lines = source.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if not node.name.startswith('test_'):
+                continue
+            body = node.body
+            # Skip leading docstring if present
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(getattr(body[0], 'value', None), ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                body = body[1:]
+            if len(body) != 1:
+                continue
+            stmt = body[0]
+            is_empty = isinstance(stmt, ast.Pass)
+            if not is_empty and isinstance(stmt, ast.Expr):
+                val = getattr(stmt, 'value', None)
+                if isinstance(val, ast.Constant) and val.value is ...:
+                    is_empty = True
+            if not is_empty:
+                continue
+            # Skip single-line forms (already caught by grep patterns above)
+            if stmt.lineno == node.lineno:
+                continue
+            # THEATER_OK on def line or immediately preceding line
+            def_idx = node.lineno - 1
+            whitelisted = False
+            for ci in range(max(0, def_idx - 1), min(len(lines), def_idx + 1)):
+                if 'THEATER_OK' in lines[ci]:
+                    whitelisted = True
+                    break
+            if whitelisted:
+                continue
+            found.append(f'{path}:{node.lineno}')
+for f in found:
+    print(f)
+" "$TESTS_DIR" 2>/dev/null || true)
+
+if [ -n "$_multiline_empty" ]; then
+    echo "  ✗ THEATER: Empty test body (multiline def/pass)"
+    echo "$_multiline_empty" | head -5 | sed 's/^/      /'
+    echo ""
+    ERRORS=$((ERRORS + 1))
+fi
 
 # =============================================================================
 # Skip without reason (hiding broken tests)
