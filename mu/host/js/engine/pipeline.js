@@ -729,6 +729,7 @@ function buildOntologyPromotionCandidate(evidence, contextStr) {
 /**
  * Build an observation record from a boundary result (A17).
  * Extracts trace metadata when available, computes control_hash.
+ * @host_iteration — Mu linked-list traversal for evidence collection
  */
 function collectOntologyEvidence(result, operation) {
   const controlHash = muHashControlCached(result, 'evidence_collector');

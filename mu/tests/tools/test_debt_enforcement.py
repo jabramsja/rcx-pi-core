@@ -460,8 +460,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 65 (64 pre-A17 + 1 A17 evidence collector)
-    assert infra_count == 65, (
-        f"Expected 65 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 64 (65 pre-MT1 - 1 MT1 reclassification:
+    # _collect_ontology_evidence AST_OK:infra → @host_iteration)
+    assert infra_count == 64, (
+        f"Expected 64 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
