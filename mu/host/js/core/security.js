@@ -200,34 +200,33 @@ function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
  * Fail-closed guard: stepKernel/runStructural use core kernel which does NOT
  * detect binding conflicts. Non-linear patterns must use runAlgorithmWithBridge.
  *
- * Bounded: iteration counter (MAX_DEPTH * MAX_MU_WIDTH) and identity-based
- * cycle detection prevent OOM on circular references or pathologically deep inputs.
+ * Traversal is structural: no host-identity dedup. Shared object references
+ * are traversed each time they appear, so aliased subtrees are correctly
+ * counted as repeated structure. Bounded only by iteration cap
+ * (MAX_DEPTH * MAX_MU_WIDTH = 300K). Cyclic or pathological input
+ * hits the cap and fail-closes as non-linear.
  * Mirrors Python _has_nonlinear_vars() in step_mu.py.
  */
 function hasNonlinearVars(pattern) {
   const varCounts = Object.create(null);
   const maxIterations = MAX_DEPTH * MAX_MU_WIDTH; // 300 * 1000 = 300,000
-  const seen = new Set();
   let iterations = 0;
 
   const stack = [pattern];
   while (stack.length > 0) {
     iterations++;
     if (iterations > maxIterations) {
-      // Fail-closed: pathological input, treat as non-linear.
+      // Fail-closed: pathological/cyclic input, treat as non-linear.
       return true;
     }
     const current = stack.pop();
     if (current === null || typeof current !== 'object') continue;
-    if (seen.has(current)) continue;
 
     if (Array.isArray(current)) {
-      seen.add(current);
       for (let i = 0; i < current.length; i++) {
         stack.push(current[i]);
       }
     } else {
-      seen.add(current);
       const keys = Object.keys(current);
       if (keys.length === 1 && keys[0] === 'var' && typeof current.var === 'string') {
         const name = current.var;
