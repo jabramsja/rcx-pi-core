@@ -1017,7 +1017,7 @@ def list_to_linked(items: list[Mu]) -> Mu:
     if not items:
         return None
     result: Mu = None
-    for item in reversed(items):
+    for item in reversed(items):  # @host_iteration: list-to-linked-list conversion (parity with JS listToLinked)
         result = {"head": item, "tail": result}
     return result
 
@@ -2273,7 +2273,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     return context
 
 
-def _collect_ontology_evidence(  # AST_OK: infra — evidence collection from boundary result
+def _collect_ontology_evidence(  # @host_iteration: Mu linked-list traversal for evidence collection
     result,
     operation: str,
 ) -> dict:
