@@ -103,14 +103,14 @@
     },
     {
       "id": "repeated_variable",
-      "description": "Same variable used twice in pattern (must match same value)",
+      "description": "Non-linear pattern (same var twice) — core kernel rejects fail-closed. Both substrates must reject on direct core path. Bridge path (apply_mu/runAlgorithmWithBridge) handles these correctly.",
       "projection": {
         "pattern": {"a": {"var": "x"}, "b": {"var": "x"}},
         "body": {"matched": {"var": "x"}}
       },
       "input": {"a": "same", "b": "same"},
-      "expected_output": {"matched": "same"},
-      "expected_stall": true
+      "expected_error": "non-linear pattern",
+      "expected_error_code": "input.nonlinear_pattern"
     },
     {
       "id": "list_with_mixed_types",

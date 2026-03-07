@@ -82,9 +82,17 @@ class TestParityVectors:
     ])
     def test_parity_vector(self, vectors, kernel_projections, vector_id):
         """Test a single parity vector."""
+        from rcx_pi.selfhost.step_mu import step_mu
+
         # Find the vector by id
         vector = next((v for v in vectors["vectors"] if v["id"] == vector_id), None)
         assert vector is not None, f"Vector {vector_id} not found"
+
+        if vector.get("expected_error"):
+            # Error vectors: step_mu must reject (e.g., non-linear pattern)
+            with pytest.raises(ValueError, match=vector["expected_error"]):
+                step_mu([vector["projection"]], vector["input"])
+            return
 
         # Normalize input and projection using the same functions as the integration tests
         normalized_input = normalize_for_match(vector["input"])
@@ -167,7 +175,9 @@ class TestVectorFileIntegrity:
             assert "description" in vector, f"Vector {vector.get('id', '?')} missing description"
             assert "projection" in vector, f"Vector {vector['id']} missing projection"
             assert "input" in vector, f"Vector {vector['id']} missing input"
-            assert "expected_output" in vector, f"Vector {vector['id']} missing expected_output"
+            assert "expected_output" in vector or "expected_error" in vector, (
+                f"Vector {vector['id']} missing expected_output or expected_error"
+            )
 
         for vector in data["security_vectors"]:
             assert "id" in vector, f"Security vector missing id"
