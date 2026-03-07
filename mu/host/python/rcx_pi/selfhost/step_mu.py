@@ -2103,6 +2103,16 @@ def _boundary_op_hash_trace(request, req_input, max_algorithm_iterations):
     return hash_trace_for_recurrence(req_input)
 
 
+# Authority: only these seeds are loadable through run_algorithm boundary dispatch.
+# Parity: matches JS seedProjectionMap keys (main.js:228-233).
+_ALGORITHM_SEED_ALLOWLIST = frozenset({  # AST_OK: security allowlist — frozen constant
+    "recurrence.v1.json",
+    "recurrence.v2.json",
+    "exhaustion.v1.json",
+    "fix.v1.json",
+})
+
+
 def _boundary_op_run_algorithm(request, req_input, max_algorithm_iterations):
     """Handler for 'run_algorithm' boundary operation."""
     if "algorithm" not in request:
@@ -2112,6 +2122,10 @@ def _boundary_op_run_algorithm(request, req_input, max_algorithm_iterations):
     if not isinstance(algo_name, str):
         raise RcxEngineError("api.bad_request",
             f"run_algorithm 'algorithm' must be string, got {type(algo_name).__name__}")
+    if algo_name not in _ALGORITHM_SEED_ALLOWLIST:
+        raise RcxEngineError("api.bad_request",
+            f"run_algorithm 'algorithm' must be an authorized algorithm seed, "
+            f"got {algo_name!r}. Allowed: {sorted(_ALGORITHM_SEED_ALLOWLIST)}")
     algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
     return _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
 
@@ -2210,7 +2224,11 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
             f"boundary dispatch missing handler for validated op: {operation}")
     result = handler(request, req_input, max_algorithm_iterations)
 
-    # SECURITY: validate boundary result before re-injection.
+    # INVARIANT: boundary results re-enter engine state (domain level).
+    # Domain-level validation is mandatory here regardless of which internal
+    # validator the handler used (e.g., algorithm_runtime for run_algorithm).
+    # Kernel-reserved fields (_mode, _remaining, _seen, etc.) must not leak
+    # into engine state. Both Python and JS enforce this same assumption.
     validate_no_kernel_reserved_fields(result, context=f"boundary_result({operation})")
 
     # Producer-side ontology promotion candidate (A14): one-shot, opt-in only.
