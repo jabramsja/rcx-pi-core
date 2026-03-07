@@ -324,3 +324,124 @@ class TestJSNonlinearRejectionParity:
         # run_recurrence uses recurrence seeds which contain non-linear patterns.
         # It must succeed (bridge path, not guarded).
         assert resp["success"], f"run_recurrence should succeed: {resp.get('error')}"
+
+
+# =============================================================================
+# Non-Linear Scanner Alias Bypass Tests
+# =============================================================================
+
+
+class TestNonlinearScannerAliasBypass:
+    """Prove that the non-linear scanner treats shared object references as
+    repeated structure — not as host-identity dedup targets.
+
+    The old implementation used a seen set (Python id(), JS Set identity) to
+    skip already-visited objects. This caused shared references to be traversed
+    only once, hiding non-linear variable usage when callers reused the same
+    object in multiple pattern positions.
+    """
+
+    def test_python_alias_leaf_detected(self):
+        """Python: same {var: x} object in two positions is non-linear."""
+        from rcx_pi.selfhost.step_mu import _has_nonlinear_vars  # ANTICHEAT_OK: grounding test for alias bypass fix
+
+        v = {"var": "x"}
+        pattern = {"a": v, "b": v}  # same object ref
+        assert _has_nonlinear_vars(pattern), (
+            "Aliased var leaf must be counted twice (non-linear)"
+        )
+
+    def test_python_alias_subtree_detected(self):
+        """Python: same subtree object containing {var: x} in two positions is non-linear."""
+        from rcx_pi.selfhost.step_mu import _has_nonlinear_vars  # ANTICHEAT_OK: grounding test for alias bypass fix
+
+        sub = {"inner": {"var": "x"}}
+        pattern = {"a": sub, "b": sub}  # same object ref
+        assert _has_nonlinear_vars(pattern), (
+            "Aliased subtree containing var must be traversed twice (non-linear)"
+        )
+
+    def test_python_distinct_repeated_structure_detected(self):
+        """Python: distinct objects with same var name is non-linear."""
+        from rcx_pi.selfhost.step_mu import _has_nonlinear_vars  # ANTICHEAT_OK: grounding test for alias bypass fix
+
+        pattern = {"a": {"var": "x"}, "b": {"var": "x"}}  # distinct objects
+        assert _has_nonlinear_vars(pattern), (
+            "Distinct repeated var structure must be detected as non-linear"
+        )
+
+    def test_python_cycle_fails_closed(self):
+        """Python: cyclic pattern hits iteration cap and fail-closes as non-linear."""
+        from rcx_pi.selfhost.step_mu import _has_nonlinear_vars  # ANTICHEAT_OK: grounding test for alias bypass fix
+
+        # Create a cycle: pattern -> inner -> pattern
+        pattern = {"inner": None}
+        pattern["inner"] = pattern
+        assert _has_nonlinear_vars(pattern), (
+            "Cyclic pattern must fail-closed as non-linear (iteration cap)"
+        )
+
+    def _run_js_helper(self, script):
+        """Run a node -e script that requires hasNonlinearVars directly."""
+        import subprocess
+        from tests.repo_root import REPO_ROOT
+        # Wrap script with require and output
+        full_script = (
+            "const { hasNonlinearVars } = require('./mu/host/js/core/security');\n"
+            + script
+        )
+        result = subprocess.run(
+            ["node", "-e", full_script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"node -e failed: stdout={result.stdout[:300]} stderr={result.stderr[:300]}"
+        )
+        return result.stdout.strip()
+
+    def test_js_alias_leaf_detected(self):
+        """JS: same {var: x} object ref in two positions is non-linear."""
+        output = self._run_js_helper(
+            "const v = {var: 'x'};\n"
+            "const pattern = {a: v, b: v};\n"  # same object ref
+            "const result = hasNonlinearVars(pattern);\n"
+            "console.log(result ? 'NONLINEAR' : 'LINEAR');\n"
+        )
+        assert output == "NONLINEAR", (
+            f"JS hasNonlinearVars must detect aliased var leaf: got {output}"
+        )
+
+    def test_js_alias_subtree_detected(self):
+        """JS: same subtree object ref containing {var: x} in two positions is non-linear."""
+        output = self._run_js_helper(
+            "const sub = {inner: {var: 'x'}};\n"
+            "const pattern = {a: sub, b: sub};\n"  # same object ref
+            "const result = hasNonlinearVars(pattern);\n"
+            "console.log(result ? 'NONLINEAR' : 'LINEAR');\n"
+        )
+        assert output == "NONLINEAR", (
+            f"JS hasNonlinearVars must detect aliased subtree: got {output}"
+        )
+
+    def test_js_distinct_repeated_structure_detected(self):
+        """JS: distinct objects with same var name is non-linear."""
+        output = self._run_js_helper(
+            "const pattern = {a: {var: 'x'}, b: {var: 'x'}};\n"  # distinct objects
+            "const result = hasNonlinearVars(pattern);\n"
+            "console.log(result ? 'NONLINEAR' : 'LINEAR');\n"
+        )
+        assert output == "NONLINEAR", (
+            f"JS hasNonlinearVars must detect distinct repeated var: got {output}"
+        )
+
+    def test_js_cycle_fails_closed(self):
+        """JS: cyclic pattern hits iteration cap and fail-closes as non-linear."""
+        output = self._run_js_helper(
+            "const pattern = {inner: null};\n"
+            "pattern.inner = pattern;\n"  # cycle
+            "const result = hasNonlinearVars(pattern);\n"
+            "console.log(result ? 'NONLINEAR' : 'LINEAR');\n"
+        )
+        assert output == "NONLINEAR", (
+            f"JS hasNonlinearVars must fail-closed on cycle: got {output}"
+        )

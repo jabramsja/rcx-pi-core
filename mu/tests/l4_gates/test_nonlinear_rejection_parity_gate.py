@@ -100,3 +100,56 @@ class TestNonlinearRejectionParityGate:
             "input": [1, 2, 3, 1],
         })
         assert resp["success"], f"Bridge path must accept: {resp.get('error')}"
+
+
+class TestNonlinearScannerAliasBypassGate:
+    """Gate: non-linear scanner detects aliased (shared-ref) patterns.
+
+    The old implementation used a seen set (Python id(), JS Set identity) to
+    skip already-visited objects. This caused shared references to be traversed
+    only once, hiding non-linear variable usage.
+
+    Fix: remove seen set entirely; rely on iteration cap for cycle safety.
+    """
+
+    def test_python_alias_leaf_detected(self):
+        """Python: same {var: x} object ref in two positions is non-linear."""
+        from rcx_pi.selfhost.step_mu import _has_nonlinear_vars  # ANTICHEAT_OK: gate test for alias bypass fix
+
+        v = {"var": "x"}
+        pattern = {"a": v, "b": v}
+        assert _has_nonlinear_vars(pattern)
+
+    def test_python_alias_subtree_detected(self):
+        """Python: shared subtree containing {var: x} is non-linear."""
+        from rcx_pi.selfhost.step_mu import _has_nonlinear_vars  # ANTICHEAT_OK: gate test for alias bypass fix
+
+        sub = {"inner": {"var": "x"}}
+        pattern = {"a": sub, "b": sub}
+        assert _has_nonlinear_vars(pattern)
+
+    def test_js_alias_leaf_detected(self):
+        """JS: same {var: x} object ref in two positions is non-linear."""
+        result = subprocess.run(
+            ["node", "-e",
+             "const { hasNonlinearVars } = require('./mu/host/js/core/security');\n"
+             "const v = {var: 'x'};\n"
+             "const pattern = {a: v, b: v};\n"
+             "console.log(hasNonlinearVars(pattern) ? 'NONLINEAR' : 'LINEAR');"],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=60,
+        )
+        assert result.returncode == 0, f"node failed: {result.stderr[:300]}"
+        assert result.stdout.strip() == "NONLINEAR"
+
+    def test_js_alias_subtree_detected(self):
+        """JS: shared subtree containing {var: x} is non-linear."""
+        result = subprocess.run(
+            ["node", "-e",
+             "const { hasNonlinearVars } = require('./mu/host/js/core/security');\n"
+             "const sub = {inner: {var: 'x'}};\n"
+             "const pattern = {a: sub, b: sub};\n"
+             "console.log(hasNonlinearVars(pattern) ? 'NONLINEAR' : 'LINEAR');"],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=60,
+        )
+        assert result.returncode == 0, f"node failed: {result.stderr[:300]}"
+        assert result.stdout.strip() == "NONLINEAR"
