@@ -173,12 +173,23 @@ module.exports = function runSelfTests(seeds) {
   console.log('\n=== Test 8: Cross-Substrate Parity Tests ===\n');
   let parityPassed = 0, parityFailed = 0;
   for (const vector of parityVectors.vectors) {
-    try {
-      const { result } = stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100 });
-      const denormalized = denormalize(result);
-      if (muEqual(denormalized, vector.expected_output)) { console.log(`  ✓ ${vector.id}`); parityPassed++; }
-      else { console.log(`  ✗ ${vector.id}: got ${JSON.stringify(denormalized)}, expected ${JSON.stringify(vector.expected_output)}`); parityFailed++; }
-    } catch (e) { console.log(`  ✗ ${vector.id}: ERROR - ${e.message}`); parityFailed++; }
+    if (vector.expected_error) {
+      // Vector expects rejection (e.g., non-linear pattern on core path).
+      try {
+        stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100 });
+        console.log(`  ✗ ${vector.id}: should have rejected but didn't`); parityFailed++;
+      } catch (e) {
+        if (e.message.includes(vector.expected_error)) { console.log(`  ✓ ${vector.id} (rejected: ${vector.expected_error})`); parityPassed++; }
+        else { console.log(`  ✗ ${vector.id}: wrong error - ${e.message}`); parityFailed++; }
+      }
+    } else {
+      try {
+        const { result } = stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100 });
+        const denormalized = denormalize(result);
+        if (muEqual(denormalized, vector.expected_output)) { console.log(`  ✓ ${vector.id}`); parityPassed++; }
+        else { console.log(`  ✗ ${vector.id}: got ${JSON.stringify(denormalized)}, expected ${JSON.stringify(vector.expected_output)}`); parityFailed++; }
+      } catch (e) { console.log(`  ✗ ${vector.id}: ERROR - ${e.message}`); parityFailed++; }
+    }
   }
   console.log(`\nParity tests: ${parityPassed} passed, ${parityFailed} failed`);
   const parityAllPassed = parityFailed === 0 && parityPassed > 0;

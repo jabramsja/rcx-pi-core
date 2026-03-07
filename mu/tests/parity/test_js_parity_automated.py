@@ -194,8 +194,11 @@ class TestCrossSubstrateParity:
         9-agent Round 3 (Grounding finding): This is the real test. Previous tests
         just parsed strings. This test runs the same parity vectors through BOTH
         Python and JavaScript kernels and compares the actual results.
+
+        Vectors with expected_error use step_mu on the Python side (which has
+        the non-linear guard) instead of raw kernel, so both substrates reject.
         """
-        from rcx_pi.selfhost.step_mu import normalize_projection, list_to_linked
+        from rcx_pi.selfhost.step_mu import step_mu, normalize_projection, list_to_linked
         from rcx_pi.selfhost.match_mu import normalize_for_match
         from rcx_pi.selfhost.subst_mu import denormalize_from_match
         from tests.conftest import run_until_done
@@ -207,18 +210,27 @@ class TestCrossSubstrateParity:
             input_val = vector["input"]
             projection = vector["projection"]
 
-            # Run through Python kernel (same pattern as test_parity_python.py)
-            try:
-                norm_input = normalize_for_match(input_val)
-                norm_proj = normalize_projection(projection)
-                kernel_entry = {
-                    "_step": norm_input,
-                    "_projs": list_to_linked([norm_proj])
-                }
-                py_result, _, _ = run_until_done(kernel_projections, kernel_entry, max_steps=100)
-                py_denorm = denormalize_from_match(py_result)
-            except Exception as e:
-                py_denorm = {"_error": str(e)}
+            if vector.get("expected_error"):
+                # Error vectors: use step_mu (has non-linear guard) for parity
+                # with JS stepKernel. Both substrates must reject.
+                try:
+                    step_mu([projection], input_val)
+                    py_denorm = {"_error": "expected rejection but succeeded"}
+                except (ValueError, Exception) as e:
+                    py_denorm = {"_error": str(e)}
+            else:
+                # Normal vectors: raw kernel execution
+                try:
+                    norm_input = normalize_for_match(input_val)
+                    norm_proj = normalize_projection(projection)
+                    kernel_entry = {
+                        "_step": norm_input,
+                        "_projs": list_to_linked([norm_proj])
+                    }
+                    py_result, _, _ = run_until_done(kernel_projections, kernel_entry, max_steps=100)
+                    py_denorm = denormalize_from_match(py_result)
+                except Exception as e:
+                    py_denorm = {"_error": str(e)}
 
             # Run through JS kernel via JSON API
             try:
@@ -234,14 +246,24 @@ class TestCrossSubstrateParity:
             except Exception as e:
                 js_denorm = {"_error": str(e)}
 
-            # Compare Python and JS results (using cross-substrate comparison
-            # that handles int/float equivalence - JS doesn't distinguish)
-            if not _cross_substrate_equal(py_denorm, js_denorm):
-                mismatches.append({
-                    "id": vector_id,
-                    "python": py_denorm,
-                    "javascript": js_denorm
-                })
+            if vector.get("expected_error"):
+                # For error vectors: both must error (content may differ across substrates)
+                py_errored = "_error" in py_denorm
+                js_errored = "_error" in js_denorm
+                if not (py_errored and js_errored):
+                    mismatches.append({
+                        "id": vector_id,
+                        "python": py_denorm,
+                        "javascript": js_denorm
+                    })
+            else:
+                # For normal vectors: outputs must match
+                if not _cross_substrate_equal(py_denorm, js_denorm):
+                    mismatches.append({
+                        "id": vector_id,
+                        "python": py_denorm,
+                        "javascript": js_denorm
+                    })
 
         assert len(mismatches) == 0, (
             f"Cross-substrate mismatch in {len(mismatches)} vectors:\n" +
@@ -3584,6 +3606,16 @@ class TestDifferentialReplayAuditR3:
             'projection': vector['projection'],
             'input': vector['input'],
         })
+        if vector.get('expected_error'):
+            # Error vectors: JS must reject (e.g., non-linear pattern on core path)
+            assert not js['success'], (
+                f"JS should have rejected {vector['id']} but succeeded"
+            )
+            assert vector['expected_error'] in js.get('error', ''), (
+                f"JS error for {vector['id']} missing expected substring "
+                f"'{vector['expected_error']}': {js.get('error')}"
+            )
+            return
         if vector.get('expected_stall') and not js['success']:
             # Stall-expected vectors may not produce a result in JS
             return

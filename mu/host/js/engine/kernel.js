@@ -11,7 +11,7 @@
 const { NO_MATCH, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
-const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
+const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields, rejectNonlinearProjections } = require('../core/security');
 const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted } = require('../core/bootstrap_core');
 
 /**
@@ -142,6 +142,13 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     }
   }
 
+  // SECURITY: Reject non-linear domain projections (fail-closed).
+  // Core kernel (match.v2) silently overwrites bindings on repeated variables.
+  // step_kernel_meta(kernelMode='bridge') is still treated as a direct external
+  // kernel API — non-linear domain projections are rejected here regardless.
+  // Bridge algorithm execution (runAlgorithmWithBridge) bypasses stepKernel entirely.
+  rejectNonlinearProjections(domainProjections, 'stepKernel');
+
   const normalizedInput = shouldNormalize ? normalize(domainInput) : domainInput;
   const normalizedProjs = shouldNormalize
     ? domainProjections.map(normalizeProjection)
@@ -241,6 +248,10 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
       }
     }
   }
+
+  // SECURITY: Reject non-linear domain projections (fail-closed).
+  // Mirrors stepKernel guard — runStructural is also a direct external entry point.
+  rejectNonlinearProjections(domainProjections, 'runStructural');
 
   // Pre-normalize projections once (constant across all trace steps).
   // Eliminates redundant normalize/validate/link per stepKernel + resolveId call.

@@ -10,6 +10,7 @@ const {
   KERNEL_RESERVED_FIELDS,
   ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS,
   MAX_VALIDATION_DEPTH,
+  MAX_DEPTH,
   RcxError,
 } = require('./constants');
 const { MAX_MU_WIDTH } = require('./types');
@@ -194,9 +195,92 @@ function validateAlgorithmRuntimeFields(value, context = 'input', _depth = 0) {
   _walkAndValidate(value, _checkAlgorithmRuntime, context, _depth);
 }
 
+/**
+ * Check if pattern has non-linear variables (same var name appears twice).
+ * Fail-closed guard: stepKernel/runStructural use core kernel which does NOT
+ * detect binding conflicts. Non-linear patterns must use runAlgorithmWithBridge.
+ *
+ * Bounded: iteration counter (MAX_DEPTH * MAX_MU_WIDTH) and identity-based
+ * cycle detection prevent OOM on circular references or pathologically deep inputs.
+ * Mirrors Python _has_nonlinear_vars() in step_mu.py.
+ */
+function hasNonlinearVars(pattern) {
+  const varCounts = Object.create(null);
+  const maxIterations = MAX_DEPTH * MAX_MU_WIDTH; // 300 * 1000 = 300,000
+  const seen = new Set();
+  let iterations = 0;
+
+  const stack = [pattern];
+  while (stack.length > 0) {
+    iterations++;
+    if (iterations > maxIterations) {
+      // Fail-closed: pathological input, treat as non-linear.
+      return true;
+    }
+    const current = stack.pop();
+    if (current === null || typeof current !== 'object') continue;
+    if (seen.has(current)) continue;
+
+    if (Array.isArray(current)) {
+      seen.add(current);
+      for (let i = 0; i < current.length; i++) {
+        stack.push(current[i]);
+      }
+    } else {
+      seen.add(current);
+      const keys = Object.keys(current);
+      if (keys.length === 1 && keys[0] === 'var' && typeof current.var === 'string') {
+        const name = current.var;
+        varCounts[name] = (varCounts[name] || 0) + 1;
+      } else {
+        for (let i = 0; i < keys.length; i++) {
+          stack.push(current[keys[i]]);
+        }
+      }
+    }
+  }
+
+  for (const name in varCounts) {
+    if (varCounts[name] > 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Fail-closed: reject projections with non-linear patterns on core kernel path.
+ *
+ * Core kernel (match.v2 without bridge) silently overwrites bindings when the
+ * same variable appears twice in a pattern. This produces wrong results for
+ * conflicting bindings instead of NO_MATCH.
+ *
+ * Mirrors Python _reject_nonlinear_projections() in step_mu.py.
+ *
+ * @param {Array} projections - Domain projections to check.
+ * @param {string} caller - Name of calling function (for error messages).
+ * @throws {RcxError} If any projection has non-linear patterns.
+ */
+function rejectNonlinearProjections(projections, caller) {
+  for (let i = 0; i < projections.length; i++) {
+    const proj = projections[i];
+    if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) continue;
+    const pattern = proj.pattern;
+    if (pattern !== undefined && hasNonlinearVars(pattern)) {
+      const projId = (typeof proj.id === 'string') ? proj.id : `projection[${i}]`;
+      throw new RcxError(
+        'input.nonlinear_pattern',
+        `${caller}: projection '${projId}' has non-linear pattern ` +
+        `(same variable appears twice). Core kernel does not detect ` +
+        `binding conflicts. Use runAlgorithmWithBridge() instead.`
+      );
+    }
+  }
+}
+
 module.exports = {
   iterNormalizedDictPairs,
   looksLikeNormalizedDictCandidate,
   validateNoKernelReservedFields,
   validateAlgorithmRuntimeFields,
+  hasNonlinearVars,
+  rejectNonlinearProjections,
 };
