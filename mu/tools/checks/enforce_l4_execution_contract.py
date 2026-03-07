@@ -2054,12 +2054,18 @@ def main() -> int:
         notes = all_notes
 
     # Determine wave class
-    # Only auto-detect from notes if TASKS.md is in the changed files (meaning
-    # this PR includes a tracker note update) or --wave-id was explicitly given.
-    # Otherwise non-wave PRs inherit the latest wave's class — false positives.
-    tasks_in_changed = any(f in ("TASKS.md",) for f in changed_files)
+    # Only auto-detect from notes if the diff actually adds/edits a tracker
+    # sync note (not merely touches TASKS.md) or --wave-id was explicitly given.
+    # Planning commits that add NEXT/VECTOR items without tracker notes must
+    # not inherit the latest wave's class — that causes false positives.
+    tracker_note_touched = False
+    if diff_text:
+        for line in diff_text.splitlines():
+            if line.startswith("+") and "Tracker sync note" in line:
+                tracker_note_touched = True
+                break
     wave_class = args.wave_class
-    if not wave_class and notes and (bound_note or tasks_in_changed):
+    if not wave_class and notes and (bound_note or tracker_note_touched):
         wave_class = notes[0]["wave_class"] if notes else None
 
     runtime_count = sum(1 for f in changed_files if is_runtime_file(f))
