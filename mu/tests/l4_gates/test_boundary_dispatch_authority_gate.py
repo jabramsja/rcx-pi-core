@@ -27,6 +27,7 @@ from rcx_pi.selfhost.step_mu import (
     _clear_boundary_ops_cache,  # ANTICHEAT_OK: gate verifies cache-clear parity
     _service_boundary_effect,  # ANTICHEAT_OK: gate verifies dispatch structure
     _BOUNDARY_DISPATCH,  # ANTICHEAT_OK: gate verifies dispatch map keys
+    _ALGORITHM_SEED_ALLOWLIST,  # ANTICHEAT_OK: gate verifies algorithm seed authority (F-22)
     RcxEngineError,  # ANTICHEAT_OK: gate verifies typed fail-closed errors
 )
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
@@ -830,3 +831,252 @@ class TestBehaviorPreservation:
             emit_fn=_stub_emit, iteration=0, state={},
         )
         assert "hashed" in ctx
+
+
+# ===========================================================================
+# Test 5: Algorithm seed allowlist (F-22)
+# ===========================================================================
+
+
+class TestAlgorithmSeedAllowlist:
+    """Gate: boundary run_algorithm rejects non-algorithm seeds (F-22).
+
+    Python _boundary_op_run_algorithm previously accepted any of 17 registered
+    seed names via get_seed_path(). JS already restricts to 4 via
+    seedProjectionMap (main.js:228-233). This gate proves Python now matches
+    that authority model.
+    """
+
+    def _make_run_algorithm_request(self, algo_name):
+        """Build a boundary request for run_algorithm with the given seed name."""
+        return {
+            "operation": "run_algorithm",
+            "input": {},
+            "context": {},
+            "inject_key": "algo_result",
+            "algorithm": algo_name,
+        }
+
+    def test_python_rejects_kernel_seed(self):
+        """Python run_algorithm rejects kernel.v1.json (not an algorithm seed)."""
+        _events.clear()
+        request = self._make_run_algorithm_request("kernel.v1.json")
+        with pytest.raises(RcxEngineError, match="authorized algorithm seed"):
+            _service_boundary_effect(
+                request, max_algorithm_iterations=10,
+                emit_fn=_stub_emit, iteration=0, state={},
+            )
+
+    def test_python_rejects_match_seed(self):
+        """Python run_algorithm rejects match.v2.json."""
+        _events.clear()
+        request = self._make_run_algorithm_request("match.v2.json")
+        with pytest.raises(RcxEngineError, match="authorized algorithm seed"):
+            _service_boundary_effect(
+                request, max_algorithm_iterations=10,
+                emit_fn=_stub_emit, iteration=0, state={},
+            )
+
+    def test_python_rejects_hemispheres_seed(self):
+        """Python run_algorithm rejects hemispheres.v1.json."""
+        _events.clear()
+        request = self._make_run_algorithm_request("hemispheres.v1.json")
+        with pytest.raises(RcxEngineError, match="authorized algorithm seed"):
+            _service_boundary_effect(
+                request, max_algorithm_iterations=10,
+                emit_fn=_stub_emit, iteration=0, state={},
+            )
+
+    def test_python_accepts_recurrence_v1(self, monkeypatch):
+        """Python run_algorithm accepts recurrence.v1.json (authorized seed reaches _run_sub_algorithm)."""
+        _events.clear()
+        called_with = {}
+
+        def _fake_run_sub_algorithm(projs, inp, max_iters):
+            called_with["projs"] = projs
+            called_with["input"] = inp
+            return {"result": "fake", "trace": None, "stall": False}
+
+        import rcx_pi.selfhost.step_mu as step_mu_mod
+        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        request = self._make_run_algorithm_request("recurrence.v1.json")
+        ctx = _service_boundary_effect(
+            request, max_algorithm_iterations=10,
+            emit_fn=_stub_emit, iteration=0, state={},
+        )
+        assert "algo_result" in ctx, "authorized seed must produce a result"
+        assert called_with.get("projs") is not None, "authorized seed must reach _run_sub_algorithm"
+
+    def test_python_accepts_recurrence_v2(self, monkeypatch):
+        """Python run_algorithm accepts recurrence.v2.json (authorized)."""
+        _events.clear()
+        called = [False]
+
+        def _fake_run_sub_algorithm(projs, inp, max_iters):
+            called[0] = True
+            return {"result": "fake"}
+
+        import rcx_pi.selfhost.step_mu as step_mu_mod
+        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        request = self._make_run_algorithm_request("recurrence.v2.json")
+        _service_boundary_effect(
+            request, max_algorithm_iterations=10,
+            emit_fn=_stub_emit, iteration=0, state={},
+        )
+        assert called[0], "recurrence.v2.json must reach _run_sub_algorithm"
+
+    def test_python_accepts_exhaustion_v1(self, monkeypatch):
+        """Python run_algorithm accepts exhaustion.v1.json (authorized)."""
+        _events.clear()
+        called = [False]
+
+        def _fake_run_sub_algorithm(projs, inp, max_iters):
+            called[0] = True
+            return {"result": "fake"}
+
+        import rcx_pi.selfhost.step_mu as step_mu_mod
+        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        request = self._make_run_algorithm_request("exhaustion.v1.json")
+        _service_boundary_effect(
+            request, max_algorithm_iterations=10,
+            emit_fn=_stub_emit, iteration=0, state={},
+        )
+        assert called[0], "exhaustion.v1.json must reach _run_sub_algorithm"
+
+    def test_python_accepts_fix_v1(self, monkeypatch):
+        """Python run_algorithm accepts fix.v1.json (authorized)."""
+        _events.clear()
+        called = [False]
+
+        def _fake_run_sub_algorithm(projs, inp, max_iters):
+            called[0] = True
+            return {"result": "fake"}
+
+        import rcx_pi.selfhost.step_mu as step_mu_mod
+        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        request = self._make_run_algorithm_request("fix.v1.json")
+        _service_boundary_effect(
+            request, max_algorithm_iterations=10,
+            emit_fn=_stub_emit, iteration=0, state={},
+        )
+        assert called[0], "fix.v1.json must reach _run_sub_algorithm"
+
+    def test_python_allowlist_matches_js_seed_map(self):
+        """Python _ALGORITHM_SEED_ALLOWLIST matches JS seedProjectionMap keys."""
+        js_main = (REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js").read_text()
+        # Extract seedProjectionMap keys from JS source.
+        # Format: const seedProjectionMap = Object.assign(Object.create(null), {
+        #   'recurrence.v1.json': ...,
+        # });
+        match = re.search(
+            r"const seedProjectionMap\s*=\s*Object\.assign\(Object\.create\(null\),\s*\{(.*?)\}\)",
+            js_main, re.DOTALL,
+        )
+        assert match, "seedProjectionMap not found in main.js"
+        map_body = match.group(1)
+        js_keys = set(re.findall(r"'([^']+\.json)'", map_body))
+        assert js_keys == _ALGORITHM_SEED_ALLOWLIST, (
+            f"Python allowlist {sorted(_ALGORITHM_SEED_ALLOWLIST)} != "
+            f"JS seedProjectionMap keys {sorted(js_keys)}"
+        )
+
+    def test_js_rejects_non_algorithm_seed(self):
+        """JS run_algorithm rejects kernel.v1.json via seedProjectionMap."""
+        js_code = """
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        // Use production seedProjectionMap keys (only 4 algorithm seeds).
+        // kernel.v1.json is not in the map, so it should be rejected.
+        const seedMap = Object.create(null);
+        seedMap['recurrence.v1.json'] = [{id:'r',pattern:{},body:{}}];
+        try {
+            pipeline.serviceBoundaryEffect(
+                [], seedMap,
+                {operation:'run_algorithm',input:{},context:{},inject_key:'r',algorithm:'kernel.v1.json'},
+                10, function(){}, 0, {}
+            );
+            console.log('ERROR: no throw');
+        } catch(e) {
+            if (e.error_code === 'api.bad_request' && e.message.includes('Unknown algorithm seed')) {
+                console.log('OK');
+            } else {
+                console.log('WRONG: ' + e.error_code + ': ' + e.message);
+            }
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        assert result.stdout.strip() == "OK", f"JS non-algorithm seed: {result.stdout.strip()}"
+
+
+# ===========================================================================
+# Test 6: Boundary result domain-validation invariant (F-24)
+# ===========================================================================
+
+
+class TestBoundaryResultDomainValidation:
+    """Gate: boundary result uses domain-level validation (F-24).
+
+    Proves the invariant that boundary results are validated with the
+    domain-level validator (validate_no_kernel_reserved_fields) before
+    re-injection into engine state, regardless of which internal validator
+    the handler used.
+
+    The behavioral test monkeypatches a handler to return a result containing
+    algorithm-runtime internal fields (_detect_closure) and asserts that
+    _service_boundary_effect rejects it via the domain validator.
+    """
+
+    def test_monkeypatch_handler_with_kernel_reserved_field_rejected(self, monkeypatch):
+        """Handler returning _mode in result is rejected by domain validator.
+
+        _mode is a kernel-reserved field (KERNEL_RESERVED_FIELDS). The domain
+        validator (validate_no_kernel_reserved_fields) must reject it when it
+        appears in a boundary result, proving the invariant that boundary
+        results are domain-validated before re-entry into engine state.
+        """
+        _events.clear()
+
+        def _poisoned_handler(request, req_input, max_algorithm_iterations):
+            # Return a result containing a kernel-reserved field.
+            # This must be rejected by validate_no_kernel_reserved_fields.
+            return {"_mode": "forged", "result": 1}
+
+        import rcx_pi.selfhost.step_mu as step_mu_mod
+        original_dispatch = dict(step_mu_mod._BOUNDARY_DISPATCH)  # ANTICHEAT_OK: gate monkeypatch for invariant test
+        # Monkeypatch run_trace handler to return poisoned result
+        step_mu_mod._BOUNDARY_DISPATCH["run_trace"] = _poisoned_handler  # ANTICHEAT_OK: gate monkeypatch for invariant test
+        try:
+            request = {
+                "operation": "run_trace",
+                "input": {},
+                "context": {},
+                "inject_key": "result",
+            }
+            with pytest.raises(ValueError, match="_mode"):
+                _service_boundary_effect(
+                    request, max_algorithm_iterations=10,
+                    emit_fn=_stub_emit, iteration=0, state={},
+                )
+        finally:
+            # Restore original dispatch
+            step_mu_mod._BOUNDARY_DISPATCH.update(original_dispatch)  # ANTICHEAT_OK: gate monkeypatch restore
+
+    def test_invariant_comment_present(self):
+        """Source-lock: INVARIANT comment present above boundary result validation."""
+        source = PY_STEP_MU.read_text()
+        invariant_marker = "INVARIANT: boundary results re-enter engine state"
+        validator_call = "validate_no_kernel_reserved_fields(result,"
+        assert invariant_marker in source, (
+            f"step_mu.py must contain invariant comment: {invariant_marker!r}"
+        )
+        marker_pos = source.index(invariant_marker)
+        # Find the first validate_no_kernel_reserved_fields(result, ...) after the marker
+        validator_pos = source.index(validator_call, marker_pos)
+        # Verify they're close (within 500 chars — comment + validation line)
+        assert validator_pos - marker_pos < 500, (
+            f"Invariant comment (pos {marker_pos}) must immediately precede "
+            f"validation call (pos {validator_pos})"
+        )
