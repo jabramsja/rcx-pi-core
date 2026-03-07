@@ -532,3 +532,145 @@ class TestNumericNonLinearPolicyLock:
             "POLICY VIOLATION: JS non-linear [x,x] with [1.0, 1] must not "
             "conflict — JS Number model collapses 1.0 and 1"
         )
+
+
+class TestMuHashCachedNegZeroCorrectness:
+    """F-14 gate: muHashCached must be position-sensitive for -0.
+
+    Before the fix, muHashCached used a boolean hasNegZero flag that recorded
+    presence but not position of -0. {x:0,y:-0} and {x:-0,y:0} shared the
+    same cache key despite having different muHash values. This caused
+    muEqual false positives and match() non-linear conflict suppression.
+
+    Fix: bypass cache entirely when value contains -0 (Option B).
+    """
+
+    def _run_js(self, code):
+        """Run a JS expression and return stdout."""
+        full = (
+            "const t = require('./mu/host/js/core/types');\n"
+            "const bc = require('./mu/host/js/core/bootstrap_core');\n"
+            f"console.log(JSON.stringify({code}));"
+        )
+        result = subprocess.run(
+            ["node", "-e", full],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10
+        )
+        assert result.returncode == 0, f"JS error: {result.stderr}"
+        return json.loads(result.stdout.strip())
+
+    def test_compound_neg_zero_position_sensitivity(self):
+        """muHashCached({x:0,y:-0}) != muHashCached({x:-0,y:0}).
+
+        Core F-14 regression test. These values have -0 in different positions,
+        so muHash returns different hashes. muHashCached must agree.
+        """
+        data = self._run_js(
+            "{"
+            "  h_a: t.muHashCached({x: 0, y: -0}),"
+            "  h_b: t.muHashCached({x: -0, y: 0}),"
+            "  ref_a: t.muHash({x: 0, y: -0}),"
+            "  ref_b: t.muHash({x: -0, y: 0})"
+            "}"
+        )
+        assert data["h_a"] != data["h_b"], (
+            "F-14: muHashCached must distinguish {x:0,y:-0} from {x:-0,y:0}"
+        )
+        assert data["h_a"] == data["ref_a"], (
+            "muHashCached must agree with muHash for {x:0,y:-0}"
+        )
+        assert data["h_b"] == data["ref_b"], (
+            "muHashCached must agree with muHash for {x:-0,y:0}"
+        )
+
+    def test_muEqual_no_false_positive(self):
+        """muEqual({x:0,y:-0}, {x:-0,y:0}) must be false.
+
+        muEqual delegates to muHashCached. Before the F-14 fix, this returned
+        true (false positive) because both values shared the same cache key.
+        """
+        data = self._run_js(
+            "{"
+            "  same_pos: t.muEqual({x: 0, y: -0}, {x: 0, y: -0}),"
+            "  diff_pos: t.muEqual({x: 0, y: -0}, {x: -0, y: 0})"
+            "}"
+        )
+        assert data["same_pos"] is True, "Same -0 positions must be equal"
+        assert data["diff_pos"] is False, (
+            "F-14: muEqual must distinguish different -0 positions"
+        )
+
+    def test_match_nonlinear_conflict_detection(self):
+        """match([z,z], [{x:0,y:-0}, {x:-0,y:0}]) must conflict.
+
+        match() uses muHashCached for non-linear binding conflict detection.
+        Before the F-14 fix, this returned bindings (false match) because
+        muHashCached returned the same hash for both values.
+        """
+        data = self._run_js(
+            "{"
+            "  conflict: bc.match([{var:'z'},{var:'z'}], [{x:0,y:-0},{x:-0,y:0}]) === bc.NO_MATCH"
+            "}"
+        )
+        assert data["conflict"] is True, (
+            "F-14: match() must detect non-linear conflict for different -0 positions"
+        )
+
+    def test_stage0Match_nonlinear_conflict_detection(self):
+        """stage0Match([z,z], [{x:0,y:-0}, {x:-0,y:0}]) must conflict.
+
+        stage0Match also uses muHashCached for non-linear binding conflict.
+        """
+        data = self._run_js(
+            "{"
+            "  conflict: bc.stage0Match([{var:'z'},{var:'z'}], [{x:0,y:-0},{x:-0,y:0}]) === bc.NO_MATCH"
+            "}"
+        )
+        assert data["conflict"] is True, (
+            "F-14: stage0Match must detect non-linear conflict for different -0 positions"
+        )
+
+    def test_python_baseline_no_neg_zero_cache_issue(self):
+        """Python mu_hash_cached is not affected by F-14 (baseline).
+
+        Python's JSON serialization handles -0.0 differently (json.dumps(-0.0)
+        produces "-0.0"), so the cache key already encodes position. This test
+        confirms Python was never affected.
+        """
+        h_a = mu_hash_cached({"x": 0, "y": -0.0})
+        h_b = mu_hash_cached({"x": -0.0, "y": 0})
+        assert h_a != h_b, (
+            "Python mu_hash_cached must distinguish {x:0,y:-0.0} from {x:-0.0,y:0}"
+        )
+        # Verify consistency with mu_hash
+        assert h_a == mu_hash({"x": 0, "y": -0.0})
+        assert h_b == mu_hash({"x": -0.0, "y": 0})
+
+    def test_cache_bypass_no_pollution(self):
+        """Values containing -0 must not pollute the cache.
+
+        After the fix, muHashCached bypasses the cache for -0 values.
+        Verify that calling muHashCached with a -0 value does not create
+        a stale entry that would be returned for a non-negzero value
+        with the same JSON shape.
+        """
+        data = self._run_js(
+            "(function() {"
+            "  const v1 = {a: -0, b: 1};"
+            "  const v2 = {a: 0, b: 1};"
+            "  const h1 = t.muHashCached(v1);"
+            "  const h2 = t.muHashCached(v2);"
+            "  return {"
+            "    h1: h1, h2: h2,"
+            "    different: h1 !== h2,"
+            "    h2_consistent: h2 === t.muHash(v2)"
+            "  };"
+            "})()"
+        )
+        assert data["different"], (
+            "F-14: {a:-0,b:1} and {a:0,b:1} must hash differently"
+        )
+        assert data["h2_consistent"], (
+            "Non-negzero value must still be cached correctly after -0 bypass"
+        )
