@@ -2054,12 +2054,36 @@ def main() -> int:
         notes = all_notes
 
     # Determine wave class
-    # Only auto-detect from notes if TASKS.md is in the changed files (meaning
-    # this PR includes a tracker note update) or --wave-id was explicitly given.
-    # Otherwise non-wave PRs inherit the latest wave's class — false positives.
-    tasks_in_changed = any(f in ("TASKS.md",) for f in changed_files)
+    # Only auto-detect from notes if the diff actually adds/edits a tracker
+    # sync note (not merely touches TASKS.md) or --wave-id was explicitly given.
+    # Planning commits that add NEXT/VECTOR items without tracker notes must
+    # not inherit the latest wave's class — that causes false positives.
+    tracker_note_touched = False
+    if "TASKS.md" in changed_files:
+        # Scope check to TASKS.md diff only — the full diff_text includes all
+        # files and would false-positive on code that mentions the string
+        # "Tracker sync note" (including this very file).
+        try:
+            if args.staged:
+                tasks_diff = subprocess.run(
+                    ["git", "diff", "--cached", "-U0", "--", "TASKS.md"],
+                    capture_output=True, text=True, check=True,
+                ).stdout
+            elif args.range:
+                tasks_diff = subprocess.run(
+                    ["git", "diff", "-U0", args.range, "--", "TASKS.md"],
+                    capture_output=True, text=True, check=True,
+                ).stdout
+            else:
+                tasks_diff = ""
+        except subprocess.CalledProcessError:
+            tasks_diff = ""
+        for line in tasks_diff.splitlines():
+            if line.startswith("+") and "Tracker sync note" in line:
+                tracker_note_touched = True
+                break
     wave_class = args.wave_class
-    if not wave_class and notes and (bound_note or tasks_in_changed):
+    if not wave_class and notes and (bound_note or tracker_note_touched):
         wave_class = notes[0]["wave_class"] if notes else None
 
     runtime_count = sum(1 for f in changed_files if is_runtime_file(f))
