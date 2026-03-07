@@ -2059,8 +2059,26 @@ def main() -> int:
     # Planning commits that add NEXT/VECTOR items without tracker notes must
     # not inherit the latest wave's class — that causes false positives.
     tracker_note_touched = False
-    if diff_text:
-        for line in diff_text.splitlines():
+    if "TASKS.md" in changed_files:
+        # Scope check to TASKS.md diff only — the full diff_text includes all
+        # files and would false-positive on code that mentions the string
+        # "Tracker sync note" (including this very file).
+        try:
+            if args.staged:
+                tasks_diff = subprocess.run(
+                    ["git", "diff", "--cached", "-U0", "--", "TASKS.md"],
+                    capture_output=True, text=True, check=True,
+                ).stdout
+            elif args.range:
+                tasks_diff = subprocess.run(
+                    ["git", "diff", "-U0", args.range, "--", "TASKS.md"],
+                    capture_output=True, text=True, check=True,
+                ).stdout
+            else:
+                tasks_diff = ""
+        except subprocess.CalledProcessError:
+            tasks_diff = ""
+        for line in tasks_diff.splitlines():
             if line.startswith("+") and "Tracker sync note" in line:
                 tracker_note_touched = True
                 break
