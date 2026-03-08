@@ -21,7 +21,7 @@ BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 Typed
 # Per-wave caps from DocGovernance.v0.md
 CAP_TEST_FILES = 70  # 40 core + 30 fuzzer
 CAP_TOOL_SCRIPTS = 5  # 2 runners + 3 checks
-CAP_CORE_DOCS = 9  # 5 core + 3 other + 1 A11 contract
+CAP_CORE_DOCS = 10  # 5 core + 3 other + 1 A11 contract + 1 AgentBridgeProtocol
 
 
 def _count_test_files() -> int:
