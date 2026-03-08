@@ -237,7 +237,11 @@ def compute_repo_state(repo_root: Path) -> RepoState:
 def changed_files(repo_root: Path, *, staged: bool) -> list[str]:
     args = ["diff", "--cached", "--name-only"] if staged else ["diff", "--name-only"]
     output = git_output(repo_root, args)
-    return [line for line in output.splitlines() if line.strip()]
+    files = [line for line in output.splitlines() if line.strip()]
+    if not staged:
+        for path in _iter_untracked_files(repo_root):
+            files.append(path.relative_to(repo_root).as_posix())
+    return files
 
 
 REVIEWER_DIFF_MAX_CHARS = 10000
@@ -337,7 +341,7 @@ def latest_turn(conn: sqlite3.Connection, job_id: str, *, role: str | None = Non
     if role is not None:
         query += " AND agent_role = ?"
         params.append(role)
-    query += " ORDER BY started_at DESC LIMIT 1"
+    query += " ORDER BY started_at DESC, rowid DESC LIMIT 1"
     return conn.execute(query, params).fetchone()
 
 
