@@ -13,29 +13,7 @@ Job:
 - WAVE_CLASS: $wave_class
 - REPO_ROOT: $repo_root
 
-Review actual live candidate state, not the reader summary.
-
-Evidence available:
-- CHANGED_FILES_ACTUAL: $changed_files_actual
-- STAGED_FILES: $staged_files
-- UNSTAGED_FILES: $unstaged_files
-- VALIDATION_RESULTS: $validation_results
-- READER_OUTPUT: $reader_summary
-
-Staged diff (up to 10000 chars):
-$staged_diff
-
-Required review scope:
-- red-team all touched files
-- red-team adjacent high-risk files implicated by those touches
-- classify findings as DEFECT, POLICY_BOUND, or DOC_ACCURACY
-
-Exhaustive enumeration requirement:
-- Do NOT stop at the first finding. Enumerate ALL issues before issuing your verdict.
-- For state machines / control flow: trace every state transition and check what happens if a crash occurs before, during, and after each transition.
-- For recovery paths: verify idempotency, primary key conflicts, format compatibility, and missing data.
-- For new APIs: verify error handling, edge cases, and backward compatibility.
-- Issue NO_GO only after you have listed every finding you can identify, not after finding just one.
+$review_mode_instructions
 
 Rules:
 - No edits (unless explicitly delegated by the reader).
