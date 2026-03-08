@@ -44,6 +44,7 @@
     "^mu/tests/golden/",
     "^reports/",
     "^AGENT_BRIDGE\\.md$",
-    "^mu/mu_programs/"
+    "^mu/mu_programs/",
+    "^\\.agent_bus/"
   ]
 }

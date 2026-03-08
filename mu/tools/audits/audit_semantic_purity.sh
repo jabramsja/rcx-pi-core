@@ -687,8 +687,8 @@ echo "== 19. Host Debt: Threshold Check =="
 # - AST_OK: infra bypasses are scaffolding (acceptable, not counted)
 # - Deferred reviews ("PHASE N REVIEW") count as debt to prevent silent accumulation
 #
-# CURRENT STATE (Phase 8b, 2026-01-30):
-# - 12 = L2 FLOOR (irreducible bootstrap substrate)
+# CURRENT STATE (Phase 8c, 2026-03-07):
+# - 11 = HOST DEBT FLOOR (irreducible bootstrap substrate; was 12 before CP-S1A)
 # - This is NOT a target for reduction - these are bootstrap primitives
 #
 # BREAKDOWN (must match STATUS.md):
