@@ -605,6 +605,70 @@ def record_turn(
     conn.commit()
 
 
+def record_turn_start(
+    conn: sqlite3.Connection,
+    *,
+    turn_id: str,
+    job_id: str,
+    round_no: int,
+    agent_role: str,
+    state_sha_start: str,
+    prompt_path: Path,
+    raw_output_path: Path,
+    started_at: str,
+) -> None:
+    """Insert a RUNNING turn row before calling the adapter."""
+    conn.execute(
+        """
+        INSERT INTO turns(
+            turn_id, job_id, round_no, agent_role, status,
+            state_sha_start, prompt_path, raw_output_path, started_at
+        ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?)
+        """,
+        (
+            turn_id,
+            job_id,
+            round_no,
+            agent_role,
+            state_sha_start,
+            str(prompt_path),
+            str(raw_output_path),
+            started_at,
+        ),
+    )
+    conn.commit()
+
+
+def update_turn_complete(
+    conn: sqlite3.Connection,
+    *,
+    turn_id: str,
+    status: str,
+    decision: str | None = None,
+    state_sha_end: str | None = None,
+    envelope: dict[str, Any] | None = None,
+    finished_at: str | None = None,
+) -> None:
+    """Update a RUNNING turn row with final results."""
+    conn.execute(
+        """
+        UPDATE turns SET
+            status = ?, decision = ?, state_sha_end = ?,
+            envelope_json = ?, finished_at = ?
+        WHERE turn_id = ?
+        """,
+        (
+            status,
+            decision,
+            state_sha_end,
+            json.dumps(envelope, indent=2, sort_keys=True) if envelope else None,
+            finished_at,
+            turn_id,
+        ),
+    )
+    conn.commit()
+
+
 def update_job_status(conn: sqlite3.Connection, job_id: str, status: str, *, current_round: int | None = None, terminal_decision: str | None = None) -> None:
     updates = ["status = ?", "updated_at = ?"]
     values: list[Any] = [status, utc_now()]
@@ -757,24 +821,56 @@ def execute_agent_turn(
     stream: bool = False,
 ) -> tuple[str, dict[str, Any], Path, Path, RepoState]:
     state_start = compute_repo_state(paths.repo_root)
-    turn_suffix = f"r{round_no}-{agent_role}" if attempt <= 1 else f"r{round_no}-{agent_role}-a{attempt}"
+    short_uuid = uuid.uuid4().hex[:8]
+    turn_suffix = f"r{round_no}-{agent_role}-{short_uuid}"
     turn_id = f"{job['job_id']}--{turn_suffix}"
     prompt_path = write_prompt(paths, job["job_id"], turn_id, prompt_text)
     started_at = utc_now()
 
+    # Pre-allocate raw output file so it exists from adapter start
+    raw_dir = paths.raw_dir / job["job_id"]
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_output_path = raw_dir / f"{turn_id}.txt"
+
+    # Record RUNNING turn row BEFORE calling adapter
+    record_turn_start(
+        conn,
+        turn_id=turn_id,
+        job_id=job["job_id"],
+        round_no=round_no,
+        agent_role=agent_role,
+        state_sha_start=state_start.state_sha,
+        prompt_path=prompt_path,
+        raw_output_path=raw_output_path,
+        started_at=started_at,
+    )
+
     config = load_bridge_config(paths.config_path)
     adapter = get_adapter(config, adapter_name)
-    output = run_adapter(
-        adapter,
-        prompt_text=prompt_text,
-        prompt_path=prompt_path,
-        repo_root=paths.repo_root,
-        job_id=job["job_id"],
-        turn_id=turn_id,
-        agent_role=agent_role,
-        stream=stream,
-    )
-    raw_output_path = write_raw_output(paths, job["job_id"], turn_id, output)
+    try:
+        output = run_adapter(
+            adapter,
+            prompt_text=prompt_text,
+            prompt_path=prompt_path,
+            repo_root=paths.repo_root,
+            job_id=job["job_id"],
+            turn_id=turn_id,
+            agent_role=agent_role,
+            stream=stream,
+            raw_output_path=raw_output_path,
+        )
+    except (BridgeAdapterError, Exception) as exc:
+        # Update turn to FAILED on adapter error
+        update_turn_complete(
+            conn,
+            turn_id=turn_id,
+            status="FAILED",
+            decision="ERROR",
+            state_sha_end=compute_repo_state(paths.repo_root).state_sha,
+            finished_at=utc_now(),
+        )
+        raise
+
     envelope = parse_envelope(output)
     state_end = compute_repo_state(paths.repo_root)
     finished_at = utc_now()
@@ -783,20 +879,13 @@ def execute_agent_turn(
     decision = envelope.get("decision", "ERROR")
     if decision == "STALE":
         status = "stale"
-    record_turn(
+    update_turn_complete(
         conn,
         turn_id=turn_id,
-        job_id=job["job_id"],
-        round_no=round_no,
-        agent_role=agent_role,
         status=status,
         decision=decision,
-        state_sha_start=state_start.state_sha,
         state_sha_end=state_end.state_sha,
-        prompt_path=prompt_path,
-        raw_output_path=raw_output_path,
         envelope=envelope,
-        started_at=started_at,
         finished_at=finished_at,
     )
     return turn_id, envelope, prompt_path, raw_output_path, state_start
@@ -1153,7 +1242,7 @@ def review_job(
         with open_db(paths) as conn:
             job = read_job(conn, final_job_id)
             round_no = 1
-            turn_id = f"{final_job_id}--r{round_no}-reader"
+            turn_id = f"{final_job_id}--r{round_no}-reader-{uuid.uuid4().hex[:8]}"
 
             # Build synthetic reader envelope from interactive session
             actual_staged = changed_files(paths.repo_root, staged=True)

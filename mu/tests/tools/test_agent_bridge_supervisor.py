@@ -174,7 +174,7 @@ def test_parse_envelope_missing_keys_raises() -> None:
 
 
 def test_stale_reviewer_retry_no_turn_id_collision(tmp_path: Path) -> None:
-    """Verify stale reviewer retry uses distinct turn_id (r1-reviewer-a2)."""
+    """Verify stale reviewer retry uses distinct UUID-based turn_ids."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _init_temp_repo(repo_root)
@@ -263,8 +263,10 @@ print("END_AGENT_ENVELOPE")
         ).fetchall()
 
     assert len(turns) == 2, f"expected 2 reviewer turns (stale + retry), got {len(turns)}"
-    assert turns[0]["turn_id"] == f"{job_id}--r1-reviewer"
-    assert turns[1]["turn_id"] == f"{job_id}--r1-reviewer-a2"
+    # UUID-based turn_ids: pattern is {job_id}--r{round}-{role}-{uuid8}
+    assert turns[0]["turn_id"].startswith(f"{job_id}--r1-reviewer-")
+    assert turns[1]["turn_id"].startswith(f"{job_id}--r1-reviewer-")
+    assert turns[0]["turn_id"] != turns[1]["turn_id"]  # distinct UUIDs
     assert turns[0]["status"] == "stale"
     assert turns[1]["status"] == "completed"
 
