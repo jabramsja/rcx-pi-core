@@ -420,21 +420,33 @@ def build_reviewer_prompt(
     job: sqlite3.Row,
     round_no: int,
     validation_results: list[dict[str, Any]],
+    *,
+    include_diff: bool = True,
 ) -> str:
     template = load_template("bridge_reviewer_prompt.txt")
     reader_envelope = latest_envelope(conn, job["job_id"], role="reader") or {}
+    if include_diff:
+        diff_text = staged_diff_content(paths.repo_root)
+        changed_actual = _format_list(changed_files(paths.repo_root, staged=False) + changed_files(paths.repo_root, staged=True))
+        staged = _format_list(changed_files(paths.repo_root, staged=True))
+        unstaged = _format_list(changed_files(paths.repo_root, staged=False))
+    else:
+        diff_text = "(no diff — this is a design deliberation, not a code review)"
+        changed_actual = "(n/a — design deliberation)"
+        staged = "(n/a)"
+        unstaged = "(n/a)"
     payload = {
         "job_id": job["job_id"],
         "round_no": round_no,
         "task_text": job["task_text"],
         "wave_class": job["wave_class"] or "(unspecified)",
         "repo_root": str(paths.repo_root),
-        "changed_files_actual": _format_list(changed_files(paths.repo_root, staged=False) + changed_files(paths.repo_root, staged=True)),
-        "staged_files": _format_list(changed_files(paths.repo_root, staged=True)),
-        "unstaged_files": _format_list(changed_files(paths.repo_root, staged=False)),
+        "changed_files_actual": changed_actual,
+        "staged_files": staged,
+        "unstaged_files": unstaged,
         "validation_results": _validation_results_text(validation_results),
         "reader_summary": reader_envelope.get("summary", "(none)"),
-        "staged_diff": staged_diff_content(paths.repo_root),
+        "staged_diff": diff_text,
         "json_schema_stub": JSON_SCHEMA_STUB,
     }
     return template.safe_substitute(payload)
@@ -737,6 +749,7 @@ def _run_reviewer_phase(
     validation_results: list[dict[str, Any]],
     verbose: bool,
     stream: bool = False,
+    include_diff: bool = True,
 ) -> str | None:
     """Run reviewer (with staleness retry). Returns terminal decision or None for REQUEST_CHANGES continuation."""
     reviewer_attempt = 0
@@ -746,7 +759,7 @@ def _run_reviewer_phase(
         update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
         _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
         review_state_start = compute_repo_state(paths.repo_root)
-        reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results)
+        reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
         reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
             conn,
             paths,
@@ -1004,6 +1017,7 @@ def review_job(
     acceptance_checks: list[str] | None = None,
     verbose: bool = False,
     job_id: str | None = None,
+    include_diff: bool = True,
 ) -> str:
     """Hybrid review: record synthetic reader turn from interactive session, then run reviewer."""
     init_db(paths)
@@ -1099,6 +1113,7 @@ def review_job(
             result = _run_reviewer_phase(
                 conn, paths, final_job_id, job, round_no,
                 validation_results, verbose, stream=verbose,
+                include_diff=include_diff,
             )
             if result is not None:
                 rendered = paths.rendered_dir / f"{final_job_id}.md"
@@ -1178,6 +1193,7 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--check", action="append", default=[])
     review.add_argument("--job-id")
     review.add_argument("--verbose", "-v", action="store_true", help="Print structured envelope output inline")
+    review.add_argument("--no-diff", action="store_true", help="Omit git diff from reviewer prompt (for design deliberation, questions, non-code review)")
 
     render = sub.add_parser("render", help="Render markdown transcript for a job")
     render.add_argument("job_id")
@@ -1241,6 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
                 acceptance_checks=args.check,
                 verbose=args.verbose,
                 job_id=args.job_id,
+                include_diff=not args.no_diff,
             )
             print(decision)
             return 0 if decision == "GO" else 1

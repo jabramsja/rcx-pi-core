@@ -104,6 +104,17 @@ These `mu/docs/core/` documents have DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTA
 | [`mu/docs/core/TypedNumericEnvelopes.v0.md`](../mu/docs/core/TypedNumericEnvelopes.v0.md) | DESIGN_SPEC | P6 VECTOR: cross-substrate int/float lexical parity decision |
 | [`mu/docs/core/recurrence_v2_design.md`](../mu/docs/core/recurrence_v2_design.md) | IMPLEMENTATION | Recurrence v2 |
 
+## Agent Infrastructure
+
+These `mu/docs/agents/` documents define the multi-agent review system and bridge collaboration protocol.
+
+| Document | TYPE | Domain |
+|----------|------|--------|
+| [`mu/docs/agents/AgentBridgeProtocol.v0.md`](../mu/docs/agents/AgentBridgeProtocol.v0.md) | REFERENCE | Claude ↔ Codex bridge protocol |
+| [`mu/docs/agents/AgentRunbook.v0.md`](../mu/docs/agents/AgentRunbook.v0.md) | REFERENCE | Agent runner usage and workflow tiers |
+| [`mu/docs/agents/AgentRig.v0.md`](../mu/docs/agents/AgentRig.v0.md) | REFERENCE | Agent trust model and architecture |
+| [`mu/docs/agents/AgentGuardrails.v0.md`](../mu/docs/agents/AgentGuardrails.v0.md) | REFERENCE | Agent output format requirements |
+
 ## Why This Architecture
 
 - **Single source of truth**: State in STATUS.md, authorization in TASKS.md
