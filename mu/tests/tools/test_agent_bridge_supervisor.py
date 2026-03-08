@@ -760,8 +760,11 @@ def test_review_job_synthetic_reader_then_reviewer(tmp_path: Path) -> None:
         assert reviewer_turn["agent_role"] == "reviewer"
         assert reviewer_turn["status"] == "completed"
 
-        # Reader envelope should contain our summary
+        # Reader envelope should be honestly marked as synthetic
         reader_env = json.loads(reader_turn["envelope_json"])
+        assert reader_env["decision"] == "SYNTHETIC"
+        assert reader_env.get("synthetic") is True
+        assert reader_turn["decision"] == "SYNTHETIC"
         assert "feature X" in reader_env["summary"]
 
         # Validations should exist

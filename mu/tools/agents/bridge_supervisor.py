@@ -48,7 +48,7 @@ JSON_SCHEMA_STUB = json.dumps(
         "job_id": "string",
         "turn_id": "string",
         "agent_role": "reader|reviewer",
-        "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR",
+        "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC",
         "summary": "string",
         "touched_files_claimed": ["string"],
         "findings": [
@@ -659,10 +659,13 @@ def render_job(paths: BridgePaths, conn: sqlite3.Connection, job_id: str) -> Pat
     ])
     for turn in turns:
         envelope = json.loads(turn["envelope_json"]) if turn["envelope_json"] else {}
+        decision_display = turn['decision'] or '(none)'
+        if decision_display == "SYNTHETIC":
+            decision_display = "SYNTHETIC (founder session, not a real review)"
         lines.extend([
             f"### {turn['turn_id']} — {turn['agent_role']}",
             f"- Status: {turn['status']}",
-            f"- Decision: {turn['decision'] or '(none)'}",
+            f"- Decision: {decision_display}",
             f"- Summary: {envelope.get('summary', '(none)')}",
             f"- Claimed files: {', '.join(envelope.get('touched_files_claimed', [])) or '(none)'}",
         ])
@@ -1161,7 +1164,8 @@ def review_job(
                 "job_id": final_job_id,
                 "turn_id": turn_id,
                 "agent_role": "reader",
-                "decision": "GO",
+                "decision": "SYNTHETIC",
+                "synthetic": True,
                 "summary": reader_summary,
                 "touched_files_claimed": all_changed,
                 "findings": [],
@@ -1190,7 +1194,7 @@ def review_job(
                 round_no=round_no,
                 agent_role="reader",
                 status="completed",
-                decision="GO",
+                decision="SYNTHETIC",
                 state_sha_start=state.state_sha,
                 state_sha_end=state.state_sha,
                 prompt_path=prompt_path,
