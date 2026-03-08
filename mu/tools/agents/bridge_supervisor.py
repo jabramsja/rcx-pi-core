@@ -819,6 +819,7 @@ def execute_agent_turn(
     prompt_text: str,
     attempt: int = 1,
     stream: bool = False,
+    prompt_baseline_sha: str | None = None,
 ) -> tuple[str, dict[str, Any], Path, Path, RepoState]:
     state_start = compute_repo_state(paths.repo_root)
     short_uuid = uuid.uuid4().hex[:8]
@@ -848,6 +849,13 @@ def execute_agent_turn(
         raw_output_path=raw_output_path,
         started_at=started_at,
     )
+    # Store prompt-baseline sha for crash recovery staleness detection
+    if prompt_baseline_sha:
+        conn.execute(
+            "UPDATE turns SET reviewer_input_validation_sha = ? WHERE turn_id = ?",
+            (prompt_baseline_sha, turn_id),
+        )
+        conn.commit()
     try:
         output = run_adapter(
             adapter,
@@ -962,17 +970,23 @@ def _run_reviewer_phase(
         _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
         review_state_start = compute_repo_state(paths.repo_root)
         reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
-        reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
-            conn,
-            paths,
-            read_job(conn, job_id),
-            round_no=round_no,
-            agent_role="reviewer",
-            adapter_name=job["reviewer_agent"],
-            prompt_text=reviewer_prompt,
-            attempt=reviewer_attempt,
-            stream=stream,
-        )
+        try:
+            reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
+                conn,
+                paths,
+                read_job(conn, job_id),
+                round_no=round_no,
+                agent_role="reviewer",
+                adapter_name=job["reviewer_agent"],
+                prompt_text=reviewer_prompt,
+                attempt=reviewer_attempt,
+                stream=stream,
+                prompt_baseline_sha=review_state_start.state_sha,
+            )
+        except BridgeAdapterError:
+            # Restore job status so continue/recovery works
+            update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
+            raise
         review_state_end = compute_repo_state(paths.repo_root)
         _log(verbose, "Reviewer complete.")
         if verbose:
@@ -1043,12 +1057,16 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             ).fetchone()
             if reviewer_turn is not None:
                 # Reviewer already completed — crash happened between record_turn and status update.
-                # But first check staleness: if repo state changed during the reviewer run,
-                # the verdict is unreliable and must be discarded.
+                # Check staleness: (1) state changed during execution, or (2) prompt was built
+                # against a different state than execution started with (stale prompt).
                 reviewer_sha_start = reviewer_turn["state_sha_start"]
                 reviewer_sha_end = reviewer_turn["state_sha_end"]
-                if reviewer_sha_start and reviewer_sha_end and reviewer_sha_start != reviewer_sha_end:
-                    _log(verbose, f"Recovering: reviewer completed but state changed during execution (stale). Discarding verdict and retrying.")
+                prompt_baseline = reviewer_turn["reviewer_input_validation_sha"]
+                execution_stale = reviewer_sha_start and reviewer_sha_end and reviewer_sha_start != reviewer_sha_end
+                prompt_stale = prompt_baseline and reviewer_sha_start and prompt_baseline != reviewer_sha_start
+                if execution_stale or prompt_stale:
+                    reason = "state changed during execution" if execution_stale else "prompt built against stale state"
+                    _log(verbose, f"Recovering: reviewer completed but {reason} (stale). Discarding verdict and retrying.")
                     conn.execute(
                         "UPDATE turns SET status = ?, decision = ? WHERE turn_id = ?",
                         ("stale", "STALE", reviewer_turn["turn_id"]),
@@ -1147,16 +1165,21 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reader ({job['reader_agent']})...")
             reader_state = compute_repo_state(paths.repo_root)
             reader_prompt = build_reader_prompt(conn, paths, job, round_no, reader_state)
-            reader_turn_id, reader_envelope, _, raw_path, _ = execute_agent_turn(
-                conn,
-                paths,
-                job,
-                round_no=round_no,
-                agent_role="reader",
-                adapter_name=job["reader_agent"],
-                prompt_text=reader_prompt,
-                stream=verbose,
-            )
+            try:
+                reader_turn_id, reader_envelope, _, raw_path, _ = execute_agent_turn(
+                    conn,
+                    paths,
+                    job,
+                    round_no=round_no,
+                    agent_role="reader",
+                    adapter_name=job["reader_agent"],
+                    prompt_text=reader_prompt,
+                    stream=verbose,
+                )
+            except BridgeAdapterError:
+                # Restore job status so recovery/retry works
+                update_job_status(conn, job_id, "READY_READER", current_round=round_no)
+                raise
             _log(verbose, "Reader complete.")
             if verbose:
                 _print_envelope("reader", job["reader_agent"], reader_envelope)

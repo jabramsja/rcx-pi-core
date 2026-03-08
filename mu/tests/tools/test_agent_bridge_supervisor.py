@@ -1544,3 +1544,51 @@ def test_adapter_config_failure_no_phantom_running_turn(tmp_path: Path) -> None:
             (job_id,),
         ).fetchall()
         assert len(running_turns) == 0, f"phantom RUNNING turns found: {len(running_turns)}"
+        # Job status should be restored to READY_READER (not stuck in READER_RUNNING)
+        job = conn.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert job["status"] == "READY_READER", f"job should be READY_READER after config failure, got {job['status']}"
+
+
+def test_reviewer_config_failure_restores_awaiting_status(tmp_path: Path) -> None:
+    """If reviewer adapter config fails, job should be restored to AWAITING_REVIEWER_APPROVAL, not stuck in REVIEWER_RUNNING."""
+    paths, fake_agent = _setup_bridge_repo(tmp_path)
+
+    job_id = bridge.submit_job(
+        paths,
+        task_text="reviewer config failure test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="reviewer-cfg-fail-job",
+    )
+    # Run with --pause-after-reader to get to AWAITING_REVIEWER_APPROVAL
+    result = bridge.run_job(paths, job_id, pause_after_reader=True)
+    assert result == "PAUSED"
+
+    # Now break the reviewer config (remove codex adapter)
+    bad_config = {"agents": {"claude": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"}}}
+    paths.config_path.write_text(json.dumps(bad_config), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="missing adapter 'codex'"):
+        bridge.continue_job(paths, job_id)
+
+    # Job should be restored to AWAITING_REVIEWER_APPROVAL (not stuck in REVIEWER_RUNNING)
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert job["status"] == "AWAITING_REVIEWER_APPROVAL", (
+            f"job should be AWAITING_REVIEWER_APPROVAL after reviewer config failure, got {job['status']}"
+        )
+
+    # Fix config and continue should work
+    good_config = {"agents": {
+        "claude": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+        "codex": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+    }}
+    paths.config_path.write_text(json.dumps(good_config), encoding="utf-8")
+    decision = bridge.continue_job(paths, job_id)
+    assert decision == "GO"
