@@ -45,6 +45,7 @@
     "^reports/",
     "^AGENT_BRIDGE\\.md$",
     "^mu/mu_programs/",
-    "^\\.agent_bus/"
+    "^\\.agent_bus/",
+    "^\\.scratch/"
   ]
 }

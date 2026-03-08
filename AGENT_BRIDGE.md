@@ -58,7 +58,15 @@ python3 tools/agents/bridge_supervisor.py submit \
   --allow-edits \
   --check "./tools/pre-push-fast"
 
+# Non-interactive (original behavior)
 python3 tools/agents/bridge_supervisor.py run <job_id>
+
+# Interactive with live streaming + pause before reviewer
+python3 tools/agents/bridge_supervisor.py run <job_id> -v --pause-after-reader
+
+# Resume a paused job (runs reviewer)
+python3 tools/agents/bridge_supervisor.py continue <job_id> -v
+
 python3 tools/agents/bridge_supervisor.py status <job_id>
 python3 tools/agents/bridge_supervisor.py render <job_id>
 ```

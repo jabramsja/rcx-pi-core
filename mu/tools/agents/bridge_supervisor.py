@@ -74,7 +74,7 @@ JSON_SCHEMA_STUB = json.dumps(
     indent=2,
 )
 ENVELOPE_RE = re.compile(
-    r"BEGIN_AGENT_ENVELOPE\s*(\{.*?\})\s*END_AGENT_ENVELOPE",
+    r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
     re.DOTALL,
 )
 
@@ -508,34 +508,65 @@ def render_job(paths: BridgePaths, conn: sqlite3.Connection, job_id: str) -> Pat
         "SELECT * FROM validations WHERE job_id = ? ORDER BY created_at ASC",
         (job_id,),
     ).fetchall()
+    status_text = job['status']
+    if job['status'] == 'AWAITING_REVIEWER_APPROVAL':
+        status_text = 'PAUSED — awaiting founder review before reviewer'
+
     lines = [
         f"# Bridge Job {job_id}",
         "",
-        f"- Status: {job['status']}",
+        f"- Status: {status_text}",
         f"- Reader: {job['reader_agent']}",
         f"- Reviewer: {job['reviewer_agent']}",
         f"- Wave class: {job['wave_class'] or '(unspecified)'}",
         f"- Allow edits: {'yes' if job['allow_edits'] else 'no'}",
         f"- Max rounds: {job['max_rounds']}",
+    ]
+    if job['status'] == 'AWAITING_REVIEWER_APPROVAL':
+        lines.extend([
+            "",
+            f"> **Paused for founder review.** Reader output is available above.",
+            f"> Inspect the reader's raw output, then resume with:",
+            f"> `python3 mu/tools/agents/bridge_supervisor.py continue {job_id}`",
+        ])
+    lines.extend([
         "",
         "## Task",
         job['task_text'],
         "",
         "## Turns",
-    ]
+    ])
     for turn in turns:
         envelope = json.loads(turn["envelope_json"]) if turn["envelope_json"] else {}
-        lines.extend(
-            [
-                f"### {turn['turn_id']} — {turn['agent_role']}",
-                f"- Status: {turn['status']}",
-                f"- Decision: {turn['decision'] or '(none)'}",
-                f"- Summary: {envelope.get('summary', '(none)')}",
-                f"- Claimed files: {', '.join(envelope.get('touched_files_claimed', [])) or '(none)'}",
-                f"- Raw output: {turn['raw_output_path']}",
-                "",
-            ]
-        )
+        lines.extend([
+            f"### {turn['turn_id']} — {turn['agent_role']}",
+            f"- Status: {turn['status']}",
+            f"- Decision: {turn['decision'] or '(none)'}",
+            f"- Summary: {envelope.get('summary', '(none)')}",
+            f"- Claimed files: {', '.join(envelope.get('touched_files_claimed', [])) or '(none)'}",
+        ])
+        findings = envelope.get("findings", [])
+        if findings:
+            lines.append(f"- **Findings ({len(findings)}):**")
+            for fi, finding in enumerate(findings, 1):
+                sev = finding.get("severity", "?")
+                cls = finding.get("class", "?")
+                title = finding.get("title", "(untitled)")
+                file_ref = finding.get("file", "?")
+                line_start = finding.get("line_start", "?")
+                status = finding.get("status", "new")
+                lines.append(f"  {fi}. **{cls}** ({sev}): {title}")
+                lines.append(f"     - File: `{file_ref}:{line_start}` | Status: {status}")
+                evidence = finding.get("evidence_result", "")
+                if evidence:
+                    lines.append(f"     - Evidence: {evidence[:300]}")
+        request = envelope.get("request_for_next_agent", "")
+        if request:
+            lines.append(f"- Request for next agent: {request}")
+        lines.extend([
+            f"- Raw output: {turn['raw_output_path']}",
+            "",
+        ])
     lines.append("## Validations")
     for validation in validations:
         lines.append(f"- `{validation['command']}` => {validation['result_summary']}")
@@ -599,9 +630,11 @@ def execute_agent_turn(
     adapter_name: str,
     prompt_text: str,
     attempt: int = 1,
+    stream: bool = False,
 ) -> tuple[str, dict[str, Any], Path, Path, RepoState]:
     state_start = compute_repo_state(paths.repo_root)
-    turn_id = f"r{round_no}-{agent_role}" if attempt <= 1 else f"r{round_no}-{agent_role}-a{attempt}"
+    turn_suffix = f"r{round_no}-{agent_role}" if attempt <= 1 else f"r{round_no}-{agent_role}-a{attempt}"
+    turn_id = f"{job['job_id']}--{turn_suffix}"
     prompt_path = write_prompt(paths, job["job_id"], turn_id, prompt_text)
     started_at = utc_now()
 
@@ -615,6 +648,7 @@ def execute_agent_turn(
         job_id=job["job_id"],
         turn_id=turn_id,
         agent_role=agent_role,
+        stream=stream,
     )
     raw_output_path = write_raw_output(paths, job["job_id"], turn_id, output)
     envelope = parse_envelope(output)
@@ -644,26 +678,247 @@ def execute_agent_turn(
     return turn_id, envelope, prompt_path, raw_output_path, state_start
 
 
-def run_job(paths: BridgePaths, job_id: str) -> str:
+def _log(verbose: bool, msg: str) -> None:
+    if verbose:
+        print(f"[bridge] {msg}", flush=True)
+
+
+def _print_envelope(role: str, agent_name: str, envelope: dict[str, Any]) -> None:
+    """Print structured envelope content to stdout for inline dialectic visibility."""
+    border = "=" * 60
+    print(f"\n{border}", flush=True)
+    print(f"  {role.upper()} ({agent_name})", flush=True)
+    print(f"{border}", flush=True)
+    print(f"Decision: {envelope.get('decision', '(none)')}", flush=True)
+    print(f"Summary:  {envelope.get('summary', '(none)')}", flush=True)
+
+    findings = envelope.get("findings", [])
+    if findings:
+        print(f"\nFindings ({len(findings)}):", flush=True)
+        for i, finding in enumerate(findings, 1):
+            sev = finding.get("severity", "?")
+            cls = finding.get("class", "?")
+            title = finding.get("title", "(untitled)")
+            file_ref = finding.get("file", "?")
+            line_start = finding.get("line_start", "?")
+            status = finding.get("status", "new")
+            print(f"  [{i}] {cls} ({sev}): {title}", flush=True)
+            print(f"      File: {file_ref}:{line_start}  Status: {status}", flush=True)
+            evidence = finding.get("evidence_result", "")
+            if evidence:
+                if len(evidence) > 200:
+                    evidence = evidence[:200] + "..."
+                print(f"      Evidence: {evidence}", flush=True)
+    else:
+        print(f"\nFindings: (none)", flush=True)
+
+    touched = envelope.get("touched_files_claimed", [])
+    print(f"\nTouched files: {', '.join(touched) if touched else '(none)'}", flush=True)
+
+    request = envelope.get("request_for_next_agent", "")
+    if request:
+        print(f"\nRequest for next agent: {request}", flush=True)
+
+    print(f"{border}\n", flush=True)
+
+
+def run_job(paths: BridgePaths, job_id: str, *, verbose: bool = False, pause_after_reader: bool = False) -> str:
     init_db(paths)
     with _BridgeLock(paths.bus_dir / "bridge.lock"):
-        return _run_job_locked(paths, job_id)
+        return _run_job_locked(paths, job_id, verbose=verbose, pause_after_reader=pause_after_reader)
 
 
-def _run_job_locked(paths: BridgePaths, job_id: str) -> str:
+def _run_reviewer_phase(
+    conn: sqlite3.Connection,
+    paths: BridgePaths,
+    job_id: str,
+    job: sqlite3.Row,
+    round_no: int,
+    validation_results: list[dict[str, Any]],
+    verbose: bool,
+    stream: bool = False,
+) -> str | None:
+    """Run reviewer (with staleness retry). Returns terminal decision or None for REQUEST_CHANGES continuation."""
+    reviewer_attempt = 0
+    reviewer_envelope: dict[str, Any] | None = None
+    while reviewer_attempt < 2:
+        reviewer_attempt += 1
+        update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
+        _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
+        review_state_start = compute_repo_state(paths.repo_root)
+        reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results)
+        reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
+            conn,
+            paths,
+            read_job(conn, job_id),
+            round_no=round_no,
+            agent_role="reviewer",
+            adapter_name=job["reviewer_agent"],
+            prompt_text=reviewer_prompt,
+            attempt=reviewer_attempt,
+            stream=stream,
+        )
+        review_state_end = compute_repo_state(paths.repo_root)
+        _log(verbose, "Reviewer complete.")
+        if verbose:
+            _print_envelope("reviewer", job["reviewer_agent"], reviewer_envelope)
+        _log(verbose, f"  Raw output: {raw_path}")
+        if review_state_start.state_sha == review_state_end.state_sha:
+            break
+        _log(verbose, f"  State changed during review — marking stale (attempt {reviewer_attempt}/2)")
+        conn.execute(
+            "UPDATE turns SET status = ?, decision = ?, state_sha_end = ? WHERE turn_id = ?",
+            ("stale", "STALE", review_state_end.state_sha, reviewer_turn_id),
+        )
+        conn.commit()
+        render_job(paths, conn, job_id)
+        if reviewer_attempt >= 2:
+            raise BridgeError(
+                "Reviewer state became stale twice. Stabilize the tree and rerun the job."
+            )
+
+    assert reviewer_envelope is not None
+    render_job(paths, conn, job_id)
+    decision = reviewer_envelope.get("decision")
+    if decision == "GO":
+        update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="GO")
+        render_job(paths, conn, job_id)
+        return "GO"
+    if decision == "QUESTION":
+        update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=round_no, terminal_decision="QUESTION")
+        render_job(paths, conn, job_id)
+        return "QUESTION"
+    if decision == "NO_GO":
+        update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="NO_GO")
+        render_job(paths, conn, job_id)
+        return "NO_GO"
+    if decision == "REQUEST_CHANGES":
+        if round_no >= job["max_rounds"]:
+            update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="NO_GO")
+            render_job(paths, conn, job_id)
+            return "NO_GO"
+        update_job_status(conn, job_id, "READY_READER", current_round=round_no)
+        render_job(paths, conn, job_id)
+        return None  # continue to next round
+    update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision=decision or "ERROR")
+    render_job(paths, conn, job_id)
+    return decision or "ERROR"
+
+
+def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, pause_after_reader: bool = False) -> str:
     with open_db(paths) as conn:
         job = read_job(conn, job_id)
         if job["terminal_decision"]:
+            _log(verbose, f"Job already terminal: {job['terminal_decision']}")
             render_job(paths, conn, job_id)
             return job["terminal_decision"]
 
         acceptance_checks = json.loads(job["acceptance_checks_json"])
+
+        # Recovery: if a previous run was interrupted mid-round, determine
+        # the correct resume point based on what turns actually completed.
+        if job["status"] in ("READER_RUNNING", "REVIEWER_RUNNING"):
+            reader_turn = conn.execute(
+                "SELECT * FROM turns WHERE job_id = ? AND round_no = ? AND agent_role = 'reader' AND status = 'completed'",
+                (job_id, job["current_round"]),
+            ).fetchone()
+            reviewer_turn = conn.execute(
+                "SELECT * FROM turns WHERE job_id = ? AND round_no = ? AND agent_role = 'reviewer' AND status = 'completed'",
+                (job_id, job["current_round"]),
+            ).fetchone()
+            if reviewer_turn is not None:
+                # Reviewer already completed — crash happened between record_turn and status update.
+                # Apply the recorded outcome instead of rerunning.
+                envelope = json.loads(reviewer_turn["envelope_json"]) if reviewer_turn["envelope_json"] else {}
+                decision = envelope.get("decision", "ERROR")
+                _log(verbose, f"Recovering: reviewer already completed (round {job['current_round']}). Applying recorded decision: {decision}")
+                if decision in ("GO", "NO_GO", "ERROR"):
+                    terminal = "GO" if decision == "GO" else decision
+                    update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=terminal)
+                elif decision == "QUESTION":
+                    update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=job["current_round"], terminal_decision="QUESTION")
+                elif decision == "REQUEST_CHANGES":
+                    if job["current_round"] >= job["max_rounds"]:
+                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision="NO_GO")
+                    else:
+                        update_job_status(conn, job_id, "READY_READER", current_round=job["current_round"])
+                else:
+                    update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=decision or "ERROR")
+                render_job(paths, conn, job_id)
+                job = read_job(conn, job_id)
+            elif reader_turn is None:
+                # Reader never completed — reset round so it reruns
+                retry_round = max(0, job["current_round"] - 1)
+                _log(verbose, f"Recovering from interrupted reader (round {job['current_round']}). Resetting to round {retry_round}.")
+                update_job_status(conn, job_id, "READY_READER", current_round=retry_round)
+                job = read_job(conn, job_id)
+            elif job["status"] == "REVIEWER_RUNNING":
+                # Reader completed but reviewer didn't — resume at reviewer
+                _log(verbose, f"Recovering from interrupted reviewer (round {job['current_round']}). Resuming at reviewer.")
+                update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=job["current_round"])
+                job = read_job(conn, job_id)
+            else:
+                # Reader completed but status is still READER_RUNNING (crash between record_turn and status update).
+                # Validations may not have run or may be partial — clear and rerun to ensure
+                # reviewer gets complete evidence. Clearing first avoids primary key collisions
+                # if some validations were committed before the crash.
+                _log(verbose, f"Reader completed but status stuck at READER_RUNNING (round {job['current_round']}). Rerunning validations and resuming at reviewer.")
+                _log(verbose, "Clearing partial validations and rerunning for recovery...")
+                conn.execute(
+                    "DELETE FROM validations WHERE job_id = ? AND turn_id = ?",
+                    (job_id, reader_turn["turn_id"]),
+                )
+                conn.commit()
+                run_validations(
+                    paths,
+                    conn,
+                    job_id=job_id,
+                    turn_id=reader_turn["turn_id"],
+                    acceptance_checks=acceptance_checks,
+                )
+                update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=job["current_round"])
+                job = read_job(conn, job_id)
+
+        # If recovery resolved the job to a terminal state, return immediately
+        if job["terminal_decision"]:
+            _log(verbose, f"Recovery resolved job to terminal: {job['terminal_decision']}")
+            render_job(paths, conn, job_id)
+            return job["terminal_decision"]
+
+        # Resume path: reviewer phase after --pause-after-reader
+        if job["status"] == "AWAITING_REVIEWER_APPROVAL":
+            round_no = job["current_round"]
+            _log(verbose, f"Resuming at reviewer phase (round {round_no})")
+            # Reconstruct validation_results from DB for this round.
+            # Look up actual reader turn_id (handles both legacy and new formats).
+            reader_turn_for_resume = conn.execute(
+                "SELECT turn_id FROM turns WHERE job_id = ? AND round_no = ? AND agent_role = 'reader' AND status = 'completed' ORDER BY started_at DESC LIMIT 1",
+                (job_id, round_no),
+            ).fetchone()
+            reader_turn_id_for_query = reader_turn_for_resume["turn_id"] if reader_turn_for_resume else f"{job_id}--r{round_no}-reader"
+            validations = conn.execute(
+                "SELECT command, exit_code, result_summary, output_path FROM validations WHERE job_id = ? AND turn_id = ?",
+                (job_id, reader_turn_id_for_query),
+            ).fetchall()
+            validation_results = [
+                {"command": v["command"], "exit_code": v["exit_code"], "result_summary": v["result_summary"], "output_path": v["output_path"]}
+                for v in validations
+            ]
+            result = _run_reviewer_phase(conn, paths, job_id, job, round_no, validation_results, verbose, stream=verbose)
+            if result is not None:
+                rendered = paths.rendered_dir / f"{job_id}.md"
+                _log(verbose, f"Rendered transcript: {rendered}")
+                _log(verbose, f"Terminal decision: {result}")
+                return result
+            # REQUEST_CHANGES — fall through to normal loop for remaining rounds
+
         for round_no in range(job["current_round"] + 1, job["max_rounds"] + 1):
             update_job_status(conn, job_id, "READER_RUNNING", current_round=round_no)
             job = read_job(conn, job_id)
+            _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reader ({job['reader_agent']})...")
             reader_state = compute_repo_state(paths.repo_root)
             reader_prompt = build_reader_prompt(conn, paths, job, round_no, reader_state)
-            reader_turn_id, reader_envelope, _, _, _ = execute_agent_turn(
+            reader_turn_id, reader_envelope, _, raw_path, _ = execute_agent_turn(
                 conn,
                 paths,
                 job,
@@ -671,14 +926,21 @@ def _run_job_locked(paths: BridgePaths, job_id: str) -> str:
                 agent_role="reader",
                 adapter_name=job["reader_agent"],
                 prompt_text=reader_prompt,
+                stream=verbose,
             )
+            _log(verbose, "Reader complete.")
+            if verbose:
+                _print_envelope("reader", job["reader_agent"], reader_envelope)
+            _log(verbose, f"  Raw output: {raw_path}")
             render_job(paths, conn, job_id)
             if reader_envelope.get("decision") in {"QUESTION", "ERROR"}:
                 terminal = reader_envelope.get("decision")
                 update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=round_no, terminal_decision=terminal)
                 render_job(paths, conn, job_id)
+                _log(verbose, f"Terminal decision: {terminal}")
                 return terminal
 
+            _log(verbose, "Running validations...")
             validation_results = run_validations(
                 paths,
                 conn,
@@ -686,69 +948,166 @@ def _run_job_locked(paths: BridgePaths, job_id: str) -> str:
                 turn_id=reader_turn_id,
                 acceptance_checks=acceptance_checks,
             )
+            passed = sum(1 for v in validation_results if v["exit_code"] == 0)
+            _log(verbose, f"Validations complete ({passed}/{len(validation_results)} passed)")
             render_job(paths, conn, job_id)
 
-            reviewer_attempt = 0
-            reviewer_envelope: dict[str, Any] | None = None
-            while reviewer_attempt < 2:
-                reviewer_attempt += 1
-                update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
-                review_state_start = compute_repo_state(paths.repo_root)
-                reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results)
-                reviewer_turn_id, reviewer_envelope, _, _, _ = execute_agent_turn(
-                    conn,
-                    paths,
-                    read_job(conn, job_id),
-                    round_no=round_no,
-                    agent_role="reviewer",
-                    adapter_name=job["reviewer_agent"],
-                    prompt_text=reviewer_prompt,
-                    attempt=reviewer_attempt,
-                )
-                review_state_end = compute_repo_state(paths.repo_root)
-                if review_state_start.state_sha == review_state_end.state_sha:
-                    break
-                conn.execute(
-                    "UPDATE turns SET status = ?, decision = ?, state_sha_end = ? WHERE turn_id = ?",
-                    ("stale", "STALE", review_state_end.state_sha, reviewer_turn_id),
-                )
-                conn.commit()
+            if pause_after_reader:
+                update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
                 render_job(paths, conn, job_id)
-                if reviewer_attempt >= 2:
-                    raise BridgeError(
-                        "Reviewer state became stale twice. Stabilize the tree and rerun the job."
-                    )
+                rendered = paths.rendered_dir / f"{job_id}.md"
+                _log(verbose, "PAUSED after reader (--pause-after-reader). Inspect:")
+                _log(verbose, f"  Raw output: {raw_path}")
+                _log(verbose, f"  Rendered:   {rendered}")
+                # Always print pause info even without --verbose — this is the intervention contract
+                if not verbose:
+                    print(f"[bridge] PAUSED after reader. Inspect:", flush=True)
+                    print(f"[bridge]   Raw output: {raw_path}", flush=True)
+                    print(f"[bridge]   Rendered:   {rendered}", flush=True)
+                print(f"[bridge] Resume: python3 mu/tools/agents/bridge_supervisor.py continue {job_id}", flush=True)
+                return "PAUSED"
 
-            assert reviewer_envelope is not None
-            render_job(paths, conn, job_id)
-            decision = reviewer_envelope.get("decision")
-            if decision == "GO":
-                update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="GO")
-                render_job(paths, conn, job_id)
-                return "GO"
-            if decision == "QUESTION":
-                update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=round_no, terminal_decision="QUESTION")
-                render_job(paths, conn, job_id)
-                return "QUESTION"
-            if decision == "NO_GO":
-                update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="NO_GO")
-                render_job(paths, conn, job_id)
-                return "NO_GO"
-            if decision == "REQUEST_CHANGES":
-                if round_no >= job["max_rounds"]:
-                    update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="NO_GO")
-                    render_job(paths, conn, job_id)
-                    return "NO_GO"
-                update_job_status(conn, job_id, "READY_READER", current_round=round_no)
-                render_job(paths, conn, job_id)
-                continue
-            update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision=decision or "ERROR")
-            render_job(paths, conn, job_id)
-            return decision or "ERROR"
+            result = _run_reviewer_phase(conn, paths, job_id, job, round_no, validation_results, verbose, stream=verbose)
+            if result is not None:
+                rendered = paths.rendered_dir / f"{job_id}.md"
+                _log(verbose, f"Rendered transcript: {rendered}")
+                _log(verbose, f"Terminal decision: {result}")
+                return result
+            # REQUEST_CHANGES — continue to next round
 
         update_job_status(conn, job_id, "DONE", current_round=job["max_rounds"], terminal_decision="NO_GO")
         render_job(paths, conn, job_id)
         return "NO_GO"
+
+
+def continue_job(paths: BridgePaths, job_id: str, *, verbose: bool = False) -> str:
+    """Resume a paused job from the AWAITING_REVIEWER_APPROVAL state."""
+    init_db(paths)
+    with open_db(paths) as conn:
+        job = read_job(conn, job_id)
+        if job["status"] != "AWAITING_REVIEWER_APPROVAL":
+            raise BridgeError(
+                f"Job '{job_id}' is not paused (status: {job['status']}). "
+                "Only jobs in AWAITING_REVIEWER_APPROVAL state can be continued."
+            )
+    with _BridgeLock(paths.bus_dir / "bridge.lock"):
+        return _run_job_locked(paths, job_id, verbose=verbose, pause_after_reader=False)
+
+
+def review_job(
+    paths: BridgePaths,
+    *,
+    task_text: str,
+    reader_summary: str,
+    wave_class: str | None = None,
+    reviewer_agent: str = "codex",
+    acceptance_checks: list[str] | None = None,
+    verbose: bool = False,
+    job_id: str | None = None,
+) -> str:
+    """Hybrid review: record synthetic reader turn from interactive session, then run reviewer."""
+    init_db(paths)
+    if acceptance_checks is None:
+        acceptance_checks = []
+
+    final_job_id = submit_job(
+        paths,
+        task_text=task_text,
+        scope_hint=None,
+        wave_class=wave_class,
+        allow_edits=True,
+        reader_agent="claude-session",
+        reviewer_agent=reviewer_agent,
+        max_rounds=2,
+        acceptance_checks=acceptance_checks,
+        job_id=job_id,
+    )
+
+    with _BridgeLock(paths.bus_dir / "bridge.lock"):
+        with open_db(paths) as conn:
+            job = read_job(conn, final_job_id)
+            round_no = 1
+            turn_id = f"{final_job_id}--r{round_no}-reader"
+
+            # Build synthetic reader envelope from interactive session
+            actual_staged = changed_files(paths.repo_root, staged=True)
+            actual_unstaged = changed_files(paths.repo_root, staged=False)
+            all_changed = sorted(set(actual_staged + actual_unstaged))
+
+            envelope = {
+                "job_id": final_job_id,
+                "turn_id": turn_id,
+                "agent_role": "reader",
+                "decision": "GO",
+                "summary": reader_summary,
+                "touched_files_claimed": all_changed,
+                "findings": [],
+                "validations_claimed": [],
+                "request_for_next_agent": "Review the implementation against the task requirements.",
+            }
+
+            # Record synthetic reader turn
+            state = compute_repo_state(paths.repo_root)
+            now = utc_now()
+            prompt_text = (
+                f"[Synthetic reader turn — implementation done in interactive Claude session]\n\n"
+                f"Task: {task_text}\n\nSummary: {reader_summary}"
+            )
+            prompt_path = write_prompt(paths, final_job_id, turn_id, prompt_text)
+            raw_output = (
+                f"[Interactive session implementation]\n\n{reader_summary}\n\n"
+                f"BEGIN_AGENT_ENVELOPE\n{json.dumps(envelope, indent=2)}\nEND_AGENT_ENVELOPE"
+            )
+            raw_path = write_raw_output(paths, final_job_id, turn_id, raw_output)
+
+            record_turn(
+                conn,
+                turn_id=turn_id,
+                job_id=final_job_id,
+                round_no=round_no,
+                agent_role="reader",
+                status="completed",
+                decision="GO",
+                state_sha_start=state.state_sha,
+                state_sha_end=state.state_sha,
+                prompt_path=prompt_path,
+                raw_output_path=raw_path,
+                envelope=envelope,
+                started_at=now,
+                finished_at=now,
+            )
+
+            if verbose:
+                _print_envelope("reader", "claude-session", envelope)
+
+            # Run validations
+            update_job_status(conn, final_job_id, "READER_RUNNING", current_round=round_no)
+            _log(verbose, "Running validations...")
+            validation_results = run_validations(
+                paths, conn,
+                job_id=final_job_id,
+                turn_id=turn_id,
+                acceptance_checks=acceptance_checks,
+            )
+            passed = sum(1 for v in validation_results if v["exit_code"] == 0)
+            _log(verbose, f"Validations complete ({passed}/{len(validation_results)} passed)")
+
+            # Advance to reviewer
+            update_job_status(conn, final_job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
+            render_job(paths, conn, final_job_id)
+
+            result = _run_reviewer_phase(
+                conn, paths, final_job_id, job, round_no,
+                validation_results, verbose, stream=verbose,
+            )
+            if result is not None:
+                rendered = paths.rendered_dir / f"{final_job_id}.md"
+                _log(verbose, f"Rendered transcript: {rendered}")
+                _log(verbose, f"Terminal decision: {result}")
+                return result
+
+            # REQUEST_CHANGES — caller should fix and re-review
+            return "REQUEST_CHANGES"
 
 
 def print_status(paths: BridgePaths, job_id: str) -> None:
@@ -765,13 +1124,17 @@ def print_status(paths: BridgePaths, job_id: str) -> None:
         }, indent=2))
 
 
+def _read_text_arg(text: str | None, file: str | None, name: str) -> str:
+    if bool(text) == bool(file):
+        raise BridgeError(f"Provide exactly one of --{name} or --{name}-file")
+    if file:
+        return Path(file).read_text(encoding="utf-8").strip()
+    assert text is not None
+    return text.strip()
+
+
 def read_task_text(task: str | None, task_file: str | None) -> str:
-    if bool(task) == bool(task_file):
-        raise BridgeError("Provide exactly one of --task or --task-file")
-    if task_file:
-        return Path(task_file).read_text(encoding="utf-8").strip()
-    assert task is not None
-    return task.strip()
+    return _read_text_arg(task, task_file, "task")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -795,9 +1158,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="Run a submitted job to completion or founder stop")
     run.add_argument("job_id")
+    run.add_argument("--verbose", "-v", action="store_true", help="Print step events, file paths, and summary excerpts")
+    run.add_argument("--pause-after-reader", action="store_true", help="Stop after reader + validations for inspection before reviewer")
+
+    cont = sub.add_parser("continue", help="Resume a paused job (AWAITING_REVIEWER_APPROVAL)")
+    cont.add_argument("job_id")
+    cont.add_argument("--verbose", "-v", action="store_true", help="Print step events and stream agent output")
 
     status = sub.add_parser("status", help="Show current job status")
     status.add_argument("job_id")
+
+    review = sub.add_parser("review", help="Hybrid review: synthetic reader turn from interactive session + live reviewer")
+    review.add_argument("--task")
+    review.add_argument("--task-file")
+    review.add_argument("--summary", help="Reader summary of implementation done in interactive session")
+    review.add_argument("--summary-file", help="File containing reader summary")
+    review.add_argument("--wave-class")
+    review.add_argument("--reviewer", default="codex")
+    review.add_argument("--check", action="append", default=[])
+    review.add_argument("--job-id")
+    review.add_argument("--verbose", "-v", action="store_true", help="Print structured envelope output inline")
 
     render = sub.add_parser("render", help="Render markdown transcript for a job")
     render.add_argument("job_id")
@@ -832,7 +1212,36 @@ def main(argv: list[str] | None = None) -> int:
             print(job_id)
             return 0
         if args.command == "run":
-            decision = run_job(paths, args.job_id)
+            decision = run_job(
+                paths,
+                args.job_id,
+                verbose=args.verbose,
+                pause_after_reader=args.pause_after_reader,
+            )
+            if decision != "PAUSED":
+                print(decision)
+            return 0 if decision == "GO" else (2 if decision == "PAUSED" else 1)
+        if args.command == "continue":
+            decision = continue_job(
+                paths,
+                args.job_id,
+                verbose=args.verbose,
+            )
+            print(decision)
+            return 0 if decision == "GO" else 1
+        if args.command == "review":
+            task_text = _read_text_arg(args.task, args.task_file, "task")
+            summary_text = _read_text_arg(args.summary, args.summary_file, "summary")
+            decision = review_job(
+                paths,
+                task_text=task_text,
+                reader_summary=summary_text,
+                wave_class=args.wave_class,
+                reviewer_agent=args.reviewer,
+                acceptance_checks=args.check,
+                verbose=args.verbose,
+                job_id=args.job_id,
+            )
             print(decision)
             return 0 if decision == "GO" else 1
         if args.command == "status":

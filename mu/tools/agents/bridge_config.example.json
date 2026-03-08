@@ -9,7 +9,7 @@
     },
     "codex": {
       "mode": "live",
-      "cmd": ["/absolute/path/to/your/codex_cli"],
+      "cmd": ["codex", "exec", "-", "--sandbox", "full-auto"],
       "prompt_via_stdin": true,
       "timeout_s": 1200,
       "env": {}
