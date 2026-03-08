@@ -133,6 +133,7 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
     const kernelInput = { _step: normalizedInput, _projs: linkedProjs };
     const wrapped = _stepKernelCoreNonMeta(allProjs, kernelInput, 10000);
     const next = denormalize(wrapped.result);
+    validator(next, 'runAlgorithmWithBridge.intermediate');
     const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');
     if (nextHash === currentHash) break;
     current = next;
