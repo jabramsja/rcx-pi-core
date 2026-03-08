@@ -1446,3 +1446,101 @@ hard_exit(0)
     assert "jobs" not in tables_after, (
         f"init_db created tables via WAL on future-version DB: {tables_after}"
     )
+
+
+def test_crash_recovery_stale_reviewer_discards_verdict(tmp_path: Path) -> None:
+    """If a recovered reviewer turn has state_sha_start != state_sha_end, discard it as stale."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+
+    job_id = bridge.submit_job(
+        paths,
+        task_text="stale recovery test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="stale-recovery-job",
+    )
+    # Run to completion normally
+    decision = bridge.run_job(paths, job_id)
+    assert decision == "GO"
+
+    # Simulate crash: force status to REVIEWER_RUNNING AND make the reviewer turn look stale
+    # (state_sha_start != state_sha_end => repo changed during review)
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        reviewer_turn = conn.execute(
+            "SELECT turn_id FROM turns WHERE job_id = ? AND agent_role = 'reviewer' AND status = 'completed'",
+            (job_id,),
+        ).fetchone()
+        assert reviewer_turn is not None
+        # Make it look stale by changing state_sha_end to differ from state_sha_start
+        conn.execute(
+            "UPDATE turns SET state_sha_end = 'DIFFERENT_HASH' WHERE turn_id = ?",
+            (reviewer_turn["turn_id"],),
+        )
+        conn.execute(
+            "UPDATE jobs SET status = 'REVIEWER_RUNNING', terminal_decision = NULL WHERE job_id = ?",
+            (job_id,),
+        )
+        conn.commit()
+
+    # Recovery should detect staleness and rerun reviewer (not accept the GO verdict)
+    decision = bridge.run_job(paths, job_id)
+    assert decision == "GO"
+
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        # The original reviewer turn should be marked stale
+        stale_turns = conn.execute(
+            "SELECT * FROM turns WHERE job_id = ? AND agent_role = 'reviewer' AND status = 'stale'",
+            (job_id,),
+        ).fetchall()
+        assert len(stale_turns) >= 1, "recovered stale reviewer should have status='stale'"
+        # A new reviewer turn should have been created (recovery retried)
+        completed_reviewer = conn.execute(
+            "SELECT * FROM turns WHERE job_id = ? AND agent_role = 'reviewer' AND status = 'completed'",
+            (job_id,),
+        ).fetchall()
+        assert len(completed_reviewer) >= 1, "recovery should have run a new reviewer turn"
+
+
+def test_adapter_config_failure_no_phantom_running_turn(tmp_path: Path) -> None:
+    """If adapter config is missing/broken, no RUNNING turn should be inserted."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    # Write a config that is MISSING the reader adapter ("claude")
+    bad_config = {"agents": {"codex": {"cmd": ["echo"], "timeout_s": 30, "mode": "live"}}}
+    paths.config_path.write_text(json.dumps(bad_config), encoding="utf-8")
+
+    job_id = bridge.submit_job(
+        paths,
+        task_text="config failure test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="config-fail-job",
+    )
+
+    with pytest.raises(RuntimeError, match="missing adapter 'claude'"):
+        bridge.run_job(paths, job_id)
+
+    # No RUNNING turn should exist — config validated before record_turn_start
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        running_turns = conn.execute(
+            "SELECT * FROM turns WHERE job_id = ? AND status = 'RUNNING'",
+            (job_id,),
+        ).fetchall()
+        assert len(running_turns) == 0, f"phantom RUNNING turns found: {len(running_turns)}"

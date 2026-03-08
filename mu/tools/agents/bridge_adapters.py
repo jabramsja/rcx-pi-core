@@ -139,6 +139,17 @@ def _run_adapter_buffered(
         ) from exc
 
     stdout_lines: list[str] = []
+    stderr_buf = io.StringIO()
+
+    # Drain stderr concurrently to prevent pipe deadlock when child writes
+    # heavily to stderr while we block reading stdout line-by-line.
+    stderr_thread = threading.Thread(
+        target=_tee_stream,
+        args=(proc.stderr, stderr_buf, None),
+        daemon=True,
+    )
+    stderr_thread.start()
+
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
             proc.stdin.write(prompt_text)
@@ -152,19 +163,24 @@ def _run_adapter_buffered(
     except subprocess.TimeoutExpired as exc:
         proc.kill()
         proc.wait()
+        stderr_thread.join(timeout=5)
         if raw_fh is not None:
             raw_fh.close()
         raise BridgeAdapterError(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         ) from exc
-    finally:
-        if raw_fh is not None:
-            raw_fh.close()
+
+    stderr_thread.join(timeout=5)
 
     output = "".join(stdout_lines)
-    stderr_text = proc.stderr.read() if proc.stderr else ""
+    stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
+        if raw_fh is not None:
+            raw_fh.write(f"\n[stderr]\n{stderr_text}")
+            raw_fh.flush()
+    if raw_fh is not None:
+        raw_fh.close()
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(
@@ -235,13 +251,16 @@ def _run_adapter_streaming(
 
     stdout_thread.join(timeout=5)
     stderr_thread.join(timeout=5)
-    if raw_fh is not None:
-        raw_fh.close()
 
     output = stdout_buf.getvalue()
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
+        if raw_fh is not None:
+            raw_fh.write(f"\n[stderr]\n{stderr_text}")
+            raw_fh.flush()
+    if raw_fh is not None:
+        raw_fh.close()
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(

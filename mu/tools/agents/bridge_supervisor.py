@@ -827,6 +827,10 @@ def execute_agent_turn(
     prompt_path = write_prompt(paths, job["job_id"], turn_id, prompt_text)
     started_at = utc_now()
 
+    # Validate adapter config BEFORE recording RUNNING turn to avoid phantom rows
+    config = load_bridge_config(paths.config_path)
+    adapter = get_adapter(config, adapter_name)
+
     # Pre-allocate raw output file so it exists from adapter start
     raw_dir = paths.raw_dir / job["job_id"]
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -844,9 +848,6 @@ def execute_agent_turn(
         raw_output_path=raw_output_path,
         started_at=started_at,
     )
-
-    config = load_bridge_config(paths.config_path)
-    adapter = get_adapter(config, adapter_name)
     try:
         output = run_adapter(
             adapter,
@@ -1042,24 +1043,38 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             ).fetchone()
             if reviewer_turn is not None:
                 # Reviewer already completed — crash happened between record_turn and status update.
-                # Apply the recorded outcome instead of rerunning.
-                envelope = json.loads(reviewer_turn["envelope_json"]) if reviewer_turn["envelope_json"] else {}
-                decision = envelope.get("decision", "ERROR")
-                _log(verbose, f"Recovering: reviewer already completed (round {job['current_round']}). Applying recorded decision: {decision}")
-                if decision in ("GO", "NO_GO", "ERROR"):
-                    terminal = "GO" if decision == "GO" else decision
-                    update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=terminal)
-                elif decision == "QUESTION":
-                    update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=job["current_round"], terminal_decision="QUESTION")
-                elif decision == "REQUEST_CHANGES":
-                    if job["current_round"] >= job["max_rounds"]:
-                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision="NO_GO")
-                    else:
-                        update_job_status(conn, job_id, "READY_READER", current_round=job["current_round"])
+                # But first check staleness: if repo state changed during the reviewer run,
+                # the verdict is unreliable and must be discarded.
+                reviewer_sha_start = reviewer_turn["state_sha_start"]
+                reviewer_sha_end = reviewer_turn["state_sha_end"]
+                if reviewer_sha_start and reviewer_sha_end and reviewer_sha_start != reviewer_sha_end:
+                    _log(verbose, f"Recovering: reviewer completed but state changed during execution (stale). Discarding verdict and retrying.")
+                    conn.execute(
+                        "UPDATE turns SET status = ?, decision = ? WHERE turn_id = ?",
+                        ("stale", "STALE", reviewer_turn["turn_id"]),
+                    )
+                    conn.commit()
+                    update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=job["current_round"])
+                    job = read_job(conn, job_id)
                 else:
-                    update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=decision or "ERROR")
-                render_job(paths, conn, job_id)
-                job = read_job(conn, job_id)
+                    # State was stable — apply the recorded outcome instead of rerunning.
+                    envelope = json.loads(reviewer_turn["envelope_json"]) if reviewer_turn["envelope_json"] else {}
+                    decision = envelope.get("decision", "ERROR")
+                    _log(verbose, f"Recovering: reviewer already completed (round {job['current_round']}). Applying recorded decision: {decision}")
+                    if decision in ("GO", "NO_GO", "ERROR"):
+                        terminal = "GO" if decision == "GO" else decision
+                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=terminal)
+                    elif decision == "QUESTION":
+                        update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=job["current_round"], terminal_decision="QUESTION")
+                    elif decision == "REQUEST_CHANGES":
+                        if job["current_round"] >= job["max_rounds"]:
+                            update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision="NO_GO")
+                        else:
+                            update_job_status(conn, job_id, "READY_READER", current_round=job["current_round"])
+                    else:
+                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=decision or "ERROR")
+                    render_job(paths, conn, job_id)
+                    job = read_job(conn, job_id)
             elif reader_turn is None:
                 # Reader never completed — reset round so it reruns
                 retry_round = max(0, job["current_round"] - 1)
