@@ -988,6 +988,16 @@ def _run_reviewer_phase(
             update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
             raise
         review_state_end = compute_repo_state(paths.repo_root)
+        # Persist the supervisor's post-review state into the turn so crash
+        # recovery sees changes that happen after execute_agent_turn but
+        # before this stale check (the turn's own state_sha_end is captured
+        # inside execute_agent_turn which is slightly earlier).
+        if review_state_end.state_sha != review_state_start.state_sha:
+            conn.execute(
+                "UPDATE turns SET state_sha_end = ? WHERE turn_id = ?",
+                (review_state_end.state_sha, reviewer_turn_id),
+            )
+            conn.commit()
         _log(verbose, "Reviewer complete.")
         if verbose:
             _print_envelope("reviewer", job["reviewer_agent"], reviewer_envelope)
@@ -1177,8 +1187,9 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
                     stream=verbose,
                 )
             except BridgeAdapterError:
-                # Restore job status so recovery/retry works
-                update_job_status(conn, job_id, "READY_READER", current_round=round_no)
+                # Restore to last completed round so the retry loop re-attempts this round
+                # (loop iterates from current_round + 1, so we must go back one)
+                update_job_status(conn, job_id, "READY_READER", current_round=max(0, round_no - 1))
                 raise
             _log(verbose, "Reader complete.")
             if verbose:

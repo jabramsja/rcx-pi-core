@@ -1545,8 +1545,23 @@ def test_adapter_config_failure_no_phantom_running_turn(tmp_path: Path) -> None:
         ).fetchall()
         assert len(running_turns) == 0, f"phantom RUNNING turns found: {len(running_turns)}"
         # Job status should be restored to READY_READER (not stuck in READER_RUNNING)
-        job = conn.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        job = conn.execute("SELECT status, current_round FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         assert job["status"] == "READY_READER", f"job should be READY_READER after config failure, got {job['status']}"
+        # current_round must be rolled back so the retry loop re-attempts the failed round
+        assert job["current_round"] == 0, f"current_round should be 0 (pre-round-1), got {job['current_round']}"
+
+    # Fix config and retry should work (round 1 should actually execute)
+    good_config = {"agents": {
+        "claude": {"cmd": [sys.executable, str(Path(paths.config_path).parent.parent.parent / "fake_agent.py")], "timeout_s": 30, "mode": "live"},
+        "codex": {"cmd": [sys.executable, str(Path(paths.config_path).parent.parent.parent / "fake_agent.py")], "timeout_s": 30, "mode": "live"},
+    }}
+    # We need to create the fake agent script for this to work
+    fake_agent_path = Path(paths.config_path).parent.parent.parent / "fake_agent.py"
+    if not fake_agent_path.exists():
+        fake_agent_path.write_text(_FAKE_AGENT_SCRIPT, encoding="utf-8")
+    paths.config_path.write_text(json.dumps(good_config), encoding="utf-8")
+    decision = bridge.run_job(paths, job_id)
+    assert decision == "GO", f"retry after config fix should succeed, got {decision}"
 
 
 def test_reviewer_config_failure_restores_awaiting_status(tmp_path: Path) -> None:
