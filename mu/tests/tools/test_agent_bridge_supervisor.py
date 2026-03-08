@@ -25,6 +25,7 @@ def _load_module(name: str, path: Path):
 
 
 bridge = _load_module("bridge_supervisor", REPO_ROOT / "tools" / "agents" / "bridge_supervisor.py")
+migrations = _load_module("bridge_migrations", REPO_ROOT / "tools" / "agents" / "bridge_migrations.py")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -980,3 +981,462 @@ print(f"BEGIN_AGENT_ENVELOPE\\n{json.dumps(envelope)}\\nEND_AGENT_ENVELOPE")
         reviewer_env = bridge.latest_envelope(conn, row["job_id"], role="reviewer")
     assert reviewer_env is not None
     assert "diff_suppressed=True" in reviewer_env["summary"]
+
+
+# ---------------------------------------------------------------------------
+# Migration tests
+# ---------------------------------------------------------------------------
+
+
+def _make_legacy_db(db_path: Path) -> sqlite3.Connection:
+    """Create a DB with the original schema (no new columns, no schema_version)."""
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS jobs (
+          job_id TEXT PRIMARY KEY,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          task_text TEXT NOT NULL,
+          scope_hint TEXT,
+          wave_class TEXT,
+          allow_edits INTEGER NOT NULL DEFAULT 0,
+          reader_agent TEXT NOT NULL,
+          reviewer_agent TEXT NOT NULL,
+          acceptance_checks_json TEXT NOT NULL,
+          max_rounds INTEGER NOT NULL DEFAULT 2,
+          current_round INTEGER NOT NULL DEFAULT 0,
+          terminal_decision TEXT
+        );
+        CREATE TABLE IF NOT EXISTS turns (
+          turn_id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          round_no INTEGER NOT NULL,
+          agent_role TEXT NOT NULL,
+          status TEXT NOT NULL,
+          decision TEXT,
+          state_sha_start TEXT NOT NULL,
+          state_sha_end TEXT,
+          prompt_path TEXT NOT NULL,
+          raw_output_path TEXT NOT NULL,
+          envelope_json TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+        );
+        CREATE TABLE IF NOT EXISTS validations (
+          validation_id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          turn_id TEXT,
+          command TEXT NOT NULL,
+          exit_code INTEGER NOT NULL,
+          result_summary TEXT NOT NULL,
+          output_path TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+        );
+    """)
+    conn.commit()
+    return conn
+
+
+def test_migration_runner_on_fresh_db(tmp_path: Path) -> None:
+    """run_pending_migrations on fresh DB applies all migrations."""
+    db_path = tmp_path / "fresh.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    # Create base tables first (schema must exist for ALTER TABLE)
+    conn.executescript("""
+        CREATE TABLE jobs (job_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, status TEXT NOT NULL, task_text TEXT NOT NULL,
+            scope_hint TEXT, wave_class TEXT, allow_edits INTEGER NOT NULL DEFAULT 0,
+            reader_agent TEXT NOT NULL, reviewer_agent TEXT NOT NULL,
+            acceptance_checks_json TEXT NOT NULL, max_rounds INTEGER NOT NULL DEFAULT 2,
+            current_round INTEGER NOT NULL DEFAULT 0, terminal_decision TEXT);
+        CREATE TABLE turns (turn_id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+            round_no INTEGER NOT NULL, agent_role TEXT NOT NULL, status TEXT NOT NULL,
+            decision TEXT, state_sha_start TEXT NOT NULL, state_sha_end TEXT,
+            prompt_path TEXT NOT NULL, raw_output_path TEXT NOT NULL, envelope_json TEXT,
+            started_at TEXT NOT NULL, finished_at TEXT,
+            FOREIGN KEY(job_id) REFERENCES jobs(job_id));
+    """)
+    conn.commit()
+
+    applied = migrations.run_pending_migrations(conn)
+    assert applied == len(migrations.MIGRATIONS)
+    assert migrations.get_schema_version(conn) == len(migrations.MIGRATIONS)
+
+    # Verify new columns exist
+    assert migrations._column_exists(conn, "turns", "attempt_no")
+    assert migrations._column_exists(conn, "turns", "is_canonical")
+    assert migrations._column_exists(conn, "turns", "reviewer_input_ref")
+    assert migrations._column_exists(conn, "jobs", "turns_modified_seq")
+    assert migrations._table_exists(conn, "job_actions")
+    conn.close()
+
+
+def test_migration_idempotent(tmp_path: Path) -> None:
+    """Running migrations twice applies zero the second time."""
+    db_path = tmp_path / "idem.db"
+    conn = _make_legacy_db(db_path)
+    first = migrations.run_pending_migrations(conn)
+    assert first == len(migrations.MIGRATIONS)
+    second = migrations.run_pending_migrations(conn)
+    assert second == 0
+    assert migrations.get_schema_version(conn) == len(migrations.MIGRATIONS)
+    conn.close()
+
+
+def test_migration_upgrades_legacy_db(tmp_path: Path) -> None:
+    """Legacy DB (no schema_version table) gets all migrations."""
+    db_path = tmp_path / "legacy.db"
+    conn = _make_legacy_db(db_path)
+
+    # Verify legacy state: no new columns
+    assert not migrations._column_exists(conn, "turns", "attempt_no")
+    assert not migrations._column_exists(conn, "jobs", "turns_modified_seq")
+    assert not migrations._table_exists(conn, "job_actions")
+
+    # Insert a legacy turn row to verify data survives migration
+    conn.execute("""
+        INSERT INTO jobs (job_id, created_at, updated_at, status, task_text,
+            reader_agent, reviewer_agent, acceptance_checks_json)
+        VALUES ('legacy-job', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+            'DONE', 'test task', 'claude', 'codex', '[]')
+    """)
+    conn.execute("""
+        INSERT INTO turns (turn_id, job_id, round_no, agent_role, status,
+            state_sha_start, prompt_path, raw_output_path, started_at)
+        VALUES ('r1-reader', 'legacy-job', 1, 'reader', 'COMPLETE',
+            'abc123', '/tmp/p', '/tmp/r', '2026-01-01T00:00:00Z')
+    """)
+    conn.commit()
+
+    applied = migrations.run_pending_migrations(conn)
+    assert applied == len(migrations.MIGRATIONS)
+
+    # Verify legacy data survived
+    row = conn.execute("SELECT * FROM turns WHERE turn_id = 'r1-reader'").fetchone()
+    assert row is not None
+    assert row["attempt_no"] == 1
+    assert row["is_canonical"] == 1
+
+    # Verify new columns have correct defaults
+    job = conn.execute("SELECT * FROM jobs WHERE job_id = 'legacy-job'").fetchone()
+    assert job["turns_modified_seq"] == 0
+
+    conn.close()
+
+
+def test_migration_partial_version(tmp_path: Path) -> None:
+    """DB at version 1 only runs migrations 2+."""
+    db_path = tmp_path / "partial.db"
+    conn = _make_legacy_db(db_path)
+
+    # Run only first migration manually
+    migrations._ensure_schema_version_table(conn)
+    migrations.MIGRATIONS[0][1](conn)
+    conn.execute("UPDATE schema_version SET version = 1 WHERE id = 1")
+    conn.commit()
+
+    assert migrations.get_schema_version(conn) == 1
+    assert migrations._column_exists(conn, "turns", "attempt_no")
+    assert not migrations._column_exists(conn, "turns", "reviewer_input_ref")
+
+    # Run remaining
+    applied = migrations.run_pending_migrations(conn)
+    assert applied == len(migrations.MIGRATIONS) - 1
+    assert migrations.get_schema_version(conn) == len(migrations.MIGRATIONS)
+    assert migrations._column_exists(conn, "turns", "reviewer_input_ref")
+    assert migrations._table_exists(conn, "job_actions")
+    conn.close()
+
+
+def test_init_db_runs_migrations(tmp_path: Path) -> None:
+    """init_db on a fresh repo runs schema + migrations, sets version to latest."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    with bridge.open_db(paths) as conn:
+        version = migrations.get_schema_version(conn)
+        # Fresh DBs get schema_version from the SQL file (inserted by
+        # run_pending_migrations which creates the table with version 0,
+        # then runs all migrations to reach latest).
+        assert version == len(migrations.MIGRATIONS)
+        assert migrations._column_exists(conn, "turns", "attempt_no")
+        assert migrations._table_exists(conn, "job_actions")
+
+
+def test_job_actions_table_structure(tmp_path: Path) -> None:
+    """job_actions table supports append-only inserts with expected columns."""
+    db_path = tmp_path / "actions.db"
+    conn = _make_legacy_db(db_path)
+    conn.execute("PRAGMA foreign_keys=ON")
+    migrations.run_pending_migrations(conn)
+
+    conn.execute("""
+        INSERT INTO jobs (job_id, created_at, updated_at, status, task_text,
+            reader_agent, reviewer_agent, acceptance_checks_json)
+        VALUES ('j1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+            'RUNNING', 'test', 'claude', 'codex', '[]')
+    """)
+    conn.execute("""
+        INSERT INTO job_actions (job_id, action, actor, timestamp, metadata)
+        VALUES ('j1', 'PAUSED', 'founder', '2026-01-01T00:01:00Z', '{"reason": "review"}')
+    """)
+    conn.execute("""
+        INSERT INTO job_actions (job_id, action, actor, timestamp, metadata)
+        VALUES ('j1', 'CONTINUED', 'founder', '2026-01-01T00:02:00Z', NULL)
+    """)
+    conn.commit()
+
+    rows = conn.execute("SELECT * FROM job_actions WHERE job_id = 'j1' ORDER BY id").fetchall()
+    assert len(rows) == 2
+    assert rows[0]["action"] == "PAUSED"
+    assert rows[1]["action"] == "CONTINUED"
+    # AUTOINCREMENT gives monotonically increasing IDs
+    assert rows[1]["id"] > rows[0]["id"]
+    conn.close()
+
+
+def test_migrated_db_not_null_parity_with_fresh(tmp_path: Path) -> None:
+    """Migrated DB columns have NOT NULL constraints matching the fresh schema."""
+    db_path = tmp_path / "notnull.db"
+    conn = _make_legacy_db(db_path)
+    migrations.run_pending_migrations(conn)
+
+    # turns.attempt_no must reject NULL
+    conn.execute("""
+        INSERT INTO jobs (job_id, created_at, updated_at, status, task_text,
+            reader_agent, reviewer_agent, acceptance_checks_json)
+        VALUES ('j1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+            'RUNNING', 'test', 'claude', 'codex', '[]')
+    """)
+    with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
+        conn.execute("""
+            INSERT INTO turns (turn_id, job_id, round_no, agent_role, status,
+                state_sha_start, prompt_path, raw_output_path, started_at, attempt_no)
+            VALUES ('t1', 'j1', 1, 'reader', 'COMPLETE',
+                'abc', '/tmp/p', '/tmp/r', '2026-01-01T00:00:00Z', NULL)
+        """)
+
+    # jobs.turns_modified_seq must reject NULL
+    with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
+        conn.execute("""
+            INSERT INTO jobs (job_id, created_at, updated_at, status, task_text,
+                reader_agent, reviewer_agent, acceptance_checks_json, turns_modified_seq)
+            VALUES ('j2', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                'RUNNING', 'test', 'claude', 'codex', '[]', NULL)
+        """)
+    conn.close()
+
+
+def test_job_actions_append_only_rejects_update_and_delete(tmp_path: Path) -> None:
+    """Triggers prevent UPDATE and DELETE on job_actions."""
+    db_path = tmp_path / "append_only.db"
+    conn = _make_legacy_db(db_path)
+    conn.execute("PRAGMA foreign_keys=ON")
+    migrations.run_pending_migrations(conn)
+
+    conn.execute("""
+        INSERT INTO jobs (job_id, created_at, updated_at, status, task_text,
+            reader_agent, reviewer_agent, acceptance_checks_json)
+        VALUES ('j1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+            'RUNNING', 'test', 'claude', 'codex', '[]')
+    """)
+    conn.execute("""
+        INSERT INTO job_actions (job_id, action, actor, timestamp)
+        VALUES ('j1', 'PAUSED', 'founder', '2026-01-01T00:01:00Z')
+    """)
+    conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="append-only.*UPDATE"):
+        conn.execute("UPDATE job_actions SET action = 'MODIFIED' WHERE job_id = 'j1'")
+
+    with pytest.raises(sqlite3.IntegrityError, match="append-only.*DELETE"):
+        conn.execute("DELETE FROM job_actions WHERE job_id = 'j1'")
+
+    # Rows still intact
+    count = conn.execute("SELECT COUNT(*) FROM job_actions").fetchone()[0]
+    assert count == 1
+    conn.close()
+
+
+def test_future_schema_version_rejected(tmp_path: Path) -> None:
+    """DB with schema version > known migrations raises MigrationVersionError."""
+    db_path = tmp_path / "future.db"
+    conn = _make_legacy_db(db_path)
+    migrations._ensure_schema_version_table(conn)
+    conn.execute("UPDATE schema_version SET version = 99 WHERE id = 1")
+    conn.commit()
+
+    with pytest.raises(migrations.MigrationVersionError, match="newer than this code"):
+        migrations.run_pending_migrations(conn)
+    conn.close()
+
+
+def test_foreign_keys_enforced_on_job_actions(tmp_path: Path) -> None:
+    """Foreign key on job_actions rejects orphan rows when FK pragma is on."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    with bridge.open_db(paths) as conn:
+        # Verify FK pragma is on
+        fk_status = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        assert fk_status == 1, "foreign_keys should be ON"
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("""
+                INSERT INTO job_actions (job_id, action, actor, timestamp)
+                VALUES ('nonexistent-job', 'PAUSED', 'founder', '2026-01-01T00:00:00Z')
+            """)
+
+
+def test_init_db_rejects_future_version_before_schema_write(tmp_path):
+    """init_db must reject a future-version DB without mutating the DB file."""
+    import hashlib
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    # Manually create a DB with only schema_version at v99.
+    paths.bus_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(paths.db_path)
+    conn.execute(
+        "CREATE TABLE schema_version "
+        "(id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0)"
+    )
+    conn.execute("INSERT INTO schema_version (id, version) VALUES (1, 99)")
+    conn.commit()
+    journal_before = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    conn.close()
+
+    db_hash_before = hashlib.sha256(paths.db_path.read_bytes()).hexdigest()
+    wal_path = paths.db_path.parent / (paths.db_path.name + "-wal")
+    shm_path = paths.db_path.parent / (paths.db_path.name + "-shm")
+
+    # Use bridge.MigrationVersionError (same import chain as bridge_supervisor)
+    # rather than migrations.MigrationVersionError (_load_module creates a
+    # separate module instance with a different class identity).
+    with pytest.raises(bridge.MigrationVersionError, match="newer than this code"):
+        bridge.init_db(paths)
+
+    # DB must NOT have been mutated — no new tables, no journal change, no WAL files.
+    conn = sqlite3.connect(paths.db_path)
+    tables_after = sorted(
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    )
+    journal_after = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    conn.close()
+
+    assert tables_after == ["schema_version"], (
+        f"init_db created tables in a future-version DB: {tables_after}"
+    )
+    assert journal_after == journal_before, (
+        f"init_db changed journal_mode: {journal_before} -> {journal_after}"
+    )
+    db_hash_after = hashlib.sha256(paths.db_path.read_bytes()).hexdigest()
+    assert db_hash_after == db_hash_before, "init_db modified a future-version DB file"
+    assert not wal_path.exists(), "init_db created WAL sidecar on future-version DB"
+    assert not shm_path.exists(), "init_db created SHM sidecar on future-version DB"
+
+
+def test_cli_future_version_clean_error(tmp_path):
+    """'init' on future-version DB should emit ERROR line, not a traceback."""
+    import io
+    import contextlib
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    # Poison the schema version.
+    conn = sqlite3.connect(paths.db_path)
+    conn.execute("UPDATE schema_version SET version = 99 WHERE id = 1")
+    conn.commit()
+    conn.close()
+
+    stderr_buf = io.StringIO()
+    stdout_buf = io.StringIO()
+    with contextlib.redirect_stderr(stderr_buf), contextlib.redirect_stdout(stdout_buf):
+        result = bridge.main(["--repo-root", str(repo_root), "init"])
+
+    assert result == 1
+    stderr_output = stderr_buf.getvalue()
+    assert "ERROR:" in stderr_output, f"Expected ERROR: line, got: {stderr_output!r}"
+    assert "Traceback" not in stderr_output, (
+        f"CLI emitted traceback instead of clean error: {stderr_output!r}"
+    )
+
+
+def test_init_db_future_version_with_wal_sidecars_no_mutation(tmp_path):
+    """Future-version DB with WAL/SHM sidecars must not be mutated by init_db."""
+    import hashlib
+    import subprocess
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    paths.bus_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create a future-version DB in WAL mode with os._exit to leave sidecars.
+    creator_script = f"""
+import os, sqlite3
+conn = sqlite3.connect("{paths.db_path}")
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute(
+    "CREATE TABLE schema_version "
+    "(id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0)"
+)
+conn.execute("INSERT INTO schema_version (id, version) VALUES (1, 99)")
+conn.commit()
+os._exit(0)
+"""
+    subprocess.run(
+        [sys.executable, "-c", creator_script],
+        check=True, capture_output=True,
+    )
+
+    wal_path = paths.db_path.parent / (paths.db_path.name + "-wal")
+    shm_path = paths.db_path.parent / (paths.db_path.name + "-shm")
+    assert wal_path.exists(), "WAL sidecar must exist for this test"
+
+    db_hash_before = hashlib.sha256(paths.db_path.read_bytes()).hexdigest()
+    wal_existed_before = wal_path.exists()
+    shm_existed_before = shm_path.exists()
+
+    with pytest.raises(bridge.MigrationVersionError, match="newer than this code"):
+        bridge.init_db(paths)
+
+    db_hash_after = hashlib.sha256(paths.db_path.read_bytes()).hexdigest()
+    assert db_hash_after == db_hash_before, "init_db mutated future-version DB file"
+    # WAL/SHM sidecars must not have been removed.
+    if wal_existed_before:
+        assert wal_path.exists(), "init_db removed WAL sidecar from future-version DB"
+    if shm_existed_before:
+        assert shm_path.exists(), "init_db removed SHM sidecar from future-version DB"
+    # Visible tables must remain unchanged (catches WAL-only mutations).
+    conn = sqlite3.connect(paths.db_path)
+    tables_after = sorted(
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    )
+    conn.close()
+    assert "jobs" not in tables_after, (
+        f"init_db created tables via WAL on future-version DB: {tables_after}"
+    )

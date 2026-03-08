@@ -25,6 +25,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
+from bridge_migrations import MIGRATIONS, MigrationVersionError, run_pending_migrations
 
 BUS_DIR_NAME = ".agent_bus"
 DB_NAME = "bridge.db"
@@ -228,15 +229,60 @@ def open_db(paths: BridgePaths) -> sqlite3.Connection:
     conn = sqlite3.connect(paths.db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def init_db(paths: BridgePaths) -> None:
+def open_db_readonly(paths: BridgePaths) -> sqlite3.Connection:
+    """Open the bridge DB read-only: no runtime dirs, no WAL, no writes."""
+    conn = sqlite3.connect(paths.db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA query_only=ON")
+    return conn
+
+
+def _check_future_version(db_path: Path) -> None:
+    """Raise MigrationVersionError if the DB is from a newer version.
+
+    Opens the DB in read-only mode (SQLite URI ?mode=ro) so we never
+    trigger WAL recovery, journal changes, or any file mutation.
+    Path is URI-encoded to handle reserved chars (?, #, %) in directory names.
+    """
+    if not db_path.exists():
+        return  # fresh DB — safe to proceed
+    from urllib.parse import quote
+    encoded_path = quote(str(db_path), safe="/:")
+    try:
+        conn = sqlite3.connect(f"file:{encoded_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        return  # can't open read-only (permissions, etc.) — let init_db handle it
+    try:
+        row = conn.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_version'",
+        ).fetchone()
+        if row[0] == 0:
+            return  # pre-migration DB — safe to proceed
+        ver_row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+        if ver_row is not None and ver_row[0] > len(MIGRATIONS):
+            raise MigrationVersionError(
+                f"Database schema version ({ver_row[0]}) is newer than this code "
+                f"supports ({len(MIGRATIONS)}). Upgrade the bridge code."
+            )
+    finally:
+        conn.close()
+
+
+def init_db(paths: BridgePaths, *, verbose: bool = False) -> None:
+    _check_future_version(paths.db_path)
     ensure_runtime_dirs(paths)
     schema = (SCRIPT_DIR / "bridge_schema.sql").read_text(encoding="utf-8")
     with open_db(paths) as conn:
         conn.executescript(schema)
         conn.commit()
+        applied = run_pending_migrations(conn, verbose=verbose)
+        if applied and verbose:
+            print(f"  applied {applied} migration(s)")
     example = SCRIPT_DIR / "bridge_config.example.json"
     if example.exists() and not paths.config_path.exists():
         shutil.copyfile(example, paths.config_path)
@@ -1189,7 +1235,7 @@ def review_job(
 
 
 def print_status(paths: BridgePaths, job_id: str) -> None:
-    with open_db(paths) as conn:
+    with open_db_readonly(paths) as conn:
         job = read_job(conn, job_id)
         print(json.dumps({
             "job_id": job["job_id"],
@@ -1325,14 +1371,21 @@ def main(argv: list[str] | None = None) -> int:
             print(decision)
             return 0 if decision == "GO" else 1
         if args.command == "status":
+            if not paths.db_path.exists():
+                raise BridgeError("No bridge database found. Run 'init' first.")
+            _check_future_version(paths.db_path)
             print_status(paths, args.job_id)
             return 0
         if args.command == "render":
-            with open_db(paths) as conn:
+            if not paths.db_path.exists():
+                raise BridgeError("No bridge database found. Run 'init' first.")
+            _check_future_version(paths.db_path)
+            paths.rendered_dir.mkdir(parents=True, exist_ok=True)
+            with open_db_readonly(paths) as conn:
                 output = render_job(paths, conn, args.job_id)
             print(output)
             return 0
-    except (BridgeError, BridgeAdapterError) as exc:
+    except (BridgeError, BridgeAdapterError, MigrationVersionError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 1

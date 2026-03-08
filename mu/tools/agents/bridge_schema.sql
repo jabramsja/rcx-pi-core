@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   acceptance_checks_json TEXT NOT NULL,
   max_rounds INTEGER NOT NULL DEFAULT 2,
   current_round INTEGER NOT NULL DEFAULT 0,
-  terminal_decision TEXT
+  terminal_decision TEXT,
+  turns_modified_seq INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS turns (
@@ -29,6 +30,11 @@ CREATE TABLE IF NOT EXISTS turns (
   envelope_json TEXT,
   started_at TEXT NOT NULL,
   finished_at TEXT,
+  attempt_no INTEGER NOT NULL DEFAULT 1,
+  is_canonical INTEGER NOT NULL DEFAULT 1,
+  reviewer_input_ref TEXT,
+  reviewer_input_validation_sha TEXT,
+  reviewer_input_prompt_sha TEXT,
   FOREIGN KEY(job_id) REFERENCES jobs(job_id)
 );
 
@@ -42,4 +48,31 @@ CREATE TABLE IF NOT EXISTS validations (
   output_path TEXT NOT NULL,
   created_at TEXT NOT NULL,
   FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+);
+
+CREATE TABLE IF NOT EXISTS job_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  actor TEXT,
+  timestamp TEXT NOT NULL,
+  metadata TEXT,
+  FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+);
+
+CREATE TRIGGER IF NOT EXISTS job_actions_no_update
+BEFORE UPDATE ON job_actions
+BEGIN
+  SELECT RAISE(ABORT, 'job_actions is append-only: UPDATE not allowed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS job_actions_no_delete
+BEFORE DELETE ON job_actions
+BEGIN
+  SELECT RAISE(ABORT, 'job_actions is append-only: DELETE not allowed');
+END;
+
+CREATE TABLE IF NOT EXISTS schema_version (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  version INTEGER NOT NULL DEFAULT 0
 );
