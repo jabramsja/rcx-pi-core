@@ -37,7 +37,7 @@ from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH
 # 3. Be eliminated before self-hosting is complete
 #
 # The audit (tools/audit_semantic_purity.sh) counts these sites.
-# Host debt floor: host_recursion sites have a stable floor (match, substitute,
+# L2 floor: host_recursion sites have a stable floor (match, substitute,
 # step). These are bootstrap primitives — see STATUS.md for current level.
 # =============================================================================
 
