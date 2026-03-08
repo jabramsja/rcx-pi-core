@@ -153,10 +153,12 @@ function muHash(value) {
 const MAX_MU_HASH_CACHE = 10000;
 const _muHashCache = new Map();
 function muHashCached(value) {
-  // Deterministic cache key: sorted-key JSON with -0 disambiguation.
-  // JSON.stringify(-0) produces "0", losing the sign. We detect -0 during serialization
-  // and append a raw \x00 suffix to the key. JSON.stringify NEVER outputs raw \x00
-  // (it escapes U+0000 to \u0000), so no Mu value's JSON can collide with the suffix.
+  // Deterministic cache key: sorted-key JSON.
+  // F-14 fix: -0 position is not encoded in JSON (JSON.stringify(-0) → "0"),
+  // so {x:0,y:-0} and {x:-0,y:0} produce the same JSON key despite having
+  // different muHash values. Bypass cache entirely when value contains -0.
+  // muHash handles -0 correctly via Object.is(v, -0) ? '-0.0'.
+  // Performance: -0 is rare in practice; bypass has negligible impact.
   let hasNegZero = false;
   const json = JSON.stringify(value, (_, v) => {
     if (typeof v === 'number' && Object.is(v, -0)) hasNegZero = true;
@@ -167,16 +169,16 @@ function muHashCached(value) {
     }
     return v;
   });
-  const key = hasNegZero ? json + '\x00NEG_ZERO' : json;
-  const cached = _muHashCache.get(key);
+  if (hasNegZero) return muHash(value);
+  const cached = _muHashCache.get(json);
   if (cached !== undefined) {
     // LRU: delete and re-insert to move to end (most recently used)
-    _muHashCache.delete(key);
-    _muHashCache.set(key, cached);
+    _muHashCache.delete(json);
+    _muHashCache.set(json, cached);
     return cached;
   }
   const hash = muHash(value);
-  _muHashCache.set(key, hash);
+  _muHashCache.set(json, hash);
   // Evict oldest if over limit
   if (_muHashCache.size > MAX_MU_HASH_CACHE) {
     const oldest = _muHashCache.keys().next().value;

@@ -1,0 +1,24 @@
+{
+  "wave_id": "w8-js-negzero-hash-cache-correctness",
+  "repeat_run_speedup_ratio": 1.188519,
+  "parity_diff_count": 20,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.459244,
+  "repeat_run_raw_seconds": [
+    0.54582,
+    0.459244
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.54582
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.005064
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-07T23:53:44Z",
+  "collector_version": "2.2.0"
+}
