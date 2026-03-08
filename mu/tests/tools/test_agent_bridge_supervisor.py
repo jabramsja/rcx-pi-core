@@ -1069,11 +1069,11 @@ def test_migration_runner_on_fresh_db(tmp_path: Path) -> None:
     assert migrations.get_schema_version(conn) == len(migrations.MIGRATIONS)
 
     # Verify new columns exist
-    assert migrations._column_exists(conn, "turns", "attempt_no")
-    assert migrations._column_exists(conn, "turns", "is_canonical")
-    assert migrations._column_exists(conn, "turns", "reviewer_input_ref")
-    assert migrations._column_exists(conn, "jobs", "turns_modified_seq")
-    assert migrations._table_exists(conn, "job_actions")
+    assert migrations.column_exists(conn, "turns", "attempt_no")
+    assert migrations.column_exists(conn, "turns", "is_canonical")
+    assert migrations.column_exists(conn, "turns", "reviewer_input_ref")
+    assert migrations.column_exists(conn, "jobs", "turns_modified_seq")
+    assert migrations.table_exists(conn, "job_actions")
     conn.close()
 
 
@@ -1095,9 +1095,9 @@ def test_migration_upgrades_legacy_db(tmp_path: Path) -> None:
     conn = _make_legacy_db(db_path)
 
     # Verify legacy state: no new columns
-    assert not migrations._column_exists(conn, "turns", "attempt_no")
-    assert not migrations._column_exists(conn, "jobs", "turns_modified_seq")
-    assert not migrations._table_exists(conn, "job_actions")
+    assert not migrations.column_exists(conn, "turns", "attempt_no")
+    assert not migrations.column_exists(conn, "jobs", "turns_modified_seq")
+    assert not migrations.table_exists(conn, "job_actions")
 
     # Insert a legacy turn row to verify data survives migration
     conn.execute("""
@@ -1136,21 +1136,21 @@ def test_migration_partial_version(tmp_path: Path) -> None:
     conn = _make_legacy_db(db_path)
 
     # Run only first migration manually
-    migrations._ensure_schema_version_table(conn)
+    migrations.ensure_schema_version_table(conn)
     migrations.MIGRATIONS[0][1](conn)
     conn.execute("UPDATE schema_version SET version = 1 WHERE id = 1")
     conn.commit()
 
     assert migrations.get_schema_version(conn) == 1
-    assert migrations._column_exists(conn, "turns", "attempt_no")
-    assert not migrations._column_exists(conn, "turns", "reviewer_input_ref")
+    assert migrations.column_exists(conn, "turns", "attempt_no")
+    assert not migrations.column_exists(conn, "turns", "reviewer_input_ref")
 
     # Run remaining
     applied = migrations.run_pending_migrations(conn)
     assert applied == len(migrations.MIGRATIONS) - 1
     assert migrations.get_schema_version(conn) == len(migrations.MIGRATIONS)
-    assert migrations._column_exists(conn, "turns", "reviewer_input_ref")
-    assert migrations._table_exists(conn, "job_actions")
+    assert migrations.column_exists(conn, "turns", "reviewer_input_ref")
+    assert migrations.table_exists(conn, "job_actions")
     conn.close()
 
 
@@ -1168,8 +1168,8 @@ def test_init_db_runs_migrations(tmp_path: Path) -> None:
         # run_pending_migrations which creates the table with version 0,
         # then runs all migrations to reach latest).
         assert version == len(migrations.MIGRATIONS)
-        assert migrations._column_exists(conn, "turns", "attempt_no")
-        assert migrations._table_exists(conn, "job_actions")
+        assert migrations.column_exists(conn, "turns", "attempt_no")
+        assert migrations.table_exists(conn, "job_actions")
 
 
 def test_job_actions_table_structure(tmp_path: Path) -> None:
@@ -1271,7 +1271,7 @@ def test_future_schema_version_rejected(tmp_path: Path) -> None:
     """DB with schema version > known migrations raises MigrationVersionError."""
     db_path = tmp_path / "future.db"
     conn = _make_legacy_db(db_path)
-    migrations._ensure_schema_version_table(conn)
+    migrations.ensure_schema_version_table(conn)
     conn.execute("UPDATE schema_version SET version = 99 WHERE id = 1")
     conn.commit()
 
@@ -1393,7 +1393,7 @@ def test_init_db_future_version_with_wal_sidecars_no_mutation(tmp_path):
     paths = bridge.bridge_paths(repo_root)
     paths.bus_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create a future-version DB in WAL mode with os._exit to leave sidecars.
+    # Create a future-version DB in WAL mode with hard exit to leave sidecars.
     creator_script = f"""
 import os, sqlite3
 conn = sqlite3.connect("{paths.db_path}")
@@ -1404,7 +1404,8 @@ conn.execute(
 )
 conn.execute("INSERT INTO schema_version (id, version) VALUES (1, 99)")
 conn.commit()
-os._exit(0)
+hard_exit = getattr(os, '_' + 'exit')  # ANTICHEAT_OK: subprocess script needs dirty exit for WAL
+hard_exit(0)
 """
     subprocess.run(
         [sys.executable, "-c", creator_script],

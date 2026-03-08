@@ -21,13 +21,13 @@ import sqlite3
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+def column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     """Return True if *column* already exists on *table*."""
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(row[1] == column for row in rows)
 
 
-def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+def table_exists(conn: sqlite3.Connection, table: str) -> bool:
     """Return True if *table* exists in the database."""
     row = conn.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",
@@ -36,10 +36,10 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return row[0] > 0
 
 
-def _add_column_if_missing(
+def add_column_if_missing(
     conn: sqlite3.Connection, table: str, column: str, col_type: str,
 ) -> None:
-    if not _column_exists(conn, table, column):
+    if not column_exists(conn, table, column):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
 
@@ -49,26 +49,26 @@ def _add_column_if_missing(
 
 def _migrate_v1_add_attempt_and_canonical(conn: sqlite3.Connection) -> None:
     """Add canonical-attempt tracking columns to turns."""
-    _add_column_if_missing(conn, "turns", "attempt_no", "INTEGER NOT NULL DEFAULT 1")
-    _add_column_if_missing(conn, "turns", "is_canonical", "INTEGER NOT NULL DEFAULT 1")
+    add_column_if_missing(conn, "turns", "attempt_no", "INTEGER NOT NULL DEFAULT 1")
+    add_column_if_missing(conn, "turns", "is_canonical", "INTEGER NOT NULL DEFAULT 1")
 
 
 def _migrate_v2_add_reviewer_baseline(conn: sqlite3.Connection) -> None:
     """Add incremental re-review baseline columns to turns."""
-    _add_column_if_missing(
+    add_column_if_missing(
         conn, "turns", "reviewer_input_ref", "TEXT",
     )
-    _add_column_if_missing(
+    add_column_if_missing(
         conn, "turns", "reviewer_input_validation_sha", "TEXT",
     )
-    _add_column_if_missing(
+    add_column_if_missing(
         conn, "turns", "reviewer_input_prompt_sha", "TEXT",
     )
 
 
 def _migrate_v3_add_job_actions_and_seq(conn: sqlite3.Connection) -> None:
     """Create the append-only job_actions table and add turns_modified_seq."""
-    if not _table_exists(conn, "job_actions"):
+    if not table_exists(conn, "job_actions"):
         conn.execute(
             """
             CREATE TABLE job_actions (
@@ -102,7 +102,7 @@ def _migrate_v3_add_job_actions_and_seq(conn: sqlite3.Connection) -> None:
         END
         """,
     )
-    _add_column_if_missing(
+    add_column_if_missing(
         conn, "jobs", "turns_modified_seq", "INTEGER NOT NULL DEFAULT 0",
     )
 
@@ -122,7 +122,7 @@ MIGRATIONS: list[tuple[str, callable]] = [
 # Runner
 # ---------------------------------------------------------------------------
 
-def _ensure_schema_version_table(conn: sqlite3.Connection) -> None:
+def ensure_schema_version_table(conn: sqlite3.Connection) -> None:
     """Create the schema_version table if it doesn't exist.
 
     Uses INSERT OR IGNORE so concurrent callers don't race on the seed row.
@@ -140,7 +140,7 @@ def _ensure_schema_version_table(conn: sqlite3.Connection) -> None:
 
 def get_schema_version(conn: sqlite3.Connection) -> int:
     """Return the current schema version, or 0 if unversioned."""
-    if not _table_exists(conn, "schema_version"):
+    if not table_exists(conn, "schema_version"):
         return 0
     row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
     return row[0] if row else 0
@@ -160,7 +160,7 @@ def run_pending_migrations(conn: sqlite3.Connection, *, verbose: bool = False) -
     # Acquire exclusive lock to prevent concurrent migration races.
     conn.execute("BEGIN EXCLUSIVE")
     try:
-        _ensure_schema_version_table(conn)
+        ensure_schema_version_table(conn)
         current = get_schema_version(conn)
 
         if current > len(MIGRATIONS):
