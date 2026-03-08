@@ -31,12 +31,15 @@ Which tool to use and when:
 | `run_deep_analysis.py` | Full codebase health scan | Monthly, pre-release, or after large refactors | ~5-10 min |
 | `run_ci_review.py` | Lightweight CI review | Manual dispatch in GitHub Actions (API cost) | ~2-4 min |
 | `run_interactive.py` | Conversational agent session | When you want to dig deeper with follow-up questions | Interactive |
+| `bridge_supervisor.py` | Claude ↔ Codex collaboration bridge | After implementation, for independent Codex review; design deliberation | ~3-10 min |
 
 **Decision guide:**
 - Changed core code? → `run_review.py --depth full`
 - Security-sensitive change? → `run_review.py --rigorous`
 - Monthly health check? → `run_deep_analysis.py`
 - Want to explore a finding? → `run_interactive.py <agent> <files>`
+- Implementation ready for independent review? → `bridge_supervisor.py review`
+- Design proposal or question for dialectic? → `bridge_supervisor.py review --no-diff`
 
 ## Recommended Workflow Tiers
 
@@ -238,6 +241,30 @@ analysis - finding issues that static tests miss:
 - Strategic recommendations (advisor)
 
 **When to run:** Monthly, before major releases, or after large refactors. NOT for every push.
+
+## Bridge Supervisor (Claude ↔ Codex)
+
+For independent Codex review of implementation work or design deliberation:
+
+```bash
+# Hybrid review: Claude implements, Codex reviews independently
+python3 tools/agents/bridge_supervisor.py review \
+  --task "implement X" --summary "added X to Y" --reviewer codex -v
+
+# Design deliberation: no diff, Codex reviews proposal content
+python3 tools/agents/bridge_supervisor.py review \
+  --task-file proposal.md --summary "design review" \
+  --reviewer codex -v --no-diff
+
+# Full submit + run cycle (non-hybrid)
+python3 tools/agents/bridge_supervisor.py submit --task-file task.txt --reader claude --reviewer codex
+python3 tools/agents/bridge_supervisor.py run <job_id> -v --pause-after-reader
+python3 tools/agents/bridge_supervisor.py continue <job_id> -v
+```
+
+**Canonical spec:** `mu/docs/agents/AgentBridgeProtocol.v0.md`
+
+**Entrypoint:** `AGENT_BRIDGE.md`
 
 ## CI Integration
 

@@ -136,6 +136,30 @@ See `mu/docs/agents/AgentRunbook.v0.md` for all runners, depth levels, rigorous 
 
 ---
 
+## Agent Bridge (Claude ↔ Codex Collaboration)
+
+**What it is:** Local turn-based bridge for automated Claude ↔ Codex collaboration. One writer, one reviewer, evidence-first review via SQLite bus.
+
+**Canonical doc:** `mu/docs/agents/AgentBridgeProtocol.v0.md`
+
+**Default workflow:** All implementation work goes through bridge `review` for independent Codex review (Option C hybrid). Use `--no-diff` for design deliberation, questions, or non-code dialectic.
+
+**Quick start:**
+```bash
+# Hybrid review (Claude implements, Codex reviews)
+python3 tools/agents/bridge_supervisor.py review \
+  --task "implement X" --summary "added X to Y" --reviewer codex -v
+
+# Design deliberation (no diff, question/proposal review)
+python3 tools/agents/bridge_supervisor.py review \
+  --task-file proposal.md --summary "design review" \
+  --reviewer codex -v --no-diff
+```
+
+**Entrypoint:** `AGENT_BRIDGE.md` | **Spec:** `mu/docs/agents/AgentBridgeProtocol.v0.md`
+
+---
+
 ## Workflow
 
 **Branching model:** `dev` is the primary branch. There is no `main` branch in active use. All PRs target `dev`. CI workflows (green gate, fixture gates) trigger on push/PR to `dev`.

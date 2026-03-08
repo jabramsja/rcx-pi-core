@@ -50,6 +50,22 @@ python3 tools/agents/bridge_supervisor.py init
 cp tools/agents/bridge_config.example.json .agent_bus/bridge_config.json
 # edit .agent_bus/bridge_config.json with real local CLI commands
 
+# --- Hybrid review (recommended: Claude implements, Codex reviews) ---
+
+# Code review: Claude's implementation reviewed by Codex
+python3 tools/agents/bridge_supervisor.py review \
+  --task "implement feature X" \
+  --summary "added X to module Y, updated tests" \
+  --reviewer codex -v
+
+# Design deliberation: proposal/question reviewed without diff
+python3 tools/agents/bridge_supervisor.py review \
+  --task-file proposal.md \
+  --summary "design review for feature X" \
+  --reviewer codex -v --no-diff
+
+# --- Full submit + run cycle (non-hybrid) ---
+
 python3 tools/agents/bridge_supervisor.py submit \
   --task-file /path/to/task.txt \
   --wave-class MAINTENANCE \
