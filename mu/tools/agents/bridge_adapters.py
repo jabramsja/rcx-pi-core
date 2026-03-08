@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
+import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,28 +84,35 @@ def get_adapter(config: dict[str, Any], adapter_name: str) -> AdapterSpec:
     )
 
 
-def run_adapter(
-    spec: AdapterSpec,
-    *,
-    prompt_text: str,
-    prompt_path: Path,
-    repo_root: Path,
-    job_id: str,
-    turn_id: str,
-    agent_role: str,
-) -> str:
-    context = {
-        "prompt_file": str(prompt_path),
-        "repo_root": str(repo_root),
-        "job_id": job_id,
-        "turn_id": turn_id,
-        "agent_role": agent_role,
-    }
+def _prepare_adapter_env(spec: AdapterSpec, context: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    """Build command list and environment for an adapter invocation."""
     cmd = [_expand_value(part, context) for part in spec.cmd]
     env = os.environ.copy()
+    # Strip nesting-detection vars so Claude Code subprocess doesn't refuse to start
+    for nest_var in ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE"):
+        env.pop(nest_var, None)
     if spec.env:
         env.update({key: _expand_value(value, context) for key, value in spec.env.items()})
+    return cmd, env
 
+
+def _tee_stream(source: io.TextIOWrapper, sink: io.StringIO, tty: Any) -> None:
+    """Read from source, write to both sink (capture) and tty (live display)."""
+    for line in source:
+        sink.write(line)
+        if tty is not None:
+            tty.write(line)
+            tty.flush()
+
+
+def _run_adapter_buffered(
+    spec: AdapterSpec,
+    cmd: list[str],
+    env: dict[str, str],
+    prompt_text: str,
+    repo_root: Path,
+) -> str:
+    """Run adapter with full capture (no streaming)."""
     try:
         result = subprocess.run(
             cmd,
@@ -132,3 +142,94 @@ def run_adapter(
             f"Adapter '{spec.name}' exited {result.returncode}. Output tail:\n{snippet}"
         )
     return output
+
+
+def _run_adapter_streaming(
+    spec: AdapterSpec,
+    cmd: list[str],
+    env: dict[str, str],
+    prompt_text: str,
+    repo_root: Path,
+) -> str:
+    """Run adapter with live tee to terminal + full capture for raw output file."""
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE if spec.prompt_via_stdin else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=repo_root,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' command not found: {cmd[0]}"
+        ) from exc
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+
+    stdout_thread = threading.Thread(
+        target=_tee_stream,
+        args=(proc.stdout, stdout_buf, sys.stdout),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_tee_stream,
+        args=(proc.stderr, stderr_buf, sys.stderr),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    try:
+        if spec.prompt_via_stdin and proc.stdin is not None:
+            proc.stdin.write(prompt_text)
+            proc.stdin.close()
+        proc.wait(timeout=spec.timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        proc.wait()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
+        ) from exc
+
+    stdout_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
+
+    output = stdout_buf.getvalue()
+    stderr_text = stderr_buf.getvalue()
+    if stderr_text:
+        output = f"{output}\n[stderr]\n{stderr_text}".strip()
+    if proc.returncode != 0:
+        snippet = output[-1000:]
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}"
+        )
+    return output
+
+
+def run_adapter(
+    spec: AdapterSpec,
+    *,
+    prompt_text: str,
+    prompt_path: Path,
+    repo_root: Path,
+    job_id: str,
+    turn_id: str,
+    agent_role: str,
+    stream: bool = False,
+) -> str:
+    context = {
+        "prompt_file": str(prompt_path),
+        "repo_root": str(repo_root),
+        "job_id": job_id,
+        "turn_id": turn_id,
+        "agent_role": agent_role,
+    }
+    cmd, env = _prepare_adapter_env(spec, context)
+
+    if stream:
+        return _run_adapter_streaming(spec, cmd, env, prompt_text, repo_root)
+    return _run_adapter_buffered(spec, cmd, env, prompt_text, repo_root)
