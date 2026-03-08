@@ -1,0 +1,24 @@
+{
+  "wave_id": "docs-floor-label-fix",
+  "repeat_run_speedup_ratio": 1.323037,
+  "parity_diff_count": 20,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.368351,
+  "repeat_run_raw_seconds": [
+    0.487342,
+    0.368351
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.487342
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.855693
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-08T04:21:05Z",
+  "collector_version": "2.2.0"
+}
