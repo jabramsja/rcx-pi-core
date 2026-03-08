@@ -944,7 +944,7 @@ prompt = sys.stdin.read()
 job = re.search(r"JOB_ID: (.+)", prompt).group(1).strip()
 round_no = re.search(r"ROUND: (.+)", prompt).group(1).strip()
 # Check if diff was suppressed
-has_design_deliberation = "design deliberation" in prompt
+has_design_deliberation = "DESIGN DELIBERATION" in prompt
 envelope = {
     "job_id": job, "turn_id": f"{job}--r{round_no}-reviewer",
     "agent_role": "reviewer", "decision": "GO",

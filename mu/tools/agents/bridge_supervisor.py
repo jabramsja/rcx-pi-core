@@ -79,6 +79,70 @@ ENVELOPE_RE = re.compile(
 )
 
 
+def _build_code_review_instructions(
+    changed_actual: str,
+    staged: str,
+    unstaged: str,
+    validation_results_text: str,
+    reader_summary: str,
+    diff_text: str,
+) -> str:
+    return f"""\
+Review actual live candidate state, not the reader summary.
+
+Evidence available:
+- CHANGED_FILES_ACTUAL: {changed_actual}
+- STAGED_FILES: {staged}
+- UNSTAGED_FILES: {unstaged}
+- VALIDATION_RESULTS: {validation_results_text}
+- READER_OUTPUT: {reader_summary}
+
+Staged diff (up to 10000 chars):
+{diff_text}
+
+Required review scope:
+- red-team all touched files
+- red-team adjacent high-risk files implicated by those touches
+- classify findings as DEFECT, POLICY_BOUND, or DOC_ACCURACY
+
+Exhaustive enumeration requirement:
+- Do NOT stop at the first finding. Enumerate ALL issues before issuing your verdict.
+- For state machines / control flow: trace every state transition and check what happens if a crash occurs before, during, and after each transition.
+- For recovery paths: verify idempotency, primary key conflicts, format compatibility, and missing data.
+- For new APIs: verify error handling, edge cases, and backward compatibility.
+- Issue NO_GO only after you have listed every finding you can identify, not after finding just one."""
+
+
+def _build_design_deliberation_instructions(
+    validation_results_text: str,
+    reader_summary: str,
+) -> str:
+    return f"""\
+THIS IS A DESIGN DELIBERATION, NOT A CODE REVIEW.
+
+You are reviewing a DESIGN PROPOSAL — evaluate it on its design merits, trade-offs, feasibility, and completeness.
+
+DO NOT:
+- Read the local codebase to find implementation bugs
+- Run SQLite probes or Python repro scripts against local files
+- Red-team source files for crash recovery, state machines, or edge cases
+- Treat this as a code review or implementation pre-review
+
+DO:
+- Evaluate the design choices, architecture, and trade-offs in the proposal
+- Search the web to validate claims about external tools and their capabilities
+- Challenge whether the right features are being stolen from the right tools
+- Identify missing design considerations, architectural risks, or scope gaps
+- Give your independent opinion on priorities, phasing, and what to build vs skip
+- If the proposal references external tools/repos, look them up and verify the claims
+
+Evidence available:
+- READER_OUTPUT: {reader_summary}
+- VALIDATION_RESULTS: {validation_results_text}
+
+Classify findings as DEFECT (design flaw), POLICY_BOUND (needs founder decision), or DOC_ACCURACY (factual error in proposal)."""
+
+
 class BridgeError(RuntimeError):
     """Raised when supervisor execution cannot continue."""
 
@@ -425,28 +489,27 @@ def build_reviewer_prompt(
 ) -> str:
     template = load_template("bridge_reviewer_prompt.txt")
     reader_envelope = latest_envelope(conn, job["job_id"], role="reader") or {}
+    validation_text = _validation_results_text(validation_results)
+    reader_summary = reader_envelope.get("summary", "(none)")
     if include_diff:
         diff_text = staged_diff_content(paths.repo_root)
         changed_actual = _format_list(changed_files(paths.repo_root, staged=False) + changed_files(paths.repo_root, staged=True))
         staged = _format_list(changed_files(paths.repo_root, staged=True))
         unstaged = _format_list(changed_files(paths.repo_root, staged=False))
+        review_mode_instructions = _build_code_review_instructions(
+            changed_actual, staged, unstaged, validation_text, reader_summary, diff_text,
+        )
     else:
-        diff_text = "(no diff — this is a design deliberation, not a code review)"
-        changed_actual = "(n/a — design deliberation)"
-        staged = "(n/a)"
-        unstaged = "(n/a)"
+        review_mode_instructions = _build_design_deliberation_instructions(
+            validation_text, reader_summary,
+        )
     payload = {
         "job_id": job["job_id"],
         "round_no": round_no,
         "task_text": job["task_text"],
         "wave_class": job["wave_class"] or "(unspecified)",
         "repo_root": str(paths.repo_root),
-        "changed_files_actual": changed_actual,
-        "staged_files": staged,
-        "unstaged_files": unstaged,
-        "validation_results": _validation_results_text(validation_results),
-        "reader_summary": reader_envelope.get("summary", "(none)"),
-        "staged_diff": diff_text,
+        "review_mode_instructions": review_mode_instructions,
         "json_schema_stub": JSON_SCHEMA_STUB,
     }
     return template.safe_substitute(payload)
