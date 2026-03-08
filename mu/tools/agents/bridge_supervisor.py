@@ -988,16 +988,15 @@ def _run_reviewer_phase(
             update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
             raise
         review_state_end = compute_repo_state(paths.repo_root)
-        # Persist the supervisor's post-review state into the turn so crash
-        # recovery sees changes that happen after execute_agent_turn but
-        # before this stale check (the turn's own state_sha_end is captured
-        # inside execute_agent_turn which is slightly earlier).
-        if review_state_end.state_sha != review_state_start.state_sha:
-            conn.execute(
-                "UPDATE turns SET state_sha_end = ? WHERE turn_id = ?",
-                (review_state_end.state_sha, reviewer_turn_id),
-            )
-            conn.commit()
+        # Always persist the supervisor's post-review state into the turn
+        # unconditionally so crash recovery has the same view as the live
+        # stale check. Without this, recovery uses the state_sha_end from
+        # inside execute_agent_turn which is captured slightly earlier.
+        conn.execute(
+            "UPDATE turns SET state_sha_end = ? WHERE turn_id = ?",
+            (review_state_end.state_sha, reviewer_turn_id),
+        )
+        conn.commit()
         _log(verbose, "Reviewer complete.")
         if verbose:
             _print_envelope("reviewer", job["reviewer_agent"], reviewer_envelope)
