@@ -113,8 +113,10 @@ The envelope JSON is stored on `turns` so the supervisor can render transcripts 
 - `--reviewer`: which adapter reviews (default: `codex`)
 - `--wave-class`, `--check`, `--job-id`: same as `submit`
 - `--verbose` / `-v`: print structured envelope output inline (findings, decision, evidence)
+- `--no-diff`: omit git diff from reviewer prompt; use for design deliberation, questions, or non-code review where the diff would distract from the task content
 - reader agent is recorded as `claude-session`; touched files auto-detected from git
 - designed for the Option C workflow: Claude implements interactively, Codex reviews independently
+- also supports design deliberation: pass a proposal via `--task-file` with `--no-diff` for non-code dialectic
 
 6. `status` / `render`
 - inspect or regenerate the human-readable transcript
@@ -223,7 +225,7 @@ Plus any acceptance checks supplied at submission time.
 
 `.agent_bus/bridge_config.json` declares named adapters under `agents`.
 
-The `claude` adapter is verified for Claude Code CLI (`claude --print` with stdin piping). The `codex` adapter uses `codex exec - --sandbox full-auto` (writable sandbox with network access for test execution and web search). Claude is the sole implementer; Codex reviews unless Claude explicitly delegates implementation in the task.
+The `claude` adapter is verified for Claude Code CLI (`claude --print` with stdin piping). The `codex` adapter uses `codex exec - --sandbox danger-full-access` (full unrestricted sandbox — filesystem write, network, and process execution). This is the most permissive Codex sandbox mode; it is required for the reviewer to run tests, execute validation commands, and search the web for evidence. The reviewer role contract (read-only, no source edits) is enforced by the prompt, not by the sandbox. Claude is the sole implementer; Codex reviews unless Claude explicitly delegates implementation in the task.
 
 Each adapter defines:
 - `cmd`

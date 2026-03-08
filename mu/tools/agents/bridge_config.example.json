@@ -9,7 +9,7 @@
     },
     "codex": {
       "mode": "live",
-      "cmd": ["codex", "exec", "-", "--sandbox", "full-auto"],
+      "cmd": ["codex", "exec", "-", "--sandbox", "danger-full-access"],
       "prompt_via_stdin": true,
       "timeout_s": 1200,
       "env": {}

@@ -905,3 +905,78 @@ print("END_AGENT_ENVELOPE")
     assert "main.py:10" in captured
     assert "crash at line 10" in captured
     assert "fix it" in captured
+
+
+def test_no_diff_flag_cli_parsing(tmp_path: Path) -> None:
+    """The --no-diff flag should parse correctly on the review subcommand."""
+    args = bridge.build_parser().parse_args([
+        "--repo-root", str(tmp_path),
+        "review",
+        "--task", "design question",
+        "--summary", "context",
+        "--no-diff",
+    ])
+    assert args.no_diff is True
+
+    # Without --no-diff, default is False
+    args2 = bridge.build_parser().parse_args([
+        "--repo-root", str(tmp_path),
+        "review",
+        "--task", "code change",
+        "--summary", "did stuff",
+    ])
+    assert args2.no_diff is False
+
+
+def test_no_diff_review_omits_diff_from_reviewer_prompt(tmp_path: Path) -> None:
+    """When include_diff=False, the reviewer prompt should not contain git diff content."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+
+    # Create a file change so there IS a diff (but --no-diff should suppress it)
+    (tmp_path / "repo" / "new_file.py").write_text("print('hello')\n")
+    _git(tmp_path / "repo", "add", "new_file.py")
+
+    # Create a reviewer that echoes back the prompt so we can inspect it
+    echo_agent = tmp_path / "repo" / "echo_reviewer.py"
+    echo_agent.write_text("""\
+import json, re, sys
+prompt = sys.stdin.read()
+job = re.search(r"JOB_ID: (.+)", prompt).group(1).strip()
+round_no = re.search(r"ROUND: (.+)", prompt).group(1).strip()
+# Check if diff was suppressed
+has_design_deliberation = "design deliberation" in prompt
+envelope = {
+    "job_id": job, "turn_id": f"{job}--r{round_no}-reviewer",
+    "agent_role": "reviewer", "decision": "GO",
+    "summary": f"diff_suppressed={has_design_deliberation}",
+    "touched_files_claimed": [], "findings": [],
+    "validations_claimed": [], "request_for_next_agent": ""
+}
+print(f"BEGIN_AGENT_ENVELOPE\\n{json.dumps(envelope)}\\nEND_AGENT_ENVELOPE")
+""")
+
+    config = json.loads((paths.bus_dir / "bridge_config.json").read_text())
+    config["agents"]["codex"] = {
+        "mode": "live",
+        "cmd": [sys.executable, str(echo_agent)],
+        "prompt_via_stdin": True,
+        "timeout_s": 30,
+    }
+    (paths.bus_dir / "bridge_config.json").write_text(json.dumps(config))
+
+    result = bridge.review_job(
+        paths,
+        task_text="Should we add event streaming?",
+        reader_summary="Design deliberation about bridge UX improvements",
+        include_diff=False,
+    )
+    assert result == "GO"
+
+    # Verify the reviewer saw the "design deliberation" marker, not actual diff
+    with bridge.open_db(paths) as conn:
+        # Get the job_id from the most recent job
+        row = conn.execute("SELECT job_id FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        assert row is not None
+        reviewer_env = bridge.latest_envelope(conn, row["job_id"], role="reviewer")
+    assert reviewer_env is not None
+    assert "diff_suppressed=True" in reviewer_env["summary"]
