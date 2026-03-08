@@ -96,13 +96,16 @@ def _prepare_adapter_env(spec: AdapterSpec, context: dict[str, str]) -> tuple[li
     return cmd, env
 
 
-def _tee_stream(source: io.TextIOWrapper, sink: io.StringIO, tty: Any) -> None:
-    """Read from source, write to both sink (capture) and tty (live display)."""
+def _tee_stream(source: io.TextIOWrapper, sink: io.StringIO, tty: Any, raw_file: Any = None) -> None:
+    """Read from source, write to sink (capture), tty (live display), and raw_file (incremental persist)."""
     for line in source:
         sink.write(line)
         if tty is not None:
             tty.write(line)
             tty.flush()
+        if raw_file is not None:
+            raw_file.write(line)
+            raw_file.flush()
 
 
 def _run_adapter_buffered(
@@ -111,48 +114,14 @@ def _run_adapter_buffered(
     env: dict[str, str],
     prompt_text: str,
     repo_root: Path,
+    raw_output_path: Path | None = None,
 ) -> str:
-    """Run adapter with full capture (no streaming)."""
+    """Run adapter with full capture (no streaming), optionally writing to raw file incrementally."""
+    raw_fh = None
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt_text if spec.prompt_via_stdin else None,
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-            env=env,
-            timeout=spec.timeout_s,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise BridgeAdapterError(
-            f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
-        ) from exc
-    except FileNotFoundError as exc:
-        raise BridgeAdapterError(
-            f"Adapter '{spec.name}' command not found: {cmd[0]}"
-        ) from exc
+        if raw_output_path is not None:
+            raw_fh = open(raw_output_path, "w", encoding="utf-8")
 
-    output = result.stdout
-    if result.stderr:
-        output = f"{output}\n[stderr]\n{result.stderr}".strip()
-    if result.returncode != 0:
-        snippet = output[-1000:]
-        raise BridgeAdapterError(
-            f"Adapter '{spec.name}' exited {result.returncode}. Output tail:\n{snippet}"
-        )
-    return output
-
-
-def _run_adapter_streaming(
-    spec: AdapterSpec,
-    cmd: list[str],
-    env: dict[str, str],
-    prompt_text: str,
-    repo_root: Path,
-) -> str:
-    """Run adapter with live tee to terminal + full capture for raw output file."""
-    try:
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE if spec.prompt_via_stdin else None,
@@ -163,6 +132,89 @@ def _run_adapter_streaming(
             env=env,
         )
     except FileNotFoundError as exc:
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' command not found: {cmd[0]}"
+        ) from exc
+
+    stdout_lines: list[str] = []
+    stderr_buf = io.StringIO()
+
+    # Drain stderr concurrently to prevent pipe deadlock when child writes
+    # heavily to stderr while we block reading stdout line-by-line.
+    stderr_thread = threading.Thread(
+        target=_tee_stream,
+        args=(proc.stderr, stderr_buf, None),
+        daemon=True,
+    )
+    stderr_thread.start()
+
+    try:
+        if spec.prompt_via_stdin and proc.stdin is not None:
+            proc.stdin.write(prompt_text)
+            proc.stdin.close()
+        for line in proc.stdout:
+            stdout_lines.append(line)
+            if raw_fh is not None:
+                raw_fh.write(line)
+                raw_fh.flush()
+        proc.wait(timeout=spec.timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        proc.wait()
+        stderr_thread.join(timeout=5)
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
+        ) from exc
+
+    stderr_thread.join(timeout=5)
+
+    output = "".join(stdout_lines)
+    stderr_text = stderr_buf.getvalue()
+    if stderr_text:
+        output = f"{output}\n[stderr]\n{stderr_text}".strip()
+        if raw_fh is not None:
+            raw_fh.write(f"\n[stderr]\n{stderr_text}")
+            raw_fh.flush()
+    if raw_fh is not None:
+        raw_fh.close()
+    if proc.returncode != 0:
+        snippet = output[-1000:]
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}"
+        )
+    return output
+
+
+def _run_adapter_streaming(
+    spec: AdapterSpec,
+    cmd: list[str],
+    env: dict[str, str],
+    prompt_text: str,
+    repo_root: Path,
+    raw_output_path: Path | None = None,
+) -> str:
+    """Run adapter with live tee to terminal + full capture for raw output file."""
+    raw_fh = None
+    try:
+        if raw_output_path is not None:
+            raw_fh = open(raw_output_path, "w", encoding="utf-8")
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE if spec.prompt_via_stdin else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=repo_root,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        if raw_fh is not None:
+            raw_fh.close()
         raise BridgeAdapterError(
             f"Adapter '{spec.name}' command not found: {cmd[0]}"
         ) from exc
@@ -172,7 +224,7 @@ def _run_adapter_streaming(
 
     stdout_thread = threading.Thread(
         target=_tee_stream,
-        args=(proc.stdout, stdout_buf, sys.stdout),
+        args=(proc.stdout, stdout_buf, sys.stdout, raw_fh),
         daemon=True,
     )
     stderr_thread = threading.Thread(
@@ -191,6 +243,8 @@ def _run_adapter_streaming(
     except subprocess.TimeoutExpired as exc:
         proc.kill()
         proc.wait()
+        if raw_fh is not None:
+            raw_fh.close()
         raise BridgeAdapterError(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         ) from exc
@@ -202,6 +256,11 @@ def _run_adapter_streaming(
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
+        if raw_fh is not None:
+            raw_fh.write(f"\n[stderr]\n{stderr_text}")
+            raw_fh.flush()
+    if raw_fh is not None:
+        raw_fh.close()
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(
@@ -220,6 +279,7 @@ def run_adapter(
     turn_id: str,
     agent_role: str,
     stream: bool = False,
+    raw_output_path: Path | None = None,
 ) -> str:
     context = {
         "prompt_file": str(prompt_path),
@@ -231,5 +291,5 @@ def run_adapter(
     cmd, env = _prepare_adapter_env(spec, context)
 
     if stream:
-        return _run_adapter_streaming(spec, cmd, env, prompt_text, repo_root)
-    return _run_adapter_buffered(spec, cmd, env, prompt_text, repo_root)
+        return _run_adapter_streaming(spec, cmd, env, prompt_text, repo_root, raw_output_path)
+    return _run_adapter_buffered(spec, cmd, env, prompt_text, repo_root, raw_output_path)

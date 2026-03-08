@@ -25,6 +25,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
+from bridge_migrations import MIGRATIONS, MigrationVersionError, run_pending_migrations
 
 BUS_DIR_NAME = ".agent_bus"
 DB_NAME = "bridge.db"
@@ -47,7 +48,7 @@ JSON_SCHEMA_STUB = json.dumps(
         "job_id": "string",
         "turn_id": "string",
         "agent_role": "reader|reviewer",
-        "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR",
+        "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC",
         "summary": "string",
         "touched_files_claimed": ["string"],
         "findings": [
@@ -228,15 +229,60 @@ def open_db(paths: BridgePaths) -> sqlite3.Connection:
     conn = sqlite3.connect(paths.db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def init_db(paths: BridgePaths) -> None:
+def open_db_readonly(paths: BridgePaths) -> sqlite3.Connection:
+    """Open the bridge DB read-only: no runtime dirs, no WAL, no writes."""
+    conn = sqlite3.connect(paths.db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA query_only=ON")
+    return conn
+
+
+def _check_future_version(db_path: Path) -> None:
+    """Raise MigrationVersionError if the DB is from a newer version.
+
+    Opens the DB in read-only mode (SQLite URI ?mode=ro) so we never
+    trigger WAL recovery, journal changes, or any file mutation.
+    Path is URI-encoded to handle reserved chars (?, #, %) in directory names.
+    """
+    if not db_path.exists():
+        return  # fresh DB — safe to proceed
+    from urllib.parse import quote
+    encoded_path = quote(str(db_path), safe="/:")
+    try:
+        conn = sqlite3.connect(f"file:{encoded_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        return  # can't open read-only (permissions, etc.) — let init_db handle it
+    try:
+        row = conn.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_version'",
+        ).fetchone()
+        if row[0] == 0:
+            return  # pre-migration DB — safe to proceed
+        ver_row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+        if ver_row is not None and ver_row[0] > len(MIGRATIONS):
+            raise MigrationVersionError(
+                f"Database schema version ({ver_row[0]}) is newer than this code "
+                f"supports ({len(MIGRATIONS)}). Upgrade the bridge code."
+            )
+    finally:
+        conn.close()
+
+
+def init_db(paths: BridgePaths, *, verbose: bool = False) -> None:
+    _check_future_version(paths.db_path)
     ensure_runtime_dirs(paths)
     schema = (SCRIPT_DIR / "bridge_schema.sql").read_text(encoding="utf-8")
     with open_db(paths) as conn:
         conn.executescript(schema)
         conn.commit()
+        applied = run_pending_migrations(conn, verbose=verbose)
+        if applied and verbose:
+            print(f"  applied {applied} migration(s)")
     example = SCRIPT_DIR / "bridge_config.example.json"
     if example.exists() and not paths.config_path.exists():
         shutil.copyfile(example, paths.config_path)
@@ -559,6 +605,70 @@ def record_turn(
     conn.commit()
 
 
+def record_turn_start(
+    conn: sqlite3.Connection,
+    *,
+    turn_id: str,
+    job_id: str,
+    round_no: int,
+    agent_role: str,
+    state_sha_start: str,
+    prompt_path: Path,
+    raw_output_path: Path,
+    started_at: str,
+) -> None:
+    """Insert a RUNNING turn row before calling the adapter."""
+    conn.execute(
+        """
+        INSERT INTO turns(
+            turn_id, job_id, round_no, agent_role, status,
+            state_sha_start, prompt_path, raw_output_path, started_at
+        ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?)
+        """,
+        (
+            turn_id,
+            job_id,
+            round_no,
+            agent_role,
+            state_sha_start,
+            str(prompt_path),
+            str(raw_output_path),
+            started_at,
+        ),
+    )
+    conn.commit()
+
+
+def update_turn_complete(
+    conn: sqlite3.Connection,
+    *,
+    turn_id: str,
+    status: str,
+    decision: str | None = None,
+    state_sha_end: str | None = None,
+    envelope: dict[str, Any] | None = None,
+    finished_at: str | None = None,
+) -> None:
+    """Update a RUNNING turn row with final results."""
+    conn.execute(
+        """
+        UPDATE turns SET
+            status = ?, decision = ?, state_sha_end = ?,
+            envelope_json = ?, finished_at = ?
+        WHERE turn_id = ?
+        """,
+        (
+            status,
+            decision,
+            state_sha_end,
+            json.dumps(envelope, indent=2, sort_keys=True) if envelope else None,
+            finished_at,
+            turn_id,
+        ),
+    )
+    conn.commit()
+
+
 def update_job_status(conn: sqlite3.Connection, job_id: str, status: str, *, current_round: int | None = None, terminal_decision: str | None = None) -> None:
     updates = ["status = ?", "updated_at = ?"]
     values: list[Any] = [status, utc_now()]
@@ -613,10 +723,13 @@ def render_job(paths: BridgePaths, conn: sqlite3.Connection, job_id: str) -> Pat
     ])
     for turn in turns:
         envelope = json.loads(turn["envelope_json"]) if turn["envelope_json"] else {}
+        decision_display = turn['decision'] or '(none)'
+        if decision_display == "SYNTHETIC":
+            decision_display = "SYNTHETIC (founder session, not a real review)"
         lines.extend([
             f"### {turn['turn_id']} — {turn['agent_role']}",
             f"- Status: {turn['status']}",
-            f"- Decision: {turn['decision'] or '(none)'}",
+            f"- Decision: {decision_display}",
             f"- Summary: {envelope.get('summary', '(none)')}",
             f"- Claimed files: {', '.join(envelope.get('touched_files_claimed', [])) or '(none)'}",
         ])
@@ -706,26 +819,67 @@ def execute_agent_turn(
     prompt_text: str,
     attempt: int = 1,
     stream: bool = False,
+    prompt_baseline_sha: str | None = None,
 ) -> tuple[str, dict[str, Any], Path, Path, RepoState]:
     state_start = compute_repo_state(paths.repo_root)
-    turn_suffix = f"r{round_no}-{agent_role}" if attempt <= 1 else f"r{round_no}-{agent_role}-a{attempt}"
+    short_uuid = uuid.uuid4().hex[:8]
+    turn_suffix = f"r{round_no}-{agent_role}-{short_uuid}"
     turn_id = f"{job['job_id']}--{turn_suffix}"
     prompt_path = write_prompt(paths, job["job_id"], turn_id, prompt_text)
     started_at = utc_now()
 
+    # Validate adapter config BEFORE recording RUNNING turn to avoid phantom rows
     config = load_bridge_config(paths.config_path)
     adapter = get_adapter(config, adapter_name)
-    output = run_adapter(
-        adapter,
-        prompt_text=prompt_text,
-        prompt_path=prompt_path,
-        repo_root=paths.repo_root,
-        job_id=job["job_id"],
+
+    # Pre-allocate raw output file so it exists from adapter start
+    raw_dir = paths.raw_dir / job["job_id"]
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_output_path = raw_dir / f"{turn_id}.txt"
+
+    # Record RUNNING turn row BEFORE calling adapter
+    record_turn_start(
+        conn,
         turn_id=turn_id,
+        job_id=job["job_id"],
+        round_no=round_no,
         agent_role=agent_role,
-        stream=stream,
+        state_sha_start=state_start.state_sha,
+        prompt_path=prompt_path,
+        raw_output_path=raw_output_path,
+        started_at=started_at,
     )
-    raw_output_path = write_raw_output(paths, job["job_id"], turn_id, output)
+    # Store prompt-baseline sha for crash recovery staleness detection
+    if prompt_baseline_sha:
+        conn.execute(
+            "UPDATE turns SET reviewer_input_validation_sha = ? WHERE turn_id = ?",
+            (prompt_baseline_sha, turn_id),
+        )
+        conn.commit()
+    try:
+        output = run_adapter(
+            adapter,
+            prompt_text=prompt_text,
+            prompt_path=prompt_path,
+            repo_root=paths.repo_root,
+            job_id=job["job_id"],
+            turn_id=turn_id,
+            agent_role=agent_role,
+            stream=stream,
+            raw_output_path=raw_output_path,
+        )
+    except (BridgeAdapterError, Exception) as exc:
+        # Update turn to FAILED on adapter error
+        update_turn_complete(
+            conn,
+            turn_id=turn_id,
+            status="FAILED",
+            decision="ERROR",
+            state_sha_end=compute_repo_state(paths.repo_root).state_sha,
+            finished_at=utc_now(),
+        )
+        raise
+
     envelope = parse_envelope(output)
     state_end = compute_repo_state(paths.repo_root)
     finished_at = utc_now()
@@ -734,20 +888,13 @@ def execute_agent_turn(
     decision = envelope.get("decision", "ERROR")
     if decision == "STALE":
         status = "stale"
-    record_turn(
+    update_turn_complete(
         conn,
         turn_id=turn_id,
-        job_id=job["job_id"],
-        round_no=round_no,
-        agent_role=agent_role,
         status=status,
         decision=decision,
-        state_sha_start=state_start.state_sha,
         state_sha_end=state_end.state_sha,
-        prompt_path=prompt_path,
-        raw_output_path=raw_output_path,
         envelope=envelope,
-        started_at=started_at,
         finished_at=finished_at,
     )
     return turn_id, envelope, prompt_path, raw_output_path, state_start
@@ -823,18 +970,33 @@ def _run_reviewer_phase(
         _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
         review_state_start = compute_repo_state(paths.repo_root)
         reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
-        reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
-            conn,
-            paths,
-            read_job(conn, job_id),
-            round_no=round_no,
-            agent_role="reviewer",
-            adapter_name=job["reviewer_agent"],
-            prompt_text=reviewer_prompt,
-            attempt=reviewer_attempt,
-            stream=stream,
-        )
+        try:
+            reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
+                conn,
+                paths,
+                read_job(conn, job_id),
+                round_no=round_no,
+                agent_role="reviewer",
+                adapter_name=job["reviewer_agent"],
+                prompt_text=reviewer_prompt,
+                attempt=reviewer_attempt,
+                stream=stream,
+                prompt_baseline_sha=review_state_start.state_sha,
+            )
+        except BridgeAdapterError:
+            # Restore job status so continue/recovery works
+            update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
+            raise
         review_state_end = compute_repo_state(paths.repo_root)
+        # Always persist the supervisor's post-review state into the turn
+        # unconditionally so crash recovery has the same view as the live
+        # stale check. Without this, recovery uses the state_sha_end from
+        # inside execute_agent_turn which is captured slightly earlier.
+        conn.execute(
+            "UPDATE turns SET state_sha_end = ? WHERE turn_id = ?",
+            (review_state_end.state_sha, reviewer_turn_id),
+        )
+        conn.commit()
         _log(verbose, "Reviewer complete.")
         if verbose:
             _print_envelope("reviewer", job["reviewer_agent"], reviewer_envelope)
@@ -904,24 +1066,42 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             ).fetchone()
             if reviewer_turn is not None:
                 # Reviewer already completed — crash happened between record_turn and status update.
-                # Apply the recorded outcome instead of rerunning.
-                envelope = json.loads(reviewer_turn["envelope_json"]) if reviewer_turn["envelope_json"] else {}
-                decision = envelope.get("decision", "ERROR")
-                _log(verbose, f"Recovering: reviewer already completed (round {job['current_round']}). Applying recorded decision: {decision}")
-                if decision in ("GO", "NO_GO", "ERROR"):
-                    terminal = "GO" if decision == "GO" else decision
-                    update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=terminal)
-                elif decision == "QUESTION":
-                    update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=job["current_round"], terminal_decision="QUESTION")
-                elif decision == "REQUEST_CHANGES":
-                    if job["current_round"] >= job["max_rounds"]:
-                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision="NO_GO")
-                    else:
-                        update_job_status(conn, job_id, "READY_READER", current_round=job["current_round"])
+                # Check staleness: (1) state changed during execution, or (2) prompt was built
+                # against a different state than execution started with (stale prompt).
+                reviewer_sha_start = reviewer_turn["state_sha_start"]
+                reviewer_sha_end = reviewer_turn["state_sha_end"]
+                prompt_baseline = reviewer_turn["reviewer_input_validation_sha"]
+                execution_stale = reviewer_sha_start and reviewer_sha_end and reviewer_sha_start != reviewer_sha_end
+                prompt_stale = prompt_baseline and reviewer_sha_start and prompt_baseline != reviewer_sha_start
+                if execution_stale or prompt_stale:
+                    reason = "state changed during execution" if execution_stale else "prompt built against stale state"
+                    _log(verbose, f"Recovering: reviewer completed but {reason} (stale). Discarding verdict and retrying.")
+                    conn.execute(
+                        "UPDATE turns SET status = ?, decision = ? WHERE turn_id = ?",
+                        ("stale", "STALE", reviewer_turn["turn_id"]),
+                    )
+                    conn.commit()
+                    update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=job["current_round"])
+                    job = read_job(conn, job_id)
                 else:
-                    update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=decision or "ERROR")
-                render_job(paths, conn, job_id)
-                job = read_job(conn, job_id)
+                    # State was stable — apply the recorded outcome instead of rerunning.
+                    envelope = json.loads(reviewer_turn["envelope_json"]) if reviewer_turn["envelope_json"] else {}
+                    decision = envelope.get("decision", "ERROR")
+                    _log(verbose, f"Recovering: reviewer already completed (round {job['current_round']}). Applying recorded decision: {decision}")
+                    if decision in ("GO", "NO_GO", "ERROR"):
+                        terminal = "GO" if decision == "GO" else decision
+                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=terminal)
+                    elif decision == "QUESTION":
+                        update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=job["current_round"], terminal_decision="QUESTION")
+                    elif decision == "REQUEST_CHANGES":
+                        if job["current_round"] >= job["max_rounds"]:
+                            update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision="NO_GO")
+                        else:
+                            update_job_status(conn, job_id, "READY_READER", current_round=job["current_round"])
+                    else:
+                        update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=decision or "ERROR")
+                    render_job(paths, conn, job_id)
+                    job = read_job(conn, job_id)
             elif reader_turn is None:
                 # Reader never completed — reset round so it reruns
                 retry_round = max(0, job["current_round"] - 1)
@@ -994,16 +1174,22 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reader ({job['reader_agent']})...")
             reader_state = compute_repo_state(paths.repo_root)
             reader_prompt = build_reader_prompt(conn, paths, job, round_no, reader_state)
-            reader_turn_id, reader_envelope, _, raw_path, _ = execute_agent_turn(
-                conn,
-                paths,
-                job,
-                round_no=round_no,
-                agent_role="reader",
-                adapter_name=job["reader_agent"],
-                prompt_text=reader_prompt,
-                stream=verbose,
-            )
+            try:
+                reader_turn_id, reader_envelope, _, raw_path, _ = execute_agent_turn(
+                    conn,
+                    paths,
+                    job,
+                    round_no=round_no,
+                    agent_role="reader",
+                    adapter_name=job["reader_agent"],
+                    prompt_text=reader_prompt,
+                    stream=verbose,
+                )
+            except BridgeAdapterError:
+                # Restore to last completed round so the retry loop re-attempts this round
+                # (loop iterates from current_round + 1, so we must go back one)
+                update_job_status(conn, job_id, "READY_READER", current_round=max(0, round_no - 1))
+                raise
             _log(verbose, "Reader complete.")
             if verbose:
                 _print_envelope("reader", job["reader_agent"], reader_envelope)
@@ -1104,7 +1290,7 @@ def review_job(
         with open_db(paths) as conn:
             job = read_job(conn, final_job_id)
             round_no = 1
-            turn_id = f"{final_job_id}--r{round_no}-reader"
+            turn_id = f"{final_job_id}--r{round_no}-reader-{uuid.uuid4().hex[:8]}"
 
             # Build synthetic reader envelope from interactive session
             actual_staged = changed_files(paths.repo_root, staged=True)
@@ -1115,7 +1301,8 @@ def review_job(
                 "job_id": final_job_id,
                 "turn_id": turn_id,
                 "agent_role": "reader",
-                "decision": "GO",
+                "decision": "SYNTHETIC",
+                "synthetic": True,
                 "summary": reader_summary,
                 "touched_files_claimed": all_changed,
                 "findings": [],
@@ -1144,7 +1331,7 @@ def review_job(
                 round_no=round_no,
                 agent_role="reader",
                 status="completed",
-                decision="GO",
+                decision="SYNTHETIC",
                 state_sha_start=state.state_sha,
                 state_sha_end=state.state_sha,
                 prompt_path=prompt_path,
@@ -1189,7 +1376,7 @@ def review_job(
 
 
 def print_status(paths: BridgePaths, job_id: str) -> None:
-    with open_db(paths) as conn:
+    with open_db_readonly(paths) as conn:
         job = read_job(conn, job_id)
         print(json.dumps({
             "job_id": job["job_id"],
@@ -1325,14 +1512,21 @@ def main(argv: list[str] | None = None) -> int:
             print(decision)
             return 0 if decision == "GO" else 1
         if args.command == "status":
+            if not paths.db_path.exists():
+                raise BridgeError("No bridge database found. Run 'init' first.")
+            _check_future_version(paths.db_path)
             print_status(paths, args.job_id)
             return 0
         if args.command == "render":
-            with open_db(paths) as conn:
+            if not paths.db_path.exists():
+                raise BridgeError("No bridge database found. Run 'init' first.")
+            _check_future_version(paths.db_path)
+            paths.rendered_dir.mkdir(parents=True, exist_ok=True)
+            with open_db_readonly(paths) as conn:
                 output = render_job(paths, conn, args.job_id)
             print(output)
             return 0
-    except (BridgeError, BridgeAdapterError) as exc:
+    except (BridgeError, BridgeAdapterError, MigrationVersionError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 1

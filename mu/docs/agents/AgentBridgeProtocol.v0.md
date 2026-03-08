@@ -151,6 +151,7 @@ Supported decisions in v1:
 - `QUESTION`
 - `STALE`
 - `ERROR`
+- `SYNTHETIC` — used for hybrid review mode: the reader envelope is auto-generated (not from an agent) to indicate a synthetic pass-through
 
 Supervisor behavior:
 - `GO` => terminal success
@@ -159,6 +160,7 @@ Supervisor behavior:
 - `REQUEST_CHANGES` => next reader round if rounds remain
 - `STALE` => rerun reviewer
 - `ERROR` => terminal failure
+- `SYNTHETIC` => non-terminal; synthetic reader envelope in hybrid review (carries `"synthetic": true` flag)
 - `PAUSED` => returned by `run` when `--pause-after-reader` is active; job enters `AWAITING_REVIEWER_APPROVAL`
 
 ## Job States
@@ -177,7 +179,7 @@ Supervisor behavior:
 If the supervisor is interrupted mid-turn, the next `run` invocation detects incomplete state and recovers:
 - `READER_RUNNING` with no completed reader turn: resets to previous round and reruns reader
 - `READER_RUNNING` with completed reader turn: reruns validations (may have been incomplete) and advances to reviewer
-- `REVIEWER_RUNNING` with completed reviewer turn: applies the recorded decision without rerunning
+- `REVIEWER_RUNNING` with completed reviewer turn: checks staleness (state_sha_start vs state_sha_end); if state changed during execution, marks turn stale and retries; otherwise applies the recorded decision without rerunning
 - `REVIEWER_RUNNING` with no completed reviewer turn: resumes at reviewer
 
 In all cases, recovery sets `AWAITING_REVIEWER_APPROVAL` before entering the reviewer phase, which is the same state used by explicit `--pause-after-reader`. The `continue` command accepts any job in `AWAITING_REVIEWER_APPROVAL` regardless of how it got there (pause or recovery). Use `run` to trigger crash detection and recovery from `READER_RUNNING` or `REVIEWER_RUNNING` states.
@@ -187,9 +189,9 @@ In all cases, recovery sets `AWAITING_REVIEWER_APPROVAL` before entering the rev
 When `--verbose` / `-v` is used with `run`, `continue`, or `review`, the supervisor:
 1. Prints `[bridge]` step events (round start, agent start/finish, validation results)
 2. Prints structured envelope after each agent turn: decision, full summary, all findings with severity/file/evidence, touched files, and request_for_next_agent
-3. Streams agent stdout/stderr live to the terminal via tee (output is simultaneously captured for the raw output file)
+3. Streams agent stdout/stderr live to the terminal via tee (output is simultaneously captured for the raw output file, including both stdout and stderr sections)
 
-Without `--verbose`, agents run with fully buffered capture and no inline envelope display.
+Without `--verbose`, agents run with fully buffered capture and no inline envelope display. In both modes, stderr is drained concurrently (thread-based) to prevent deadlock when agents write heavily to stderr, and is appended as a `[stderr]` section in the raw output file.
 
 **Streaming limitations:** `claude --print` buffers all output until the response is complete — no incremental tokens appear during execution. Codex streams line-by-line. When the bridge is invoked from within the Claude Code Bash tool, all output appears only after the command finishes regardless of streaming. The streaming feature delivers its full value when the bridge is run from a standalone terminal shell.
 
