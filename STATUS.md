@@ -319,7 +319,7 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ```
 THRESHOLD: 11
 CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
-L2 FLOOR: 11 (see explanation below)
+FLOOR: 11 (see explanation below)
 INFRA_CEILING: 65
 INFRA_CURRENT: 65
 ```
@@ -336,23 +336,35 @@ INFRA_CURRENT: 65
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 11 is the L2 floor (not a target for reduction):**
-The `match()` and `substitute()` in eval_seed.py are NOT "reference implementations" - they ARE the bootstrap primitives that `eval_step()` uses to apply ANY projection. The production path is:
-1. `step_kernel_mu()` → `eval_step()` (on kernel.v1 + match.v2 + subst.v2)
-2. `eval_step()` → `apply_projection()` → `match()` + `substitute()` (eval_seed.py)
-3. `run_mu_structural()` → structural trace for Recurrence (Phase 8d)
-4. `run_algorithm_meta_circular()` → trusted algorithm execution (recurrence, exhaustion)
+**Why 11 is the host debt floor (not a target for reduction):**
+The 11 counts ALL host debt sites across L2 kernel, L3 boundary, and utilities:
+
+*L2 kernel substrate (7 sites):*
+1. `match()` in eval_seed.py — @host_recursion + @host_builtin (pattern matching bootstrap primitive)
+2. `substitute()` in eval_seed.py — @host_recursion (substitution bootstrap primitive)
+3. `step_kernel_mu()` in step_mu.py — @host_iteration (kernel execution loop)
+4. `run_mu_structural()` in step_mu.py — @host_iteration (structural trace for Recurrence)
+5. AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+
+*L3 boundary (1 site):*
+6. `run_mu()` in step_mu.py — @host_iteration (repeat-until-stall loop, L2 EXCLUDED by design)
+
+*Utility debt (3 sites):*
+7. `validate_deep_eval_state()` in deep_eval.py — @host_builtin (isinstance, set operations)
+8. `run_deep_eval()` in deep_eval.py — @host_builtin + @host_mutation (range iteration, history.append)
 
 These cannot be eliminated because:
 - eval_step needs to apply projections (pattern match + substitute)
 - match_mu/subst_mu use eval_step to apply THEIR projections
 - run_mu_structural provides trace accumulation for Recurrence
-- run_algorithm_meta_circular runs trusted internal algorithms through eval_step
+- run_mu is the L3 outer loop (repeat-until-stall scaffolding)
+- deep_eval provides iterative projection application with state tracking
+- run_algorithm_meta_circular delegates to eval_step (no own decorator, Gate 6 note)
 - Circular dependency: eliminating them would require eval_step to not exist
 
 **CP-S1A (wave 25):** Python `@host_mutation` on `match()` eliminated by converting `_match_inner`'s dict-key mutation (`bindings[k] = v`) to pure dict merge (`{**bindings, **sub_bindings}`). Construct genuinely removed from trusted runtime path. Floor reduced from 12→11. Remaining debt: 2 recursion, 3 builtin, 3 iteration, 1 mutation (deep_eval only), 2 AST_OK bootstrap.
 
-The debt of 11 represents the IRREDUCIBLE BOOTSTRAP SUBSTRATE for L2. L4 paths are documented:
+The debt of 11 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
@@ -652,7 +664,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - `tests/engine/test_phase8b_mechanical_kernel.py` (31 tests)
 - `tests/engine/test_phase8b_grounding_gaps.py` (12 tests)
 
-**Debt:** 12 (10 tracked decorators + 2 AST_OK bootstrap = L2 floor)
+**Debt:** 11 (9 tracked decorators + 2 AST_OK bootstrap = host debt floor; was 12 before CP-S1A wave 25)
 
 ---
 

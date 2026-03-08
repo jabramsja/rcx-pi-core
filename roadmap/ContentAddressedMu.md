@@ -51,7 +51,7 @@ This is not a new idea. It is the same principle behind:
 
 - **Projection semantics**: Projections remain pure Mu JSON. They don't see or manipulate hashes.
 - **Kernel state machine**: kernel.v1.json unchanged. Match/subst projections unchanged.
-- **Debt count**: Stays at 12 (irreducible L2 floor).
+- **Debt count**: Stays at 11 (irreducible host debt floor; was 12 before CP-S1A).
 - **L3 parity**: JS already has `muHash()`. Both substrates compute identical SHA-256.
 
 ### What Could Be DEMOTED

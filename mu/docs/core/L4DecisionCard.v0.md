@@ -350,7 +350,7 @@ Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
    | Forbidden changes | eval_seed.step(), match(), substitute(), step_kernel_mu() |
    | Bootstrap primitives | Must remain exactly 4 (no increase) |
    | BOOTSTRAP_PRIMITIVE markers | Py:4, JS:8 (no increase) |
-   | Debt ceiling | Must remain <=12 (L2 floor) |
+   | Debt ceiling | Must remain <=12 (host debt floor is 11; ceiling allows headroom) |
    | Infra ceiling | Must remain <=48 |
    | L3 parity | If any production change, JS must mirror |
    | Seed files | No modifications to kernel.v1, match.v2, subst.v2 |
