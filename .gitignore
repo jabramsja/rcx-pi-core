@@ -96,6 +96,7 @@ RCX_MINIMAL_SPINE_MANIFEST.json
 !.claude/settings.json
 !.claude/agents/
 .agent_memory/
+.agent_bus/
 experiments/
 
 # Reference documents (not source code)

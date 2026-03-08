@@ -1,126 +1,110 @@
-# Agent Bridge (Codex <-> Claude)
+# Agent Bridge
 
-Purpose: a single shared ledger for structured handoff and convergence.
+Purpose: define the tracked operator contract for automated Claude <-> Codex collaboration.
 
-Important: true "direct agent-to-agent chat" is not possible here. Best practice is:
-1) one agent makes changes,
-2) the other agent reviews/challenges,
-3) repeat until convergence.
+This file is **not** the live conversation ledger anymore.
+Runtime bridge state lives in untracked `.agent_bus/`.
 
-This file makes that loop fast and auditable.
+## Model
+
+Bridge v1 is intentionally narrow:
+1. one local supervisor process
+2. one writer agent
+3. one read-only reviewer agent
+4. turn-based execution
+5. SQLite bus for state and transcripts
+
+This keeps the collaboration auditable without introducing dual-writer merge problems or background-daemon complexity.
 
 ## Rules
 
-1. Single writer at a time.
-2. Never delete prior rounds; only append.
-3. Every claim must include evidence (command/test/file refs).
-4. If code changes are made, include exact files touched.
-5. End each round with a clear `REQUEST_FOR_NEXT_AGENT`.
+1. One supervisor run at a time.
+2. One writer, one reviewer.
+3. Git state is the source of truth for changed files.
+4. `.agent_bus/` is runtime state and must stay untracked.
+5. This file stays static; transcripts are rendered elsewhere.
 
-## Round Format (append-only)
+## Tracked vs Untracked
 
-Use this template exactly:
+Tracked in the repo:
+- `AGENT_BRIDGE.md` — operator contract and entrypoint
+- `mu/docs/agents/AgentBridgeProtocol.v0.md` — detailed protocol/spec
+- `tools/agents/bridge_supervisor.py` — bridge CLI
+- `tools/agents/bridge_schema.sql` — SQLite schema
+- `tools/agents/bridge_adapters.py` — generic command adapters
+- `tools/agents/templates/` — prompt templates
+- `tools/agents/bridge_config.example.json` — config template
 
-```md
-## Round <ID> — <AgentName>
-DATE: YYYY-MM-DD
-BRANCH: <branch>
-SCOPE: <short scope>
+Untracked runtime state:
+- `.agent_bus/bridge.db`
+- `.agent_bus/bridge_config.json`
+- `.agent_bus/prompts/`
+- `.agent_bus/raw/`
+- `.agent_bus/rendered/`
+- `.agent_bus/validations/`
 
-### Objective
-<what this round is trying to prove/do>
+## Quick Start
 
-### Changes
-- <file path>: <what changed>
+```bash
+python3 tools/agents/bridge_supervisor.py init
+cp tools/agents/bridge_config.example.json .agent_bus/bridge_config.json
+# edit .agent_bus/bridge_config.json with real local CLI commands
 
-### Evidence
-- Command: `<command>`
-  - Result: <short result>
-- File refs:
-  - `<absolute/or-workspace path>:<line>`
+python3 tools/agents/bridge_supervisor.py submit \
+  --task-file /path/to/task.txt \
+  --wave-class MAINTENANCE \
+  --reader claude \
+  --reviewer codex \
+  --allow-edits \
+  --check "./tools/pre-push-fast"
 
-### Findings
-- P1/P2/P3: <finding or "None">
-
-### Decision
-GO | NO-GO | GO-WITH-RISKS
-Reason: <1-3 lines>
-
-### REQUEST_FOR_NEXT_AGENT
-<single concrete request, acceptance checks, and expected output format>
+python3 tools/agents/bridge_supervisor.py run <job_id>
+python3 tools/agents/bridge_supervisor.py status <job_id>
+python3 tools/agents/bridge_supervisor.py render <job_id>
 ```
 
-## Acceptance Contract
+## Operating Rules
 
-When proposing completion, include:
+1. Single supervisor instance at a time.
+2. Writer may edit only if the submitted job allows edits.
+3. Reviewer is read-only by contract.
+4. Git state, not agent prose, is the source of truth for changed files.
+5. If the repo state changes during review, the review is stale and must be rerun.
+6. `.agent_bus/` is local runtime state and must not be committed.
 
-- Required tests run and results
-- `git diff --name-only` scope check
-- Residual risk statement
+## Round Format
 
-## Non-Negotiables
+Bridge v1 does not append rounds to this tracked file.
+The supervisor renders `.agent_bus/rendered/<job_id>.md` from:
+- job metadata
+- per-turn envelope summaries
+- recorded validation results
 
-- No hidden assumptions
-- No silent scope expansion
-- No "trust me" claims without reproducible evidence
-
-## Starter Prompt for Claude
-
-Use this with Claude:
+The required machine envelope from each agent remains:
 
 ```text
-Use /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/AGENT_BRIDGE.md as the only collaboration ledger.
-Read the latest round.
-If there is a REQUEST_FOR_NEXT_AGENT, execute it and append a new round using the exact template in that file.
-Do not rewrite prior rounds. Append only.
-Provide evidence-first output (commands/tests/file refs), then decision (GO/NO-GO), then next request.
+BEGIN_AGENT_ENVELOPE
+{ ...json... }
+END_AGENT_ENVELOPE
 ```
 
----
+## Scope Guard
 
-## Round 13A — Claude
-DATE: 2026-02-10
-BRANCH: dev (working tree, uncommitted)
-SCOPE: GAP-04-FIX design contract — no runtime changes
+Bridge v1 is for local orchestration only.
+It does **not** include:
+- background daemon mode
+- file watching
+- worktrees
+- dual-writer collaboration
+- markdown-as-database
 
-### Objective
-Turn GAP-04-FIX from "known gap" into a concrete, test-locked design contract promotable from VECTOR. Define Fix intent, input/output shapes, 5 invariants, disallowed behaviors, and 5 evidence items required for VECTOR → NEXT.
+## Detailed Spec
 
-### Changes
-- `mu/docs/core/EngineNewFixContract.v0.md` (new): Design contract for EngineNew step 4 (Rule 0.6). DOC_STATUS header (DESIGN_SPEC). Defines input shape (stalled_state, stall_hash, tau_step, engine_iteration), output shape (fixed_state, fix_applied, fix_type), 5 invariants (I1: minimality, I2: structural purity, I3: idempotence safety, I4: stall-breaking, I5: no semantic drift), disallowed behaviors table, and 5 evidence items (E1–E5) for promotion.
-- `tests/structural/test_engine_cycle_mapping.py`: Extended `GapEntry` NamedTuple with `contract_doc` (str) and `invariants` (tuple[str, ...]) fields. Updated GAP-04-FIX entry with contract doc ref, 5 invariant IDs, and E1–E5 in unblock_condition. Added `TestGapContractDocs` class (6 tests): doc exists on disk, ≥3 invariants declared, invariant labels cross-referenced in doc text, E1–E5 referenced in unblock_condition, DOC_STATUS governance compliance, consistency guard for gaps without contract docs.
-- `TASKS.md`: Expanded VECTOR GAP-04-FIX item with contract doc link and 5 explicit checkbox items (E1–E5).
+See [mu/docs/agents/AgentBridgeProtocol.v0.md](mu/docs/agents/AgentBridgeProtocol.v0.md) for:
+- bus schema
+- state machine
+- adapter contract
+- prompt envelope contract
+- transcript rendering rules
 
-### Evidence
-- Command: `PYTHONHASHSEED=0 pytest -q tests/structural/test_engine_cycle_mapping.py -v`
-  - Result: 22 passed (16 existing + 6 new TestGapContractDocs)
-- Command: `PYTHONHASHSEED=0 pytest -q tests/docs/test_roadmap_governance.py`
-  - Result: 11 passed
-- Command: `git diff --name-only`
-  - Result: `TASKS.md`, `tests/structural/test_engine_cycle_mapping.py` (2 modified files)
-- Command: `git status --short`
-  - Result: `M TASKS.md`, `M tests/structural/test_engine_cycle_mapping.py`, `?? mu/docs/core/EngineNewFixContract.v0.md` (new untracked), `?? AGENT_BRIDGE.md`, `?? reports/`
-- Structural/gap tally: 8 structural / 2 gaps (unchanged)
-- File refs:
-  - `mu/docs/core/EngineNewFixContract.v0.md:1` — new contract doc
-  - `tests/structural/test_engine_cycle_mapping.py:155` — GapEntry with contract_doc + invariants fields
-  - `tests/structural/test_engine_cycle_mapping.py:163` — GAP-04-FIX entry with 5 invariant IDs
-  - `tests/structural/test_engine_cycle_mapping.py:401` — TestGapContractDocs class (6 tests)
-  - `TASKS.md:371` — GAP-04-FIX with E1–E5 checkboxes
-
-### Findings
-- None. All tests pass, tally unchanged, no runtime files touched.
-
-### Decision
-GO
-Reason: GAP-04-FIX is now a test-locked design contract with 5 invariants (I1–I5), 5 evidence items (E1–E5), and cross-references enforced by 6 new tests. No runtime changes, no tally change, no ontology expansion. Ready for commit + PR.
-
-### REQUEST_FOR_NEXT_AGENT
-Commit and create PR for Round 13A:
-1. `git add mu/docs/core/EngineNewFixContract.v0.md tests/structural/test_engine_cycle_mapping.py TASKS.md`
-2. `git commit -m "docs(engine): add EngineNewFixContract.v0.md and lock GAP-04-FIX design contract"`
-3. Push to new branch `feat/round13a-gap04-fix-contract`
-4. Create PR against `dev` with title: "GAP-04-FIX: design contract with test-locked invariants and promotion checklist"
-5. Acceptance: `pytest -q tests/structural/test_engine_cycle_mapping.py` (22 pass), `pytest -q tests/docs/test_roadmap_governance.py` (11 pass), CI green.
-6. Append Round 13B to AGENT_BRIDGE.md with commit SHA, PR URL, and CI status.
-
+Questions? Concerns? Thoughts? -- Think hard
