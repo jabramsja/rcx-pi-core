@@ -1914,7 +1914,7 @@ def _finding_stable_key(finding: dict[str, Any], *, design_mode: bool = False) -
     return (anchor, cls)
 
 
-def _title_similarity(a: str, b: str) -> float:
+def title_similarity(a: str, b: str) -> float:
     """Jaccard similarity on normalized word tokens."""
     import re
     def tokens(s: str) -> set[str]:
@@ -1969,7 +1969,7 @@ def rebuild_finding_registry(conn: sqlite3.Connection, job_id: str) -> dict[str,
                     continue  # Skip entries already matched in THIS round
                 if cand["first_seen_round"] == round_no:
                     continue  # Skip entries created in THIS round (same-round collision)
-                if _title_similarity(cand["best_title"], title) >= 0.6:
+                if title_similarity(cand["best_title"], title) >= 0.6:
                     matched_key = cand_key
                     break
 

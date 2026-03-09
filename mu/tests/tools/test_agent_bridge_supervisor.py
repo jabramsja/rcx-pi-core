@@ -1954,7 +1954,7 @@ def test_finding_lifecycle_prompt_format() -> None:
 def test_title_similarity_matching() -> None:
     """Title similarity correctly identifies similar vs different findings."""
     # Similar titles should match
-    assert bridge._title_similarity("Missing null check", "missing null check") >= 0.6
-    assert bridge._title_similarity("error handling absent", "absent error handling") >= 0.6
+    assert bridge.title_similarity("Missing null check", "missing null check") >= 0.6
+    assert bridge.title_similarity("error handling absent", "absent error handling") >= 0.6
     # Different titles should not match
-    assert bridge._title_similarity("Missing null check", "Naming convention violation") < 0.6
+    assert bridge.title_similarity("Missing null check", "Naming convention violation") < 0.6
