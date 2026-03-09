@@ -485,7 +485,7 @@ Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_
 **Verification:**
 ```bash
 pytest tests/docs/test_doc_contracts.py -v  # Verify all doc claims
-python tools/docs/add_doc_headers.py --check     # Verify all docs have headers
+python3 -m tools.docs.add_doc_headers --check     # Verify all docs have headers
 ```
 
 **DO NOT:**

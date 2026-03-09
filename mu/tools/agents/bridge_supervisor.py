@@ -370,6 +370,99 @@ def staged_diff_content(repo_root: Path, max_chars: int = REVIEWER_DIFF_MAX_CHAR
     return diff
 
 
+# -- Validation command whitelist (shell injection prevention) --
+# Each entry maps a known command string to its tokenized argv form.
+# Only whitelisted commands may be executed via --check or built-in defaults.
+# To add a new validation command: add it here AND in the test suite.
+VALIDATION_WHITELIST: dict[str, list[str]] = {
+    # Built-in defaults
+    "git status --short": ["git", "status", "--short"],
+    "python3 tools/checks/enforce_l4_execution_contract.py --staged": [
+        "python3", "tools/checks/enforce_l4_execution_contract.py", "--staged",
+    ],
+    # Common acceptance checks (tools/checks/)
+    "bash tools/checks/check_docs_consistency.sh": [
+        "bash", "tools/checks/check_docs_consistency.sh",
+    ],
+    "bash tools/checks/check_test_speed.sh": [
+        "bash", "tools/checks/check_test_speed.sh",
+    ],
+    "bash tools/checks/check_test_theater.sh": [
+        "bash", "tools/checks/check_test_theater.sh",
+    ],
+    "bash tools/checks/check_test_theater_js.sh": [
+        "bash", "tools/checks/check_test_theater_js.sh",
+    ],
+    "bash tools/checks/check_js_debt.sh": [
+        "bash", "tools/checks/check_js_debt.sh",
+    ],
+    "bash tools/checks/check_untracked_artifacts.sh": [
+        "bash", "tools/checks/check_untracked_artifacts.sh",
+    ],
+    "bash tools/checks/check_agent_review_needed.sh": [
+        "bash", "tools/checks/check_agent_review_needed.sh",
+    ],
+    "bash tools/checks/enforce_tracker_sync.sh": [
+        "bash", "tools/checks/enforce_tracker_sync.sh",
+    ],
+    "python3 tools/checks/check_host_semantics_ratchet.py": [
+        "python3", "tools/checks/check_host_semantics_ratchet.py",
+    ],
+    "python3 tools/checks/check_gate_behavioral_pairs.py": [
+        "python3", "tools/checks/check_gate_behavioral_pairs.py",
+    ],
+    "python3 tools/checks/check_theater_risk_ratchet.py": [
+        "python3", "tools/checks/check_theater_risk_ratchet.py",
+    ],
+    "python3 tools/checks/check_seed_auto_execution_contract.py": [
+        "python3", "tools/checks/check_seed_auto_execution_contract.py",
+    ],
+    "python3 tools/checks/check_simulated_production_logic.py": [
+        "python3", "tools/checks/check_simulated_production_logic.py",
+    ],
+    "python3 tools/checks/check_agent_runtime.py": [
+        "python3", "tools/checks/check_agent_runtime.py",
+    ],
+    # Top-level audit/tool scripts
+    "./tools/pre-push-fast": ["./tools/pre-push-fast"],
+    "./tools/audit_fast.sh": ["./tools/audit_fast.sh"],
+    "./tools/audit_all.sh": ["./tools/audit_all.sh"],
+    "./tools/pre-commit-doc-check": ["./tools/pre-commit-doc-check"],
+    "./tools/debt_dashboard.sh": ["./tools/debt_dashboard.sh"],
+    # Doc tools
+    "python3 -m tools.docs.add_doc_headers --check": [
+        "python3", "-m", "tools.docs.add_doc_headers", "--check",
+    ],
+    "python3 tools/docs/docs_sync_report.py --check": [
+        "python3", "tools/docs/docs_sync_report.py", "--check",
+    ],
+    # Pytest invocations (common patterns)
+    "pytest tests/parity/test_seed_loading_parity.py -v": [
+        "pytest", "tests/parity/test_seed_loading_parity.py", "-v",
+    ],
+    "pytest tests/parity/test_cross_substrate_constants.py -v": [
+        "pytest", "tests/parity/test_cross_substrate_constants.py", "-v",
+    ],
+    # JS parity
+    "node mu/host/js/eval_step.js": ["node", "mu/host/js/eval_step.js"],
+}
+
+
+def resolve_validation_command(command: str) -> list[str]:
+    """Resolve a validation command string to a safe argv list via whitelist.
+
+    Raises BridgeError if the command is not in the whitelist.
+    """
+    argv = VALIDATION_WHITELIST.get(command)
+    if argv is not None:
+        return argv
+    raise BridgeError(
+        f"Validation command not in whitelist: {command!r}\n"
+        f"Add it to VALIDATION_WHITELIST in bridge_supervisor.py to allow execution.\n"
+        f"Known commands: {sorted(VALIDATION_WHITELIST.keys())}"
+    )
+
+
 def default_validation_commands(repo_root: Path, acceptance_checks: list[str]) -> list[str]:
     commands = ["git status --short"]
     enforcer = repo_root / "tools" / "checks" / "enforce_l4_execution_contract.py"
@@ -402,30 +495,66 @@ def run_validations(
     out_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
     for index, command in enumerate(commands, start=1):
-        proc = subprocess.run(
-            command,
-            shell=True,
-            cwd=paths.repo_root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        output = (proc.stdout or "") + ("\n[stderr]\n" + proc.stderr if proc.stderr else "")
+        try:
+            argv = resolve_validation_command(command)
+        except BridgeError as exc:
+            # Unknown command: record as validation failure instead of
+            # propagating, which would strand the job in READER_RUNNING.
+            exit_code = 1
+            output = f"[error] {exc}"
+            output_path = out_dir / f"validation-{index}.txt"
+            output_path.write_text(output, encoding="utf-8")
+            validation_id = f"{turn_id}-validation-{index}"
+            summary = summarize_validation_output(output, exit_code)
+            conn.execute(
+                """
+                INSERT INTO validations(validation_id, job_id, turn_id, command, exit_code, result_summary, output_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (validation_id, job_id, turn_id, command, exit_code, summary, str(output_path), utc_now()),
+            )
+            results.append(
+                {
+                    "command": command,
+                    "exit_code": exit_code,
+                    "result_summary": summary,
+                    "output_path": str(output_path),
+                }
+            )
+            continue
+        try:
+            validation_env = {**os.environ, "PYTHONHASHSEED": "0"}
+            proc = subprocess.run(
+                argv,
+                cwd=paths.repo_root,
+                env=validation_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            exit_code = proc.returncode
+            output = (proc.stdout or "") + ("\n[stderr]\n" + proc.stderr if proc.stderr else "")
+        except FileNotFoundError:
+            exit_code = 127
+            output = f"[error] command not found: {argv[0]}"
+        except OSError as exc:
+            exit_code = 126
+            output = f"[error] failed to execute: {exc}"
         output_path = out_dir / f"validation-{index}.txt"
         output_path.write_text(output, encoding="utf-8")
         validation_id = f"{turn_id}-validation-{index}"
-        summary = summarize_validation_output(output, proc.returncode)
+        summary = summarize_validation_output(output, exit_code)
         conn.execute(
             """
             INSERT INTO validations(validation_id, job_id, turn_id, command, exit_code, result_summary, output_path, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (validation_id, job_id, turn_id, command, proc.returncode, summary, str(output_path), utc_now()),
+            (validation_id, job_id, turn_id, command, exit_code, summary, str(output_path), utc_now()),
         )
         results.append(
             {
                 "command": command,
-                "exit_code": proc.returncode,
+                "exit_code": exit_code,
                 "result_summary": summary,
                 "output_path": str(output_path),
             }
@@ -782,6 +911,14 @@ def submit_job(
     acceptance_checks: list[str],
     job_id: str | None,
 ) -> str:
+    # Fail-closed: reject unknown acceptance checks at submit time
+    unknown = [cmd for cmd in acceptance_checks if cmd not in VALIDATION_WHITELIST]
+    if unknown:
+        raise BridgeError(
+            f"Unknown acceptance check(s) rejected at submit time: {unknown}\n"
+            f"Add to VALIDATION_WHITELIST in bridge_supervisor.py to allow execution.\n"
+            f"Known commands: {sorted(VALIDATION_WHITELIST.keys())}"
+        )
     init_db(paths)
     with open_db(paths) as conn:
         final_job_id = job_id or f"{slugify((wave_class or 'bridge') + '-' + task_text[:40])}-{uuid.uuid4().hex[:8]}"

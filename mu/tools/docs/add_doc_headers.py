@@ -8,9 +8,9 @@ This implements the documentation governance solution:
 - AI agents can parse these to understand doc freshness
 
 Usage:
-    python tools/add_doc_headers.py              # Add headers to docs without them
-    python tools/add_doc_headers.py --check      # Verify all docs have headers
-    python tools/add_doc_headers.py --dry-run    # Show what would be done
+    python3 -m tools.docs.add_doc_headers              # Add headers to docs without them
+    python3 -m tools.docs.add_doc_headers --check      # Verify all docs have headers
+    python3 -m tools.docs.add_doc_headers --dry-run    # Show what would be done
 """
 
 import argparse
@@ -206,7 +206,7 @@ def main():
             print(f"  ✗ {doc}")
 
         if without_headers:
-            print(f"\nRun 'python tools/add_doc_headers.py' to add headers")
+            print(f"\nRun 'python3 -m tools.docs.add_doc_headers' to add headers")
             return 1
         else:
             print("\nAll governed docs have headers!")

@@ -221,7 +221,7 @@ Built-ins in v1:
 
 Plus any acceptance checks supplied at submission time.
 
-**Shell execution:** Built-in and user-supplied acceptance checks run via `shell=True` (subprocess) to support pipes, redirects, and compound commands. Sanitize check commands before passing via `--check`.
+**Validation whitelist:** Acceptance checks are executed via `shell=False` (subprocess with argv list) for security. Only commands in the `VALIDATION_WHITELIST` dict in `bridge_supervisor.py` are allowed. Unknown `--check` values are rejected at submit time (before the job is created) with a `BridgeError` listing known commands. As defense-in-depth, unknown commands encountered at run time are recorded as failed validations. All validation subprocesses run with `PYTHONHASHSEED=0` in the environment. To add a new validation command, add it to `VALIDATION_WHITELIST`.
 
 ## Adapter Contract
 
