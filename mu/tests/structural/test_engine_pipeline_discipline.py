@@ -558,6 +558,7 @@ class TestEngineWithRoutingReturnShape:
 KNOWN_RUN_MU_CALLERS = {
     "run_hemisphere_routing",  # hemispheres.v1 routing
     "run_metabolization_cycle",  # metabolize_cycle.v1 structural walker
+    "_collect_ontology_evidence",  # evidence_walker.v1 trace walker
 }
 
 
@@ -585,11 +586,11 @@ class TestRunMuCallsiteInventory:
         )
 
     def test_caller_count_locked(self):
-        """Exactly 2 production callers of run_mu."""
+        """Exactly 3 production callers of run_mu."""
         source = _STEP_MU_PATH.read_text()
         actual = _find_callers(source, "run_mu")
-        assert len(actual) == 2, (
-            f"Expected 2 run_mu callers, found {len(actual)}: {actual}"
+        assert len(actual) == 3, (
+            f"Expected 3 run_mu callers, found {len(actual)}: {actual}"
         )
 
 

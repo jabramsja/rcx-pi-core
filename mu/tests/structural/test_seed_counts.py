@@ -27,7 +27,7 @@ MU_SEEDS = {
     "substrate": ["kernel.v1.json", "match.v1.json", "match.v2.json", "subst.v1.json", "subst.v2.json"],
     "closures": ["recurrence.v1.json", "recurrence.v2.json", "exhaustion.v1.json", "fix.v1.json"],
     "programs": ["rcx_engine.v1.json", "hemispheres.v1.json", "paxos_demo.v1.json", "metabolization.v1.json", "metabolize_cycle.v1.json"],
-    "utilities": ["classify.v1.json", "eval.v1.json", "terminal_classify.v1.json"],
+    "utilities": ["classify.v1.json", "eval.v1.json", "terminal_classify.v1.json", "evidence_walker.v1.json"],
     "bridge": ["bootstrap_structural.v1.json"],
 }
 
@@ -66,6 +66,7 @@ EXPECTED_COUNTS = {
     "bootstrap_structural.v1.json": 5,  # non-linear pattern support
     # mu/utilities/ (structural displacement)
     "terminal_classify.v1.json": 7,  # terminal classification + exit-reason derivation
+    "evidence_walker.v1.json": 4,   # structural trace walker for ontology evidence collection
 }
 
 # Expected namespace prefixes (self-hosting seeds only)
