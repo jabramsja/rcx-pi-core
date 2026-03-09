@@ -1607,3 +1607,376 @@ def test_reviewer_config_failure_restores_awaiting_status(tmp_path: Path) -> Non
     paths.config_path.write_text(json.dumps(good_config), encoding="utf-8")
     decision = bridge.continue_job(paths, job_id)
     assert decision == "GO"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Events
+# ---------------------------------------------------------------------------
+
+
+def _write_fake_agent(repo_root: Path) -> Path:
+    """Write a fake agent script for tests. Returns the script path."""
+    fake_agent = repo_root / "fake_agent.py"
+    if fake_agent.exists():
+        return fake_agent
+    fake_agent.write_text(
+        """
+import json
+import re
+import sys
+
+prompt = sys.stdin.read()
+job = re.search(r"JOB_ID: (.+)", prompt).group(1).strip()
+round_no = re.search(r"ROUND: (.+)", prompt).group(1).strip()
+role = "reviewer" if "You are the REVIEWER" in prompt else "reader"
+turn_id = f"r{round_no}-{role}"
+decision = "GO" if role == "reviewer" else "REQUEST_CHANGES"
+summary = "review complete" if role == "reviewer" else "reader pass complete"
+print("BEGIN_AGENT_ENVELOPE")
+print(json.dumps({
+    "job_id": job,
+    "turn_id": turn_id,
+    "agent_role": role,
+    "decision": decision,
+    "summary": summary,
+    "touched_files_claimed": [],
+    "findings": [{"file": "test.py", "class": "DEFECT", "severity": "medium",
+                   "title": "Test finding", "evidence_cmd": "echo test"}] if role == "reviewer" else [],
+    "validations_claimed": [],
+    "request_for_next_agent": "review" if role == "reader" else ""
+}))
+print("END_AGENT_ENVELOPE")
+""",
+        encoding="utf-8",
+    )
+    return fake_agent
+
+
+def test_events_shows_turn_lifecycle(tmp_path: Path) -> None:
+    """Events query synthesizes TURN_STARTED and TURN_COMPLETED pseudo-events."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    fake_agent = _write_fake_agent(repo_root)
+    config = {"agents": {
+        "claude": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+        "codex": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+    }}
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    job_id = bridge.submit_job(
+        paths, task_text="test events", reader_agent="claude",
+        reviewer_agent="codex", max_rounds=1, acceptance_checks=[],
+        scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
+    )
+    bridge.run_job(paths, job_id)
+
+    with bridge.open_db_readonly(paths) as conn:
+        events = bridge.query_events(conn, job_id)
+
+    # Should have at minimum: reader started, reader completed, reviewer started, reviewer completed
+    event_types = [e["event_type"] for e in events]
+    assert "TURN_STARTED" in event_types
+    assert "TURN_COMPLETED" in event_types
+    assert event_types.count("TURN_STARTED") >= 2  # reader + reviewer
+    assert event_types.count("TURN_COMPLETED") >= 2
+
+    # Events should be ordered by timestamp
+    timestamps = [e["timestamp"] for e in events]
+    assert timestamps == sorted(timestamps)
+
+
+def test_events_includes_validations(tmp_path: Path) -> None:
+    """Events include VALIDATION entries from the validations table."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    fake_agent = _write_fake_agent(repo_root)
+    config = {"agents": {
+        "claude": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+        "codex": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+    }}
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    job_id = bridge.submit_job(
+        paths, task_text="test events validations",
+        reader_agent="claude", reviewer_agent="codex",
+        max_rounds=1, acceptance_checks=["echo test-validation-check"],
+        scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
+    )
+    bridge.run_job(paths, job_id)
+
+    with bridge.open_db_readonly(paths) as conn:
+        events = bridge.query_events(conn, job_id)
+
+    event_types = [e["event_type"] for e in events]
+    assert "VALIDATION" in event_types
+
+
+def test_events_cursor_pagination(tmp_path: Path) -> None:
+    """Events cursor supports pagination (after_cursor filters earlier events)."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    fake_agent = _write_fake_agent(repo_root)
+    config = {"agents": {
+        "claude": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+        "codex": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+    }}
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    job_id = bridge.submit_job(
+        paths, task_text="test pagination", reader_agent="claude",
+        reviewer_agent="codex", max_rounds=1, acceptance_checks=[],
+        scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
+    )
+    bridge.run_job(paths, job_id)
+
+    with bridge.open_db_readonly(paths) as conn:
+        all_events = bridge.query_events(conn, job_id)
+        assert len(all_events) >= 4  # At least 4 events
+
+        # Paginate: get first 2, then rest
+        first_page = bridge.query_events(conn, job_id, limit=2)
+        assert len(first_page) == 2
+        cursor = first_page[-1]["cursor"]
+        second_page = bridge.query_events(conn, job_id, after_cursor=cursor)
+        assert len(second_page) == len(all_events) - 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Enhanced status
+# ---------------------------------------------------------------------------
+
+
+def test_status_all_lists_jobs(tmp_path: Path, capsys) -> None:
+    """status --all shows one-line-per-job summary."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    job1 = bridge.submit_job(
+        paths, task_text="job one", reader_agent="claude",
+        reviewer_agent="codex", max_rounds=1, acceptance_checks=[],
+        scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
+    )
+    job2 = bridge.submit_job(
+        paths, task_text="job two", reader_agent="claude",
+        reviewer_agent="codex", max_rounds=1, acceptance_checks=[],
+        scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
+    )
+
+    bridge.print_status(paths, job_id=None)
+    captured = capsys.readouterr()
+    assert job1 in captured.out
+    assert job2 in captured.out
+
+
+def test_status_single_job_enhanced(tmp_path: Path, capsys) -> None:
+    """Single-job status shows enhanced info (elapsed, last_completed, artifacts)."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    fake_agent = _write_fake_agent(repo_root)
+    config = {"agents": {
+        "claude": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+        "codex": {"cmd": [sys.executable, str(fake_agent)], "timeout_s": 30, "mode": "live"},
+    }}
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    job_id = bridge.submit_job(
+        paths, task_text="test enhanced status", reader_agent="claude",
+        reviewer_agent="codex", max_rounds=1, acceptance_checks=[],
+        scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
+    )
+    bridge.run_job(paths, job_id)
+
+    bridge.print_status(paths, job_id)
+    captured = capsys.readouterr()
+    info = json.loads(captured.out)
+    assert info["job_id"] == job_id
+    assert "elapsed" in info
+    assert "last_completed" in info
+    assert info["last_completed"]["decision"] == "GO"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Doctor
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_basic_checks(tmp_path: Path) -> None:
+    """Doctor runs all non-probe checks and returns structured results."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    checks = bridge.run_doctor(paths)
+    check_names = [c["check"] for c in checks]
+    assert "database" in check_names
+    assert "config" in check_names
+    assert "template" in check_names
+    assert "lock" in check_names
+    assert "worktree" in check_names
+
+    # DB should be OK since we just initialized
+    db_check = next(c for c in checks if c["check"] == "database")
+    assert db_check["status"] == "OK"
+
+
+def test_doctor_missing_db(tmp_path: Path) -> None:
+    """Doctor reports FAIL when DB doesn't exist."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    paths = bridge.bridge_paths(repo_root)
+
+    checks = bridge.run_doctor(paths)
+    db_check = next(c for c in checks if c["check"] == "database")
+    assert db_check["status"] == "FAIL"
+
+
+def test_doctor_cli_subcommand(tmp_path: Path) -> None:
+    """Doctor CLI subcommand returns 0 on healthy bridge."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    # Override config with commands that exist on any system (CI lacks claude/codex)
+    import json
+    config = {
+        "agents": {
+            "claude": {
+                "mode": "live",
+                "cmd": ["python3", "-c", "pass"],
+                "prompt_via_stdin": True,
+                "timeout_s": 30,
+                "env": {},
+            },
+            "codex": {
+                "mode": "live",
+                "cmd": ["python3", "-c", "pass"],
+                "prompt_via_stdin": True,
+                "timeout_s": 30,
+                "env": {},
+            },
+        }
+    }
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    ret = bridge.main(["--repo-root", str(repo_root), "doctor"])
+    assert ret == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Finding lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_finding_lifecycle_basic(tmp_path: Path) -> None:
+    """Finding lifecycle correctly tracks new and persisting findings."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    with bridge.open_db(paths) as conn:
+        # Create a job
+        job_id = "test-lifecycle"
+        conn.execute(
+            "INSERT INTO jobs(job_id, created_at, updated_at, status, task_text, "
+            "reader_agent, reviewer_agent, acceptance_checks_json, max_rounds) "
+            "VALUES (?, ?, ?, 'COMPLETED', 'test', 'claude', 'codex', '[]', 2)",
+            (job_id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        )
+
+        # Round 1 reviewer finds 2 issues
+        envelope_r1 = json.dumps({
+            "findings": [
+                {"file": "foo.py", "class": "DEFECT", "severity": "high",
+                 "title": "Missing null check"},
+                {"file": "bar.py", "class": "DESIGN", "severity": "medium",
+                 "title": "Naming convention violation"},
+            ],
+            "decision": "REQUEST_CHANGES", "summary": "needs fixes",
+            "touched_files_claimed": [], "validations_claimed": [],
+            "request_for_next_agent": "",
+        })
+        conn.execute(
+            "INSERT INTO turns(turn_id, job_id, round_no, agent_role, status, "
+            "state_sha_start, prompt_path, raw_output_path, started_at, "
+            "finished_at, decision, envelope_json, is_canonical) "
+            "VALUES (?, ?, 1, 'reviewer', 'completed', 'sha1', '/p', '/r', "
+            "'2026-01-01T00:00:01Z', '2026-01-01T00:00:02Z', 'REQUEST_CHANGES', ?, 1)",
+            ("r1-reviewer", job_id, envelope_r1),
+        )
+
+        # Round 2 reviewer finds 1 persisting + 1 new
+        envelope_r2 = json.dumps({
+            "findings": [
+                {"file": "foo.py", "class": "DEFECT", "severity": "high",
+                 "title": "Missing null check still present"},
+                {"file": "baz.py", "class": "PERF", "severity": "low",
+                 "title": "Unnecessary copy"},
+            ],
+            "decision": "GO", "summary": "mostly fixed",
+            "touched_files_claimed": [], "validations_claimed": [],
+            "request_for_next_agent": "",
+        })
+        conn.execute(
+            "INSERT INTO turns(turn_id, job_id, round_no, agent_role, status, "
+            "state_sha_start, prompt_path, raw_output_path, started_at, "
+            "finished_at, decision, envelope_json, is_canonical) "
+            "VALUES (?, ?, 2, 'reviewer', 'completed', 'sha2', '/p2', '/r2', "
+            "'2026-01-01T00:01:01Z', '2026-01-01T00:01:02Z', 'GO', ?, 1)",
+            ("r2-reviewer", job_id, envelope_r2),
+        )
+        conn.commit()
+
+        registry = bridge.rebuild_finding_registry(conn, job_id)
+
+    summary = registry["summary"]
+    # Round 2: "Missing null check" persists, "Naming convention" is addressed (disappeared
+    # from immediately previous round), "Unnecessary copy" is new
+    assert summary["persisting"] >= 1, f"Expected persisting findings, got {summary}"
+    assert summary["new"] >= 1, f"Expected new findings, got {summary}"
+    assert summary["addressed"] >= 1, f"Expected addressed findings, got {summary}"
+
+
+def test_finding_lifecycle_prompt_format() -> None:
+    """format_lifecycle_prompt_section produces expected string format."""
+    registry = {
+        "summary": {"new": 1, "persisting": 2, "addressed": 0, "silent": 1, "regression": 0},
+    }
+    result = bridge.format_lifecycle_prompt_section(registry)
+    assert "PRIOR FINDINGS:" in result
+    assert "1 new" in result
+    assert "2 persisting" in result
+    assert "1 silent" in result
+
+
+def test_title_similarity_matching() -> None:
+    """Title similarity correctly identifies similar vs different findings."""
+    # Similar titles should match
+    assert bridge.title_similarity("Missing null check", "missing null check") >= 0.6
+    assert bridge.title_similarity("error handling absent", "absent error handling") >= 0.6
+    # Different titles should not match
+    assert bridge.title_similarity("Missing null check", "Naming convention violation") < 0.6

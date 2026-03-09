@@ -118,10 +118,10 @@ def _run_adapter_buffered(
 ) -> str:
     """Run adapter with full capture (no streaming), optionally writing to raw file incrementally."""
     raw_fh = None
-    try:
-        if raw_output_path is not None:
-            raw_fh = open(raw_output_path, "w", encoding="utf-8")
+    if raw_output_path is not None:
+        raw_fh = open(raw_output_path, "w", encoding="utf-8")
 
+    try:
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE if spec.prompt_via_stdin else None,
@@ -137,6 +137,12 @@ def _run_adapter_buffered(
         raise BridgeAdapterError(
             f"Adapter '{spec.name}' command not found: {cmd[0]}"
         ) from exc
+    except PermissionError as exc:
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' command not executable: {cmd[0]}"
+        ) from exc
 
     stdout_lines: list[str] = []
     stderr_buf = io.StringIO()
@@ -150,17 +156,38 @@ def _run_adapter_buffered(
     )
     stderr_thread.start()
 
+    # Watchdog timer: kill the process if it exceeds timeout_s.
+    # This covers the case where the process hangs without producing output
+    # (the `for line in proc.stdout` loop blocks until stdout closes).
+    timed_out = threading.Event()
+
+    def _kill_after_timeout() -> None:
+        timed_out.set()
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    watchdog = threading.Timer(spec.timeout_s, _kill_after_timeout)
+    watchdog.daemon = True
+    watchdog.start()
+
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
-            proc.stdin.write(prompt_text)
-            proc.stdin.close()
+            try:
+                proc.stdin.write(prompt_text)
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass  # Process exited early; continue to read remaining output
         for line in proc.stdout:
             stdout_lines.append(line)
             if raw_fh is not None:
                 raw_fh.write(line)
                 raw_fh.flush()
         proc.wait(timeout=spec.timeout_s)
+        watchdog.cancel()
     except subprocess.TimeoutExpired as exc:
+        watchdog.cancel()
         proc.kill()
         proc.wait()
         stderr_thread.join(timeout=5)
@@ -169,6 +196,16 @@ def _run_adapter_buffered(
         raise BridgeAdapterError(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         ) from exc
+
+    if timed_out.is_set() and proc.returncode is None:
+        # Timer fired AND process hasn't completed — genuine timeout
+        proc.wait()
+        stderr_thread.join(timeout=5)
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
+        )
 
     stderr_thread.join(timeout=5)
 
@@ -199,10 +236,10 @@ def _run_adapter_streaming(
 ) -> str:
     """Run adapter with live tee to terminal + full capture for raw output file."""
     raw_fh = None
-    try:
-        if raw_output_path is not None:
-            raw_fh = open(raw_output_path, "w", encoding="utf-8")
+    if raw_output_path is not None:
+        raw_fh = open(raw_output_path, "w", encoding="utf-8")
 
+    try:
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE if spec.prompt_via_stdin else None,
@@ -217,6 +254,12 @@ def _run_adapter_streaming(
             raw_fh.close()
         raise BridgeAdapterError(
             f"Adapter '{spec.name}' command not found: {cmd[0]}"
+        ) from exc
+    except PermissionError as exc:
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' command not executable: {cmd[0]}"
         ) from exc
 
     stdout_buf = io.StringIO()
@@ -237,8 +280,11 @@ def _run_adapter_streaming(
 
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
-            proc.stdin.write(prompt_text)
-            proc.stdin.close()
+            try:
+                proc.stdin.write(prompt_text)
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass  # Process exited early; continue to wait for remaining output
         proc.wait(timeout=spec.timeout_s)
     except subprocess.TimeoutExpired as exc:
         proc.kill()
