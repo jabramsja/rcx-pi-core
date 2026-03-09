@@ -24,7 +24,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
+from bridge_adapters import BridgeAdapterError, _prepare_adapter_env, get_adapter, load_bridge_config, run_adapter
 from bridge_migrations import MIGRATIONS, MigrationVersionError, run_pending_migrations
 
 BUS_DIR_NAME = ".agent_bus"
@@ -549,6 +549,11 @@ def build_reviewer_prompt(
         review_mode_instructions = _build_design_deliberation_instructions(
             validation_text, reader_summary,
         )
+    # Inject prior-finding lifecycle context when available (round > 1)
+    lifecycle_section = ""
+    if round_no > 1:
+        registry = rebuild_finding_registry(conn, job["job_id"])
+        lifecycle_section = format_lifecycle_prompt_section(registry)
     payload = {
         "job_id": job["job_id"],
         "round_no": round_no,
@@ -557,6 +562,7 @@ def build_reviewer_prompt(
         "repo_root": str(paths.repo_root),
         "review_mode_instructions": review_mode_instructions,
         "json_schema_stub": JSON_SCHEMA_STUB,
+        "prior_findings": lifecycle_section,
     }
     return template.safe_substitute(payload)
 
@@ -880,7 +886,18 @@ def execute_agent_turn(
         )
         raise
 
-    envelope = parse_envelope(output)
+    try:
+        envelope = parse_envelope(output)
+    except Exception:
+        update_turn_complete(
+            conn,
+            turn_id=turn_id,
+            status="FAILED",
+            decision="ERROR",
+            state_sha_end=compute_repo_state(paths.repo_root).state_sha,
+            finished_at=utc_now(),
+        )
+        raise
     state_end = compute_repo_state(paths.repo_root)
     finished_at = utc_now()
 
@@ -966,11 +983,11 @@ def _run_reviewer_phase(
     reviewer_envelope: dict[str, Any] | None = None
     while reviewer_attempt < 2:
         reviewer_attempt += 1
-        update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
-        _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
-        review_state_start = compute_repo_state(paths.repo_root)
-        reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
         try:
+            update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
+            _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
+            review_state_start = compute_repo_state(paths.repo_root)
+            reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
             reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
                 conn,
                 paths,
@@ -983,8 +1000,10 @@ def _run_reviewer_phase(
                 stream=stream,
                 prompt_baseline_sha=review_state_start.state_sha,
             )
-        except BridgeAdapterError:
-            # Restore job status so continue/recovery works
+        except BaseException:
+            # Restore job status so continue/recovery works.
+            # Catch BaseException to ensure job status is NEVER left stranded in
+            # *_RUNNING regardless of exception type (PermissionError, BrokenPipeError, etc).
             update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
             raise
         review_state_end = compute_repo_state(paths.repo_root)
@@ -1169,12 +1188,12 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             # REQUEST_CHANGES — fall through to normal loop for remaining rounds
 
         for round_no in range(job["current_round"] + 1, job["max_rounds"] + 1):
-            update_job_status(conn, job_id, "READER_RUNNING", current_round=round_no)
-            job = read_job(conn, job_id)
-            _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reader ({job['reader_agent']})...")
-            reader_state = compute_repo_state(paths.repo_root)
-            reader_prompt = build_reader_prompt(conn, paths, job, round_no, reader_state)
             try:
+                update_job_status(conn, job_id, "READER_RUNNING", current_round=round_no)
+                job = read_job(conn, job_id)
+                _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reader ({job['reader_agent']})...")
+                reader_state = compute_repo_state(paths.repo_root)
+                reader_prompt = build_reader_prompt(conn, paths, job, round_no, reader_state)
                 reader_turn_id, reader_envelope, _, raw_path, _ = execute_agent_turn(
                     conn,
                     paths,
@@ -1185,9 +1204,10 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
                     prompt_text=reader_prompt,
                     stream=verbose,
                 )
-            except BridgeAdapterError:
-                # Restore to last completed round so the retry loop re-attempts this round
-                # (loop iterates from current_round + 1, so we must go back one)
+            except BaseException:
+                # Restore to last completed round so the retry loop re-attempts this round.
+                # Catch BaseException to ensure job status is NEVER left stranded in
+                # *_RUNNING regardless of exception type (PermissionError, BrokenPipeError, etc).
                 update_job_status(conn, job_id, "READY_READER", current_round=max(0, round_no - 1))
                 raise
             _log(verbose, "Reader complete.")
@@ -1375,10 +1395,42 @@ def review_job(
             return "REQUEST_CHANGES"
 
 
-def print_status(paths: BridgePaths, job_id: str) -> None:
+def print_status(paths: BridgePaths, job_id: str | None = None, *, show_latest: bool = False) -> None:
+    """Enhanced status: per-job detail or all-jobs summary.
+
+    job_id semantics:
+    - None + show_latest=False: all-jobs summary (--all mode)
+    - None + show_latest=True: show detail for the most recent job (bare status)
+    - any string: show detail for that specific job
+    """
     with open_db_readonly(paths) as conn:
+        if job_id is None and not show_latest:
+            # --all mode: one-line-per-job summary
+            jobs = conn.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC"
+            ).fetchall()
+            if not jobs:
+                print("No bridge jobs found.")
+                return
+            for job in jobs:
+                elapsed = _elapsed_str(job["created_at"])
+                decision = job["terminal_decision"] or ""
+                print(f"{job['job_id']}  {job['status']:<30s}  "
+                      f"round {job['current_round']}/{job['max_rounds']}  "
+                      f"{elapsed}  {decision}")
+            return
+
+        if job_id is None and show_latest:
+            latest = conn.execute(
+                "SELECT job_id FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+            if not latest:
+                print("No bridge jobs found.")
+                return
+            job_id = latest["job_id"]
+
         job = read_job(conn, job_id)
-        print(json.dumps({
+        info: dict[str, Any] = {
             "job_id": job["job_id"],
             "status": job["status"],
             "reader_agent": job["reader_agent"],
@@ -1386,7 +1438,614 @@ def print_status(paths: BridgePaths, job_id: str) -> None:
             "current_round": job["current_round"],
             "max_rounds": job["max_rounds"],
             "terminal_decision": job["terminal_decision"],
-        }, indent=2))
+            "created_at": job["created_at"],
+            "elapsed": _elapsed_str(job["created_at"]),
+        }
+        # In-flight turn data
+        running = conn.execute(
+            "SELECT * FROM turns WHERE job_id = ? AND status = 'RUNNING' "
+            "ORDER BY started_at DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        if running:
+            raw_path = Path(running["raw_output_path"])
+            info["in_flight"] = {
+                "turn_id": running["turn_id"],
+                "role": running["agent_role"],
+                "started_at": running["started_at"],
+                "elapsed": _elapsed_str(running["started_at"]),
+                "raw_file": str(raw_path),
+                "raw_size_bytes": raw_path.stat().st_size if raw_path.exists() else 0,
+            }
+        # Last completed turn
+        last = conn.execute(
+            "SELECT * FROM turns WHERE job_id = ? AND status = 'completed' "
+            "ORDER BY finished_at DESC, rowid DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        if last:
+            envelope = json.loads(last["envelope_json"]) if last["envelope_json"] else {}
+            info["last_completed"] = {
+                "turn_id": last["turn_id"],
+                "role": last["agent_role"],
+                "decision": last["decision"],
+                "finding_count": len(envelope.get("findings", [])),
+            }
+        # Artifact discovery — match exact job_id dir or file prefix with separator
+        artifacts: dict[str, list[str]] = {}
+        for subdir_name in ("prompts", "raw", "rendered"):
+            subdir = paths.bus_dir / subdir_name
+            if subdir.exists():
+                # Match job_id exactly as directory name, or file starting with job_id
+                # followed by a non-alphanumeric separator (prevents job-1 matching job-10)
+                exact_dir = subdir / job_id
+                matches: list[Path] = []
+                if exact_dir.exists():
+                    matches.append(exact_dir)
+                for p in sorted(subdir.iterdir()):
+                    name = p.name
+                    if name == job_id:
+                        continue  # Already added above
+                    if name.startswith(job_id) and len(name) > len(job_id) and not name[len(job_id)].isalnum():
+                        matches.append(p)
+                if matches:
+                    artifacts[subdir_name] = [str(m) for m in sorted(matches)]
+        if artifacts:
+            info["artifacts"] = artifacts
+        print(json.dumps(info, indent=2))
+
+
+def _elapsed_str(iso_timestamp: str) -> str:
+    """Human-readable elapsed time from an ISO timestamp to now."""
+    try:
+        then = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - then
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        return f"{secs // 3600}h {(secs % 3600) // 60}m ago"
+    except (ValueError, TypeError):
+        return "(unknown)"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Event stream
+# ---------------------------------------------------------------------------
+
+def query_events(
+    conn: sqlite3.Connection,
+    job_id: str | None = None,
+    *,
+    after_cursor: tuple[str, int, str, int] | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Derive events from turns, validations, and job_actions tables.
+
+    Events are pseudo-events synthesized from existing rows — no separate
+    events table. Cursor ordering: (timestamp, event_seq, source_table, rowid).
+    event_seq: 0=turn_started, 1=validation, 2=turn_completed, 3=job_action.
+    """
+    # Build per-branch filters and collect params in order
+    parts = []
+    params: list[Any] = []
+
+    job_filter = ""
+    if job_id:
+        job_filter = "WHERE job_id = ?"
+
+    # 0: TURN_STARTED
+    parts.append(f"""
+        SELECT started_at AS ts, 0 AS event_seq, 'turns' AS source_table,
+               rowid AS source_rowid, job_id,
+               'TURN_STARTED' AS event_type,
+               agent_role || ' round ' || round_no AS description,
+               turn_id AS ref_id
+        FROM turns {job_filter}
+    """)
+    if job_id:
+        params.append(job_id)
+
+    # 1: VALIDATION
+    parts.append(f"""
+        SELECT created_at AS ts, 1 AS event_seq, 'validations' AS source_table,
+               rowid AS source_rowid, job_id,
+               'VALIDATION' AS event_type,
+               CASE WHEN exit_code = 0 THEN 'pass' ELSE 'fail' END
+                 || ': ' || command AS description,
+               validation_id AS ref_id
+        FROM validations {job_filter}
+    """)
+    if job_id:
+        params.append(job_id)
+
+    # 2: TURN_COMPLETED (only finished turns)
+    turn_complete_filter = "WHERE finished_at IS NOT NULL"
+    if job_id:
+        turn_complete_filter += " AND job_id = ?"
+    parts.append(f"""
+        SELECT finished_at AS ts, 2 AS event_seq, 'turns' AS source_table,
+               rowid AS source_rowid, job_id,
+               'TURN_COMPLETED' AS event_type,
+               agent_role || ' round ' || round_no || ': '
+                 || COALESCE(decision, '(none)') AS description,
+               turn_id AS ref_id
+        FROM turns {turn_complete_filter}
+    """)
+    if job_id:
+        params.append(job_id)
+
+    # 3: JOB_ACTION (only if table exists — gracefully degrade for pre-v3 DBs)
+    has_job_actions = conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='job_actions'"
+    ).fetchone()[0] > 0
+    if has_job_actions:
+        parts.append(f"""
+            SELECT timestamp AS ts, 3 AS event_seq, 'job_actions' AS source_table,
+                   id AS source_rowid, job_id,
+                   action AS event_type,
+                   COALESCE(actor, '') || CASE WHEN metadata IS NOT NULL
+                     THEN ': ' || metadata ELSE '' END AS description,
+                   CAST(id AS TEXT) AS ref_id
+            FROM job_actions {job_filter}
+        """)
+        if job_id:
+            params.append(job_id)
+
+    query = " UNION ALL ".join(parts)
+
+    # Apply cursor filter
+    if after_cursor:
+        query = f"""
+            SELECT * FROM ({query})
+            WHERE (ts, event_seq, source_table, source_rowid)
+                > (?, ?, ?, ?)
+        """
+        params.extend(after_cursor)
+
+    query += " ORDER BY ts ASC, event_seq ASC, source_table ASC, source_rowid ASC"
+    query += f" LIMIT {limit}"
+
+    rows = conn.execute(query, params).fetchall()
+    events = []
+    for row in rows:
+        events.append({
+            "timestamp": row["ts"],
+            "event_type": row["event_type"],
+            "description": row["description"],
+            "job_id": row["job_id"],
+            "ref_id": row["ref_id"],
+            "cursor": (row["ts"], row["event_seq"], row["source_table"], row["source_rowid"]),
+        })
+    return events
+
+
+def print_events(
+    paths: BridgePaths,
+    job_id: str | None = None,
+    *,
+    follow: bool = False,
+    limit: int = 50,
+) -> None:
+    """Print event stream. With --follow, polls at 2s intervals."""
+    import time
+
+    show_job = job_id is None  # Show job_id prefix in all-jobs mode
+    with open_db_readonly(paths) as conn:
+        cursor: tuple[str, int, str, int] | None = None
+        events = query_events(conn, job_id, limit=limit)
+        for ev in events:
+            _print_event_line(ev, show_job_id=show_job)
+            cursor = ev["cursor"]
+
+        if not follow:
+            if not events:
+                print("No events found.")
+            return
+
+        # Follow mode: poll for new events
+        try:
+            while True:
+                time.sleep(2)
+                new_events = query_events(conn, job_id, after_cursor=cursor, limit=100)
+                for ev in new_events:
+                    _print_event_line(ev, show_job_id=show_job)
+                    cursor = ev["cursor"]
+        except KeyboardInterrupt:
+            pass
+
+
+def _print_event_line(ev: dict[str, Any], *, show_job_id: bool = False) -> None:
+    """Format one event for terminal output."""
+    ts = ev["timestamp"]
+    try:
+        time_part = ts[11:19]  # HH:MM:SS from ISO timestamp
+    except (TypeError, IndexError):
+        time_part = "??:??:??"
+    job_prefix = f" [{ev['job_id']}]" if show_job_id else ""
+    print(f"[{time_part}]{job_prefix} {ev['event_type']}: {ev['description']}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Doctor command
+# ---------------------------------------------------------------------------
+
+def run_doctor(paths: BridgePaths, *, probe: bool = False) -> list[dict[str, Any]]:
+    """Diagnose bridge health. Returns list of check results."""
+    checks: list[dict[str, Any]] = []
+
+    # 1. DB validation
+    if paths.db_path.exists():
+        try:
+            _check_future_version(paths.db_path)
+            with open_db_readonly(paths) as conn:
+                tables = {r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()}
+            expected = {"jobs", "turns", "validations", "schema_version", "job_actions"}
+            missing = expected - tables
+            if missing:
+                checks.append({"check": "database", "status": "WARN",
+                               "detail": f"Missing tables: {', '.join(sorted(missing))}"})
+            else:
+                checks.append({"check": "database", "status": "OK",
+                               "detail": f"All {len(expected)} tables present"})
+        except (sqlite3.Error, MigrationVersionError) as exc:
+            checks.append({"check": "database", "status": "FAIL", "detail": str(exc)})
+    else:
+        checks.append({"check": "database", "status": "FAIL",
+                       "detail": f"DB not found at {paths.db_path}"})
+
+    # 2. Config / adapter validation
+    try:
+        config = load_bridge_config(paths.config_path)
+        agents_block = config.get("agents")
+        if not isinstance(agents_block, dict) or not agents_block:
+            checks.append({"check": "config", "status": "FAIL",
+                           "detail": "Config missing or empty 'agents' object"})
+        else:
+            checks.append({"check": "config", "status": "OK",
+                           "detail": str(paths.config_path)})
+        # Validate each adapter — expand placeholders first to mirror runtime
+        for agent_name in (agents_block if isinstance(agents_block, dict) else {}):
+            try:
+                adapter = get_adapter(config, agent_name)
+                # Expand placeholders using dummy context (same as probe)
+                check_context = {
+                    "prompt_file": "/dev/null",
+                    "repo_root": str(paths.repo_root),
+                    "job_id": "doctor-check",
+                    "turn_id": "doctor-check",
+                    "agent_role": "reviewer",
+                }
+                try:
+                    expanded_cmd, _ = _prepare_adapter_env(adapter, check_context)
+                except BridgeAdapterError as exc:
+                    checks.append({"check": f"adapter:{agent_name}", "status": "FAIL",
+                                   "detail": f"Placeholder expansion failed: {exc}"})
+                    continue
+                cmd_str = " ".join(expanded_cmd)
+                executable = expanded_cmd[0]
+                exe_basename = os.path.basename(executable)
+
+                def _check_executable(cmd_name: str) -> tuple[str, str]:
+                    """Check if a command is findable and executable (not a directory)."""
+                    found = shutil.which(cmd_name)
+                    if found:
+                        if Path(found).is_dir():
+                            return ("FAIL", f"resolves to directory: {found}")
+                        return ("OK", f"found at {found}")
+                    # Check as absolute/relative path
+                    cmd_path = Path(cmd_name)
+                    if cmd_path.is_absolute() and cmd_path.exists():
+                        if cmd_path.is_dir():
+                            return ("FAIL", f"is a directory: {cmd_path}")
+                        if os.access(str(cmd_path), os.X_OK):
+                            return ("OK", f"found at {cmd_path}")
+                        return ("FAIL", "found but not executable")
+                    repo_path = paths.repo_root / cmd_name
+                    if repo_path.exists():
+                        if repo_path.is_dir():
+                            return ("FAIL", f"is a directory: {repo_path}")
+                        if os.access(str(repo_path), os.X_OK):
+                            return ("OK", "found relative to repo root")
+                        return ("FAIL", "found relative to repo root but not executable")
+                    return ("FAIL", "command not found")
+
+                # Handle bash/sh -c wrappers (including absolute paths like /bin/bash)
+                if exe_basename in ("bash", "sh") and len(expanded_cmd) >= 3 and expanded_cmd[1] == "-c":
+                    import shlex
+                    shell_builtins = {"exec", "eval", "source", ".", "command", "builtin", "env", "cd", "set", "export", "unset", "test", "true", "false"}
+                    try:
+                        tokens = shlex.split(expanded_cmd[2])
+                    except ValueError:
+                        tokens = expanded_cmd[2].split()
+                    # Skip shell builtins, env assignments (FOO=bar), and flags
+                    actual_cmd = ""
+                    for tok in tokens:
+                        if "=" in tok and not tok.startswith("-"):
+                            continue  # env assignment like FOO=1
+                        if tok in shell_builtins:
+                            continue
+                        if tok.startswith("-"):
+                            continue
+                        actual_cmd = tok
+                        break
+                    detail_prefix = f"wrapper: {exe_basename} -c, inner: {actual_cmd or '(unparseable)'}"
+                    if actual_cmd:
+                        inner_status, inner_detail = _check_executable(actual_cmd)
+                        checks.append({"check": f"adapter:{agent_name}", "status": inner_status,
+                                       "detail": f"{detail_prefix} ({inner_detail})"})
+                    else:
+                        checks.append({"check": f"adapter:{agent_name}", "status": "INFO",
+                                       "detail": f"{detail_prefix} (use --probe to verify)"})
+                else:
+                    status, detail = _check_executable(executable)
+                    checks.append({"check": f"adapter:{agent_name}", "status": status,
+                                   "detail": f"{cmd_str} ({detail})"})
+            except BridgeAdapterError as exc:
+                checks.append({"check": f"adapter:{agent_name}", "status": "FAIL",
+                               "detail": str(exc)})
+    except BridgeAdapterError as exc:
+        checks.append({"check": "config", "status": "FAIL", "detail": str(exc)})
+
+    # 3. Prompt template validation
+    template_path = SCRIPT_DIR / "templates" / "bridge_reviewer_prompt.txt"
+    if template_path.exists():
+        checks.append({"check": "template", "status": "OK",
+                       "detail": str(template_path)})
+    else:
+        checks.append({"check": "template", "status": "FAIL",
+                       "detail": f"Reviewer prompt template not found at {template_path}"})
+
+    # 4. Lock file check
+    lock_path = paths.bus_dir / "bridge.lock"
+    if lock_path.exists():
+        try:
+            fd = os.open(str(lock_path), os.O_RDONLY)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                checks.append({"check": "lock", "status": "OK",
+                               "detail": "Lock file exists but is not held"})
+            except OSError:
+                checks.append({"check": "lock", "status": "WARN",
+                               "detail": "Lock file is currently held (bridge running?)"})
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            checks.append({"check": "lock", "status": "WARN",
+                           "detail": f"Cannot check lock: {exc}"})
+    else:
+        checks.append({"check": "lock", "status": "OK", "detail": "No lock file"})
+
+    # 5. Working tree (informational)
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True,
+            cwd=str(paths.repo_root), timeout=10,
+        )
+        if result.returncode != 0:
+            checks.append({"check": "worktree", "status": "WARN",
+                           "detail": "Not a git repository or git error"})
+        else:
+            dirty_count = len([l for l in result.stdout.strip().splitlines() if l.strip()])
+            if dirty_count:
+                checks.append({"check": "worktree", "status": "INFO",
+                               "detail": f"{dirty_count} dirty file(s)"})
+            else:
+                checks.append({"check": "worktree", "status": "OK",
+                               "detail": "Clean working tree"})
+    except (subprocess.SubprocessError, OSError):
+        checks.append({"check": "worktree", "status": "INFO",
+                       "detail": "Could not check git status"})
+
+    # 6. Opt-in probe (--probe)
+    if probe:
+        import tempfile
+        try:
+            config = load_bridge_config(paths.config_path)
+            for agent_name in config.get("agents", {}):
+                try:
+                    adapter = get_adapter(config, agent_name)
+                    test_prompt = "Bridge doctor probe: respond with OK"
+                    # Write prompt to a temp file for file-based adapters
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".txt", prefix="bridge-probe-",
+                        dir=str(paths.bus_dir), delete=False,
+                    ) as tf:
+                        tf.write(test_prompt)
+                        probe_prompt_path = tf.name
+                    try:
+                        # Expand placeholders using the same path as run_adapter
+                        # Use "reviewer" as agent_role (matches live execution roles)
+                        probe_context = {
+                            "prompt_file": probe_prompt_path,
+                            "repo_root": str(paths.repo_root),
+                            "job_id": "doctor-probe",
+                            "turn_id": "doctor-probe",
+                            "agent_role": "reviewer",
+                        }
+                        expanded_cmd, expanded_env = _prepare_adapter_env(adapter, probe_context)
+                        # Respect prompt_via_stdin: only pipe input when adapter expects it
+                        stdin_input = test_prompt if adapter.prompt_via_stdin else None
+                        proc = subprocess.run(
+                            expanded_cmd, input=stdin_input, capture_output=True,
+                            text=True, timeout=adapter.timeout_s, cwd=str(paths.repo_root),
+                            env=expanded_env,
+                        )
+                        if proc.returncode == 0:
+                            checks.append({"check": f"probe:{agent_name}", "status": "OK",
+                                           "detail": f"Adapter responded (exit 0, {len(proc.stdout)} chars)"})
+                        else:
+                            checks.append({"check": f"probe:{agent_name}", "status": "FAIL",
+                                           "detail": f"Adapter failed (exit {proc.returncode})"})
+                    finally:
+                        Path(probe_prompt_path).unlink(missing_ok=True)
+                except subprocess.TimeoutExpired:
+                    checks.append({"check": f"probe:{agent_name}", "status": "FAIL",
+                                   "detail": f"Adapter timed out ({adapter.timeout_s}s)"})
+                except (BridgeAdapterError, OSError) as exc:
+                    checks.append({"check": f"probe:{agent_name}", "status": "FAIL",
+                                   "detail": str(exc)})
+        except BridgeAdapterError:
+            pass  # Config already reported above
+
+    return checks
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Finding lifecycle tracking
+# ---------------------------------------------------------------------------
+
+def _finding_stable_key(finding: dict[str, Any], *, design_mode: bool = False) -> tuple[str, str]:
+    """Compute stable key for a finding. Returns (anchor, class).
+
+    Severity is deliberately excluded — a finding should persist across
+    severity reclassification (e.g. medium → high).
+    """
+    cls = finding.get("class", "unknown")
+    if design_mode:
+        anchor = finding.get("file", "(unanchored)")
+    else:
+        anchor = finding.get("file", "(unknown)")
+    return (anchor, cls)
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Jaccard similarity on normalized word tokens."""
+    import re
+    def tokens(s: str) -> set[str]:
+        # Split on whitespace and hyphens, strip punctuation, lowercase
+        words = re.split(r'[\s\-_]+', s)
+        return {w.lower().strip(".,;:!?()[]{}\"'") for w in words if w.strip(".,;:!?()[]{}\"'")}
+    ta, tb = tokens(a), tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def rebuild_finding_registry(conn: sqlite3.Connection, job_id: str) -> dict[str, Any]:
+    """Rebuild the finding lifecycle registry from turn history.
+
+    Returns the registry dict with per-finding tracking across all rounds.
+    """
+    turns = conn.execute(
+        "SELECT * FROM turns WHERE job_id = ? AND agent_role = 'reviewer' "
+        "AND is_canonical = 1 AND status = 'completed' ORDER BY round_no ASC",
+        (job_id,),
+    ).fetchall()
+
+    # Registry: keyed by stable_key string, value is finding lifecycle info
+    registry: dict[str, dict[str, Any]] = {}
+    # Track which findings appeared in each round
+    round_findings: dict[int, set[str]] = {}
+
+    for turn in turns:
+        if not turn["envelope_json"]:
+            continue
+        envelope = json.loads(turn["envelope_json"])
+        findings = envelope.get("findings", [])
+        round_no = turn["round_no"]
+        seen_this_round: set[str] = set()
+
+        for finding in findings:
+            sk = _finding_stable_key(finding)
+            base_key = f"{sk[0]}|{sk[1]}"
+            title = finding.get("title", "(untitled)")
+
+            # Search for a matching entry from PREVIOUS rounds (not current round).
+            # Check the base key first, then any suffixed variants.
+            matched_key: str | None = None
+            candidates = [
+                k for k, v in registry.items()
+                if k == base_key or k.startswith(base_key + "|")
+            ]
+            for cand_key in candidates:
+                cand = registry[cand_key]
+                if cand_key in seen_this_round:
+                    continue  # Skip entries already matched in THIS round
+                if cand["first_seen_round"] == round_no:
+                    continue  # Skip entries created in THIS round (same-round collision)
+                if _title_similarity(cand["best_title"], title) >= 0.6:
+                    matched_key = cand_key
+                    break
+
+            if matched_key is not None:
+                entry = registry[matched_key]
+                entry["last_seen_round"] = round_no
+                entry["times_raised"] += 1
+                if entry["current_disposition"] in ("addressed", "silent"):
+                    entry["current_disposition"] = "regression"
+                else:
+                    entry["current_disposition"] = "persisting"
+                seen_this_round.add(matched_key)
+                continue
+
+            # New finding — use base_key if free, otherwise suffix with title
+            if base_key not in registry and base_key not in seen_this_round:
+                new_key = base_key
+            else:
+                new_key = f"{base_key}|{title[:40]}"
+            registry[new_key] = {
+                "stable_key": new_key,
+                "anchor": sk[0],
+                "class": sk[1],
+                "best_title": title,
+                "first_seen_round": round_no,
+                "last_seen_round": round_no,
+                "times_raised": 1,
+                "current_disposition": "new",
+            }
+            seen_this_round.add(new_key)
+
+        round_findings[round_no] = seen_this_round
+
+        # Mark findings NOT seen this round
+        for key, entry in registry.items():
+            if key not in seen_this_round and entry["last_seen_round"] < round_no:
+                if entry["current_disposition"] in ("new", "persisting", "regression"):
+                    # "addressed" = disappeared from the immediately previous round
+                    # "silent" = was already absent for >1 round
+                    if entry["last_seen_round"] == round_no - 1:
+                        entry["current_disposition"] = "addressed"
+                    else:
+                        entry["current_disposition"] = "silent"
+
+    return {
+        "job_id": job_id,
+        "registry_version": len(turns),
+        "findings": registry,
+        "summary": _lifecycle_summary(registry),
+    }
+
+
+def _lifecycle_summary(registry: dict[str, dict[str, Any]]) -> dict[str, int]:
+    """Summarize dispositions across the registry."""
+    counts: dict[str, int] = {"new": 0, "persisting": 0, "addressed": 0, "silent": 0, "regression": 0}
+    for entry in registry.values():
+        disposition = entry.get("current_disposition", "new")
+        counts[disposition] = counts.get(disposition, 0) + 1
+    return counts
+
+
+def format_lifecycle_prompt_section(registry: dict[str, Any]) -> str:
+    """Format the finding lifecycle summary for injection into reviewer prompt."""
+    summary = registry.get("summary", {})
+    total = sum(summary.values())
+    if total == 0:
+        return ""
+    parts = []
+    for disposition in ("new", "persisting", "addressed", "silent", "regression"):
+        count = summary.get(disposition, 0)
+        if count > 0:
+            label = disposition
+            if disposition == "silent":
+                label = "silent (may need re-examination)"
+            parts.append(f"{count} {label}")
+    return f"PRIOR FINDINGS: {', '.join(parts)}."
 
 
 def _read_text_arg(text: str | None, file: str | None, name: str) -> str:
@@ -1431,7 +2090,8 @@ def build_parser() -> argparse.ArgumentParser:
     cont.add_argument("--verbose", "-v", action="store_true", help="Print step events and stream agent output")
 
     status = sub.add_parser("status", help="Show current job status")
-    status.add_argument("job_id")
+    status.add_argument("job_id", nargs="?", default=None)
+    status.add_argument("--all", action="store_true", help="Show all jobs summary")
 
     review = sub.add_parser("review", help="Hybrid review: synthetic reader turn from interactive session + live reviewer")
     review.add_argument("--task")
@@ -1447,6 +2107,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     render = sub.add_parser("render", help="Render markdown transcript for a job")
     render.add_argument("job_id")
+
+    events = sub.add_parser("events", help="Show event stream for a job")
+    events.add_argument("job_id", nargs="?", default=None)
+    events.add_argument("--follow", "-f", action="store_true", help="Poll for new events")
+    events.add_argument("--limit", "-n", type=int, default=50, help="Max events to show")
+
+    doctor = sub.add_parser("doctor", help="Diagnose bridge health")
+    doctor.add_argument("--probe", action="store_true",
+                        help="Run end-to-end adapter probe (may invoke real API)")
 
     return parser
 
@@ -1515,8 +2184,32 @@ def main(argv: list[str] | None = None) -> int:
             if not paths.db_path.exists():
                 raise BridgeError("No bridge database found. Run 'init' first.")
             _check_future_version(paths.db_path)
-            print_status(paths, args.job_id)
+            if args.all:
+                target_id = None
+                show_latest = False
+            elif args.job_id:
+                target_id = args.job_id
+                show_latest = False
+            else:
+                target_id = None
+                show_latest = True
+            print_status(paths, target_id, show_latest=show_latest)
             return 0
+        if args.command == "events":
+            if not paths.db_path.exists():
+                raise BridgeError("No bridge database found. Run 'init' first.")
+            _check_future_version(paths.db_path)
+            print_events(paths, args.job_id, follow=args.follow, limit=args.limit)
+            return 0
+        if args.command == "doctor":
+            checks = run_doctor(paths, probe=args.probe)
+            has_fail = False
+            for check in checks:
+                icon = {"OK": "✓", "WARN": "⚠", "FAIL": "✗", "INFO": "ℹ"}.get(check["status"], "?")
+                print(f"  {icon} {check['check']}: {check['detail']}")
+                if check["status"] == "FAIL":
+                    has_fail = True
+            return 1 if has_fail else 0
         if args.command == "render":
             if not paths.db_path.exists():
                 raise BridgeError("No bridge database found. Run 'init' first.")
