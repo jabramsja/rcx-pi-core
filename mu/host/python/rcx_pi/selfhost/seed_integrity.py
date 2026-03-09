@@ -81,6 +81,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "terminal_classify.v1.json": "413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7",
     # Metabolize cycle v1: structural walker for hemisphere metabolization (APPLICATION)
     "metabolize_cycle.v1.json": "f8888ecab6845193610499d15dea8a8e845d07ce04391457770ef32cac69dfd8",
+    # Evidence walker v1: structural trace walker for ontology evidence collection (APPLICATION)
+    "evidence_walker.v1.json": "e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29",
 }
 
 # Expected projection IDs for each seed.
@@ -294,6 +296,13 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "metabolize.cycle.lobes_reverse_done",  # Reverse complete -> set lobes, done
         "metabolize.cycle.unwrap",              # Exit: extract final hemispheres
     ],
+    # Evidence walker v1: structural trace walker for ontology evidence collection (APPLICATION)
+    "evidence_walker.v1.json": [
+        "evidence.walk.init",              # Entry: trace has entries -> start collecting
+        "evidence.walk.init_empty",        # Entry: null trace -> done immediately
+        "evidence.walk.collect_and_next",  # Collect entry, advance to next
+        "evidence.walk.collect_and_done",  # Collect last entry -> done
+    ],
 }
 
 
@@ -323,6 +332,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     "paxos_demo.v1.json": "programs",
     "metabolization.v1.json": "programs",
     "metabolize_cycle.v1.json": "programs",
+    "evidence_walker.v1.json": "utilities",
 }
 
 

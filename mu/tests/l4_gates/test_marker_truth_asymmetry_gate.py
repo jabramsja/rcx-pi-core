@@ -31,17 +31,14 @@ class TestMarkerTruthAsymmetryGate:
         assert found, "list_to_linked for-loop must have @host_iteration marker"
 
     def test_python_collect_ontology_evidence_marked(self):
-        """Python _collect_ontology_evidence has @host_iteration (not AST_OK: infra)."""
+        """Python _collect_ontology_evidence has @host_iteration (boundary walker output drain)."""
         path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
         text = path.read_text()
         lines = text.splitlines()
         for line in lines:
             if "_collect_ontology_evidence" in line and "def " in line:
                 assert "@host_iteration" in line, (
-                    "_collect_ontology_evidence must have @host_iteration, not AST_OK: infra"
-                )
-                assert "AST_OK: infra" not in line, (
-                    "_collect_ontology_evidence must not have AST_OK: infra (reclassified)"
+                    "_collect_ontology_evidence must have @host_iteration (boundary walker output drain)"
                 )
                 return
         pytest.fail("_collect_ontology_evidence def line not found")

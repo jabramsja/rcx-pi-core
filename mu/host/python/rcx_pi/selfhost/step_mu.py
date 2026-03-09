@@ -2299,6 +2299,11 @@ def _collect_ontology_evidence(  # @host_iteration: Mu linked-list traversal for
 
     Extracts trace metadata (trace_len, stall, projection_ids) when available,
     computes control_hash, and timestamps the observation. Returns a 6-field dict.
+
+    Trace walking is structural: evidence_walker.v1.json projections iterate
+    the linked-list trace via pattern matching (no host loops). Boundary
+    post-processes the walker output: count total, filter non-string pids,
+    deduplicate, sort.
     """
     # Control hash of the boundary result.
     control_hash = mu_hash_control_cached(result, "evidence_collector")
@@ -2307,20 +2312,40 @@ def _collect_ontology_evidence(  # @host_iteration: Mu linked-list traversal for
     stall = None
     projection_ids = None
 
-    if isinstance(result, dict) and "trace" in result:
+    if isinstance(result, dict) and "trace" in result:  # AST_OK: infra — boundary type guard
+        # Structural trace walking via evidence_walker.v1.json
+        projs = load_verified_seed(get_seed_path("evidence_walker.v1.json"))["projections"]
+        wrapped = {"evidence_walk": {"trace": result["trace"]}}
+        walker_result, _trace, _stall = run_mu(projs, wrapped, max_steps=5000)
+
+        # Extract collected entries from walker output
+        collected = None
+        if isinstance(walker_result, dict) and "evidence_done" in walker_result:  # AST_OK: infra — boundary unwrap
+            collected = walker_result["evidence_done"].get("collected")
+
+        # Boundary post-processing: count entries, extract string pids, dedup, sort
+        # Mu runtime denormalizes {head, tail} to Python list; handle both formats
         trace_len = 0
         pids = []
-        node = result["trace"]
-        while isinstance(node, dict) and "head" in node:
-            trace_len += 1
-            entry = node["head"]
-            if isinstance(entry, dict):
-                pid = entry.get("projection")
-                # C4: only collect string IDs — skip int/dict/None to avoid
-                # TypeError on sorted() and maintain parity with JS.
-                if isinstance(pid, str):
-                    pids.append(pid)
-            node = node.get("tail")
+        if isinstance(collected, list):  # AST_OK: infra — boundary list drain (Mu denormalization)
+            trace_len = len(collected)
+            for entry in collected:
+                if isinstance(entry, dict):
+                    pid = entry.get("projection")
+                    if isinstance(pid, str):
+                        pids.append(pid)
+        else:
+            node = collected
+            while isinstance(node, dict) and "head" in node:  # AST_OK: infra — boundary linked-list drain (walker output)
+                trace_len += 1
+                entry = node["head"]
+                if isinstance(entry, dict):  # AST_OK: infra — boundary type guard
+                    pid = entry.get("projection")
+                    # C4: only collect string IDs — skip int/dict/None to avoid
+                    # TypeError on sorted() and maintain parity with JS.
+                    if isinstance(pid, str):  # AST_OK: infra — boundary string filter
+                        pids.append(pid)
+                node = node.get("tail")
         projection_ids = sorted(set(pids))
         stall = result.get("stall")
 

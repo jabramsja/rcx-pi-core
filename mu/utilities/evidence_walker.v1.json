@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "EVIDENCE_WALKER",
+    "description": "Structural trace walker: iterates trace linked lists via pattern matching (no host loops). Collects each trace entry into an accumulator linked list for boundary post-processing.",
+    "doc": "mu/docs/core/OntologyPromotionContract.v0.md",
+    "spec_ref": "step_mu.py::_collect_ontology_evidence",
+    "status": "testable",
+    "execution_layer": "APPLICATION",
+    "requires_patterns": ["linear"],
+    "dependencies": [],
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Structural iteration via pattern matching on linked lists (no host loops)",
+      "Linear-only patterns (no bridge required)",
+      "Each trace entry is collected into accumulator (raw, no extraction)",
+      "Output is a linked list of raw entries for boundary post-processing",
+      "Boundary performs: count total, extract projection ids, filter non-strings, deduplicate, sort"
+    ]
+  },
+  "projections": [
+    {
+      "id": "evidence.walk.init",
+      "description": "Entry: trace has entries → extract first, start collecting",
+      "pattern": {
+        "evidence_walk": {
+          "trace": {
+            "head": {"var": "entry"},
+            "tail": {"var": "rest"}
+          }
+        }
+      },
+      "body": {
+        "evidence_advance": {
+          "entry": {"var": "entry"},
+          "rest": {"var": "rest"},
+          "collected": null
+        }
+      }
+    },
+    {
+      "id": "evidence.walk.init_empty",
+      "description": "Entry: null trace → done immediately",
+      "pattern": {
+        "evidence_walk": {
+          "trace": null
+        }
+      },
+      "body": {
+        "evidence_done": {
+          "collected": null
+        }
+      }
+    },
+    {
+      "id": "evidence.walk.collect_and_next",
+      "description": "Collect current entry and advance to next",
+      "pattern": {
+        "evidence_advance": {
+          "entry": {"var": "e"},
+          "rest": {
+            "head": {"var": "next_entry"},
+            "tail": {"var": "next_rest"}
+          },
+          "collected": {"var": "c"}
+        }
+      },
+      "body": {
+        "evidence_advance": {
+          "entry": {"var": "next_entry"},
+          "rest": {"var": "next_rest"},
+          "collected": {
+            "head": {"var": "e"},
+            "tail": {"var": "c"}
+          }
+        }
+      }
+    },
+    {
+      "id": "evidence.walk.collect_and_done",
+      "description": "Collect last entry (rest is null) → done",
+      "pattern": {
+        "evidence_advance": {
+          "entry": {"var": "e"},
+          "rest": null,
+          "collected": {"var": "c"}
+        }
+      },
+      "body": {
+        "evidence_done": {
+          "collected": {
+            "head": {"var": "e"},
+            "tail": {"var": "c"}
+          }
+        }
+      }
+    }
+  ]
+}
