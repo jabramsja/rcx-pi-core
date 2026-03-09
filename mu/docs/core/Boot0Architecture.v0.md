@@ -173,7 +173,7 @@ def assert_not_lambda_calculus(value: Mu) -> None:
 ### What Boot0 Does NOT Include
 
 - No kernel state machine (_mode, _phase)
-- No EngineNews closure detection
+- No recurrence closure detection
 - No type tags (_type field)
 - No projection selection logic beyond linear scan
 - No caching or optimization
@@ -279,7 +279,7 @@ This is marked `@host_iteration` in current code (`step_mu.py:run_mu`) because t
 
 ## Boot2: Full System
 
-Boot2 adds the kernel state machine and EngineNews closure detection, built using Boot1's match/subst.
+Boot2 adds the kernel state machine and recurrence closure detection, built using Boot1's match/subst.
 
 ### Seeds Loaded in Boot2
 
@@ -294,7 +294,7 @@ Boot2 adds the kernel state machine and EngineNews closure detection, built usin
 
 1. Boot1 is available (match/subst as projections)
 2. Kernel state: `{"_mode": "match", "_phase": "start", ...}`
-3. EngineNews tracks seen values for cycle detection
+3. Recurrence detection tracks seen values for cycle detection
 4. Full projection selection with priority
 
 ### Boot2 Contract
@@ -334,7 +334,7 @@ See `STATUS.md` for current implementation status.
 
 ### What Stays the Same
 
-- All seed files (match.v2.json, subst.v2.json, kernel.v1.json, recurrence.v1.json)
+- All seed files (see STATUS.md L3 Seed Categories table for full list; 19 seeds total, 13 JS-loaded)
 - All parity tests
 - All grounding tests
 - The fundamental algorithms
@@ -352,7 +352,7 @@ See `STATUS.md` for current implementation status.
    - Verify parity tests still pass
 
 3. **Refactor Boot2 boundary** (`rcx_pi/selfhost/boot2.py`)
-   - Wrap Boot1 + kernel.v1 + enginenews.v1
+   - Wrap Boot1 + kernel.v1 + rcx_engine.v1
    - Clear contract: "Boot2 provides full evaluation"
    - Verify integration tests still pass
 
@@ -387,7 +387,7 @@ See `STATUS.md` for current implementation status.
 - **Debt tracking:** 12/12 markers, ratchet prevents regression
 
 **L3 Parity Contract (explicit definition):**
-- Same input seed set (kernel.v1 + match.v2 + subst.v2 + enginenews.v1)
+- Same input seed set (13 JS-loaded seeds; see STATUS.md L3 Seed Categories table for full list)
 - Same input value
 - → Identical final value
 - → Identical trace format (including stall behavior and step counts)
@@ -400,7 +400,7 @@ This contract is verified by `tests/parity/test_js_parity_automated.py` which ru
 |------------|---------------|-------|
 | Boot0 | `eval_seed.py` (match, substitute), `mu_type.py` (mu_hash_cached), `kernel.py` (budget) | None (pure Python) |
 | Boot1 | `step_mu.py`, `match_mu.py`, `subst_mu.py` | `match.v2.json`, `subst.v2.json` |
-| Boot2 | `kernel.py`, `eval_seed.py` (step) | `kernel.v1.json`, `recurrence.v1.json`, `eval.v1.json`, `classify.v1.json` |
+| Boot2 | `kernel.py`, `eval_seed.py` (step) | All remaining seeds (see STATUS.md L3 Seed Categories for full 19-seed inventory) |
 
 ## Risk Assessment
 
@@ -458,7 +458,7 @@ The bootstrap `match()` and `substitute()` functions are NOT exposed to external
 
 1. **Boot0 isolated:** 4 primitives + bootstrap code in single module, <250 LOC
 2. **Boot1 parity:** All match/subst parity tests pass
-3. **Boot2 parity:** All kernel/enginenews tests pass
+3. **Boot2 parity:** All kernel/rcx_engine tests pass
 4. **JS parity maintained:** Both substrates run same boot sequence
 5. **No new debt:** Migration doesn't increase debt count
 

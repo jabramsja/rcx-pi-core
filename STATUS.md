@@ -78,7 +78,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
 **What L3 proves:**
-- The SAME projections (all 4 seed files) run on Python AND JavaScript
+- The SAME projections (13 JS-loaded seed files) run on Python AND JavaScript
 - All semantics are in the projections (data), not the host (code)
 - The host provides only mechanical execution (the 4 bootstrap primitives)
 - Recurrence closure detection works identically on both substrates
@@ -88,7 +88,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 **L3 Parity Requirement (MANDATORY - North Star #13):**
 - Any change to Python projection behavior MUST be mirrored in JavaScript
 - **Core L3 seeds** (kernel, match, subst, recurrence, exhaustion, bootstrap_structural) MUST be loaded in BOTH substrates
-- **Utility seeds** (classify.v1, eval.v1) are Python-only for now
+- **Utility seeds** (classify.v1, eval.v1, evidence_walker.v1) are Python-only; terminal_classify.v1 is JS-loaded
 - Parity vectors in `tests/fixtures/` are shared by both implementations
 - Run `node mu/host/js/eval_step.js` after Python changes to verify JS parity
 - Run `./tools/checks/check_js_debt.sh` to verify JS debt markers match Python
@@ -97,11 +97,11 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 **L3 Seed Categories:**
 | Category | Seeds | JS Loaded | Notes |
 |----------|-------|-----------|-------|
-| **Substrate (Core)** | kernel.v1, match.v2, subst.v2 | ✅ | Required for L3 |
+| **Substrate (Core)** | kernel.v1, match.v1, match.v2, subst.v1, subst.v2 | v2 seeds: ✅; v1 seeds: Python-only | match.v1/subst.v1 are self-hosting POC; v2 is production |
 | **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1 | ✅ | v1 is POC; v2 is hash-accelerated production; fix.v1 is edge/vertex repair |
 | **Bridge** | bootstrap_structural.v1 | ✅ | Non-linear pattern support |
-| **Utilities** | classify.v1, eval.v1 | Python-only | Optional - helper algorithms |
-| **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization: ✅ | Engine orchestration + hemisphere routing + metabolization L3 parity; paxos_demo application |
+| **Utilities** | classify.v1, eval.v1, terminal_classify.v1, evidence_walker.v1 | terminal_classify: ✅; others: Python-only | terminal_classify JS-loaded via seed_loader.js; evidence_walker Python-only |
+| **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization + metabolize_cycle: ✅ | Engine orchestration + hemisphere routing + metabolization + metabolize cycle L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
 - JS file has DEBT SUMMARY header with counts: 16 total (9 iteration + 4 recursion + 3 builtin) — per `constants.js` canonical header. Note: `debt_dashboard.sh` grep reports 10+5+4=19 because it counts header listing lines as token hits; the actual distinct host-operation count is 16.
@@ -769,7 +769,7 @@ New organized structure makes architecture visible:
 - [x] exhaustion.v1.json: 13 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] hemispheres.v1.json: 12 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
 - [x] Total: 61 projections across 6 listed seeds (see `mu/tests/structural/test_seed_counts.py::EXPECTED_COUNTS` for per-seed counts)
-- [x] Seed integrity: 17 seeds, 143 projection IDs, 0 intra-seed collisions (verified by `mu/tests/structural/test_seed_counts.py`)
+- [x] Seed integrity: 19 seeds, 162 projection IDs, 0 intra-seed collisions (verified by `mu/tests/structural/test_seed_counts.py`)
 - [x] 5 Recurrence + 6 Exhaust parity vectors pass on both substrates
 
 **Bootstrap-Structural Bridge: IMPLEMENTED (Two Execution Paths)**
