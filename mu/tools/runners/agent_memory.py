@@ -41,12 +41,15 @@ Usage:
 
 import argparse
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 if os.name == "nt":
     import msvcrt
@@ -74,7 +77,9 @@ def _exclusive_lock(lock_file):
     """Cross-platform exclusive file lock for lock sidecar files."""
     if os.name == "nt":
         # Windows msvcrt.locking() locks a byte range from current file position.
+        # Truncate to 1 byte to prevent growth with append-mode callers.
         lock_file.seek(0)
+        lock_file.truncate()
         lock_file.write("0")
         lock_file.flush()
         lock_file.seek(0)
@@ -100,6 +105,39 @@ def ensure_memory_dir():
         gitignore.write_text("# Agent memory is local\n*\n!.gitignore\n")
 
 
+def _atomic_write(data_path: Path, content: str) -> None:
+    """Write content to data_path crash-safely via temp+fsync+rename.
+
+    Guarantees the file is either the old valid content or the new valid
+    content -- never a partial write.
+    """
+    tmp_path = data_path.with_suffix('.json.tmp')
+    tmp_path.write_text(content, encoding='utf-8')
+    # fsync to ensure data hits disk before rename
+    with open(tmp_path, 'rb') as f:
+        os.fsync(f.fileno())
+    os.replace(str(tmp_path), str(data_path))
+
+
+def _safe_json_load(path: Path, label: str) -> list:
+    """Load JSON list from path with graceful corruption recovery.
+
+    If the file is corrupt (e.g. from a prior crash mid-write), logs a
+    warning and returns [] instead of crashing.
+    """
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "%s is corrupt (JSONDecodeError: %s); returning empty list. "
+            "The corrupt file will be overwritten on next save.",
+            label, exc,
+        )
+        return []
+
+
 def get_findings_file() -> Path:
     """Get the path to the findings file."""
     ensure_memory_dir()
@@ -113,34 +151,38 @@ def get_patterns_file() -> Path:
 
 
 def load_findings() -> list[dict]:
-    """Load all findings from disk with shared lock to prevent torn reads."""
+    """Load all findings from disk with exclusive lock to prevent torn reads.
+
+    Gracefully recovers from corrupt JSON (e.g. prior crash mid-write)
+    by returning [] and logging a warning.
+    """
     path = get_findings_file()
-    if not path.exists():
-        return []
     lock_path = path.with_suffix('.lock')
-    with open(lock_path, 'w') as lock_file:
+    with open(lock_path, 'a') as lock_file:
         with _exclusive_lock(lock_file):
-            return json.loads(path.read_text()) if path.exists() else []
+            return _safe_json_load(path, "findings.json")
 
 
 def save_findings(findings: list[dict]):
-    """Save findings to disk with file locking.
+    """Save findings to disk with file locking and crash-safe writes.
 
     Note: For add/modify operations, prefer _atomic_modify_findings() to
     prevent TOCTOU races between load_findings() and save_findings().
     """
     path = get_findings_file()
     lock_path = path.with_suffix('.lock')
-    with open(lock_path, 'w') as lock_file:
+    with open(lock_path, 'a') as lock_file:
         with _exclusive_lock(lock_file):
             content = json.dumps(findings, indent=2, default=str)
-            path.write_text(content)
+            _atomic_write(path, content)
 
 
 def _atomic_modify_findings(modifier):
     """Atomically load, modify, and save findings inside a single lock.
 
     Prevents TOCTOU races where concurrent callers read stale data.
+    Uses crash-safe writes (temp+fsync+rename) and graceful corruption
+    recovery on load.
 
     Args:
         modifier: callable(findings: list[dict]) -> list[dict]
@@ -148,44 +190,48 @@ def _atomic_modify_findings(modifier):
     """
     path = get_findings_file()
     lock_path = path.with_suffix('.lock')
-    with open(lock_path, 'w') as lock_file:
+    with open(lock_path, 'a') as lock_file:
         with _exclusive_lock(lock_file):
-            findings = json.loads(path.read_text()) if path.exists() else []
+            findings = _safe_json_load(path, "findings.json")
             findings = modifier(findings)
             content = json.dumps(findings, indent=2, default=str)
-            path.write_text(content)
+            _atomic_write(path, content)
     return findings
 
 
 def load_patterns() -> list[dict]:
-    """Load patterns from disk with shared lock to prevent torn reads."""
+    """Load patterns from disk with exclusive lock to prevent torn reads.
+
+    Gracefully recovers from corrupt JSON (e.g. prior crash mid-write)
+    by returning [] and logging a warning.
+    """
     path = get_patterns_file()
-    if not path.exists():
-        return []
     lock_path = path.with_suffix('.lock')
-    with open(lock_path, 'w') as lock_file:
+    with open(lock_path, 'a') as lock_file:
         with _exclusive_lock(lock_file):
-            return json.loads(path.read_text()) if path.exists() else []
+            return _safe_json_load(path, "patterns.json")
 
 
 def save_patterns(patterns: list[dict]):
-    """Save patterns to disk with file locking.
+    """Save patterns to disk with file locking and crash-safe writes.
 
     Note: For add/modify operations, prefer _atomic_modify_patterns() to
     prevent TOCTOU races between load_patterns() and save_patterns().
     """
     path = get_patterns_file()
     lock_path = path.with_suffix('.lock')
-    with open(lock_path, 'w') as lock_file:
+    with open(lock_path, 'a') as lock_file:
         with _exclusive_lock(lock_file):
             content = json.dumps(patterns, indent=2, default=str)
-            path.write_text(content)
+            _atomic_write(path, content)
 
 
 def _atomic_modify_patterns(modifier):
     """Atomically load, modify, and save patterns inside a single lock.
 
     Prevents TOCTOU races where concurrent callers read stale data.
+    Uses crash-safe writes (temp+fsync+rename) and graceful corruption
+    recovery on load.
 
     Args:
         modifier: callable(patterns: list[dict]) -> list[dict]
@@ -193,12 +239,12 @@ def _atomic_modify_patterns(modifier):
     """
     path = get_patterns_file()
     lock_path = path.with_suffix('.lock')
-    with open(lock_path, 'w') as lock_file:
+    with open(lock_path, 'a') as lock_file:
         with _exclusive_lock(lock_file):
-            patterns = json.loads(path.read_text()) if path.exists() else []
+            patterns = _safe_json_load(path, "patterns.json")
             patterns = modifier(patterns)
             content = json.dumps(patterns, indent=2, default=str)
-            path.write_text(content)
+            _atomic_write(path, content)
     return patterns
 
 

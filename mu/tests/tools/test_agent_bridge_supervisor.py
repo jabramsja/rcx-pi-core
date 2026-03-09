@@ -1707,7 +1707,7 @@ def test_events_includes_validations(tmp_path: Path) -> None:
     job_id = bridge.submit_job(
         paths, task_text="test events validations",
         reader_agent="claude", reviewer_agent="codex",
-        max_rounds=1, acceptance_checks=["echo test-validation-check"],
+        max_rounds=1, acceptance_checks=["./tools/pre-push-fast"],
         scope_hint=None, wave_class=None, allow_edits=False, job_id=None,
     )
     bridge.run_job(paths, job_id)

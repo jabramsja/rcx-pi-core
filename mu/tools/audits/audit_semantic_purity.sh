@@ -306,12 +306,12 @@ if [ -d "mu" ]; then
         echo "  Found $SEED_COUNT seed JSON files"
 
         # Validate each seed is valid JSON
-        for seed in $(find mu -name '*.json' -type f 2>/dev/null); do
-            if ! python3 -c "import json; json.load(open('$seed'))" 2>/dev/null; then
+        while IFS= read -r -d '' seed; do
+            if ! python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$seed" 2>/dev/null; then
                 echo "  ERROR: Seed $seed is not valid JSON"
                 FAILED=1
             fi
-        done
+        done < <(find mu -name '*.json' -type f -print0 2>/dev/null)
 
         if [ $FAILED -eq 0 ]; then
             echo "  ✓ All seeds are valid JSON"
@@ -802,10 +802,9 @@ echo "Checking for Python files in rcx_pi/ not covered by audits..."
 AUDITED_FILES="eval_seed.py kernel.py mu_type.py"
 
 # Find all .py files in rcx_pi/ (excluding __pycache__)
-ALL_PY_FILES=$(find -H rcx_pi -maxdepth 1 -name "*.py" -type f 2>/dev/null | xargs -I{} basename {} | sort)
-
-UNAUDITED=""
-for f in $ALL_PY_FILES; do
+UNAUDITED=()
+while IFS= read -r -d '' pypath; do
+    f="$(basename "$pypath")"
     # Skip __init__.py
     if [ "$f" = "__init__.py" ]; then
         continue
@@ -829,14 +828,14 @@ for f in $ALL_PY_FILES; do
             ;;
         *)
             # New file - needs review
-            UNAUDITED="$UNAUDITED $f"
+            UNAUDITED+=("$f")
             ;;
     esac
-done
+done < <(find -H rcx_pi -maxdepth 1 -name "*.py" -type f -print0 2>/dev/null | sort -z)
 
-if [ -n "$UNAUDITED" ]; then
+if [ ${#UNAUDITED[@]} -gt 0 ]; then
     echo "  WARNING: New files found that may need audit coverage:"
-    for f in $UNAUDITED; do
+    for f in "${UNAUDITED[@]}"; do
         echo "    - rcx_pi/$f"
     done
     echo "  Action: Add to AUDITED_FILES list or mark as legacy/infrastructure"

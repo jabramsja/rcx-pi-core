@@ -285,7 +285,7 @@ class TestLaw2DocLifecycle:
             msg = f"\nGoverned docs missing DOC_STATUS header ({len(missing)} total):\n"
             for doc in sorted(missing):
                 msg += f"  - {doc}\n"
-            msg += "\nRun: python tools/docs/add_doc_headers.py\n"
+            msg += "\nRun: python3 -m tools.docs.add_doc_headers\n"
             msg += "Per DocGovernance.v0.md: 'A doc without DOC_STATUS fails CI.'\n"
             pytest.fail(msg)
 
