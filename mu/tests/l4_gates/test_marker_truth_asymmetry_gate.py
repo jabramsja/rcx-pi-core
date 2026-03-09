@@ -31,17 +31,14 @@ class TestMarkerTruthAsymmetryGate:
         assert found, "list_to_linked for-loop must have @host_iteration marker"
 
     def test_python_collect_ontology_evidence_marked(self):
-        """Python _collect_ontology_evidence has AST_OK: infra (structural walker boundary)."""
+        """Python _collect_ontology_evidence has @host_iteration (boundary walker output drain)."""
         path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
         text = path.read_text()
         lines = text.splitlines()
         for line in lines:
             if "_collect_ontology_evidence" in line and "def " in line:
-                assert "AST_OK: infra" in line, (
-                    "_collect_ontology_evidence must have AST_OK: infra (structural walker boundary)"
-                )
-                assert "@host_iteration" not in line, (
-                    "_collect_ontology_evidence must not have @host_iteration (displaced by evidence_walker.v1.json)"
+                assert "@host_iteration" in line, (
+                    "_collect_ontology_evidence must have @host_iteration (boundary walker output drain)"
                 )
                 return
         pytest.fail("_collect_ontology_evidence def line not found")
@@ -69,9 +66,8 @@ class TestMarkerTruthAsymmetryGate:
         py = data["counts"]["python"]
         js = data["counts"]["javascript"]
         # MT1 added 2 Python iteration markers and 1 JS iteration marker
-        # Wave rt6: evidence_walker.v1.json displaced 1 @host_iteration → 11
-        assert py["host_iteration"] >= 11, (
-            f"Python host_iteration baseline must be >= 11, got {py['host_iteration']}"
+        assert py["host_iteration"] >= 12, (
+            f"Python host_iteration baseline must be >= 12 (MT1), got {py['host_iteration']}"
         )
         assert js["host_iteration"] >= 11, (
             f"JS host_iteration baseline must be >= 11 (MT1), got {js['host_iteration']}"

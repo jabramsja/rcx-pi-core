@@ -321,7 +321,7 @@ THRESHOLD: 11
 CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
 FLOOR: 11 (see explanation below)
 INFRA_CEILING: 74
-INFRA_CURRENT: 74
+INFRA_CURRENT: 73
 ```
 
 **Debt breakdown:**
@@ -374,7 +374,7 @@ The debt of 11 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 bounda
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 74 (current 74)
+- AST_OK:infra ceiling: 74 (current 73)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 

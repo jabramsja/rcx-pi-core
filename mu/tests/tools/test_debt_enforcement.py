@@ -460,9 +460,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 74 (67 pre-evidence_walker + 7 new:
-    # evidence_walker boundary: function def + type guard + unwrap + list drain + linked-list drain + type guard + string filter)
-    assert infra_count == 74, (
-        f"Expected 74 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 73 (67 pre-evidence_walker + 6 new:
+    # evidence_walker boundary: type guard + unwrap + list drain + linked-list drain + type guard + string filter)
+    assert infra_count == 73, (
+        f"Expected 73 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

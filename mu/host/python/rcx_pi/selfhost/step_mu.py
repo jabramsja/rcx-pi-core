@@ -2291,7 +2291,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     return context
 
 
-def _collect_ontology_evidence(  # AST_OK: infra — structural walker boundary (evidence_walker.v1.json)
+def _collect_ontology_evidence(  # @host_iteration: boundary walker output drain (evidence_walker.v1.json)
     result,
     operation: str,
 ) -> dict:
