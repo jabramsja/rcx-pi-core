@@ -49,7 +49,7 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
 
 /**
  * Count entries and validate linked-list structure across all hemisphere buckets.
- * Mirrors Python _count_hemisphere_entries().
+ * Mirrors Python count_hemisphere_entries().
  */
 function countHemisphereEntries(hemispheres, maxEntriesPerBucket) {
   if (maxEntriesPerBucket === undefined) maxEntriesPerBucket = 1000;

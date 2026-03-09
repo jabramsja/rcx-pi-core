@@ -13,7 +13,7 @@ from rcx_pi.selfhost.seed_integrity import (
 )
 from rcx_pi.selfhost.step_mu import (
     run_metabolization_cycle,  # SPEED_OK: tested via run_mu (slow-marked below)
-    _count_hemisphere_entries,
+    count_hemisphere_entries,
 )
 
 
@@ -106,18 +106,18 @@ class TestMetabolizeCycleSeedStructure:
 # =============================================================================
 
 class TestCountHemisphereEntries:
-    """Tests for _count_hemisphere_entries boundary validator."""
+    """Tests for count_hemisphere_entries boundary validator."""
 
     def test_empty_hemispheres(self):
         h = {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
-        assert _count_hemisphere_entries(h) == 0
+        assert count_hemisphere_entries(h) == 0
 
     def test_single_entry(self):
         h = {
             "r_null": None, "r_inf": None, "r_a": None, "lobes": None,
             "sink": [{"state": "x", "closure_flag": False, "origin": "test"}],
         }
-        assert _count_hemisphere_entries(h) == 1
+        assert count_hemisphere_entries(h) == 1
 
     def test_multiple_entries_across_buckets(self):
         h = {
@@ -127,7 +127,7 @@ class TestCountHemisphereEntries:
             "lobes": [{"state": "c"}],
             "sink": None,
         }
-        assert _count_hemisphere_entries(h) == 4
+        assert count_hemisphere_entries(h) == 4
 
     def test_malformed_node_raises(self):
         h = {
@@ -135,7 +135,7 @@ class TestCountHemisphereEntries:
             "r_inf": None, "r_a": None, "lobes": None, "sink": None,
         }
         with pytest.raises(ValueError, match="must be null or list"):
-            _count_hemisphere_entries(h)
+            count_hemisphere_entries(h)
 
     def test_malformed_entry_raises(self):
         """Non-dict entry in bucket raises RcxEngineError (input.shape_mismatch)."""
@@ -144,7 +144,7 @@ class TestCountHemisphereEntries:
             "r_inf": None, "r_a": None, "lobes": None, "sink": None,
         }
         with pytest.raises(RuntimeError, match="entry\\[0\\] must be a plain object"):
-            _count_hemisphere_entries(h)
+            count_hemisphere_entries(h)
 
     def test_malformed_entry_null_raises(self):
         """Null entry in bucket raises RcxEngineError (input.shape_mismatch)."""
@@ -153,7 +153,7 @@ class TestCountHemisphereEntries:
             "r_inf": None, "r_a": None, "lobes": None, "sink": None,
         }
         with pytest.raises(RuntimeError, match="entry\\[0\\] must be a plain object"):
-            _count_hemisphere_entries(h)
+            count_hemisphere_entries(h)
 
     def test_depth_guard(self):
         """Depth guard catches overly deep lists."""
@@ -162,7 +162,7 @@ class TestCountHemisphereEntries:
             "r_inf": None, "r_a": None, "lobes": None, "sink": None,
         }
         with pytest.raises(ValueError, match="exceeds depth guard"):
-            _count_hemisphere_entries(h, max_entries_per_bucket=3)
+            count_hemisphere_entries(h, max_entries_per_bucket=3)
 
 
 # =============================================================================

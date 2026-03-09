@@ -2838,7 +2838,7 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
 
 # --- Metabolization Cycle (Structural Walker) ---
 
-def _count_hemisphere_entries(hemispheres: dict, max_entries_per_bucket: int = 1000) -> int:  # AST_OK: infra — boundary validation
+def count_hemisphere_entries(hemispheres: dict, max_entries_per_bucket: int = 1000) -> int:  # AST_OK: infra — boundary validation
     """Count entries and validate linked-list structure across all hemisphere buckets.
 
     The Mu runtime normalizes {head, tail} linked lists to Python lists.
@@ -2913,7 +2913,7 @@ def run_metabolization_cycle(hemispheres: Mu) -> Mu:  # AST_OK: infra — bounda
         raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
 
     # Recursive list validation + budget calculation (single pass)
-    entry_count = _count_hemisphere_entries(hemispheres)  # raises on malformed nodes
+    entry_count = count_hemisphere_entries(hemispheres)  # raises on malformed nodes
 
     projs = load_verified_seed(get_seed_path("metabolize_cycle.v1.json"))["projections"]
     wrapped = {"metabolize_cycle": {"hemispheres": hemispheres}}
@@ -2927,7 +2927,7 @@ def run_metabolization_cycle(hemispheres: Mu) -> Mu:  # AST_OK: infra — bounda
             "input.shape_mismatch",
             "Metabolization cycle did not produce valid hemispheres"
         )
-    _count_hemisphere_entries(result)  # raises on malformed output nodes
+    count_hemisphere_entries(result)  # raises on malformed output nodes
 
     return result
 
