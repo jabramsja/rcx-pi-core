@@ -1859,6 +1859,28 @@ def test_doctor_cli_subcommand(tmp_path: Path) -> None:
     paths = bridge.bridge_paths(repo_root)
     bridge.init_db(paths)
 
+    # Override config with commands that exist on any system (CI lacks claude/codex)
+    import json
+    config = {
+        "agents": {
+            "claude": {
+                "mode": "live",
+                "cmd": ["python3", "-c", "pass"],
+                "prompt_via_stdin": True,
+                "timeout_s": 30,
+                "env": {},
+            },
+            "codex": {
+                "mode": "live",
+                "cmd": ["python3", "-c", "pass"],
+                "prompt_via_stdin": True,
+                "timeout_s": 30,
+                "env": {},
+            },
+        }
+    }
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
     ret = bridge.main(["--repo-root", str(repo_root), "doctor"])
     assert ret == 0
 
