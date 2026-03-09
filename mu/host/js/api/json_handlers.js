@@ -14,7 +14,7 @@ const { step, run, match } = require('../core/bootstrap_core');
 const { HEMISPHERE_KEYS, setsEqual, defaultHemispheres, deriveEngineExitReason } = require('../core/terminal_classification');
 const { stepKernel, runStructural } = require('../engine/kernel');
 const { runAlgorithmWithBridge, runEnginePipeline, runEnginePipelineRecursive, hashTraceForRecurrence } = require('../engine/pipeline');
-const { runHemisphereRouting, runEngineWithRouting } = require('../engine/routing');
+const { runHemisphereRouting, runMetabolizationCycle, runEngineWithRouting } = require('../engine/routing');
 
 // API-level caps for externally reachable endpoints.
 const API_MAX_STEPS = 10000;
@@ -66,7 +66,8 @@ function handleJsonApi(apiArg, seeds) {
     allProjections, allProjectionsWithBridge, allProjectionsWithExhaustion,
     allProjectionsWithExhaustionAndBridge,
     recurrenceProjections, exhaustionProjections, hemisphereProjections,
-    engineProjections, metabolizationProjections, seedProjectionMap,
+    engineProjections, metabolizationProjections, metabolizeCycleProjections,
+    seedProjectionMap,
     parityVectors,
     kernel, matchSeed, substSeed, bridgeSeed,
     recurrenceSeed, exhaustionSeed, hemisphereSeed, engineSeed, metabolizationSeed,
@@ -320,7 +321,8 @@ function handleJsonApi(apiArg, seeds) {
               maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
               observer: observerEvents,
             },
-            boot1Mode
+            boot1Mode,
+            metabolizeCycleProjections
           );
           response = { success: true, result };
           if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
@@ -391,6 +393,14 @@ function handleJsonApi(apiArg, seeds) {
           response = { success: false, error_code: classifyError(e), error: e.message };
         }
       }
+    } else if (request.action === 'run_metabolization_cycle') {
+      const { hemispheres } = request;
+      try {
+        const result = runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemispheres ?? null);
+        response = { success: true, result };
+      } catch (e) {
+        response = { success: false, error_code: classifyError(e), error: e.message };
+      }
     } else if (request.action === 'step_metabolization') {
       const { input } = request;
       try {
@@ -410,7 +420,8 @@ function handleJsonApi(apiArg, seeds) {
           'validate_reserved_fields', 'validate_algorithm_runtime_fields',
           'run_structural_trace', 'run_hemisphere', 'run_engine_pipeline',
           'hash_trace', 'run_hemisphere_routing', 'run_engine_with_routing',
-          'step_metabolization', 'step_kernel_meta', 'run_engine_pipeline_meta', 'list_actions'
+          'run_metabolization_cycle', 'step_metabolization',
+          'step_kernel_meta', 'run_engine_pipeline_meta', 'list_actions'
         ]
       };
     } else {

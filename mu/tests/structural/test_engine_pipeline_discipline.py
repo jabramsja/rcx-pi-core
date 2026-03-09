@@ -556,7 +556,8 @@ class TestEngineWithRoutingReturnShape:
 
 # All functions that call run_mu() directly in production code.
 KNOWN_RUN_MU_CALLERS = {
-    "run_hemisphere_routing",  # Only production caller (hemispheres.v1 routing)
+    "run_hemisphere_routing",  # hemispheres.v1 routing
+    "run_metabolization_cycle",  # metabolize_cycle.v1 structural walker
 }
 
 
@@ -584,11 +585,11 @@ class TestRunMuCallsiteInventory:
         )
 
     def test_caller_count_locked(self):
-        """Exactly 1 production caller of run_mu."""
+        """Exactly 2 production callers of run_mu."""
         source = _STEP_MU_PATH.read_text()
         actual = _find_callers(source, "run_mu")
-        assert len(actual) == 1, (
-            f"Expected 1 run_mu caller, found {len(actual)}: {actual}"
+        assert len(actual) == 2, (
+            f"Expected 2 run_mu callers, found {len(actual)}: {actual}"
         )
 
 
@@ -635,7 +636,7 @@ class TestRunMuStructuralCallsiteInventory:
 
 # ── JS JSON API action list parity ────────────────────────────────────────
 
-# Expected JS JSON API actions (21 total, extracted from dispatch branches)
+# Expected JS JSON API actions (22 total, extracted from dispatch branches)
 EXPECTED_JS_ACTIONS = {
     "run_vector", "run_all_vectors", "run_recurrence", "run_exhaustion",
     "get_constants", "normalize_roundtrip", "validate_mu",
@@ -643,7 +644,8 @@ EXPECTED_JS_ACTIONS = {
     "validate_reserved_fields", "validate_algorithm_runtime_fields",
     "run_structural_trace", "run_hemisphere", "run_engine_pipeline",
     "hash_trace", "run_hemisphere_routing", "run_engine_with_routing",
-    "step_metabolization", "step_kernel_meta", "run_engine_pipeline_meta",
+    "run_metabolization_cycle", "step_metabolization",
+    "step_kernel_meta", "run_engine_pipeline_meta",
     "list_actions",
 }
 
@@ -666,11 +668,11 @@ class TestJsActionListParity:
     """JS JSON API action dispatch must be self-consistent and locked."""
 
     def test_action_count_locked(self):
-        """JS must have exactly 21 JSON API actions."""
+        """JS must have exactly 22 JSON API actions."""
         source = _read_all_js_source()
         actual = _extract_js_dispatch_actions(source)
-        assert len(actual) == 21, (
-            f"Expected 21 JS actions, found {len(actual)}: {sorted(actual)}"
+        assert len(actual) == 22, (
+            f"Expected 22 JS actions, found {len(actual)}: {sorted(actual)}"
         )
 
     def test_dispatch_matches_list_actions(self):

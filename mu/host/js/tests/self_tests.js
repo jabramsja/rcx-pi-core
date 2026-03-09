@@ -25,14 +25,14 @@ module.exports = function runSelfTests(seeds) {
     recurrenceProjections, metabolizationProjections,
     kernel, matchSeed, substSeed, bridgeSeed,
     recurrenceSeed, recurrenceV2Seed, exhaustionSeed,
-    hemisphereSeed, engineSeed, metabolizationSeed,
+    hemisphereSeed, engineSeed, metabolizationSeed, metabolizeCycleSeed,
     parityVectors,
     bridgeProjections,
     validateCombinedBridgeOrdering,
   } = seeds;
 
   console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
-  console.log('Seed integrity: 12 seeds verified (checksum + structure + projection order)');
+  console.log('Seed integrity: 13 seeds verified (checksum + structure + projection order)');
   console.log(`Loaded projections from mu/ folder:`);
   console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
   console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
@@ -44,6 +44,7 @@ module.exports = function runSelfTests(seeds) {
   console.log(`  - closures/fix.v1.json: ${seeds.fixSeed.projections.length} projections (draft — GAP-04-FIX)`);
   console.log(`  - programs/hemispheres.v1.json: ${hemisphereSeed.projections.length} projections`);
   console.log(`  - programs/metabolization.v1.json: ${metabolizationSeed.projections.length} projections`);
+  console.log(`  - programs/metabolize_cycle.v1.json: ${metabolizeCycleSeed.projections.length} projections`);
   console.log(`  - programs/rcx_engine.v1.json: ${engineSeed.projections.length} projections`);
   console.log(`  - Total (kernel ops): ${allProjections.length} projections`);
   console.log(`  - Total (with Bridge): ${seeds.allProjectionsWithBridge.length} projections`);

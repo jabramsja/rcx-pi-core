@@ -2,12 +2,12 @@
 /**
  * RCX Engine Routing
  *
- * runHemisphereRouting, runEngineWithRouting.
+ * runHemisphereRouting, runMetabolizationCycle, runEngineWithRouting.
  * Depends on: core/*, core/terminal_classification.js, engine/pipeline.js, engine/kernel.js
  */
 
 const { RcxError } = require('../core/constants');
-const { HEMISPHERE_KEYS, setsEqual, defaultHemispheres, deriveEngineExitReason } = require('../core/terminal_classification');
+const { HEMISPHERE_KEYS, HEMISPHERE_KEY_ORDER, setsEqual, defaultHemispheres, deriveEngineExitReason } = require('../core/terminal_classification');
 const { stepKernel } = require('./kernel');
 const { runEnginePipeline, runEnginePipelineRecursive } = require('./pipeline');
 
@@ -48,11 +48,92 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
 }
 
 /**
- * Chain runEnginePipeline -> runHemisphereRouting.
- * Parameterized: takes all projection sets.
- * Mirrors Python run_engine_with_routing() (step_mu.py:1635-1672).
+ * Count entries and validate linked-list structure across all hemisphere buckets.
+ * Mirrors Python _count_hemisphere_entries().
  */
-function runEngineWithRouting(allProjections, hemisphereProjections, kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, hemispheres, engineKwargs, boot1Mode) {
+function countHemisphereEntries(hemispheres, maxEntriesPerBucket) {
+  if (maxEntriesPerBucket === undefined) maxEntriesPerBucket = 1000;
+  let count = 0;
+  const keyOrder = HEMISPHERE_KEY_ORDER;
+  for (let i = 0; i < keyOrder.length; i++) {
+    const bucketName = keyOrder[i];
+    const bucket = hemispheres[bucketName];
+    if (bucket === undefined) {
+      throw new RcxError('input.shape_mismatch',
+        `hemisphere bucket '${bucketName}' is undefined (expected null or array)`);
+    }
+    if (bucket === null) continue;
+    if (!Array.isArray(bucket)) {
+      throw new RcxError('input.shape_mismatch',
+        `hemisphere bucket '${bucketName}' must be null or array, got ${typeof bucket}`);
+    }
+    if (bucket.length > maxEntriesPerBucket) {
+      throw new RcxError('input.shape_mismatch',
+        `hemisphere bucket '${bucketName}' exceeds depth guard (${maxEntriesPerBucket}), possible cyclic structure`);
+    }
+    for (let j = 0; j < bucket.length; j++) {
+      if (bucket[j] === null || typeof bucket[j] !== 'object' || Array.isArray(bucket[j])) {
+        throw new RcxError('input.shape_mismatch',
+          `hemisphere bucket '${bucketName}' entry[${j}] must be object, got ${bucket[j] === null ? 'null' : Array.isArray(bucket[j]) ? 'array' : typeof bucket[j]}`);
+      }
+    }
+    count += bucket.length;
+  }
+  return count;
+}
+
+/**
+ * Run structural metabolization cycle over hemispheres.
+ * Loads metabolize_cycle.v1.json projections and runs via stepKernel loop.
+ * No host iteration — iteration is structural (walker projections pattern-match).
+ * Mirrors Python run_metabolization_cycle().
+ */
+function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemispheres) {
+  // Input validation (fail-closed)
+  if (hemispheres === null || typeof hemispheres !== 'object' || Array.isArray(hemispheres)) {
+    throw new RcxError('input.invalid_type', `hemispheres must be dict, got ${typeof hemispheres}`);
+  }
+  const actual = new Set(Object.keys(hemispheres));
+  if (!setsEqual(actual, HEMISPHERE_KEYS)) {
+    const missing = [...HEMISPHERE_KEYS].filter(k => !actual.has(k)).sort();
+    const extra = [...actual].filter(k => !HEMISPHERE_KEYS.has(k)).sort();
+    throw new RcxError('input.shape_mismatch',
+      `hemispheres shape mismatch: missing=${JSON.stringify(missing)}, extra=${JSON.stringify(extra)}`);
+  }
+
+  // Recursive list validation + budget calculation
+  const entryCount = countHemisphereEntries(hemispheres);
+
+  const wrapped = { metabolize_cycle: { hemispheres: hemispheres } };
+  const stepBudget = Math.max(20, 4 * entryCount + 10);
+
+  let current = wrapped;
+  for (let i = 0; i < stepBudget; i++) {
+    const meta = stepKernel(
+      allProjections, current, metabolizeCycleProjections,
+      { returnMeta: true }
+    );
+    if (meta.stall) break;
+    current = meta.output;
+  }
+
+  // Output validation (symmetric with input)
+  if (typeof current !== 'object' || current === null ||
+      !setsEqual(new Set(Object.keys(current)), HEMISPHERE_KEYS)) {
+    throw new RcxError('input.shape_mismatch',
+      'Metabolization cycle did not produce valid hemispheres');
+  }
+  countHemisphereEntries(current);  // raises on malformed output nodes
+
+  return current;
+}
+
+/**
+ * Chain runEnginePipeline -> runHemisphereRouting -> runMetabolizationCycle.
+ * Parameterized: takes all projection sets.
+ * Mirrors Python run_engine_with_routing() (step_mu.py).
+ */
+function runEngineWithRouting(allProjections, hemisphereProjections, kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, hemispheres, engineKwargs, boot1Mode, metabolizeCycleProjections) {
   if (hemispheres === undefined || hemispheres === null) {
     hemispheres = defaultHemispheres();
   } else {
@@ -79,11 +160,16 @@ function runEngineWithRouting(allProjections, hemisphereProjections, kernelProje
   } else {
     engineResult = runEnginePipeline(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, engineKwargs);
   }
-  const updatedHemispheres = runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres);
+  let updatedHemispheres = runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres);
 
   const outputKeys = new Set(Object.keys(updatedHemispheres));
   if (typeof updatedHemispheres !== 'object' || !setsEqual(outputKeys, HEMISPHERE_KEYS)) {
     throw new RcxError('input.shape_mismatch', 'runHemisphereRouting returned unexpected shape');
+  }
+
+  // Run metabolization cycle (structural walker — no host iteration)
+  if (metabolizeCycleProjections) {
+    updatedHemispheres = runMetabolizationCycle(allProjections, metabolizeCycleProjections, updatedHemispheres);
   }
 
   return { engine_result: engineResult, hemispheres: updatedHemispheres };
@@ -91,5 +177,7 @@ function runEngineWithRouting(allProjections, hemisphereProjections, kernelProje
 
 module.exports = {
   runHemisphereRouting,
+  runMetabolizationCycle,
+  countHemisphereEntries,
   runEngineWithRouting,
 };

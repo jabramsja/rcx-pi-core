@@ -97,10 +97,10 @@ class TestSeedChecksumParity:
         assert not mismatches, f"Checksum mismatches:\n" + "\n".join(mismatches)
 
     def test_js_loads_expected_seed_count(self):
-        """JS must load exactly 12 seeds (kernel + match/subst v2 + closures + bridge + programs + metabolization + terminal_classify)."""
+        """JS must load exactly 13 seeds (kernel + match/subst v2 + closures + bridge + programs + metabolization + metabolize_cycle + terminal_classify)."""
         js_checksums = _extract_js_seed_checksums(_js_source())
-        assert len(js_checksums) == 12, (
-            f"JS seed count changed from 12 to {len(js_checksums)}. "
+        assert len(js_checksums) == 13, (
+            f"JS seed count changed from 13 to {len(js_checksums)}. "
             f"Seeds: {sorted(js_checksums.keys())}"
         )
 

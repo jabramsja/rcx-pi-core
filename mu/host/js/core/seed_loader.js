@@ -79,6 +79,7 @@ const SEED_SUBDIRS = {
   'hemispheres.v1.json': 'programs',
   'paxos_demo.v1.json': 'programs',
   'metabolization.v1.json': 'programs',
+  'metabolize_cycle.v1.json': 'programs',
 };
 
 /**

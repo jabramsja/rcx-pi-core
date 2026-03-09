@@ -3441,7 +3441,7 @@ _FIXTURES_DIR = ROOT / "tests" / "fixtures"
 _R3_ADAPTED_ACTIONS = frozenset({
     'hash_trace', 'validate_reserved_fields', 'validate_algorithm_runtime_fields',
     'run_engine_pipeline', 'run_hemisphere_routing', 'run_engine_with_routing',
-    'run_recurrence',
+    'run_recurrence', 'run_metabolization_cycle',
 })
 
 
@@ -3557,6 +3557,10 @@ def _run_python_r3(action, request):
                 max_algorithm_iterations=request.get('maxAlgorithmIterations', 50),
                 **kwargs,
             )
+            return True, result, None
+        elif action == 'run_metabolization_cycle':
+            from rcx_pi.selfhost.step_mu import run_metabolization_cycle  # SPEED_OK: adapter for R3 replay
+            result = run_metabolization_cycle(request.get('hemispheres'))
             return True, result, None
         elif action == 'run_recurrence':
             from rcx_pi.selfhost.step_mu import run_mu
