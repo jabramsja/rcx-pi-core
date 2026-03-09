@@ -1,0 +1,37 @@
+{
+  "wave_id": "redteam-2026-03-09-wave1-docs",
+  "wave_class": "MAINTENANCE",
+  "timestamp": "2026-03-09T00:00:00Z",
+  "target_gate_id": "G5",
+  "changed_files": [
+    "CLAUDE.md",
+    "STATUS.md",
+    "TASKS.md",
+    "mu/docs/core/Boot0Architecture.v0.md",
+    "reports/deferred/redteam_2026-03-09_wave1.md"
+  ],
+  "test_results": {
+    "doc_tests": "294 passed",
+    "doc_consistency": "all checks passed"
+  },
+  "no_op_proof": "Docs-only red-team wave: 11 stale seed count/name/parity claims fixed across 4 canonical docs (STATUS.md, TASKS.md, CLAUDE.md, Boot0Architecture.v0.md). Zero runtime/substrate/seed/test changes.",
+  "defer_reason_code": "RED_TEAM_DOCS_MAINTENANCE",
+  "primary_blocker_class": "DESIGN",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+  "boot0_track_id": "N3",
+  "boot0_progress_state": "HOLD",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id redteam-2026-03-09-wave1-docs --range origin/dev...HEAD --output reports/l4_wave_indicators/redteam-2026-03-09-wave1-docs.json",
+  "repeat_run_speedup_ratio": 1.0,
+  "parity_diff_count": 0,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.001,
+  "repeat_run_raw_seconds": [0.001, 0.001],
+  "step_growth_points": [
+    {"step": 1, "elapsed_seconds": 0.001},
+    {"step": 2, "elapsed_seconds": 0.002}
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-09T06:00:00Z",
+  "collector_version": "2.2.0-manual"
+}
