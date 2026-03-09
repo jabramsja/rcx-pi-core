@@ -1,0 +1,432 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "METABOLIZE_CYCLE",
+    "description": "Structural metabolization walker: iterates hemisphere linked lists via pattern matching (no host loops). Phases: sink metabolization, lobes promotion, lobes order restore, exit.",
+    "doc": "roadmap/MuHemispheresDesign.md",
+    "spec_ref": "reports/metabolize_cycle_design_convergence.md",
+    "status": "testable",
+    "execution_layer": "APPLICATION",
+    "requires_patterns": ["linear"],
+    "dependencies": [
+      "hemispheres.v1.json (produces 5-bucket hemisphere state)",
+      "metabolization.v1.json (per-entry routing, coexists)"
+    ],
+    "invariants": [
+      "All projections are pure Mu (JSON-compatible)",
+      "Structural iteration via pattern matching on linked lists (no host loops)",
+      "Linear-only patterns (no bridge required)",
+      "No kernel-reserved underscore fields in intermediate state",
+      "Null-specific projections must precede generic-var projections (first-match-wins correctness)",
+      "Lobes order preserved via structural reverse phase",
+      "Step budget: O(N) in total hemisphere entries, bounded by 4N+10"
+    ],
+    "step_budget_contract": "max(20, 4 * total_entries + 10)"
+  },
+  "projections": [
+    {
+      "id": "metabolize.cycle.init",
+      "description": "Entry: sink has entries -> extract first, start scanning",
+      "pattern": {
+        "metabolize_cycle": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {
+              "head": {"var": "entry"},
+              "tail": {"var": "rest"}
+            }
+          }
+        }
+      },
+      "body": {
+        "sink_scan": {
+          "entry": {"var": "entry"},
+          "remaining": {"var": "rest"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": null
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.init_skip_sink",
+      "description": "Entry: sink is empty -> skip to lobes phase",
+      "pattern": {
+        "metabolize_cycle": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": null
+          }
+        }
+      },
+      "body": {
+        "lobes_scan_init": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": null
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.sink_to_r_null",
+      "description": "Sink entry with null state -> route to r_null. MUST precede sink_to_r_inf (null literal before var).",
+      "pattern": {
+        "sink_scan": {
+          "entry": {
+            "state": null,
+            "closure_flag": {"var": "cf"},
+            "origin": {"var": "orig"}
+          },
+          "remaining": {"var": "rem"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      },
+      "body": {
+        "sink_scanned": {
+          "remaining": {"var": "rem"},
+          "hemispheres": {
+            "r_null": {
+              "head": {
+                "state": null,
+                "closure_flag": {"var": "cf"},
+                "origin": "metabolized"
+              },
+              "tail": {"var": "rn"}
+            },
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.sink_to_r_inf",
+      "description": "Sink entry with non-null state -> route to r_inf",
+      "pattern": {
+        "sink_scan": {
+          "entry": {
+            "state": {"var": "s"},
+            "closure_flag": {"var": "cf"},
+            "origin": {"var": "orig"}
+          },
+          "remaining": {"var": "rem"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      },
+      "body": {
+        "sink_scanned": {
+          "remaining": {"var": "rem"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {
+              "head": {
+                "state": {"var": "s"},
+                "closure_flag": {"var": "cf"},
+                "origin": "metabolized"
+              },
+              "tail": {"var": "ri"}
+            },
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.sink_next",
+      "description": "Remaining sink entries -> continue scanning",
+      "pattern": {
+        "sink_scanned": {
+          "remaining": {
+            "head": {"var": "next_entry"},
+            "tail": {"var": "rest"}
+          },
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "sink_scan": {
+          "entry": {"var": "next_entry"},
+          "remaining": {"var": "rest"},
+          "hemispheres": {"var": "h"}
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.sink_done",
+      "description": "No remaining sink entries -> transition to lobes phase",
+      "pattern": {
+        "sink_scanned": {
+          "remaining": null,
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "lobes_scan_init": {
+          "hemispheres": {"var": "h"}
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_start",
+      "description": "Lobes has entries -> extract first, start scanning with kept accumulator",
+      "pattern": {
+        "lobes_scan_init": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {
+              "head": {"var": "entry"},
+              "tail": {"var": "rest"}
+            },
+            "sink": {"var": "sk"}
+          }
+        }
+      },
+      "body": {
+        "lobes_scan": {
+          "entry": {"var": "entry"},
+          "remaining": {"var": "rest"},
+          "kept": null,
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": null,
+            "sink": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_start_empty",
+      "description": "Lobes is null -> done (no lobes to process)",
+      "pattern": {
+        "lobes_scan_init": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": null,
+            "sink": {"var": "sk"}
+          }
+        }
+      },
+      "body": {
+        "metabolize_cycle_done": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": null,
+            "sink": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_promote",
+      "description": "Lobes entry with closure_flag=true -> promote to r_a",
+      "pattern": {
+        "lobes_scan": {
+          "entry": {
+            "state": {"var": "s"},
+            "closure_flag": true,
+            "origin": {"var": "orig"}
+          },
+          "remaining": {"var": "rem"},
+          "kept": {"var": "k"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      },
+      "body": {
+        "lobes_scanned": {
+          "remaining": {"var": "rem"},
+          "kept": {"var": "k"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {
+              "head": {
+                "state": {"var": "s"},
+                "closure_flag": true,
+                "origin": "promoted"
+              },
+              "tail": {"var": "ra"}
+            },
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_keep",
+      "description": "Lobes entry with closure_flag=false -> add to kept accumulator (stays in lobes)",
+      "pattern": {
+        "lobes_scan": {
+          "entry": {
+            "state": {"var": "s"},
+            "closure_flag": false,
+            "origin": {"var": "orig"}
+          },
+          "remaining": {"var": "rem"},
+          "kept": {"var": "k"},
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "lobes_scanned": {
+          "remaining": {"var": "rem"},
+          "kept": {
+            "head": {
+              "state": {"var": "s"},
+              "closure_flag": false,
+              "origin": {"var": "orig"}
+            },
+            "tail": {"var": "k"}
+          },
+          "hemispheres": {"var": "h"}
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_next",
+      "description": "Remaining lobes entries -> continue scanning",
+      "pattern": {
+        "lobes_scanned": {
+          "remaining": {
+            "head": {"var": "next_entry"},
+            "tail": {"var": "rest"}
+          },
+          "kept": {"var": "k"},
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "lobes_scan": {
+          "entry": {"var": "next_entry"},
+          "remaining": {"var": "rest"},
+          "kept": {"var": "k"},
+          "hemispheres": {"var": "h"}
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_done",
+      "description": "No remaining lobes entries -> start reverse to restore order",
+      "pattern": {
+        "lobes_scanned": {
+          "remaining": null,
+          "kept": {"var": "k"},
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "lobes_reverse": {
+          "source": {"var": "k"},
+          "target": null,
+          "hemispheres": {"var": "h"}
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_reverse_step",
+      "description": "Reverse: move head of source to target (reverses kept list to restore original order)",
+      "pattern": {
+        "lobes_reverse": {
+          "source": {
+            "head": {"var": "entry"},
+            "tail": {"var": "rest"}
+          },
+          "target": {"var": "t"},
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {
+        "lobes_reverse": {
+          "source": {"var": "rest"},
+          "target": {
+            "head": {"var": "entry"},
+            "tail": {"var": "t"}
+          },
+          "hemispheres": {"var": "h"}
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.lobes_reverse_done",
+      "description": "Reverse complete: source exhausted -> set lobes to reversed result, done",
+      "pattern": {
+        "lobes_reverse": {
+          "source": null,
+          "target": {"var": "t"},
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "l"},
+            "sink": {"var": "sk"}
+          }
+        }
+      },
+      "body": {
+        "metabolize_cycle_done": {
+          "hemispheres": {
+            "r_null": {"var": "rn"},
+            "r_inf": {"var": "ri"},
+            "r_a": {"var": "ra"},
+            "lobes": {"var": "t"},
+            "sink": {"var": "sk"}
+          }
+        }
+      }
+    },
+    {
+      "id": "metabolize.cycle.unwrap",
+      "description": "Exit: extract final hemispheres dict (causes run_mu stall, returned as result)",
+      "pattern": {
+        "metabolize_cycle_done": {
+          "hemispheres": {"var": "h"}
+        }
+      },
+      "body": {"var": "h"}
+    }
+  ]
+}

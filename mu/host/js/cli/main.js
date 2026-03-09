@@ -3,7 +3,7 @@
  * RCX CLI Main — Seed loading, projection composition, self-tests, CLI output
  *
  * This is the runtime entrypoint. When executed directly or via eval_step.js shim:
- *   1. Loads and verifies all 11 seeds
+ *   1. Loads and verifies all 13 seeds
  *   2. Composes projection arrays
  *   3. Runs self-tests (console output with "All tests passed: true")
  *   4. If --json-api in process.argv, delegates to api/json_handlers.js
@@ -33,6 +33,7 @@ const SEED_CHECKSUMS = {
   'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
   'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
   'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
+  'metabolize_cycle.v1.json': 'f8888ecab6845193610499d15dea8a8e845d07ce04391457770ef32cac69dfd8',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -100,6 +101,16 @@ const EXPECTED_PROJECTION_IDS = {
   'terminal_classify.v1.json': [
     'tc.recurrence', 'tc.exhaustion', 'tc.engine',
     'tc.exit.closure', 'tc.exit.exhaustion', 'tc.exit.stall', 'tc.exit.completed',
+  ],
+  'metabolize_cycle.v1.json': [
+    'metabolize.cycle.init', 'metabolize.cycle.init_skip_sink',
+    'metabolize.cycle.sink_to_r_null', 'metabolize.cycle.sink_to_r_inf',
+    'metabolize.cycle.sink_next', 'metabolize.cycle.sink_done',
+    'metabolize.cycle.lobes_start', 'metabolize.cycle.lobes_start_empty',
+    'metabolize.cycle.lobes_promote', 'metabolize.cycle.lobes_keep',
+    'metabolize.cycle.lobes_next', 'metabolize.cycle.lobes_done',
+    'metabolize.cycle.lobes_reverse_step', 'metabolize.cycle.lobes_reverse_done',
+    'metabolize.cycle.unwrap',
   ],
 };
 
@@ -213,6 +224,7 @@ const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v
 const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
 const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json'), 'rcx_engine.v1.json');
 const metabolizationSeed = loadVerifiedSeed(path.join(programsDir, 'metabolization.v1.json'), 'metabolization.v1.json');
+const metabolizeCycleSeed = loadVerifiedSeed(path.join(programsDir, 'metabolize_cycle.v1.json'), 'metabolize_cycle.v1.json');
 
 // Compose projection arrays
 const allProjections = [...kernel.projections, ...matchSeed.projections, ...substSeed.projections];
@@ -223,6 +235,7 @@ const fixProjections = fixSeed.projections;
 const hemisphereProjections = hemisphereSeed.projections;
 const engineProjections = engineSeed.projections;
 const metabolizationProjections = metabolizationSeed.projections;
+const metabolizeCycleProjections = metabolizeCycleSeed.projections;
 const recurrenceV2Projections = recurrenceV2Seed.projections;
 
 const seedProjectionMap = Object.assign(Object.create(null), {
@@ -269,11 +282,12 @@ const seedsContext = {
   allProjections, allProjectionsWithBridge, allProjectionsWithExhaustion,
   allProjectionsWithExhaustionAndBridge, allProjectionsWithRecurrenceAndBridge,
   recurrenceProjections, exhaustionProjections, hemisphereProjections,
-  engineProjections, metabolizationProjections, seedProjectionMap,
+  engineProjections, metabolizationProjections, metabolizeCycleProjections,
+  seedProjectionMap,
   parityVectors,
   kernel, matchSeed, substSeed, bridgeSeed,
   recurrenceSeed, exhaustionSeed, hemisphereSeed, engineSeed, metabolizationSeed,
-  recurrenceV2Seed, fixSeed,
+  recurrenceV2Seed, fixSeed, metabolizeCycleSeed,
   bridgeProjections, fixProjections, recurrenceV2Projections,
   SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS,
   validateCombinedBridgeOrdering,

@@ -2836,6 +2836,102 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
     )
 
 
+# --- Metabolization Cycle (Structural Walker) ---
+
+def count_hemisphere_entries(hemispheres: dict, max_entries_per_bucket: int = 1000) -> int:  # AST_OK: infra — boundary validation
+    """Count entries and validate linked-list structure across all hemisphere buckets.
+
+    The Mu runtime normalizes {head, tail} linked lists to Python lists.
+    Each bucket is either None (empty) or a Python list of entry dicts.
+    Validates structure and returns total entry count for dynamic step budget.
+
+    Args:
+        hemispheres: 5-bucket hemisphere dict.
+        max_entries_per_bucket: Depth guard per bucket (defense-in-depth).
+
+    Returns:
+        Total entry count across all buckets.
+
+    Raises:
+        ValueError: If any bucket has invalid type or exceeds depth guard.
+    """
+    count = 0
+    for bucket_name in _get_hemisphere_key_order():  # AST_OK: infra — seed-derived key iteration
+        bucket = hemispheres[bucket_name]
+        if bucket is None:
+            continue
+        if not isinstance(bucket, list):
+            raise ValueError(
+                f"hemisphere bucket '{bucket_name}' must be null or list, "
+                f"got {type(bucket).__name__}"
+            )
+        if len(bucket) > max_entries_per_bucket:
+            raise ValueError(
+                f"hemisphere bucket '{bucket_name}' exceeds depth guard "
+                f"({max_entries_per_bucket}), possible cyclic structure"
+            )
+        for i, entry in enumerate(bucket):
+            if not isinstance(entry, dict):
+                raise RcxEngineError(
+                    "input.shape_mismatch",
+                    f"hemisphere bucket '{bucket_name}' entry[{i}] must be a plain object, "
+                    f"got {type(entry).__name__}"
+                )
+        count += len(bucket)
+    return count
+
+
+def run_metabolization_cycle(hemispheres: Mu) -> Mu:  # AST_OK: infra — boundary host wrapper
+    """Run structural metabolization cycle over hemispheres.
+
+    Loads metabolize_cycle.v1.json projections and runs them via run_mu().
+    No host iteration — the iteration is structural (walker projections
+    pattern-match on linked-list structure).
+
+    Phases: sink scan (route to r_null/r_inf) → lobes promotion (closure_flag=true → r_a)
+            → lobes order restore (reverse) → exit.
+
+    Args:
+        hemispheres: 5-bucket hemisphere dict {r_null, r_inf, r_a, lobes, sink}.
+
+    Returns:
+        Updated hemispheres dict after metabolization.
+
+    Raises:
+        TypeError: If hemispheres is not a dict.
+        ValueError: If hemispheres has wrong key set or malformed linked lists.
+        RcxEngineError: If metabolization cycle does not produce valid output.
+    """
+    # Input validation (fail-closed)
+    if not isinstance(hemispheres, dict):  # AST_OK: boundary
+        raise TypeError(f"hemispheres must be dict, got {type(hemispheres).__name__}")
+    actual = set(hemispheres.keys())
+    expected = _get_hemisphere_keys()
+    if actual != expected:
+        missing = sorted(expected - actual, key=str)
+        extra = sorted(actual - expected, key=str)
+        raise ValueError(f"hemispheres shape mismatch: missing={missing}, extra={extra}")
+
+    # Recursive list validation + budget calculation (single pass)
+    entry_count = count_hemisphere_entries(hemispheres)  # raises on malformed nodes
+
+    projs = load_verified_seed(get_seed_path("metabolize_cycle.v1.json"))["projections"]
+    wrapped = {"metabolize_cycle": {"hemispheres": hemispheres}}
+    step_budget = max(20, 4 * entry_count + 10)
+
+    result, _trace, stall = run_mu(projs, wrapped, max_steps=step_budget)
+
+    # Output validation (symmetric with input)
+    if not isinstance(result, dict) or set(result.keys()) != expected:
+        raise RcxEngineError(
+            "input.shape_mismatch",
+            "Metabolization cycle did not produce valid hemispheres"
+        )
+    count_hemisphere_entries(result)  # raises on malformed output nodes
+
+    return result
+
+
 # --- Engine → Hemisphere Integration ---
 
 def _default_hemispheres():  # AST_OK: infra
@@ -2844,9 +2940,9 @@ def _default_hemispheres():  # AST_OK: infra
 
 
 def run_engine_with_routing(projections, input_value, hemispheres=None, **engine_kwargs):
-    """Chain run_engine_pipeline() → run_hemisphere_routing().
+    """Chain run_engine_pipeline() → run_hemisphere_routing() → run_metabolization_cycle().
 
-    Top-level integration: projections → trace → recurrence → exhaustion → routing.
+    Top-level integration: projections → trace → recurrence → exhaustion → routing → metabolization.
 
     Args:
         projections: Application projections to run.
@@ -2860,7 +2956,7 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
     Raises:
         TypeError: If hemispheres is not a dict.
         ValueError: If hemispheres has wrong key set.
-        RuntimeError: If routing output has unexpected shape.
+        RcxEngineError: If routing or metabolization output has unexpected shape.
     """
     if hemispheres is None:
         hemispheres = _default_hemispheres()
@@ -2895,5 +2991,8 @@ def run_engine_with_routing(projections, input_value, hemispheres=None, **engine
     # Fail-closed: validate output shape before returning
     if not isinstance(updated_hemispheres, dict) or set(updated_hemispheres.keys()) != _get_hemisphere_keys():  # AST_OK: boundary
         raise RcxEngineError("input.shape_mismatch", "run_hemisphere_routing returned unexpected shape")
+
+    # Run metabolization cycle (structural walker — no host iteration)
+    updated_hemispheres = run_metabolization_cycle(updated_hemispheres)
 
     return {"engine_result": engine_result, "hemispheres": updated_hemispheres}

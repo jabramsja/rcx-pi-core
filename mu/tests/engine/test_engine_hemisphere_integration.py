@@ -1,10 +1,11 @@
 """
 Engine → Hemisphere Integration Tests
 
-Tests the handoff contract between run_engine_pipeline() and
-run_hemisphere_routing() via the run_engine_with_routing() wrapper.
+Tests the handoff contract between run_engine_pipeline(),
+run_hemisphere_routing(), and run_metabolization_cycle()
+via the run_engine_with_routing() wrapper.
 
-8 fast tests (green gate) + 2 slow tests (full suite).
+14 fast tests (green gate) + 2 slow tests (full suite).
 No module-level pytestmark — per-test @pytest.mark.slow only.
 """
 import pytest
@@ -31,7 +32,7 @@ class TestWiringContract:
     """Verify run_engine_with_routing composes correctly via mocks."""
 
     def test_wiring_call_order(self):
-        """Wrapper calls pipeline then routing with correct args."""
+        """Wrapper calls pipeline then routing then metabolization with correct args."""
         fake_engine_result = {
             "value": "x", "closure_detected": False, "tau_step": 0,
             "exhaustion_detected": False, "operator_frozen": False,
@@ -43,9 +44,11 @@ class TestWiringContract:
         }
 
         with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
+            mock_metab.return_value = fake_hemispheres
 
             result = run_engine_with_routing(
                 ["proj1"], "input_val", max_steps=5
@@ -59,6 +62,9 @@ class TestWiringContract:
             mock_routing.assert_called_once()
             args = mock_routing.call_args[0]
             assert args[0] is fake_engine_result
+
+            # Metabolization called with routing output
+            mock_metab.assert_called_once_with(fake_hemispheres)
 
             # Return shape has both keys
             assert "engine_result" in result
@@ -80,9 +86,11 @@ class TestKwargCollisionRegression:
         fake_hemispheres = _local_default_hemispheres()
 
         with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
+            mock_metab.return_value = fake_hemispheres
 
             # This used to raise TypeError: got multiple values for 'use_boot1_recursive'
             result = run_engine_with_routing(
@@ -104,9 +112,11 @@ class TestKwargCollisionRegression:
         fake_hemispheres = _local_default_hemispheres()
 
         with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
+            mock_metab.return_value = fake_hemispheres
 
             result = run_engine_with_routing(
                 ["proj1"], "input_val", use_boot1_recursive=True, max_steps=5
@@ -127,9 +137,11 @@ class TestKwargCollisionRegression:
         fake_hemispheres = _local_default_hemispheres()
 
         with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
+            mock_metab.return_value = fake_hemispheres
 
             run_engine_with_routing(["proj1"], "input_val")
 
@@ -174,9 +186,11 @@ class TestOutputValidation:
         }
 
         with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = {"bad": "shape"}  # Wrong keys
+            mock_metab.return_value = {"bad": "shape"}
 
             with pytest.raises(RuntimeError, match="unexpected shape"):
                 run_engine_with_routing([], "input")
@@ -198,11 +212,14 @@ class TestExactShapeValidation:
             "frozen_set": None, "action": "continue", "stall": True,
         }
         # Patch run_hemisphere_routing to return a dict with extra key
-        with patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
-            mock_routing.return_value = {
+        with patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+            bad_result = {
                 "r_null": None, "r_inf": None, "r_a": None,
                 "lobes": None, "sink": None, "extra_key": "bad",
             }
+            mock_routing.return_value = bad_result
+            mock_metab.return_value = bad_result
             with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline:
                 mock_pipeline.return_value = fake_engine_result
                 with pytest.raises(RuntimeError, match="unexpected shape"):
@@ -282,7 +299,7 @@ class TestRoutingPriorityRegression:
 
 @pytest.mark.slow
 def test_wrapper_equivalent_to_manual_chain():
-    """run_engine_with_routing == manual run_engine_pipeline + run_hemisphere_routing."""
+    """run_engine_with_routing == manual run_engine_pipeline + run_hemisphere_routing + run_metabolization_cycle."""
     from rcx_pi.selfhost.step_mu import run_engine_pipeline, run_hemisphere_routing
     from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
     from rcx_pi.selfhost.kernel import reset_step_budget
@@ -295,10 +312,13 @@ def test_wrapper_equivalent_to_manual_chain():
 
     engine_kwargs = dict(max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50)
 
+    from rcx_pi.selfhost.step_mu import run_metabolization_cycle
+
     # Manual chain (use_boot1_recursive=True matches wrapper's Boot1 default)
     engine_result = run_engine_pipeline(cycle_projs, initial, use_boot1_recursive=True, **engine_kwargs)
     hemispheres = _local_default_hemispheres()
     manual_hemispheres = run_hemisphere_routing(engine_result, hemispheres)
+    manual_hemispheres = run_metabolization_cycle(manual_hemispheres)
 
     # Wrapper
     reset_step_budget()

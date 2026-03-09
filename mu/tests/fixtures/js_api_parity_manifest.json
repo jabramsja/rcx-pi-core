@@ -313,6 +313,29 @@
         }
       ]
     },
+    "run_metabolization_cycle": {
+      "type": "operation",
+      "requires_error_edges": true,
+      "required_args": {"hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}},
+      "optional_args": {},
+      "edge_args": [
+        {
+          "description": "Non-dict hemispheres",
+          "args": {"hemispheres": "not_a_dict"},
+          "expected_error_code": "input.invalid_type"
+        },
+        {
+          "description": "Bad hemispheres shape",
+          "args": {"hemispheres": {"bad": "shape"}},
+          "expected_error_code": "input.shape_mismatch"
+        },
+        {
+          "description": "Malformed entry in bucket (non-dict)",
+          "args": {"hemispheres": {"r_null": [1], "r_inf": null, "r_a": null, "lobes": null, "sink": null}},
+          "expected_error_code": "input.shape_mismatch"
+        }
+      ]
+    },
     "step_metabolization": {
       "type": "operation",
       "requires_error_edges": false,

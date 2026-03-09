@@ -79,6 +79,8 @@ SEED_CHECKSUMS: dict[str, str] = {
     "metabolization.v1.json": "a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7",
     # Terminal classify v1: structural terminal classification and exit-reason derivation (STRUCTURAL)
     "terminal_classify.v1.json": "413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7",
+    # Metabolize cycle v1: structural walker for hemisphere metabolization (APPLICATION)
+    "metabolize_cycle.v1.json": "f8888ecab6845193610499d15dea8a8e845d07ce04391457770ef32cac69dfd8",
 }
 
 # Expected projection IDs for each seed.
@@ -274,6 +276,24 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "tc.exit.stall",       # Exit reason: stall
         "tc.exit.completed",   # Exit reason: completed (lowest priority)
     ],
+    # Metabolize cycle v1: structural walker for hemisphere metabolization (APPLICATION)
+    "metabolize_cycle.v1.json": [
+        "metabolize.cycle.init",               # Entry: sink has entries -> extract first
+        "metabolize.cycle.init_skip_sink",      # Entry: sink empty -> lobes phase
+        "metabolize.cycle.sink_to_r_null",      # Sink entry null state -> r_null (must precede r_inf)
+        "metabolize.cycle.sink_to_r_inf",       # Sink entry non-null state -> r_inf
+        "metabolize.cycle.sink_next",           # Remaining sink entries -> continue
+        "metabolize.cycle.sink_done",           # No remaining sink -> lobes phase
+        "metabolize.cycle.lobes_start",         # Lobes has entries -> start scanning
+        "metabolize.cycle.lobes_start_empty",   # Lobes null -> done
+        "metabolize.cycle.lobes_promote",       # Lobes closure_flag=true -> r_a
+        "metabolize.cycle.lobes_keep",          # Lobes closure_flag=false -> kept
+        "metabolize.cycle.lobes_next",          # Remaining lobes -> continue
+        "metabolize.cycle.lobes_done",          # No remaining lobes -> start reverse
+        "metabolize.cycle.lobes_reverse_step",  # Reverse: move head to target
+        "metabolize.cycle.lobes_reverse_done",  # Reverse complete -> set lobes, done
+        "metabolize.cycle.unwrap",              # Exit: extract final hemispheres
+    ],
 }
 
 
@@ -302,6 +322,7 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     "hemispheres.v1.json": "programs",
     "paxos_demo.v1.json": "programs",
     "metabolization.v1.json": "programs",
+    "metabolize_cycle.v1.json": "programs",
 }
 
 

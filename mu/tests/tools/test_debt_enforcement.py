@@ -438,13 +438,13 @@ def test_debt_dashboard_json_includes_infra_count():
 
 
 def test_infra_count_within_ceiling():
-    """Verify AST_OK:infra count is below ceiling (35).
+    """Verify AST_OK:infra count is below ceiling (68).
 
     This test enforces the infra ceiling to prevent unbounded accumulation
     of boundary scaffolding. Infra markers are not debt (they don't block
     self-hosting), but excessive infra suggests architectural issues.
 
-    Current expected: 37
+    Current expected: 67
     """
     result = _run(["bash", str(DEBT_DASHBOARD), "--json"])
 
@@ -460,9 +460,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 64 (65 pre-MT1 - 1 MT1 reclassification:
-    # _collect_ontology_evidence AST_OK:infra → @host_iteration)
-    assert infra_count == 64, (
-        f"Expected 64 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 67 (64 pre-metabolize_cycle + 3 new:
+    # count_hemisphere_entries x2 + run_metabolization_cycle boundary wrapper)
+    assert infra_count == 67, (
+        f"Expected 67 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
