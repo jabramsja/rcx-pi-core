@@ -17,7 +17,7 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   @host_iteration: 10
+ *   @host_iteration: 9
  *     - step()                    - for loop over projections
  *     - run()                     - for loop until stall
  *     - runStructural()           - for loop until stall (Gate 5: routes through stepKernel)
@@ -27,7 +27,6 @@
  *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
  *     - runEnginePipeline()       - engine state machine effect handler loop
  *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
- *     - collectOntologyEvidence() - Mu linked-list traversal for evidence collection
  *
  *   @host_recursion: 4
  *     - match()             - recursive pattern matching
@@ -40,7 +39,7 @@
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 17 (10 iteration + 4 recursion + 3 builtin)
+ * TOTAL DEBT: 16 (9 iteration + 4 recursion + 3 builtin)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
  * exist in Python (JS requires additional normalize/denormalize; see STATUS.md for canonical counts).

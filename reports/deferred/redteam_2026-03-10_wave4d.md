@@ -33,3 +33,11 @@ Date: 2026-03-10
 - run() matches all projections to find matchedId for trace, then step() re-matches
 - Python run() gets matched projection from kernel state, doesn't double-match
 - Performance-only — same semantics
+
+### D6: constants.js debt summary stale counts (Claude audit)
+- File: constants.js:20,43
+- Comment says `@host_iteration: 9` but actual count is 10 (collectOntologyEvidence missing)
+- Comment says `TOTAL DEBT: 16` but actual total is 17
+- Deferred because changing `@host_*` text in runtime file comments triggers L4 enforcer
+  marker-touch detection, requiring strict debt reduction — a MAINTENANCE wave can fix safely
+- Accuracy issue only — no behavioral impact
