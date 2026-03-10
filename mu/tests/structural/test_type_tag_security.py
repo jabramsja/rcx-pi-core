@@ -356,7 +356,7 @@ class TestKernelBypassIntegration:
         # Build a deeply nested structure with "match" field at top level
         # This should go through depth validation now
         bomb = {"value": 42}
-        for i in range(102):  # Exceeds MAX_VALIDATION_DEPTH=100
+        for i in range(305):  # Exceeds MAX_MU_DEPTH=300
             bomb = {f"level_{i}": bomb}
 
         attack = {"match": {}, "bomb": bomb}
@@ -424,7 +424,7 @@ class TestKernelBypassIntegration:
 
         # Build depth bomb
         bomb = {"payload": "deep"}
-        for i in range(105):
+        for i in range(305):  # Exceeds MAX_MU_DEPTH=300
             bomb = {f"level_{i}": bomb}
 
         # The exact Round 6 attack - generic fields that WERE in kernel_fields
@@ -519,17 +519,18 @@ class TestStepKernelMuIntegration:
 
         The specific attack: {"match": {}, "bomb": <depth 500>}
         Previously bypassed validation, now should be caught.
+        assert_mu catches the depth bomb before validate_no_kernel_reserved_fields.
         """
         from rcx_pi.selfhost.step_mu import step_kernel_mu
 
-        # Build depth bomb
+        # Build depth bomb exceeding MAX_MU_DEPTH=300
         bomb = {"value": 42}
-        for i in range(105):
+        for i in range(305):
             bomb = {f"level_{i}": bomb}
 
         # Round 6 attack vector
         attack = {"match": {}, "bomb": bomb}
 
-        # Kernel entry should catch depth violation
-        with pytest.raises(ValueError, match="depth"):
+        # Kernel entry catches depth violation — assert_mu rejects before validation
+        with pytest.raises(TypeError, match="must be a Mu"):
             step_kernel_mu([], attack)
