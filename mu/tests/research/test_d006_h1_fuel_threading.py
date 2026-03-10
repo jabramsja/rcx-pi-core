@@ -24,6 +24,8 @@ import time
 
 import pytest
 
+pytestmark = [pytest.mark.slow]
+
 # We import the REAL production step/run for comparison
 from rcx_pi.selfhost.eval_seed import step as eval_step
 from rcx_pi.selfhost.mu_type import mu_hash_cached

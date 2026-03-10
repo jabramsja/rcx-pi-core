@@ -8,7 +8,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-import pytest
+import pytest  # SPEED_OK: run_mu appears in test data strings only, never actually imported or called
 
 # Import the checker module
 import importlib.util

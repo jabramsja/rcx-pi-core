@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_at": "2026-02-27T12:00:00Z",
-  "total_theater_risk": 11,
+  "total_theater_risk": 8,
   "entries": [
     {
       "file": "mu/tests/l4_gates/test_boot1_default_routing_gate.py",
@@ -82,36 +82,6 @@
       "owner": "founder",
       "expires_on": "2026-06-01",
       "target_wave": "A18-P1"
-    },
-    {
-      "file": "mu/tests/l4_gates/test_terminal_classifier_integration_gate.py",
-      "class": "TestNoRegressionToExistingGates",
-      "method": "test_classification_parity_gate_importable",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Import-check pattern; no-exception-is-pass verifies module is loadable",
-      "owner": "founder",
-      "expires_on": "2026-06-01",
-      "target_wave": "A19"
-    },
-    {
-      "file": "mu/tests/l4_gates/test_terminal_classifier_integration_gate.py",
-      "class": "TestNoRegressionToExistingGates",
-      "method": "test_engine_exit_reason_gate_importable",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Import-check pattern; no-exception-is-pass verifies module is loadable",
-      "owner": "founder",
-      "expires_on": "2026-06-01",
-      "target_wave": "A19"
-    },
-    {
-      "file": "mu/tests/l4_gates/test_terminal_classifier_integration_gate.py",
-      "class": "TestNoRegressionToExistingGates",
-      "method": "test_engine_terminal_event_gate_importable",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Import-check pattern; no-exception-is-pass verifies module is loadable",
-      "owner": "founder",
-      "expires_on": "2026-06-01",
-      "target_wave": "A19"
     }
   ]
 }

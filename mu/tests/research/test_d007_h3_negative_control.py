@@ -30,6 +30,8 @@ import inspect
 
 import pytest
 
+pytestmark = [pytest.mark.slow]
+
 from rcx_pi.selfhost.mu_type import mu_hash_cached
 from rcx_pi.selfhost.step_mu import run_mu, step_mu
 
