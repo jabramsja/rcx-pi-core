@@ -282,26 +282,19 @@ class TestStage0Gate3TypeListParity:
 # ===========================================================================
 
 class TestLOCBudget:
-    """Stage 0 functions must be within LOC budget.
-
-    Limits widened 60/25/100 → 70/35/105 in wave4a (2026-03-10):
-    B3/B4 added @host_recursion + @host_builtin decorators and
-    expanded docstrings on _stage0_match/_stage0_substitute.
-    No logic growth — metadata markers only. _count_code_lines
-    includes decorators and docstring lines in its count.
-    """
+    """Stage 0 functions must be within LOC budget."""
 
     def test_stage0_match_loc(self):
         loc = _count_code_lines(_stage0_match)
-        assert loc <= 70, f"_stage0_match is {loc} LOC (limit 70)"
+        assert loc <= 60, f"_stage0_match is {loc} LOC (limit 60)"
 
     def test_stage0_substitute_loc(self):
         loc = _count_code_lines(_stage0_substitute)
-        assert loc <= 35, f"_stage0_substitute is {loc} LOC (limit 35)"
+        assert loc <= 25, f"_stage0_substitute is {loc} LOC (limit 25)"
 
     def test_total_stage0_loc(self):
         total = _count_code_lines(_stage0_match) + _count_code_lines(_stage0_substitute)
-        assert total <= 105, f"Total Stage 0 is {total} LOC (limit 105)"
+        assert total <= 100, f"Total Stage 0 is {total} LOC (limit 100)"
 
 
 # ===========================================================================
@@ -375,7 +368,7 @@ class TestAntiLaundering:
 # ===========================================================================
 
 class TestRatchetPasses:
-    """Host-semantics ratchet must pass (total=39, no increase)."""
+    """Host-semantics ratchet must pass (total=35, no increase)."""
 
     def test_ratchet_exits_zero(self):
         result = subprocess.run(

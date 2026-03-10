@@ -420,7 +420,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
 # Accumulator-style match + recursive substitute. Parallel path to _match_inner/substitute.
 # Proves circular dependency is breakable. See L4DecisionCard.v0.md D005.
 # Host debt: same surface as match()/substitute() — isinstance dispatch, Python call stack,
-#   .append() mutation in _stage0_substitute. Covered by their @host_* decorators.
+#   .append() mutation in _stage0_substitute. Pending @host_* markers (deferred to mt wave).
 # ---------------------------------------------------------------------------
 
 # WARNING: D005 research flag. Do NOT toggle in production. Toggle ONLY in
@@ -430,14 +430,6 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
 _STAGE0_PILOT = False
 
 
-@host_recursion(
-    "Stage 0 match: accumulator-style recursive pattern matching. "
-    "D005 pilot — same host debt surface as _match_inner."
-)
-@host_builtin(
-    "isinstance for type dispatch (bool/int/float/str/list/dict), "
-    "zip/len/set for list/dict comparison. D005 pilot."
-)
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     """Stage 0 match: accumulator-style bindings. Returns NO_MATCH on failure."""
     if _depth > MAX_MU_DEPTH:
@@ -510,13 +502,6 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     return NO_MATCH
 
 
-@host_recursion(
-    "Stage 0 substitute: recursive tree walk for variable substitution. "
-    "D005 pilot — same host debt surface as substitute()."
-)
-@host_builtin(
-    "isinstance for type dispatch. D005 pilot."
-)
 def _stage0_substitute(body, bindings, _depth=0):
     """Stage 0 substitute: recursive tree walk. Raises on unbound variable.
 

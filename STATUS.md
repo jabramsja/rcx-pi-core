@@ -317,16 +317,16 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 15
-CURRENT: 15 (13 tracked decorators + 2 AST_OK bootstrap)
-FLOOR: 15 (see explanation below)
+THRESHOLD: 11
+CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
+FLOOR: 11 (see explanation below)
 INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
 **Debt breakdown:**
-- @host_recursion: 4 (eval_seed match/substitute + _stage0_match/_stage0_substitute - BOOTSTRAP)
-- @host_builtin: 5 (eval_seed match/substitute, deep_eval + _stage0_match/_stage0_substitute)
+- @host_recursion: 2 (eval_seed match/substitute - BOOTSTRAP)
+- @host_builtin: 3 (eval_seed, deep_eval)
 - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
 - @host_mutation: 1 (deep_eval only — eval_seed mutation removed via pure merge in CP-S1A)
 - AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
@@ -336,8 +336,8 @@ INFRA_CURRENT: 73
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 15 is the host debt floor (not a target for reduction):**
-The 15 counts ALL host debt sites across L2 kernel, L3 boundary, D005 pilot, and utilities:
+**Why 11 is the host debt floor (not a target for reduction):**
+The 11 counts ALL host debt sites across L2 kernel, L3 boundary, and utilities:
 
 *L2 kernel substrate (7 sites):*
 1. `match()` in eval_seed.py — @host_recursion + @host_builtin (pattern matching bootstrap primitive)
@@ -346,16 +346,12 @@ The 15 counts ALL host debt sites across L2 kernel, L3 boundary, D005 pilot, and
 4. `run_mu_structural()` in step_mu.py — @host_iteration (structural trace for Recurrence)
 5. AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
 
-*D005 Stage 0 pilot (4 sites, wave4a marker-truth):*
-6. `_stage0_match()` in eval_seed.py — @host_recursion + @host_builtin (D005 research pilot)
-7. `_stage0_substitute()` in eval_seed.py — @host_recursion + @host_builtin (D005 research pilot)
-
 *L3 boundary (1 site):*
-8. `run_mu()` in step_mu.py — @host_iteration (repeat-until-stall loop, L2 EXCLUDED by design)
+6. `run_mu()` in step_mu.py — @host_iteration (repeat-until-stall loop, L2 EXCLUDED by design)
 
 *Utility debt (3 sites):*
-9. `validate_deep_eval_state()` in deep_eval.py — @host_builtin (isinstance, set operations)
-10. `run_deep_eval()` in deep_eval.py — @host_builtin + @host_mutation (range iteration, history.append)
+7. `validate_deep_eval_state()` in deep_eval.py — @host_builtin (isinstance, set operations)
+8. `run_deep_eval()` in deep_eval.py — @host_builtin + @host_mutation (range iteration, history.append)
 
 These cannot be eliminated because:
 - eval_step needs to apply projections (pattern match + substitute)
@@ -669,7 +665,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - `tests/engine/test_phase8b_mechanical_kernel.py` (31 tests)
 - `tests/engine/test_phase8b_grounding_gaps.py` (12 tests)
 
-**Debt:** 15 (13 tracked decorators + 2 AST_OK bootstrap = host debt floor; was 11 before D005 Stage 0 pilot)
+**Debt:** 11 (9 tracked decorators + 2 AST_OK bootstrap = host debt floor; was 12 before CP-S1A wave 25)
 
 ---
 

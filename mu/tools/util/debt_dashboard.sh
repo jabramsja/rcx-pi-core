@@ -132,7 +132,7 @@ else
     printf "  @bootstrap_only:  %3d\n" "$BOOTSTRAP"
 
     echo "----------------------------------------------"
-    printf "  Total Tracked:    %3d (ceiling: 13)\n" "$TOTAL_TRACKED"
+    printf "  Total Tracked:    %3d (ceiling: 12)\n" "$TOTAL_TRACKED"
     echo ""
 
     echo "AST_OK Bypasses (rcx_pi/) - Statement-level semantic debt"
