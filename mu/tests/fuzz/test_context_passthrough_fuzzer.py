@@ -2,14 +2,16 @@
 Context Passthrough Fuzzer - Kernel Context Preservation Tests
 
 Property-based tests for context passthrough to ensure:
-1. _match_ctx is preserved through all match projections
-2. _subst_ctx is preserved through all subst projections
+1. _match_ctx is preserved through kernel match projections
+2. _subst_ctx is preserved through kernel subst projections
 3. Context fields survive mode transitions
 4. No context field corruption or loss
 5. Round-trip through kernel preserves context
 
-These tests specifically target the context passthrough mechanism
-that was identified as a gap in fuzzer coverage.
+Context passthrough is a KERNEL-level concern: combined kernel projections
+include _match_ctx/_subst_ctx in their patterns. Standalone match/subst
+projections do NOT handle context — they have 5/6-key patterns without
+context fields. Tests must use load_combined_kernel_projections().
 """
 
 import pytest
@@ -21,12 +23,6 @@ from rcx_pi.selfhost.step_mu import (
     list_to_linked,
     normalize_projection,
 )
-from rcx_pi.selfhost.match_mu import (
-    load_match_projections,
-    normalize_for_match,
-    match_mu,
-)
-from rcx_pi.selfhost.subst_mu import load_subst_projections, subst_mu
 from rcx_pi.selfhost.projection_runner import make_projection_runner
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
@@ -86,77 +82,70 @@ simple_values = st.one_of(
 # =============================================================================
 
 class TestMatchContextPreservation:
-    """Test that _match_ctx is preserved through match projections."""
+    """Test that _match_ctx is preserved through kernel match projections.
+
+    Uses kernel dispatch format: {match: {pattern: P, value: V}, _match_ctx: ctx}
+    which triggers kernel projection 14 → match stepping → match_done with ctx.
+    """
 
     def setup_method(self):
-        """Reset step budget and load projections."""
+        """Reset step budget and load combined kernel projections."""
         reset_step_budget()
-        self.match_v2_projs = load_match_projections()  # Uses match.v2.json
+        self.kernel_projs = load_combined_kernel_projections()
 
     @given(ctx=match_contexts())
     @settings(deadline=5000)
     def test_context_preserved_on_equal_match(self, ctx):
         """Context preserved when matching equal values."""
-        # State: matching 42 against 42 with context
         initial = {
-            "mode": "match",
-            "pattern_focus": 42,
-            "value_focus": 42,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": 42, "value": 42},
             "_match_ctx": ctx,
         }
 
-        # Take steps until done or stall
-        _, _, run = make_projection_runner("match")
-        final, _, is_stall = run(self.match_v2_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        # If completed, context should be preserved
-        if final.get("mode") == "match_done":
-            assert "_match_ctx" in final
-            assert mu_equal(final["_match_ctx"], ctx)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert final.get("_status") == "success"
+        assert "_match_ctx" in final
+        assert mu_equal(final["_match_ctx"], ctx)
 
     @given(ctx=match_contexts())
     @settings(deadline=5000)
     def test_context_preserved_on_var_match(self, ctx):
         """Context preserved when matching variable."""
         initial = {
-            "mode": "match",
-            "pattern_focus": {"var": "x"},
-            "value_focus": 42,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": {"var": "x"}, "value": 42},
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match")
-        final, _, is_stall = run(self.match_v2_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("mode") == "match_done":
-            assert "_match_ctx" in final
-            assert mu_equal(final["_match_ctx"], ctx)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert final.get("_status") == "success"
+        assert "_match_ctx" in final
+        assert mu_equal(final["_match_ctx"], ctx)
 
     @given(ctx=match_contexts())
     @settings(deadline=5000)
     def test_context_preserved_on_match_failure(self, ctx):
-        """Context preserved when match fails."""
-        # 5 != 6, so this will fail
+        """Context preserved when match fails (5 != 6)."""
         initial = {
-            "mode": "match",
-            "pattern_focus": 5,
-            "value_focus": 6,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": 5, "value": 6},
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match")
-        final, _, is_stall = run(self.match_v2_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        # match.fail should produce match_done with no_match status
-        if final.get("_mode") == "match_done":
-            assert "_match_ctx" in final
-            assert mu_equal(final["_match_ctx"], ctx)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert final.get("_status") == "no_match"
+        assert "_match_ctx" in final
+        assert mu_equal(final["_match_ctx"], ctx)
 
 
 # =============================================================================
@@ -164,56 +153,52 @@ class TestMatchContextPreservation:
 # =============================================================================
 
 class TestSubstContextPreservation:
-    """Test that _subst_ctx is preserved through subst projections."""
+    """Test that _subst_ctx is preserved through kernel subst projections.
+
+    Uses kernel dispatch format: {subst: {body: B, bindings: binds}, _subst_ctx: ctx}
+    which triggers kernel projection 26 → subst stepping → subst_done with ctx.
+    """
 
     def setup_method(self):
-        """Reset step budget and load projections."""
+        """Reset step budget and load combined kernel projections."""
         reset_step_budget()
-        self.subst_v2_projs = load_subst_projections()  # Uses subst.v2.json
+        self.kernel_projs = load_combined_kernel_projections()
 
     @given(ctx=subst_contexts())
     @settings(deadline=5000)
     def test_context_preserved_on_simple_subst(self, ctx):
         """Context preserved on simple value substitution."""
         initial = {
-            "mode": "subst",
-            "phase": "traverse",
-            "focus": 42,
-            "bindings": None,
-            "context": None,
+            "subst": {"body": 42, "bindings": None},
             "_subst_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("subst")
-        final, _, is_stall = run(self.subst_v2_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("subst", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        # Check if subst completed with context
-        if final.get("_mode") == "subst_done":
-            assert "_subst_ctx" in final
-            assert mu_equal(final["_subst_ctx"], ctx)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "subst_done"
+        assert "_subst_ctx" in final
+        assert mu_equal(final["_subst_ctx"], ctx)
 
     @given(ctx=subst_contexts(), value=simple_values)
     @settings(deadline=5000)
     def test_context_preserved_through_var_lookup(self, ctx, value):
         """Context preserved when looking up variable."""
-        # Bindings with a variable
         bindings = {"name": "x", "value": value, "rest": None}
 
         initial = {
-            "mode": "subst",
-            "phase": "traverse",
-            "focus": {"var": "x"},
-            "bindings": bindings,
-            "context": None,
+            "subst": {"body": {"var": "x"}, "bindings": bindings},
             "_subst_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("subst")
-        final, _, is_stall = run(self.subst_v2_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("subst", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("_mode") == "subst_done":
-            assert "_subst_ctx" in final
-            assert mu_equal(final["_subst_ctx"], ctx)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "subst_done"
+        assert "_subst_ctx" in final
+        assert mu_equal(final["_subst_ctx"], ctx)
 
 
 # =============================================================================
@@ -221,17 +206,22 @@ class TestSubstContextPreservation:
 # =============================================================================
 
 class TestModeTransitionContext:
-    """Test context survives mode transitions."""
+    """Test context survives mode transitions at the kernel level.
+
+    match_done → step: kernel extracts _match_ctx fields and threads them
+    into _subst_ctx for the next phase. subst_done → step: kernel produces
+    done state (context consumed — no _subst_ctx in output).
+    """
 
     def setup_method(self):
         """Reset step budget."""
         reset_step_budget()
+        self.kernel_projs = load_combined_kernel_projections()
 
     @given(input_val=simple_values, body=simple_values, remaining=st.one_of(st.none(), simple_values))
     @settings(deadline=5000)
     def test_match_to_kernel_transition(self, input_val, body, remaining):
-        """Context in match_done can be consumed by kernel."""
-        # Simulate what kernel.match_success expects
+        """match_done → step threads _match_ctx into _subst_ctx."""
         match_done_state = {
             "_mode": "match_done",
             "_status": "success",
@@ -243,18 +233,19 @@ class TestModeTransitionContext:
             }
         }
 
-        # This state should be consumable by kernel.match_success
-        kernel_projs = load_combined_kernel_projections()
-        result = step(kernel_projs, match_done_state)
+        result = step(self.kernel_projs, match_done_state)
 
-        # Should transition to subst mode or done (result is valid Mu)
-        # Note: result can be dict, list, or primitive depending on projection outcome
-        assert result is None or isinstance(result, (bool, int, float, str, list, dict))
+        # Kernel should produce subst dispatch with _subst_ctx threaded from _match_ctx
+        assert isinstance(result, dict), f"expected dict, got {type(result)}"
+        assert "subst" in result, f"expected subst dispatch, got keys {list(result.keys())}"
+        assert "_subst_ctx" in result, "kernel dropped _subst_ctx during match→subst transition"
+        assert mu_equal(result["_subst_ctx"]["_input"], input_val)
+        assert mu_equal(result["_subst_ctx"]["_remaining"], remaining)
 
     @given(input_val=simple_values, remaining=st.one_of(st.none(), simple_values))
     @settings(deadline=5000)
     def test_subst_to_kernel_transition(self, input_val, remaining):
-        """Context in subst_done can be consumed by kernel."""
+        """subst_done → step produces done state (context consumed)."""
         subst_done_state = {
             "_mode": "subst_done",
             "_result": 42,
@@ -264,11 +255,12 @@ class TestModeTransitionContext:
             }
         }
 
-        kernel_projs = load_combined_kernel_projections()
-        result = step(kernel_projs, subst_done_state)
+        result = step(self.kernel_projs, subst_done_state)
 
-        # Should transition to done mode (result is valid Mu)
-        assert result is None or isinstance(result, (bool, int, float, str, list, dict))
+        # Kernel produces done mode — _subst_ctx is consumed (not threaded further)
+        assert isinstance(result, dict), f"expected dict, got {type(result)}"
+        assert result.get("_mode") == "done", f"expected done mode, got {result.get('_mode')}"
+        assert mu_equal(result.get("_result"), 42)
 
 
 # =============================================================================
@@ -276,11 +268,12 @@ class TestModeTransitionContext:
 # =============================================================================
 
 class TestContextFieldIntegrity:
-    """Test that context fields are not corrupted."""
+    """Test that individual context fields are not corrupted through kernel."""
 
     def setup_method(self):
-        """Reset step budget."""
+        """Reset step budget and load kernel projections."""
         reset_step_budget()
+        self.kernel_projs = load_combined_kernel_projections()
 
     @given(
         input_val=context_values,
@@ -296,25 +289,21 @@ class TestContextFieldIntegrity:
             "_remaining": remaining_val,
         }
 
-        # Simple match that succeeds
         initial = {
-            "mode": "match",
-            "pattern_focus": {"var": "x"},
-            "value_focus": 42,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": {"var": "x"}, "value": 42},
             "_match_ctx": ctx,
         }
 
-        match_projs = load_match_projections()
-        _, _, run = make_projection_runner("match")
-        final, _, _ = run(match_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("mode") == "match_done" and "_match_ctx" in final:
-            final_ctx = final["_match_ctx"]
-            assert mu_equal(final_ctx.get("_input"), input_val)
-            assert mu_equal(final_ctx.get("_body"), body_val)
-            assert mu_equal(final_ctx.get("_remaining"), remaining_val)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert "_match_ctx" in final
+        final_ctx = final["_match_ctx"]
+        assert mu_equal(final_ctx.get("_input"), input_val)
+        assert mu_equal(final_ctx.get("_body"), body_val)
+        assert mu_equal(final_ctx.get("_remaining"), remaining_val)
 
     @given(
         input_val=context_values,
@@ -329,22 +318,19 @@ class TestContextFieldIntegrity:
         }
 
         initial = {
-            "mode": "subst",
-            "phase": "traverse",
-            "focus": 42,
-            "bindings": None,
-            "context": None,
+            "subst": {"body": 42, "bindings": None},
             "_subst_ctx": ctx,
         }
 
-        subst_projs = load_subst_projections()
-        _, _, run = make_projection_runner("subst")
-        final, _, _ = run(subst_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("subst", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("_mode") == "subst_done" and "_subst_ctx" in final:
-            final_ctx = final["_subst_ctx"]
-            assert mu_equal(final_ctx.get("_input"), input_val)
-            assert mu_equal(final_ctx.get("_remaining"), remaining_val)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "subst_done"
+        assert "_subst_ctx" in final
+        final_ctx = final["_subst_ctx"]
+        assert mu_equal(final_ctx.get("_input"), input_val)
+        assert mu_equal(final_ctx.get("_remaining"), remaining_val)
 
 
 # =============================================================================
@@ -352,35 +338,32 @@ class TestContextFieldIntegrity:
 # =============================================================================
 
 class TestAdversarialContexts:
-    """Test with adversarial context values."""
+    """Test with adversarial context values through kernel projections."""
 
     def setup_method(self):
-        """Reset step budget."""
+        """Reset step budget and load kernel projections."""
         reset_step_budget()
+        self.kernel_projs = load_combined_kernel_projections()
 
     def test_empty_context(self):
-        """Empty context dict is preserved."""
+        """Empty context dict is preserved through match."""
         ctx = {}
 
         initial = {
-            "mode": "match",
-            "pattern_focus": 42,
-            "value_focus": 42,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": 42, "value": 42},
             "_match_ctx": ctx,
         }
 
-        match_projs = load_match_projections()
-        _, _, run = make_projection_runner("match")
-        final, _, _ = run(match_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("mode") == "match_done":
-            assert "_match_ctx" in final
-            assert final["_match_ctx"] == {}
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert "_match_ctx" in final
+        assert final["_match_ctx"] == {}
 
     def test_deeply_nested_context(self):
-        """Deeply nested context is preserved."""
+        """Deeply nested context is preserved through match."""
         nested = {"level": 1}
         for i in range(2, 6):
             nested = {"level": i, "inner": nested}
@@ -388,24 +371,20 @@ class TestAdversarialContexts:
         ctx = {"_input": nested, "_body": None, "_remaining": None}
 
         initial = {
-            "mode": "match",
-            "pattern_focus": 42,
-            "value_focus": 42,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": 42, "value": 42},
             "_match_ctx": ctx,
         }
 
-        match_projs = load_match_projections()
-        _, _, run = make_projection_runner("match")
-        final, _, _ = run(match_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("mode") == "match_done":
-            assert "_match_ctx" in final
-            assert mu_equal(final["_match_ctx"]["_input"], nested)
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert "_match_ctx" in final
+        assert mu_equal(final["_match_ctx"]["_input"], nested)
 
     def test_context_with_special_keys(self):
-        """Context with special key names is preserved."""
+        """Context with special key names is preserved through match."""
         ctx = {
             "_input": {"_mode": "fake", "_phase": "also_fake"},
             "_body": {"var": "x"},
@@ -413,19 +392,14 @@ class TestAdversarialContexts:
         }
 
         initial = {
-            "mode": "match",
-            "pattern_focus": 42,
-            "value_focus": 42,
-            "bindings": None,
-            "stack": None,
+            "match": {"pattern": 42, "value": 42},
             "_match_ctx": ctx,
         }
 
-        match_projs = load_match_projections()
-        _, _, run = make_projection_runner("match")
-        final, _, _ = run(match_projs, initial, max_steps=50)
+        _, _, run = make_projection_runner("match", terminal_field="_mode")
+        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
 
-        if final.get("mode") == "match_done":
-            assert "_match_ctx" in final
-            # Context should preserve the fake _mode values
-            assert final["_match_ctx"]["_input"]["_mode"] == "fake"
+        assert not is_stall, f"stalled at step {steps}"
+        assert final.get("_mode") == "match_done"
+        assert "_match_ctx" in final
+        assert final["_match_ctx"]["_input"]["_mode"] == "fake"

@@ -54,6 +54,9 @@ load_match_projections, clear_projection_cache = make_projection_loader("match.v
 # Bridge-Aware Projection Loading (match.v2 + bridge)
 # =============================================================================
 
+# RACE_OK: benign — worst case is redundant seed loading, not corruption.
+# json.dumps/loads defensive copy prevents shared mutation. CPython GIL
+# serializes writes; free-threaded Python (PEP 703) would need a lock.
 _match_bridge_cache: list[Mu] | None = None
 
 
@@ -399,7 +402,7 @@ def normalize_for_match(value: Mu) -> Mu:
                     tail = {"head": elem, "tail": tail}
                 # Add type tag to root node (fixes list/dict ambiguity)
                 if tail is not None:
-                    tail["_type"] = "list"
+                    tail["_type"] = "list"  # AST_OK: boundary — mutation of just-created dict (construction, not external Mu)
                 result = tail
             else:
                 # More elements to process
@@ -420,7 +423,7 @@ def normalize_for_match(value: Mu) -> Mu:
                     tail = {"head": kv, "tail": tail}
                 # Add type tag to root node (fixes list/dict ambiguity)
                 if tail is not None:
-                    tail["_type"] = "dict"
+                    tail["_type"] = "dict"  # AST_OK: boundary — mutation of just-created dict (construction, not external Mu)
                 result = tail
             else:
                 # More keys to process
@@ -529,7 +532,7 @@ def denormalize_from_match(value: Mu) -> Mu:
         return None
     if isinstance(value, (bool, int, float, str)):
         return value
-    if isinstance(value, dict) and set(value.keys()) == {"var"}:
+    if isinstance(value, dict) and set(value.keys()) == {"var"} and isinstance(value.get("var"), str):
         return value
 
     # Iterative denormalization using explicit stack (Phase 6c)
@@ -566,7 +569,7 @@ def denormalize_from_match(value: Mu) -> Mu:
             if val is None or isinstance(val, (bool, int, float, str)):
                 result = val
                 continue
-            if isinstance(val, dict) and set(val.keys()) == {"var"}:
+            if isinstance(val, dict) and set(val.keys()) == {"var"} and isinstance(val.get("var"), str):
                 result = val
                 continue
 
@@ -913,5 +916,7 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
             # Explicit failure status (including "no_match" from bridge conflict detection)
             return NO_MATCH
 
-    # Unexpected state
-    return NO_MATCH
+    # Unexpected terminal state — fail-closed instead of masking as NO_MATCH
+    raise RuntimeError(
+        f"match_mu: unexpected terminal state (not stall, not match_done): {final_state!r}"
+    )

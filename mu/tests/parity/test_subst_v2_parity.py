@@ -6,6 +6,7 @@ These tests verify that:
 1. v2 seed structure is compatible with v1
 2. All v1 projection IDs exist in v2
 3. subst_mu() (using v1) behavior is unchanged
+4. Execution parity: v1 and v2 produce identical substitution results
 
 If these tests fail after modifying subst.v2.json, the change may have broken
 backward compatibility with v1 behavior.
@@ -14,7 +15,11 @@ backward compatibility with v1 behavior.
 import pytest
 
 from rcx_pi.selfhost.subst_mu import subst_mu
+from rcx_pi.selfhost.match_mu import normalize_for_match, dict_to_bindings
+from rcx_pi.selfhost.projection_runner import make_projection_runner
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from rcx_pi.selfhost.mu_type import mu_equal
+from rcx_pi.selfhost.kernel import reset_step_budget
 
 
 class TestSubstV2SeedStructure:
@@ -161,3 +166,139 @@ class TestSubstV2ContextDesign:
         body = done_proj["body"]
         assert "_subst_ctx" in body, "subst.done must preserve _subst_ctx"
         assert body["_subst_ctx"] == {"var": "ctx"}, "subst.done must pass through context"
+
+
+class TestSubstV1V2ExecutionParity:
+    """Execution parity: v1 and v2 projections produce identical results.
+
+    subst_mu() uses subst.v1.json internally, but the kernel uses subst.v2.json.
+    This test runs the same normalized inputs through both seed versions and
+    asserts output equivalence, catching semantic drift between v1 and v2.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_budget(self):
+        """Reset step budget before each test."""
+        reset_step_budget()
+
+    @pytest.fixture
+    def v1_projections(self):
+        return load_verified_seed(get_seed_path("subst.v1.json"))["projections"]
+
+    @pytest.fixture
+    def v2_projections(self):
+        return load_verified_seed(get_seed_path("subst.v2.json"))["projections"]
+
+    def _run_v1(self, v1_projs, norm_body, linked_bindings):
+        """Run substitution through v1 projections (mode-based terminal)."""
+        _, _, run = make_projection_runner("subst")
+        initial = {"subst": {"body": norm_body, "bindings": linked_bindings}}
+        final, steps, is_stall = run(v1_projs, initial, max_steps=200)
+        assert not is_stall, f"v1 stalled at step {steps}: {final}"
+        assert final.get("mode") == "subst_done", f"v1 unexpected terminal: {final}"
+        return final["result"]
+
+    def _run_v2(self, v2_projs, norm_body, linked_bindings):
+        """Run substitution through v2 projections (_mode-based terminal)."""
+        _, _, run = make_projection_runner("subst", terminal_field="_mode")
+        ctx = {"_input": "parity_test", "_remaining": None}
+        initial = {
+            "subst": {"body": norm_body, "bindings": linked_bindings},
+            "_subst_ctx": ctx,
+        }
+        final, steps, is_stall = run(v2_projs, initial, max_steps=200)
+        assert not is_stall, f"v2 stalled at step {steps}: {final}"
+        assert final.get("_mode") == "subst_done", f"v2 unexpected terminal: {final}"
+        # Verify context passthrough as side-check
+        assert mu_equal(final.get("_subst_ctx"), ctx), "v2 lost _subst_ctx"
+        return final["_result"]
+
+    def _assert_parity(self, v1_projs, v2_projs, body, bindings, label):
+        """Assert v1 and v2 produce identical results for same inputs."""
+        norm_body = normalize_for_match(body)
+        linked = dict_to_bindings(bindings)
+        r1 = self._run_v1(v1_projs, norm_body, linked)
+        reset_step_budget()
+        r2 = self._run_v2(v2_projs, norm_body, linked)
+        assert mu_equal(r1, r2), (
+            f"v1/v2 execution divergence on {label}: v1={r1!r}, v2={r2!r}"
+        )
+
+    def test_literal_parity(self, v1_projections, v2_projections):
+        """Literal passthrough produces same result in v1 and v2."""
+        self._assert_parity(v1_projections, v2_projections, 42, {}, "literal")
+
+    def test_string_parity(self, v1_projections, v2_projections):
+        """String passthrough produces same result in v1 and v2."""
+        self._assert_parity(v1_projections, v2_projections, "hello", {}, "string")
+
+    def test_null_parity(self, v1_projections, v2_projections):
+        """Null passthrough produces same result in v1 and v2."""
+        self._assert_parity(v1_projections, v2_projections, None, {}, "null")
+
+    def test_bool_parity(self, v1_projections, v2_projections):
+        """Boolean passthrough produces same result in v1 and v2."""
+        self._assert_parity(v1_projections, v2_projections, True, {}, "bool_true")
+        reset_step_budget()
+        self._assert_parity(v1_projections, v2_projections, False, {}, "bool_false")
+
+    def test_variable_substitution_parity(self, v1_projections, v2_projections):
+        """Variable lookup produces same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"var": "x"}, {"x": 42}, "var_subst"
+        )
+
+    def test_dict_substitution_parity(self, v1_projections, v2_projections):
+        """Dict with variable produces same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"a": {"var": "x"}, "b": 2}, {"x": 1}, "dict_subst"
+        )
+
+    def test_nested_substitution_parity(self, v1_projections, v2_projections):
+        """Nested structures produce same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"outer": {"inner": {"var": "v"}}}, {"v": 99}, "nested_subst"
+        )
+
+    def test_multiple_variables_parity(self, v1_projections, v2_projections):
+        """Multiple variable sites produce same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"x": {"var": "a"}, "y": {"var": "b"}}, {"a": 1, "b": 2},
+            "multi_var"
+        )
+
+    def test_list_substitution_parity(self, v1_projections, v2_projections):
+        """List body produces same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            [{"var": "a"}, 10, {"var": "b"}], {"a": 1, "b": 2},
+            "list_subst"
+        )
+
+    def test_deeply_nested_parity(self, v1_projections, v2_projections):
+        """Deeply nested dict produces same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"a": {"b": {"c": {"d": {"var": "x"}}}}}, {"x": "deep"},
+            "deep_nested"
+        )
+
+    def test_no_vars_parity(self, v1_projections, v2_projections):
+        """Body with no variables produces same result in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"a": 1, "b": {"c": 2}}, {"unused": 99}, "no_vars"
+        )
+
+    def test_var_to_dict_parity(self, v1_projections, v2_projections):
+        """Variable substituted with dict value same in v1 and v2."""
+        self._assert_parity(
+            v1_projections, v2_projections,
+            {"result": {"var": "data"}},
+            {"data": {"nested": {"value": 123}}},
+            "var_to_dict"
+        )

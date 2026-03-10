@@ -35,15 +35,23 @@ is_subst_done, is_subst_state, run_subst_projections = make_projection_runner("s
 
 
 def is_head_tail_structure(value: Mu) -> bool:
-    """Check if value is a head/tail dict (not a normalized list/dict).
+    """Check if value is a head/tail dict (including type-tagged variants).
+
+    Recognizes both plain {"head", "tail"} and type-tagged {"_type", "head", "tail"}
+    structures. Without this, type-tagged head/tail values would be incorrectly
+    denormalized back to Python list/dict.
 
     isinstance at boundary is scaffolding: this is a type-dispatch guard
     at the host/Mu boundary, consistent with is_mu() and normalize_for_match().
     """
-    return (
-        isinstance(value, dict)  # BOUNDARY SCAFFOLDING: host type check
-        and set(value.keys()) == {"head", "tail"}
-    )
+    if not isinstance(value, dict):  # AST_OK: boundary scaffolding — host type check
+        return False
+    keys = set(value.keys())  # AST_OK: boundary scaffolding — key set for structure dispatch
+    if keys == {"head", "tail"}:  # AST_OK: key — structure dispatch
+        return True
+    if keys == {"_type", "head", "tail"}:  # AST_OK: key — structure dispatch
+        return value["_type"] in ("list", "dict")  # Only valid type tags
+    return False
 
 
 def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
@@ -68,8 +76,8 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     _check_empty_var_names(body, "body")
 
     # F-41: Validate binding names and values at entry (fail-closed)
-    for k, v in bindings.items():
-        if not isinstance(k, str) or not k:
+    for k, v in bindings.items():  # AST_OK: boundary validation loop — entry guard
+        if not isinstance(k, str) or not k:  # AST_OK: boundary scaffolding — type check
             raise ValueError(f"subst_mu: binding name must be non-empty string, got {k!r}")
         assert_mu(v, f"subst_mu.bindings[{k!r}]")
 

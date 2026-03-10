@@ -276,9 +276,35 @@ async def run_agents_parallel(
     files: list[str],
     model_override: str | None = None,
 ) -> list[dict]:
-    """Run multiple agents in parallel."""
+    """Run multiple agents in parallel.
+
+    Uses return_exceptions=True so a single cancelled/failed agent doesn't
+    abort the entire batch. Exception results are converted to fail-closed
+    synthetic results.
+    """
     tasks = [run_agent(agent, files, model_override=model_override) for agent in agents]
-    return await asyncio.gather(*tasks)
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for agent_name, raw in zip(agents, raw_results):
+        if isinstance(raw, BaseException):
+            # Convert exception to a fail-closed synthetic result.
+            # Must match schema of run_agent() return dict for report generators.
+            is_hard_gate = agent_name in HARD_GATE_AGENTS
+            results.append({
+                "name": agent_name,
+                "verdict": "ERROR",
+                "passed": False,
+                "is_hard_gate": is_hard_gate,
+                "blocks_merge": is_hard_gate,
+                "is_compliant": True,  # Not a format failure — agent crashed/cancelled
+                "compliance_error": None,
+                "retried": False,
+                "output": f"AGENT ERROR: {type(raw).__name__}: {raw}",
+            })
+        else:
+            results.append(raw)
+    return results
 
 
 # =============================================================================

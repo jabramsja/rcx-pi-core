@@ -146,25 +146,84 @@ def assert_not_lambda_calculus(projection: "Mu") -> None:
     pattern = projection["pattern"]
     body = projection["body"]
 
-    # Check: pattern should not match projection structures
-    # (no higher-order pattern matching)
-    def contains_projection_pattern(mu: "Mu") -> bool:
-        """Check if mu tries to match a projection structure."""
+    # Collect variable names bound by the enclosing pattern. These will be
+    # substituted away at evaluation time and do NOT create closure-like behavior.
+    def _collect_pattern_vars(mu: "Mu", out: set, _depth: int = 0) -> None:
+        if _depth > MAX_MU_DEPTH:
+            return
+        if is_var(mu):
+            out.add(mu["var"])
+            return
         if isinstance(mu, dict):
-            # A pattern that matches {"pattern": ..., "body": ...} is suspicious
-            if "pattern" in mu and "body" in mu:
-                # Unless both are variables (which is just matching any dict)
-                if not (is_var(mu.get("pattern")) and is_var(mu.get("body"))):
-                    return True
-            return any(contains_projection_pattern(v) for v in mu.values())
+            for v in mu.values():
+                _collect_pattern_vars(v, out, _depth + 1)
+        elif isinstance(mu, list):
+            for v in mu:
+                _collect_pattern_vars(v, out, _depth + 1)
+
+    bound_vars: set[str] = set()
+    _collect_pattern_vars(pattern, bound_vars)
+
+    # Check: pattern and body should not contain projection structures
+    # (no higher-order pattern matching, no closure-like body smuggling)
+    def _contains_free_var(mu: "Mu", _depth: int = 0) -> bool:
+        """Check if mu contains a variable reference NOT bound by the enclosing pattern.
+
+        Free vars in nested projection-shaped structures indicate closure-like
+        behavior (they'd need runtime lookup, not substitution).
+        Vars from the enclosing pattern are substituted away → inert output.
+        """
+        if _depth > MAX_MU_DEPTH:
+            return False
+        if is_var(mu):
+            return mu["var"] not in bound_vars
+        if isinstance(mu, dict):
+            return any(_contains_free_var(v, _depth + 1) for v in mu.values())
         if isinstance(mu, list):
-            return any(contains_projection_pattern(v) for v in mu)
+            return any(_contains_free_var(v, _depth + 1) for v in mu)
+        return False
+
+    def contains_projection_pattern(mu: "Mu", _depth: int = 0, *, check_vars: bool = False) -> bool:
+        """Check if mu contains a projection-like structure.
+
+        When check_vars=True (body check), only flags structures that contain
+        FREE variable references (not bound by enclosing pattern) — inert
+        projection-shaped output from substitution is allowed.
+        """
+        if _depth > MAX_MU_DEPTH:
+            return False  # Bounded by assert_mu at caller; stop recursion
+        if isinstance(mu, dict):
+            # A structure with {"pattern": ..., "body": ...} is suspicious
+            if "pattern" in mu and "body" in mu:
+                if check_vars:
+                    # Body check: only flag if nested structure has FREE variables
+                    # (not bound by enclosing pattern — closure-like behavior).
+                    # Vars from the enclosing pattern will be substituted → inert data.
+                    # The "both vars" exception doesn't apply here because even
+                    # {pattern: {var: free_x}, body: {var: free_y}} is closure-like
+                    # if free_x/free_y aren't bound by the enclosing pattern.
+                    if _contains_free_var(mu):
+                        return True
+                else:
+                    # Pattern check: any projection shape is suspicious UNLESS
+                    # both fields are vars (just matching any dict with those keys)
+                    if not (is_var(mu.get("pattern")) and is_var(mu.get("body"))):
+                        return True
+            return any(contains_projection_pattern(v, _depth + 1, check_vars=check_vars) for v in mu.values())
+        if isinstance(mu, list):
+            return any(contains_projection_pattern(v, _depth + 1, check_vars=check_vars) for v in mu)
         return False
 
     if contains_projection_pattern(pattern):
         raise ValueError(
             "Projection pattern appears to match projection structures "
             "(higher-order patterns not allowed - this looks like lambda calculus)"
+        )
+
+    if contains_projection_pattern(body, check_vars=True):
+        raise ValueError(
+            "Projection body contains projection-like structures with free variables "
+            "(closure-like behavior not allowed - this looks like lambda calculus)"
         )
 
 
@@ -358,15 +417,21 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
 
 # ---------------------------------------------------------------------------
 # Stage 0 micro-kernel (D005 production pilot)
-# Pure-merge match + substitute. Parallel path to _match_inner/substitute.
+# Accumulator-style match + recursive substitute. Parallel path to _match_inner/substitute.
 # Proves circular dependency is breakable. See L4DecisionCard.v0.md D005.
+# Host debt: same surface as match()/substitute() — isinstance dispatch, Python call stack,
+#   .append() mutation in _stage0_substitute. Pending @host_* markers (deferred to mt wave).
 # ---------------------------------------------------------------------------
 
-_STAGE0_PILOT = False  # Module-level pilot flag (default OFF, Slice C routing)
+# WARNING: D005 research flag. Do NOT toggle in production. Toggle ONLY in
+# tests via monkeypatch. If enabled, _apply_projection_trusted routes through
+# _stage0_match/_stage0_substitute instead of _match_inner/substitute.
+# See L4DecisionCard.v0.md D005 for risk profile.
+_STAGE0_PILOT = False
 
 
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
-    """Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure."""
+    """Stage 0 match: accumulator-style bindings. Returns NO_MATCH on failure."""
     if _depth > MAX_MU_DEPTH:
         return NO_MATCH
     current = bindings if bindings is not None else {}
@@ -438,9 +503,12 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
 
 
 def _stage0_substitute(body, bindings, _depth=0):
-    """Stage 0 substitute: recursive tree walk. Raises on unbound variable."""
+    """Stage 0 substitute: recursive tree walk. Raises on unbound variable.
+
+    Host debt: .append() mutation for list/dict construction (same as substitute).
+    """
     if _depth > MAX_MU_DEPTH:
-        raise RecursionError(f"Stage 0 substitute depth exceeded {MAX_MU_DEPTH}")
+        raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
     if body is None:
         return None
     if isinstance(body, (bool, int, float, str)):
@@ -468,7 +536,7 @@ def _stage0_substitute(body, bindings, _depth=0):
     "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
     "subst_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
-def substitute(body: Mu, bindings: dict[str, Mu], _depth: int = 0) -> Mu:
+def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0) -> Mu:
     """
     Substitute variable sites in body with bound values.
 
@@ -479,7 +547,9 @@ def substitute(body: Mu, bindings: dict[str, Mu], _depth: int = 0) -> Mu:
     Args:
         body: The body with possible {"var": "x"} sites.
         bindings: Dict mapping variable names to values.
-        _depth: Current recursion depth (internal). Parity with JS substitute.
+
+    Keyword Args (internal only — do NOT pass from external callers):
+        _depth: Current recursion depth. Enforced by MAX_MU_DEPTH.
 
     Returns:
         Body with variables replaced by their bound values.
@@ -506,11 +576,11 @@ def substitute(body: Mu, bindings: dict[str, Mu], _depth: int = 0) -> Mu:
 
     # List - recursively substitute
     if isinstance(body, list):
-        return [substitute(elem, bindings, _depth + 1) for elem in body]  # AST_OK: bootstrap - subst_mu replaces this
+        return [substitute(elem, bindings, _depth=_depth + 1) for elem in body]  # AST_OK: bootstrap recursive substitution
 
     # Dict - recursively substitute values
     if isinstance(body, dict):
-        return {k: substitute(v, bindings, _depth + 1) for k, v in body.items()}  # AST_OK: bootstrap - subst_mu replaces this
+        return {k: substitute(v, bindings, _depth=_depth + 1) for k, v in body.items()}  # AST_OK: bootstrap recursive substitution
 
     # Should not reach here
     raise TypeError(f"Invalid body type: {type(body)}")
