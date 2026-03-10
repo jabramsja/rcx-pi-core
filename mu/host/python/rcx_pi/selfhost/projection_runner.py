@@ -33,7 +33,7 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
     This consolidates the runner pattern used by match/subst/classify.
 
     HOST ITERATION DEBT: The returned run() function contains a for-loop that
-    iterates projections. This is semantic debt that Phase 7d will eliminate
+    iterates projections. This is semantic debt tracked toward L4 elimination
     when the meta-circular kernel handles match/subst internally. Cannot use
     decorator on nested function, so documented here instead.
 

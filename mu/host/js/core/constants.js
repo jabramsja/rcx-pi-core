@@ -141,8 +141,8 @@ const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
 // produce linked lists longer than MAX_DEPTH=300.
 const MAX_DENORM_ITER = 10000;
 
-// Maximum depth for validation traversal (fail closed)
-const MAX_VALIDATION_DEPTH = 100;
+// Maximum depth for validation traversal (fail closed, must cover full MAX_DEPTH)
+const MAX_VALIDATION_DEPTH = MAX_DEPTH;
 
 // =============================================================================
 // Typed Error Class (for parity manifest error_code assertions)

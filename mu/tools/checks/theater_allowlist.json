@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_at": "2026-02-27T12:00:00Z",
-  "total_theater_risk": 8,
+  "total_theater_risk": 10,
   "entries": [
     {
       "file": "mu/tests/l4_gates/test_boot1_default_routing_gate.py",
@@ -79,6 +79,26 @@
       "method": "test_js_seed_registration_loads",
       "classification": "heuristic_false_positive",
       "defer_reason": "Subprocess assertion in _js_eval() helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_validation_depth_alignment_gate.py",
+      "class": "TestValidationDepthAlignment",
+      "method": "test_python_validation_covers_max_mu_depth",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; production validator raises on exceeding depth",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_validation_depth_alignment_gate.py",
+      "class": "TestValidationDepthAlignment",
+      "method": "test_python_depth_200_accepted",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; regression guard for old hardcoded limit=100",
       "owner": "founder",
       "expires_on": "2026-06-01",
       "target_wave": "A18-P1"
