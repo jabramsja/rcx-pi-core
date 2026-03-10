@@ -16,6 +16,7 @@ This file is read by Claude Code at session start.
 6. **Founder IS the override authority.** If something is "POLICY_BOUND" or needs "FOUNDER_OVERRIDE," ASK the founder directly. Don't passively defer — present the issue and ask for the decision.
 7. **ALWAYS prove your work.** Every finding, fix, addition, or claim must be backed by evidence — show the diff, run the test, grep the output, demonstrate before/after. Never say "it's fixed" without proof. If you can't prove it, it's not done.
 8. **At the bottom of EVERY summary/deliverable:** Ask "Ready to commit?" / "Ready to push?" — unless standing authorization is active, in which case proceed autonomously with a layman summary of what was done + what's next.
+9. **NEVER add host capabilities to the bootstrap. EVER.** The host (Python/JS) is a DUMB bootstrap — it loads seeds and executes projections. That's it. No "helpful" features, no debug timestamps, no logging, no observability, no convenience functions. If it's not structurally necessary for projection execution, it does not belong in the kernel. Any new host import, new CONTRABAND_OK marker, or new host functionality in `rcx_pi/selfhost/` or `mu/host/js/` is a violation. Enforced mechanically by `tools/checks/check_bootstrap_purity_ratchet.py`. See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md`.
 
 ---
 

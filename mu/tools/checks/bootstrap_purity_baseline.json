@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "description": "Baseline for bootstrap purity ratchet. The host must be a DUMB bootstrap — no new host capabilities may be added. See mu/docs/core/Why_RCX_PI_VM_EXISTS.md. Any increase = hard fail.",
+  "contraband_ok_count": {
+    "python_kernel": 4,
+    "javascript_kernel": 3,
+    "total": 7
+  },
+  "stdlib_modules": {
+    "python_kernel": [
+      "collections",
+      "hashlib",
+      "json",
+      "math",
+      "pathlib",
+      "threading",
+      "time",
+      "typing"
+    ],
+    "javascript_kernel": [
+      "crypto",
+      "fs",
+      "path"
+    ]
+  },
+  "notes": {
+    "time": "HOST LEAK — must be eliminated (collected_at uses wall-clock). Target: replace with derived:<hash>.",
+    "threading": "HOST LEAK — thread-local storage for step budget. Accepted bootstrap debt.",
+    "math": "Used for math.inf comparisons. Minimal footprint.",
+    "hashlib": "Bootstrap necessity — content addressing for seed integrity.",
+    "json": "Bootstrap necessity — seed file loading.",
+    "pathlib": "Bootstrap necessity — seed file path resolution.",
+    "collections": "OrderedDict for mu_type. Host data structure debt.",
+    "collections (abc)": "Callable type hint + OrderedDict. Host data structure debt.",
+    "typing": "Type hints only (no runtime host capability).",
+    "crypto": "JS: deterministic hashing for seed integrity (NOT randomness).",
+    "fs": "JS: read-only seed file loading.",
+    "path": "JS: seed file path resolution."
+  }
+}
