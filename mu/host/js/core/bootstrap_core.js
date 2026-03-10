@@ -16,6 +16,9 @@ const { isVar, isValidMu, muHashCached, muHashControlCached } = require('./types
 const { normalize, denormalize } = require('./normalize');
 
 /**
+ * @host_recursion — recursive pattern matching
+ * (host debt, not a bootstrap primitive)
+ *
  * Internal recursive matcher — no entry validation.
  * Parity with Python _match_inner(). Callers: match() (public entry)
  * and _applyProjectionTrusted() (kernel-internal fast path).
@@ -100,11 +103,9 @@ function _matchInner(pattern, input, _depth) {
 }
 
 /**
- * @host_recursion — recursive pattern matching
- * (host debt, not a bootstrap primitive)
- *
  * Match pattern against input, returning bindings or NO_MATCH.
  * Public entry point: validates inputs, auto-normalizes, then delegates to _matchInner.
+ * (@host_recursion debt tracked on _matchInner above)
  */
 function match(pattern, input, _depth = 0) {
   if (_depth > MAX_DEPTH) {
