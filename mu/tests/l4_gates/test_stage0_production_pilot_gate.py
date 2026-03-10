@@ -368,7 +368,7 @@ class TestAntiLaundering:
 # ===========================================================================
 
 class TestRatchetPasses:
-    """Host-semantics ratchet must pass (total=35, no increase)."""
+    """Host-semantics ratchet must pass (total=32, no increase)."""
 
     def test_ratchet_exits_zero(self):
         result = subprocess.run(
