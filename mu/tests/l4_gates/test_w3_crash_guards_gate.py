@@ -10,6 +10,8 @@ Verifies fixes for 4 fuzzer-confirmed crash/false-positive paths:
 import json
 import subprocess
 
+import pytest
+
 from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.eval_seed import match, NO_MATCH, _stage0_match  # ANTICHEAT_OK: founder-approved direct call for gate test
 from rcx_pi.selfhost.match_mu import denormalize_from_match, bindings_to_dict
@@ -120,37 +122,43 @@ class TestF10DenormalizeMalformedKv:
 # ---------------------------------------------------------------------------
 
 class TestF10LegacyListStructuralGuard:
-    """Legacy list loop: non-dict tail node no longer crashes."""
+    """Legacy list loop: non-dict tail node raises fail-closed."""
 
-    def test_legacy_list_nondict_tail_no_crash(self):
-        """denormalize_from_match({'head': 1, 'tail': 42}) must not crash.
+    def test_legacy_list_nondict_tail_raises(self):
+        """denormalize_from_match({'head': 1, 'tail': 42}) raises (fail-closed).
 
         Red-team finding: legacy list loop accessed current["head"] without
         checking isinstance(current, dict), causing TypeError on int tail.
+        Original W3 fix: silent truncation. Current fix: fail-closed raise.
         """
         malformed = {"head": 1, "tail": 42}
-        result = denormalize_from_match(malformed)
-        assert result is not None
+        with pytest.raises(ValueError, match="improper linked list tail"):
+            denormalize_from_match(malformed)
 
-    def test_legacy_list_string_tail_no_crash(self):
-        """Legacy list with string tail doesn't crash."""
+    def test_legacy_list_string_tail_raises(self):
+        """Legacy list with string tail raises (fail-closed)."""
         malformed = {"head": "a", "tail": "not_a_node"}
-        result = denormalize_from_match(malformed)
-        assert result is not None
+        with pytest.raises(ValueError, match="improper linked list tail"):
+            denormalize_from_match(malformed)
 
     def test_cross_substrate_parity_malformed_legacy_list(self):
-        """Python result equals JS result for malformed legacy list."""
+        """Both substrates raise on malformed legacy list (parity)."""
         malformed_input = {"head": 1, "tail": 42}
-        py_result = denormalize_from_match(malformed_input)
 
+        # Python raises
+        with pytest.raises(ValueError, match="improper linked list tail"):
+            denormalize_from_match(malformed_input)
+
+        # JS also raises
         js_script = (
             "const { denormalize } = require('./mu/host/js/core/normalize');\n"
             f"const input = {json.dumps(malformed_input)};\n"
             "try {\n"
-            "  const result = denormalize(input);\n"
-            "  console.log(JSON.stringify(result));\n"
+            "  denormalize(input);\n"
+            "  console.log('ERROR: should have thrown');\n"
+            "  process.exit(1);\n"
             "} catch (e) {\n"
-            "  console.log(JSON.stringify({__error: e.message}));\n"
+            "  console.log(e.message);\n"
             "}\n"
         )
         proc = subprocess.run(
@@ -161,10 +169,8 @@ class TestF10LegacyListStructuralGuard:
             timeout=10,
         )
         assert proc.returncode == 0, f"JS error: {proc.stderr}"
-        js_result = json.loads(proc.stdout.strip())
-
-        assert py_result == js_result, (
-            f"Cross-substrate parity failure:\n  Python: {py_result}\n  JS: {js_result}"
+        assert "Improper linked list tail" in proc.stdout, (
+            f"JS did not raise on improper tail: {proc.stdout}"
         )
 
 

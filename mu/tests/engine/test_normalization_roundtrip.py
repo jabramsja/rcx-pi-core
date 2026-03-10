@@ -672,11 +672,10 @@ class TestMalformedLinkedListEdgeCases:
         normalized = normalize_for_match(malformed)
         assert normalized == malformed  # Passed through unchanged
 
-        # W3-CRASH: denormalize now handles malformed tails gracefully
-        # (structural guard breaks out of loop instead of crashing).
-        # This is correct behavior - malformed tail is treated as list terminator.
-        result = denormalize_from_match(normalized)
-        assert result is not None  # No crash, produces partial result
+        # Fail-closed: improper tail raises instead of silently dropping data.
+        # Previously (W3-CRASH) this silently truncated; now it errors.
+        with pytest.raises(ValueError, match="improper linked list tail"):
+            denormalize_from_match(normalized)
 
     def test_denormalize_typed_with_extra_keys(self):
         """Type-tagged dict with extra keys is not a valid structure."""
