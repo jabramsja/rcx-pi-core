@@ -108,6 +108,7 @@ class TestKernelProjectionIDRejection:
 # ===========================================================================
 # 3. Engine Pipeline Reserved Field Validation
 # ===========================================================================
+@pytest.mark.slow
 class TestEnginePipelineReservedFieldValidation:
     """Engine pipeline entry must reject reserved fields in user input."""
 
