@@ -284,14 +284,14 @@ class TestRequestValidation:
             )
 
     def test_unknown_operation_api_bad_request(self):
-        """Unknown operation raises ValueError with api.bad_request semantics."""
+        """Unknown operation raises RcxEngineError with api.bad_request error code."""
         bad_request = {
             "operation": "nonexistent_op",
             "input": {},
             "context": {},
             "inject_key": "result",
         }
-        with pytest.raises(ValueError, match="Unknown boundary operation"):
+        with pytest.raises(RcxEngineError, match="Unknown boundary operation"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
                 emit_fn=_stub_emit, iteration=0, state={},
