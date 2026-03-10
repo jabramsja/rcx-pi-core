@@ -271,11 +271,15 @@ const BOUNDARY_DISPATCH = Object.freeze({
 // to frozen BOUNDARY_DISPATCH. Allows tests to inject a handler that returns
 // pre-existing ontology_promotion to exercise the overwrite guard.
 let testDispatchOverride = null;
+// Structural test mode flag — replaces process.env.RCX_TEST_MODE (host env leak).
+// Tests must call enableTestMode() before using setTestDispatchOverride.
+let _testModeEnabled = false;
+function enableTestMode() { _testModeEnabled = true; }
 function setTestDispatchOverride(override) {
   // A16: gate behind explicit test mode — fail-closed outside tests.
-  if (process.env.RCX_TEST_MODE !== '1') {  // CONTRABAND_OK: test-only gate (P-04 policy-bound)
+  if (!_testModeEnabled) {
     throw new RcxError('api.bad_request',
-      'setTestDispatchOverride is test-only (RCX_TEST_MODE=1 required)');
+      'setTestDispatchOverride is test-only (call enableTestMode() first)');
   }
   if (override !== null) {
     if (typeof override !== 'object' || Array.isArray(override)) {
@@ -1079,4 +1083,5 @@ module.exports = {
   _clearBoundaryOpsCache,
   _ensureBoundaryOps,
   setTestDispatchOverride,
+  enableTestMode,
 };

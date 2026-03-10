@@ -17,7 +17,6 @@ DELETED (2026-01-29):
 
 from __future__ import annotations
 
-import threading  # CONTRABAND_OK: infra - thread-local storage for step budget
 
 # Maximum total projection steps across all match_mu/subst_mu calls
 # Prevents resource exhaustion from nested/cascading calls
@@ -102,18 +101,17 @@ class _ProjectionStepBudget:
         return self._total_steps
 
 
-# Thread-local storage for step budget
-# Each thread gets its own budget instance to support concurrent execution
-_BUDGET_STORAGE = threading.local()
+# Module-level storage for step budget (single-threaded by design)
+_BUDGET_STORAGE = type('_BudgetStorage', (), {})()
 
 
 def get_step_budget() -> _ProjectionStepBudget:
-    """Get the thread-local projection step budget."""
+    """Get the module-level projection step budget."""
     if not hasattr(_BUDGET_STORAGE, 'budget'):
         _BUDGET_STORAGE.budget = _ProjectionStepBudget()
     return _BUDGET_STORAGE.budget
 
 
 def reset_step_budget() -> None:
-    """Reset the thread-local step budget (for testing)."""
+    """Reset the module-level step budget (for testing)."""
     _BUDGET_STORAGE.budget = _ProjectionStepBudget()
