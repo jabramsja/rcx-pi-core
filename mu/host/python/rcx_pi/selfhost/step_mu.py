@@ -29,8 +29,6 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
-import math
-import time  # CONTRABAND_OK: debug timestamps in derivation metadata
 
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
@@ -981,7 +979,7 @@ def _build_ontology_promotion_candidate(  # AST_OK: infra — producer-side reco
         "closure_structure": evidence["closure_structure"],
         "perturbation_log": evidence["perturbation_log"],
         "tau_lineage": evidence["tau_lineage"],
-        "derivation_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "derivation_timestamp": "derived:" + checksum,
         "substrate_versions": {"python": checksum, "js": checksum},
         "authority": {
             "source": "seed",
@@ -2084,7 +2082,7 @@ def _boundary_op_run_trace(request, req_input, max_algorithm_iterations):
     max_steps = req_input.get("max_steps", 100)
     if isinstance(max_steps, bool) or not isinstance(max_steps, (int, float)):
         max_steps = 100
-    elif math.isnan(max_steps) or math.isinf(max_steps):
+    elif max_steps != max_steps or abs(max_steps) == float('inf'):
         max_steps = 100
     else:
         max_steps = int(max_steps)
@@ -2372,7 +2370,7 @@ def _collect_ontology_evidence(  # @host_iteration: Mu linked-list traversal for
         "stall": stall,
         "projection_ids": projection_ids,
         "control_hash": control_hash,
-        "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "collected_at": "derived:" + control_hash,
     }
 
 

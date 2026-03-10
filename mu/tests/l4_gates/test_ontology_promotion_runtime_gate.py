@@ -96,7 +96,7 @@ def _run_js_expr(js_code: str, *, env: dict | None = None) -> subprocess.Complet
     """Run arbitrary JS expression via node -e.
 
     Args:
-        env: Optional extra env vars merged into os.environ (e.g. RCX_TEST_MODE).
+        env: Optional extra env vars merged into os.environ.
     """
     run_env = None
     if env is not None:
@@ -463,6 +463,7 @@ class TestEnvelopeTypeValidation:
         for bad_value, bad_label in [("'string'", "string"), ("[]", "array"), ("null", "null")]:
             js_code = textwrap.dedent(f"""\
                 const pipeline = require('./mu/host/js/engine/pipeline');
+                pipeline.enableTestMode();
                 pipeline.setTestDispatchOverride({{
                     run_trace: (kp, spm, req, inp, maxIters) => ({{
                         result: 'hello',
@@ -491,7 +492,7 @@ class TestEnvelopeTypeValidation:
                     pipeline.setTestDispatchOverride(null);
                 }}
             """)
-            result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+            result = _run_js_expr(js_code)
             assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
                 f"Expected typed error for {bad_label}, got: {result.stdout} {result.stderr}"
             )
@@ -814,8 +815,8 @@ class TestBuilderPython:
         record = _build_ontology_promotion_candidate(evidence, "test")
         ts = record["derivation_timestamp"]
         assert isinstance(ts, str) and len(ts) > 0
-        # Must contain 'T' (ISO format)
-        assert "T" in ts
+        # Deterministic derivation from seed checksum (no wall-clock)
+        assert ts.startswith("derived:")
 
     def test_substrate_versions_auto_generated(self):
         evidence = _make_valid_evidence()
@@ -1404,6 +1405,7 @@ class TestCrossSubstrateMalformedEvidence:
         # --- JS: testability seam via setTestDispatchOverride ---
         js_code = textwrap.dedent(f"""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             const evidence = {json.dumps(evidence)};
             // Override run_trace handler to return result with ontology_promotion
             pipeline.setTestDispatchOverride({{
@@ -1437,7 +1439,7 @@ class TestCrossSubstrateMalformedEvidence:
                 pipeline.setTestDispatchOverride(null);
             }}
         """)
-        js_result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        js_result = _run_js_expr(js_code)
         assert js_result.stdout.startswith("FAIL:input.shape_mismatch:"), (
             f"JS overwrite guard did not fire: {js_result.stdout} {js_result.stderr}"
         )
@@ -1514,18 +1516,18 @@ class TestAntiTheaterLock:
 # ===========================================================================
 
 class TestSetterGateA16:
-    """A16: setTestDispatchOverride is gated behind RCX_TEST_MODE=1.
+    """A16: setTestDispatchOverride is gated behind enableTestMode().
 
     Verifies:
     - Setter blocked outside test mode (api.bad_request)
-    - Setter allowed with RCX_TEST_MODE=1
+    - Setter allowed after enableTestMode()
     - Invalid override types rejected (input.shape_mismatch)
     - Unknown operation keys rejected (input.shape_mismatch)
     - null reset accepted in test mode
     """
 
     def test_setter_blocked_without_test_mode(self):
-        """setTestDispatchOverride without RCX_TEST_MODE=1 raises api.bad_request."""
+        """setTestDispatchOverride without enableTestMode() raises api.bad_request."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
             try {
@@ -1535,16 +1537,17 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code)  # no env → no RCX_TEST_MODE
+        result = _run_js_expr(js_code)  # no enableTestMode() call
         assert result.stdout.startswith("FAIL:api.bad_request:"), (
             f"Expected api.bad_request without test mode, got: {result.stdout} {result.stderr}"
         )
-        assert "RCX_TEST_MODE" in result.stdout
+        assert "enableTestMode" in result.stdout
 
     def test_setter_allowed_with_test_mode(self):
-        """setTestDispatchOverride with RCX_TEST_MODE=1 succeeds."""
+        """setTestDispatchOverride after enableTestMode() succeeds."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             try {
                 pipeline.setTestDispatchOverride({
                     run_trace: () => ({ result: 'ok', trace: [], stall: false }),
@@ -1555,7 +1558,7 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        result = _run_js_expr(js_code)
         assert result.stdout == "PASS", (
             f"Expected setter to succeed in test mode, got: {result.stdout} {result.stderr}"
         )
@@ -1564,6 +1567,7 @@ class TestSetterGateA16:
         """Array override → input.shape_mismatch."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             try {
                 pipeline.setTestDispatchOverride([1, 2, 3]);
                 process.stdout.write('NO_ERROR');
@@ -1571,7 +1575,7 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        result = _run_js_expr(js_code)
         assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
             f"Expected input.shape_mismatch for array, got: {result.stdout} {result.stderr}"
         )
@@ -1580,6 +1584,7 @@ class TestSetterGateA16:
         """String override → input.shape_mismatch."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             try {
                 pipeline.setTestDispatchOverride('bad');
                 process.stdout.write('NO_ERROR');
@@ -1587,7 +1592,7 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        result = _run_js_expr(js_code)
         assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
             f"Expected input.shape_mismatch for string, got: {result.stdout} {result.stderr}"
         )
@@ -1596,6 +1601,7 @@ class TestSetterGateA16:
         """Unknown operation key in override → input.shape_mismatch."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             try {
                 pipeline.setTestDispatchOverride({
                     fake_op: () => ({}),
@@ -1605,7 +1611,7 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        result = _run_js_expr(js_code)
         assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
             f"Expected input.shape_mismatch for unknown key, got: {result.stdout} {result.stderr}"
         )
@@ -1615,6 +1621,7 @@ class TestSetterGateA16:
         """null override (reset) succeeds in test mode."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             try {
                 pipeline.setTestDispatchOverride(null);
                 process.stdout.write('PASS');
@@ -1622,7 +1629,7 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        result = _run_js_expr(js_code)
         assert result.stdout == "PASS", (
             f"Expected null override to succeed, got: {result.stdout} {result.stderr}"
         )
@@ -1631,6 +1638,7 @@ class TestSetterGateA16:
         """Non-function handler value → input.shape_mismatch at setter time."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
+            pipeline.enableTestMode();
             try {
                 pipeline.setTestDispatchOverride({ run_trace: 3 });
                 process.stdout.write('NO_ERROR');
@@ -1638,7 +1646,7 @@ class TestSetterGateA16:
                 process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
             }
         """)
-        result = _run_js_expr(js_code, env={"RCX_TEST_MODE": "1"})
+        result = _run_js_expr(js_code)
         assert result.stdout.startswith("FAIL:input.shape_mismatch:"), (
             f"Expected input.shape_mismatch for non-function handler, got: {result.stdout} {result.stderr}"
         )
@@ -1715,11 +1723,11 @@ class TestEvidenceCollectorPython:
         assert isinstance(obs["collected_at"], str)
         assert len(obs["collected_at"]) > 0
 
-    def test_collected_at_is_iso_string(self):
-        """collected_at auto-generated non-empty ISO timestamp."""
+    def test_collected_at_is_derived_string(self):
+        """collected_at auto-generated as derived:<hash> (deterministic, no wall-clock)."""
         obs = _collect_ontology_evidence({"result": "x"}, "run_algorithm")
         assert isinstance(obs["collected_at"], str)
-        assert "T" in obs["collected_at"]
+        assert obs["collected_at"].startswith("derived:")
 
     def test_control_hash_is_string(self):
         """control_hash auto-generated non-empty string."""
