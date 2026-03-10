@@ -16,30 +16,15 @@ const { isVar, isValidMu, muHashCached, muHashControlCached } = require('./types
 const { normalize, denormalize } = require('./normalize');
 
 /**
- * @host_recursion — recursive pattern matching
- * (host debt, not a bootstrap primitive)
- *
- * Match pattern against input, returning bindings or NO_MATCH.
+ * Internal recursive matcher — no entry validation.
+ * Parity with Python _match_inner(). Callers: match() (public entry)
+ * and _applyProjectionTrusted() (kernel-internal fast path).
  */
-function match(pattern, input, _depth = 0) {
+function _matchInner(pattern, input, _depth) {
+  // Parity with Python _match_inner: depth overflow returns NO_MATCH (not throw).
+  // This allows step() to try the next projection gracefully.
   if (_depth > MAX_DEPTH) {
-    throw new Error(`Max depth exceeded in match (${MAX_DEPTH})`);
-  }
-
-  // Entry validation — validate once at depth 0, not on every recursive call.
-  if (_depth === 0) {
-    if (!isValidMu(pattern)) {
-      throw new RcxError('input.invalid_type', 'Invalid Mu pattern in match()');
-    }
-    if (!isValidMu(input)) {
-      throw new RcxError('input.invalid_type', 'Invalid Mu input in match()');
-    }
-  }
-
-  // Gate 3: Auto-normalize input when pattern uses normalized dict format.
-  if (_depth === 0 && typeof pattern === 'object' && pattern !== null &&
-      !Array.isArray(pattern) && pattern._type === 'dict') {
-    input = normalize(input);
+    return NO_MATCH;
   }
 
   if (isVar(pattern)) {
@@ -61,7 +46,7 @@ function match(pattern, input, _depth = 0) {
     }
     const bindings = Object.create(null);
     for (let i = 0; i < pattern.length; i++) {
-      const sub = match(pattern[i], input[i], _depth + 1);
+      const sub = _matchInner(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
         // Non-linear conflict: use muHashCached (NOT muHashControlCached —
@@ -97,7 +82,7 @@ function match(pattern, input, _depth = 0) {
     }
     const bindings = Object.create(null);
     for (const k of pKeys) {
-      const sub = match(pattern[k], input[k], _depth + 1);
+      const sub = _matchInner(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
         // Non-linear conflict: use muHashCached (NOT muHashControlCached —
@@ -112,6 +97,37 @@ function match(pattern, input, _depth = 0) {
   }
 
   return NO_MATCH;
+}
+
+/**
+ * @host_recursion — recursive pattern matching
+ * (host debt, not a bootstrap primitive)
+ *
+ * Match pattern against input, returning bindings or NO_MATCH.
+ * Public entry point: validates inputs, auto-normalizes, then delegates to _matchInner.
+ */
+function match(pattern, input, _depth = 0) {
+  if (_depth > MAX_DEPTH) {
+    return NO_MATCH;
+  }
+
+  // Entry validation — validate once at depth 0, not on every recursive call.
+  if (_depth === 0) {
+    if (!isValidMu(pattern)) {
+      throw new RcxError('input.invalid_type', 'Invalid Mu pattern in match()');
+    }
+    if (!isValidMu(input)) {
+      throw new RcxError('input.invalid_type', 'Invalid Mu input in match()');
+    }
+  }
+
+  // Gate 3: Auto-normalize input when pattern uses normalized dict format.
+  if (_depth === 0 && typeof pattern === 'object' && pattern !== null &&
+      !Array.isArray(pattern) && pattern._type === 'dict') {
+    input = normalize(input);
+  }
+
+  return _matchInner(pattern, input, _depth);
 }
 
 /**
@@ -215,14 +231,16 @@ function _applyProjectionTrusted(projection, input) {
     inputVal = normalize(inputVal);
   }
 
-  // depth=1 skips depth-0 isValidMu check in match/substitute (caller already validated)
+  // Use _matchInner directly at depth=0 — skips entry validation (caller already validated).
+  // Parity with Python _apply_projection_trusted which calls _match_inner(pattern, input, {}, 0).
   const bindings = _stage0Pilot
     ? stage0Match(pattern, inputVal)
-    : match(pattern, inputVal, 1);
+    : _matchInner(pattern, inputVal, 0);
   if (bindings === NO_MATCH) return NO_MATCH;
+  // substitute at depth=0 — body validation is fine (seeds are verified), depth parity with Python.
   let result = _stage0Pilot
     ? stage0Substitute(projection.body, bindings)
-    : substitute(projection.body, bindings, 1);
+    : substitute(projection.body, bindings, 0);
   if (typeof projection.body === 'object' && projection.body !== null &&
       !Array.isArray(projection.body) && projection.body._type === 'dict') {
     result = denormalize(result);

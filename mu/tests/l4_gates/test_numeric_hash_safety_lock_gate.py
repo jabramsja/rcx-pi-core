@@ -383,25 +383,28 @@ class TestSourceLocks:
         assert "muHashControlCached(" in source
 
     def test_match_nonlinear_binding_uses_content_hash(self):
-        """match() in bootstrap_core.js uses muHashCached for non-linear binding.
+        """_matchInner() in bootstrap_core.js uses muHashCached for non-linear binding.
 
         Content hash (muHashCached) preserves int/float type distinction.
         Control hash (muHashControlCached) canonicalizes 0.0→0, breaking
         non-linear conflict detection for type-distinct values.
+
+        Note: match() delegates to _matchInner() (mirrors Python _match_inner),
+        so the muHashCached calls live in _matchInner, not match.
         """
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
-        # Find match function lines with muHashCached (non-linear binding)
+        # Find _matchInner function lines with muHashCached (non-linear binding)
         in_match = False
         match_content_lines = []
         for i, line in enumerate(source.splitlines(), 1):
-            if "function match(" in line:
+            if "function _matchInner(" in line:
                 in_match = True
             elif in_match and line.startswith("function "):
                 break
             if in_match and "muHashCached(" in line and "muHashControlCached(" not in line:
                 match_content_lines.append(line.strip())
         assert len(match_content_lines) >= 2, (
-            "match() should have >=2 muHashCached calls for non-linear binding"
+            "_matchInner() should have >=2 muHashCached calls for non-linear binding"
         )
 
     def test_python_eval_seed_match_uses_content_hash(self):

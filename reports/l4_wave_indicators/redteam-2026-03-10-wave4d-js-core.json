@@ -1,0 +1,26 @@
+{
+  "wave_id": "redteam-2026-03-10-wave4d-js-core",
+  "wave_class": "L4_STRUCTURAL",
+  "target_gate_id": "G5",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_PARITY_FLOOR",
+  "boot0_track_id": "V3",
+  "boot0_progress_state": "ADVANCE",
+  "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/redteam-2026-03-10-wave4d-js-core.json",
+  "indicator_collection_command": "python3 tools/checks/enforce_l4_execution_contract.py --staged",
+  "host_semantics_delta": "match() depth overflow returns NO_MATCH (was throw); _matchInner extracted (mirrors Python _match_inner); trusted path depth parity (was off-by-one at MAX_DEPTH)",
+  "evidence_command": "PYTHONHASHSEED=0 pytest tests/parity/test_cross_substrate_constants.py -v && node mu/host/js/eval_step.js",
+  "evidence_delta": "2 new field-set parity tests; match depth overflow parity fix; _matchInner extraction; trusted path depth-0 parity fix",
+  "progress_proof_before": "JS match() throws Error on depth overflow; trusted path off-by-one at MAX_DEPTH; 16 parity tests; debt summary counted 9 @host_iteration",
+  "progress_proof_after": "JS match() returns NO_MATCH on depth overflow; _matchInner mirrors Python _match_inner; trusted path at depth 0; 18 parity tests (+2); debt summary correctly counts 10 @host_iteration",
+  "post_gate_contract_sweep": "pytest tests/parity/ -v && ./tools/checks/check_js_debt.sh",
+  "provenance": {
+    "derivation_method": "grep + node eval + parity agent comparison",
+    "derivation_timestamp": "2026-03-10T00:00:00Z",
+    "substrate_versions": {
+      "python_eval_seed": "eval_seed.py:322 returns NO_MATCH",
+      "js_bootstrap_core": "bootstrap_core.js:28 returns NO_MATCH"
+    }
+  }
+}
