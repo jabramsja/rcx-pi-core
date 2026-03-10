@@ -29,6 +29,7 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
+import math
 import time  # CONTRABAND_OK: debug timestamps in derivation metadata
 
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
@@ -1260,7 +1261,7 @@ def is_kernel_intermediate(result: Mu) -> bool:
     # SECURITY FIX (9-agent round 2): Only check underscore-prefixed fields.
     # Generic keys 'match' and 'subst' removed - domain data can legitimately
     # contain these, and checking for them bypasses stall detection.
-    # See KERNEL_RESERVED_FIELDS comment at line 110-113.
+    # See KERNEL_RESERVED_FIELDS declaration and its preceding comment.
     kernel_internal_fields = ('_subst_ctx', '_match_ctx', '_kernel_ctx')
     if any(f in result for f in kernel_internal_fields):  # AST_OK: infra
         return True
@@ -2036,14 +2037,14 @@ def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:
     """
     current = initial
     # INVARIANT: run_algorithm_meta_circular returns new structures — hash caching is safe.
-    current_hash = mu_hash_control_cached(initial, "run_hemisphere_routing")
+    current_hash = mu_hash_control_cached(initial, "_run_sub_algorithm")
     for _ in range(max_iterations):  # AST_OK: infra — boundary iteration loop
         result = run_algorithm_meta_circular(projs, current)
         # Early termination: semantic final shape detected
         if _is_terminal_shape(result):
             return result
         # Hash-stall fallback: algorithm converged
-        result_hash = mu_hash_control_cached(result, "run_hemisphere_routing.stall")
+        result_hash = mu_hash_control_cached(result, "_run_sub_algorithm.stall")
         if result_hash == current_hash:
             return result
         current = result
@@ -2080,7 +2081,6 @@ def _boundary_op_run_trace(request, req_input, max_algorithm_iterations):
     # max_steps parity policy: normalize-fallback.
     # Numeric finite → floor to int. Non-numeric/bool/NaN/±Inf → fallback to 100.
     # Matches JS behavior (typeof !== 'number' || isNaN → 100, Math.floor) exactly.
-    import math
     max_steps = req_input.get("max_steps", 100)
     if isinstance(max_steps, bool) or not isinstance(max_steps, (int, float)):
         max_steps = 100
@@ -2210,7 +2210,9 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     valid_ops = _load_boundary_ops()
     if operation not in valid_ops:
         emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
-        raise ValueError(f"Unknown boundary operation: {operation}")
+        raise RcxEngineError("api.bad_request",
+            f"Unknown boundary operation: {operation}. "
+            f"Valid: {sorted(valid_ops)}")
 
     # Dispatch coverage invariant: map keys must match seed-derived ops
     if frozenset(_BOUNDARY_DISPATCH) != valid_ops:
@@ -2287,6 +2289,13 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
             result, operation,
         )
 
+    # SECURITY: Reject inject_key collision with existing context keys.
+    # Prevents boundary requests from silently overwriting domain context state.
+    if inject_key in context:
+        emit_fn("fail_closed", iteration, state, error_code="input.inject_key_collision")
+        raise RcxEngineError("input.inject_key_collision",
+            f"boundary inject_key '{inject_key}' already exists in context. "
+            f"Cannot overwrite existing context state.")
     context[inject_key] = result
     return context
 
@@ -2336,7 +2345,15 @@ def _collect_ontology_evidence(  # @host_iteration: Mu linked-list traversal for
                         pids.append(pid)
         else:
             node = collected
+            visited_ids: set[int] = set()  # AST_OK: cycle — cycle detection guard
+            _max_drain = _MAX_TRACE_ENTRIES_HARD_CAP
             while isinstance(node, dict) and "head" in node:  # AST_OK: infra — boundary linked-list drain (walker output)
+                nid = id(node)
+                if nid in visited_ids:
+                    break  # cyclic — stop draining
+                visited_ids.add(nid)
+                if trace_len >= _max_drain:
+                    break  # iteration cap — defense-in-depth
                 trace_len += 1
                 entry = node["head"]
                 if isinstance(entry, dict):  # AST_OK: infra — boundary type guard
