@@ -133,10 +133,10 @@ class TestAlgorithmRuntimeDepthProtection:
     """Verify depth limits prevent stack overflow attacks."""
 
     def test_deeply_nested_exceeds_max_depth(self):
-        """Structures nested beyond MAX_VALIDATION_DEPTH are rejected."""
-        # Build structure deeper than 100 levels
+        """Structures nested beyond MAX_MU_DEPTH (300) are rejected."""
+        # Build structure deeper than MAX_MU_DEPTH (300) levels
         value = "leaf"
-        for i in range(105):
+        for i in range(305):
             value = {"safe_key": value}
         with pytest.raises(ValueError, match="maximum validation depth"):
             validate_algorithm_runtime_fields(value, "test")
@@ -144,7 +144,7 @@ class TestAlgorithmRuntimeDepthProtection:
     def test_deeply_nested_domain_exceeds_max_depth(self):
         """Domain validator also rejects deeply nested structures."""
         value = "leaf"
-        for i in range(105):
+        for i in range(305):
             value = {"safe_key": value}
         with pytest.raises(ValueError, match="maximum validation depth"):
             validate_no_kernel_reserved_fields(value, "test")

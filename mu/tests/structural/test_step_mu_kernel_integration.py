@@ -454,34 +454,39 @@ class TestKernelReservedFieldsValidation:
     # =========================================================================
 
     def test_validate_rejects_excessive_depth(self):
-        """CRITICAL: Structures deeper than 100 are rejected (fail closed)."""
-        # Build structure with 101 levels of nesting
+        """CRITICAL: Structures deeper than MAX_MU_DEPTH (300) are rejected (fail closed)."""
+        # Build structure with 301 levels of nesting (exceeds MAX_MU_DEPTH=300)
         deep = {"data": 42}
-        for _ in range(101):
+        for _ in range(301):
             deep = {"level": deep}
 
         # Should raise - depth exceeded (fail CLOSED, not open)
         with pytest.raises(ValueError, match="exceeded maximum validation depth"):
             validate_no_kernel_reserved_fields(deep, "test")
 
-    def test_validate_accepts_depth_100(self):
-        """Structures exactly at depth 100 are accepted."""
-        # Build structure with exactly 100 levels
+    def test_validate_accepts_depth_at_limit(self):
+        """Structures exactly at MAX_MU_DEPTH (300) are accepted."""
+        # Build structure with exactly 300 levels
         deep = {"data": 42}
-        for _ in range(99):  # 99 wraps + initial = 100 total
+        for _ in range(299):  # 299 wraps + initial = 300 total
             deep = {"level": deep}
 
         # Should not raise - within limit
         validate_no_kernel_reserved_fields(deep, "test")
 
     def test_step_kernel_mu_rejects_excessive_depth_attack(self):
-        """step_kernel_mu rejects excessively deep structures."""
-        # Build structure with 101 levels of nesting
+        """step_kernel_mu rejects excessively deep structures.
+
+        Structures exceeding MAX_MU_DEPTH (300) fail at assert_mu boundary
+        (TypeError) before reaching _walk_and_validate. Both limits are 300,
+        so assert_mu is the first defense line.
+        """
+        # Build structure with 301 levels of nesting (exceeds MAX_MU_DEPTH=300)
         deep = {"data": 42}
-        for _ in range(101):
+        for _ in range(301):
             deep = {"level": deep}
 
-        with pytest.raises(ValueError, match="exceeded maximum validation depth"):
+        with pytest.raises(TypeError, match="must be a Mu"):
             step_kernel_mu([], deep)
 
 

@@ -873,6 +873,10 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
 
     This is the parity function for eval_seed.match().
 
+    NOTE: Non-linear patterns (same variable bound twice) may produce different
+    results than eval_seed.match() when denormalization interacts with binding
+    comparison. This is a known parity gap tracked in reports/deferred/.
+
     Args:
         pattern: The pattern to match (Mu with possible var sites).
         value: The value to match against (Mu).
