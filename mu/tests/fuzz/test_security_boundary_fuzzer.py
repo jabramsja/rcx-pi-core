@@ -7,7 +7,7 @@ These functions are CRITICAL for preventing state injection attacks.
 Targets:
 - validate_no_kernel_reserved_fields() - deep recursive validation
 - KERNEL_RESERVED_FIELDS - field whitelist
-- Depth guard (MAX_VALIDATION_DEPTH = 100)
+- Depth guard (MAX_VALIDATION_DEPTH = MAX_MU_DEPTH = 300)
 
 Added 2026-01-29 after 7-agent steelman review identified this as a fuzzer gap.
 """
@@ -185,31 +185,31 @@ class TestNestedReservedFields:
 class TestDepthGuard:
     """Tests for depth limit enforcement (fail-closed behavior)."""
 
-    def test_depth_100_clean_accepted(self):
-        """Clean structure at exactly depth 100 is accepted."""
-        # Build structure at depth 100
+    def test_depth_300_clean_accepted(self):
+        """Clean structure at exactly depth 300 (MAX_MU_DEPTH) is accepted."""
+        # Build structure at depth 300
         current = {"value": 42}
-        for i in range(99):  # 99 more levels = 100 total
+        for i in range(299):  # 299 more levels = 300 total
             current = {f"level_{i}": current}
 
         # Should not raise (clean structure at limit)
         validate_no_kernel_reserved_fields(current, "test")
 
-    def test_depth_101_raises_regardless_of_content(self):
-        """Depth 101 raises ValueError (fail-closed)."""
-        # Build structure at depth 101
+    def test_depth_301_raises_regardless_of_content(self):
+        """Depth 301 raises ValueError (fail-closed, MAX_MU_DEPTH=300)."""
+        # Build structure at depth 301
         current = {"value": 42}
-        for i in range(100):  # 100 more levels = 101 total
+        for i in range(300):  # 300 more levels = 301 total
             current = {f"level_{i}": current}
 
         # Should raise due to depth, not content
         with pytest.raises(ValueError, match="depth"):
             validate_no_kernel_reserved_fields(current, "test")
 
-    @given(st.integers(min_value=101, max_value=150))
+    @given(st.integers(min_value=301, max_value=350))
     @settings(max_examples=20, deadline=30000)
     def test_excessive_depth_always_rejected(self, depth):
-        """Any depth > 100 is rejected (fail-closed)."""
+        """Any depth > MAX_MU_DEPTH (300) is rejected (fail-closed)."""
         # Build structure at specified depth
         current = {"value": 42}
         for i in range(depth - 1):

@@ -243,28 +243,28 @@ class TestUnknownFieldsRejected:
 class TestAlgorithmRuntimeDepthGuard:
     """Depth limit enforcement on algorithm-runtime validator."""
 
-    def test_depth_101_fails_closed(self):
-        """Depth 101 raises ValueError regardless of content."""
+    def test_depth_301_fails_closed(self):
+        """Depth 301 raises ValueError regardless of content (MAX_MU_DEPTH=300)."""
         current = {"safe": 42}
-        for i in range(100):
+        for i in range(300):
             current = {f"level_{i}": current}
         with pytest.raises(ValueError, match="depth"):
             validate_algorithm_runtime_fields(current, "test")
 
-    @given(st.integers(min_value=101, max_value=130))
+    @given(st.integers(min_value=301, max_value=330))
     @settings(max_examples=10, deadline=30000)
     def test_excessive_depth_always_rejected(self, depth):
-        """Any depth > 100 is rejected."""
+        """Any depth > MAX_MU_DEPTH (300) is rejected."""
         current = {"safe": 42}
         for i in range(depth - 1):
             current = {f"level_{i}": current}
         with pytest.raises(ValueError, match="depth"):
             validate_algorithm_runtime_fields(current, "test")
 
-    def test_depth_100_clean_accepted(self):
-        """Clean structure at exactly depth 100 is accepted."""
+    def test_depth_300_clean_accepted(self):
+        """Clean structure at exactly depth 300 (MAX_MU_DEPTH) is accepted."""
         current = {"safe": 42}
-        for i in range(99):
+        for i in range(299):
             current = {f"level_{i}": current}
         validate_algorithm_runtime_fields(current, "test")
 

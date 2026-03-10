@@ -422,7 +422,7 @@ class TestDepthBoundaryFuzzer:
     """
     Fuzzer for depth boundary behavior in validation.
 
-    Tests the MAX_VALIDATION_DEPTH=100 boundary behavior
+    Tests the MAX_VALIDATION_DEPTH=MAX_MU_DEPTH=300 boundary behavior
     in validate_no_kernel_reserved_fields().
     """
 
@@ -441,30 +441,30 @@ class TestDepthBoundaryFuzzer:
         # Should not raise
         validate_no_kernel_reserved_fields(nested, "test input")
 
-    @given(st.integers(min_value=101, max_value=105))
+    @given(st.integers(min_value=301, max_value=305))
     @settings(deadline=10000)
     def test_deep_nesting_over_limit_fails(self, depth):
-        """Nesting depths 101-105 (over MAX=100) should fail validation."""
+        """Nesting depths 301-305 (over MAX_MU_DEPTH=300) should fail validation."""
         nested = self.build_nested_dict(depth)
         with pytest.raises(ValueError, match="maximum validation depth"):
             validate_no_kernel_reserved_fields(nested, "test input")
 
-    def test_exact_boundary_100_passes(self):
-        """Exactly depth 100 should pass (boundary case)."""
-        nested = self.build_nested_dict(99)  # 99 wraps = 100 depth checks
+    def test_exact_boundary_300_passes(self):
+        """Exactly depth 300 (MAX_MU_DEPTH) should pass (boundary case)."""
+        nested = self.build_nested_dict(299)  # 299 wraps = 300 depth checks
         # Should not raise
         validate_no_kernel_reserved_fields(nested, "test input")
 
-    def test_exact_boundary_101_fails(self):
-        """Exactly depth 101 should fail (just over boundary)."""
-        nested = self.build_nested_dict(101)
+    def test_exact_boundary_301_fails(self):
+        """Exactly depth 301 should fail (just over MAX_MU_DEPTH=300)."""
+        nested = self.build_nested_dict(301)
         with pytest.raises(ValueError, match="maximum validation depth"):
             validate_no_kernel_reserved_fields(nested, "test input")
 
     @given(st.integers(min_value=95, max_value=99))
     @settings(deadline=10000)
     def test_deep_nesting_with_reserved_field_at_depth(self, depth):
-        """Reserved field at depth < 100 should be detected."""
+        """Reserved field at depth < MAX_MU_DEPTH should be detected."""
         # Build nested structure with _mode at specified depth
         nested = {"_mode": "forged"}
         for _ in range(depth):
