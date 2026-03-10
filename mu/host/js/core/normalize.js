@@ -275,6 +275,13 @@ function denormalize(value, _depth = 0) {
           result.push(denormalize(node.head, _depth + 1));
           node = node.tail;
         }
+        // Fail-closed: improper tail (non-null terminator) silently drops data
+        if (node !== null && node !== undefined) {
+          throw new Error(
+            `Improper linked list tail in denormalize: expected null, ` +
+            `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
+          );
+        }
         return result;
       }
 
@@ -291,6 +298,13 @@ function denormalize(value, _depth = 0) {
             result[kv.head] = denormalize(kv.tail.head, _depth + 1);
           }
           node = node.tail;
+        }
+        // Fail-closed: improper tail (non-null terminator) silently drops data
+        if (node !== null && node !== undefined) {
+          throw new Error(
+            `Improper linked list tail in denormalize: expected null, ` +
+            `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
+          );
         }
         return result;
       }
@@ -315,6 +329,13 @@ function denormalize(value, _depth = 0) {
         }
         node = node.tail;
       }
+      // Fail-closed: improper tail (non-null terminator) silently drops data
+      if (node !== null && node !== undefined) {
+        throw new Error(
+          `Improper linked list tail in denormalize: expected null, ` +
+          `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
+        );
+      }
       return result;
     } else {
       const result = [];
@@ -326,6 +347,13 @@ function denormalize(value, _depth = 0) {
         }
         result.push(denormalize(node.head, _depth + 1));
         node = node.tail;
+      }
+      // Fail-closed: improper tail (non-null terminator) silently drops data
+      if (node !== null && node !== undefined) {
+        throw new Error(
+          `Improper linked list tail in denormalize: expected null, ` +
+          `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
+        );
       }
       return result;
     }

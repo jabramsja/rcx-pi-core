@@ -1,0 +1,24 @@
+{
+  "wave_id": "fix-denormalize-silent-truncation",
+  "repeat_run_speedup_ratio": 1.014385,
+  "parity_diff_count": 17,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.376578,
+  "repeat_run_raw_seconds": [
+    0.381995,
+    0.376578
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.381995
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.758573
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-10T20:15:34Z",
+  "collector_version": "2.2.0"
+}

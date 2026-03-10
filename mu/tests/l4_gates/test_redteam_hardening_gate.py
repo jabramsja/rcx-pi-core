@@ -210,18 +210,23 @@ class TestDenormalizeTypedPathGuard:
     """Typed denormalize paths must not crash on non-object tail (RT-001)."""
 
     def test_list_typed_path_primitive_tail(self):
-        """Typed list denormalize with primitive tail returns partial result."""
+        """Typed list denormalize with primitive tail raises (fail-closed)."""
         script = """
 const { denormalize } = require('./mu/host/js/core/normalize');
 const malformed = { _type: 'list', head: 42, tail: 'not_an_object' };
-const result = denormalize(malformed);
-console.log(JSON.stringify(result));
+try {
+    denormalize(malformed);
+    console.log('ERROR: should have thrown');
+    process.exit(1);
+} catch (e) {
+    console.log(e.message);
+}
 """
-        parsed = json.loads(_js_eval(script))
-        assert parsed == [42], f"Expected [42], got {parsed}"
+        out = _js_eval(script)
+        assert "Improper linked list tail" in out, f"Expected error, got: {out}"
 
     def test_dict_typed_path_primitive_tail(self):
-        """Typed dict denormalize with primitive tail returns partial result."""
+        """Typed dict denormalize with primitive tail raises (fail-closed)."""
         script = """
 const { denormalize } = require('./mu/host/js/core/normalize');
 const malformed = {
@@ -229,11 +234,16 @@ const malformed = {
     head: { head: 'key1', tail: { head: 'val1', tail: null } },
     tail: 99
 };
-const result = denormalize(malformed);
-console.log(JSON.stringify(result));
+try {
+    denormalize(malformed);
+    console.log('ERROR: should have thrown');
+    process.exit(1);
+} catch (e) {
+    console.log(e.message);
+}
 """
-        parsed = json.loads(_js_eval(script))
-        assert parsed == {"key1": "val1"}, f"Expected {{key1: val1}}, got {parsed}"
+        out = _js_eval(script)
+        assert "Improper linked list tail" in out, f"Expected error, got: {out}"
 
 
 # =============================================================================

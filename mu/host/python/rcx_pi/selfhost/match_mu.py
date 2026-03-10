@@ -650,6 +650,13 @@ def denormalize_from_match(value: Mu) -> Mu:
                             kv_pairs.append((key, val_to_process))
                             current = current.get("tail")
 
+                        # Fail-closed: improper tail silently drops data
+                        if current is not None:
+                            raise ValueError(
+                                f"denormalize_from_match: improper linked list tail in dict — "
+                                f"expected None, got {type(current).__name__}: {current!r}"
+                            )
+
                         # Push processing in reverse order (last kv pushed first)
                         for key, val_to_process in reversed(kv_pairs):
                             stack.append(("dict_kv", key, result_dict))
@@ -678,6 +685,13 @@ def denormalize_from_match(value: Mu) -> Mu:
                                 break
                             elements.append(current["head"])
                             current = current.get("tail")
+
+                        # Fail-closed: improper tail silently drops data
+                        if current is not None:
+                            raise ValueError(
+                                f"denormalize_from_match: improper linked list tail in list — "
+                                f"expected None, got {type(current).__name__}: {current!r}"
+                            )
 
                         # Push processing in reverse order (last element pushed first)
                         for elem in reversed(elements):
@@ -721,6 +735,13 @@ def denormalize_from_match(value: Mu) -> Mu:
                             kv_pairs.append((key, val_to_process))
                             current = current.get("tail")
 
+                        # Fail-closed: improper tail silently drops data
+                        if current is not None:
+                            raise ValueError(
+                                f"denormalize_from_match: improper linked list tail in legacy dict — "
+                                f"expected None, got {type(current).__name__}: {current!r}"
+                            )
+
                         # Push processing in reverse order (last kv pushed first)
                         for key, val_to_process in reversed(kv_pairs):
                             stack.append(("dict_kv", key, result_dict))
@@ -749,6 +770,13 @@ def denormalize_from_match(value: Mu) -> Mu:
                                 break
                             elements.append(current["head"])
                             current = current.get("tail")
+
+                        # Fail-closed: improper tail silently drops data
+                        if current is not None:
+                            raise ValueError(
+                                f"denormalize_from_match: improper linked list tail in legacy list — "
+                                f"expected None, got {type(current).__name__}: {current!r}"
+                            )
 
                         # Push processing in reverse order (last element pushed first)
                         for elem in reversed(elements):
