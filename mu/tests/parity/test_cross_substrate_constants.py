@@ -30,6 +30,8 @@ import pytest
 from rcx_pi.selfhost.step_mu import (
     KERNEL_RESERVED_FIELDS,
     ALGORITHM_ENTRYPOINT_KEYS,
+    ALGORITHM_INTERNAL_UNRESERVED_FIELDS,
+    ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS,
 )
 from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH, MAX_MU_WIDTH
 
@@ -113,6 +115,41 @@ class TestReservedFieldParity:
             f"Algorithm entrypoint key drift!\n"
             f"  Python-only: {py_keys - js_keys}\n"
             f"  JS-only:     {js_keys - py_keys}"
+        )
+
+    def test_algorithm_internal_unreserved_fields_match(self):
+        """ALGORITHM_INTERNAL_UNRESERVED_FIELDS must match between substrates."""
+        js = _js_source()
+        js_fields = _extract_js_set(js, "ALGORITHM_INTERNAL_UNRESERVED_FIELDS")
+        py_fields = set(ALGORITHM_INTERNAL_UNRESERVED_FIELDS)
+        assert py_fields == js_fields, (
+            f"Algorithm internal unreserved field drift!\n"
+            f"  Python-only: {py_fields - js_fields}\n"
+            f"  JS-only:     {js_fields - py_fields}"
+        )
+
+    def test_algorithm_runtime_allowed_fields_match(self):
+        """ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS must match between substrates.
+
+        The JS definition uses spread syntax (...ALGORITHM_ENTRYPOINT_KEYS, etc.)
+        which regex can't parse, so we evaluate via Node.js to get the runtime set.
+        """
+        import json
+        import subprocess
+        result = subprocess.run(
+            ["node", "-e",
+             "const c = require('./mu/host/js/core/constants.js');"
+             "console.log(JSON.stringify(Array.from("
+             "c.ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS).sort()));"],
+            capture_output=True, text=True, cwd=str(_REPO), timeout=10,
+        )
+        assert result.returncode == 0, f"Node.js failed: {result.stderr}"
+        js_fields = set(json.loads(result.stdout.strip()))
+        py_fields = set(ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS)
+        assert py_fields == js_fields, (
+            f"Algorithm runtime allowed underscore field drift!\n"
+            f"  Python-only: {py_fields - js_fields}\n"
+            f"  JS-only:     {js_fields - py_fields}"
         )
 
 

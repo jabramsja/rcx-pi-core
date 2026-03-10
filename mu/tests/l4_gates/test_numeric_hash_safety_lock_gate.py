@@ -404,6 +404,40 @@ class TestSourceLocks:
             "match() should have >=2 muHashCached calls for non-linear binding"
         )
 
+    def test_js_trusted_path_depth_parity(self):
+        """_applyProjectionTrusted uses match(pattern, inputVal, 0, true) at depth 0.
+
+        Parity with Python _apply_projection_trusted which calls
+        _match_inner(pattern, input, {}, 0) at depth 0. The _validated=true
+        parameter skips entry validation without offsetting depth, ensuring
+        MAX_DEPTH boundary behavior matches Python exactly.
+        """
+        source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
+        # Find _applyProjectionTrusted and verify it calls match at depth 0
+        in_trusted = False
+        found_match_call = False
+        found_substitute_call = False
+        for line in source.splitlines():
+            if "function _applyProjectionTrusted(" in line:
+                in_trusted = True
+            elif in_trusted and line.startswith("function "):
+                break
+            if in_trusted:
+                # Must call match with depth=0 and _validated=true
+                if "match(pattern, inputVal, 0, true)" in line:
+                    found_match_call = True
+                # Must call substitute with depth=0
+                if "substitute(projection.body, bindings, 0)" in line:
+                    found_substitute_call = True
+        assert found_match_call, (
+            "_applyProjectionTrusted must call match(pattern, inputVal, 0, true) "
+            "for depth parity with Python _apply_projection_trusted"
+        )
+        assert found_substitute_call, (
+            "_applyProjectionTrusted must call substitute(projection.body, bindings, 0) "
+            "for depth parity with Python _apply_projection_trusted"
+        )
+
     def test_python_eval_seed_match_uses_content_hash(self):
         """eval_seed.py match uses mu_hash_cached for non-linear binding.
 
