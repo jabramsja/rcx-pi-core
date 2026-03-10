@@ -208,7 +208,8 @@ def mu_type_name(value: Any) -> str:
 # =============================================================================
 
 
-def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
+def has_callable(value: Any, _seen: set[int] | None = None,
+                 _depth: int = 0) -> bool:
     """
     Check if a value contains any callable (function, lambda, method).
 
@@ -219,6 +220,7 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
     Args:
         value: The value to check.
         _seen: Internal parameter for cycle detection. Do not pass.
+        _depth: Internal parameter for depth tracking. Do not pass.
 
     Returns:
         True if value contains a callable anywhere in its structure.
@@ -229,6 +231,9 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
     """
     if callable(value):
         return True
+
+    if _depth >= MAX_MU_DEPTH:
+        return False  # Too deep — no callable found within depth limit
 
     # For compound types, check for circular references.
     # Uses isinstance (not type()) intentionally — catches callables hidden in
@@ -244,16 +249,17 @@ def has_callable(value: Any, _seen: set[int] | None = None) -> bool:
         # O(1) per node (vs O(depth) for set copy).
         _seen.add(value_id)
         if isinstance(value, list):
-            result = any(has_callable(item, _seen) for item in value)
+            result = any(has_callable(item, _seen, _depth + 1) for item in value)
         else:
-            result = any(has_callable(v, _seen) for v in value.values())
+            result = any(has_callable(v, _seen, _depth + 1) for v in value.values())
         _seen.discard(value_id)
         return result
 
     return False
 
 
-def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None) -> str | None:
+def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None,
+                       _depth: int = 0) -> str | None:
     """
     Find the path to the first callable in a value.
 
@@ -261,6 +267,7 @@ def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None
         value: The value to search.
         path: Current path (internal, builds up during recursion).
         _seen: Internal parameter for cycle detection. Do not pass.
+        _depth: Internal parameter for depth tracking. Do not pass.
 
     Returns:
         Path string like "projections[0].handler" or None if no callable found.
@@ -270,6 +277,9 @@ def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None
     """
     if callable(value):
         return path or "(root)"
+
+    if _depth >= MAX_MU_DEPTH:
+        return None  # Too deep — no callable found within depth limit
 
     # For compound types, check for circular references.
     # Uses isinstance (not type()) — same rationale as has_callable.
@@ -285,12 +295,12 @@ def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None
         found = None
         if isinstance(value, list):
             for i, item in enumerate(value):
-                found = find_callable_path(item, f"{path}[{i}]", _seen)
+                found = find_callable_path(item, f"{path}[{i}]", _seen, _depth + 1)
                 if found:
                     break
         else:
             for k, v in value.items():
-                found = find_callable_path(v, f"{path}.{k}" if path else k, _seen)
+                found = find_callable_path(v, f"{path}.{k}" if path else k, _seen, _depth + 1)
                 if found:
                     break
         _seen.discard(value_id)

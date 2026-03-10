@@ -115,6 +115,44 @@ class TestPythonCanonnicalization:
         assert mu_hash_control(1e16) == mu_hash_control(int(1e16))
         assert mu_hash_control(1e20) == mu_hash_control(int(1e20))
 
+    def test_1e21_boundary_not_int_cast(self):
+        """1e21 is at the JS scientific-notation boundary — must NOT be int-cast.
+
+        JS: JSON.stringify(1e21) -> "1e+21" (scientific notation).
+        Python: int(1e21) -> "1000000000000000000000" (full digits).
+        Leaving as float preserves cross-substrate parity.
+        """
+        h_float = mu_hash_control(1e21)
+        assert isinstance(h_float, str) and len(h_float) == 64
+        # Verify the guard: abs(1e21) >= 1e21, so NOT int-cast
+        import json as _json
+        float_ser = _json.dumps(1e21, sort_keys=True, ensure_ascii=False)
+        int_ser = _json.dumps(int(1e21), sort_keys=True, ensure_ascii=False)
+        assert float_ser != int_ser, "1e21 float vs int serialization must diverge"
+
+    def test_neg_1e21_boundary_not_int_cast(self):
+        """-1e21 negative mirror — must NOT be int-cast."""
+        h = mu_hash_control(-1e21)
+        assert isinstance(h, str) and len(h) == 64
+
+    def test_just_below_1e21_is_int_cast(self):
+        """IEEE-754 predecessor of 1e21 (9.999999999999999e+20) IS int-cast.
+
+        This is the last representable float before 1e21 where JS uses
+        integer notation. 1e21 - 131072 is the first distinct predecessor
+        (1e21 - 1 rounds back to 1e21 in IEEE-754).
+        """
+        just_below = 1e21 - 131072  # 9.999999999999999e+20
+        assert just_below < 1e21, "Predecessor must be strictly less than 1e21"
+        assert just_below.is_integer(), "Predecessor must be integral"
+        # Must be int-cast (abs < 1e21)
+        assert mu_hash_control(just_below) == mu_hash_control(int(just_below))
+
+    def test_neg_just_below_1e21_is_int_cast(self):
+        """Negative mirror of predecessor — must be int-cast."""
+        just_below = -(1e21 - 131072)
+        assert mu_hash_control(just_below) == mu_hash_control(int(just_below))
+
     def test_global_mu_hash_unchanged(self):
         """mu_hash(1.0) != mu_hash(1) — global hash is NOT canonicalized."""
         # This verifies we didn't modify the global hash function
@@ -228,6 +266,43 @@ class TestCrossSubstrateParity:
         py_hash = mu_hash_control(-1e30)
         js_hash = self._js_hash("-1e30")
         assert py_hash == js_hash
+
+    def test_1e21_boundary_parity(self):
+        """1e21 boundary: both substrates must NOT int-cast and must agree."""
+        py_hash = mu_hash_control(1e21)
+        js_hash = self._js_hash("1e21")
+        assert py_hash == js_hash, (
+            f"1e21 boundary hash divergence: py={py_hash}, js={js_hash}"
+        )
+
+    def test_neg_1e21_boundary_parity(self):
+        """-1e21 boundary: negative mirror must agree."""
+        py_hash = mu_hash_control(-1e21)
+        js_hash = self._js_hash("-1e21")
+        assert py_hash == js_hash, (
+            f"-1e21 boundary hash divergence: py={py_hash}, js={js_hash}"
+        )
+
+    def test_just_below_1e21_known_divergence(self):
+        """IEEE-754 predecessor of 1e21: cross-substrate serialization diverges.
+
+        Both substrates int-cast this value (abs < 1e21), but:
+        - Python int(9.999999999999999e+20) = 999999999999999868928 (exact)
+        - JS Math.floor(same) = 999999999999999900000 (rounded to ~17 sig digits)
+        JSON.stringify produces different strings, so hashes diverge.
+
+        This is a KNOWN LIMITATION of int-casting near the boundary. It only
+        affects values where the exact integer exceeds ~17 significant digits.
+        Production control paths use small integers (step counts, depths), so
+        this divergence is not reachable in practice.
+        """
+        py_hash = mu_hash_control(1e21 - 131072)
+        js_hash = self._js_hash("1e21 - 131072")
+        # These DIVERGE — this documents the known limitation
+        assert py_hash != js_hash, (
+            "Expected divergence: Python and JS serialize large int-cast "
+            "IEEE-754 predecessors of 1e21 differently"
+        )
 
 
 class TestSourceLocks:
