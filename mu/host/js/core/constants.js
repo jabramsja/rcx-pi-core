@@ -9,6 +9,12 @@
  * DEBT SUMMARY (L3 Parity - must match Python bootstrap primitives)
  * =============================================================================
  *
+ * NORTH STAR: See mu/docs/core/Why_RCX_PI_VM_EXISTS.md
+ * Host languages (Python, JavaScript) are bootstrap scaffolding, NOT the
+ * semantic destination. Every host operation below is tracked debt that must
+ * eventually be replaced by structural Mu projections. We program IN RCX,
+ * not ABOUT RCX. Meaning lives in the projections (data), not the host (code).
+ *
  * BOOTSTRAP PRIMITIVES (4 — named set, gate-enforced):
  *   eval_step       - step()           - applies first matching projection
  *   max_steps       - maxSteps param   - termination guard
@@ -17,7 +23,7 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   @host_iteration: 9
+ *   iteration debt: 10
  *     - step()                    - for loop over projections
  *     - run()                     - for loop until stall
  *     - runStructural()           - for loop until stall (Gate 5: routes through stepKernel)
@@ -25,21 +31,23 @@
  *     - denormalize()             - while loop for linked list
  *     - listToLinked()            - for loop for conversion
  *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
+ *     - collectOntologyEvidence() - Mu linked-list traversal for evidence collection
  *     - runEnginePipeline()       - engine state machine effect handler loop
  *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
  *
- *   @host_recursion: 4
+ *   recursion debt: 4
  *     - match()             - recursive pattern matching
  *     - substitute()        - recursive substitution
  *     - normalize()         - recursive normalization
  *     - denormalize()       - recursive denormalization
  *
- *   @host_builtin: 3
+ *   builtin debt: 3
  *     - muEqual()           - structural equality (convenience wrapper, delegates to muHashCached)
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 16 (9 iteration + 4 recursion + 3 builtin)
+ * TOTAL DEBT: 17 (10 iteration + 4 recursion + 3 builtin)
+ * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
  * exist in Python (JS requires additional normalize/denormalize; see STATUS.md for canonical counts).

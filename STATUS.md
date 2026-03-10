@@ -104,7 +104,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization + metabolize_cycle: ✅ | Engine orchestration + hemisphere routing + metabolization + metabolize cycle L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
-- JS file has DEBT SUMMARY header with counts: 16 total (9 iteration + 4 recursion + 3 builtin) — per `constants.js` canonical header. Note: `debt_dashboard.sh` grep reports 10+5+4=19 because it counts header listing lines as token hits; the actual distinct host-operation count is 16.
+- JS DEBT SUMMARY in `constants.js` lists 17 host operations (10 iteration + 4 recursion + 3 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (32 total: 15 Py + 17 JS). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
 - These are AST-level host loop markers, analogous to Python's AST_OK:infra (65), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 9 Python host-debt decorator sites (ceiling: 12) — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)

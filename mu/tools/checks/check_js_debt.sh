@@ -138,9 +138,10 @@ echo "  host_test_loc_js:    $HOST_TEST_LOC_JS"
 echo ""
 
 # Extract expected counts from DEBT SUMMARY header in core/constants.js
-EXPECTED_ITERATION=$(grep -o '@host_iteration: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
-EXPECTED_RECURSION=$(grep -o '@host_recursion: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
-EXPECTED_BUILTIN=$(grep -o '@host_builtin: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f2)
+# Header uses "iteration debt: N" format (plain text, avoids ratchet scanner inflation)
+EXPECTED_ITERATION=$(grep -o 'iteration debt: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f3)
+EXPECTED_RECURSION=$(grep -o 'recursion debt: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f3)
+EXPECTED_BUILTIN=$(grep -o 'builtin debt: [0-9]*' "$JS_HEADER_FILE" | head -1 | cut -d' ' -f3)
 EXPECTED_BOOTSTRAP=$(grep -o 'BOOTSTRAP PRIMITIVES ([0-9]*' "$JS_HEADER_FILE" | head -1 | grep -o '[0-9]*')
 EXPECTED_PRIMITIVE_SET=$(load_expected_primitive_set "$JS_PRIMITIVE_SET_FILE")
 

@@ -66,9 +66,11 @@ class TestMarkerTruthAsymmetryGate:
         py = data["counts"]["python"]
         js = data["counts"]["javascript"]
         # MT1 added 2 Python iteration markers and 1 JS iteration marker
+        # Wave 4f corrected JS count: header self-references no longer inflate baseline
+        # Real JS iteration markers: 10 (was 11 when constants.js header was counted)
         assert py["host_iteration"] >= 12, (
             f"Python host_iteration baseline must be >= 12 (MT1), got {py['host_iteration']}"
         )
-        assert js["host_iteration"] >= 11, (
-            f"JS host_iteration baseline must be >= 11 (MT1), got {js['host_iteration']}"
+        assert js["host_iteration"] >= 10, (
+            f"JS host_iteration baseline must be >= 10 (honest count, wave 4f), got {js['host_iteration']}"
         )

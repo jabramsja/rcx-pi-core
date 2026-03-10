@@ -25,20 +25,26 @@ from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH
 
 
 # =============================================================================
-# HOST RECURSION DEBT TRACKING
+# HOST DEBT TRACKING
 # =============================================================================
 #
-# Functions marked with @host_recursion are using Python's call stack
-# instead of RCX kernel iteration. This is TEMPORARY scaffolding.
+# NORTH STAR: See mu/docs/core/Why_RCX_PI_VM_EXISTS.md
+# Host languages (Python, JavaScript) are bootstrap scaffolding, NOT the
+# semantic destination. Every host operation marked below is tracked debt
+# that must eventually be replaced by structural Mu projections. We program
+# IN RCX, not ABOUT RCX. Meaning lives in projections (data), not host (code).
 #
-# Each @host_recursion site MUST:
+# Functions marked with @host_recursion, @host_iteration, or @host_builtin
+# are using Python's call stack / loops / builtins instead of RCX kernel
+# structural operations. This is TEMPORARY scaffolding.
+#
+# Each host debt site MUST:
 # 1. Document WHY it exists
 # 2. Have a projection-based equivalent planned
 # 3. Be eliminated before self-hosting is complete
 #
-# The audit (tools/audit_semantic_purity.sh) counts these sites.
-# L2 floor: host_recursion sites have a stable floor (match, substitute,
-# step). These are bootstrap primitives — see STATUS.md for current level.
+# Canonical counts: tools/checks/host_semantics_baseline.json
+# Ratchet enforcer: tools/checks/check_host_semantics_ratchet.py
 # =============================================================================
 
 
