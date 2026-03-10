@@ -214,15 +214,15 @@ PARALLEL_GROUPS = [
 # 25 turns handles full-codebase reviews; agents hit turn limits at lower values
 # on large scopes. Use --max-turns to override if needed.
 AGENT_MAX_TURNS = {
-    "verifier": 30,
-    "adversary": 25,
-    "expert": 25,
-    "structural-proof": 30,
-    "grounding": 25,
-    "fuzzer": 20,
-    "translator": 20,
-    "visualizer": 15,
-    "advisor": 18,
+    "verifier": 45,
+    "adversary": 40,
+    "expert": 40,
+    "structural-proof": 45,
+    "grounding": 40,
+    "fuzzer": 35,
+    "translator": 30,
+    "visualizer": 25,
+    "advisor": 30,
 }
 
 GROUNDING_HIGH_RISK_PATTERNS = (
@@ -545,6 +545,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
 
         result_text = ""
         last_error = None
+        was_cancelled = False
         message_text_fragments: list[str] = []
         max_turns = self.agent_max_turns.get(agent_name, 12)
 
@@ -565,6 +566,21 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 # Primary: get result from ResultMessage
                 if hasattr(message, 'result') and message.result:
                     result_text = message.result
+        except asyncio.CancelledError:
+            # CancelledError is BaseException (not Exception) in Python 3.9+.
+            # Capture partial output and return a proper AgentResult instead of
+            # re-raising — gather(return_exceptions=True) already isolates agents,
+            # so we don't need the exception to propagate. Returning an AgentResult
+            # preserves partial streamed text and prevents nonsensical retry.
+            was_cancelled = True
+            if result_text:
+                # Already had a full result — preserve it with cancellation note
+                result_text += "\n\nAGENT CANCELLED (full result captured before cancellation)"
+            elif message_text_fragments:
+                result_text = "\n".join(dict.fromkeys(message_text_fragments))
+                result_text += "\n\nAGENT CANCELLED (partial output above)"
+            else:
+                result_text = f"AGENT CANCELLED: {agent_name} was cancelled by asyncio"
         except Exception as e:
             # Preserve any text fragments collected before the error
             if message_text_fragments and not result_text:
@@ -605,15 +621,29 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             if imprecise_count > 0 and self.verbose:
                 print(f"    ⚠️  {agent_name}: {imprecise_count} imprecise citation(s) (non-blocking)")
 
+        # Cancelled agents: mark compliant to skip retry (cancellation ≠ format failure)
+        # but override verdict to CANCELLED so partial output can't falsely pass a gate.
+        if was_cancelled:
+            is_compliant = True
+            compliance_error = None
+
         # Extract verdict
         verdict = extract_verdict(agent_name, result_text)
+
+        # Override verdict for cancelled agents: partial output is unreliable.
+        # The agent may have been interrupted before completing analysis, so even
+        # an extracted APPROVE/SECURE is not trustworthy.
+        if was_cancelled:
+            verdict = "CANCELLED"
+
         passed = agent_passed(agent_name, verdict) and is_compliant
         is_hard_gate = agent_name in HARD_GATE_AGENTS
         blocks_merge = is_hard_gate and not passed
 
         # Evidence-gated adversary blocking: failing adversary verdicts only block
         # when output is compliant and contains machine-checkable proof markers.
-        if agent_name == "adversary" and blocks_merge:
+        # Skip for cancelled agents: cancelled = fail-closed (blocks merge by default).
+        if agent_name == "adversary" and blocks_merge and not was_cancelled:
             blocks_merge = adversary_blocks_merge(
                 verdict=verdict,
                 output=result_text,
@@ -621,8 +651,10 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             )
 
         # Store findings in memory (if enabled and findings exist)
+        # Skip memory storage for cancelled agents — partial output is unreliable
+        # and would pollute finding history with incomplete analysis.
         findings_stored = 0
-        if self.use_memory and result_text:
+        if self.use_memory and result_text and not was_cancelled:
             findings = extract_findings_from_output(agent_name, result_text, verdict)
             for finding in findings:
                 try:
@@ -674,11 +706,51 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         async def _run_and_report(agent_name: str) -> AgentResult:
             result = await self.run_single_agent(agent_name)
             self.results.append(result)
-            self._report_agent_done(result)
+            # Isolate reporting so a write failure doesn't abort the group
+            # or create a synthetic duplicate result in the error handler.
+            try:
+                self._report_agent_done(result)
+            except Exception as e:
+                if self.verbose:
+                    print(f"    Warning: report write failed for {agent_name}: {e}")
             return result
 
         tasks = [_run_and_report(agent) for agent in agents_in_scope]
-        results = await asyncio.gather(*tasks)
+        # return_exceptions=True: one agent failure must NOT cancel others.
+        # Without this, CancelledError (BaseException) from rate-limited or
+        # timed-out agents kills the entire gather, losing all pending results.
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Separate successful results from exceptions
+        results: list[AgentResult] = []
+        for i, raw in enumerate(raw_results):
+            if isinstance(raw, BaseException):
+                agent_name = agents_in_scope[i]
+                error_msg = f"AGENT EXCEPTION: {type(raw).__name__}: {raw}"
+                print(f"  ⚠️  {agent_name}: {error_msg}")
+                # Create a synthetic failure result so the agent appears in the report.
+                # Mark is_compliant=True to prevent nonsensical retry (crash ≠ format failure).
+                fallback = AgentResult(
+                    name=agent_name,
+                    output=error_msg,
+                    verdict="UNKNOWN",
+                    is_compliant=True,
+                    compliance_error=None,
+                    is_hard_gate=agent_name in HARD_GATE_AGENTS,
+                    blocks_merge=agent_name in HARD_GATE_AGENTS,
+                    passed=False,
+                    findings_stored=0,
+                )
+                if fallback not in self.results:
+                    self.results.append(fallback)
+                try:
+                    self._report_agent_done(fallback)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"    Warning: report write failed for {agent_name}: {e}")
+                results.append(fallback)
+            else:
+                results.append(raw)
 
         # Retry agents that failed format compliance (1 retry attempt)
         retry_results = []
@@ -696,7 +768,11 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     self.results[idx] = retry
                 except ValueError:
                     self.results.append(retry)
-                self._report_agent_done(retry)
+                try:
+                    self._report_agent_done(retry)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"    Warning: report write failed for {result.name}: {e}")
                 retry_results.append(retry)
             else:
                 retry_results.append(result)

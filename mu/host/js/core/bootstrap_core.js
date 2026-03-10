@@ -206,10 +206,19 @@ function step(projections, input) {
  * Matches Python _apply_projection_trusted() parity.
  */
 function _applyProjectionTrusted(projection, input) {
-  // depth=1 skips depth-0 isValidMu + auto-normalize checks in match/substitute
+  const pattern = projection.pattern;
+  let inputVal = input;
+
+  // Gate 3: auto-normalize input when pattern uses _type:"dict" (parity with Python)
+  if (typeof pattern === 'object' && pattern !== null &&
+      !Array.isArray(pattern) && pattern._type === 'dict') {
+    inputVal = normalize(inputVal);
+  }
+
+  // depth=1 skips depth-0 isValidMu check in match/substitute (caller already validated)
   const bindings = _stage0Pilot
-    ? stage0Match(projection.pattern, input)
-    : match(projection.pattern, input, 1);
+    ? stage0Match(pattern, inputVal)
+    : match(pattern, inputVal, 1);
   if (bindings === NO_MATCH) return NO_MATCH;
   let result = _stage0Pilot
     ? stage0Substitute(projection.body, bindings)
