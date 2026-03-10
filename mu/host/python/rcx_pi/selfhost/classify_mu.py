@@ -82,7 +82,12 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     # See STATUS.md "Boundary Scaffolding vs Semantic Debt" for policy.
     visited: set[int] = set()
     current = value
+    _max_classify_walk = 10000  # Defense-in-depth: cap iterations for acyclic lists
+    _walk_count = 0
     while current is not None:  # @host_iteration: boundary pre-validation (9-agent review 2026-01-31)
+        _walk_count += 1
+        if _walk_count > _max_classify_walk:
+            return "list"  # Too long to classify — treat as list
         if not isinstance(current, dict):
             break
         node_id = id(current)

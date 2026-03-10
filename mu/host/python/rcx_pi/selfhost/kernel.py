@@ -70,11 +70,16 @@ class _ProjectionStepBudget:
         Consume steps from the budget.
 
         Args:
-            steps: Number of steps to consume.
+            steps: Number of steps to consume (must be non-negative).
 
         Raises:
+            ValueError: If steps is negative.
             RuntimeError: If budget exceeded.
         """
+        if steps < 0:
+            raise ValueError(
+                f"consume() requires non-negative steps, got {steps}"
+            )
         if not self._active:
             return  # No budget tracking active
 
