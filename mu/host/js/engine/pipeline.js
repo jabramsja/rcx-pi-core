@@ -423,6 +423,15 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
     context.ontology_candidate_observation = collectOntologyEvidence(result, operation);
   }
 
+  // SECURITY: Reject inject_key collision with existing context keys.
+  // Prevents boundary requests from silently overwriting domain context state.
+  // Parity with Python _service_boundary_effect inject_key collision guard.
+  if (injectKey in context) {
+    emitFn('fail_closed', iteration, state, 'input.inject_key_collision');
+    throw new RcxError('input.inject_key_collision',
+      `SECURITY: inject_key '${injectKey}' already exists in context. ` +
+      `Cannot overwrite existing context state.`);
+  }
   context[injectKey] = result;
   return context;
 }
@@ -742,8 +751,13 @@ function collectOntologyEvidence(result, operation) {
   if (result !== null && typeof result === 'object' && !Array.isArray(result) && 'trace' in result) {
     traceLen = 0;
     const projSet = new Set();
+    const visited = new Set();  // Cycle detection (parity with Python visited_ids)
+    const MAX_DRAIN = 100000;   // Iteration cap (parity with Python _MAX_TRACE_ENTRIES_HARD_CAP)
     let node = result.trace;
     while (node !== null && typeof node === 'object' && 'head' in node) {
+      if (visited.has(node)) break;   // cyclic — stop draining
+      visited.add(node);
+      if (traceLen >= MAX_DRAIN) break;  // iteration cap — defense-in-depth
       traceLen++;
       const entry = node.head;
       // C4: only collect string IDs — skip int/dict/null for parity with Python.
