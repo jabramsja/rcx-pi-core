@@ -1080,3 +1080,55 @@ class TestBoundaryResultDomainValidation:
             f"Invariant comment (pos {marker_pos}) must immediately precede "
             f"validation call (pos {validator_pos})"
         )
+
+
+class TestInjectKeyCollisionGuardParity:
+    """Cross-substrate parity: inject_key collision guard in serviceBoundaryEffect."""
+
+    def test_js_inject_key_collision_guard_present(self):
+        """JS serviceBoundaryEffect must check for inject_key collision before assignment.
+
+        Parity with Python _service_boundary_effect which checks
+        `if inject_key in context:` and raises RcxEngineError('input.inject_key_collision').
+        """
+        source = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js").read_text()
+        assert "inject_key_collision" in source, (
+            "pipeline.js must contain inject_key_collision error code "
+            "(parity with Python _service_boundary_effect)"
+        )
+        # Verify the guard is before the assignment, not after
+        guard_pos = source.index("inject_key_collision")
+        assign_pos = source.index("context[injectKey] = result")
+        assert guard_pos < assign_pos, (
+            "inject_key collision guard must precede context[injectKey] = result assignment"
+        )
+
+    def test_js_collect_ontology_evidence_cycle_detection(self):
+        """JS collectOntologyEvidence must have cycle detection for linked-list traversal.
+
+        Parity with Python _collect_ontology_evidence which uses visited_ids set
+        and _MAX_TRACE_ENTRIES_HARD_CAP iteration cap.
+        """
+        source = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js").read_text()
+        # Find collectOntologyEvidence function
+        in_fn = False
+        has_visited = False
+        has_cap = False
+        for line in source.splitlines():
+            if "function collectOntologyEvidence(" in line:
+                in_fn = True
+            elif in_fn and line.startswith("function "):
+                break
+            if in_fn:
+                if "visited" in line and "Set" in line:
+                    has_visited = True
+                if "MAX_DRAIN" in line or "100000" in line:
+                    has_cap = True
+        assert has_visited, (
+            "collectOntologyEvidence must use a visited Set for cycle detection "
+            "(parity with Python visited_ids)"
+        )
+        assert has_cap, (
+            "collectOntologyEvidence must have iteration cap "
+            "(parity with Python _MAX_TRACE_ENTRIES_HARD_CAP)"
+        )
