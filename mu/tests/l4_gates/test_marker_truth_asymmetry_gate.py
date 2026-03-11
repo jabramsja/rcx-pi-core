@@ -32,7 +32,7 @@ class TestMarkerTruthAsymmetryGate:
 
     def test_python_collect_ontology_evidence_marked(self):
         """Python _collect_ontology_evidence has @host_iteration (boundary walker output drain)."""
-        path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
         text = path.read_text()
         lines = text.splitlines()
         for line in lines:

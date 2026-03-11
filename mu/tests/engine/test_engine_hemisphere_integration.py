@@ -43,9 +43,9 @@ class TestWiringContract:
             "lobes": None, "sink": None,
         }
 
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
-             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
             mock_metab.return_value = fake_hemispheres
@@ -85,9 +85,9 @@ class TestKwargCollisionRegression:
         }
         fake_hemispheres = _local_default_hemispheres()
 
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
-             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
             mock_metab.return_value = fake_hemispheres
@@ -111,9 +111,9 @@ class TestKwargCollisionRegression:
         }
         fake_hemispheres = _local_default_hemispheres()
 
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
-             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
             mock_metab.return_value = fake_hemispheres
@@ -136,9 +136,9 @@ class TestKwargCollisionRegression:
         }
         fake_hemispheres = _local_default_hemispheres()
 
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
-             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = fake_hemispheres
             mock_metab.return_value = fake_hemispheres
@@ -185,9 +185,9 @@ class TestOutputValidation:
             "frozen_set": None, "action": "continue", "stall": True,
         }
 
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
-             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = fake_engine_result
             mock_routing.return_value = {"bad": "shape"}  # Wrong keys
             mock_metab.return_value = {"bad": "shape"}
@@ -212,15 +212,15 @@ class TestExactShapeValidation:
             "frozen_set": None, "action": "continue", "stall": True,
         }
         # Patch run_hemisphere_routing to return a dict with extra key
-        with patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing, \
-             patch("rcx_pi.selfhost.step_mu.run_metabolization_cycle") as mock_metab:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             bad_result = {
                 "r_null": None, "r_inf": None, "r_a": None,
                 "lobes": None, "sink": None, "extra_key": "bad",
             }
             mock_routing.return_value = bad_result
             mock_metab.return_value = bad_result
-            with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline:
+            with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline:
                 mock_pipeline.return_value = fake_engine_result
                 with pytest.raises(RuntimeError, match="unexpected shape"):
                     run_engine_with_routing([], "input")
@@ -270,7 +270,7 @@ class TestRoutingPriorityRegression:
             "exhaustion_detected": False, "operator_frozen": False,
             "frozen_set": None, "action": "continue", "stall": True,
         }
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline:
             mock_pipeline.return_value = crafted_engine_result
             result = run_engine_with_routing([], "ignored_input")
 
@@ -285,7 +285,7 @@ class TestRoutingPriorityRegression:
             "exhaustion_detected": False, "operator_frozen": False,
             "frozen_set": None, "action": "continue", "stall": True,
         }
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline:
             mock_pipeline.return_value = crafted_engine_result
             result = run_engine_with_routing([], "ignored_input")
 

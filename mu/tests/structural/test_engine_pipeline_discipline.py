@@ -32,7 +32,7 @@ from rcx_pi.selfhost.step_mu import run_engine_pipeline
 # ── Source paths ─────────────────────────────────────────────────────────
 
 _REPO = Path(__file__).resolve().parents[3]
-_STEP_MU_PATH = _REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+_STEP_MU_PATH = _REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
 
 
 def _read_all_js_source() -> str:
@@ -739,7 +739,7 @@ class TestBoot1ModeRoutingContract:
                         )
                         return
                 pytest.fail("use_boot1_recursive parameter not found in run_engine_pipeline")
-        pytest.fail("run_engine_pipeline function not found in step_mu.py")
+        pytest.fail("run_engine_pipeline function not found in engine_pipeline.py")
 
     def test_js_boot1_defaults_to_true(self):
         """JS boot1LoopMode must default to true via ?? operator."""
@@ -770,7 +770,7 @@ class TestBoot1ModeRoutingContract:
                 pytest.fail(
                     "No `if use_boot1_recursive:` branch found in run_engine_pipeline"
                 )
-        pytest.fail("run_engine_pipeline not found in step_mu.py")
+        pytest.fail("run_engine_pipeline not found in engine_pipeline.py")
 
     def test_js_routing_is_conditional_on_boot1mode(self):
         """JS must conditionally route: boot1Mode → recursive vs trampoline."""

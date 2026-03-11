@@ -70,8 +70,8 @@ def _js_source() -> str:
 
 
 def _py_source() -> str:
-    """Read step_mu.py source."""
-    return (REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py").read_text()
+    """Read engine_pipeline.py source (Boot2 functions live here)."""
+    return (REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py").read_text()
 
 
 # =============================================================================
@@ -132,10 +132,10 @@ class TestPythonReentryProof:
 
     def test_mock_injected_reentry_increments_depth(self):
         """Injected re-entry produces observer events with boot1_depth >= 1."""
-        import rcx_pi.selfhost.step_mu as step_mu_mod
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        original_step = step_mu_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies iterative re-entry mechanism
+        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies iterative re-entry mechanism
         injected = [False]
 
         def reentry_injecting_step(projs, state):
@@ -159,7 +159,7 @@ class TestPythonReentryProof:
 
         reset_step_budget()
         observer = []
-        with patch.object(step_mu_mod, "_step_trusted", side_effect=reentry_injecting_step):
+        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
             run_engine_pipeline(
                 [], {"test": True},
                 max_steps=10, max_engine_iterations=20,
@@ -181,10 +181,10 @@ class TestPythonReentryProof:
 
     def test_depth_monotonically_increases_on_reentry(self):
         """boot1_depth increases across re-entry boundary, never decreases."""
-        import rcx_pi.selfhost.step_mu as step_mu_mod
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        original_step = step_mu_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies depth monotonicity
+        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies depth monotonicity
         injected = [False]
 
         def reentry_injecting_step(projs, state):
@@ -206,7 +206,7 @@ class TestPythonReentryProof:
 
         reset_step_budget()
         observer = []
-        with patch.object(step_mu_mod, "_step_trusted", side_effect=reentry_injecting_step):
+        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
             run_engine_pipeline(
                 [], {"test": True},
                 max_steps=10, max_engine_iterations=20,
@@ -242,14 +242,14 @@ class TestPythonStructuralIterationProof:
     """
 
     def _extract_body(self):
-        """Extract _run_engine_recursive function body from step_mu.py."""
+        """Extract _run_engine_recursive function body from engine_pipeline.py."""
         source = _py_source()
         # Match from 'def _run_engine_recursive' to the next top-level def
         m = re.search(
             r"(def _run_engine_recursive\b.*?)(?=\ndef [a-zA-Z_]|\Z)",
             source, re.DOTALL,
         )
-        assert m, "Could not find _run_engine_recursive in step_mu.py"
+        assert m, "Could not find _run_engine_recursive in engine_pipeline.py"
         return m.group(1)
 
     def test_no_recursive_self_calls(self):
@@ -736,7 +736,7 @@ class TestHostHasNoExhaustionBranch:
     """
 
     def test_python_host_no_exhaustion_conditional(self):
-        """Python step_mu.py boundary handlers must not reference exhaustion.v1.json."""
+        """Python engine_pipeline.py boundary handlers must not reference exhaustion.v1.json."""
         source = _py_source()
         # Extract both boundary handler sections
         # Boot1: _run_engine_recursive
@@ -789,7 +789,7 @@ class TestHostHasNoExhaustionBranch:
         """Python must not contain _strip_trace_terminal_sentinel."""
         source = _py_source()
         assert "_strip_trace_terminal_sentinel" not in source, (
-            "Dead helper _strip_trace_terminal_sentinel still in step_mu.py"
+            "Dead helper _strip_trace_terminal_sentinel still in engine_pipeline.py"
         )
 
     def test_js_no_strip_sentinel_helper(self):

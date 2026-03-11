@@ -73,7 +73,7 @@ class TestReentryPayloadHelperExists:
 
     def test_python_helper_defined(self):
         """Python must define _validate_reentry_payload."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert "def _validate_reentry_payload(" in src
 
     def test_js_helper_defined(self):
@@ -83,12 +83,12 @@ class TestReentryPayloadHelperExists:
 
     def test_python_helper_validates_input_reserved_fields(self):
         """Python helper must call validate_no_kernel_reserved_fields on payload input."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert 'validate_no_kernel_reserved_fields(payload["input"]' in src
 
     def test_python_helper_validates_frozen_reserved_fields(self):
         """Python helper must call validate_no_kernel_reserved_fields on payload frozen."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert "validate_no_kernel_reserved_fields(frozen," in src
 
     def test_js_helper_validates_input_reserved_fields(self):
@@ -103,12 +103,12 @@ class TestReentryPayloadHelperExists:
 
     def test_python_helper_validates_mu_type_input(self):
         """Python helper must check is_mu on payload input."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert 'is_mu(payload["input"])' in src
 
     def test_python_helper_validates_mu_type_frozen(self):
         """Python helper must check is_mu on frozen."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert "is_mu(frozen)" in src
 
     def test_js_helper_validates_mu_type_input(self):
@@ -127,12 +127,12 @@ class TestBoot1ReentryValidation:
 
     def test_python_boot1_run_engine_calls_helper(self):
         """Python Boot1 _run_engine path must call _validate_reentry_payload."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert '_validate_reentry_payload(payload, "Boot1 _run_engine")' in src
 
     def test_python_boot1_tail_call_calls_helper(self):
         """Python Boot1 _tail_call path must call _validate_reentry_payload."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert '_validate_reentry_payload(payload, "Boot1 _tail_call")' in src
 
     def test_js_boot1_run_engine_calls_helper(self):
@@ -147,7 +147,7 @@ class TestBoot1ReentryValidation:
 
     def test_cross_substrate_boot1_validation_parity(self):
         """Both substrates must have 2 Boot1 helper call sites (_run_engine + _tail_call)."""
-        py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         js_src = _read_all_js_source()
         py_boot1 = py_src.count('_validate_reentry_payload(payload, "Boot1')
         js_boot1 = js_src.count("validateReentryPayload(payload, 'Boot1")
@@ -164,7 +164,7 @@ class TestTrampolineTailCallValidation:
 
     def test_python_trampoline_calls_helper(self):
         """Python trampoline must call _validate_reentry_payload on tail_payload."""
-        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         assert '_validate_reentry_payload(tail_payload, "trampoline _tail_call")' in src
 
     def test_js_trampoline_calls_helper(self):
@@ -174,7 +174,7 @@ class TestTrampolineTailCallValidation:
 
     def test_all_reentry_paths_use_helper(self):
         """All 3 re-entry paths in both substrates must use the centralized helper."""
-        py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/step_mu.py").read_text()
+        py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         js_src = _read_all_js_source()
         # Count "helperName(" occurrences — includes definition + call sites.
         # Python: 1 def + 3 calls = 4.  JS: 1 function def + 3 calls = 4.

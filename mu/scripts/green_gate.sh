@@ -57,6 +57,10 @@ run_python() {
   python3 tools/checks/check_bootstrap_purity_ratchet.py
   echo
 
+  echo "[PY 6c/14] Boot layer boundary check"
+  python3 tools/checks/check_boot_layer_boundaries.py
+  echo
+
   echo "[PY 7/14] AST police (catches what grep misses)"
   python3 tools/checks/linters/ast_police.py
   echo

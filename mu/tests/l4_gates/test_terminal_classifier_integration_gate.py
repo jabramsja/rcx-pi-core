@@ -34,6 +34,7 @@ from rcx_pi.selfhost.step_mu import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 STEP_MU_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+ENGINE_PIPELINE_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
 EVAL_STEP_JS_PATH = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
 
 
@@ -80,12 +81,12 @@ class TestClassifierUsedByRuntimePredicates:
             "_is_terminal_shape must not use direct frozenset comparison"
 
     def test_python_is_engine_terminal_calls_classifier(self):
-        body = _get_python_function_body(STEP_MU_PATH, "_is_engine_terminal")
+        body = _get_python_function_body(ENGINE_PIPELINE_PATH, "_is_engine_terminal")
         assert "classify_terminal_kind" in body, \
             "_is_engine_terminal must call classify_terminal_kind"
 
     def test_python_is_engine_terminal_no_direct_frozenset(self):
-        body = _get_python_function_body(STEP_MU_PATH, "_is_engine_terminal")
+        body = _get_python_function_body(ENGINE_PIPELINE_PATH, "_is_engine_terminal")
         assert "frozenset" not in body, \
             "_is_engine_terminal must not use direct frozenset comparison"
 

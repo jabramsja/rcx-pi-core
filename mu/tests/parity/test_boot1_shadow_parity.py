@@ -1411,9 +1411,9 @@ class TestTrampolineTailCallReservedFieldRejection:
 
     def test_trampoline_tail_call_rejects_reserved_in_input(self, monkeypatch):
         """Trampoline rejects _tail_call with reserved field in input."""
-        import rcx_pi.selfhost.step_mu as step_mu_mod  # ANTICHEAT_OK: monkeypatch target
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod  # ANTICHEAT_OK: monkeypatch target
 
-        original_step = step_mu_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
+        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
         call_count = [0]
 
         def _injecting_step(projs, state):
@@ -1427,7 +1427,7 @@ class TestTrampolineTailCallReservedFieldRejection:
                 }}
             return original_step(projs, state)
 
-        monkeypatch.setattr(step_mu_mod, "_step_trusted", _injecting_step)  # ANTICHEAT_OK: monkeypatch
+        monkeypatch.setattr(engine_pipeline_mod, "_step_trusted", _injecting_step)  # ANTICHEAT_OK: monkeypatch
         reset_step_budget()
         with pytest.raises(ValueError, match="reserved"):
             run_engine_pipeline(
@@ -1437,9 +1437,9 @@ class TestTrampolineTailCallReservedFieldRejection:
 
     def test_trampoline_tail_call_rejects_reserved_in_frozen(self, monkeypatch):
         """Trampoline rejects _tail_call with reserved field in frozen."""
-        import rcx_pi.selfhost.step_mu as step_mu_mod  # ANTICHEAT_OK: monkeypatch target
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod  # ANTICHEAT_OK: monkeypatch target
 
-        original_step = step_mu_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
+        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
         call_count = [0]
 
         def _injecting_step(projs, state):
@@ -1453,7 +1453,7 @@ class TestTrampolineTailCallReservedFieldRejection:
                 }}
             return original_step(projs, state)
 
-        monkeypatch.setattr(step_mu_mod, "_step_trusted", _injecting_step)  # ANTICHEAT_OK: monkeypatch
+        monkeypatch.setattr(engine_pipeline_mod, "_step_trusted", _injecting_step)  # ANTICHEAT_OK: monkeypatch
         reset_step_budget()
         with pytest.raises(ValueError, match="reserved"):
             run_engine_pipeline(

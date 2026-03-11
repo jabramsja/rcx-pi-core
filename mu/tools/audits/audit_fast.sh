@@ -140,6 +140,9 @@ python3 tools/checks/check_host_semantics_ratchet.py
 echo "== 1p) Bootstrap purity ratchet check =="
 python3 tools/checks/check_bootstrap_purity_ratchet.py
 
+echo "== 1q) Boot layer boundary check =="
+python3 tools/checks/check_boot_layer_boundaries.py
+
 echo "== 1m) L4 execution contract check =="
 # Derive wave-id from branch name when TASKS.md is in the scope being checked.
 # Supports codex/* and jabramsja/* branch naming conventions.
