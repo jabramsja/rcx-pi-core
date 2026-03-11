@@ -1580,48 +1580,65 @@ def enforce(
                 ):
                     is_pure_cross_file_move = True
             if marker_touched and not is_pure_cross_file_move:
-                if _touches_host_semantics_baseline(changed_files):
-                    errors.append(
-                        "L4_STRUCTURAL with runtime @host_* marker changes cannot modify "
-                        "tools/checks/host_semantics_baseline.json in the same wave. "
-                        "Baseline ratchet updates must be a separate MAINTENANCE wave."
-                    )
+                # FOUNDER_OVERRIDE bypass for marker-touch rules 19/20.
+                # Structural waves that add *new* irreducible bootstrap host
+                # operations (not reducing existing debt) can use FOUNDER_OVERRIDE
+                # to bypass strict-decrease and baseline-split requirements.
+                marker_touch_override = None
+                if notes and override_wave_bound:
+                    oid = notes[0].get("founder_override")
+                    if oid:
+                        marker_touch_override = oid
 
-                if removed_total <= 0:
-                    errors.append(
-                        "L4_STRUCTURAL touched runtime @host_* markers but removed none. "
-                        "Debt movement/addition without removals is forbidden."
+                if marker_touch_override:
+                    print(
+                        f"  FOUNDER_OVERRIDE:{marker_touch_override} active — "
+                        f"bypassing marker-touch rules 19/20 "
+                        f"(added={added_total}, removed={removed_total})"
                     )
-
-                ratchet_json, probe_errors = probe_host_semantics_ratchet()
-                if probe_errors:
-                    errors.extend(
-                        "FAIL-CLOSED debt-removal integrity: " + e for e in probe_errors
-                    )
-                elif ratchet_json is not None:
-                    try:
-                        baseline_total, current_total, increases = summarize_host_semantics_delta(
-                            ratchet_json
-                        )
-                    except ValueError as exc:
+                else:
+                    if _touches_host_semantics_baseline(changed_files):
                         errors.append(
-                            "FAIL-CLOSED debt-removal integrity: "
-                            f"invalid host-semantics probe data ({exc})"
+                            "L4_STRUCTURAL with runtime @host_* marker changes cannot modify "
+                            "tools/checks/host_semantics_baseline.json in the same wave. "
+                            "Baseline ratchet updates must be a separate MAINTENANCE wave."
                         )
-                    else:
-                        if current_total >= baseline_total:
-                            errors.append(
-                                "L4_STRUCTURAL runtime @host_* marker change requires strict "
-                                f"debt reduction. Current total={current_total}, "
-                                f"baseline total={baseline_total}."
+
+                    if removed_total <= 0:
+                        errors.append(
+                            "L4_STRUCTURAL touched runtime @host_* markers but removed none. "
+                            "Debt movement/addition without removals is forbidden."
+                        )
+
+                    ratchet_json, probe_errors = probe_host_semantics_ratchet()
+                    if probe_errors:
+                        errors.extend(
+                            "FAIL-CLOSED debt-removal integrity: " + e for e in probe_errors
+                        )
+                    elif ratchet_json is not None:
+                        try:
+                            baseline_total, current_total, increases = summarize_host_semantics_delta(
+                                ratchet_json
                             )
-                        for inc in increases:
+                        except ValueError as exc:
                             errors.append(
-                                "L4_STRUCTURAL runtime @host_* marker change cannot increase "
-                                "any host category (no debt-category movement). "
-                                f"Found increase: {inc['substrate']}.{inc['category']} "
-                                f"{inc['baseline']}→{inc['current']} (+{inc['delta']})."
+                                "FAIL-CLOSED debt-removal integrity: "
+                                f"invalid host-semantics probe data ({exc})"
                             )
+                        else:
+                            if current_total >= baseline_total:
+                                errors.append(
+                                    "L4_STRUCTURAL runtime @host_* marker change requires strict "
+                                    f"debt reduction. Current total={current_total}, "
+                                    f"baseline total={baseline_total}."
+                                )
+                            for inc in increases:
+                                errors.append(
+                                    "L4_STRUCTURAL runtime @host_* marker change cannot increase "
+                                    "any host category (no debt-category movement). "
+                                    f"Found increase: {inc['substrate']}.{inc['category']} "
+                                    f"{inc['baseline']}→{inc['current']} (+{inc['delta']})."
+                                )
 
             if marker_touched:
                 # Rule A4 semantic-removal proof:

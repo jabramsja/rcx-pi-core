@@ -42,7 +42,7 @@ from rcx_pi.mu_type import (
     mu_equal,
     mu_hash,
     mu_type_name,
-    has_callable,
+    find_callable_path,
     MAX_MU_DEPTH,
     MAX_MU_WIDTH,
 )
@@ -842,10 +842,10 @@ class TestNoCrashOnValidInputs:
 
     @given(mu_values(max_depth=3))
     @settings(deadline=5000)
-    def test_has_callable_never_crashes(self, value):
-        """has_callable should never crash."""
-        result = has_callable(value)
-        assert isinstance(result, bool)
+    def test_find_callable_path_never_crashes(self, value):
+        """find_callable_path should never crash on valid Mu."""
+        result = find_callable_path(value)
+        assert result is None or isinstance(result, str)
 
     # DELETED (2026-01-29): test_compute_identity_never_crashes_on_valid_mu
     # compute_identity was removed in architecture cleanup

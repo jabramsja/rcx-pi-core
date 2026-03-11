@@ -41,7 +41,6 @@ from rcx_pi.selfhost.mu_type import (
     mu_hash_cached,
     mu_hash_control,
     mu_hash_control_cached,
-    NumericHashError,
 )
 
 JS_DIR = REPO_ROOT / "mu" / "host" / "js"
