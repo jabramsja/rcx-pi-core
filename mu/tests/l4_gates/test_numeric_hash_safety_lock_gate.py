@@ -321,11 +321,12 @@ class TestSourceLocks:
         assert "function muHashControlCached(" in source
 
     def test_python_step_mu_uses_control_wrappers(self):
-        """step_mu.py control paths use mu_hash_control_cached."""
+        """step_mu.py + engine_pipeline.py control paths use mu_hash_control_cached."""
         source = (PY_DIR / "step_mu.py").read_text()
-        # Control sites: must use control wrappers
+        ep_source = (PY_DIR / "engine_pipeline.py").read_text()
+        # Control sites: must use control wrappers (across Boot1 + Boot2)
         assert "mu_hash_control_cached(" in source
-        assert "mu_hash_control(" in source  # hash_trace_for_recurrence
+        assert "mu_hash_control(" in ep_source  # hash_trace_for_recurrence (Boot2)
 
     def test_python_projection_runner_uses_control_wrappers(self):
         """projection_runner.py uses mu_hash_control_cached."""

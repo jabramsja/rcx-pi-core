@@ -34,8 +34,7 @@ from rcx_pi.selfhost.step_mu import RcxEngineError
 from rcx_pi.selfhost.step_mu import _validate_ontology_promotion_record  # ANTICHEAT_OK: A12 gate test requires direct validator access
 from rcx_pi.selfhost.step_mu import _OPROMO_FULLY_LOCKED_SEEDS  # ANTICHEAT_OK: A12 parity test for locked seed set
 from rcx_pi.selfhost.step_mu import _derive_opromo_fully_locked_seeds  # ANTICHEAT_OK: A13 derivation rule test
-from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_CHECKSUMS_KEYS  # ANTICHEAT_OK: A13 registry mirror test
-from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_PROJECTION_IDS_KEYS  # ANTICHEAT_OK: A13 registry mirror test
+from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_REGISTRY_KEYS  # ANTICHEAT_OK: A13 registry mirror test (collapsed from checksums+projIDs)
 from rcx_pi.selfhost.step_mu import _build_ontology_promotion_candidate  # ANTICHEAT_OK: A14 builder unit test
 from rcx_pi.selfhost.step_mu import _service_boundary_effect  # ANTICHEAT_OK: A14 behavioral integration test
 from rcx_pi.selfhost.step_mu import _BOUNDARY_DISPATCH  # ANTICHEAT_OK: A15 monkeypatch target for overwrite guard test
@@ -372,7 +371,7 @@ class TestWiring:
     """Verify hooks are present in both substrates' boundary effect functions."""
 
     def test_python_hook_present(self):
-        src_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        src_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
         content = src_path.read_text(encoding="utf-8")
         # Find _service_boundary_effect function
         func_match = re.search(
@@ -406,7 +405,7 @@ class TestWiring:
         """
         # This is implicitly tested by all existing engine pipeline tests,
         # but we verify the code path explicitly.
-        src_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        src_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
         content = src_path.read_text(encoding="utf-8")
         # The hook is guarded by 'if isinstance(result, dict) and "ontology_promotion" in result'
         assert 'and "ontology_promotion" in result' in content
@@ -701,8 +700,7 @@ class TestFullLockConsistency:
     def test_derivation_uses_4way_intersection(self):
         """Derived set is subset of all 4 registries."""
         derived = _derive_opromo_fully_locked_seeds()
-        assert derived <= _JS_CORE_SEED_CHECKSUMS_KEYS
-        assert derived <= _JS_CORE_SEED_PROJECTION_IDS_KEYS
+        assert derived <= _JS_CORE_SEED_REGISTRY_KEYS
         assert derived <= frozenset(SEED_CHECKSUMS.keys())
         assert derived <= frozenset(EXPECTED_PROJECTION_IDS.keys())
 
@@ -720,11 +718,8 @@ class TestFullLockConsistency:
         assert result.returncode == 0, f"JS error: {result.stderr}"
         js_locked = set(json.loads(result.stdout))
         # Python mirrors must match
-        assert _JS_CORE_SEED_CHECKSUMS_KEYS == js_locked, (
-            f"JS CORE checksums mirror drift: Python={_JS_CORE_SEED_CHECKSUMS_KEYS}, JS={js_locked}"
-        )
-        assert _JS_CORE_SEED_PROJECTION_IDS_KEYS == js_locked, (
-            f"JS CORE projIDs mirror drift: Python={_JS_CORE_SEED_PROJECTION_IDS_KEYS}, JS={js_locked}"
+        assert _JS_CORE_SEED_REGISTRY_KEYS == js_locked, (
+            f"JS CORE registry mirror drift: Python={_JS_CORE_SEED_REGISTRY_KEYS}, JS={js_locked}"
         )
 
     def test_unlocked_seed_still_rejected_after_displacement(self):
@@ -978,7 +973,7 @@ class TestWiringA14:
     """A14: Source inspection for opt-in wiring in both substrates."""
 
     def _get_python_boundary_body(self):
-        src_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        src_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
         content = src_path.read_text(encoding="utf-8")
         func_match = re.search(
             r'def _service_boundary_effect\b.*?(?=\ndef [a-zA-Z_])',

@@ -48,6 +48,7 @@ EXPECTED_IDS = [
 
 JS_CORE_DIR = REPO_ROOT / "mu" / "host" / "js" / "core"
 PY_STEP_MU = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+PY_ENGINE_PIPELINE = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
 
 
 def _load_seed():
@@ -173,7 +174,7 @@ class TestSourceLockUsesEvalStep:
 
     def test_derive_exit_reason_calls_eval_step(self):
         """_derive_engine_exit_reason must call eval_step() (structural seed path)."""
-        source = PY_STEP_MU.read_text(encoding="utf-8")
+        source = PY_ENGINE_PIPELINE.read_text(encoding="utf-8")
         lines = source.splitlines()
         # Find the function start line
         start = None
@@ -181,7 +182,7 @@ class TestSourceLockUsesEvalStep:
             if "def _derive_engine_exit_reason(" in line:
                 start = i
                 break
-        assert start is not None, "_derive_engine_exit_reason not found in step_mu.py"
+        assert start is not None, "_derive_engine_exit_reason not found in engine_pipeline.py"
         # Extract body (next 20 lines is more than enough for this function)
         body = "\n".join(lines[start:start + 20])
         assert "eval_step(" in body, (

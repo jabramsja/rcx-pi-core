@@ -25,7 +25,7 @@ from rcx_pi.selfhost.step_mu import (
     validate_no_kernel_reserved_fields,
 )
 
-PY_RUNTIME = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+PY_RUNTIME = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
 
 
 def _read_all_js_source() -> str:

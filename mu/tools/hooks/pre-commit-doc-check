@@ -135,7 +135,17 @@ if [ -f "./tools/checks/enforce_tracker_sync.sh" ]; then
     fi
 fi
 
-# === 5b. Check for untracked backup/temp artifacts (WARNING, non-blocking) ===
+# === 5b. Boot layer boundary check (BLOCKING, <1s) ===
+if [ -f "./tools/checks/check_boot_layer_boundaries.py" ]; then
+    if ! python3 tools/checks/check_boot_layer_boundaries.py 2>/dev/null; then
+        echo ""
+        echo "❌ Boot layer boundary check FAILED"
+        echo "   Run: python3 tools/checks/check_boot_layer_boundaries.py"
+        FAILED=1
+    fi
+fi
+
+# === 5c. Check for untracked backup/temp artifacts (WARNING, non-blocking) ===
 if [ -f "./tools/checks/check_untracked_artifacts.sh" ]; then
     if ! ./tools/checks/check_untracked_artifacts.sh --quiet 2>/dev/null; then
         echo ""

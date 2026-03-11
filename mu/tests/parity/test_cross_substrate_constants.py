@@ -281,7 +281,7 @@ class TestHemisphereRoutingLimitParity:
     def test_hemisphere_routing_step_limit_parity(self):
         """Python max_steps=30 must match JS const limit = 30."""
         import re as _re
-        py_source = (_REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py").read_text()
+        py_source = (_REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py").read_text()
         # Find max_steps=N in run_hemisphere_routing function
         m = _re.search(
             r'def run_hemisphere_routing.*?run_mu\([^)]*max_steps=(\d+)',

@@ -66,8 +66,8 @@ class TestPythonBoot1Default:
 
     def test_omitted_flag_routes_boot1(self):
         """Omitting use_boot1_recursive routes to Boot1 (recursive) path."""
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
 
@@ -79,8 +79,8 @@ class TestPythonBoot1Default:
 
     def test_explicit_false_routes_trampoline(self):
         """Explicit use_boot1_recursive=False routes trampoline path."""
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
 
@@ -92,8 +92,8 @@ class TestPythonBoot1Default:
 
     def test_explicit_true_matches_default(self):
         """Explicit use_boot1_recursive=True matches omitted-flag behavior."""
-        with patch("rcx_pi.selfhost.step_mu.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.step_mu.run_hemisphere_routing") as mock_routing:
+        with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
 

@@ -37,7 +37,7 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 # Paths
 # ---------------------------------------------------------------------------
 
-PY_STEP_MU = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+PY_STEP_MU = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
 JS_PIPELINE = REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js"
 
 EXPECTED_OPS = frozenset({"run_trace", "hash_trace", "run_algorithm"})
@@ -91,7 +91,7 @@ class TestBoundaryOpsDerivation:
     def test_python_rejects_non_string_op(self):
         """Non-string operation in seed projection body raises typed fail-closed."""
         import copy
-        from rcx_pi.selfhost.step_mu import (
+        from rcx_pi.selfhost.engine_pipeline import (
             _load_engine_projections,  # ANTICHEAT_OK: gate verifies fail-closed
         )
         # Get real projections, inject a non-string operation into one
@@ -107,14 +107,14 @@ class TestBoundaryOpsDerivation:
                     break
         # Monkeypatch the loader to return tampered projections
         _clear_boundary_ops_cache()
-        import rcx_pi.selfhost.step_mu as step_mu_mod
-        original_loader = step_mu_mod._load_engine_projections  # ANTICHEAT_OK: gate monkeypatch for fail-closed test
-        step_mu_mod._load_engine_projections = lambda: tampered  # ANTICHEAT_OK: gate monkeypatch for fail-closed test
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        original_loader = engine_pipeline_mod._load_engine_projections  # ANTICHEAT_OK: gate monkeypatch for fail-closed test
+        engine_pipeline_mod._load_engine_projections = lambda: tampered  # ANTICHEAT_OK: gate monkeypatch for fail-closed test
         try:
             with pytest.raises(RcxEngineError, match="boundary op must be string"):
                 _load_boundary_ops()
         finally:
-            step_mu_mod._load_engine_projections = original_loader  # ANTICHEAT_OK: gate monkeypatch restore
+            engine_pipeline_mod._load_engine_projections = original_loader  # ANTICHEAT_OK: gate monkeypatch restore
             _clear_boundary_ops_cache()
 
     def test_js_rejects_non_string_op(self):
@@ -897,8 +897,8 @@ class TestAlgorithmSeedAllowlist:
             called_with["input"] = inp
             return {"result": "fake", "trace": None, "stall": False}
 
-        import rcx_pi.selfhost.step_mu as step_mu_mod
-        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        monkeypatch.setattr(engine_pipeline_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
         request = self._make_run_algorithm_request("recurrence.v1.json")
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
@@ -916,8 +916,8 @@ class TestAlgorithmSeedAllowlist:
             called[0] = True
             return {"result": "fake"}
 
-        import rcx_pi.selfhost.step_mu as step_mu_mod
-        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        monkeypatch.setattr(engine_pipeline_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
         request = self._make_run_algorithm_request("recurrence.v2.json")
         _service_boundary_effect(
             request, max_algorithm_iterations=10,
@@ -934,8 +934,8 @@ class TestAlgorithmSeedAllowlist:
             called[0] = True
             return {"result": "fake"}
 
-        import rcx_pi.selfhost.step_mu as step_mu_mod
-        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        monkeypatch.setattr(engine_pipeline_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
         request = self._make_run_algorithm_request("exhaustion.v1.json")
         _service_boundary_effect(
             request, max_algorithm_iterations=10,
@@ -952,8 +952,8 @@ class TestAlgorithmSeedAllowlist:
             called[0] = True
             return {"result": "fake"}
 
-        import rcx_pi.selfhost.step_mu as step_mu_mod
-        monkeypatch.setattr(step_mu_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        monkeypatch.setattr(engine_pipeline_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
         request = self._make_run_algorithm_request("fix.v1.json")
         _service_boundary_effect(
             request, max_algorithm_iterations=10,
@@ -1044,10 +1044,10 @@ class TestBoundaryResultDomainValidation:
             # This must be rejected by validate_no_kernel_reserved_fields.
             return {"_mode": "forged", "result": 1}
 
-        import rcx_pi.selfhost.step_mu as step_mu_mod
-        original_dispatch = dict(step_mu_mod._BOUNDARY_DISPATCH)  # ANTICHEAT_OK: gate monkeypatch for invariant test
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        original_dispatch = dict(engine_pipeline_mod._BOUNDARY_DISPATCH)  # ANTICHEAT_OK: gate monkeypatch for invariant test
         # Monkeypatch run_trace handler to return poisoned result
-        step_mu_mod._BOUNDARY_DISPATCH["run_trace"] = _poisoned_handler  # ANTICHEAT_OK: gate monkeypatch for invariant test
+        engine_pipeline_mod._BOUNDARY_DISPATCH["run_trace"] = _poisoned_handler  # ANTICHEAT_OK: gate monkeypatch for invariant test
         try:
             request = {
                 "operation": "run_trace",
@@ -1062,7 +1062,7 @@ class TestBoundaryResultDomainValidation:
                 )
         finally:
             # Restore original dispatch
-            step_mu_mod._BOUNDARY_DISPATCH.update(original_dispatch)  # ANTICHEAT_OK: gate monkeypatch restore
+            engine_pipeline_mod._BOUNDARY_DISPATCH.update(original_dispatch)  # ANTICHEAT_OK: gate monkeypatch restore
 
     def test_invariant_comment_present(self):
         """Source-lock: INVARIANT comment present above boundary result validation."""
@@ -1070,7 +1070,7 @@ class TestBoundaryResultDomainValidation:
         invariant_marker = "INVARIANT: boundary results re-enter engine state"
         validator_call = "validate_no_kernel_reserved_fields(result,"
         assert invariant_marker in source, (
-            f"step_mu.py must contain invariant comment: {invariant_marker!r}"
+            f"engine_pipeline.py must contain invariant comment: {invariant_marker!r}"
         )
         marker_pos = source.index(invariant_marker)
         # Find the first validate_no_kernel_reserved_fields(result, ...) after the marker
