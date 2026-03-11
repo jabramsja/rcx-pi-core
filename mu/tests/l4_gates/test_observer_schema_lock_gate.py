@@ -140,9 +140,13 @@ class TestEventNameSourceLock:
     """All registered event names must appear as strings in both substrates."""
 
     def test_all_event_names_in_python_source(self):
-        """Python step_mu.py contains all 5 event name strings."""
-        py_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
-        source = py_path.read_text()
+        """Python runtime source contains all 5 event name strings."""
+        # After Boot0 extraction (Wave E), engine event names live in engine_pipeline.py
+        py_files = [
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py",
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py",
+        ]
+        source = "\n".join(f.read_text() for f in py_files)
         for name in VALID_EVENT_NAMES:
             assert f'"{name}"' in source, (
                 f"Python source missing event name string: {name!r}"
