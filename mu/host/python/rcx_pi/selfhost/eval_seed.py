@@ -14,7 +14,7 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH
+from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH, consume_budget, _NO_BUDGET
 
 
 # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
@@ -316,7 +316,8 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     return _match_inner(pattern, input_value, 0)
 
 
-def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu] | _NoMatch:
+def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
+                 _budget: object = _NO_BUDGET) -> dict[str, Mu] | _NoMatch:
     """Internal recursive matcher — no validation (already done at match() entry).
 
     This function contains 13 isinstance calls for Python type dispatch
@@ -324,7 +325,91 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0) -> dict[str, Mu]
     separate debt markers — they are all covered by the single host_builtin
     decorator on match(). Callers: match() (public entry) and
     _apply_projection_trusted() (kernel-internal fast path).
+
+    When _budget is provided, uses structural Mu linked-list budget instead
+    of integer _depth for depth limiting. Same semantics (depth-only: same
+    remaining budget passed to all siblings at a given level).
     """
+    # --- Structural budget path (opt-in) ---
+    if _budget is not _NO_BUDGET:
+        ok, remaining = consume_budget(_budget)
+        if not ok:
+            return NO_MATCH
+
+        if is_var(pattern):
+            var_name = pattern["var"]
+            if not var_name:
+                return NO_MATCH
+            return {var_name: input_value}
+
+        if pattern is None:
+            return {} if input_value is None else NO_MATCH
+
+        if isinstance(pattern, bool):
+            if isinstance(input_value, bool) and pattern == input_value:
+                return {}
+            return NO_MATCH
+
+        if isinstance(pattern, int):
+            if isinstance(input_value, int) and not isinstance(input_value, bool):
+                if pattern == input_value:
+                    return {}
+            return NO_MATCH
+
+        if isinstance(pattern, float):
+            if isinstance(input_value, float) and pattern == input_value:
+                return {}
+            return NO_MATCH
+
+        if isinstance(pattern, str):
+            if isinstance(input_value, str) and pattern == input_value:
+                return {}
+            return NO_MATCH
+
+        if isinstance(pattern, list):
+            if not isinstance(input_value, list):
+                return NO_MATCH
+            if len(pattern) != len(input_value):
+                return NO_MATCH
+            bindings: dict[str, Mu] = {}
+            for p_elem, i_elem in zip(pattern, input_value):
+                # Depth-only: same 'remaining' to all siblings
+                sub_bindings = _match_inner(p_elem, i_elem, _depth, _budget=remaining)
+                if sub_bindings is NO_MATCH:
+                    return NO_MATCH
+                for k in sub_bindings:
+                    if k in bindings:
+                        if mu_hash_cached(bindings[k]) != mu_hash_cached(sub_bindings[k]):
+                            return NO_MATCH
+                bindings = {**bindings, **sub_bindings}
+            return bindings
+
+        if isinstance(pattern, dict):
+            if not isinstance(input_value, dict):
+                return NO_MATCH
+            pattern_keys = set(pattern.keys())
+            input_keys = set(input_value.keys())
+            if pattern_keys != input_keys:
+                extra_is_type = (input_keys - pattern_keys == {"_type"})
+                no_pattern_extra = (len(pattern_keys - input_keys) == 0)
+                type_is_list = (input_value.get("_type") == "list")
+                if not (extra_is_type and no_pattern_extra and type_is_list):
+                    return NO_MATCH
+            bindings = {}
+            for key in pattern:
+                sub_bindings = _match_inner(pattern[key], input_value[key], _depth, _budget=remaining)
+                if sub_bindings is NO_MATCH:
+                    return NO_MATCH
+                for k in sub_bindings:
+                    if k in bindings:
+                        if mu_hash_cached(bindings[k]) != mu_hash_cached(sub_bindings[k]):
+                            return NO_MATCH
+                bindings = {**bindings, **sub_bindings}
+            return bindings
+
+        return NO_MATCH
+
+    # --- Integer depth path (default — existing behavior, zero overhead) ---
     if _depth > MAX_MU_DEPTH:
         return NO_MATCH
 
@@ -542,7 +627,8 @@ def _stage0_substitute(body, bindings, _depth=0):
     "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
     "subst_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
 )
-def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0) -> Mu:
+def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0,
+               _budget: object = _NO_BUDGET) -> Mu:
     """
     Substitute variable sites in body with bound values.
 
@@ -550,20 +636,51 @@ def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0) -> Mu:
     (None/bool/int/float/str check, list check, dict check). Tracked on
     match()'s @host_builtin decorator (same debt surface as _match_inner).
 
+    When _budget is provided, uses structural Mu linked-list budget instead
+    of integer _depth for depth limiting. Same semantics (depth-only: same
+    remaining budget passed to all siblings at a given level).
+
     Args:
         body: The body with possible {"var": "x"} sites.
         bindings: Dict mapping variable names to values.
 
     Keyword Args (internal only — do NOT pass from external callers):
         _depth: Current recursion depth. Enforced by MAX_MU_DEPTH.
+        _budget: Structural depth budget (Mu linked-list or None).
 
     Returns:
         Body with variables replaced by their bound values.
 
     Raises:
         KeyError: If a variable in body is not in bindings.
-        TypeError: If depth exceeds MAX_MU_DEPTH.
+        TypeError: If depth exceeds MAX_MU_DEPTH or budget exhausted.
     """
+    # --- Structural budget path (opt-in) ---
+    if _budget is not _NO_BUDGET:
+        ok, remaining = consume_budget(_budget)
+        if not ok:
+            raise TypeError(f"Structural depth budget exhausted in substitute")
+        if _depth == 0:
+            assert_mu(body, "substitute.body")
+
+        if is_var(body):
+            name = get_var_name(body)
+            if name not in bindings:
+                raise KeyError(f"Unbound variable: {name}")
+            return bindings[name]
+
+        if body is None or isinstance(body, (bool, int, float, str)):
+            return body
+
+        if isinstance(body, list):
+            return [substitute(elem, bindings, _depth=_depth, _budget=remaining) for elem in body]  # AST_OK: bootstrap recursive substitution
+
+        if isinstance(body, dict):
+            return {k: substitute(v, bindings, _depth=_depth, _budget=remaining) for k, v in body.items()}  # AST_OK: bootstrap recursive substitution
+
+        raise TypeError(f"Invalid body type: {type(body)}")
+
+    # --- Integer depth path (default — existing behavior, zero overhead) ---
     if _depth > MAX_MU_DEPTH:
         raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
     if _depth == 0:

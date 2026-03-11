@@ -317,36 +317,36 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 11
-CURRENT: 11 (9 tracked decorators + 2 AST_OK bootstrap)
-FLOOR: 11 (see explanation below)
+THRESHOLD: 13
+CURRENT: 13 (9 tracked decorators + 4 AST_OK bootstrap)
+FLOOR: 13 (see explanation below)
 INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
-**Debt floor breakdown (11 irreducible sites — see enumeration below):**
+**Debt floor breakdown (13 irreducible sites — see enumeration below):**
 - @host_recursion: 2 (eval_seed match/substitute - BOOTSTRAP)
 - @host_builtin: 3 (eval_seed, deep_eval)
 - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
 - @host_mutation: 1 (deep_eval only — eval_seed mutation removed via pure merge in CP-S1A)
-- AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+- AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
-**Total host semantics markers (32 = 15 Py + 17 JS):** The floor of 11 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 2 recursion + 1 builtin + 12 iteration; JS = 4 recursion + 3 builtin + 10 iteration.
+**Total host semantics markers (34 = 17 Py + 17 JS):** The floor of 13 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 2 recursion + 2 builtin + 13 iteration; JS = 4 recursion + 3 builtin + 10 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 11 is the host debt floor (not a target for reduction):**
-The 11 counts ALL host debt sites across L2 kernel, L3 boundary, and utilities:
+**Why 13 is the host debt floor (not a target for reduction):**
+The 13 counts ALL host debt sites across L2 kernel, L3 boundary, and utilities:
 
-*L2 kernel substrate (7 sites):*
+*L2 kernel substrate (9 sites):*
 1. `match()` in eval_seed.py — @host_recursion + @host_builtin (pattern matching bootstrap primitive)
 2. `substitute()` in eval_seed.py — @host_recursion (substitution bootstrap primitive)
 3. `step_kernel_mu()` in step_mu.py — @host_iteration (kernel execution loop)
 4. `run_mu_structural()` in step_mu.py — @host_iteration (structural trace for Recurrence)
-5. AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+5. AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
 *L3 boundary (1 site):*
 6. `run_mu()` in step_mu.py — @host_iteration (repeat-until-stall loop, L2 EXCLUDED by design)
@@ -366,7 +366,9 @@ These cannot be eliminated because:
 
 **CP-S1A (wave 25):** Python `@host_mutation` on `match()` eliminated by converting `_match_inner`'s dict-key mutation (`bindings[k] = v`) to pure dict merge (`{**bindings, **sub_bindings}`). Construct genuinely removed from trusted runtime path. Floor reduced from 12→11. Remaining debt: 2 recursion, 3 builtin, 3 iteration, 1 mutation (deep_eval only), 2 AST_OK bootstrap.
 
-The debt of 11 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
+**D009 (wave F):** Structural depth budget primitives added to mu_type.py (make_depth_budget, consume_budget) and eval_seed.py (_match_inner, substitute budget paths). Host semantics +2: @host_iteration (linked-list construction loop), @host_builtin (isinstance for budget validation). Both are infra-level irreducible bootstrap, not primitive debt. +2 AST_OK bootstrap (substitute budget path list/dict comprehensions). Floor increased 11→13. FOUNDER_OVERRIDE:2026-03-11-d009-irreducible-bootstrap for L4 rules 19/20 deadlock.
+
+The debt of 13 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)

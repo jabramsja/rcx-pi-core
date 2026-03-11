@@ -219,11 +219,11 @@ echo "== 9. Structural Purity: Programming IN RCX =="
 echo "Checking structural purity guardrail functions exist..."
 
 if [ -f "$MU_TYPE_FILE" ]; then
-    # Check that has_callable exists
-    if grep -q "def has_callable" "$MU_TYPE_FILE" 2>/dev/null; then
-        echo "  ✓ has_callable() detector defined"
+    # Check that find_callable_path exists (replaces has_callable)
+    if grep -q "def find_callable_path" "$MU_TYPE_FILE" 2>/dev/null; then
+        echo "  ✓ find_callable_path() detector defined"
     else
-        echo "  ERROR: has_callable() detector missing"
+        echo "  ERROR: find_callable_path() detector missing"
         FAILED=1
     fi
 

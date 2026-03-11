@@ -10,6 +10,53 @@ const { MAX_DEPTH, RcxError } = require('./constants');
 
 const MAX_MU_WIDTH = 1000;
 
+// =============================================================================
+// Structural Depth Budget (D009 Productionization)
+// =============================================================================
+// Budget is a Mu linked list: {head: null, tail: <budget>} or null (exhausted).
+// Created once at module load and frozen (Object.freeze) for immutability.
+// Shared across all calls (depth-only semantics: each recursion level reads
+// budget.tail but never modifies the original).
+// =============================================================================
+
+// Sentinel for "no budget provided" — distinct from null (= budget exhausted).
+const _NO_BUDGET = Object.freeze({ _sentinel: 'NO_BUDGET' });
+
+/**
+ * Create a structural depth budget of given size. Returns frozen Mu linked-list.
+ */
+function makeDepthBudget(depth) {
+  let budget = null;
+  for (let i = 0; i < depth; i++) {
+    budget = { head: null, tail: budget };
+  }
+  // Recursively freeze (Q5: immutability enforcement)
+  function deepFreeze(obj) {
+    if (obj !== null && typeof obj === 'object') {
+      Object.freeze(obj);
+      deepFreeze(obj.tail);
+    }
+  }
+  deepFreeze(budget);
+  return budget;
+}
+
+/**
+ * Consume one level from budget. Returns [ok, remaining].
+ */
+function consumeBudget(budget) {
+  if (budget === null) {
+    return [false, null];
+  }
+  if (typeof budget === 'object' && budget !== null && 'tail' in budget) {
+    return [true, budget.tail];
+  }
+  return [false, null];
+}
+
+// Module-level shared budget (frozen — immutable).
+const _STRUCTURAL_DEPTH_BUDGET = makeDepthBudget(MAX_DEPTH + 1);
+
 /**
  * Check if a number is valid (rejects NaN, Infinity, -Infinity).
  * Matches Python's mu_type validation.
@@ -40,7 +87,46 @@ function isVar(mu) {
  * Backtracking allows DAGs (shared references) while catching true cycles.
  * @host_builtin - BOOTSTRAP: type validation primitive
  */
-function isValidMu(value, _depth = 0, _seen) {
+function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
+  // --- Structural budget path (opt-in) ---
+  if (_budget !== _NO_BUDGET) {
+    const [ok, remaining] = consumeBudget(_budget);
+    if (!ok) return false;  // Budget exhausted
+
+    if (value === null) return true;
+    if (value === undefined) return false;
+
+    const t = typeof value;
+    if (t === 'boolean' || t === 'string') return true;
+    if (t === 'number') return isValidNumber(value);
+    if (t === 'function' || t === 'symbol') return false;
+
+    if (!_seen) _seen = new WeakSet();  // AST_OK_JS: cycle detection for is_mu budget path (matches Python _seen set)
+    if (_seen.has(value)) return false;
+    _seen.add(value);
+
+    if (Array.isArray(value)) {
+      if (value.length > MAX_MU_WIDTH) { _seen.delete(value); return false; }
+      // Depth-only: same 'remaining' passed to all siblings
+      const result = value.every(v => isValidMu(v, _depth, _seen, remaining));
+      _seen.delete(value);
+      return result;
+    }
+
+    if (t === 'object') {
+      const keys = Object.keys(value);
+      if (keys.length > MAX_MU_WIDTH) { _seen.delete(value); return false; }
+      if (Object.getOwnPropertySymbols(value).length > 0) { _seen.delete(value); return false; }
+      if (!keys.every(k => typeof k === 'string')) { _seen.delete(value); return false; }
+      const result = keys.every(k => isValidMu(value[k], _depth, _seen, remaining));
+      _seen.delete(value);
+      return result;
+    }
+
+    return false;
+  }
+
+  // --- Integer depth path (default — existing behavior, zero overhead) ---
   // Depth guard (matches Python MAX_MU_DEPTH)
   if (_depth > MAX_DEPTH) return false;
 
@@ -249,4 +335,9 @@ module.exports = {
   canonicalizeHashNumeric,
   muHashControl,
   muHashControlCached,
+  // D009 depth budget primitives
+  _NO_BUDGET,
+  makeDepthBudget,
+  consumeBudget,
+  _STRUCTURAL_DEPTH_BUDGET,
 };

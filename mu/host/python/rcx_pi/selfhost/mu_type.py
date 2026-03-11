@@ -37,8 +37,54 @@ MAX_MU_DEPTH = 300
 MAX_MU_WIDTH = 1000
 
 
+# =============================================================================
+# Structural Depth Budget (D009 Productionization)
+# =============================================================================
+# Budget is a Mu linked list: {"head": None, "tail": <budget>} or None (exhausted).
+# Created once at module load and shared across all calls (depth-only semantics:
+# each recursion level reads budget["tail"] but never modifies the original).
+# See mu/tests/research/test_d009_h4_depth_threading.py for the research proof.
+# =============================================================================
+
+
+def make_depth_budget(depth: int) -> dict | None:
+    """Create a structural depth budget of given size. Returns Mu linked-list.
+
+    The for-loop is an irreducible bootstrap dependency (F2 from D009):
+    constructing a linked list of length N requires host iteration.
+    """
+    budget = None
+    for _ in range(depth):  # @host_iteration — irreducible bootstrap: linked-list construction (D009-F2)
+        budget = {"head": None, "tail": budget}
+    return budget
+
+
+def consume_budget(budget: dict | None) -> tuple[bool, dict | None]:
+    """Consume one level from budget. Returns (ok, remaining).
+
+    ok=True means budget was available and remaining is the tail.
+    ok=False means budget is exhausted (None or malformed).
+    """
+    if budget is None:
+        return (False, None)
+    if isinstance(budget, dict) and "tail" in budget:  # @host_builtin:isinstance — irreducible bootstrap: budget validation (D009-F2)
+        return (True, budget["tail"])
+    return (False, None)
+
+
+# Sentinel for "no budget provided" — distinct from None (= budget exhausted).
+# This is necessary because budget["tail"] = None for the last node, and we
+# need to distinguish "caller didn't provide a budget" from "budget ran out."
+_NO_BUDGET: object = object()
+
+# Module-level shared budget (depth-only traversal reads but never modifies).
+# Each node has a stable id() since it's created once — used as O(1) memo key.
+_STRUCTURAL_DEPTH_BUDGET = make_depth_budget(MAX_MU_DEPTH + 1)
+
+
 def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0,
-          _memo: dict[tuple[int, int], bool] | None = None) -> bool:
+          _memo: dict[tuple[int, int], bool] | None = None,
+          _budget: object = _NO_BUDGET) -> bool:
     """
     Check if a value is a valid Mu (JSON-compatible).
 
@@ -70,8 +116,68 @@ def is_mu(value: Any, _seen: set[int] | None = None, _depth: int = 0,
         at different depths is re-checked (depth affects validity). The memo is
         per-call only (no global cache) and fail-closed: only True results are
         memoized; False results and cycles are always re-checked.
+
+    When _budget is provided (structural budget path):
+        Uses structural Mu linked-list budget instead of integer _depth.
+        Memo key uses id(_budget) for O(1) lookup (each node in the shared
+        singleton has a unique, stable id). See D009 research.
     """
-    # Depth limit check (prevents RecursionError attacks)
+    # --- Structural budget path (opt-in) ---
+    if _budget is not _NO_BUDGET:
+        ok, remaining = consume_budget(_budget)
+        if not ok:
+            return False  # Budget exhausted
+
+        if value is None:
+            return True
+        if isinstance(value, bool):
+            return True
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and (value != value or value == float('inf') or value == float('-inf')):
+                return False
+            return True
+        if isinstance(value, str):
+            return True
+
+        value_type = type(value)
+        if value_type is list or value_type is dict:
+            if _seen is None:
+                _seen = set()
+            if _memo is None:
+                _memo = {}
+            value_id = id(value)
+            memo_key = (value_id, id(_budget))
+            if memo_key in _memo:
+                return _memo[memo_key]
+            if value_id in _seen:
+                return False
+            _seen.add(value_id)
+
+        if value_type is list:
+            if len(value) > MAX_MU_WIDTH:
+                _seen.discard(value_id)
+                return False
+            # Depth-only: same 'remaining' passed to all siblings
+            result = all(is_mu(item, _seen, _depth, _memo, _budget=remaining) for item in value)
+            _seen.discard(value_id)
+            if result:
+                _memo[memo_key] = True
+            return result
+        if value_type is dict:
+            if len(value) > MAX_MU_WIDTH:
+                _seen.discard(value_id)
+                return False
+            result = (
+                all(type(k) is str for k in value.keys()) and
+                all(is_mu(v, _seen, _depth, _memo, _budget=remaining) for v in value.values())
+            )
+            _seen.discard(value_id)
+            if result:
+                _memo[memo_key] = True
+            return result
+        return False
+
+    # --- Integer depth path (default — existing behavior, zero overhead) ---
     if _depth > MAX_MU_DEPTH:
         return False
 
@@ -208,56 +314,6 @@ def mu_type_name(value: Any) -> str:
 # =============================================================================
 
 
-def has_callable(value: Any, _seen: set[int] | None = None,
-                 _depth: int = 0) -> bool:
-    """
-    Check if a value contains any callable (function, lambda, method).
-
-    This is a structural purity check - callables cannot be Mu because
-    they cannot be serialized to JSON. They represent host (Python) logic
-    leaking into the Mu world.
-
-    Args:
-        value: The value to check.
-        _seen: Internal parameter for cycle detection. Do not pass.
-        _depth: Internal parameter for depth tracking. Do not pass.
-
-    Returns:
-        True if value contains a callable anywhere in its structure.
-
-    Note:
-        Circular references are handled safely (return False, no callable found
-        in the cycle since we already checked the node).
-    """
-    if callable(value):
-        return True
-
-    if _depth >= MAX_MU_DEPTH:
-        return False  # Too deep — no callable found within depth limit
-
-    # For compound types, check for circular references.
-    # Uses isinstance (not type()) intentionally — catches callables hidden in
-    # list/dict subclasses too. Wider safety net than is_mu's type() check.
-    if isinstance(value, (list, dict)):
-        if _seen is None:
-            _seen = set()
-        value_id = id(value)
-        if value_id in _seen:
-            # Already visited - no callable found on this path
-            return False
-        # Backtracking: add on entry, remove on exit.
-        # O(1) per node (vs O(depth) for set copy).
-        _seen.add(value_id)
-        if isinstance(value, list):
-            result = any(has_callable(item, _seen, _depth + 1) for item in value)
-        else:
-            result = any(has_callable(v, _seen, _depth + 1) for v in value.values())
-        _seen.discard(value_id)
-        return result
-
-    return False
-
-
 def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None,
                        _depth: int = 0) -> str | None:
     """
@@ -282,7 +338,7 @@ def find_callable_path(value: Any, path: str = "", _seen: set[int] | None = None
         return None  # Too deep — no callable found within depth limit
 
     # For compound types, check for circular references.
-    # Uses isinstance (not type()) — same rationale as has_callable.
+    # Uses isinstance (not type()) intentionally — catches callables hidden in subclasses.
     if isinstance(value, (list, dict)):
         if _seen is None:
             _seen = set()
@@ -565,20 +621,6 @@ def mu_hash(value: Any) -> str:
 # Data-flow paths (observer output, undefined motif) use mu_hash directly.
 # See NorthStarSemantics.v0.md §B.1 for policy.
 # =============================================================================
-
-
-class NumericHashError(TypeError):
-    """Raised when a non-integer float enters a hash-sensitive control path.
-
-    Currently unused (canonicalization handles all cases), but retained as
-    the canonical error type for future strictness if needed.
-    """
-    error_code = "input.numeric_hash_unsupported"
-
-    def __init__(self, context: str, value: Any):
-        super().__init__(
-            f"{context}: non-integer float {value!r} in hash-sensitive path"
-        )
 
 
 def _canonicalize_hash_numeric(value: Any) -> Any:

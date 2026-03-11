@@ -244,9 +244,11 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 2 (eval_seed.py list/dict comprehensions)
-    assert ast_ok_count == 2, (
-        f"Expected 2 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    # Current expected count is 4:
+    #   - 2 eval_seed.py list/dict comprehensions (original)
+    #   - 2 eval_seed.py budget-path comprehensions (D009 depth threading)
+    assert ast_ok_count == 4, (
+        f"Expected 4 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 

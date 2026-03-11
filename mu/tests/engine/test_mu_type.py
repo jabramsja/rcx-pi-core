@@ -14,7 +14,7 @@ import pytest
 
 from rcx_pi.mu_type import (
     is_mu, validate_mu, assert_mu, mu_type_name,
-    has_callable, find_callable_path, assert_no_callables,
+    find_callable_path, assert_no_callables,
     assert_seed_pure, assert_handler_pure, validate_kernel_boundary,
     mu_equal, mu_hash, mark_bootstrap, get_bootstrap_registry,
     assert_no_bootstrap_in_production, BOOTSTRAP_REGISTRY
@@ -453,59 +453,6 @@ class TestTracePayloadCompatibility:
 # These tests ensure we program IN RCX (using Mu) rather than ABOUT RCX.
 # See mu/docs/core/StructuralPurity.v0.md for rationale.
 # =============================================================================
-
-
-class TestHasCallable:
-    """Tests for has_callable() - detects functions/lambdas in structures."""
-
-    def test_lambda_detected(self):
-        """Lambda is detected as callable."""
-        assert has_callable(lambda x: x) is True
-
-    def test_function_detected(self):
-        """Function is detected as callable."""
-        def my_func():
-            pass
-        assert has_callable(my_func) is True
-
-    def test_builtin_detected(self):
-        """Built-in function is detected as callable."""
-        assert has_callable(len) is True
-
-    def test_lambda_in_dict_detected(self):
-        """Lambda nested in dict is detected."""
-        value = {"handler": lambda x: x}
-        assert has_callable(value) is True
-
-    def test_lambda_in_list_detected(self):
-        """Lambda nested in list is detected."""
-        value = [1, 2, lambda x: x]
-        assert has_callable(value) is True
-
-    def test_deeply_nested_callable_detected(self):
-        """Callable deeply nested is detected."""
-        value = {"a": [{"b": {"c": lambda x: x}}]}
-        assert has_callable(value) is True
-
-    def test_pure_mu_no_callable(self):
-        """Pure Mu has no callable."""
-        assert has_callable(42) is False
-        assert has_callable("hello") is False
-        assert has_callable([1, 2, 3]) is False
-        assert has_callable({"a": 1}) is False
-        assert has_callable({"a": [1, {"b": 2}]}) is False
-
-    def test_circular_list_no_callable(self):
-        """Circular list without callable handled safely (no stack overflow)."""
-        circular_list = [1, 2]
-        circular_list.append(circular_list)  # Creates cycle
-        assert has_callable(circular_list) is False
-
-    def test_circular_dict_no_callable(self):
-        """Circular dict without callable handled safely (no stack overflow)."""
-        circular_dict = {"a": 1}
-        circular_dict["self"] = circular_dict  # Creates cycle
-        assert has_callable(circular_dict) is False
 
 
 class TestFindCallablePath:

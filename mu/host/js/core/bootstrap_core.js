@@ -12,7 +12,7 @@
  */
 
 const { MAX_DEPTH, NO_MATCH, RcxError } = require('./constants');
-const { isVar, isValidMu, muHashCached, muHashControlCached } = require('./types');
+const { isVar, isValidMu, muHashCached, muHashControlCached, _NO_BUDGET, consumeBudget } = require('./types');
 const { normalize, denormalize } = require('./normalize');
 
 /**
@@ -24,7 +24,60 @@ const { normalize, denormalize } = require('./normalize');
  * Parity: Python match() validates at entry, _match_inner does not.
  * The _validated flag mirrors calling _match_inner directly.
  */
-function match(pattern, input, _depth = 0, _validated = false) {
+function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUDGET) {
+  // --- Structural budget path (opt-in) ---
+  if (_budget !== _NO_BUDGET) {
+    const [ok, remaining] = consumeBudget(_budget);
+    if (!ok) return NO_MATCH;
+
+    if (isVar(pattern)) {
+      if (!pattern.var) return NO_MATCH;
+      return { [pattern.var]: input };
+    }
+    if (pattern === null) return input === null ? {} : NO_MATCH;
+    if (typeof pattern !== 'object') return pattern === input ? {} : NO_MATCH;
+
+    if (Array.isArray(pattern)) {
+      if (!Array.isArray(input) || pattern.length !== input.length) return NO_MATCH;
+      const bindings = Object.create(null);
+      for (let i = 0; i < pattern.length; i++) {
+        const sub = match(pattern[i], input[i], _depth, false, remaining);
+        if (sub === NO_MATCH) return NO_MATCH;
+        for (const [k, v] of Object.entries(sub)) {
+          if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) return NO_MATCH;
+          bindings[k] = v;
+        }
+      }
+      return bindings;
+    }
+
+    if (typeof pattern === 'object') {
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) return NO_MATCH;
+      const pKeys = new Set(Object.keys(pattern));
+      const iKeys = new Set(Object.keys(input));
+      if (pKeys.size !== iKeys.size) {
+        const inputExtra = [...iKeys].filter(k => !pKeys.has(k));
+        const patternExtra = [...pKeys].filter(k => !iKeys.has(k));
+        const typeIsList = (input._type === 'list');
+        if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) return NO_MATCH;
+      } else {
+        for (const k of pKeys) { if (!iKeys.has(k)) return NO_MATCH; }
+      }
+      const bindings = Object.create(null);
+      for (const k of pKeys) {
+        const sub = match(pattern[k], input[k], _depth, false, remaining);
+        if (sub === NO_MATCH) return NO_MATCH;
+        for (const [bk, bv] of Object.entries(sub)) {
+          if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) return NO_MATCH;
+          bindings[bk] = bv;
+        }
+      }
+      return bindings;
+    }
+    return NO_MATCH;
+  }
+
+  // --- Integer depth path (default — existing behavior, zero overhead) ---
   // Parity with Python _match_inner: depth overflow returns NO_MATCH (not throw).
   // This allows step() to try the next projection gracefully.
   if (_depth > MAX_DEPTH) {
@@ -126,7 +179,35 @@ function match(pattern, input, _depth = 0, _validated = false) {
  *
  * Substitute variable sites in body with bound values.
  */
-function substitute(body, bindings, _depth = 0) {
+function substitute(body, bindings, _depth = 0, _budget = _NO_BUDGET) {
+  // --- Structural budget path (opt-in) ---
+  if (_budget !== _NO_BUDGET) {
+    const [ok, remaining] = consumeBudget(_budget);
+    if (!ok) throw new Error('Structural depth budget exhausted in substitute');
+
+    if (_depth === 0) {
+      if (!isValidMu(body)) {
+        throw new RcxError('input.invalid_type', 'Invalid Mu body in substitute()');
+      }
+    }
+
+    if (isVar(body)) {
+      const name = body.var;
+      if (!Object.hasOwn(bindings, name)) throw new Error(`Unbound variable: ${name}`);
+      return bindings[name];
+    }
+    if (body === null || typeof body !== 'object') return body;
+    if (Array.isArray(body)) {
+      return body.map(elem => substitute(elem, bindings, _depth, remaining));
+    }
+    const result = Object.create(null);
+    for (const [k, v] of Object.entries(body)) {
+      result[k] = substitute(v, bindings, _depth, remaining);
+    }
+    return result;
+  }
+
+  // --- Integer depth path (default — existing behavior, zero overhead) ---
   if (_depth > MAX_DEPTH) {
     throw new Error(`Max depth exceeded in substitute (${MAX_DEPTH})`);
   }
