@@ -85,6 +85,17 @@ SEED_CHECKSUMS: dict[str, str] = {
     "evidence_walker.v1.json": "e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29",
 }
 
+# Sidecar metadata: lifecycle status for each seed.
+# Does NOT affect checksum validation — pure metadata for tooling and audit.
+# Values: "production" (default), "legacy-poc" (proof-of-concept, superseded by v2+)
+SEED_STATUS: dict[str, str] = {
+    "kernel.v1.json": "production",
+    "recurrence.v1.json": "legacy-poc",  # superseded by recurrence.v2.json
+    "exhaustion.v1.json": "legacy-poc",  # proof-of-concept sentinel-skip patterns
+    "match.v1.json": "legacy-poc",  # superseded by match.v2.json
+    "subst.v1.json": "legacy-poc",  # superseded by subst.v2.json
+}
+
 # Expected projection IDs for each seed.
 # These must be present for the seed to be valid.
 EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
