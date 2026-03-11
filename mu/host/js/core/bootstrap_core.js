@@ -246,9 +246,15 @@ function substitute(body, bindings, _depth = 0, _budget = _NO_BUDGET) {
  * Apply a single projection to input.
  */
 function applyProjection(projection, input) {
-  // D005 Stage 0 pilot routing (default OFF — zero behavior change at rest)
+  // Gate 3: Auto-normalize input when pattern uses normalized dict format.
+  // match() handles this internally; stage0Match needs it externally (parity).
+  let inputVal = input;
+  if (_stage0Pilot && typeof projection.pattern === 'object' && projection.pattern !== null &&
+      !Array.isArray(projection.pattern) && projection.pattern._type === 'dict') {
+    inputVal = normalize(inputVal);
+  }
   const bindings = _stage0Pilot
-    ? stage0Match(projection.pattern, input)
+    ? stage0Match(projection.pattern, inputVal)
     : match(projection.pattern, input);
   if (bindings === NO_MATCH) {
     return NO_MATCH;
@@ -421,7 +427,7 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
 // See L4DecisionCard.v0.md D005.
 // ---------------------------------------------------------------------------
 
-let _stage0Pilot = false; // Module-level pilot flag (default OFF)
+let _stage0Pilot = true; // Module-level pilot flag (default ON — Wave H 2026-03-11)
 
 function setStage0Pilot(value) {
   _stage0Pilot = !!value;
@@ -429,6 +435,7 @@ function setStage0Pilot(value) {
 
 /**
  * Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure.
+ * @host_recursion — Stage 0 recursive pattern matching (bootstrap primitive)
  */
 function stage0Match(pattern, input, bindings, _depth = 0) {
   if (_depth > MAX_DEPTH) {
@@ -509,6 +516,7 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
 
 /**
  * Stage 0 substitute: recursive tree walk. Throws on unbound variable.
+ * @host_recursion — Stage 0 recursive substitution (bootstrap primitive)
  */
 function stage0Substitute(body, bindings, _depth = 0) {
   if (_depth > MAX_DEPTH) {

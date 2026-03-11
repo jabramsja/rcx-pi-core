@@ -507,20 +507,24 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 
 
 # ---------------------------------------------------------------------------
-# Stage 0 micro-kernel (D005 production pilot)
+# Stage 0 micro-kernel (D005 production)
 # Accumulator-style match + recursive substitute. Parallel path to _match_inner/substitute.
 # Proves circular dependency is breakable. See L4DecisionCard.v0.md D005.
 # Host debt: same surface as match()/substitute() — isinstance dispatch, Python call stack,
-#   .append() mutation in _stage0_substitute. Pending @host_* markers (deferred to mt wave).
+#   .append() mutation in _stage0_substitute. Markers added Wave H (2026-03-11).
 # ---------------------------------------------------------------------------
 
-# WARNING: D005 research flag. Do NOT toggle in production. Toggle ONLY in
-# tests via monkeypatch. If enabled, _apply_projection_trusted routes through
+# Stage0 production flag. When True, _apply_projection_trusted routes through
 # _stage0_match/_stage0_substitute instead of _match_inner/substitute.
-# See L4DecisionCard.v0.md D005 for risk profile.
-_STAGE0_PILOT = False
+# Flipped to True in Wave H (2026-03-11) after 90 gate tests proving ON/OFF parity.
+_STAGE0_PILOT = True
 
 
+@host_recursion(
+    "Stage 0 micro-match: isinstance dispatch + recursive dict/list traversal. "
+    "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → match → kernel). "
+    "Same host surface as _match_inner but ~52 LOC accumulator-style."
+)
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     """Stage 0 match: accumulator-style bindings. Returns NO_MATCH on failure."""
     if _depth > MAX_MU_DEPTH:
@@ -593,11 +597,13 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     return NO_MATCH
 
 
+@host_recursion(
+    "Stage 0 micro-substitute: isinstance dispatch + recursive dict/list traversal + .append() mutation. "
+    "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → subst → kernel). "
+    "Same host surface as substitute but ~27 LOC simple tree walk."
+)
 def _stage0_substitute(body, bindings, _depth=0):
-    """Stage 0 substitute: recursive tree walk. Raises on unbound variable.
-
-    Host debt: .append() mutation for list/dict construction (same as substitute).
-    """
+    """Stage 0 substitute: recursive tree walk. Raises on unbound variable."""
     if _depth > MAX_MU_DEPTH:
         raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
     if body is None:
