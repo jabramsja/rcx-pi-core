@@ -989,8 +989,8 @@ class TestJSBridgeParity:
         assert "bootstrap_structural.v1.json: 5 projections" in result.stdout, (
             "JS should load 5 bridge projections"
         )
-        assert "Total (with Bridge): 32 projections" in result.stdout, (
-            "JS combined kernel+bridge should be 32 projections"
+        assert "Total (with Bridge): 33 projections" in result.stdout, (
+            "JS combined kernel+bridge should be 33 projections"
         )
 
     def test_js_bridge_constants_reported(self):
@@ -1000,8 +1000,8 @@ class TestJSBridgeParity:
         assert js_response["bridge_projection_count"] == 5, (
             f"Expected 5 bridge projections, got {js_response['bridge_projection_count']}"
         )
-        assert js_response["total_with_bridge"] == 32, (
-            f"Expected 32 total with bridge, got {js_response['total_with_bridge']}"
+        assert js_response["total_with_bridge"] == 33, (
+            f"Expected 33 total with bridge, got {js_response['total_with_bridge']}"
         )
 
     def test_recurrence_with_bridge_no_closure(self):

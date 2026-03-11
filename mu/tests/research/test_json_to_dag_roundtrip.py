@@ -189,7 +189,7 @@ class TestBaselineCounts:
     def test_subst_v2_projection_count(self) -> None:
         seed = _load_seed(SUBST_V2)
         dag = compile_to_dag(seed)
-        assert dag["metrics"]["projection_count"] == 12
+        assert dag["metrics"]["projection_count"] == 13
 
     def test_match_v2_has_sharing(self) -> None:
         """DAG should have fewer nodes than naive tree (content-addressing works)."""

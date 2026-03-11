@@ -42,10 +42,12 @@ SEED_CHECKSUMS: dict[str, str] = {
     "kernel.v1.json": "8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f",
     # Phase 7b: match with kernel context passthrough + match.fail (fixed var names)
     # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
-    "match.v2.json": "cd89ce2bef9668b2e0bb190ad8a615a53bd699d4a0ad3ff9d6c1429db5e3594d",
+    # Updated: Fixed invariant honesty (match.equal non-linear acknowledgment)
+    "match.v2.json": "11c79466bb3c4761513cd09f0d4bfda234802a8f8f130a62282e46f2c078fbb6",
     # Phase 7b: subst with kernel context passthrough
     # Updated: Added execution_layer: META_CIRCULAR
-    "subst.v2.json": "0b735c52da437a6eae1478dc4c992269bff8978c7e9084d15ffcba6c06e3037f",
+    # Updated: Added subst.lookup.exhausted (structural unbound-variable error)
+    "subst.v2.json": "aa6a9581ef2befe3783e5190d5149c4dd71d7e67e70b92e90f93e7c193822d24",
     # mu/ folder reorganization: renamed from enginenews.v1/exhaust.v1 to recurrence.v1/exhaustion.v1
     # Legacy names (enginenews.v1, exhaust.v1) removed - mu/ is now canonical
     # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
@@ -158,6 +160,7 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "subst.var",
         "subst.lookup.found",
         "subst.lookup.next",
+        "subst.lookup.exhausted",
         "subst.typed.descend",
         "subst.typed.sibling",
         "subst.typed.ascend",

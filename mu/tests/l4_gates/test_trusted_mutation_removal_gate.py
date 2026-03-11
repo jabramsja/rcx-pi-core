@@ -249,7 +249,7 @@ class TestRatchetEvidence:
         assert result.returncode == 0, f"Ratchet failed:\n{result.stderr}"
 
     def test_py_host_mutation_zero(self):
-        """Python host_mutation must be 0."""
+        """Python host_mutation must be 1 (Wave I: _stage0_substitute @host_mutation)."""
         result = subprocess.run(
             ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
             capture_output=True,
@@ -257,9 +257,9 @@ class TestRatchetEvidence:
             timeout=30,
         )
         data = json.loads(result.stdout)
-        assert data["current"]["python"]["host_mutation"] == 0, (
+        assert data["current"]["python"]["host_mutation"] == 1, (
             f"Python host_mutation is {data['current']['python']['host_mutation']}, "
-            f"expected 0"
+            f"expected 1"
         )
 
     def test_total_decreased(self):

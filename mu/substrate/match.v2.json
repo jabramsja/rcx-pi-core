@@ -9,7 +9,7 @@
       "All projections are pure Mu (JSON-compatible)",
       "No host recursion - kernel loop provides iteration",
       "Deterministic: same input -> same output",
-      "Linear patterns only (no conflict detection)",
+      "Linear patterns only except match.equal (non-linear: same-var equality via host conflict detection)",
       "_match_ctx passes through unchanged for kernel integration"
     ]
   },

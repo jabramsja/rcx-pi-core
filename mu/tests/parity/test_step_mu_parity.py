@@ -294,14 +294,14 @@ class TestStepMuErrors:
 
     @pytest.mark.slow
     def test_unbound_variable(self):
-        """Unbound variable in body: step raises KeyError, step_mu stalls.
+        """Unbound variable in body: step raises KeyError, step_mu produces structural error.
 
-        Phase 7d behavioral difference: The structural kernel (step_mu) treats
-        unbound variables as a stall condition rather than an error. This is
-        more consistent with pure Mu semantics where errors become stalls.
+        Wave I (subst.lookup.exhausted): The structural kernel (step_mu) now
+        produces a structural error value instead of silently stalling.
+        This is the correct meta-circular behavior — errors are values.
 
         - step(): Raises KeyError (Python error handling)
-        - step_mu(): Returns original input (stall - structural behavior)
+        - step_mu(): Returns {"_error": "unbound_variable", "_name": <name>}
         """
         projections = [
             {"pattern": 42, "body": {"result": {"var": "unbound"}}}
@@ -311,6 +311,11 @@ class TestStepMuErrors:
         with pytest.raises(KeyError):
             step(projections, 42)
 
-        # Structural step_mu stalls instead of raising
+        # Structural step_mu produces error value (not stall)
+        # Body is {"result": {"var": "unbound"}} — error nests inside "result" key
         result = step_mu(projections, 42)
-        assert result == 42  # Returns original input (stall)
+        assert isinstance(result, dict)
+        error_value = result.get("result")
+        assert isinstance(error_value, dict)
+        assert error_value.get("_error") == "unbound_variable"
+        assert error_value.get("_name") == "unbound"

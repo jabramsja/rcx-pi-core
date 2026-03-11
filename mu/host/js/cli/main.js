@@ -22,8 +22,8 @@ const { validateNoKernelReservedFields } = require('../core/security');
 // Seed integrity verification — parity with Python's seed_integrity.py
 const SEED_CHECKSUMS = {
   'kernel.v1.json': '8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f',
-  'match.v2.json': 'cd89ce2bef9668b2e0bb190ad8a615a53bd699d4a0ad3ff9d6c1429db5e3594d',
-  'subst.v2.json': '0b735c52da437a6eae1478dc4c992269bff8978c7e9084d15ffcba6c06e3037f',
+  'match.v2.json': '11c79466bb3c4761513cd09f0d4bfda234802a8f8f130a62282e46f2c078fbb6',
+  'subst.v2.json': 'aa6a9581ef2befe3783e5190d5149c4dd71d7e67e70b92e90f93e7c193822d24',
   'recurrence.v1.json': 'ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0',
   'recurrence.v2.json': 'f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9',
   'exhaustion.v1.json': '8489398b8264dd547b231f67c98543bba1d6d45a24bb5504039395a24eb068d3',
@@ -48,7 +48,8 @@ const EXPECTED_PROJECTION_IDS = {
   ],
   'subst.v2.json': [
     'subst.done', 'subst.ascend', 'subst.sibling', 'subst.var',
-    'subst.lookup.found', 'subst.lookup.next', 'subst.typed.descend',
+    'subst.lookup.found', 'subst.lookup.next', 'subst.lookup.exhausted',
+    'subst.typed.descend',
     'subst.typed.sibling', 'subst.typed.ascend', 'subst.descend',
     'subst.primitive', 'subst.wrap',
   ],
@@ -116,7 +117,7 @@ const EXPECTED_PROJECTION_IDS = {
 
 function verifySeedChecksum(seedName, rawContent) {
   const expected = SEED_CHECKSUMS[seedName];
-  if (!expected) return;
+  if (!expected) throw new Error(`Unknown seed: ${seedName} — not in SEED_CHECKSUMS (fail-closed)`);
   const actual = crypto.createHash('sha256').update(rawContent).digest('hex');
   if (actual !== expected) {
     throw new Error(`Seed ${seedName} checksum mismatch: expected ${expected}, got ${actual}`);
@@ -143,7 +144,7 @@ function validateSeedStructure(seedName, seed) {
 
 function validateProjectionIds(seedName, seed) {
   const expected = EXPECTED_PROJECTION_IDS[seedName];
-  if (!expected) return;
+  if (!expected) throw new Error(`Unknown seed: ${seedName} — not in EXPECTED_PROJECTION_IDS (fail-closed)`);
   const actualIds = seed.projections.map(p => p.id);
   if (actualIds.length !== expected.length) {
     throw new Error(`Seed ${seedName}: expected ${expected.length} projections, got ${actualIds.length}`);

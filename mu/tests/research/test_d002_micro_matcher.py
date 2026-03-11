@@ -128,7 +128,7 @@ ALL_PROJECTIONS = _load_projections("match.v2.json", "subst.v2.json")
 # ---------------------------------------------------------------------------
 
 class TestMicroMatcherAllProjections:
-    """Validate micro_match against all 20 match.v2 + subst.v2 patterns."""
+    """Validate micro_match against all 21 match.v2 + subst.v2 patterns."""
 
     @pytest.mark.parametrize(
         "seed_name,proj_id,pattern,body",
@@ -333,7 +333,7 @@ class TestD001Consistency:
     """Verify D001 counts are still accurate."""
 
     def test_total_projection_count(self):
-        assert len(ALL_PROJECTIONS) == 20
+        assert len(ALL_PROJECTIONS) == 21
 
     def test_match_projection_count(self):
         match_projs = [p for p in ALL_PROJECTIONS if p[0] == "match.v2.json"]
@@ -341,7 +341,7 @@ class TestD001Consistency:
 
     def test_subst_projection_count(self):
         subst_projs = [p for p in ALL_PROJECTIONS if p[0] == "subst.v2.json"]
-        assert len(subst_projs) == 12
+        assert len(subst_projs) == 13
 
     def test_distinct_top_level_signatures(self):
         sigs = set()

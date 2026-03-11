@@ -18,7 +18,6 @@ from rcx_pi.selfhost.step_mu import (
     step_kernel_mu,
     step_mu,
 )
-from rcx_pi.selfhost.mu_type import mu_equal
 
 
 # =============================================================================
@@ -306,12 +305,19 @@ class TestParityWithPreviousBehavior:
         # Identity returns same value, detected as stall
         assert result == 42
 
-    def test_unbound_var_stalls(self):
-        """Unbound variable in body causes stall (not error)."""
+    def test_unbound_var_produces_structural_error(self):
+        """Unbound variable in body produces structural error value (not silent stall).
+
+        Wave I (subst.lookup.exhausted): structural substitution now produces
+        {"_error": "unbound_variable", "_name": <varname>} instead of silently
+        stalling. This is the correct structural behavior — errors are values.
+        """
         projections = [{"pattern": 42, "body": {"var": "unbound"}}]
         result = step_mu(projections, 42)
-        # Phase 7d-1 changed: unbound vars stall instead of KeyError
-        assert result == 42
+        # Structural path: subst.lookup.exhausted produces error value
+        assert isinstance(result, dict)
+        assert result.get("_error") == "unbound_variable"
+        assert result.get("_name") == "unbound"
 
     def test_empty_list_handled(self):
         """Empty lists are handled correctly."""

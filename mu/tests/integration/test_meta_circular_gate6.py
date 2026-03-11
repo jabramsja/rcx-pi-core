@@ -378,8 +378,8 @@ class TestKernelWithBridgeLoading:
         """Verify combined kernel with bridge projections load correctly."""
         projs = load_combined_kernel_with_bridge_projections()
 
-        # kernel.v1 = 7, match.v2 = 8, bridge = 5, subst.v2 = 12 = 32
-        assert len(projs) == 32, f"Expected 32 projections, got {len(projs)}"
+        # kernel.v1 = 7, match.v2 = 8, bridge = 5, subst.v2 = 13 = 33
+        assert len(projs) == 33, f"Expected 33 projections, got {len(projs)}"
 
     def test_kernel_includes_bridge(self):
         """Verify combined kernel includes bridge projections."""
