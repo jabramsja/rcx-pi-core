@@ -10,7 +10,7 @@
 
 ```
 PHASE: 8c
-NAME: Gate 5 Meta-Circular Parity (COMPLETE)
+NAME: Structural Selection Parity (L1-L3 COMPLETE)
 ```
 
 ## Projection-Based Architecture Levels
@@ -196,11 +196,11 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Terminology Lock:** `sink` (lowercase) = runtime hemisphere bucket (e.g., `r_sink` in projection routing). `SINK` (uppercase) = governance task lane in TASKS.md (parked work items). `r_a` = runtime accumulator bucket. `Ra` = resolved-work section in TASKS.md. These are distinct concepts; never conflate them.
 
-**Boot1 Current Reality (truth-sync 2026-02-18):**
+**Boot1 Current Reality (truth-sync 2026-03-11):**
 Boot1 is a **host-side loop policy alternative**, not a seed-defined structural loop. Two host paths exist:
-- **Trampoline (default):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:run_engine_pipeline()`, `eval_step.js:runEnginePipeline()`)
-- **Recursive shadow:** `_run_engine_recursive()` recursive call stack (`step_mu.py:_run_engine_recursive()`, `eval_step.js:runEnginePipelineRecursive()`)
-Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); default remains trampoline. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec.
+- **Recursive (default):** `_run_engine_recursive()` recursive call stack (`step_mu.py:_run_engine_recursive()`, `eval_step.js:runEnginePipelineRecursive()`) — `use_boot1_recursive=True` default in `run_engine_pipeline()`
+- **Trampoline (fallback):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:run_engine_pipeline()`, `eval_step.js:runEnginePipeline()`)
+Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); Boot1 recursive promoted to default. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec. Note: Boot1 is NOT meta-circular progress — it changes the host execution strategy, not the structural execution model (see `Boot1LoopContract.v0.md` "does not promote to META-CIRCULAR").
 
 **Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~4200 LOC core in JS across 15 modules), we know exactly what would need to change.
 
@@ -324,12 +324,14 @@ INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
-**Debt breakdown:**
+**Debt floor breakdown (11 irreducible sites — see enumeration below):**
 - @host_recursion: 2 (eval_seed match/substitute - BOOTSTRAP)
 - @host_builtin: 3 (eval_seed, deep_eval)
 - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
 - @host_mutation: 1 (deep_eval only — eval_seed mutation removed via pure merge in CP-S1A)
 - AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+
+**Total host semantics markers (32 = 15 Py + 17 JS):** The floor of 11 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 2 recursion + 1 builtin + 12 iteration; JS = 4 recursion + 3 builtin + 10 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
@@ -465,11 +467,13 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 - Design doc: `mu/docs/core/MetaCircularKernel.v0.md`
 - Self-hosting: `mu/host/python/rcx_pi/selfhost/` (match_mu, subst_mu, step_mu) — `rcx_pi/` is backward-compat symlink
-- **mu/ folder (new organized structure):**
-  - Substrate: `mu/substrate/` (kernel.v1, match.v2, subst.v2)
-  - Closures: `mu/closures/` (recurrence.v1, recurrence.v2, exhaustion.v1)
-  - Programs: `mu/programs/` (rcx_engine.v1, hemispheres.v1)
-  - Host: `mu/host/js/eval_step.js`, `mu/host/python/selfhost`
+- **mu/ folder (5-directory seed layout + host):**
+  - Substrate: `mu/substrate/` (kernel.v1, match.v1, match.v2, subst.v1, subst.v2)
+  - Closures: `mu/closures/` (recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1)
+  - Bridge: `mu/bridge/` (bootstrap_structural.v1)
+  - Programs: `mu/programs/` (rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1)
+  - Utilities: `mu/utilities/` (classify.v1, eval.v1, terminal_classify.v1, evidence_walker.v1)
+  - Host: `mu/host/js/` (15 modules, ~4500 LOC core), `mu/host/python/rcx_pi/selfhost/`
 - Task list: `TASKS.md`
 - **Agent bridge:** `mu/docs/agents/AgentBridgeProtocol.v0.md` (Claude ↔ Codex collaboration, hybrid review, design deliberation)
 - **Documentation governance:** `mu/docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
