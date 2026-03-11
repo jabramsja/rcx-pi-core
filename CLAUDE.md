@@ -82,7 +82,7 @@ These are the only two files that track current state. Do not duplicate status i
 
 ## Agents
 
-**What agents are:** RCX uses a multi-agent code review system - specialized AI agents that each check different aspects of code changes. The key agents are:
+**What agents are:** RCX uses a multi-agent code review system — specialized AI agents that each check different aspects of code changes. The key agents are:
 - **verifier** - Checks code against North Star invariants
 - **adversary** - Red-team security review (tries to break things)
 - **expert** - Complexity and simplification review
@@ -90,14 +90,36 @@ These are the only two files that track current state. Do not duplicate status i
 
 **Why agents exist:** We don't trust any single reviewer. We trust the *fight* between specialized agents that check each other's blind spots.
 
+**Two ways to run agents:**
+
+| Method | When | What it gives you |
+|--------|------|-------------------|
+| **Native subagents** (`.claude/agents/`) | Ad-hoc single-agent checks during development | Instant launch, no SDK needed, project memory |
+| **SDK orchestrator** (`run_review.py`) | Batch review: parallel groups, depth tiers, unified reports | `--depth`, `--rigorous`, verdict synthesis, regression tracking |
+
+Both systems are complementary. Native agents do NOT replace `run_review.py`.
+
 **Canonical docs:**
 - `mu/docs/agents/AgentRunbook.v0.md` - **Start here** - Tool overview, which tool when, commands, depth levels
 - `mu/docs/agents/AgentRig.v0.md` - Architecture and trust model
 - `mu/docs/agents/AgentGuardrails.v0.md` - Output format requirements
 
-**Quick start:** `./tools/agents.sh`
+### Native Subagents (Ad-Hoc Use)
 
-### When to Run Agents
+9 native agents live in `.claude/agents/*.md`. Use them for quick targeted checks during development — no SDK or Python orchestration needed.
+
+```
+# In any Claude Code session, use the Agent tool:
+Agent(name="adversary", prompt="Review eval_seed.py for security issues")
+Agent(name="verifier", prompt="Check _match_inner for North Star violations")
+Agent(name="expert", prompt="Review step_mu.py for unnecessary complexity")
+```
+
+Available agents: `adversary`, `verifier`, `expert`, `structural-proof`, `grounding`, `fuzzer`, `translator`, `visualizer`, `advisor`
+
+**Sync**: If you update `tools/agents/*_prompt.md` (source of truth), run `bash tools/sync_native_agents.sh` to regenerate `.claude/agents/`.
+
+### SDK Orchestrator (Batch Review)
 
 **The rule:** If you touched `rcx_pi/selfhost/` or `mu/`, run agents before saying "done."
 
@@ -126,7 +148,10 @@ python tools/runners/run_review.py --pr --depth full
 # Rigorous mode (all 9 agents + skeptic challenge)
 python tools/runners/run_review.py --pr --rigorous
 
-# Interactive session
+# Ad-hoc native agent (in Claude Code session)
+# Agent(name="adversary", prompt="Review <file> for <focus>")
+
+# Interactive SDK session
 python tools/runners/run_interactive.py verifier rcx_pi/selfhost/
 
 # Full-stack health analysis (monthly/pre-release)
@@ -446,11 +471,14 @@ Every wave MUST declare a wave class. Machine-enforced by `tools/checks/enforce_
 | `STATUS.md` | Current phase/debt (source of truth) |
 | `TASKS.md` | Work items (source of truth) |
 | `mu/docs/core/` | Design specs |
+| `mu/docs/agents/AgentRunbook.v0.md` | Agent runbook (start here for agents) |
 | `mu/docs/agents/AgentRig.v0.md` | Agent rig docs |
 | `mu/host/python/rcx_pi/selfhost/` | Core implementation (canonical; `rcx_pi/` is backward-compat symlink) |
 | `mu/` | Mu projections: substrate/, closures/, bridge/, programs/, utilities/, host/ |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
 | `mu/substrate/`, `mu/closures/`, `mu/programs/` | Seed files (JSON projections) |
+| `.claude/agents/*.md` | Native subagents (generated — sync via `tools/sync_native_agents.sh`) |
+| `tools/agents/*_prompt.md` | Agent prompt source of truth |
 
 ---
 

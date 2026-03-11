@@ -23,7 +23,31 @@ Purpose: practical instructions for running RCX agents via SDK runners.
 
 ## Tool Overview
 
-Which tool to use and when:
+Two complementary systems exist for running agents:
+
+### 1. Native Subagents (`.claude/agents/`) — Ad-Hoc Use
+
+9 native Claude Code subagents for quick, targeted, interactive checks during development. No SDK or Python orchestration needed.
+
+| Feature | Detail |
+|---------|--------|
+| **Location** | `.claude/agents/*.md` |
+| **Source of truth** | `tools/agents/*_prompt.md` (sync via `bash tools/sync_native_agents.sh`) |
+| **How to invoke** | `Agent(name="adversary", prompt="Review <file> for <focus>")` in any Claude Code session |
+| **Permission mode** | `plan` (read-only — agents can Read/Grep/Glob but cannot write files) |
+| **Memory** | `project` scope — agents remember findings across sessions |
+| **Contract** | Red-team contract from `tools/agents/_contract_redteam.md` is inlined into each agent file |
+| **Compliance** | `SubagentStop` hook in `.claude/settings.json` validates agent output format |
+
+**Available agents:** `adversary`, `verifier`, `expert`, `structural-proof`, `grounding`, `fuzzer`, `translator`, `visualizer`, `advisor`
+
+**When to use:** Quick single-agent checks during development, targeted review of specific files/functions, ad-hoc security or invariant verification.
+
+**When NOT to use:** Batch review (use SDK orchestrator instead), anything requiring parallel groups, depth tiers, unified reports, or verdict synthesis.
+
+### 2. SDK Orchestrator (`run_review.py`) — Batch Review
+
+Full orchestration pipeline with parallel execution, depth tiers, unified reports, and regression tracking. This is the primary review system for pre-merge gates.
 
 | Tool | What it is | When to use | Time |
 |------|------------|-------------|------|
@@ -34,6 +58,7 @@ Which tool to use and when:
 | `bridge_supervisor.py` | Claude ↔ Codex collaboration bridge | After implementation, for independent Codex review; design deliberation | ~3-10 min |
 
 **Decision guide:**
+- Quick check on one file? → Native subagent (`Agent(name="adversary", prompt="...")`)
 - Changed core code? → `run_review.py --depth full`
 - Security-sensitive change? → `run_review.py --rigorous`
 - Monthly health check? → `run_deep_analysis.py`
@@ -351,12 +376,30 @@ python tools/runners/agent_memory.py clear --days 30
 
 Disable with `--no-memory` if needed.
 
+## Syncing Native Agents
+
+Native subagent files in `.claude/agents/` are generated from the source-of-truth prompt files in `tools/agents/`. If you update a prompt, re-sync:
+
+```bash
+bash tools/sync_native_agents.sh
+```
+
+This script:
+1. Reads each `tools/agents/*_prompt.md` (YAML frontmatter + lens body)
+2. Reads `tools/agents/_contract_redteam.md` (shared red-team contract)
+3. Generates `.claude/agents/<name>.md` with contract inlined + native YAML fields (permissionMode, maxTurns, memory)
+
+**Do NOT edit `.claude/agents/*.md` directly** — edits will be overwritten by the sync script. Edit `tools/agents/*_prompt.md` instead.
+
 ## Notes
 
-- Orchestrators run agents **in parallel** for speed
-- All agents load prompts from `tools/agents/*_prompt.md`
+- SDK orchestrators run agents **in parallel** for speed
+- Native subagents run via Claude Code's built-in Agent tool (can also run in background)
+- Prompt source of truth: `tools/agents/*_prompt.md`
+- Native agent files: `.claude/agents/*.md` (generated — do not edit directly)
+- SDK agent memory: `.agent_memory/findings.json`
+- Native agent memory: project-scoped (`.claude/` memory directory)
 - Session transcripts persist in `.claude/sessions/`
-- Findings persist in `.agent_memory/findings.json`
 - See `mu/docs/agents/AgentGuardrails.v0.md` for format requirements
 - See `mu/docs/agents/AgentRig.v0.md` for architecture and trust model
 - See `mu/docs/agents/NoOpProofTemplate.v0.md` for structured NO-OP evidence when correct action is "do nothing"
