@@ -35,9 +35,11 @@
  *     - runEnginePipeline()       - engine state machine effect handler loop
  *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
  *
- *   recursion debt: 4
+ *   recursion debt: 6
  *     - match()             - recursive pattern matching
  *     - substitute()        - recursive substitution
+ *     - stage0Match()       - Stage 0 recursive pattern matching (bootstrap primitive)
+ *     - stage0Substitute()  - Stage 0 recursive substitution (bootstrap primitive)
  *     - normalize()         - recursive normalization
  *     - denormalize()       - recursive denormalization
  *
@@ -46,7 +48,7 @@
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
  *
- * TOTAL DEBT: 17 (10 iteration + 4 recursion + 3 builtin)
+ * TOTAL DEBT: 19 (10 iteration + 6 recursion + 3 builtin)
  * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations
