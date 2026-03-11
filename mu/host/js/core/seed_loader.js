@@ -60,6 +60,36 @@ const CORE_SEED_PROJECTION_IDS = {
   ],
 };
 
+// Seed dependencies — mirrors SEED_DEPENDENCIES in Python seed_integrity.py.
+// Maps seed names to execution-time prerequisites (seeds whose projections must
+// be present for the dependent seed's projections to produce correct output).
+const SEED_DEPENDENCIES = {
+  'kernel.v1.json': ['match.v2.json', 'subst.v2.json'],
+  'match.v2.json': ['bootstrap_structural.v1.json'],
+  'rcx_engine.v1.json': ['recurrence.v2.json', 'exhaustion.v1.json', 'fix.v1.json'],
+  'hemispheres.v1.json': ['rcx_engine.v1.json'],
+  'metabolize_cycle.v1.json': ['hemispheres.v1.json', 'metabolization.v1.json'],
+};
+
+/**
+ * Validate that all execution-time dependencies are satisfied.
+ * @param {Set<string>} loadedSeeds - Set of seed names that are loaded
+ * @returns {string[]} Error messages (empty if all satisfied)
+ */
+function validateSeedDependencies(loadedSeeds) {
+  const errors = [];
+  for (const seedName of loadedSeeds) {
+    const deps = SEED_DEPENDENCIES[seedName];
+    if (!deps) continue;
+    for (const dep of deps) {
+      if (!loadedSeeds.has(dep)) {
+        errors.push(`Seed ${seedName} requires ${dep} but it is not loaded`);
+      }
+    }
+  }
+  return errors;
+}
+
 // Map seed names to mu/ subfolders — mirrors MU_SEED_LOCATIONS in Python seed_integrity.py.
 const SEED_SUBDIRS = {
   'kernel.v1.json': 'substrate',
@@ -169,4 +199,4 @@ function getSeedChecksum(seedName) {
   return CORE_SEED_CHECKSUMS[seedName] ?? null;
 }
 
-module.exports = { loadVerifiedSeed, getSeedSubdir, isFullyLockedSeed, getSeedChecksum, SEED_SUBDIRS };
+module.exports = { loadVerifiedSeed, getSeedSubdir, isFullyLockedSeed, getSeedChecksum, validateSeedDependencies, SEED_SUBDIRS, SEED_DEPENDENCIES };
