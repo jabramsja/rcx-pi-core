@@ -30,8 +30,13 @@ def _get_relative_import_modules(filepath: Path) -> list[tuple[int, str]]:
     tree = ast.parse(source, str(filepath))
     imports = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.level > 0 and node.module:
-            imports.append((node.lineno, node.module))
+        if isinstance(node, ast.ImportFrom) and node.level > 0:
+            if node.module:
+                imports.append((node.lineno, node.module))
+            else:
+                # from . import name1, name2 — module is None
+                for alias in (node.names or []):
+                    imports.append((node.lineno, alias.name))
     return imports
 
 
@@ -217,6 +222,32 @@ class TestNoCyclesWithoutShim:
             for n in no_deps:
                 order.append(n)
                 del remaining[n]
+
+
+class TestBareDotImportParsing:
+    """Ensure 'from . import X' form (module=None) is detected by the parser."""
+
+    def test_bare_dot_import_detected(self):
+        """_get_relative_import_modules must parse 'from . import step_mu'."""
+        import tempfile
+        code = "from . import step_mu\n"
+        with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+            f.write(code)
+            f.flush()
+            results = _get_relative_import_modules(Path(f.name))
+        assert len(results) == 1
+        assert results[0][1] == "step_mu"
+
+    def test_bare_dot_import_multiple_names(self):
+        """'from . import a, b' produces two entries."""
+        import tempfile
+        code = "from . import step_mu, engine_pipeline\n"
+        with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+            f.write(code)
+            f.flush()
+            results = _get_relative_import_modules(Path(f.name))
+        modules = {m for _, m in results}
+        assert modules == {"step_mu", "engine_pipeline"}
 
 
 class TestEnforcerScript:

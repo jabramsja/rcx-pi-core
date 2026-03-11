@@ -60,8 +60,14 @@ def _get_relative_imports(filepath: Path) -> list[tuple[int, str]]:
     tree = ast.parse(source, str(filepath))
     imports = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.level > 0 and node.module:
-            imports.append((node.lineno, node.module))
+        if isinstance(node, ast.ImportFrom) and node.level > 0:
+            if node.module:
+                # from .module import name
+                imports.append((node.lineno, node.module))
+            else:
+                # from . import name1, name2 — module is None
+                for alias in (node.names or []):
+                    imports.append((node.lineno, alias.name))
     return imports
 
 
