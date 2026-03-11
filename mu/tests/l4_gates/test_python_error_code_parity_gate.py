@@ -220,9 +220,13 @@ class TestErrorCodeSourceLock:
     """All locked error codes must appear as string literals in both substrates."""
 
     def test_python_source_contains_all_codes(self):
-        """Python step_mu.py contains all locked error code strings."""
-        py_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
-        source = py_path.read_text()
+        """Python runtime source contains all locked error code strings."""
+        # After Boot0 extraction (Wave E), engine codes live in engine_pipeline.py
+        py_files = [
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py",
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py",
+        ]
+        source = "\n".join(f.read_text() for f in py_files)
         for code in LOCKED_ERROR_CODES:
             assert f'"{code}"' in source, (
                 f"Python source missing error code string: {code!r}"
