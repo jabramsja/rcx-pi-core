@@ -348,6 +348,62 @@ MU_SEED_LOCATIONS: dict[str, str] = {
 
 
 # =============================================================================
+# Seed Dependencies (Execution-Time Prerequisites)
+# =============================================================================
+# Maps seed names to the seeds they require to be loaded for correct execution.
+# Dependencies are EXECUTION-level: the dependent seed's projections produce output
+# that expects to be consumed by projections from the required seed.
+# This is NOT about load order (seeds load independently) but about ensuring
+# all required projection families are present when running a program.
+SEED_DEPENDENCIES: dict[str, list[str]] = {
+    # Kernel dispatches to match.v2 and subst.v2 for structural execution
+    "kernel.v1.json": ["match.v2.json", "subst.v2.json"],
+    # match.v2 uses bootstrap_structural bridge for non-linear binding support
+    "match.v2.json": ["bootstrap_structural.v1.json"],
+    # Engine orchestrates recurrence, exhaustion, and fix sub-algorithms
+    "rcx_engine.v1.json": [
+        "recurrence.v2.json",
+        "exhaustion.v1.json",
+        "fix.v1.json",
+    ],
+    # Hemispheres routing expects engine result shape (from rcx_engine)
+    "hemispheres.v1.json": ["rcx_engine.v1.json"],
+    # Metabolize cycle walks hemisphere structure (from hemispheres)
+    "metabolize_cycle.v1.json": [
+        "hemispheres.v1.json",
+        "metabolization.v1.json",
+    ],
+    # Seeds with NO external dependencies (leaf nodes):
+    # match.v1.json, subst.v1.json, subst.v2.json, classify.v1.json,
+    # recurrence.v1.json, recurrence.v2.json, exhaustion.v1.json,
+    # bootstrap_structural.v1.json, eval.v1.json, paxos_demo.v1.json,
+    # fix.v1.json, metabolization.v1.json, terminal_classify.v1.json,
+    # evidence_walker.v1.json
+}
+
+
+def validate_seed_dependencies(loaded_seeds: set[str]) -> list[str]:
+    """
+    Validate that all execution-time dependencies are satisfied.
+
+    Args:
+        loaded_seeds: Set of seed names that are loaded/available.
+
+    Returns:
+        List of error messages (empty if all dependencies satisfied).
+    """
+    errors = []
+    for seed_name in loaded_seeds:
+        deps = SEED_DEPENDENCIES.get(seed_name, [])
+        for dep in deps:
+            if dep not in loaded_seeds:
+                errors.append(
+                    f"Seed {seed_name} requires {dep} but it is not loaded"
+                )
+    return errors
+
+
+# =============================================================================
 # Checksum Verification
 # =============================================================================
 
