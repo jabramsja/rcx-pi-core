@@ -49,12 +49,15 @@ class TestSubstV2SeedStructure:
             assert "_subst_ctx" in proj_str, f"Projection {proj['id']} missing _subst_ctx"
 
     def test_v2_projection_count(self, v1_seed, v2_seed):
-        """v2 should have same projection count as v1 (context is additive only)."""
+        """v2 must have >= v1 projections (v2 may add new projections)."""
         v1_count = len(v1_seed["projections"])
         v2_count = len(v2_seed["projections"])
 
-        assert v2_count == v1_count, (
-            f"v2 has {v2_count} projections, expected {v1_count} (same as v1)"
+        assert v2_count == 13, (
+            f"v2 has {v2_count} projections, expected 13"
+        )
+        assert v2_count >= v1_count, (
+            f"v2 has {v2_count} projections, fewer than v1's {v1_count}"
         )
 
     def test_v2_wrap_is_last(self, v2_seed):

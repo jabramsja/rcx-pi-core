@@ -120,7 +120,7 @@ class TestSeedLoading:
         ("match.v1.json", 7),
         ("match.v2.json", 8),
         ("subst.v1.json", 12),
-        ("subst.v2.json", 12),
+        ("subst.v2.json", 13),
         ("classify.v1.json", 6),
         ("kernel.v1.json", 7),
         ("eval.v1.json", 7),  # Now registered in seed_integrity checksums

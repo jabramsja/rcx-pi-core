@@ -163,6 +163,27 @@
       }
     },
     {
+      "id": "subst.lookup.exhausted",
+      "description": "Lookup: bindings exhausted (null) -> unbound variable, emit structural error value",
+      "pattern": {
+        "mode": "subst",
+        "phase": "lookup",
+        "lookup_name": {"var": "n"},
+        "lookup_bindings": null,
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      },
+      "body": {
+        "mode": "subst",
+        "phase": "result",
+        "focus": {"_error": "unbound_variable", "_name": {"var": "n"}},
+        "bindings": {"var": "b"},
+        "context": {"var": "c"},
+        "_subst_ctx": {"var": "ctx"}
+      }
+    },
+    {
       "id": "subst.typed.descend",
       "description": "Descend into type-tagged head/tail structure (Phase 6c)",
       "pattern": {

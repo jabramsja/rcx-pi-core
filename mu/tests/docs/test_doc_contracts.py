@@ -86,7 +86,7 @@ DOC_CONTRACTS: dict[str, dict[str, Any]] = {
         "seeds": {
             "kernel.v1.json": 7,   # 7 kernel projections
             "match.v2.json": 8,    # 8 match projections (7 + match.fail)
-            "subst.v2.json": 12,   # 12 subst projections
+            "subst.v2.json": 13,   # 13 subst projections (+ subst.lookup.exhausted)
         },
     },
 

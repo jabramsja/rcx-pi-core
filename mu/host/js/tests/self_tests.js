@@ -463,7 +463,7 @@ module.exports = function runSelfTests(seeds) {
   console.log(`  - NaN/Infinity rejection (matches Python)`);
   console.log(`  - KERNEL_RESERVED_FIELDS validation (matches Python step_mu.py)`);
   console.log(`  - Strict head/tail detection (exact key counts)`);
-  console.log(`  - Unbound variables stall (matches Python Phase 7d-1)`);
+  console.log(`  - Unbound variables produce structural error values (Wave I subst.lookup.exhausted)`);
   console.log(`\nCore implementation: ~350 lines of JavaScript (with security + Recurrence)`);
   console.log(`Projections loaded from mu/ folder:`);
   console.log(`  - Kernel ops: ${allProjections.length} (kernel + match + subst)`);

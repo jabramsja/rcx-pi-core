@@ -18,7 +18,7 @@ A projection-based computational substrate where **structure is the primitive**.
 > Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
 - **~5,500+ tests** across 260+ test files
-- **15 semantic debt** (irreducible bootstrap floor)
+- **17 semantic debt** (irreducible bootstrap floor)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
 - **143 projections** across 17 seed files
 
@@ -89,7 +89,7 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 |------|---------|
 | `mu/substrate/kernel.v1.json` | Structural kernel (7 projections) - state machine |
 | `mu/substrate/match.v2.json` | Pattern matching (8 projections) - with context passthrough |
-| `mu/substrate/subst.v2.json` | Substitution (12 projections) - with context passthrough |
+| `mu/substrate/subst.v2.json` | Substitution (13 projections) - with context passthrough |
 | `mu/bridge/bootstrap_structural.v1.json` | Non-linear pattern support (5 projections) |
 | `mu/closures/recurrence.v1.json` | Closure detection (9 projections) - Rule 2.2♢ (proof-of-concept) |
 | `mu/closures/recurrence.v2.json` | Hash-accelerated closure detection (9 projections) - production |

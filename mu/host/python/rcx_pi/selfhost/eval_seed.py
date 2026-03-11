@@ -525,6 +525,10 @@ _STAGE0_PILOT = True
     "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → match → kernel). "
     "Same host surface as _match_inner but ~52 LOC accumulator-style."
 )
+@host_builtin(
+    "isinstance, len, zip, set, .keys(), .get(), 'in' — same host-builtin surface as match(). "
+    "Production path (_STAGE0_PILOT=True). Tracked separately from match() for ratchet accuracy."
+)
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     """Stage 0 match: accumulator-style bindings. Returns NO_MATCH on failure."""
     if _depth > MAX_MU_DEPTH:
@@ -601,6 +605,10 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     "Stage 0 micro-substitute: isinstance dispatch + recursive dict/list traversal + .append() mutation. "
     "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → subst → kernel). "
     "Same host surface as substitute but ~27 LOC simple tree walk."
+)
+@host_mutation(
+    ".append() for list/dict building in stage0 substitute. "
+    "Production path (_STAGE0_PILOT=True). Local-scoped lists, no shared-state corruption."
 )
 def _stage0_substitute(body, bindings, _depth=0):
     """Stage 0 substitute: recursive tree walk. Raises on unbound variable."""

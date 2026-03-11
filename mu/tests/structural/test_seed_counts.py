@@ -50,7 +50,7 @@ EXPECTED_COUNTS = {
     "eval.v1.json": 7,       # deep_eval traversal (legacy naming)
     "kernel.v1.json": 7,     # Phase 7a (meta-circular kernel)
     "match.v2.json": 8,      # Phase 7b: 7 + match.fail
-    "subst.v2.json": 12,     # Phase 7b: same count, added _subst_ctx
+    "subst.v2.json": 13,     # Phase 7b + subst.lookup.exhausted (structural unbound-variable error)
     # mu/closures/ seeds
     "recurrence.v1.json": 9,   # closure detection
     "recurrence.v2.json": 9,   # hash-accelerated closure detection

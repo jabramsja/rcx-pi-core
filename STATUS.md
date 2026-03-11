@@ -39,7 +39,7 @@ NAME: Structural Selection Parity (L1-L3 COMPLETE)
 **L2 FULL (current status - PARTIAL + explicit acceptance):**
 - [x] Kernel state machine is 7 Mu projections (`kernel.v1.json`)
 - [x] Match v2 with context passthrough (8 projections, `_match_ctx`) - used by kernel
-- [x] Subst v2 with context passthrough (12 projections, `_subst_ctx`) - used by kernel
+- [x] Subst v2 with context passthrough (13 projections, `_subst_ctx`) - used by kernel
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 - [x] `step_kernel_mu()` wired to use structural kernel
 - [x] Security hardening complete (27 reserved fields: 25 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
@@ -70,7 +70,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 |-----------|------|--------|-----|
 | **kernel.v1.json** | Kernel state machine (7 projections) | ✅ | ✅ |
 | **match.v2.json** | Pattern matching (8 projections) | ✅ | ✅ |
-| **subst.v2.json** | Substitution (12 projections) | ✅ | ✅ |
+| **subst.v2.json** | Substitution (13 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
 | **Python Substrate** | ~6,274 LOC, ~5,556 tests, production-ready | ✅ PRIMARY | - |
@@ -104,7 +104,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization + metabolize_cycle: ✅ | Engine orchestration + hemisphere routing + metabolization + metabolize cycle L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
-- JS DEBT SUMMARY in `constants.js` lists 19 host operations (10 iteration + 6 recursion + 3 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (38 total: 19 Py + 19 JS). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
+- JS DEBT SUMMARY in `constants.js` lists 19 host operations (10 iteration + 6 recursion + 3 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (40 total: 21 Py + 19 JS). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
 - These are AST-level host loop markers, analogous to Python's AST_OK:infra (65), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 9 Python host-debt decorator sites (ceiling: 12) — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
@@ -317,29 +317,29 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 15
-CURRENT: 15 (11 tracked decorators + 4 AST_OK bootstrap)
-FLOOR: 15 (see explanation below)
+THRESHOLD: 17
+CURRENT: 17 (13 tracked decorators + 4 AST_OK bootstrap)
+FLOOR: 17 (see explanation below)
 INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
-**Debt floor breakdown (15 irreducible sites — see enumeration below):**
+**Debt floor breakdown (17 irreducible sites — see enumeration below):**
 - @host_recursion: 4 (eval_seed match/substitute + _stage0_match/_stage0_substitute - BOOTSTRAP)
-- @host_builtin: 3 (eval_seed, deep_eval)
+- @host_builtin: 4 (eval_seed x2, deep_eval x2)
 - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
-- @host_mutation: 1 (deep_eval only — eval_seed mutation removed via pure merge in CP-S1A)
+- @host_mutation: 2 (eval_seed deep_eval: 1 original + 1 Wave I)
 - AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
-**Total host semantics markers (38 = 19 Py + 19 JS):** The floor of 15 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 4 recursion + 2 builtin + 13 iteration; JS = 6 recursion + 3 builtin + 10 iteration.
+**Total host semantics markers (40 = 21 Py + 19 JS):** The floor of 17 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 4 recursion + 3 builtin + 13 iteration + 1 mutation; JS = 6 recursion + 3 builtin + 10 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 13 is the host debt floor (not a target for reduction):**
-The 13 counts ALL host debt sites across L2 kernel, L3 boundary, and utilities:
+**Why 17 is the host debt floor (not a target for reduction):**
+The 17 counts ALL host debt sites (13 tracked decorators + 4 AST_OK bootstrap) across L2 kernel, L3 boundary, and utilities:
 
 *L2 kernel substrate (11 sites):*
 1. `match()` in eval_seed.py — @host_recursion + @host_builtin (pattern matching bootstrap primitive)
@@ -372,7 +372,7 @@ These cannot be eliminated because:
 
 **D005-H (wave H):** Stage 0 micro-kernel promoted to production (_STAGE0_PILOT flipped True). Host semantics +4: @host_recursion on _stage0_match and _stage0_substitute (Python, 2 markers) + @host_recursion on stage0Match and stage0Substitute (JS, 2 markers). Both are infra-level irreducible bootstrap — Stage 0 breaks the circular dependency (kernel → match → kernel) that would otherwise prevent meta-circular evaluation. Floor increased 13→15. FOUNDER_OVERRIDE:2026-03-11-d005h-stage0-production for L4 rules 19/20 deadlock.
 
-The debt of 15 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
+The debt of 17 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
@@ -774,7 +774,7 @@ New organized structure makes architecture visible:
 **Proof:**
 - [x] kernel.v1.json: 7 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] match.v2.json: 8 projections (Python ✓, JS ✓) - META_CIRCULAR (linear only)
-- [x] subst.v2.json: 12 projections (Python ✓, JS ✓) - META_CIRCULAR
+- [x] subst.v2.json: 13 projections (Python ✓, JS ✓) - META_CIRCULAR
 - [x] recurrence.v1.json: 9 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] exhaustion.v1.json: 13 projections (Python ✓, JS ✓) - META_CIRCULAR (bridge-backed)
 - [x] hemispheres.v1.json: 12 projections (Python ✓, JS ✓) - APPLICATION (linear-only, no bridge needed)
