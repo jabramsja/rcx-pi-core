@@ -1560,11 +1560,26 @@ def enforce(
                 diff_text,
                 runtime_files,
             )
-            # Net marker change: cross-file moves (equal add/remove) are not
-            # semantic changes and should not trigger strict-reduction rules.
-            marker_net_changed = (added_total != removed_total)
             marker_touched = (added_total + removed_total) > 0
-            if marker_net_changed:
+            # Detect cross-file marker moves: if every removed marker has a
+            # same-category counterpart in a DIFFERENT file, the markers were
+            # moved (not changed) and strict-reduction rules don't apply.
+            is_pure_cross_file_move = False
+            if marker_touched and added_total == removed_total:
+                removed_events_pre, added_events_pre = collect_runtime_marker_events(
+                    diff_text, runtime_files,
+                )
+                if removed_events_pre and all(
+                    _marker_event_has_added_counterpart(ev, added_events_pre)
+                    and any(
+                        str(a["category"]) == str(ev["category"])
+                        and str(a["file"]) != str(ev["file"])
+                        for a in added_events_pre
+                    )
+                    for ev in removed_events_pre
+                ):
+                    is_pure_cross_file_move = True
+            if marker_touched and not is_pure_cross_file_move:
                 if _touches_host_semantics_baseline(changed_files):
                     errors.append(
                         "L4_STRUCTURAL with runtime @host_* marker changes cannot modify "
