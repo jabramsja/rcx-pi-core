@@ -37,6 +37,7 @@
     "^\\.rcx_library/",
     "/archive/",
     "mu/tools/agents/.*_prompt\\.md$",
+    "^\\.claude/agents/",
     "\\.auto\\.md$",
     "^archive/",
     "^rcx_pi/specs/",

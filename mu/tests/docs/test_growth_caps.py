@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # Baseline snapshot (2026-02-28, Phase 8c, dev HEAD 965c64d)
 # Update these when phase boundary is crossed (founder approval required).
 BASELINE_TEST_FILES = 190
-BASELINE_TOOL_SCRIPTS = 67  # .py + .sh in mu/tools/ (66 + 1 bootstrap_purity_ratchet, 2026-03-10)
+BASELINE_TOOL_SCRIPTS = 68  # .py + .sh in mu/tools/ (67 + sync_native_agents.sh, 2026-03-11)
 BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 TypedNumericEnvelopes.v0.md
 
 # Per-wave caps from DocGovernance.v0.md

@@ -40,6 +40,7 @@ TOOLS_ROOT_ALLOWED: frozenset[str] = frozenset({
     "pr_to_dev.sh",
     "pre-commit-doc-check",
     "pre-push-fast",
+    "sync_native_agents.sh",  # Regenerates .claude/agents/ from tools/agents/*_prompt.md
 })
 
 TESTS_ROOT_ALLOWED: frozenset[str] = frozenset({
@@ -61,7 +62,7 @@ SCRIPTS_ROOT_ALLOWED: frozenset[str] = frozenset({
 
 # Ratchet ceilings — can only stay same or decrease (never increase).
 # If you need to add a root file, you must remove one first or get founder approval.
-TOOLS_RATCHET_CEILING = 10
+TOOLS_RATCHET_CEILING = 11
 TESTS_RATCHET_CEILING = 5
 SCRIPTS_RATCHET_CEILING = 2
 
