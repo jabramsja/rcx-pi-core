@@ -617,17 +617,26 @@ def _marker_event_has_added_counterpart(
     removed_event: dict[str, object],
     added_events: list[dict[str, object]],
 ) -> bool:
-    """Return True if a removed marker is likely a same-category marker rewrite."""
-    rf = str(removed_event["file"])
+    """Return True if a removed marker is likely a same-category marker rewrite.
+
+    Checks both same-file rewrites (line distance within tolerance) and
+    cross-file moves (same category in a different file — covers module
+    extraction where functions move between files without semantic change).
+    """
     rc = str(removed_event["category"])
+    rf = str(removed_event["file"])
     ra = int(removed_event["anchor_line"])
     for ev in added_events:
-        if str(ev["file"]) != rf:
-            continue
         if str(ev["category"]) != rc:
             continue
-        aa = int(ev["anchor_line"])
-        if abs(aa - ra) <= FUNCTION_MARKER_LINE_DISTANCE:
+        ef = str(ev["file"])
+        if ef == rf:
+            # Same-file rewrite: check line distance
+            aa = int(ev["anchor_line"])
+            if abs(aa - ra) <= FUNCTION_MARKER_LINE_DISTANCE:
+                return True
+        else:
+            # Cross-file move: same category in different file is sufficient
             return True
     return False
 
@@ -1551,8 +1560,11 @@ def enforce(
                 diff_text,
                 runtime_files,
             )
+            # Net marker change: cross-file moves (equal add/remove) are not
+            # semantic changes and should not trigger strict-reduction rules.
+            marker_net_changed = (added_total != removed_total)
             marker_touched = (added_total + removed_total) > 0
-            if marker_touched:
+            if marker_net_changed:
                 if _touches_host_semantics_baseline(changed_files):
                     errors.append(
                         "L4_STRUCTURAL with runtime @host_* marker changes cannot modify "
@@ -1596,6 +1608,7 @@ def enforce(
                                 f"{inc['baseline']}→{inc['current']} (+{inc['delta']})."
                             )
 
+            if marker_touched:
                 # Rule A4 semantic-removal proof:
                 # marker removal must correspond to construct removal in function body.
                 removed_events, added_events = collect_runtime_marker_events(

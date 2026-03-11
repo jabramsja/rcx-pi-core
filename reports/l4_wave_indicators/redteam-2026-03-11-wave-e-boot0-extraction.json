@@ -1,16 +1,21 @@
 {
   "wave_id": "redteam-2026-03-11-wave-e-boot0-extraction",
-  "repeat_run_speedup_ratio": 1.0,
+  "repeat_run_speedup_ratio": 1.038462,
   "parity_diff_count": 17,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.0,
+  "step_growth_slope": 0.26,
   "repeat_run_raw_seconds": [
-    0.27
+    0.27,
+    0.26
   ],
   "step_growth_points": [
     {
       "step": 1,
       "elapsed_seconds": 0.27
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.53
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
