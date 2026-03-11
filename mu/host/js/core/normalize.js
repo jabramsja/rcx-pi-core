@@ -223,6 +223,68 @@ function normalize(value, _depth = 0) {
 }
 
 /**
+ * Safe truncated summary for error messages — avoids JSON.stringify pitfalls
+ * (circular refs, BigInt, deeply nested structures).
+ */
+function _safeSummary(node) {
+  const t = typeof node;
+  if (t !== 'object' || node === null) return `${t}: ${String(node).slice(0, 100)}`;
+  const keys = Object.keys(node);
+  return `object with keys [${keys.slice(0, 5).join(', ')}${keys.length > 5 ? ', ...' : ''}]`;
+}
+
+/**
+ * Collect linked list elements into an array. Fail-closed on improper tails.
+ * Iteration counted under denormalize()'s host-iteration marker.
+ */
+function _collectListElements(startNode, context) {
+  const elements = [];
+  let node = startNode;
+  let nodeDepth = 0;
+  while (node && typeof node === 'object' && 'head' in node) {
+    if (nodeDepth++ > MAX_DENORM_ITER) {
+      throw new Error(`Max denorm iterations exceeded in ${context} list denormalization`);
+    }
+    elements.push(node.head);
+    node = node.tail;
+  }
+  if (node !== null && node !== undefined) {
+    throw new Error(
+      `Improper linked list tail in denormalize (${context}): expected null, ` +
+      `got ${typeof node} (${_safeSummary(node)}). Data would be silently lost.`
+    );
+  }
+  return elements;
+}
+
+/**
+ * Collect linked list kv-pairs into an array of [key, value]. Fail-closed on improper tails.
+ * Iteration counted under denormalize()'s host-iteration marker.
+ */
+function _collectDictKVPairs(startNode, context) {
+  const pairs = [];
+  let node = startNode;
+  let nodeDepth = 0;
+  while (node && typeof node === 'object' && 'head' in node) {
+    if (nodeDepth++ > MAX_DENORM_ITER) {
+      throw new Error(`Max denorm iterations exceeded in ${context} dict denormalization`);
+    }
+    const kv = node.head;
+    if (kv && typeof kv === 'object' && 'head' in kv && kv.tail && 'head' in kv.tail) {
+      pairs.push([kv.head, kv.tail.head]);
+    }
+    node = node.tail;
+  }
+  if (node !== null && node !== undefined) {
+    throw new Error(
+      `Improper linked list tail in denormalize (${context}): expected null, ` +
+      `got ${typeof node} (${_safeSummary(node)}). Data would be silently lost.`
+    );
+  }
+  return pairs;
+}
+
+/**
  * Denormalize from linked-list format back to JS values.
  *
  * @host_recursion - recursive denormalization
@@ -265,46 +327,15 @@ function denormalize(value, _depth = 0) {
       }
 
       if (type === 'list') {
-        const result = [];
-        let node = value;
-        let nodeDepth = 0;
-        while (node && typeof node === 'object' && 'head' in node) {
-          if (nodeDepth++ > MAX_DENORM_ITER) {
-            throw new Error(`Max denorm iterations exceeded in list denormalization`);
-          }
-          result.push(denormalize(node.head, _depth + 1));
-          node = node.tail;
-        }
-        // Fail-closed: improper tail (non-null terminator) silently drops data
-        if (node !== null && node !== undefined) {
-          throw new Error(
-            `Improper linked list tail in denormalize: expected null, ` +
-            `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
-          );
-        }
-        return result;
+        const elements = _collectListElements(value, 'typed');
+        return elements.map(elem => denormalize(elem, _depth + 1));
       }
 
       if (type === 'dict') {
+        const pairs = _collectDictKVPairs(value, 'typed');
         const result = Object.create(null);
-        let node = value;
-        let nodeDepth = 0;
-        while (node && typeof node === 'object' && 'head' in node) {
-          if (nodeDepth++ > MAX_DENORM_ITER) {
-            throw new Error(`Max denorm iterations exceeded in dict denormalization`);
-          }
-          const kv = node.head;
-          if (kv && typeof kv === 'object' && 'head' in kv && kv.tail && 'head' in kv.tail) {
-            result[kv.head] = denormalize(kv.tail.head, _depth + 1);
-          }
-          node = node.tail;
-        }
-        // Fail-closed: improper tail (non-null terminator) silently drops data
-        if (node !== null && node !== undefined) {
-          throw new Error(
-            `Improper linked list tail in denormalize: expected null, ` +
-            `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
-          );
+        for (const [k, v] of pairs) {
+          result[k] = denormalize(v, _depth + 1);
         }
         return result;
       }
@@ -316,46 +347,15 @@ function denormalize(value, _depth = 0) {
     const isDictEncoding = classifyLegacyLinkedList(value) === 'dict';
 
     if (isDictEncoding) {
+      const pairs = _collectDictKVPairs(value, 'legacy');
       const result = Object.create(null);
-      let node = value;
-      let nodeDepth = 0;
-      while (node && typeof node === 'object' && 'head' in node) {
-        if (nodeDepth++ > MAX_DENORM_ITER) {
-          throw new Error(`Max denorm iterations exceeded in dict denormalization`);
-        }
-        const kv = node.head;
-        if (kv && typeof kv === 'object' && 'head' in kv && kv.tail && 'head' in kv.tail) {
-          result[kv.head] = denormalize(kv.tail.head, _depth + 1);
-        }
-        node = node.tail;
-      }
-      // Fail-closed: improper tail (non-null terminator) silently drops data
-      if (node !== null && node !== undefined) {
-        throw new Error(
-          `Improper linked list tail in denormalize: expected null, ` +
-          `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
-        );
+      for (const [k, v] of pairs) {
+        result[k] = denormalize(v, _depth + 1);
       }
       return result;
     } else {
-      const result = [];
-      let node = value;
-      let nodeDepth = 0;
-      while (node && typeof node === 'object' && 'head' in node) {
-        if (nodeDepth++ > MAX_DENORM_ITER) {
-          throw new Error(`Max denorm iterations exceeded in list denormalization`);
-        }
-        result.push(denormalize(node.head, _depth + 1));
-        node = node.tail;
-      }
-      // Fail-closed: improper tail (non-null terminator) silently drops data
-      if (node !== null && node !== undefined) {
-        throw new Error(
-          `Improper linked list tail in denormalize: expected null, ` +
-          `got ${typeof node} (${JSON.stringify(node)}). Data would be silently lost.`
-        );
-      }
-      return result;
+      const elements = _collectListElements(value, 'legacy');
+      return elements.map(elem => denormalize(elem, _depth + 1));
     }
   }
 

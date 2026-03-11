@@ -23,6 +23,9 @@ from .projection_runner import make_projection_runner
 # Whitelist of valid _type values - prevents injection of unexpected types
 VALID_TYPE_TAGS = frozenset({"list", "dict"})  # AST_OK: constant whitelist
 
+# Maximum iterations for linked-list denormalization (parity with JS constants.js)
+MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
+
 
 def validate_type_tag(tag: str, context: str = "") -> None:
     """
@@ -506,6 +509,72 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
+def _collect_kv_pairs(val: Mu, context: str) -> list[tuple]:
+    """Collect kv-pairs from a head/tail linked list with cycle detection + iteration guard.
+
+    Returns list of (key, value) tuples. Fail-closed on improper tails.
+    """
+    kv_pairs: list[tuple] = []
+    current = val
+    visited: set[int] = set()
+    while current is not None:
+        if len(visited) > MAX_DENORM_ITER:
+            raise ValueError(f"denormalize_from_match: {context} kv-pair iteration exceeded {MAX_DENORM_ITER}")
+        node_id = id(current)
+        if node_id in visited:
+            raise ValueError("Circular reference in linked list during denormalization")
+        visited.add(node_id)
+        if not isinstance(current, dict) or "head" not in current:
+            break
+        kv = current["head"]
+        if not isinstance(kv, dict) or "head" not in kv:
+            current = current.get("tail")
+            continue
+        key = kv["head"]
+        kv_tail = kv.get("tail")
+        if not isinstance(kv_tail, dict) or "head" not in kv_tail:
+            current = current.get("tail")
+            continue
+        val_to_process = kv_tail["head"]
+        kv_pairs.append((key, val_to_process))
+        current = current.get("tail")
+    # Fail-closed: improper tail silently drops data
+    if current is not None:
+        raise ValueError(
+            f"denormalize_from_match: improper linked list tail in {context} — "
+            f"expected None, got {type(current).__name__}: {current!r}"
+        )
+    return kv_pairs
+
+
+def _collect_elements(val: Mu, context: str) -> list:
+    """Collect elements from a head/tail linked list with cycle detection + iteration guard.
+
+    Returns list of raw elements. Fail-closed on improper tails.
+    """
+    elements: list = []
+    current = val
+    visited: set[int] = set()
+    while current is not None:
+        if len(visited) > MAX_DENORM_ITER:
+            raise ValueError(f"denormalize_from_match: {context} element iteration exceeded {MAX_DENORM_ITER}")
+        node_id = id(current)
+        if node_id in visited:
+            raise ValueError("Circular reference in linked list during denormalization")
+        visited.add(node_id)
+        if not isinstance(current, dict) or "head" not in current:
+            break
+        elements.append(current["head"])
+        current = current.get("tail")
+    # Fail-closed: improper tail silently drops data
+    if current is not None:
+        raise ValueError(
+            f"denormalize_from_match: improper linked list tail in {context} — "
+            f"expected None, got {type(current).__name__}: {current!r}"
+        )
+    return elements
+
+
 def denormalize_from_match(value: Mu) -> Mu:
     """
     Convert normalized Mu back to regular Python structures.
@@ -623,39 +692,7 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_dict", result_dict))
 
-                        # Collect kv-pairs with cycle detection + iteration guard
-                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
-                        kv_pairs: list = []
-                        current = val
-                        visited: set[int] = set()
-                        while current is not None:
-                            if len(visited) > MAX_DENORM_ITER:
-                                raise ValueError(f"denormalize_from_match: dict kv-pair iteration exceeded {MAX_DENORM_ITER}")
-                            node_id = id(current)
-                            if node_id in visited:
-                                raise ValueError("Circular reference in linked list during denormalization")
-                            visited.add(node_id)
-                            if not isinstance(current, dict) or "head" not in current:
-                                break
-                            kv = current["head"]
-                            if not isinstance(kv, dict) or "head" not in kv:
-                                current = current.get("tail")
-                                continue
-                            key = kv["head"]
-                            kv_tail = kv.get("tail")
-                            if not isinstance(kv_tail, dict) or "head" not in kv_tail:
-                                current = current.get("tail")
-                                continue
-                            val_to_process = kv_tail["head"]
-                            kv_pairs.append((key, val_to_process))
-                            current = current.get("tail")
-
-                        # Fail-closed: improper tail silently drops data
-                        if current is not None:
-                            raise ValueError(
-                                f"denormalize_from_match: improper linked list tail in dict — "
-                                f"expected None, got {type(current).__name__}: {current!r}"
-                            )
+                        kv_pairs = _collect_kv_pairs(val, "dict")
 
                         # Push processing in reverse order (last kv pushed first)
                         for key, val_to_process in reversed(kv_pairs):
@@ -669,29 +706,7 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_list", result_list))
 
-                        # Collect elements with cycle detection + iteration guard
-                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
-                        elements: list = []
-                        current = val
-                        visited: set[int] = set()
-                        while current is not None:
-                            if len(visited) > MAX_DENORM_ITER:
-                                raise ValueError(f"denormalize_from_match: list element iteration exceeded {MAX_DENORM_ITER}")
-                            node_id = id(current)
-                            if node_id in visited:
-                                raise ValueError("Circular reference in linked list during denormalization")
-                            visited.add(node_id)
-                            if not isinstance(current, dict) or "head" not in current:
-                                break
-                            elements.append(current["head"])
-                            current = current.get("tail")
-
-                        # Fail-closed: improper tail silently drops data
-                        if current is not None:
-                            raise ValueError(
-                                f"denormalize_from_match: improper linked list tail in list — "
-                                f"expected None, got {type(current).__name__}: {current!r}"
-                            )
+                        elements = _collect_elements(val, "list")
 
                         # Push processing in reverse order (last element pushed first)
                         for elem in reversed(elements):
@@ -708,39 +723,7 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_dict", result_dict))
 
-                        # Collect kv-pairs with cycle detection + iteration guard
-                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
-                        kv_pairs: list = []
-                        current = val
-                        visited: set[int] = set()
-                        while current is not None:
-                            if len(visited) > MAX_DENORM_ITER:
-                                raise ValueError(f"denormalize_from_match: legacy dict kv-pair iteration exceeded {MAX_DENORM_ITER}")
-                            node_id = id(current)
-                            if node_id in visited:
-                                raise ValueError("Circular reference in linked list during denormalization")
-                            visited.add(node_id)
-                            if not isinstance(current, dict) or "head" not in current:
-                                break
-                            kv = current["head"]
-                            if not isinstance(kv, dict) or "head" not in kv:
-                                current = current.get("tail")
-                                continue
-                            key = kv["head"]
-                            kv_tail = kv.get("tail")
-                            if not isinstance(kv_tail, dict) or "head" not in kv_tail:
-                                current = current.get("tail")
-                                continue
-                            val_to_process = kv_tail["head"]
-                            kv_pairs.append((key, val_to_process))
-                            current = current.get("tail")
-
-                        # Fail-closed: improper tail silently drops data
-                        if current is not None:
-                            raise ValueError(
-                                f"denormalize_from_match: improper linked list tail in legacy dict — "
-                                f"expected None, got {type(current).__name__}: {current!r}"
-                            )
+                        kv_pairs = _collect_kv_pairs(val, "legacy dict")
 
                         # Push processing in reverse order (last kv pushed first)
                         for key, val_to_process in reversed(kv_pairs):
@@ -754,29 +737,7 @@ def denormalize_from_match(value: Mu) -> Mu:
                         # Push finalize first (will be processed last)
                         stack.append(("finalize_list", result_list))
 
-                        # Collect elements with cycle detection + iteration guard
-                        MAX_DENORM_ITER = 10000  # AST_OK: infra - iteration guard (adversary finding #1032)
-                        elements: list = []
-                        current = val
-                        visited: set[int] = set()
-                        while current is not None:
-                            if len(visited) > MAX_DENORM_ITER:
-                                raise ValueError(f"denormalize_from_match: legacy list element iteration exceeded {MAX_DENORM_ITER}")
-                            node_id = id(current)
-                            if node_id in visited:
-                                raise ValueError("Circular reference in linked list during denormalization")
-                            visited.add(node_id)
-                            if not isinstance(current, dict) or "head" not in current:
-                                break
-                            elements.append(current["head"])
-                            current = current.get("tail")
-
-                        # Fail-closed: improper tail silently drops data
-                        if current is not None:
-                            raise ValueError(
-                                f"denormalize_from_match: improper linked list tail in legacy list — "
-                                f"expected None, got {type(current).__name__}: {current!r}"
-                            )
+                        elements = _collect_elements(val, "legacy list")
 
                         # Push processing in reverse order (last element pushed first)
                         for elem in reversed(elements):
