@@ -295,12 +295,11 @@ class TestSeedDependencyParity:
 
     def test_js_seed_dependencies_match_python(self):
         """JS SEED_DEPENDENCIES must mirror Python SEED_DEPENDENCIES."""
-        import json
         from pathlib import Path
-        from rcx_pi.selfhost.seed_integrity import SEED_DEPENDENCIES
+        from rcx_pi.selfhost.seed_integrity import SEED_DEPENDENCIES, get_mu_dir
 
-        # Read JS seed_loader.js and extract SEED_DEPENDENCIES
-        js_path = Path(__file__).parent.parent.parent / "host" / "js" / "core" / "seed_loader.js"
+        # Read JS seed_loader.js using canonical mu_dir (avoids symlink issues)
+        js_path = get_mu_dir() / "host" / "js" / "core" / "seed_loader.js"
         js_content = js_path.read_text()
 
         # For each Python dependency, verify the JS file mentions it
