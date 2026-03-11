@@ -22,7 +22,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 Define a canonical event schema and ordering contract for observability in the RCX engine pipeline. Events must be deterministic, hashable, and substrate-neutral so that Python and JS traces can be compared structurally.
 
 **Scope:** N6a = schema + canonicalization contract (this document).
-N6b = cross-substrate isomorphic stream comparison (out of scope, deferred).
+N6b = cross-substrate isomorphic stream comparison (IMPLEMENTED — see Parity Intent section below).
 
 ## Event Schema (v0)
 

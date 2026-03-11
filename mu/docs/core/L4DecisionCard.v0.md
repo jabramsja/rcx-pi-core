@@ -324,7 +324,7 @@ Scope: GO/NO-GO/DEFER decision for production staged bootstrap pilot
    - eval_step.js modifications
 
 6. Decision Outcome
-   Outcome: GO/NO-GO/DEFER (pending founder review)
+   Outcome: SUPERSEDED by D008 GO (founder-rendered, 2026-03-01). D005 production pilot authorized and completed (PR #452). Original D004 decision package was never independently rendered — D008 subsumed it.
 
    GO criteria (all required):
    - Research evidence is sufficient (D001-D003: YES)

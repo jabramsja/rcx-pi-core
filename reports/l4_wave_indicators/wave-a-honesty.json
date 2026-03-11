@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave-a-honesty",
+  "repeat_run_speedup_ratio": 1.260666,
+  "parity_diff_count": 17,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.436938,
+  "repeat_run_raw_seconds": [
+    0.550833,
+    0.436938
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.550833
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.987771
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-11T05:41:49Z",
+  "collector_version": "2.2.0"
+}

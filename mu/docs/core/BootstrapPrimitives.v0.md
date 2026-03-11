@@ -351,17 +351,17 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## L3 Substrate Portability: JavaScript POC
 
-**Location:** `mu/host/js/eval_step.js` (see `wc -l` for current count; ~3800 LOC total)
+**Location:** `mu/host/js/` (15 modules; ~4500 LOC core + ~480 LOC inline tests; `eval_step.js` is a compatibility shim that delegates to `cli/main.js`)
 
 **What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json, recurrence.v1.json, exhaustion.v1.json, hemispheres.v1.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 
 | Primitive | Python Implementation | JavaScript Implementation |
 |-----------|----------------------|---------------------------|
-| eval_step | `eval_seed.py:step()` | `eval_step.js:step()` |
-| mu_hash_cached | `mu_type.py:mu_hash_cached()` | `eval_step.js:muHashCached()` |
-| max_steps | `step_mu.py:max_steps` | `eval_step.js:maxSteps` |
-| stack_guard | `mu_type.py:MAX_MU_DEPTH` | `eval_step.js:MAX_DEPTH` |
-| projection_loader | `seed_integrity.py` | `eval_step.js:JSON.parse()` |
+| eval_step | `eval_seed.py:step()` | `bootstrap_core.js:step()` |
+| mu_hash_cached | `mu_type.py:mu_hash_cached()` | `types.js:muHashCached()` |
+| max_steps | `step_mu.py:max_steps` | `constants.js:MAX_STEPS` |
+| stack_guard | `mu_type.py:MAX_MU_DEPTH` | `constants.js:MAX_DEPTH` |
+| projection_loader | `seed_integrity.py` | `seed_loader.js:loadSeed()` |
 
 **Security hardening (completed 2026-01-30, updated 2026-02-02):**
 - [x] `KERNEL_RESERVED_FIELDS` validation (25 fields: 12 base + 3 Engine/Boot1 + 3 Recurrence + 3 Exhaustion + 4 Bridge)
@@ -452,7 +452,7 @@ However, normalization is not fully outside `step_kernel_mu` today: the kernel b
 
 **What Boot1 recursive is NOT:** A structural CPS proof. It does not eliminate the host iteration primitive — it replaces one host loop mechanism (for-loop) with another (call stack). Both remain host code.
 
-**Default:** Trampoline (`run_engine_pipeline`) remains the production default. Recursive mode is opt-in via `use_boot1_recursive=True` / `boot1LoopMode` JSON API.
+**Default:** Boot1 recursive (`_run_engine_recursive`) is the production default (`use_boot1_recursive=True` at step_mu.py:run_engine_pipeline()). Trampoline is fallback via `use_boot1_recursive=False` / `boot1LoopMode` JSON API. Note: Boot1 is NOT meta-circular progress — it changes host execution strategy only.
 
 ---
 

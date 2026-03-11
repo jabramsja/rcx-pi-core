@@ -81,7 +81,7 @@ Every wave must be machine-classifiable, auditable, and subject to anti-stagnati
 
 16. **Collector fail-closed policy:** The canonical indicator collector (`tools/metrics/collect_l4_wave_indicators.py`) must exit non-zero if any probe command fails (non-zero exit code) or if parity-diff output cannot be parsed. Silent coercion of failures to zero/default values is prohibited. Collector version ≥2.1.0 enforces this.
 
-17. **RCX-first semantic destination binding (L4_STRUCTURAL):** Every L4_STRUCTURAL wave must declare `workload_target` (enum) to bind runtime changes to an RCX semantic objective, not generic process churn. Valid values: `ontology_promotion`, `rcx_engine_cycle`, `seed_auto_execution`, `execution_layer_truth`, `recurrence_exhaustion`.
+17. **RCX-first semantic destination binding (L4_STRUCTURAL):** Every L4_STRUCTURAL wave must declare `workload_target` (enum) to bind runtime changes to an RCX semantic objective, not generic process churn. Valid values: `ontology_promotion`, `rcx_engine_cycle`, `seed_auto_execution`, `execution_layer_truth`, `recurrence_exhaustion`, `host_debt_reduction`.
 
 18. **Workload target proof binding (L4_STRUCTURAL):** When a `workload_target` has registered evidence files in `WORKLOAD_TARGET_EVIDENCE`, the enforcer checks: (a) contract test files exist on disk (hard fail if missing), (b) at least one evidence file appears in the wave's changed files or is referenced in gate scripts (`audit_fast.sh`, `audit_all.sh`, `green_gate.sh`), (c) `evidence_command` references at least one evidence test module name. Targets with empty evidence lists are exempt (proof binding not yet established).
 
