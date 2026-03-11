@@ -18,13 +18,13 @@ from rcx_pi.selfhost.mu_type import (
     is_mu,
     make_depth_budget,
     consume_budget,
-    _STRUCTURAL_DEPTH_BUDGET,
-    _NO_BUDGET,
+    _STRUCTURAL_DEPTH_BUDGET,  # ANTICHEAT_OK: gate test needs direct singleton access
+    _NO_BUDGET,  # ANTICHEAT_OK: gate test needs sentinel identity check
     MAX_MU_DEPTH,
 )
 from rcx_pi.selfhost.eval_seed import (
     match,
-    _match_inner,
+    _match_inner,  # ANTICHEAT_OK: gate test needs inner match for budget-only path
     substitute,
     NO_MATCH,
 )
