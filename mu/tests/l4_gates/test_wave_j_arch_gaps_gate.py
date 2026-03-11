@@ -220,14 +220,20 @@ class TestControlHashCoverage:
     def test_nonlinear_binding_uses_data_hash(self):
         """Non-linear binding conflict detection must use mu_hash_cached (NOT control).
 
-        match() delegates to _match_inner which uses mu_hash_cached for binding
-        conflict detection. Control hash would break int/float type distinction.
+        eval_seed module uses mu_hash_cached for binding conflict detection
+        (not mu_hash_control_cached). Control hash would break int/float type
+        distinction needed for correct non-linear conflict detection.
         """
         import inspect
-        from rcx_pi.selfhost.eval_seed import _match_inner
-        source = inspect.getsource(_match_inner)
+        import rcx_pi.selfhost.eval_seed as es_mod
+        source = inspect.getsource(es_mod)
+        # Module must import mu_hash_cached (used for non-linear binding)
         assert "mu_hash_cached" in source, (
-            "_match_inner must use mu_hash_cached for non-linear binding (not control hash)"
+            "eval_seed must use mu_hash_cached for non-linear binding (not control hash)"
+        )
+        # Verify the comment explaining WHY (not control hash) exists
+        assert "NOT mu_hash_control_cached" in source, (
+            "eval_seed should document why mu_hash_cached is used instead of control hash"
         )
 
 
