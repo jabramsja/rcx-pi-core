@@ -104,9 +104,9 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization + metabolize_cycle: ✅ | Engine orchestration + hemisphere routing + metabolization + metabolize cycle L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
-- JS DEBT SUMMARY in `constants.js` lists 19 host operations (10 iteration + 6 recursion + 3 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (40 total: 21 Py + 19 JS). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
+- JS DEBT SUMMARY in `constants.js` lists 6 host operations (2 iteration + 2 recursion + 2 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (11 total: 5 Py + 6 JS). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
-- These are AST-level host loop markers, analogous to Python's AST_OK:infra (65), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 9 Python host-debt decorator sites (ceiling: 12) — these are distinct concepts.
+- These are AST-level host loop markers, analogous to Python's AST_OK:infra (65), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 5 Python host-debt marker sites — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
 - `tools/checks/check_js_debt.sh` validates markers are present
 - `tools/checks/linters/contraband_js.sh` validates no forbidden patterns (determinism, purity)

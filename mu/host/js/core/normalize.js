@@ -121,7 +121,7 @@ function classifyLegacyLinkedList(value) {
  *
  * Converts dicts and lists to type-tagged head/tail linked lists:
  *   List: [1, 2] -> {"_type": "list", "head": 1, "tail": {"head": 2, "tail": null}}
- *   Dict: {"a": 1} -> {"_type": "dict", "head": {"head": "a", "tail": 1}, "tail": null}
+ *   Dict: {"a": 1} -> {"_type": "dict", "head": {"head": "a", "tail": {"head": 1, "tail": null}}, "tail": null}
  *
  * BOUNDARY: normalization (off kernel path — called by public API, not stepKernel).
  * Reclassified P7W4: was host recursion + iteration debt, now BOUNDARY.
