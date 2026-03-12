@@ -47,6 +47,6 @@ def test_python_no_stage0_pilot_flag():
         # Skip comment lines
         if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'"):
             continue
-        assert "_stage0_pilot" not in line.lower() or "stage0_pilot" not in line, (
+        assert "_stage0_pilot" not in line.lower(), (
             f"eval_seed.py line {i} appears to have an active _stage0_pilot reference: {line.strip()}"
         )
