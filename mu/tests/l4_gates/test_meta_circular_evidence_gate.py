@@ -49,7 +49,7 @@ def _force_stage0_production_path():
     The global reset_state_between_tests fixture sets _STAGE0_PILOT=False.
     This gate proves the PRODUCTION Stage0 path, so we must run with it ON.
     """
-    _eval_seed_module._STAGE0_PILOT = True
+    _eval_seed_module._STAGE0_PILOT = True  # ANTICHEAT_OK: gate test forces production Stage0 path
     yield
     # Global fixture will reset to False after us — that's fine
 
@@ -131,8 +131,10 @@ class TestStepCountEvidence:
         """
         from unittest.mock import patch
         proj = {"id": "lit", "pattern": "x", "body": "y"}
-        with patch.object(_eval_seed_module, '_stage0_match', wraps=_eval_seed_module._stage0_match) as s0m, \
-             patch.object(_eval_seed_module, '_match_inner', wraps=_eval_seed_module._match_inner) as mi:
+        with (  # ANTICHEAT_OK: routing lock proof requires observing internal dispatch
+            patch.object(_eval_seed_module, '_stage0_match', wraps=_eval_seed_module._stage0_match) as s0m,  # ANTICHEAT_OK
+            patch.object(_eval_seed_module, '_match_inner', wraps=_eval_seed_module._match_inner) as mi,  # ANTICHEAT_OK
+        ):
             step_kernel_mu([proj], "x", return_meta=True)
             assert s0m.call_count > 0, (
                 "_stage0_match was never called — gate is not exercising "
