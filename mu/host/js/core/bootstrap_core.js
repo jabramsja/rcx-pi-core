@@ -17,7 +17,7 @@ const { normalize, denormalize } = require('./normalize');
 const { assertNotLambdaCalculus } = require('./security');
 
 /**
- * BOUNDARY: match() is OFF the kernel execution path since _stage0Pilot=true (Wave H).
+ * BOUNDARY: match() is OFF the kernel execution path (Wave H onward).
  * Kernel path: stepKernel → _stepTrusted → applyProjection → stage0Match.
  * match() is only called by the public API, not by the kernel.
  * Reclassified P7W4: was host recursion debt, now BOUNDARY.
@@ -172,7 +172,7 @@ function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUD
 }
 
 /**
- * BOUNDARY: substitute() is OFF the kernel execution path since _stage0Pilot=true (Wave H).
+ * BOUNDARY: substitute() is OFF the kernel execution path (Wave H onward).
  * Kernel path: stepKernel → _stepTrusted → applyProjection → stage0Substitute.
  * substitute() is only called by the public API, not by the kernel.
  * Reclassified P7W4: was host recursion debt, now BOUNDARY.
@@ -254,21 +254,17 @@ function applyProjection(projection, input) {
   assertNotLambdaCalculus(projection);
 
   // Gate 3: Auto-normalize input when pattern uses normalized dict format.
-  // match() handles this internally; stage0Match needs it externally (parity).
+  // stage0Match does not auto-normalize; do it here (parity with Python).
   let inputVal = input;
-  if (_stage0Pilot && typeof projection.pattern === 'object' && projection.pattern !== null &&
+  if (typeof projection.pattern === 'object' && projection.pattern !== null &&
       !Array.isArray(projection.pattern) && projection.pattern._type === 'dict') {
     inputVal = normalize(inputVal);
   }
-  const bindings = _stage0Pilot
-    ? stage0Match(projection.pattern, inputVal)
-    : match(projection.pattern, input);
+  const bindings = stage0Match(projection.pattern, inputVal);
   if (bindings === NO_MATCH) {
     return NO_MATCH;
   }
-  let result = _stage0Pilot
-    ? stage0Substitute(projection.body, bindings)
-    : substitute(projection.body, bindings);
+  let result = stage0Substitute(projection.body, bindings);
 
   // Gate 3: Auto-denormalize output when body uses normalized dict format.
   if (typeof projection.body === 'object' && projection.body !== null &&
@@ -315,16 +311,11 @@ function _applyProjectionTrusted(projection, input) {
     inputVal = normalize(inputVal);
   }
 
-  // Use match() with _validated=true at depth=0 — skips entry validation (caller already validated).
-  // Parity with Python _apply_projection_trusted which calls _match_inner(pattern, input, {}, 0).
-  const bindings = _stage0Pilot
-    ? stage0Match(pattern, inputVal)
-    : match(pattern, inputVal, 0, true);
+  // Stage 0 match — sole production path (parity with Python, flag removed Wave 9).
+  const bindings = stage0Match(pattern, inputVal);
   if (bindings === NO_MATCH) return NO_MATCH;
-  // substitute at depth=0 — body validation is fine (seeds are verified), depth parity with Python.
-  let result = _stage0Pilot
-    ? stage0Substitute(projection.body, bindings)
-    : substitute(projection.body, bindings, 0);
+  // Stage 0 substitute — body validation fine (seeds verified at load time).
+  let result = stage0Substitute(projection.body, bindings);
   if (typeof projection.body === 'object' && projection.body !== null &&
       !Array.isArray(projection.body) && projection.body._type === 'dict') {
     result = denormalize(result);
@@ -439,16 +430,10 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 0 micro-kernel (D005 production pilot)
-// Pure-merge match + substitute. Parallel path to match/substitute.
+// Stage 0 micro-kernel (D005 — sole production path since Wave H 2026-03-11)
+// Pure-merge match + substitute. Flag removed Wave 9 (parity with Python).
 // See L4DecisionCard.v0.md D005.
 // ---------------------------------------------------------------------------
-
-let _stage0Pilot = true; // Module-level pilot flag (default ON — Wave H 2026-03-11)
-
-function setStage0Pilot(value) {
-  _stage0Pilot = !!value;
-}
 
 /**
  * Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure.
@@ -564,7 +549,6 @@ module.exports = {
   NO_MATCH,
   stage0Match,
   stage0Substitute,
-  setStage0Pilot,
   _applyProjectionTrusted,
   _stepTrusted,
 };

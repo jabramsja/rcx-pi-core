@@ -405,15 +405,15 @@ class TestSourceLocks:
         )
 
     def test_js_trusted_path_depth_parity(self):
-        """_applyProjectionTrusted uses match(pattern, inputVal, 0, true) at depth 0.
+        """_applyProjectionTrusted uses stage0Match/stage0Substitute directly.
 
         Parity with Python _apply_projection_trusted which calls
-        _match_inner(pattern, input, {}, 0) at depth 0. The _validated=true
-        parameter skips entry validation without offsetting depth, ensuring
-        MAX_DEPTH boundary behavior matches Python exactly.
+        stage0_match/stage0_substitute directly. Stage 0 is the sole
+        production path — the _stage0Pilot flag was removed in Wave 9 (JS)
+        and Wave 4 (Python).
         """
         source = (JS_DIR / "core" / "bootstrap_core.js").read_text()
-        # Find _applyProjectionTrusted and verify it calls match at depth 0
+        # Find _applyProjectionTrusted and verify it calls stage0Match/stage0Substitute
         in_trusted = False
         found_match_call = False
         found_substitute_call = False
@@ -423,19 +423,19 @@ class TestSourceLocks:
             elif in_trusted and line.startswith("function "):
                 break
             if in_trusted:
-                # Must call match with depth=0 and _validated=true
-                if "match(pattern, inputVal, 0, true)" in line:
+                # Must call stage0Match directly (unconditional, no flag)
+                if "stage0Match(pattern, inputVal)" in line:
                     found_match_call = True
-                # Must call substitute with depth=0
-                if "substitute(projection.body, bindings, 0)" in line:
+                # Must call stage0Substitute directly (unconditional, no flag)
+                if "stage0Substitute(projection.body, bindings)" in line:
                     found_substitute_call = True
         assert found_match_call, (
-            "_applyProjectionTrusted must call match(pattern, inputVal, 0, true) "
-            "for depth parity with Python _apply_projection_trusted"
+            "_applyProjectionTrusted must call stage0Match(pattern, inputVal) "
+            "— stage0 is the sole production path (flag removed Wave 9)"
         )
         assert found_substitute_call, (
-            "_applyProjectionTrusted must call substitute(projection.body, bindings, 0) "
-            "for depth parity with Python _apply_projection_trusted"
+            "_applyProjectionTrusted must call stage0Substitute(projection.body, bindings) "
+            "— stage0 is the sole production path (flag removed Wave 9)"
         )
 
     def test_python_eval_seed_match_uses_content_hash(self):

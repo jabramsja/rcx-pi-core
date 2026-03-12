@@ -34,7 +34,7 @@
  *   recursion debt: 2
  *     - stage0Match()       - Stage 0 recursive pattern matching (bootstrap primitive, P7W4: list branch removed)
  *     - stage0Substitute()  - Stage 0 recursive substitution (bootstrap primitive)
- *     (match/substitute reclassified: BOUNDARY, off kernel path since _stage0Pilot=true — P7W4)
+ *     (match/substitute reclassified: BOUNDARY, off kernel path since Wave H — P7W4)
  *     (normalize/denormalize reclassified: BOUNDARY, off kernel path — P7W4)
  *
  *   builtin debt: 2

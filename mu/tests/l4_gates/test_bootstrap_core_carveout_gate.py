@@ -77,8 +77,8 @@ ALLOWED_EXPORTS = {
     "match", "substitute", "applyProjection", "step", "run",
     "isKernelTerminal", "isKernelIntermediate", "makeUndefinedMotif",
     "NO_MATCH",
-    # D005 Stage 0 pilot exports
-    "stage0Match", "stage0Substitute", "setStage0Pilot",
+    # D005 Stage 0 (sole production path since Wave H, flag removed Wave 9)
+    "stage0Match", "stage0Substitute",
     # Trusted fast path (parity with Python _step_trusted/_apply_projection_trusted)
     "_applyProjectionTrusted", "_stepTrusted",
 }
