@@ -78,7 +78,7 @@ class TestMetabolizeCycleJSParityGate:
     def test_js_loads_metabolize_cycle_seed(self):
         resp = _js_request("get_constants")
         assert resp["success"]
-        assert resp["seed_count"] == 13
+        assert resp["seed_count"] == 14
 
     def test_js_metabolize_cycle_empty_noop(self):
         h = _empty_hemispheres()

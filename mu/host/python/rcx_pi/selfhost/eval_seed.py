@@ -274,14 +274,14 @@ def get_var_name(mu: Mu) -> str:
     return name
 
 
-# BOUNDARY: match() is OFF the kernel execution path since _STAGE0_PILOT=True (Wave H).
-# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → _stage0_match.
+# BOUNDARY: match() is OFF the kernel execution path since Stage 0 became default (Wave H).
+# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → stage0 match.
 # match() is only called by the public API (match_mu → apply_mu), not by the kernel.
 # Reclassified P7W4: was @host_recursion + @host_builtin, now BOUNDARY.
 def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """
     BOUNDARY: Match pattern against input, returning bindings or NO_MATCH.
-    Off kernel path since _STAGE0_PILOT=True (Wave H). Reclassified P7W4.
+    Off kernel path since Stage 0 became default (Wave H). Reclassified P7W4.
 
     Rules:
     - {"var": "x"} matches anything, binds to x
@@ -510,9 +510,9 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 #   .append() mutation in _stage0_substitute. Markers added Wave H (2026-03-11).
 # ---------------------------------------------------------------------------
 
-# Stage0 production flag. When True, _apply_projection_trusted routes through
-# _stage0_match/_stage0_substitute instead of _match_inner/substitute.
-# Flipped to True in Wave H (2026-03-11) after 90 gate tests proving ON/OFF parity.
+# Stage 0 production flag. Always True since Wave H (2026-03-11).
+# 90 gate tests proved ON/OFF parity. The OFF path remains for equivalence tests
+# (test_stage0_production_pilot_gate.py) but is never active in production.
 _STAGE0_PILOT = True
 
 
@@ -627,15 +627,15 @@ def _stage0_substitute(body, bindings, _depth=0):
     return body
 
 
-# BOUNDARY: substitute() is OFF the kernel execution path since _STAGE0_PILOT=True (Wave H).
-# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → _stage0_substitute.
+# BOUNDARY: substitute() is OFF the kernel execution path since Stage 0 became default (Wave H).
+# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → stage0 substitute.
 # substitute() is only called by the public API (subst_mu → apply_mu), not by the kernel.
 # Reclassified P7W4: was @host_recursion, now BOUNDARY.
 def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0,
                _budget: object = _NO_BUDGET) -> Mu:
     """
     BOUNDARY: Substitute variable sites in body with bound values.
-    Off kernel path since _STAGE0_PILOT=True (Wave H). Reclassified P7W4.
+    Off kernel path since Stage 0 became default (Wave H). Reclassified P7W4.
 
     Host debt: 3 isinstance calls for Python type dispatch on body values
     (None/bool/int/float/str check, list check, dict check). Tracked on
@@ -825,8 +825,9 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
 # eliminates shape-inference from the security model entirely.
 
 def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
-    """Internal: apply projection without validating input_value.
+    """Internal: apply projection skipping assert_mu on input_value.
 
+    Still validates projection structure (dict with pattern/body keys).
     ONLY for use by kernel loops that have already validated at the boundary.
     Callers: _step_trusted, step_kernel_mu (via _step_trusted).
 
@@ -849,7 +850,7 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
 
-    # D005 Stage 0 pilot routing (default OFF — zero behavior change at rest)
+    # D005 Stage 0 production routing (default ON since Wave H, 2026-03-11)
     if _STAGE0_PILOT:
         bindings = _stage0_match(pattern, input_value)
     else:
