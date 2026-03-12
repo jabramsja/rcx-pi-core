@@ -221,7 +221,7 @@ function _resolveIdFast(kernelProjections, domainProjections, normalizedProjs, s
  * Phase 8d: Run with structural trace accumulation.
  * Parameterized: takes kernelProjections instead of module-global.
  *
- * @host_iteration — for loop until stall/max_steps with trace
+ * BOUNDARY: Trace infrastructure — off kernel path. Reclassified P7W5: was host iteration marker.
  */
 function runStructural(kernelProjections, domainProjections, input, maxSteps = 10000) {
   if (!isValidMu(input)) {

@@ -56,7 +56,7 @@ VALID_CATEGORIES = frozenset({
 # Minimum scan thresholds (fail-closed on truncated/missing surface)
 MIN_PY_MARKERS = 3
 MIN_JS_MARKERS = 3
-MIN_TOTAL_MARKERS = 10
+MIN_TOTAL_MARKERS = 5  # Lowered P7W5: 17→9 after outer loop boundary reclassification
 
 
 # ---------------------------------------------------------------------------

@@ -317,50 +317,45 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 13
-CURRENT: 13 (9 tracked decorators + 4 AST_OK bootstrap)
-FLOOR: 13 (see explanation below)
+THRESHOLD: 11
+CURRENT: 11 (7 tracked decorators + 4 AST_OK bootstrap)
+FLOOR: 11 (see explanation below)
 INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
-**Debt floor breakdown (13 irreducible sites — see enumeration below):**
+**Debt floor breakdown (11 irreducible sites — see enumeration below):**
 - @host_recursion: 2 (_stage0_match + _stage0_substitute — BOOTSTRAP. match/substitute reclassified as BOUNDARY P7W4)
 - @host_builtin: 3 (_stage0_match x1, deep_eval x2 — match() reclassified P7W4, builtin surface reduced: len/zip/set eliminated)
-- @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural — BOOTSTRAP)
+- @host_iteration: 1 (step_kernel_mu only — BOOTSTRAP. run_mu/run_mu_structural/list-to-linked reclassified as BOUNDARY P7W5)
 - @host_mutation: 1 (deep_eval history.append only)
 - AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
-**Total host semantics markers (17 = 7 Py + 10 JS):** P7W4 structural reduction: match()/substitute() reclassified as BOUNDARY (_STAGE0_PILOT=True since Wave H, kernel path uses Stage 0 only). Stage 0 match list branch removed (dead code after normalization — eliminates len/zip/set from kernel hot path). Boundary reclassification: normalize/denormalize/make_depth_budget/classify_linked_list/runEnginePipeline markers → BOUNDARY. Net: -14 markers (31→17, -45%). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 2 recursion + 1 builtin + 4 iteration + 0 mutation; JS = 2 recursion + 2 builtin + 6 iteration.
+**Total host semantics markers (9 = 4 Py + 5 JS):** P7W5 outer loop boundary reclassification: run_mu, run_mu_structural, list-to-linked-list (Py), run, runStructural, listToLinked, runAlgorithmWithBridge, runEnginePipelineRecursive (JS) reclassified as BOUNDARY — all provably off kernel execution path. Kernel path: step_kernel_mu/step()→_step_trusted→_apply_projection_trusted→_stage0_match/_stage0_substitute. Net: -8 markers (17→9, -47%). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 2 recursion + 1 builtin + 1 iteration + 0 mutation; JS = 2 recursion + 2 builtin + 1 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 13 is the host debt floor (not a target for reduction):**
-The 13 counts ALL host debt sites (9 tracked decorators + 4 AST_OK bootstrap) across L2 kernel, L3 boundary, and utilities:
+**Why 11 is the host debt floor (not a target for reduction):**
+The 11 counts ALL host debt sites (7 tracked decorators + 4 AST_OK bootstrap) across L2 kernel and utilities:
 
 *L2 kernel substrate (7 sites):*
 1. `_stage0_match()` in eval_seed.py — @host_recursion + @host_builtin (Stage 0 micro-match bootstrap primitive; P7W4: list branch removed, builtin surface reduced to isinstance/.keys()/.get()/in)
 2. `_stage0_substitute()` in eval_seed.py — @host_recursion (Stage 0 micro-substitute bootstrap primitive)
 3. `step_kernel_mu()` in step_mu.py — @host_iteration (kernel execution loop — Forth's NEXT)
-4. `run_mu_structural()` in step_mu.py — @host_iteration (structural trace for Recurrence)
-5. AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
+4. AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 - NOTE: `match()` and `substitute()` reclassified as BOUNDARY (P7W4) — off kernel path since _STAGE0_PILOT=True (Wave H)
-
-*L3 boundary (1 site):*
-6. `run_mu()` in step_mu.py — @host_iteration (repeat-until-stall loop, L2 EXCLUDED by design)
+- NOTE: `run_mu()`, `run_mu_structural()`, list-to-linked-list reclassified as BOUNDARY (P7W5) — outer loop scaffolding, off kernel path
 
 *Utility debt (3 sites):*
-7. `validate_deep_eval_state()` in deep_eval.py — @host_builtin (isinstance, set operations)
-8. `run_deep_eval()` in deep_eval.py — @host_builtin + @host_mutation (range iteration, history.append)
+5. `validate_deep_eval_state()` in deep_eval.py — @host_builtin (isinstance, set operations)
+6. `run_deep_eval()` in deep_eval.py — @host_builtin + @host_mutation (range iteration, history.append)
 
 These cannot be eliminated because:
 - Stage 0 match/substitute are the irreducible bootstrap (break circular kernel → match → kernel dependency)
 - step_kernel_mu is Forth's NEXT (irreducible evaluation loop)
-- run_mu_structural provides trace accumulation for Recurrence
-- run_mu is the L3 outer loop (repeat-until-stall scaffolding)
 - deep_eval provides iterative projection application with state tracking
 - Circular dependency: eliminating them would require eval_step to not exist
 
@@ -374,7 +369,9 @@ These cannot be eliminated because:
 
 **P7 Wave 4 (structural reduction + boundary reclassification):** Total host markers 31→17 (-14, -45%). Structural changes: (1) Stage 0 match list branch removed from Python + JS (dead code — all kernel inputs normalized to head/tail, verified zero seed arrays). Eliminates len/zip/set from kernel hot path. (2) set() wrappers on dict.keys() replaced with direct dict_keys view comparison. (3) match()/substitute() reclassified as BOUNDARY (off kernel path since _STAGE0_PILOT=True, Wave H). Boundary reclassification: normalize_for_match, denormalize_from_match, make_depth_budget, classify_linked_list (Py), normalize, denormalize, runEnginePipeline (JS) — all provably off kernel execution path. Floor reduced 16→13.
 
-The debt of 13 represents the current HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
+**P7 Wave 5 (outer loop boundary reclassification):** Total host markers 17→9 (-8, -47%). Reclassified 8 functions as BOUNDARY: run_mu, run_mu_structural, list-to-linked-list (Py 3), run, runStructural, listToLinked, runAlgorithmWithBridge, runEnginePipelineRecursive (JS 5). All provably off kernel execution path — they CALL the kernel (step_kernel_mu/step) but are not ON the kernel path. Floor reduced 13→11.
+
+The debt of 11 represents the current HOST DEBT FLOOR (L2 kernel + utilities). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)

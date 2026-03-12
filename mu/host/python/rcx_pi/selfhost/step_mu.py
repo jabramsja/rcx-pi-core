@@ -578,7 +578,7 @@ def list_to_linked(items: list[Mu]) -> Mu:
     if not items:
         return None
     result: Mu = None
-    for item in reversed(items):  # @host_iteration: list-to-linked-list conversion (parity with JS listToLinked)
+    for item in reversed(items):  # BOUNDARY: list-to-linked-list conversion (parity with JS listToLinked, reclassified P7W5)
         result = {"head": item, "tail": result}
     return result
 
@@ -1346,10 +1346,14 @@ def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     return step_kernel_mu(projections, input_value)
 
 
-@host_iteration("Kernel run loop - for-loop accepted as bootstrap primitive (L2 FULL)")
+# BOUNDARY: Outer loop scaffolding — calls step_kernel_mu but is NOT on the kernel
+# execution path. Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted
+# → _stage0_match/_stage0_substitute. run_mu is L3 boundary scaffolding (repeat-until-stall).
+# Reclassified P7W5: was @host_iteration, now BOUNDARY.
 def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[Mu, list[dict], bool]:
     """
-    Run projections repeatedly until stall or max steps (core, linear-only).
+    BOUNDARY: Run projections repeatedly until stall or max steps (core, linear-only).
+    Off kernel path — outer driver loop. Reclassified P7W5.
 
     Uses core kernel (match.v2 without bridge). Non-linear patterns
     (same variable twice) are rejected — use run_algorithm_meta_circular
@@ -1445,14 +1449,17 @@ def _resolve_trace_projection_id(
     return None
 
 
-@host_iteration("Phase 8d trace model - structural trace for EngineNews")
+# BOUNDARY: Trace infrastructure — calls step_kernel_mu but is NOT on the kernel
+# execution path. Phase 8d structural trace for EngineNews.
+# Reclassified P7W5: was @host_iteration, now BOUNDARY.
 def run_mu_structural(
     projections: list[Mu],
     initial: Mu,
     max_steps: int = 1000
 ) -> dict:
     """
-    Run projections with structural trace accumulation (Phase 8d).
+    BOUNDARY: Run projections with structural trace accumulation (Phase 8d).
+    Off kernel path — trace infrastructure. Reclassified P7W5.
 
     Returns a Mu-compatible result structure that EngineNews can analyze:
     {

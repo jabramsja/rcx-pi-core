@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_at": "2026-02-27T12:00:00Z",
-  "total_theater_risk": 10,
+  "total_theater_risk": 15,
   "entries": [
     {
       "file": "mu/tests/l4_gates/test_boot1_default_routing_gate.py",
@@ -102,6 +102,56 @@
       "owner": "founder",
       "expires_on": "2026-06-01",
       "target_wave": "A18-P1"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+      "class": "TestJSOuterLoopBoundary",
+      "method": "test_js_run_boundary",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Assertions inside _check_js_function_boundary helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "P7W5"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+      "class": "TestJSOuterLoopBoundary",
+      "method": "test_js_run_structural_boundary",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Assertions inside _check_js_function_boundary helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "P7W5"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+      "class": "TestJSOuterLoopBoundary",
+      "method": "test_js_list_to_linked_boundary",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Assertions inside _check_js_function_boundary helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "P7W5"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+      "class": "TestJSOuterLoopBoundary",
+      "method": "test_js_run_algorithm_with_bridge_boundary",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Assertions inside _check_js_function_boundary helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "P7W5"
+    },
+    {
+      "file": "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+      "class": "TestJSOuterLoopBoundary",
+      "method": "test_js_run_engine_pipeline_recursive_boundary",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Assertions inside _check_js_function_boundary helper not detected by AST classifier",
+      "owner": "founder",
+      "expires_on": "2026-06-01",
+      "target_wave": "P7W5"
     }
   ]
 }

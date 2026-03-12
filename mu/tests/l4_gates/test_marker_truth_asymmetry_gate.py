@@ -1,9 +1,9 @@
 """L4 gate: marker-truth asymmetry fix (MT1).
 
-Proves that scoped sites have honest markers: list_to_linked retains
-@host_iteration (kernel-path), while collectOntologyEvidence (Py+JS) was
-reclassified to BOUNDARY in P7 Wave 3 (off kernel path). Ratchet baseline
-reflects the corrected counts.
+Proves that scoped sites have honest markers: list_to_linked reclassified
+to BOUNDARY in P7 Wave 5 (off kernel path, data preparation only), while
+collectOntologyEvidence (Py+JS) was reclassified to BOUNDARY in P7 Wave 3
+(off kernel path). Ratchet baseline reflects the corrected counts.
 """
 from __future__ import annotations
 
@@ -20,17 +20,17 @@ class TestMarkerTruthAsymmetryGate:
     """Gate: marker-truth sites honestly marked (list_to_linked kernel, ontology evidence boundary)."""
 
     def test_python_list_to_linked_marked(self):
-        """Python list_to_linked has @host_iteration marker."""
+        """Python list_to_linked has BOUNDARY marker (reclassified P7W5 — off kernel path)."""
         path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
         text = path.read_text()
-        # Find the function and verify marker is on the for-loop line
+        # Find the function and verify BOUNDARY marker is on the for-loop line
         lines = text.splitlines()
         found = False
         for line in lines:
-            if "for item in reversed(items):" in line and "@host_iteration" in line:
+            if "for item in reversed(items):" in line and "BOUNDARY" in line:
                 found = True
                 break
-        assert found, "list_to_linked for-loop must have @host_iteration marker"
+        assert found, "list_to_linked for-loop must have BOUNDARY marker (reclassified P7W5)"
 
     def test_python_collect_ontology_evidence_boundary(self):
         """Python _collect_ontology_evidence reclassified as BOUNDARY (P7 Wave 3 — off kernel path)."""

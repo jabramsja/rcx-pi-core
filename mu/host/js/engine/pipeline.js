@@ -80,7 +80,7 @@ function _clearBoundaryOpsCache() {
  * Run an algorithm (recurrence/exhaustion) through bridge-backed meta-circular kernel.
  * Pre-validates and pre-normalizes projections once (constant across all iterations).
  * Only current input is re-normalized per iteration.
- * @host_iteration (bridge-backed algorithm execution loop)
+ * BOUNDARY: Algorithm harness — off kernel path. Reclassified P7W5: was host iteration marker.
  */
 function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
   // Validate input and projections once at entry (same checks as stepKernel).
@@ -908,7 +908,7 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
 /**
  * Boot1 engine pipeline with iterative re-entry (no host recursion).
  * Parameterized: takes kernelProjections, seedProjectionMap, and engineProjections.
- * @host_iteration: for loop per re-entry pass (Boot1 iterative)
+ * BOUNDARY: Engine pipeline runner — off kernel path. Reclassified P7W5: was host iteration marker.
  */
 function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, options, recursionDepth) {
   if (!isValidMu(inputValue)) {
