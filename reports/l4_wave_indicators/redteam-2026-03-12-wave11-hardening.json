@@ -1,9 +1,9 @@
 {
   "wave_id": "redteam-2026-03-12-wave11-hardening",
-  "repeat_run_speedup_ratio": 1.0,
+  "repeat_run_speedup_ratio": 0.969697,
   "parity_diff_count": 0,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.001,
+  "step_growth_slope": 0.01,
   "repeat_run_raw_seconds": [0.32, 0.33],
   "step_growth_points": [
     {"step": 1, "elapsed_seconds": 0.32},
