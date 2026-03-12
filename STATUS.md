@@ -317,21 +317,21 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 17
-CURRENT: 17 (13 tracked decorators + 4 AST_OK bootstrap)
-FLOOR: 17 (see explanation below)
+THRESHOLD: 16
+CURRENT: 16 (12 tracked decorators + 4 AST_OK bootstrap)
+FLOOR: 16 (see explanation below)
 INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
-**Debt floor breakdown (17 irreducible sites — see enumeration below):**
+**Debt floor breakdown (16 irreducible sites — see enumeration below):**
 - @host_recursion: 4 (eval_seed match/substitute + _stage0_match/_stage0_substitute - BOOTSTRAP)
 - @host_builtin: 4 (eval_seed x2, deep_eval x2)
 - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
-- @host_mutation: 2 (eval_seed deep_eval: 1 original + 1 Wave I)
+- @host_mutation: 1 (deep_eval history.append only — eval_seed _stage0_substitute mutation eliminated P7 Wave 1 via generator expressions)
 - AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
-**Total host semantics markers (40 = 21 Py + 19 JS):** The floor of 17 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category: Py = 4 recursion + 3 builtin + 13 iteration + 1 mutation; JS = 6 recursion + 3 builtin + 10 iteration.
+**Total host semantics markers (39 = 20 Py + 19 JS):** The floor of 16 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json` (baseline update pending MAINTENANCE wave per L4 Rule 20). Per-category: Py = 4 recursion + 3 builtin + 13 iteration + 0 mutation; JS = 6 recursion + 3 builtin + 10 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
@@ -372,7 +372,9 @@ These cannot be eliminated because:
 
 **D005-H (wave H):** Stage 0 micro-kernel promoted to production (_STAGE0_PILOT flipped True). Host semantics +4: @host_recursion on _stage0_match and _stage0_substitute (Python, 2 markers) + @host_recursion on stage0Match and stage0Substitute (JS, 2 markers). Both are infra-level irreducible bootstrap — Stage 0 breaks the circular dependency (kernel → match → kernel) that would otherwise prevent meta-circular evaluation. Floor increased 13→15. FOUNDER_OVERRIDE:2026-03-11-d005h-stage0-production for L4 rules 19/20 deadlock.
 
-The debt of 17 represents the IRREDUCIBLE HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
+**P7 Wave 1:** Python `@host_mutation` on `_stage0_substitute` eliminated by converting `.append()` loops to generator expressions (`dict(genexpr)` / `list(genexpr)`). Construct genuinely removed. Floor reduced 17→16. Remaining debt: 4 recursion, 4 builtin, 3 iteration, 0 mutation, 4 AST_OK bootstrap.
+
+The debt of 16 represents the current HOST DEBT FLOOR (L2 kernel + L3 boundary + utilities). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)

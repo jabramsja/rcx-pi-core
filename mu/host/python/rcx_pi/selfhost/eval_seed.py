@@ -602,13 +602,10 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
 
 
 @host_recursion(
-    "Stage 0 micro-substitute: isinstance dispatch + recursive dict/list traversal + .append() mutation. "
+    "Stage 0 micro-substitute: isinstance dispatch + recursive dict/list traversal. "
     "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → subst → kernel). "
-    "Same host surface as substitute but ~27 LOC simple tree walk."
-)
-@host_mutation(
-    ".append() for list/dict building in stage0 substitute. "
-    "Production path (_STAGE0_PILOT=True). Local-scoped lists, no shared-state corruption."
+    "Same host surface as substitute but ~27 LOC simple tree walk. "
+    "Mutation eliminated (P7 Wave 1): dict/list built via generator expressions."
 )
 def _stage0_substitute(body, bindings, _depth=0):
     """Stage 0 substitute: recursive tree walk. Raises on unbound variable."""
@@ -624,15 +621,15 @@ def _stage0_substitute(body, bindings, _depth=0):
             if name not in bindings:
                 raise KeyError(f"Unbound variable: {name}")
             return bindings[name]
-        pairs = []
-        for k, v in body.items():
-            pairs.append((k, _stage0_substitute(v, bindings, _depth + 1)))
-        return dict(pairs)
+        return dict(
+            (k, _stage0_substitute(v, bindings, _depth + 1))
+            for k, v in body.items()
+        )
     if isinstance(body, list):
-        result = []
-        for item in body:
-            result.append(_stage0_substitute(item, bindings, _depth + 1))
-        return result
+        return list(
+            _stage0_substitute(item, bindings, _depth + 1)
+            for item in body
+        )
     return body
 
 
