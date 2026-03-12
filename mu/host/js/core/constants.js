@@ -23,7 +23,7 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   iteration debt: 10
+ *   iteration debt: 9
  *     - step()                    - for loop over projections
  *     - run()                     - for loop until stall
  *     - runStructural()           - for loop until stall (Gate 5: routes through stepKernel)
@@ -31,9 +31,9 @@
  *     - denormalize()             - while loop for linked list
  *     - listToLinked()            - for loop for conversion
  *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
- *     - collectOntologyEvidence() - Mu linked-list traversal for evidence collection
  *     - runEnginePipeline()       - engine state machine effect handler loop
  *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
+ *     (collectOntologyEvidence reclassified: boundary-effect servicing, off kernel path — P7 Wave 3)
  *
  *   recursion debt: 6
  *     - match()             - recursive pattern matching
@@ -48,7 +48,7 @@
  *     - isValidMu()         - type validation
  *     (muEqual demoted: test-only convenience wrapper, delegates to muHashCached — P7 Wave 2)
  *
- * TOTAL DEBT: 18 (10 iteration + 6 recursion + 2 builtin)
+ * TOTAL DEBT: 17 (9 iteration + 6 recursion + 2 builtin)
  * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations

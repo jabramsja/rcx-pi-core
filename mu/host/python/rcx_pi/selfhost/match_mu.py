@@ -187,7 +187,7 @@ def _check_empty_var_names(value: Mu, context: str) -> None:
     max_nodes = MAX_MU_DEPTH * MAX_MU_WIDTH
     nodes_scanned = 0
 
-    while stack:  # @host_iteration: boundary pre-validation (9-agent review 2026-01-31)
+    while stack:  # BOUNDARY: pre-validation traversal (off kernel path, via match_mu → apply_mu only)
         current, exiting = stack.pop()
         if exiting:
             if isinstance(current, (dict, list)):
@@ -493,7 +493,7 @@ def is_dict_linked_list(value: Mu) -> bool:
     # BOUNDARY SCAFFOLDING: Legacy classification for untagged structures.
     visited: set[int] = set()
     current = value
-    while current is not None:  # @host_iteration: boundary classification (legacy)
+    while current is not None:  # BOUNDARY: legacy classification (off kernel path, test-only)
         node_id = id(current)
         if node_id in visited:
             return False  # Circular structure - not a valid dict encoding
@@ -801,7 +801,7 @@ def bindings_to_dict(linked: Mu) -> dict[str, Mu]:
     result: dict[str, Mu] = {}
     current = linked
     steps = 0
-    while current is not None:  # @host_iteration: boundary conversion (API scaffolding)
+    while current is not None:  # BOUNDARY: API conversion (off kernel path, via match_mu → apply_mu only)
         steps += 1
         if steps > MAX_BINDINGS:
             raise ValueError(
