@@ -24,7 +24,7 @@ echo "mode: $MODE"
 echo
 
 run_python() {
-  echo "[PY 1/16] Repo clean check"
+  echo "[PY 1/17] Repo clean check"
   if [ -n "$(git status --porcelain)" ]; then
     echo "ERROR: Repo not clean"
     git status --porcelain
@@ -33,39 +33,39 @@ run_python() {
   echo "OK: Repo is clean"
   echo
 
-  echo "[PY 2/16] Contraband check (grep-based lint)"
+  echo "[PY 2/17] Contraband check (grep-based lint)"
   ./tools/checks/linters/contraband.sh rcx_pi
   echo
 
-  echo "[PY 3/16] Test theater check (assert True)"
+  echo "[PY 3/17] Test theater check (assert True)"
   ./tools/checks/check_test_theater.sh tests
   echo
 
-  echo "[PY 4/16] L4 gate theater risk ratchet"
+  echo "[PY 4/17] L4 gate theater risk ratchet"
   python3 tools/checks/check_theater_risk_ratchet.py
   echo
 
-  echo "[PY 5/16] Seed-auto execution contract check"
+  echo "[PY 5/17] Seed-auto execution contract check"
   python3 tools/checks/check_seed_auto_execution_contract.py
   echo
 
-  echo "[PY 6/16] Host-semantics ratchet check"
+  echo "[PY 6/17] Host-semantics ratchet check"
   python3 tools/checks/check_host_semantics_ratchet.py
   echo
 
-  echo "[PY 6b/16] Bootstrap purity ratchet check"
+  echo "[PY 6b/17] Bootstrap purity ratchet check"
   python3 tools/checks/check_bootstrap_purity_ratchet.py
   echo
 
-  echo "[PY 6c/16] Boot layer boundary check"
+  echo "[PY 6c/17] Boot layer boundary check"
   python3 tools/checks/check_boot_layer_boundaries.py
   echo
 
-  echo "[PY 7/16] AST police (catches what grep misses)"
+  echo "[PY 7/17] AST police (catches what grep misses)"
   python3 tools/checks/linters/ast_police.py
   echo
 
-  echo "[PY 8/16] Anti-cheat scans (test integrity)"
+  echo "[PY 8/17] Anti-cheat scans (test integrity)"
   # No private attr access in tests/
   echo "-- no private attr access in tests/"
   if grep -RInE '\._[a-zA-Z0-9]+' tests/ 2>/dev/null | \
@@ -113,25 +113,25 @@ run_python() {
   echo "OK"
   echo
 
-  echo "[PY 9/16] Semantic purity audit (host debt, smuggling detection)"
+  echo "[PY 9/17] Semantic purity audit (host debt, smuggling detection)"
   ./tools/audit_semantic_purity.sh
   echo
 
-  echo "[PY 9b/16] Test speed enforcer (catches misclassified slow tests)"
+  echo "[PY 9b/17] Test speed enforcer (catches misclassified slow tests)"
   bash tools/checks/check_test_speed.sh
   echo
 
-  echo "[PY 9c/16] Simulated production logic check (RT2+RT3)"
+  echo "[PY 9c/17] Simulated production logic check (RT2+RT3)"
   python3 tools/checks/check_simulated_production_logic.py
   echo
 
   # Nightly (ci_full) runs ALL tests including fuzzers, slow, and JS parity;
   # push/PR excludes fuzzers and slow (JS parity verified via node run in step 11)
   if [ "${HYPOTHESIS_PROFILE:-}" = "ci_full" ]; then
-    echo "[PY 10/16] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
+    echo "[PY 10/17] Python test suite — NIGHTLY (includes fuzzers + slow + JS parity)"
     python3 -m pytest $PARALLEL_FLAG --ignore=tests/stress/ --timeout="$PYTEST_TIMEOUT"
   else
-    echo "[PY 10/16] Python test suite (excludes stress, slow, fuzzer)"
+    echo "[PY 10/17] Python test suite (excludes stress, slow, fuzzer)"
     # Fuzzer tests run 50+ hypothesis examples each, consuming ~22 min on CI
     # Run fuzzers via: audit_all.sh (local) or nightly CI (ci_full profile)
     # Slow tests (meta-circular, engine pipeline, hemispheres) run in nightly
@@ -143,7 +143,7 @@ run_python() {
   fi
   echo
 
-  echo "[PY 10b/16] Cross-substrate parity canary (F-01: fast behavioral check)"
+  echo "[PY 10b/17] Cross-substrate parity canary (F-01: fast behavioral check)"
   # Single cross-substrate comparison via run_vector JSON API.
   # Full parity suite (150+ tests, ~54s) runs in audit_fast.sh and nightly.
   # This canary catches parity regressions at merge-time in <2s.
@@ -151,7 +151,18 @@ run_python() {
     --timeout="$PYTEST_TIMEOUT" -q
   echo
 
-  echo "[PY 10c/16] L4 gate evidence tests (slow-marked but merge-blocking)"
+  echo "[PY 10c/17] Cross-substrate parity gate (L3 hard gate, ~7s)"
+  # Gate-mapped parity + fast structural parity tests. Catches seed checksum drift,
+  # constant divergence, algorithm parity regressions. Excludes slow subprocess-based
+  # cross-substrate tests (test_js_parity_automated.py, test_boot1_shadow_parity.py)
+  # which run in nightly. Added per founder directive (wave6, 2026-03-12).
+  python3 -m pytest $PARALLEL_FLAG -m "not fuzzer and not slow" tests/parity/ \
+    --ignore=tests/parity/test_js_parity_automated.py \
+    --ignore=tests/parity/test_boot1_shadow_parity.py \
+    --timeout="$PYTEST_TIMEOUT" -q
+  echo
+
+  echo "[PY 10d/17] L4 gate evidence tests (slow-marked but merge-blocking)"
   # BR-2: 116 L4 gate tests are marked @pytest.mark.slow (they call run_mu,
   # run_engine_pipeline, etc.) but are fast enough for CI (~24s local, ~40s CI).
   # These are the L4 evidence tests that prove gate passage — must run at merge.
@@ -159,7 +170,7 @@ run_python() {
     --timeout="$PYTEST_TIMEOUT" -q
   echo
 
-  echo "[PY 11/16] Fixture v2 validation"
+  echo "[PY 11/17] Fixture v2 validation"
   FIXTURE_COUNT=0
   EMPTY_COUNT=0
   for f in $(find tests/fixtures/traces_v2 -name '*.v2.jsonl' -maxdepth 3 2>/dev/null | sort); do
@@ -182,11 +193,11 @@ run_python() {
   echo "OK"
   echo
 
-  echo "[PY 12/16] CLI smoke (end-to-end entrypoints)"
+  echo "[PY 12/17] CLI smoke (end-to-end entrypoints)"
   python3 scripts/utils/cli_smoke.py
   echo
 
-  echo "[PY 13/16] JavaScript L3 parity (same projections, same semantics)"
+  echo "[PY 13/17] JavaScript L3 parity (same projections, same semantics)"
   ./tools/checks/check_js_debt.sh
   ./tools/checks/linters/contraband_js.sh
   ./tools/checks/linters/ast_police_js.sh
