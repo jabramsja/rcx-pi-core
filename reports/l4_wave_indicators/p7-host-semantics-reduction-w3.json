@@ -1,0 +1,24 @@
+{
+  "wave_id": "p7-host-semantics-reduction-w3",
+  "repeat_run_speedup_ratio": 1.004573,
+  "parity_diff_count": 17,
+  "net_host_semantic_delta": -6,
+  "step_growth_slope": 0.435379,
+  "repeat_run_raw_seconds": [
+    0.43737,
+    0.435379
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.43737
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.872749
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-12T07:20:43Z",
+  "collector_version": "2.2.0"
+}

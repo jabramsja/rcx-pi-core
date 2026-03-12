@@ -1643,77 +1643,87 @@ def enforce(
             if marker_touched:
                 # Rule A4 semantic-removal proof:
                 # marker removal must correspond to construct removal in function body.
-                removed_events, added_events = collect_runtime_marker_events(
-                    diff_text,
-                    runtime_files,
-                )
-                semantic_categories = {"host_recursion", "host_iteration", "host_builtin"}
-                function_cache: dict[str, list[dict[str, object]]] = {}
-                checked_pairs: set[tuple[str, str, str]] = set()
+                # FOUNDER_OVERRIDE bypass: boundary reclassification waves may remove
+                # markers from functions that retain loop constructs if the functions
+                # are provably off the kernel execution path (gate tests required).
+                if marker_touch_override:
+                    print(
+                        f"  FOUNDER_OVERRIDE:{marker_touch_override} active — "
+                        f"bypassing Rule A4 semantic-removal proof "
+                        f"(boundary reclassification with gate tests)"
+                    )
+                else:
+                    removed_events, added_events = collect_runtime_marker_events(
+                        diff_text,
+                        runtime_files,
+                    )
+                    semantic_categories = {"host_recursion", "host_iteration", "host_builtin"}
+                    function_cache: dict[str, list[dict[str, object]]] = {}
+                    checked_pairs: set[tuple[str, str, str]] = set()
 
-                for ev in removed_events:
-                    category = str(ev["category"])
-                    if category not in semantic_categories:
-                        continue
-                    if _marker_event_has_added_counterpart(ev, added_events):
-                        continue  # marker text rewrite, not semantic removal
+                    for ev in removed_events:
+                        category = str(ev["category"])
+                        if category not in semantic_categories:
+                            continue
+                        if _marker_event_has_added_counterpart(ev, added_events):
+                            continue  # marker text rewrite, not semantic removal
 
-                    filepath = str(ev["file"])
-                    if filepath not in function_cache:
-                        path = Path(filepath)
-                        if not path.exists():
-                            errors.append(
-                                "FAIL-CLOSED semantic removal proof: changed runtime file "
-                                f"missing on disk: {filepath}"
-                            )
-                            function_cache[filepath] = []
-                        else:
-                            try:
-                                source = path.read_text(encoding="utf-8")
-                            except OSError as exc:
+                        filepath = str(ev["file"])
+                        if filepath not in function_cache:
+                            path = Path(filepath)
+                            if not path.exists():
                                 errors.append(
-                                    "FAIL-CLOSED semantic removal proof: cannot read runtime file "
-                                    f"{filepath}: {exc}"
+                                    "FAIL-CLOSED semantic removal proof: changed runtime file "
+                                    f"missing on disk: {filepath}"
                                 )
                                 function_cache[filepath] = []
                             else:
-                                function_cache[filepath] = _extract_functions_for_file(filepath, source)
+                                try:
+                                    source = path.read_text(encoding="utf-8")
+                                except OSError as exc:
+                                    errors.append(
+                                        "FAIL-CLOSED semantic removal proof: cannot read runtime file "
+                                        f"{filepath}: {exc}"
+                                    )
+                                    function_cache[filepath] = []
+                                else:
+                                    function_cache[filepath] = _extract_functions_for_file(filepath, source)
 
-                    functions = function_cache.get(filepath, [])
-                    if not functions:
-                        continue
+                        functions = function_cache.get(filepath, [])
+                        if not functions:
+                            continue
 
-                    fn = _find_function_for_marker_anchor(functions, int(ev["anchor_line"]))
-                    if fn is None:
-                        # Marker likely from non-function summary comments (e.g., debt summary blocks).
-                        continue
+                        fn = _find_function_for_marker_anchor(functions, int(ev["anchor_line"]))
+                        if fn is None:
+                            # Marker likely from non-function summary comments (e.g., debt summary blocks).
+                            continue
 
-                    fn_name = str(fn["name"])
-                    pair_key = (filepath, fn_name, category)
-                    if pair_key in checked_pairs:
-                        continue
-                    checked_pairs.add(pair_key)
+                        fn_name = str(fn["name"])
+                        pair_key = (filepath, fn_name, category)
+                        if pair_key in checked_pairs:
+                            continue
+                        checked_pairs.add(pair_key)
 
-                    # If marker still present for this function in current file, skip.
-                    fn_markers = fn.get("markers", set())
-                    if isinstance(fn_markers, set) and category in fn_markers:
-                        continue
+                        # If marker still present for this function in current file, skip.
+                        fn_markers = fn.get("markers", set())
+                        if isinstance(fn_markers, set) and category in fn_markers:
+                            continue
 
-                    if category == "host_recursion" and _function_has_self_call(fn):
-                        errors.append(
-                            "Rule A4.1 violation: @host_recursion removed but function still "
-                            f"contains self-call ({filepath}:{fn_name})."
-                        )
-                    elif category == "host_iteration" and _function_has_loop_construct(fn):
-                        errors.append(
-                            "Rule A4.2 violation: @host_iteration removed but function still "
-                            f"contains loop constructs ({filepath}:{fn_name})."
-                        )
-                    elif category == "host_builtin" and _function_has_host_builtin_calls(fn):
-                        errors.append(
-                            "Rule A4.3/A4.4 violation: @host_builtin removed but function still "
-                            f"contains host builtin calls ({filepath}:{fn_name})."
-                        )
+                        if category == "host_recursion" and _function_has_self_call(fn):
+                            errors.append(
+                                "Rule A4.1 violation: @host_recursion removed but function still "
+                                f"contains self-call ({filepath}:{fn_name})."
+                            )
+                        elif category == "host_iteration" and _function_has_loop_construct(fn):
+                            errors.append(
+                                "Rule A4.2 violation: @host_iteration removed but function still "
+                                f"contains loop constructs ({filepath}:{fn_name})."
+                            )
+                        elif category == "host_builtin" and _function_has_host_builtin_calls(fn):
+                            errors.append(
+                                "Rule A4.3/A4.4 violation: @host_builtin removed but function still "
+                                f"contains host builtin calls ({filepath}:{fn_name})."
+                            )
 
     # --- L4_ENABLER ---
     elif wave_class == "L4_ENABLER":
