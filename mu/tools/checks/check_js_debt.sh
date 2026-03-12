@@ -219,7 +219,7 @@ check_function_marker "runAlgorithmWithBridge" "BOUNDARY"
 check_function_marker "runEnginePipelineRecursive" "BOUNDARY"
 # collectOntologyEvidence reclassified as boundary (off kernel path) — P7 Wave 3
 # runEnginePipeline reclassified as BOUNDARY (off kernel path — orchestrator) — P7W4
-# match/substitute reclassified as BOUNDARY (off kernel path since _stage0Pilot=true) — P7W4
+# match/substitute reclassified as BOUNDARY (off kernel path since Wave H) — P7W4
 check_function_marker "stage0Match" "@host_recursion"
 check_function_marker "stage0Substitute" "@host_recursion"
 # normalize/denormalize reclassified as BOUNDARY (off kernel path) — P7W4

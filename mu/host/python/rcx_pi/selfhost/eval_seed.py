@@ -832,7 +832,7 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 
     Still validates projection structure (dict with pattern/body keys).
     ONLY for use by kernel loops that have already validated at the boundary.
-    Callers: _step_trusted, step_kernel_mu (via _step_trusted).
+    Callers: _step_trusted.
 
     Host debt (isinstance) tracked on match()'s @host_builtin decorator.
 
