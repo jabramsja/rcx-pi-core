@@ -13,7 +13,7 @@ const {
   MAX_DEPTH,
   RcxError,
 } = require('./constants');
-const { MAX_MU_WIDTH } = require('./types');
+const { MAX_MU_WIDTH, isVar } = require('./types');
 
 /**
  * If value is a normalized dict encoding, return list of [key, value] pairs.
@@ -275,6 +275,94 @@ function rejectNonlinearProjections(projections, caller) {
   }
 }
 
+/**
+ * Verify a projection doesn't smuggle in lambda calculus semantics.
+ * Parity with Python assert_not_lambda_calculus() in eval_seed.py.
+ *
+ * Checks:
+ * 1. Body doesn't contain projection-like structures with free variables
+ *    (which would create closure-like behavior)
+ * 2. Pattern doesn't try to match projections (no higher-order matching)
+ *
+ * @param {Object} projection - Projection with pattern and body keys
+ * @throws {Error} If projection appears to smuggle lambda calculus
+ */
+function assertNotLambdaCalculus(projection) {
+  if (projection === null || typeof projection !== 'object' || Array.isArray(projection)) return;
+  if (!('pattern' in projection) || !('body' in projection)) return;
+
+  const pattern = projection.pattern;
+  const body = projection.body;
+
+  // Collect variable names bound by the enclosing pattern.
+  const boundVars = new Set();
+  function collectPatternVars(mu, depth) {
+    if (depth > MAX_DEPTH) return;
+    if (isVar(mu)) {
+      boundVars.add(mu.var);
+      return;
+    }
+    if (mu !== null && typeof mu === 'object') {
+      if (Array.isArray(mu)) {
+        for (const v of mu) collectPatternVars(v, depth + 1);
+      } else {
+        for (const v of Object.values(mu)) collectPatternVars(v, depth + 1);
+      }
+    }
+  }
+  collectPatternVars(pattern, 0);
+
+  // Check if mu contains a variable not bound by enclosing pattern.
+  function containsFreeVar(mu, depth) {
+    if (depth > MAX_DEPTH) return false;
+    if (isVar(mu)) {
+      return !boundVars.has(mu.var);
+    }
+    if (mu !== null && typeof mu === 'object') {
+      if (Array.isArray(mu)) {
+        return mu.some(v => containsFreeVar(v, depth + 1));
+      }
+      return Object.values(mu).some(v => containsFreeVar(v, depth + 1));
+    }
+    return false;
+  }
+
+  // Check if mu contains a projection-like structure.
+  function containsProjectionPattern(mu, depth, checkVars) {
+    if (depth > MAX_DEPTH) return false;
+    if (mu !== null && typeof mu === 'object' && !Array.isArray(mu)) {
+      if ('pattern' in mu && 'body' in mu) {
+        if (checkVars) {
+          // Body check: only flag if nested structure has free variables
+          if (containsFreeVar(mu, 0)) return true;
+        } else {
+          // Pattern check: projection shape suspicious UNLESS both fields are vars
+          if (!(isVar(mu.pattern) && isVar(mu.body))) return true;
+        }
+      }
+      return Object.values(mu).some(v => containsProjectionPattern(v, depth + 1, checkVars));
+    }
+    if (Array.isArray(mu)) {
+      return mu.some(v => containsProjectionPattern(v, depth + 1, checkVars));
+    }
+    return false;
+  }
+
+  if (containsProjectionPattern(pattern, 0, false)) {
+    throw new Error(
+      'Projection pattern appears to match projection structures ' +
+      '(higher-order patterns not allowed - this looks like lambda calculus)'
+    );
+  }
+
+  if (containsProjectionPattern(body, 0, true)) {
+    throw new Error(
+      'Projection body contains projection-like structures with free variables ' +
+      '(closure-like behavior not allowed - this looks like lambda calculus)'
+    );
+  }
+}
+
 module.exports = {
   iterNormalizedDictPairs,
   looksLikeNormalizedDictCandidate,
@@ -282,4 +370,5 @@ module.exports = {
   validateAlgorithmRuntimeFields,
   hasNonlinearVars,
   rejectNonlinearProjections,
+  assertNotLambdaCalculus,
 };
