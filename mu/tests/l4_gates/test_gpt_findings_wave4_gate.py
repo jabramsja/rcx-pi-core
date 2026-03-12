@@ -5,6 +5,7 @@ Proves:
 1. evidence_walker stall fallback exists in engine_pipeline.py (AST proof)
 2. Walker stalls on head-only trace nodes (behavioral proof of fix necessity)
 3. bridge_supervisor open_db_readonly uses SQLite URI read-only mode (source proof)
+4. JS seed_loader verifies checksum BEFORE JSON.parse for known seeds (source proof)
 
 Usage:
     PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_gpt_findings_wave4_gate.py -v
@@ -123,3 +124,31 @@ class TestBridgeSupervisorReadOnly:
                     "open_db_readonly should not use PRAGMA query_only — "
                     "URI mode=ro provides true read-only at connection level"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Gate Tests: JS Seed Loader Checksum-Before-Parse (bot sweep finding)
+# ---------------------------------------------------------------------------
+
+class TestSeedLoaderChecksumOrdering:
+    """Gate: JS seed_loader verifies checksum BEFORE JSON.parse for known seeds."""
+
+    def test_checksum_before_parse_for_known_seeds(self):
+        """Source proof: hash comparison occurs before JSON.parse call."""
+        src = _read_source("mu/host/js/core/seed_loader.js")
+        # Find positions of key operations in loadVerifiedSeed
+        hash_check_pos = src.find("hash !== expected")
+        json_parse_pos = src.find("JSON.parse(raw)")
+        assert hash_check_pos > 0, "seed_loader.js must contain hash !== expected check"
+        assert json_parse_pos > 0, "seed_loader.js must contain JSON.parse(raw) call"
+        assert hash_check_pos < json_parse_pos, (
+            "Checksum verification (hash !== expected) must appear BEFORE JSON.parse(raw) "
+            f"in source — found at positions {hash_check_pos} and {json_parse_pos}"
+        )
+
+    def test_known_seed_early_reject_comment(self):
+        """Source proof: security comment documents checksum-before-parse rationale."""
+        src = _read_source("mu/host/js/core/seed_loader.js")
+        assert "SECURITY: For known seeds, verify checksum BEFORE JSON.parse" in src, (
+            "seed_loader.js must document the checksum-before-parse security rationale"
+        )
