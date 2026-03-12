@@ -834,9 +834,7 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     ONLY for use by kernel loops that have already validated at the boundary.
     Callers: _step_trusted, step_kernel_mu (via _step_trusted).
 
-    Host debt: 3 isinstance calls (projection type, pattern _type check,
-    body _type check). These are on the trusted path, separate from
-    match()'s @host_builtin decorator surface.
+    Host debt (isinstance) tracked on match()'s @host_builtin decorator.
 
     Note: Skips assert_not_lambda_calculus() by design. Kernel-internal
     projections come from verified seeds (integrity-checked at load time).
