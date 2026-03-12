@@ -4,13 +4,12 @@ L4 gate test: Wave 8 — README and doc wording accuracy.
 Proves that README.md and docs use accurate 'tracked @host_* markers'
 wording instead of stale 'irreducible bootstrap floor'.
 """
-from pathlib import Path
+from tests.repo_root import REPO_ROOT
 
 
 def test_readme_uses_tracked_marker_wording():
     """README.md must use 'tracked @host_* markers' not 'irreducible bootstrap floor'."""
-    readme = Path(__file__).resolve().parents[3] / "README.md"
-    content = readme.read_text()
+    content = (REPO_ROOT / "README.md").read_text()
 
     assert "irreducible bootstrap floor" not in content, (
         "README.md still uses stale 'irreducible bootstrap floor' wording. "
@@ -23,8 +22,7 @@ def test_readme_uses_tracked_marker_wording():
 
 def test_content_addressed_mu_uses_tracked_marker_wording():
     """ContentAddressedMu.md must use 'tracked @host_* markers' not 'irreducible host debt floor'."""
-    doc = Path(__file__).resolve().parents[3] / "roadmap" / "ContentAddressedMu.md"
-    content = doc.read_text()
+    content = (REPO_ROOT / "roadmap" / "ContentAddressedMu.md").read_text()
 
     assert "irreducible host debt floor" not in content, (
         "ContentAddressedMu.md still uses stale 'irreducible host debt floor' wording."
