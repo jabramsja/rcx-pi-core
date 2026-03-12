@@ -1,0 +1,24 @@
+{
+  "wave_id": "redteam-2026-03-12-wave8-deferred-fixes",
+  "repeat_run_speedup_ratio": 1.23072,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.45628,
+  "repeat_run_raw_seconds": [
+    0.561553,
+    0.45628
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.561553
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.017833
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-12T20:48:33Z",
+  "collector_version": "2.2.0"
+}
