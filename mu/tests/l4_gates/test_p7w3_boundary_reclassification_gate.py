@@ -275,15 +275,15 @@ class TestRatchetEvidence:
         )
         assert result.returncode == 0, f"Ratchet failed:\n{result.stderr}"
 
-    def test_host_iteration_decreased(self):
-        """Python host_iteration must show decrease from 13 to 8, JS 10 to 9."""
+    def test_host_iteration_counts(self):
+        """Python host_iteration must be 8, JS must be 9 (post-P7W3 baseline)."""
         result = subprocess.run(
             ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
             capture_output=True, text=True, timeout=30,
         )
         data = json.loads(result.stdout)
 
-        # Verify current counts reflect the decrease
+        # Verify current counts reflect the P7W3 reduction
         assert data["current"]["python"]["host_iteration"] == 8, (
             f"Python host_iteration is {data['current']['python']['host_iteration']}, expected 8"
         )
@@ -291,14 +291,9 @@ class TestRatchetEvidence:
             f"JS host_iteration is {data['current']['javascript']['host_iteration']}, expected 9"
         )
 
-        # Verify no increases
+        # Verify no increases (ratchet must never regress)
         assert data["increases"] == [], (
             f"Ratchet shows increases (regression): {data['increases']}"
-        )
-
-        # Verify decreases exist
-        assert len(data["decreases"]) >= 2, (
-            f"Expected at least 2 decreases (Python + JS), got {len(data['decreases'])}"
         )
 
     def test_js_eval_step_passes(self):
