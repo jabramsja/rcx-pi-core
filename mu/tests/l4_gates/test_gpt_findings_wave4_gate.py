@@ -13,11 +13,10 @@ Usage:
 from __future__ import annotations
 
 import ast
-import inspect
-import re
 
 import pytest
 
+from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import run_mu  # SPEED_OK: used in slow tests only
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
@@ -28,9 +27,7 @@ from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 def _read_source(module_path: str) -> str:
     """Read source file from mu/ path."""
-    import pathlib
-    repo = pathlib.Path(__file__).resolve().parents[3]  # mu/tests/l4_gates/ -> repo
-    return (repo / module_path).read_text()
+    return (REPO_ROOT / module_path).read_text()
 
 
 # ---------------------------------------------------------------------------

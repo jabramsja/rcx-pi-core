@@ -462,9 +462,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 69 (70 pre-wave-e - 1: Boot2 extraction to
-    # engine_pipeline.py consolidated one infra marker)
-    assert infra_count == 69, (
-        f"Expected 69 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 70 (69 pre-wave4-core + 1: evidence walker
+    # stall fallback in engine_pipeline.py adds AST_OK:infra boundary fallback)
+    assert infra_count == 70, (
+        f"Expected 70 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
