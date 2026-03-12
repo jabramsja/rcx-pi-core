@@ -114,6 +114,54 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
+# 7. Check README.md references valid files/commands
+echo ""
+echo "7. Checking README.md references..."
+
+README_ERRORS=0
+# Check that key files referenced in README.md exist
+for file in "STATUS.md" "TASKS.md" "CHANGELOG.md" "ROADMAP.md"; do
+    if grep -q "$file" README.md 2>/dev/null && [ ! -f "$file" ]; then
+        echo "   MISSING: $file (referenced in README.md)"
+        README_ERRORS=$((README_ERRORS + 1))
+    fi
+done
+# Check that key scripts referenced in README.md exist
+for script in "tools/audit_fast.sh" "tools/audit_all.sh" "scripts/green_gate.sh"; do
+    if grep -q "$script" README.md 2>/dev/null && [ ! -f "$script" ]; then
+        echo "   MISSING: $script (referenced in README.md)"
+        README_ERRORS=$((README_ERRORS + 1))
+    fi
+done
+if [ "$README_ERRORS" -eq 0 ]; then
+    echo "   OK: README.md references check out"
+else
+    ERRORS=$((ERRORS + README_ERRORS))
+fi
+
+# 8. Check roadmap/ files for stale references
+echo ""
+echo "8. Checking roadmap/ doc freshness..."
+
+ROADMAP_ERRORS=0
+if [ -d "roadmap" ]; then
+    # Check that roadmap docs don't reference removed files/flags
+    for stale_ref in "_STAGE0_PILOT" "match.v1.json" "subst.v1.json"; do
+        hits=$(grep -rl "$stale_ref" roadmap/ 2>/dev/null | grep -v "CHANGELOG" || true)
+        if [ -n "$hits" ]; then
+            echo "   STALE: '$stale_ref' found in: $hits"
+            ROADMAP_ERRORS=$((ROADMAP_ERRORS + 1))
+        fi
+    done
+    if [ "$ROADMAP_ERRORS" -eq 0 ]; then
+        echo "   OK: No stale references in roadmap/"
+    else
+        ERRORS=$((ERRORS + ROADMAP_ERRORS))
+    fi
+else
+    echo "   SKIP: roadmap/ directory not found"
+fi
+
 # Summary
 echo ""
 echo "=== Summary ==="
