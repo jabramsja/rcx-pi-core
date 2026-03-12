@@ -1,0 +1,15 @@
+{
+  "wave_id": "redteam-2026-03-12-wave6b-doc-accuracy",
+  "repeat_run_speedup_ratio": 1.262614,
+  "parity_diff_count": 0,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.319899,
+  "repeat_run_raw_seconds": [0.403909, 0.319899],
+  "step_growth_points": [
+    {"step": 1, "elapsed_seconds": 0.403909},
+    {"step": 2, "elapsed_seconds": 0.723808}
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-12T22:45:00Z",
+  "collector_version": "2.2.0"
+}
