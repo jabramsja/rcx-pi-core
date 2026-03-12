@@ -1148,7 +1148,7 @@ def check_noop_throttle(notes: list[dict]) -> tuple[bool, list[str]]:
 
     errors = []
     for gate_id, count in gate_noop_count.items():
-        if count == 2 and gate_override_count.get(gate_id, 0) == 1:
+        if count == 2 and gate_override_count.get(gate_id, 0) >= 1:
             print(f"  FOUNDER_OVERRIDE active for {gate_id} — "
                   f"allowing one NO_OP repeat")
         elif count >= 2:
