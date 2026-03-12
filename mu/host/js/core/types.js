@@ -43,12 +43,18 @@ function makeDepthBudget(depth) {
 
 /**
  * Consume one level from budget. Returns [ok, remaining].
+ *
+ * Budget is always either null (exhausted) or a well-formed linked-list
+ * node {head: null, tail: <budget>} constructed by makeDepthBudget().
+ * All callers are internal — no external input reaches this function.
+ * typeof check removed (P7 Wave 2): trusting well-formed budget,
+ * parity with Python consume_budget simplification.
  */
 function consumeBudget(budget) {
   if (budget === null) {
     return [false, null];
   }
-  if (typeof budget === 'object' && budget !== null && 'tail' in budget) {
+  if ('tail' in budget) {
     return [true, budget.tail];
   }
   return [false, null];
@@ -169,11 +175,10 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
 }
 
 /**
- * ELIMINATED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
+ * DEMOTED PRIMITIVE: mu_equal (Content-Addressed Mu Level 1)
  * Previously a bootstrap primitive. Now derivable from muHashCached.
- * Used in production stall-detection loops (pipeline.js, json_handlers.js)
- * and tests.
- * @host_builtin - convenience wrapper around muHashCached
+ * Retained for test convenience only — all production stall-detection
+ * uses muHashCached directly (P7 Wave 2 demotion, parity with Python).
  */
 function muEqual(a, b) {
   if (!isValidMu(a) || !isValidMu(b)) {

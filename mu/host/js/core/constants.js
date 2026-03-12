@@ -43,12 +43,12 @@
  *     - normalize()         - recursive normalization
  *     - denormalize()       - recursive denormalization
  *
- *   builtin debt: 3
- *     - muEqual()           - structural equality (convenience wrapper, delegates to muHashCached)
+ *   builtin debt: 2
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
+ *     (muEqual demoted: test-only convenience wrapper, delegates to muHashCached — P7 Wave 2)
  *
- * TOTAL DEBT: 19 (10 iteration + 6 recursion + 3 builtin)
+ * TOTAL DEBT: 18 (10 iteration + 6 recursion + 2 builtin)
  * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations

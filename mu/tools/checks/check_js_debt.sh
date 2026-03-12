@@ -220,7 +220,7 @@ check_function_marker "stage0Match" "@host_recursion"
 check_function_marker "stage0Substitute" "@host_recursion"
 check_function_marker "normalize" "@host_recursion"
 check_function_marker "denormalize" "@host_recursion"
-check_function_marker "muEqual" "@host_builtin"
+# muEqual demoted to test-only (P7 Wave 2) — no longer tracked as @host_builtin
 check_function_marker "muHash" "@host_builtin"
 check_function_marker "isValidMu" "@host_builtin"
 

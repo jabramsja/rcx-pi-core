@@ -9,7 +9,7 @@
  */
 
 const { KERNEL_RESERVED_FIELDS, RcxError } = require('../core/constants');
-const { isValidMu, muHash, muEqual, muHashCached, muHashControl, muHashControlCached } = require('../core/types');
+const { isValidMu, muHash, muHashCached, muHashControl, muHashControlCached } = require('../core/types');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
