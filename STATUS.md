@@ -317,7 +317,7 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 ## Debt Status
 
 ```
-THRESHOLD: 17
+THRESHOLD: 16
 CURRENT: 16 (12 tracked decorators + 4 AST_OK bootstrap)
 FLOOR: 16 (see explanation below)
 INFRA_CEILING: 74
