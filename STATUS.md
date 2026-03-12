@@ -331,15 +331,15 @@ INFRA_CURRENT: 73
 - @host_mutation: 1 (deep_eval history.append only — eval_seed _stage0_substitute mutation eliminated P7 Wave 1 via generator expressions)
 - AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
-**Total host semantics markers (39 = 20 Py + 19 JS):** The floor of 16 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json` (baseline update pending MAINTENANCE wave per L4 Rule 20). Per-category: Py = 4 recursion + 3 builtin + 13 iteration + 0 mutation; JS = 6 recursion + 3 builtin + 10 iteration.
+**Total host semantics markers (37 = 19 Py + 18 JS):** The floor of 16 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json` (baseline update pending MAINTENANCE wave per L4 Rule 20). Per-category: Py = 4 recursion + 2 builtin + 13 iteration + 0 mutation; JS = 6 recursion + 2 builtin + 10 iteration. P7 Wave 2: consume_budget isinstance removed (Py host_builtin 3→2), muEqual demoted to test-only (JS host_builtin 3→2).
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 17 is the host debt floor (not a target for reduction):**
-The 17 counts ALL host debt sites (13 tracked decorators + 4 AST_OK bootstrap) across L2 kernel, L3 boundary, and utilities:
+**Why 16 is the host debt floor (not a target for reduction):**
+The 16 counts ALL host debt sites (12 tracked decorators + 4 AST_OK bootstrap) across L2 kernel, L3 boundary, and utilities:
 
 *L2 kernel substrate (11 sites):*
 1. `match()` in eval_seed.py — @host_recursion + @host_builtin (pattern matching bootstrap primitive)

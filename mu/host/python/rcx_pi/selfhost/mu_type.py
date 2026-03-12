@@ -64,10 +64,16 @@ def consume_budget(budget: dict | None) -> tuple[bool, dict | None]:
 
     ok=True means budget was available and remaining is the tail.
     ok=False means budget is exhausted (None or malformed).
+
+    Budget is always either None (exhausted) or a well-formed linked-list
+    node {"head": None, "tail": <budget>} constructed by make_depth_budget().
+    All callers are internal — no external input reaches this function.
+    isinstance removed (P7 Wave 2): trusting well-formed budget eliminates
+    one host_builtin dependency.
     """
     if budget is None:
         return (False, None)
-    if isinstance(budget, dict) and "tail" in budget:  # @host_builtin:isinstance — irreducible bootstrap: budget validation (D009-F2)
+    if "tail" in budget:
         return (True, budget["tail"])
     return (False, None)
 
