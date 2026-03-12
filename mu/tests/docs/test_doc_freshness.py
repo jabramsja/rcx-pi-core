@@ -460,9 +460,14 @@ class TestPathReferences:
 
     def test_referenced_paths_exist(self):
         """File paths mentioned in docs should exist."""
+        # TASKS.md is a historical log — tracker sync notes describe path
+        # changes using old paths (e.g., "X → Y"). Skip path validation.
+        _PATH_REF_EXCLUDES = {"TASKS.md"}
         violations = []
 
         for doc_path in iter_governed_docs():
+            if doc_path.name in _PATH_REF_EXCLUDES:
+                continue
             content = doc_path.read_text()
 
             for pattern_str, path_type in PATH_PATTERNS:
