@@ -1,15 +1,15 @@
 {
   "wave_id": "redteam-2026-03-12-wave6-ci-docs",
-  "repeat_run_speedup_ratio": 1.0,
+  "repeat_run_speedup_ratio": 1.021358,
   "parity_diff_count": 0,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.0,
-  "repeat_run_raw_seconds": [0.0, 0.0],
+  "step_growth_slope": 0.315812,
+  "repeat_run_raw_seconds": [0.322557, 0.315812],
   "step_growth_points": [
-    {"step": 1, "elapsed_seconds": 0.0},
-    {"step": 2, "elapsed_seconds": 0.0}
+    {"step": 1, "elapsed_seconds": 0.322557},
+    {"step": 2, "elapsed_seconds": 0.638369}
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-03-12T22:00:00Z",
+  "collection_timestamp_utc": "2026-03-12T22:15:00Z",
   "collector_version": "2.2.0"
 }
