@@ -23,30 +23,26 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   iteration debt: 9
+ *   iteration debt: 6
  *     - step()                    - for loop over projections
  *     - run()                     - for loop until stall
  *     - runStructural()           - for loop until stall (Gate 5: routes through stepKernel)
- *     - normalize()               - for loop for array conversion
- *     - denormalize()             - while loop for linked list
  *     - listToLinked()            - for loop for conversion
  *     - runAlgorithmWithBridge()  - bridge-backed algorithm execution loop
- *     - runEnginePipeline()       - engine state machine effect handler loop
  *     - runEnginePipelineRecursive() - Boot1 engine loop (iterative re-entry)
- *     (collectOntologyEvidence reclassified: boundary-effect servicing, off kernel path — P7 Wave 3)
+ *     (normalize/denormalize/runEnginePipeline reclassified: BOUNDARY, off kernel path — P7W4)
+ *     (collectOntologyEvidence reclassified: boundary-effect servicing, off kernel path — P7W3)
  *
- *   recursion debt: 6
- *     - match()             - recursive pattern matching
- *     - substitute()        - recursive substitution
- *     - stage0Match()       - Stage 0 recursive pattern matching (bootstrap primitive)
+ *   recursion debt: 2
+ *     - stage0Match()       - Stage 0 recursive pattern matching (bootstrap primitive, P7W4: list branch removed)
  *     - stage0Substitute()  - Stage 0 recursive substitution (bootstrap primitive)
- *     - normalize()         - recursive normalization
- *     - denormalize()       - recursive denormalization
+ *     (match/substitute reclassified: BOUNDARY, off kernel path since _stage0Pilot=true — P7W4)
+ *     (normalize/denormalize reclassified: BOUNDARY, off kernel path — P7W4)
  *
  *   builtin debt: 2
  *     - muHash()            - SHA-256 hash (BOOTSTRAP_PRIMITIVE, hash-accelerated closure detection)
  *     - isValidMu()         - type validation
- *     (muEqual demoted: test-only convenience wrapper, delegates to muHashCached — P7 Wave 2)
+ *     (muEqual demoted: test-only convenience wrapper, delegates to muHashCached — P7W2)
  *
  * TOTAL DEBT: 17 (9 iteration + 6 recursion + 2 builtin)
  * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)

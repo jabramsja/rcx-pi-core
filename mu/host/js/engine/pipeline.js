@@ -790,7 +790,8 @@ const BOOT1_MAX_REENTRY_DEPTH = 20;
 /**
  * Host loop that drives the engine state machine (rcx_engine.v1.json).
  * Parameterized: takes kernelProjections, seedProjectionMap, and engineProjections.
- * @host_iteration (boundary host loop, services engine state machine)
+ * BOUNDARY: host orchestrator loop (off kernel path — CALLS stepKernel, not called BY it).
+ * Reclassified P7W4: was host iteration debt, now BOUNDARY.
  */
 function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, options) {
   if (!isValidMu(inputValue)) {

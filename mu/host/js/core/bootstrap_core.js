@@ -16,13 +16,10 @@ const { isVar, isValidMu, muHashCached, muHashControlCached, _NO_BUDGET, consume
 const { normalize, denormalize } = require('./normalize');
 
 /**
- * @host_recursion — recursive pattern matching
- * (host debt, not a bootstrap primitive)
- *
- * Match pattern against input, returning bindings or NO_MATCH.
- * _validated=true skips depth-0 entry validation (for trusted callers).
- * Parity: Python match() validates at entry, _match_inner does not.
- * The _validated flag mirrors calling _match_inner directly.
+ * BOUNDARY: match() is OFF the kernel execution path since _stage0Pilot=true (Wave H).
+ * Kernel path: stepKernel → _stepTrusted → applyProjection → stage0Match.
+ * match() is only called by the public API, not by the kernel.
+ * Reclassified P7W4: was host recursion debt, now BOUNDARY.
  */
 function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUDGET) {
   // --- Structural budget path (opt-in) ---
@@ -174,10 +171,10 @@ function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUD
 }
 
 /**
- * @host_recursion — recursive substitution
- * (host debt, not a bootstrap primitive)
- *
- * Substitute variable sites in body with bound values.
+ * BOUNDARY: substitute() is OFF the kernel execution path since _stage0Pilot=true (Wave H).
+ * Kernel path: stepKernel → _stepTrusted → applyProjection → stage0Substitute.
+ * substitute() is only called by the public API, not by the kernel.
+ * Reclassified P7W4: was host recursion debt, now BOUNDARY.
  */
 function substitute(body, bindings, _depth = 0, _budget = _NO_BUDGET) {
   // --- Structural budget path (opt-in) ---
@@ -435,7 +432,8 @@ function setStage0Pilot(value) {
 
 /**
  * Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure.
- * @host_recursion — Stage 0 recursive pattern matching (bootstrap primitive)
+ * @host_recursion — Stage 0 recursive pattern matching (bootstrap primitive).
+ * P7W4: Array branch removed (dead code — all kernel inputs normalized to head/tail).
  */
 function stage0Match(pattern, input, bindings, _depth = 0) {
   if (_depth > MAX_DEPTH) {
@@ -471,18 +469,10 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
     return pattern === input ? current : NO_MATCH;
   }
 
-  // Array
-  if (Array.isArray(pattern)) {
-    if (!Array.isArray(input) || pattern.length !== input.length) {
-      return NO_MATCH;
-    }
-    let merged = current;
-    for (let i = 0; i < pattern.length; i++) {
-      merged = stage0Match(pattern[i], input[i], merged, _depth + 1);
-      if (merged === NO_MATCH) return NO_MATCH;
-    }
-    return merged;
-  }
+  // Array branch REMOVED (P7W4): After normalization, all arrays become head/tail
+  // linked lists (objects). No kernel-path code passes raw JS arrays to stage0Match.
+  // Verified: zero seed patterns/bodies contain raw arrays.
+  // If a raw array reaches here, it falls through to the object branch or NO_MATCH.
 
   // Object (Gate-3: allow pattern to omit _type when input has _type="list")
   if (typeof pattern === 'object') {

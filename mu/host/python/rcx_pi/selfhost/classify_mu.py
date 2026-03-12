@@ -84,7 +84,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     current = value
     _max_classify_walk = 10000  # Defense-in-depth: cap iterations for acyclic lists
     _walk_count = 0
-    while current is not None:  # @host_iteration: boundary pre-validation (9-agent review 2026-01-31)
+    while current is not None:  # BOUNDARY: pre-validation loop (off kernel path — called by classify_mu/apply_mu, not step_kernel_mu). Reclassified P7W4.
         _walk_count += 1
         if _walk_count > _max_classify_walk:
             return "list"  # Too long to classify — treat as list

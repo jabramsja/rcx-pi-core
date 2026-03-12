@@ -213,14 +213,12 @@ check_function_marker "run" "@host_iteration"
 check_function_marker "runStructural" "@host_iteration"
 check_function_marker "runAlgorithmWithBridge" "@host_iteration"
 # collectOntologyEvidence reclassified as boundary (off kernel path) — P7 Wave 3
-check_function_marker "runEnginePipeline" "@host_iteration"
+# runEnginePipeline reclassified as BOUNDARY (off kernel path — orchestrator) — P7W4
 check_function_marker "runEnginePipelineRecursive" "@host_iteration"
-check_function_marker "match" "@host_recursion"
-check_function_marker "substitute" "@host_recursion"
+# match/substitute reclassified as BOUNDARY (off kernel path since _stage0Pilot=true) — P7W4
 check_function_marker "stage0Match" "@host_recursion"
 check_function_marker "stage0Substitute" "@host_recursion"
-check_function_marker "normalize" "@host_recursion"
-check_function_marker "denormalize" "@host_recursion"
+# normalize/denormalize reclassified as BOUNDARY (off kernel path) — P7W4
 # muEqual demoted to test-only (P7 Wave 2) — no longer tracked as @host_builtin
 check_function_marker "muHash" "@host_builtin"
 check_function_marker "isValidMu" "@host_builtin"

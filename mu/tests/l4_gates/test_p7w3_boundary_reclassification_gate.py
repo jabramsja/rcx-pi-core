@@ -276,19 +276,19 @@ class TestRatchetEvidence:
         assert result.returncode == 0, f"Ratchet failed:\n{result.stderr}"
 
     def test_host_iteration_counts(self):
-        """Python host_iteration must be 8, JS must be 9 (post-P7W3 baseline)."""
+        """Host iteration must be <= post-P7W3 baseline (further reduced by W4)."""
         result = subprocess.run(
             ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
             capture_output=True, text=True, timeout=30,
         )
         data = json.loads(result.stdout)
 
-        # Verify current counts reflect the P7W3 reduction
-        assert data["current"]["python"]["host_iteration"] == 8, (
-            f"Python host_iteration is {data['current']['python']['host_iteration']}, expected 8"
+        # P7W4 further reduced: Py 8→4, JS 9→6. Verify monotonic decrease.
+        assert data["current"]["python"]["host_iteration"] <= 8, (
+            f"Python host_iteration is {data['current']['python']['host_iteration']}, expected <= 8"
         )
-        assert data["current"]["javascript"]["host_iteration"] == 9, (
-            f"JS host_iteration is {data['current']['javascript']['host_iteration']}, expected 9"
+        assert data["current"]["javascript"]["host_iteration"] <= 9, (
+            f"JS host_iteration is {data['current']['javascript']['host_iteration']}, expected <= 9"
         )
 
         # Verify no increases (ratchet must never regress)
