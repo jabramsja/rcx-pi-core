@@ -31,6 +31,9 @@ Usage:
     # Associate findings with a PR
     python tools/runners/run_review.py --pr --pr-number 123
 
+    # Auto-escalate critical findings to bridge for Codex second opinion
+    python tools/runners/run_review.py --pr --bridge-escalate
+
 Depth levels:
     quick:  verifier, adversary, expert, structural-proof (4 agents)
     full:   + fuzzer always; grounding is risk-triggered (5-6 agents)
@@ -1164,6 +1167,72 @@ def auto_select_depth(files: list[str]) -> str:
 
 
 # =============================================================================
+# Bridge Escalation
+# =============================================================================
+
+def _maybe_escalate_to_bridge(orchestrator) -> None:
+    """Send CRITICAL/HIGH findings to bridge for Codex second opinion (advisory)."""
+    high_findings = []
+    for agent_result in orchestrator.results:
+        findings = extract_findings_from_output(agent_result.name, agent_result.output, agent_result.verdict)
+        for finding in findings:
+            sev = finding.get("severity", "info").lower()
+            if sev in ("critical", "high"):
+                high_findings.append({
+                    "agent": agent_result.name,
+                    "verdict": agent_result.verdict,
+                    "severity": sev,
+                    "message": finding.get("message", "untitled"),
+                    "file": finding.get("file", ""),
+                })
+
+    if not high_findings:
+        print("\n  Bridge escalation: no CRITICAL/HIGH findings — skipping")
+        return
+
+    summary_lines = [
+        f"- [{f['severity'].upper()}] {f['agent']}: {f['message']}"
+        + (f" ({f['file']})" if f['file'] else "")
+        for f in high_findings
+    ]
+    task_text = (
+        "REQUIRED: Before proceeding, read and summarize FOUNDER_SESSION_BOOTSTRAP.md. "
+        "Confirm you have read it and list key points. Then proceed with:\n\n"
+        f"SDK agent review produced {len(high_findings)} CRITICAL/HIGH finding(s). "
+        "Please review these findings for accuracy and provide a second opinion:\n\n"
+        + "\n".join(summary_lines)
+    )
+
+    print(f"\n  Bridge escalation: {len(high_findings)} CRITICAL/HIGH finding(s) → sending to Codex...")
+    bridge_script = Path(__file__).resolve().parent.parent / "agents" / "bridge_supervisor.py"
+    if not bridge_script.exists():
+        print(f"  Bridge escalation: bridge_supervisor.py not found at {bridge_script} — skipping")
+        return
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(bridge_script), "review",
+             "--task", task_text,
+             "--summary", f"Bridge escalation: {len(high_findings)} high-severity agent findings",
+             "--reviewer", "codex", "--no-diff", "-v"],
+            capture_output=True, text=True, timeout=300,
+            cwd=Path(__file__).resolve().parents[3],
+        )
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode == 0:
+            print("  Bridge escalation: Codex review complete (advisory)")
+        else:
+            if result.stderr:
+                print(result.stderr)
+            print(f"  Bridge escalation: Codex review returned exit {result.returncode} (non-blocking)")
+    except subprocess.TimeoutExpired:
+        print("  Bridge escalation: timed out after 300s (non-blocking)")
+    except Exception as e:
+        print(f"  Bridge escalation: failed ({e}) — non-blocking")
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -1267,6 +1336,11 @@ Examples:
         "--pr-number",
         type=int,
         help="PR number to associate with findings (for tracking)"
+    )
+    parser.add_argument(
+        "--bridge-escalate",
+        action="store_true",
+        help="Auto-escalate CRITICAL/HIGH findings to bridge for Codex second opinion (advisory)"
     )
 
     args = parser.parse_args()
@@ -1491,6 +1565,10 @@ Examples:
     if args.output:
         args.output.write_text(report)
         print(f"\nReport saved to: {args.output}")
+
+    # Bridge escalation: send CRITICAL/HIGH findings to Codex for second opinion
+    if args.bridge_escalate:
+        _maybe_escalate_to_bridge(orchestrator)
 
     # Exit with appropriate code
     exit_code = orchestrator.get_exit_code()
