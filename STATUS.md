@@ -74,7 +74,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
 | **Python Substrate** | ~6,274 LOC, ~5,556 tests, production-ready | ✅ PRIMARY | - |
-| **JS Substrate** | ~4200 LOC core + ~470 LOC inline tests (15 JS modules), auditable, portability proof | - | ✅ COMPLETE |
+| **JS Substrate** | ~4800 LOC core + ~480 LOC inline tests (15 JS modules), auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
 **What L3 proves:**
@@ -149,7 +149,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `mu/host/js/` (~4200 LOC core + ~470 LOC inline tests across 15 JS modules; `eval_step.js` is compatibility shim)
+**JS POC location:** `mu/host/js/` (~4800 LOC core + ~480 LOC inline tests across 15 JS modules; `eval_step.js` is compatibility shim)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -202,9 +202,9 @@ Boot1 is a **host-side loop policy alternative**, not a seed-defined structural 
 - **Trampoline (fallback):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:run_engine_pipeline()`, `eval_step.js:runEnginePipeline()`)
 Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); Boot1 recursive promoted to default. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec. Note: Boot1 is NOT meta-circular progress — it changes the host execution strategy, not the structural execution model (see `Boot1LoopContract.v0.md` "does not promote to META-CIRCULAR").
 
-**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~4200 LOC core in JS across 15 modules), we know exactly what would need to change.
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~4800 LOC core in JS across 15 modules), we know exactly what would need to change.
 
-**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS substrate at ~4200 LOC core is our current answer - auditable, portable, mechanical.
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS substrate at ~4800 LOC core is our current answer - auditable, portable, mechanical.
 
 ### Cross-Substrate Testing Strategy
 
@@ -480,7 +480,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
   - Bridge: `mu/bridge/` (bootstrap_structural.v1)
   - Programs: `mu/programs/` (rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1)
   - Utilities: `mu/utilities/` (classify.v1, eval.v1, terminal_classify.v1, evidence_walker.v1)
-  - Host: `mu/host/js/` (15 modules, ~4500 LOC core), `mu/host/python/rcx_pi/selfhost/`
+  - Host: `mu/host/js/` (15 modules, ~4800 LOC core), `mu/host/python/rcx_pi/selfhost/`
 - Task list: `TASKS.md`
 - **Agent bridge:** `mu/docs/agents/AgentBridgeProtocol.v0.md` (Claude ↔ Codex collaboration, hybrid review, design deliberation)
 - **Documentation governance:** `mu/docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)

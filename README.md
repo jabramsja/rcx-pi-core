@@ -20,10 +20,10 @@ A projection-based computational substrate where **structure is the primitive**.
 - **~5,500+ tests** across 260+ test files
 - **11 semantic debt** (irreducible bootstrap floor)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
-- **143 projections** across 17 seed files
+- **163 projections** across 19 seed files
 
 **Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
-Three automatic routes: null→r_null, closure→r_a, default→lobes. Cross-substrate parity verified.
+Five automatic routes: null→r_null, closure→r_a, exhaustion→sink, stall→lobes, default→lobes. Cross-substrate parity verified. Metabolization COMPLETE (E1-E5 all MET).
 
 See `STATUS.md` for full details.
 
@@ -101,8 +101,10 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/substrate/subst.v1.json` | Substitution (12 projections) - legacy standalone |
 | `mu/closures/fix.v1.json` | Fixed-point combinator (6 projections) - Rule 4.1 |
 | `mu/programs/metabolization.v1.json` | Hemisphere metabolization (6 projections) - structural metabolism |
+| `mu/programs/metabolize_cycle.v1.json` | Metabolize cycle (15 projections) - full metabolization pipeline |
 | `mu/utilities/classify.v1.json` | Type classification (6 projections) |
 | `mu/utilities/eval.v1.json` | Evaluation (7 projections) |
+| `mu/utilities/evidence_walker.v1.json` | Evidence walking (4 projections) - structural evidence traversal |
 | `mu/utilities/terminal_classify.v1.json` | Terminal classification (7 projections) - engine terminal detection |
 
 ### Core Modules

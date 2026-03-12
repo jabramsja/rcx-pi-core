@@ -351,7 +351,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 
 ## L3 Substrate Portability: JavaScript POC
 
-**Location:** `mu/host/js/` (15 modules; ~4500 LOC core + ~480 LOC inline tests; `eval_step.js` is a compatibility shim that delegates to `cli/main.js`)
+**Location:** `mu/host/js/` (15 modules; ~4800 LOC core + ~480 LOC inline tests; `eval_step.js` is a compatibility shim that delegates to `cli/main.js`)
 
 **What it proves:** The same projections (kernel.v1.json, match.v2.json, subst.v2.json, recurrence.v1.json, exhaustion.v1.json, hemispheres.v1.json) run identically on JavaScript. This demonstrates that all meaning is in the projections, not the host language.
 

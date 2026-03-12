@@ -41,11 +41,15 @@ Define native structural routing states for RCX: `r_null`, `r_inf`, `r_a`, `lobe
 3. 5-bucket shape parity enforced across Python and JS substrates.
 4. Fail-closed on invalid engine_result or hemisphere shape.
 
-**FUTURE_TARGET** (VECTOR — no projections exist, no implementation yet):
+**IMPLEMENTED** (metabolization seeds exist and are wired into the runtime path):
+1. `mu/programs/metabolization.v1.json` — 6 projections for hemisphere metabolization.
+2. `mu/programs/metabolize_cycle.v1.json` — 15 projections for the full metabolization pipeline.
+3. Metabolization is COMPLETE (E1-E5 all MET, 2026-02-20). Both seeds loaded in Python and JS.
+
+**FUTURE_TARGET** (VECTOR — design only, not yet implemented):
 1. `lobes` to `r_a` requires explicit closure evidence (structural, not host-derived).
-2. `sink` re-expression (metabolization): sink contents re-enter the system via r_inf or r_null for processing, then route to lobes/r_a or recycle back to sink. Requires new metabolization projections in `hemispheres.v1.json` (or a v2 seed). See `TASKS.md` VECTOR: "Hemisphere Metabolization Contract".
-3. Stall recovery: stalled structures check lobes first (preferred recovery), then sink if lobes cannot accept. Requires lobes-compatibility predicate (not yet designed).
-4. Any promotion or re-expression must be observable and traceable with deterministic events.
+2. Stall recovery: stalled structures check lobes first (preferred recovery), then sink if lobes cannot accept. Requires lobes-compatibility predicate (not yet designed).
+3. Any promotion or re-expression must be observable and traceable with deterministic events.
 
 ## Execution Layer Requirements
 1. Routing projections must run in the meta-circular kernel after normalization refactor.
@@ -84,15 +88,15 @@ Fail-closed validation on both input (hemisphere shape) and output (routing resu
 `runEnginePipeline()`, `hashTraceForRecurrence()`, `runHemisphereRouting()`, `runEngineWithRouting()`.
 rcx_engine.v1.json loaded in JS (9 seeds total). 36 cross-substrate parity tests pass.
 
-## FUTURE_TARGET: Hemisphere Metabolization Contract (VECTOR)
+## Hemisphere Metabolization Contract
 
-> **Status:** VECTOR — design only. No projections exist. No implementation. Not enforced.
+> **Status:** Core metabolization IMPLEMENTED (`metabolization.v1.json`, `metabolize_cycle.v1.json`). The advanced metabolization cycle design below (sink re-expression, stall recovery, promotion) remains VECTOR — design only.
 > **Authorization:** `TASKS.md` VECTOR: "Hemisphere Metabolization Contract".
 > **Prerequisite:** CURRENT_ENFORCED routing (12 projections) must remain green.
 
-### Not Implemented
+### Advanced Metabolization Cycle (Not Implemented)
 
-Nothing in this section is implemented, tested, or enforced. The projections listed below are design sketches only. Implementation requires explicit VECTOR → NEXT promotion in `TASKS.md` with all promotion criteria met.
+The advanced metabolization cycle projections listed below are design sketches only. Core metabolization (intake, basic cycle) is implemented. The advanced features (sink re-expression, stall recovery, lobes→r_a promotion) require explicit VECTOR → NEXT promotion in `TASKS.md` with all promotion criteria met.
 
 ### Cycle Definition
 

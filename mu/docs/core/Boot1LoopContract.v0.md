@@ -25,13 +25,20 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 ---
 
+## Truth Sync (2026-03-12)
+
+> **Original design intent:** Replace the trampoline path with a structural recursive loop primitive.
+> **What was implemented:** Boot1 recursive shadow (`_run_engine_recursive()`) promoted to default in both Python and JS. This is a host-side execution strategy change — the recursive variant replaces the iterative trampoline loop as the default host path.
+> **What Boot1 did NOT achieve:** The loop-back execution remains host code. Boot1 changed HOW the host executes re-entry (recursion vs iteration), not WHETHER the host executes it. The loop-back decision is structural (made by projections); the loop-back execution is still host code in both paths.
+> **Current state:** See `STATUS.md` for Boot1 status. Both recursive (default) and trampoline (fallback) paths exist.
+
 ## 1. Purpose and Non-Goals
 
 ### Purpose
 
-Define the recursive kernel loop primitive that **replaces** the current trampoline path for engine re-entry. The trampoline (`engine.exhaustion_done_freeze` → `{_run_engine: ...}` → `engine.init_config`) was explicitly labeled TRANSITIONAL (founder directive, Round 16D). This contract specifies the Boot1 mechanism that supersedes it.
+Define the recursive kernel loop primitive that offers an alternative to the current trampoline path for engine re-entry. The trampoline (`engine.exhaustion_done_freeze` → `{_run_engine: ...}` → `engine.init_config`) was explicitly labeled TRANSITIONAL (founder directive, Round 16D). This contract specifies the Boot1 mechanism.
 
-The core question: **Can the engine's loop-back decision be expressed as a self-re-entry primitive within the projection system, eliminating the trampoline entirely?**
+The core question: **Can the engine's loop-back decision be expressed as a self-re-entry primitive within the projection system, eliminating the trampoline entirely?** (Answer: the decision is structural, but execution remains host code — see Truth Sync above.)
 
 ### What Boot1 Loop Replaces
 
@@ -45,7 +52,7 @@ engine.exhaustion_done_freeze:
 
 The `{_run_engine: ...}` envelope is consumed by the **host** effect handler loop (`run_engine_pipeline` in Python/JS), which re-enters the engine state machine. The loop-back decision is structural (made by the projection), but the loop-back **execution** is host code.
 
-Boot1 Loop aims to make the loop-back execution also structural — a recursive self-application of the engine projection set, not a host-level `state = next_state` branch.
+Boot1 Loop originally aimed to make the loop-back execution also structural. In practice, Boot1 implemented a recursive host alternative (`_run_engine_recursive`) that replaced the iterative trampoline as default — a cleaner host execution strategy, but still host code.
 
 ### Non-Goals
 
