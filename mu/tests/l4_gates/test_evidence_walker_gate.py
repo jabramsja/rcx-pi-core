@@ -19,6 +19,7 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed,
     get_seed_path,
     EXPECTED_PROJECTION_IDS,
+    SEED_CHECKSUMS,
 )
 
 
@@ -36,6 +37,39 @@ class TestEvidenceWalkerSeedGate:
     def test_projection_ids_registered(self):
         assert "evidence_walker.v1.json" in EXPECTED_PROJECTION_IDS
         assert len(EXPECTED_PROJECTION_IDS["evidence_walker.v1.json"]) == 4
+
+    def test_checksum_registered(self):
+        assert "evidence_walker.v1.json" in SEED_CHECKSUMS
+
+
+class TestEvidenceWalkerJsParityGate:
+    """Gate: evidence_walker.v1.json registered in JS registries (cross-substrate parity)."""
+
+    def test_js_seed_checksums_contains_evidence_walker(self):
+        """JS SEED_CHECKSUMS must include evidence_walker.v1.json."""
+        import re
+        from pathlib import Path
+        js_main = Path(__file__).parents[2] / "host" / "js" / "cli" / "main.js"
+        source = js_main.read_text()
+        match = re.search(r"evidence_walker\.v1\.json.*?:\s*'([a-f0-9]+)'", source)
+        assert match, "evidence_walker.v1.json not found in JS SEED_CHECKSUMS"
+        py_checksum = SEED_CHECKSUMS["evidence_walker.v1.json"]
+        assert match.group(1) == py_checksum, (
+            f"JS/Python checksum mismatch: JS={match.group(1)} Python={py_checksum}"
+        )
+
+    def test_js_projection_ids_contains_evidence_walker(self):
+        """JS EXPECTED_PROJECTION_IDS must include evidence_walker.v1.json."""
+        import re
+        from pathlib import Path
+        js_main = Path(__file__).parents[2] / "host" / "js" / "cli" / "main.js"
+        source = js_main.read_text()
+        assert "'evidence_walker.v1.json'" in source or '"evidence_walker.v1.json"' in source, (
+            "evidence_walker.v1.json not found in JS EXPECTED_PROJECTION_IDS"
+        )
+        py_ids = EXPECTED_PROJECTION_IDS["evidence_walker.v1.json"]
+        for pid in py_ids:
+            assert pid in source, f"JS missing projection ID: {pid}"
 
 
 @pytest.mark.slow

@@ -3,7 +3,7 @@
  * RCX CLI Main — Seed loading, projection composition, self-tests, CLI output
  *
  * This is the runtime entrypoint. When executed directly or via eval_step.js shim:
- *   1. Loads and verifies all 13 seeds
+ *   1. Loads and verifies all 14 seeds
  *   2. Composes projection arrays
  *   3. Runs self-tests (console output with "All tests passed: true")
  *   4. If --json-api in process.argv, delegates to api/json_handlers.js
@@ -34,6 +34,7 @@ const SEED_CHECKSUMS = {
   'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
   'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
   'metabolize_cycle.v1.json': 'f8888ecab6845193610499d15dea8a8e845d07ce04391457770ef32cac69dfd8',
+  'evidence_walker.v1.json': 'e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29',
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -112,6 +113,10 @@ const EXPECTED_PROJECTION_IDS = {
     'metabolize.cycle.lobes_next', 'metabolize.cycle.lobes_done',
     'metabolize.cycle.lobes_reverse_step', 'metabolize.cycle.lobes_reverse_done',
     'metabolize.cycle.unwrap',
+  ],
+  'evidence_walker.v1.json': [
+    'evidence.walk.init', 'evidence.walk.init_empty',
+    'evidence.walk.collect_and_next', 'evidence.walk.collect_and_done',
   ],
 };
 
