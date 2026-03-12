@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from rcx_pi.selfhost.eval_seed import step
+from rcx_pi.selfhost.eval_seed import _STAGE0_PILOT as _SOURCE_STAGE0_PILOT  # ANTICHEAT_OK: captures source default at module load (before autouse fixture)
 from rcx_pi.selfhost.step_mu import run_engine_pipeline
 from rcx_pi.selfhost.projection_loader import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
@@ -148,11 +149,14 @@ class TestD005Stage0Contract:
     alternatives. Required by Rule-18 workload_target=execution_layer_truth.
     """
 
-    def test_pilot_flag_default_off(self):
-        """_STAGE0_PILOT must default to False at import time."""
-        from rcx_pi.selfhost import eval_seed
-        assert eval_seed._STAGE0_PILOT is False, (  # ANTICHEAT_OK: contract test
-            "_STAGE0_PILOT must default to False — production safety invariant"
+    def test_pilot_flag_default_on(self):
+        """_STAGE0_PILOT must default to True (production mode, Wave H).
+
+        Uses module-level import-by-value (_SOURCE_STAGE0_PILOT) to capture
+        the source-code default before the autouse fixture resets it to False.
+        """
+        assert _SOURCE_STAGE0_PILOT is True, (  # ANTICHEAT_OK: contract test
+            "_STAGE0_PILOT must default to True — Stage 0 is production (Wave H)"
         )
 
     def test_stage0_functions_exist(self):

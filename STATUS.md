@@ -794,17 +794,18 @@ New organized structure makes architecture visible:
 **Current Algorithm Execution:**
 - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - Bootstrap fallback exists only as explicit debug mode (`execution_mode="bootstrap", allow_bootstrap_fallback=True`)
-- Algorithm runtime is now true meta-circular for recurrence/exhaustion production path
+- Algorithm runtime is bridge-backed meta-circular: the kernel loop runs structurally via `step_kernel_mu`, but non-linear matching delegates to host code via bridge projections
 
-**Path to True Meta-Circular Algorithm Execution:**
-1. Algorithm projections (recurrence.v1, exhaustion.v1) expect their own format:
-   - State machine: `{_mode: "recurrence", _phase: "scan", ...}`
-   - Traces: linked-list `{head: entry, tail: ...}`
-2. Structural match/subst normalize everything to linked-list format
-3. Options for true meta-circular:
-   - **Option A:** Rewrite algorithm projections to work with fully normalized format
-   - **Option B:** Create normalization-free structural matcher for algorithm use
-   - **Option C:** Accept Python match/substitute as bootstrap primitive for algorithms
+**Meta-Circular Execution Evidence (Wave I Phase 2, verified 2026-03-12):**
+- kernel.v1 + match.v2 + subst.v2 execute STRUCTURALLY in the kernel loop (28 combined projections, 10+ steps per match+subst)
+- `_step_trusted` is a projection loop (iterates projections via `_apply_projection_trusted`, plus coverage hooks) → Stage0 bootstrap (irreducible ~80 LOC)
+- Stage0 (`_stage0_match` + `_stage0_substitute`) is the irreducible bootstrap: applies projections mechanically with minimal host-level branching (var binding, type dispatch, dict traversal)
+- Cross-substrate parity confirmed for linear projections: Python and JS produce identical step counts and results (nonlinear projections are correctly rejected by JS `step_kernel_meta` per existing parity policy — see `rejectNonlinearProjections` guard)
+- Evidence: `mu/tests/l4_gates/test_meta_circular_evidence_gate.py` (24 gate tests, including Stage0 routing lock)
+
+**Remaining host dependency:** Stage0 breaks the circular dependency (kernel → match → kernel). This is the irreducible bootstrap — not a deficiency but an architectural necessity.
+
+**Bridge-backed algorithm execution:** recurrence.v1 and exhaustion.v1 use bridge mode (`kernel_mode="bridge"`) which adds 5 bridge projections for non-linear pattern support. The kernel loop is structural, but bridge projections delegate non-linear matching to host `_match_inner`. True non-linear structural matching is a future L4 gate target.
 
 **Agent Validator Enhancement (2026-02-03):**
 - `tools/runners/validate_agent_compliance.py` now verifies CODE matches FILE:LINE
