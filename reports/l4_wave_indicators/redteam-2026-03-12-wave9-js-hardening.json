@@ -1,6 +1,6 @@
 {
   "wave_id": "redteam-2026-03-12-wave9-js-hardening",
-  "repeat_run_speedup_ratio": 1.22142,
+  "repeat_run_speedup_ratio": 1.221424,
   "parity_diff_count": 4,
   "net_host_semantic_delta": 0,
   "step_growth_slope": 0.059614,
