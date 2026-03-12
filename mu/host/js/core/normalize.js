@@ -379,7 +379,7 @@ function normalizeProjection(proj) {
 
 /**
  * Convert array to linked list for kernel input.
- * BOUNDARY: Data preparation — off kernel execution path. Reclassified P7W5: was host iteration marker.
+ * @host_iteration: data conversion loop (parity with Python list_to_linked)
  */
 function listToLinked(arr) {
   if (!Array.isArray(arr) || arr.length === 0) {

@@ -5,7 +5,7 @@
   "timestamp": "2026-03-12T16:00:00.000000Z",
   "repeat_run_speedup_ratio": 1.072155,
   "parity_diff_count": 5,
-  "net_host_semantic_delta": -8,
+  "net_host_semantic_delta": -6,
   "step_growth_slope": 0.378573,
   "host_semantics_delta": {
     "before": {
@@ -14,39 +14,37 @@
       "total": 17
     },
     "after": {
-      "python": {"host_builtin": 1, "host_iteration": 1, "host_mutation": 0, "host_recursion": 2, "total": 4},
-      "javascript": {"host_builtin": 2, "host_iteration": 1, "host_mutation": 0, "host_recursion": 2, "total": 5},
-      "total": 9
+      "python": {"host_builtin": 1, "host_iteration": 2, "host_mutation": 0, "host_recursion": 2, "total": 5},
+      "javascript": {"host_builtin": 2, "host_iteration": 2, "host_mutation": 0, "host_recursion": 2, "total": 6},
+      "total": 11
     },
-    "delta": -8,
-    "delta_python": -3,
-    "delta_javascript": -5,
+    "delta": -6,
+    "delta_python": -2,
+    "delta_javascript": -4,
     "reduction_type": "boundary_reclassification"
   },
   "reclassified_functions": {
     "python": [
       {"function": "run_mu", "file": "step_mu.py", "from": "@host_iteration", "to": "BOUNDARY", "reason": "outer loop scaffolding — calls step_mu but is not on kernel path"},
-      {"function": "run_mu_structural", "file": "step_mu.py", "from": "@host_iteration", "to": "BOUNDARY", "reason": "trace infrastructure — off kernel path"},
-      {"function": "list_to_linked_list", "file": "step_mu.py:581", "from": "@host_iteration (inline)", "to": "BOUNDARY", "reason": "data preparation — off kernel execution path"}
+      {"function": "run_mu_structural", "file": "step_mu.py", "from": "@host_iteration", "to": "BOUNDARY", "reason": "trace infrastructure — off kernel path"}
     ],
     "javascript": [
       {"function": "run", "file": "bootstrap_core.js", "from": "@host_iteration", "to": "BOUNDARY", "reason": "outer loop scaffolding — calls step() but is not on kernel path"},
       {"function": "runStructural", "file": "kernel.js", "from": "@host_iteration", "to": "BOUNDARY", "reason": "trace infrastructure — off kernel path"},
-      {"function": "listToLinked", "file": "normalize.js", "from": "@host_iteration", "to": "BOUNDARY", "reason": "data conversion — off kernel execution path"},
       {"function": "runAlgorithmWithBridge", "file": "pipeline.js", "from": "@host_iteration", "to": "BOUNDARY", "reason": "algorithm harness — off kernel path"},
       {"function": "runEnginePipelineRecursive", "file": "pipeline.js", "from": "@host_iteration", "to": "BOUNDARY", "reason": "engine pipeline runner — off kernel path"}
     ]
   },
   "kernel_path_preserved": {
-    "python": ["step_kernel_mu (@host_iteration)", "_stage0_match (@host_recursion + @host_builtin)", "_stage0_substitute (@host_recursion)"],
-    "javascript": ["step (@host_iteration)", "stage0Match (@host_recursion)", "stage0Substitute (@host_recursion)", "isValidMu (@host_builtin)", "muHash (@host_builtin)"]
+    "python": ["step_kernel_mu (@host_iteration)", "list_to_linked (@host_iteration)", "_stage0_match (@host_recursion + @host_builtin)", "_stage0_substitute (@host_recursion)"],
+    "javascript": ["step (@host_iteration)", "listToLinked (@host_iteration)", "stage0Match (@host_recursion)", "stage0Substitute (@host_recursion)", "isValidMu (@host_builtin)", "muHash (@host_builtin)"]
   },
   "evidence_command": "PYTHONHASHSEED=0 pytest mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py -v",
   "gate_tests": 19,
   "tooling_changes": [
-    "check_js_debt.sh: reclassified functions check BOUNDARY instead of @host_iteration",
-    "constants.js: DEBT SUMMARY updated — iteration 6→1, total JS 10→5",
-    "check_host_semantics_ratchet.py: MIN_TOTAL_MARKERS lowered 10→5"
+    "check_js_debt.sh: reclassified functions check BOUNDARY instead of @host_iteration (except listToLinked — on kernel path)",
+    "constants.js: DEBT SUMMARY updated — iteration 6→2, total JS 10→6",
+    "check_host_semantics_ratchet.py: MIN_TOTAL_MARKERS lowered 10→6"
   ],
   "repeat_run_raw_seconds": [0.405889, 0.378573],
   "step_growth_points": [
@@ -59,6 +57,6 @@
   "provenance": {
     "branch": "jabramsja/p7-host-semantics-reduction-w5",
     "prior_wave": "p7-host-semantics-reduction-w4",
-    "derivation": "inventory of 17 remaining markers → classified kernel-path vs boundary → 8 functions provably off kernel path reclassified"
+    "derivation": "inventory of 17 remaining markers → classified kernel-path vs boundary → 6 functions provably off kernel path reclassified. list_to_linked/listToLinked reverted (on kernel path via step_kernel_mu/step)"
   }
 }

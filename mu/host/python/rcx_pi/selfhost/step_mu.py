@@ -578,7 +578,7 @@ def list_to_linked(items: list[Mu]) -> Mu:
     if not items:
         return None
     result: Mu = None
-    for item in reversed(items):  # BOUNDARY: list-to-linked-list conversion (parity with JS listToLinked, reclassified P7W5)
+    for item in reversed(items):  # @host_iteration: list-to-linked-list conversion (parity with JS listToLinked)
         result = {"head": item, "tail": result}
     return result
 

@@ -1,16 +1,18 @@
 """P7 Wave 5: Outer Loop Boundary Reclassification — Gate Tests.
 
 Validates:
-  Part A: Python reclassification — run_mu(), run_mu_structural(), list-to-linked-list
+  Part A: Python reclassification — run_mu(), run_mu_structural()
     removed from @host_iteration, marked BOUNDARY.
-  Part B: JavaScript reclassification — run(), runStructural(), listToLinked(),
-    runAlgorithmWithBridge(), runEnginePipelineRecursive() removed from @host_iteration,
-    marked BOUNDARY.
+  Part B: JavaScript reclassification — run(), runStructural(),
+    runAlgorithmWithBridge(), runEnginePipelineRecursive() removed from
+    @host_iteration, marked BOUNDARY.
+  Part C: list_to_linked/listToLinked stay @host_iteration (on kernel path).
 
 Anti-laundering: All reclassified functions are provably OFF the kernel execution path.
 Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted →
   _stage0_match/_stage0_substitute (Python) / step → stage0Match/stage0Substitute (JS).
 The reclassified functions CALL the kernel but are not ON the kernel path.
+list_to_linked/listToLinked are ON the kernel path (called by step_kernel_mu/step).
 
 Evidence for: P7 Host Semantics Reduction, target gate G8.
 L4 class: L4_STRUCTURAL.
@@ -84,20 +86,17 @@ class TestPythonOuterLoopBoundary:
             "step_kernel_mu lost @host_iteration — this is the irreducible kernel loop!"
         )
 
-    def test_list_to_linked_boundary_comment(self):
-        """list-to-linked-list conversion must have BOUNDARY comment, not @host_iteration."""
+    def test_list_to_linked_still_has_host_iteration(self):
+        """list_to_linked MUST still have @host_iteration (on kernel path via step_kernel_mu)."""
         path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
         text = path.read_text()
-        assert "# BOUNDARY: list-to-linked-list conversion" in text, (
-            "list-to-linked-list conversion missing BOUNDARY comment"
-        )
-        # Verify no @host_iteration on that specific line
         for line in text.splitlines():
-            if "list-to-linked-list conversion" in line:
-                assert "@host_iteration" not in line, (
-                    "list-to-linked-list line still has @host_iteration marker"
+            if "for item in reversed(items):" in line:
+                assert "@host_iteration" in line, (
+                    "list_to_linked for-loop must have @host_iteration (on kernel path)"
                 )
-                break
+                return
+        pytest.fail("list_to_linked for-loop not found in step_mu.py")
 
 
 # ===========================================================================
@@ -129,9 +128,6 @@ class TestJSOuterLoopBoundary:
     def test_js_run_structural_boundary(self):
         self._check_js_function_boundary(JS_KERNEL_PATH, "runStructural")
 
-    def test_js_list_to_linked_boundary(self):
-        self._check_js_function_boundary(JS_NORMALIZE_PATH, "listToLinked")
-
     def test_js_run_algorithm_with_bridge_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runAlgorithmWithBridge")
 
@@ -150,6 +146,19 @@ class TestJSOuterLoopBoundary:
                 )
                 return
         pytest.fail("JS step() function not found")
+
+    def test_js_list_to_linked_still_has_host_iteration(self):
+        """JS listToLinked MUST still have @host_iteration (on kernel path via step)."""
+        text = JS_NORMALIZE_PATH.read_text()
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if "function listToLinked(" in line:
+                block = "\n".join(lines[max(0, i - 10):i])
+                assert "@host_iteration" in block, (
+                    "JS listToLinked() lost @host_iteration — on kernel path via step()"
+                )
+                return
+        pytest.fail("JS listToLinked() function not found")
 
 
 # ===========================================================================
@@ -178,6 +187,13 @@ class TestKernelPathExclusion:
         source = _get_function_source(run_mu)
         assert "step_mu(" in source, (
             "run_mu doesn't call step_mu — outer loop must call kernel via step_mu"
+        )
+
+    def test_step_kernel_mu_calls_list_to_linked(self):
+        """step_kernel_mu MUST call list_to_linked — it's on the kernel path."""
+        source = _get_function_source(step_kernel_mu)
+        assert "list_to_linked(" in source, (
+            "step_kernel_mu must call list_to_linked (kernel path data preparation)"
         )
 
 

@@ -209,11 +209,12 @@ check_function_marker() {
 }
 
 check_function_marker "step" "@host_iteration"
-# run/runStructural/listToLinked/runAlgorithmWithBridge/runEnginePipelineRecursive
+# run/runStructural/runAlgorithmWithBridge/runEnginePipelineRecursive
 # reclassified as BOUNDARY (outer loop scaffolding, off kernel path) — P7W5
 check_function_marker "run" "BOUNDARY"
 check_function_marker "runStructural" "BOUNDARY"
-check_function_marker "listToLinked" "BOUNDARY"
+# listToLinked is on kernel path (called by step/stepKernel) — stays @host_iteration
+check_function_marker "listToLinked" "@host_iteration"
 check_function_marker "runAlgorithmWithBridge" "BOUNDARY"
 check_function_marker "runEnginePipelineRecursive" "BOUNDARY"
 # collectOntologyEvidence reclassified as boundary (off kernel path) — P7 Wave 3

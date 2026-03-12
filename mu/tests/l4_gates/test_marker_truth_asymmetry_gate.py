@@ -20,17 +20,17 @@ class TestMarkerTruthAsymmetryGate:
     """Gate: marker-truth sites honestly marked (list_to_linked kernel, ontology evidence boundary)."""
 
     def test_python_list_to_linked_marked(self):
-        """Python list_to_linked has BOUNDARY marker (reclassified P7W5 — off kernel path)."""
+        """Python list_to_linked has @host_iteration marker (on kernel path via step_kernel_mu)."""
         path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
         text = path.read_text()
-        # Find the function and verify BOUNDARY marker is on the for-loop line
+        # Find the function and verify @host_iteration marker is on the for-loop line
         lines = text.splitlines()
         found = False
         for line in lines:
-            if "for item in reversed(items):" in line and "BOUNDARY" in line:
+            if "for item in reversed(items):" in line and "@host_iteration" in line:
                 found = True
                 break
-        assert found, "list_to_linked for-loop must have BOUNDARY marker (reclassified P7W5)"
+        assert found, "list_to_linked for-loop must have @host_iteration marker (on kernel path)"
 
     def test_python_collect_ontology_evidence_boundary(self):
         """Python _collect_ontology_evidence reclassified as BOUNDARY (P7 Wave 3 — off kernel path)."""
