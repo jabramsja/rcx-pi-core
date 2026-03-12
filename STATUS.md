@@ -331,7 +331,7 @@ INFRA_CURRENT: 73
 - @host_mutation: 1 (deep_eval history.append only — eval_seed _stage0_substitute mutation eliminated P7 Wave 1 via generator expressions)
 - AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
-**Total host semantics markers (37 = 19 Py + 18 JS):** The floor of 16 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, evidence collection, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json` (baseline update pending MAINTENANCE wave per L4 Rule 20). Per-category: Py = 4 recursion + 2 builtin + 13 iteration + 0 mutation; JS = 6 recursion + 2 builtin + 10 iteration. P7 Wave 2: consume_budget isinstance removed (Py host_builtin 3→2), muEqual demoted to test-only (JS host_builtin 3→2).
+**Total host semantics markers (31 = 14 Py + 17 JS):** The floor of 16 above counts only irreducible sites. Additional markers exist for boundary/infra operations (normalization, denormalization, classification, etc.). Canonical counts in `tools/checks/host_semantics_baseline.json` (baseline update pending MAINTENANCE wave per L4 Rule 20). Per-category: Py = 4 recursion + 2 builtin + 8 iteration + 0 mutation; JS = 6 recursion + 2 builtin + 9 iteration. P7 Wave 3: boundary scaffolding reclassification (-5 Py, -1 JS @host_iteration markers removed from functions off kernel path). P7 Wave 2: consume_budget isinstance removed (Py host_builtin 3→2), muEqual demoted to test-only (JS host_builtin 3→2).
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
@@ -388,7 +388,7 @@ The debt of 16 represents the current HOST DEBT FLOOR (L2 kernel + L3 boundary +
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
-Note: projection_runner has a comment mentioning @host_iteration but uses composition pattern, not decoration.
+Note: projection_runner had @host_iteration comment reclassified as BOUNDARY in P7 Wave 3 (off kernel path, via match_mu/subst_mu → apply_mu only).
 
 **Note on boundary scaffolding:**
 The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match, bindings_to_dict, etc.) are NOT counted as debt. These are Python API conversion functions that convert between Python types and Mu linked lists at the boundary. They are explicitly documented as "boundary scaffolding" in their docstrings. Boundary scaffolding is expected to remain indefinitely as part of the Python API layer - it's not a target for structural replacement.

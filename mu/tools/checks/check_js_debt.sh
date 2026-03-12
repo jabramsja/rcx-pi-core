@@ -212,6 +212,7 @@ check_function_marker "step" "@host_iteration"
 check_function_marker "run" "@host_iteration"
 check_function_marker "runStructural" "@host_iteration"
 check_function_marker "runAlgorithmWithBridge" "@host_iteration"
+# collectOntologyEvidence reclassified as boundary (off kernel path) — P7 Wave 3
 check_function_marker "runEnginePipeline" "@host_iteration"
 check_function_marker "runEnginePipelineRecursive" "@host_iteration"
 check_function_marker "match" "@host_recursion"

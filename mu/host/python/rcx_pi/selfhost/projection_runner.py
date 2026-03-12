@@ -37,7 +37,7 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
     when the meta-circular kernel handles match/subst internally. Cannot use
     decorator on nested function, so documented here instead.
 
-    # @host_iteration - nested function debt (counted by debt_dashboard.sh)
+    # BOUNDARY: iteration debt (off kernel path — used by match_mu/subst_mu/classify_mu, not step_kernel_mu)
 
     Args:
         mode_name: The mode name (e.g., "match", "subst", "classify")

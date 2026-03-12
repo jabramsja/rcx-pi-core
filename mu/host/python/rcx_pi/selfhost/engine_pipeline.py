@@ -536,7 +536,7 @@ def _derive_engine_exit_reason(engine_result: dict) -> str:  # AST_OK: infra —
 # Ontology Evidence Collection (A17)
 # =============================================================================
 
-def _collect_ontology_evidence(  # @host_iteration: Mu linked-list traversal for evidence collection
+def _collect_ontology_evidence(  # BOUNDARY: evidence collection (off kernel path, engine boundary-effect servicing)
     result,
     operation: str,
 ) -> dict:
