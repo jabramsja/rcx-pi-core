@@ -1,6 +1,6 @@
 {
   "wave_id": "redteam-2026-03-12-wave4-simplification",
-  "repeat_run_speedup_ratio": 1.0098,
+  "repeat_run_speedup_ratio": 1.009769,
   "parity_diff_count": 0,
   "net_host_semantic_delta": 0,
   "step_growth_slope": 0.074111,
