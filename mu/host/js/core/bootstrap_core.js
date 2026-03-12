@@ -14,6 +14,7 @@
 const { MAX_DEPTH, NO_MATCH, RcxError } = require('./constants');
 const { isVar, isValidMu, muHashCached, muHashControlCached, _NO_BUDGET, consumeBudget } = require('./types');
 const { normalize, denormalize } = require('./normalize');
+const { assertNotLambdaCalculus } = require('./security');
 
 /**
  * BOUNDARY: match() is OFF the kernel execution path since _stage0Pilot=true (Wave H).
@@ -243,6 +244,15 @@ function substitute(body, bindings, _depth = 0, _budget = _NO_BUDGET) {
  * Apply a single projection to input.
  */
 function applyProjection(projection, input) {
+  // Parity with Python apply_projection: validate projection + input + lambda-calc guard
+  if (!isValidMu(projection) || typeof projection !== 'object' || projection === null || Array.isArray(projection))
+    throw new RcxError('input.invalid_type', 'Projection must be a valid Mu object');
+  if (!('pattern' in projection) || !('body' in projection))
+    throw new RcxError('input.invalid_type', "Projection must have 'pattern' and 'body' keys");
+  if (!isValidMu(input))
+    throw new RcxError('input.invalid_type', 'Invalid Mu input in applyProjection()');
+  assertNotLambdaCalculus(projection);
+
   // Gate 3: Auto-normalize input when pattern uses normalized dict format.
   // match() handles this internally; stage0Match needs it externally (parity).
   let inputVal = input;
@@ -378,9 +388,10 @@ function makeUndefinedMotif(op, lhs, rhs, cause, details = null) {
 /**
  * BOOTSTRAP_PRIMITIVE: max_steps (termination guard)
  * Run projections until fixpoint (stall or max steps).
+ * Single-pass: each step matches + applies in one loop (N6 fix).
  *
- * BOUNDARY: Outer loop scaffolding — calls step() but is NOT on the kernel
- * execution path. Reclassified P7W5: was host iteration marker, now BOUNDARY.
+ * BOUNDARY: Outer loop scaffolding — NOT on the kernel execution path.
+ * Reclassified P7W5: was host iteration marker, now BOUNDARY.
  */
 const MAX_RUN_STEPS = 10000; // Hard cap — prevents unbounded trace accumulation
 
@@ -391,23 +402,25 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
   if (typeof maxSteps !== 'number' || maxSteps < 0 || maxSteps > MAX_RUN_STEPS) {
     maxSteps = MAX_RUN_STEPS;
   }
+  // Guard lambda-calc projections up front (public boundary parity with applyProjection)
+  for (const proj of projections) assertNotLambdaCalculus(proj);
 
   let current = input;
   let currentHash = muHashControlCached(input, 'run');
   const trace = [];
-
   for (let i = 0; i < maxSteps; i++) {
     let matchedId = null;
+    let next = current;
     for (const proj of projections) {
-      if (match(proj.pattern, current) !== NO_MATCH) {
+      const result = _applyProjectionTrusted(proj, current);
+      if (result !== NO_MATCH) {
         matchedId = proj.id ?? 'unknown';
+        next = result;
         break;
       }
     }
 
     trace.push({ step: i, projection: matchedId, state: current });
-
-    const next = step(projections, current);
 
     const nextHash = muHashControlCached(next, 'run.stall');
     if (nextHash === currentHash) {
