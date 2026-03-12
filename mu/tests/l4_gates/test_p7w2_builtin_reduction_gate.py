@@ -179,22 +179,25 @@ class TestRatchetEvidence:
         )
         assert result.returncode == 0, f"Ratchet failed:\n{result.stderr}"
 
-    def test_host_builtin_decreased(self):
-        """Both substrates must show host_builtin < baseline."""
+    def test_host_builtin_locked(self):
+        """Both substrates must show host_builtin == 2 (locked post-P7W2)."""
         result = subprocess.run(
             ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
             capture_output=True, text=True, timeout=30,
         )
         data = json.loads(result.stdout)
-        py_current = data["current"]["python"]["host_builtin"]
-        py_baseline = data["baseline_counts"]["python"]["host_builtin"]
-        js_current = data["current"]["javascript"]["host_builtin"]
-        js_baseline = data["baseline_counts"]["javascript"]["host_builtin"]
-        assert py_current < py_baseline, (
-            f"Python host_builtin not decreased: {py_current} (baseline {py_baseline})"
+        assert data["baseline_counts"]["python"]["host_builtin"] == 2, (
+            f"Baseline Python host_builtin is {data['baseline_counts']['python']['host_builtin']}, "
+            f"expected 2 (locked after P7 Wave 2)"
         )
-        assert js_current < js_baseline, (
-            f"JS host_builtin not decreased: {js_current} (baseline {js_baseline})"
+        assert data["baseline_counts"]["javascript"]["host_builtin"] == 2, (
+            f"Baseline JS host_builtin is {data['baseline_counts']['javascript']['host_builtin']}, "
+            f"expected 2 (locked after P7 Wave 2)"
+        )
+        assert data["current"]["python"]["host_builtin"] == 2
+        assert data["current"]["javascript"]["host_builtin"] == 2
+        assert data["increases"] == [], (
+            f"Ratchet shows increases (regression): {data['increases']}"
         )
 
     def test_no_increases(self):
