@@ -1565,6 +1565,7 @@ def enforce(
             # same-category counterpart in a DIFFERENT file, the markers were
             # moved (not changed) and strict-reduction rules don't apply.
             is_pure_cross_file_move = False
+            marker_touch_override = None  # initialized here; assigned in marker-touched block
             if marker_touched and added_total == removed_total:
                 removed_events_pre, added_events_pre = collect_runtime_marker_events(
                     diff_text, runtime_files,
