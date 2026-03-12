@@ -2,20 +2,20 @@
   "counts": {
     "javascript": {
       "host_builtin": 2,
-      "host_iteration": 9,
+      "host_iteration": 6,
       "host_mutation": 0,
-      "host_recursion": 6
+      "host_recursion": 2
     },
     "python": {
-      "host_builtin": 2,
-      "host_iteration": 8,
+      "host_builtin": 1,
+      "host_iteration": 4,
       "host_mutation": 0,
-      "host_recursion": 4
+      "host_recursion": 2
     }
   },
-  "generated_at": "2026-03-12T08:15:00.000000Z",
+  "generated_at": "2026-03-12T14:30:00.000000Z",
   "schema_version": 1,
-  "total": 31,
-  "total_javascript": 17,
-  "total_python": 14
+  "total": 17,
+  "total_javascript": 10,
+  "total_python": 7
 }
