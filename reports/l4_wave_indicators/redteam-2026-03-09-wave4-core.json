@@ -1,6 +1,6 @@
 {
   "wave_id": "redteam-2026-03-09-wave4-core",
-  "repeat_run_speedup_ratio": 0.99487,
+  "repeat_run_speedup_ratio": 0.994872,
   "parity_diff_count": 10,
   "net_host_semantic_delta": 0,
   "step_growth_slope": 0.195,
