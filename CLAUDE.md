@@ -154,6 +154,9 @@ python tools/runners/run_review.py --pr --rigorous
 # Interactive SDK session
 python tools/runners/run_interactive.py verifier rcx_pi/selfhost/
 
+# Auto-escalate CRITICAL/HIGH findings to bridge for Codex second opinion
+python tools/runners/run_review.py --pr --bridge-escalate
+
 # Full-stack health analysis (monthly/pre-release)
 python tools/runners/run_deep_analysis.py
 ```

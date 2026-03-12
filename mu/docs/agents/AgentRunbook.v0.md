@@ -391,6 +391,50 @@ This script:
 
 **Do NOT edit `.claude/agents/*.md` directly** — edits will be overwritten by the sync script. Edit `tools/agents/*_prompt.md` instead.
 
+## Bridge Escalation
+
+When `run_review.py` discovers CRITICAL or HIGH severity findings, you can automatically send them to the bridge for a Codex second opinion:
+
+```bash
+python tools/runners/run_review.py --pr --bridge-escalate
+```
+
+This is **advisory only** — it doesn't change the exit code or block merges. The bridge call is synchronous (up to 300s timeout), so the `run_review.py` process waits for the bridge to finish before exiting. The bridge invocation runs `bridge_supervisor.py review --no-diff` (deliberation mode) with a summary of the high-severity findings including file paths, extracted via `extract_findings_from_output()`.
+
+**Note:** `--no-diff` routes the bridge reviewer into design-deliberation mode, which means the reviewer reasons about finding validity from the summary text alone — it does not independently verify findings against the live codebase. This is a deliberate tradeoff: a full code-review escalation would require a dedicated bridge review mode (see wave plan stop condition). For now, the advisory second opinion is deliberation-level only.
+
+## Agent Memory Strategy
+
+Two memory systems coexist — they serve different purposes:
+
+| System | Location | Purpose | Scope |
+|--------|----------|---------|-------|
+| **SDK memory** | `.agent_memory/findings.json` | Structured regression tracking: stores findings, links to PRs, detects regressions across runs | Centralized, all agents |
+| **Native memory** | `.claude/agent-memory/<agent-name>/MEMORY.md` | Per-agent persistent context: each native subagent has its own `MEMORY.md` for cross-session learning | Per-agent, independent |
+
+**SDK memory** is the canonical findings ledger for `run_review.py`. It enables regression warnings ("this file had a CRITICAL finding last run") and pattern tracking. **Native memory** helps individual subagents remember project context across interactive sessions (e.g., "last time I reviewed eval_seed.py, I found X").
+
+Neither replaces the other. Do not deprecate `.agent_memory/` — it provides structured cross-run regression tracking that native per-agent memory cannot.
+
+## Parallel Execution Architecture
+
+**SDK orchestrator (`run_review.py`)** uses Python asyncio to run agents in parallel groups. This provides:
+- Deterministic control: agent ordering, phased execution (hard gates → depth agents → founder agents)
+- Unified report synthesis and verdict aggregation
+- Configurable retry with backoff on failures
+
+**Native subagents** can run in background via Claude Code's built-in background execution (`run_in_background` for Bash tool, `background: true` frontmatter for subagents, or Ctrl+B to background a running task), but this is ad-hoc and doesn't provide the deterministic control plane of `run_review.py`.
+
+**Decision (2026-03-11):** The asyncio orchestration in `run_review.py` is NOT being replaced. Claude Code's background execution options don't support parallel agent groups, phased execution, or unified reporting. The SDK orchestrator remains the batch review tool.
+
+## Agent Teams (Evaluation — Parked)
+
+Claude Code's Agent Teams feature allows multiple subagents to collaborate on tasks with shared context. As of 2026-03-11, this feature is **experimental and disabled by default** per official Anthropic documentation, with known limitations.
+
+**What it would enable:** Multiple native subagents reviewing code simultaneously with coordination — similar to `run_review.py` but without the SDK. Could eventually replace the asyncio orchestrator if it stabilizes.
+
+**Decision (2026-03-11):** PARKED. Feature is experimental and disabled by default, API may change. Revisit when Agent Teams stabilizes and has mature documentation. Current two-system architecture (native ad-hoc + SDK batch) is sufficient.
+
 ## Notes
 
 - SDK orchestrators run agents **in parallel** for speed
@@ -398,7 +442,7 @@ This script:
 - Prompt source of truth: `tools/agents/*_prompt.md`
 - Native agent files: `.claude/agents/*.md` (generated — do not edit directly)
 - SDK agent memory: `.agent_memory/findings.json`
-- Native agent memory: project-scoped (`.claude/` memory directory)
+- Native agent memory: project-scoped (`.claude/agent-memory/<agent-name>/MEMORY.md`)
 - Session transcripts persist in `.claude/sessions/`
 - See `mu/docs/agents/AgentGuardrails.v0.md` for format requirements
 - See `mu/docs/agents/AgentRig.v0.md` for architecture and trust model
