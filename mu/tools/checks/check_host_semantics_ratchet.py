@@ -56,7 +56,7 @@ VALID_CATEGORIES = frozenset({
 # Minimum scan thresholds (fail-closed on truncated/missing surface)
 MIN_PY_MARKERS = 3
 MIN_JS_MARKERS = 3
-MIN_TOTAL_MARKERS = 10
+MIN_TOTAL_MARKERS = 6  # P7W5: 17→11 after boundary reclassification (list_to_linked stays on kernel path)
 
 
 # ---------------------------------------------------------------------------

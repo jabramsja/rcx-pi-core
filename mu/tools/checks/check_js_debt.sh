@@ -209,12 +209,16 @@ check_function_marker() {
 }
 
 check_function_marker "step" "@host_iteration"
-check_function_marker "run" "@host_iteration"
-check_function_marker "runStructural" "@host_iteration"
-check_function_marker "runAlgorithmWithBridge" "@host_iteration"
+# run/runStructural/runAlgorithmWithBridge/runEnginePipelineRecursive
+# reclassified as BOUNDARY (outer loop scaffolding, off kernel path) — P7W5
+check_function_marker "run" "BOUNDARY"
+check_function_marker "runStructural" "BOUNDARY"
+# listToLinked is on kernel path (called by step/stepKernel) — stays @host_iteration
+check_function_marker "listToLinked" "@host_iteration"
+check_function_marker "runAlgorithmWithBridge" "BOUNDARY"
+check_function_marker "runEnginePipelineRecursive" "BOUNDARY"
 # collectOntologyEvidence reclassified as boundary (off kernel path) — P7 Wave 3
 # runEnginePipeline reclassified as BOUNDARY (off kernel path — orchestrator) — P7W4
-check_function_marker "runEnginePipelineRecursive" "@host_iteration"
 # match/substitute reclassified as BOUNDARY (off kernel path since _stage0Pilot=true) — P7W4
 check_function_marker "stage0Match" "@host_recursion"
 check_function_marker "stage0Substitute" "@host_recursion"

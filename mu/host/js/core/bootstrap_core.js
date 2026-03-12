@@ -379,7 +379,8 @@ function makeUndefinedMotif(op, lhs, rhs, cause, details = null) {
  * BOOTSTRAP_PRIMITIVE: max_steps (termination guard)
  * Run projections until fixpoint (stall or max steps).
  *
- * @host_iteration — for loop until stall/max_steps
+ * BOUNDARY: Outer loop scaffolding — calls step() but is NOT on the kernel
+ * execution path. Reclassified P7W5: was host iteration marker, now BOUNDARY.
  */
 const MAX_RUN_STEPS = 10000; // Hard cap — prevents unbounded trace accumulation
 
