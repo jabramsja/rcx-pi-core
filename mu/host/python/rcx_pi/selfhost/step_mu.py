@@ -551,6 +551,28 @@ def validate_algorithm_runtime_fields(
     _walk_and_validate(value, _check_algorithm_runtime, context, _depth)
 
 
+def _validate_projection_fields(
+    projections: list[Mu],
+    validator,
+    label: str,
+) -> None:
+    """Validate projection pattern/body fields, skipping non-dict entries.
+
+    Shared validation loop for run_mu, run_mu_structural, and
+    step_algorithm_with_bridge. Lenient mode: non-dict projections are
+    skipped (not rejected) and missing pattern/body keys are tolerated.
+    For strict validation (TypeError/KeyError on invalid projections),
+    see step_kernel_mu's inline loop.
+    """
+    for i, proj in enumerate(projections):
+        if not isinstance(proj, dict):
+            continue
+        if "pattern" in proj:
+            validator(proj["pattern"], f"{label} projection[{i}].pattern")
+        if "body" in proj:
+            validator(proj["body"], f"{label} projection[{i}].body")
+
+
 # =============================================================================
 # Structural Kernel Helpers (Phase 7d)
 # =============================================================================
@@ -1177,14 +1199,9 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
                 f"SECURITY: step_algorithm_with_bridge expects algorithm/domain projections only, "
                 f"got kernel projection at index {i}: {proj_id}"
             )
-        if "pattern" in proj:
-            validate_algorithm_runtime_fields(
-                proj["pattern"], f"step_algorithm_with_bridge projection[{i}].pattern"
-            )
-        if "body" in proj:
-            validate_algorithm_runtime_fields(
-                proj["body"], f"step_algorithm_with_bridge projection[{i}].body"
-            )
+    _validate_projection_fields(
+        projections, validate_algorithm_runtime_fields, "step_algorithm_with_bridge"
+    )
 
     # Gate 3: Normalize input for matching against normalized seed patterns.
     # normalize_for_match is idempotent, so already-normalized state is unchanged.
@@ -1377,13 +1394,9 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     validate_no_kernel_reserved_fields(initial, "run_mu initial")
     _reject_nonlinear_projections(projections, "run_mu")
     validate_kernel_projections_first(projections)
-    for i, proj in enumerate(projections):
-        if not isinstance(proj, dict):
-            continue
-        if "pattern" in proj:
-            validate_no_kernel_reserved_fields(proj["pattern"], f"run_mu projection[{i}].pattern")
-        if "body" in proj:
-            validate_no_kernel_reserved_fields(proj["body"], f"run_mu projection[{i}].body")
+    _validate_projection_fields(
+        projections, validate_no_kernel_reserved_fields, "run_mu"
+    )
 
     trace = []
     current = initial
@@ -1482,17 +1495,9 @@ def run_mu_structural(
     assert_mu(initial, "run_mu_structural.initial")
     validate_no_kernel_reserved_fields(initial, "run_mu_structural initial")
     validate_kernel_projections_first(projections)
-    for i, proj in enumerate(projections):
-        if not isinstance(proj, dict):
-            continue
-        if "pattern" in proj:
-            validate_no_kernel_reserved_fields(
-                proj["pattern"], f"run_mu_structural projection[{i}].pattern"
-            )
-        if "body" in proj:
-            validate_no_kernel_reserved_fields(
-                proj["body"], f"run_mu_structural projection[{i}].body"
-            )
+    _validate_projection_fields(
+        projections, validate_no_kernel_reserved_fields, "run_mu_structural"
+    )
 
     budget = get_step_budget()
     started_budget = False

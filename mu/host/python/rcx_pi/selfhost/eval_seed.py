@@ -316,11 +316,13 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
                  _budget: object = _NO_BUDGET) -> dict[str, Mu] | _NoMatch:
     """Internal recursive matcher — no validation (already done at match() entry).
 
-    This function contains 13 isinstance calls for Python type dispatch
-    (plus 1 in match() = 14 isinstance calls total). These are NOT 14
-    separate debt markers — they are all covered by the single host_builtin
-    decorator on match(). Callers: match() (public entry) and
-    _apply_projection_trusted() (kernel-internal fast path).
+    This function contains 26 isinstance calls for Python type dispatch:
+    13 in the structural budget path + 13 in the depth path (near-identical
+    type-dispatch branches). Plus 1 in match() = 27 isinstance calls total.
+    These are NOT 27 separate debt markers — they are all covered by the
+    single host_builtin decorator on match(). Callers: match() (public
+    entry); _apply_projection_trusted calls _stage0_match directly (not
+    _match_inner) since Wave 4 flag removal.
 
     When _budget is provided, uses structural Mu linked-list budget instead
     of integer _depth for depth limiting. Same semantics (depth-only: same
