@@ -34,17 +34,41 @@ from typing import NamedTuple
 
 import pytest
 
-from tools.docs.shared_doc_config import REPO_ROOT, get_governed_folders_as_paths
+from tools.docs.shared_doc_config import (
+    REPO_ROOT,
+    ROOT_CANONICAL_FILES,
+    SPECIAL_FOLDERS,
+    get_governed_folders_as_paths,
+)
 
 # All governed folders - single source of truth: tools/shared_doc_config.py
 GOVERNED_FOLDERS = get_governed_folders_as_paths()
 
+# Root canonical files excluded from freshness checks:
+# - CLAUDE.md, FOUNDER_SESSION_BOOTSTRAP.md: instructional, not content docs
+# - CHANGELOG.md: historical entries legitimately contain old counts/status
+_ROOT_FRESHNESS_EXCLUDES = {"CLAUDE.md", "FOUNDER_SESSION_BOOTSTRAP.md", "CHANGELOG.md"}
+
 
 def iter_governed_docs():
-    """Iterate over all markdown files in governed folders."""
+    """Iterate over all markdown files in governed + root + roadmap folders."""
+    # 1. Governed folders (mu/docs/core, mu/docs/agents, etc.)
     for folder in GOVERNED_FOLDERS:
         if folder.exists():
             for doc_path in sorted(folder.glob("*.md")):
+                yield doc_path
+    # 2. Root canonical files (STATUS.md, TASKS.md, ROADMAP.md, README.md)
+    for name in sorted(ROOT_CANONICAL_FILES):
+        if name in _ROOT_FRESHNESS_EXCLUDES:
+            continue
+        root_doc = REPO_ROOT / name
+        if root_doc.exists():
+            yield root_doc
+    # 3. Special folders (roadmap/)
+    for folder_name in sorted(SPECIAL_FOLDERS):
+        folder_path = REPO_ROOT / folder_name
+        if folder_path.exists():
+            for doc_path in sorted(folder_path.glob("*.md")):
                 yield doc_path
 
 
@@ -84,6 +108,7 @@ FORBIDDEN_PATTERNS = [
         r'(?<![/a-z])`(?:green_gate|audit_fast|audit_all|contraband|seed_police)\.sh`',
         "Script references must include directory path",
         "Use scripts/green_gate.sh, tools/audit_fast.sh, etc.",
+        exceptions=["TASKS.md"],  # Historical log entries
     ),
     # Doc paths must include full path from docs/
     ForbiddenPattern(
@@ -118,6 +143,7 @@ FORBIDDEN_PATTERNS = [
         r'(?<![/a-z])normalized_prototype/',
         "normalized_prototype/ archived to archive/normalized_prototype/ (Round 22E)",
         "Use archive/normalized_prototype/ or remove reference",
+        exceptions=["TASKS.md"],  # Historical log
     ),
     ForbiddenPattern(
         r'(?<![/a-z])corpus/Universalrecursion',
@@ -138,24 +164,25 @@ FORBIDDEN_PATTERNS = [
         r'(?<![/a-z])prototypes/',
         "prototypes/ archived to archive/prototypes/ (Round 22I)",
         "Use archive/prototypes/ or remove reference",
+        exceptions=["TASKS.md"],  # Historical log
     ),
     ForbiddenPattern(
         r'rcx_core_mut4\.json',
         "rcx_core_mut4.json removed as duplicate of mut3 (Round 22J)",
         "Use rcx_core_mut3.json instead",
-        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+        exceptions=["LegacySurfaceDecisionRecord.v0.md", "TASKS.md"],
     ),
     ForbiddenPattern(
         r'(?<![/a-z])rcx_omega/',
         "rcx_omega/ archived to archive/rcx_omega/ (Round 23A)",
         "Use archive/rcx_omega/ or remove reference",
-        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+        exceptions=["LegacySurfaceDecisionRecord.v0.md", "TASKS.md"],
     ),
     ForbiddenPattern(
         r'(?<![/a-z])rcx_pi_rust/',
         "rcx_pi_rust/ archived to archive/rcx_pi_rust/ (Round 23A)",
         "Use archive/rcx_pi_rust/ or remove reference",
-        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+        exceptions=["LegacySurfaceDecisionRecord.v0.md", "TASKS.md"],
     ),
     ForbiddenPattern(
         r'(?<![/a-z])worlds_json/',
@@ -169,13 +196,13 @@ FORBIDDEN_PATTERNS = [
         r'(?<![/a-z_])rcx_runtime\.py',
         "rcx_runtime.py archived to archive/root_legacy/ (Round 23E)",
         "Use archive/root_legacy/rcx_runtime.py or scripts/world/world_trace.sh",
-        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+        exceptions=["LegacySurfaceDecisionRecord.v0.md", "TASKS.md"],
     ),
     ForbiddenPattern(
         r'(?<![/a-z_])rcx_start\.py',
         "rcx_start.py archived to archive/root_legacy/ (Round 23E)",
         "Use archive/root_legacy/rcx_start.py or remove reference",
-        exceptions=["LegacySurfaceDecisionRecord.v0.md"],
+        exceptions=["LegacySurfaceDecisionRecord.v0.md", "TASKS.md"],
     ),
 
     # =========================================================================
@@ -185,7 +212,7 @@ FORBIDDEN_PATTERNS = [
         r'Phase [23] (?:is |in progress|deliverables)',
         "Phase 2/3 terminology is outdated (now L1/L2/L3)",
         "Use L1 (Algorithmic), L2 (Operational), L3 (Substrate Portability)",
-        exceptions=["EVAL_SEED.v0.md"],  # Historical spec context
+        exceptions=["EVAL_SEED.v0.md", "TASKS.md"],  # Historical spec/log context
     ),
     ForbiddenPattern(
         r'EVAL_SEED Phase [234]',
@@ -224,21 +251,25 @@ FORBIDDEN_PATTERNS = [
         r'\*\*Status:\s*(?:APPROVED|IN PROGRESS|PENDING|BLOCKED|TODO)',
         "Inline status claims violate Law 3 (docs describe WHAT, not progress)",
         "Remove status line; reference STATUS.md for current state",
+        exceptions=["STATUS.md", "TASKS.md"],  # Source-of-truth files
     ),
     ForbiddenPattern(
         r'Status:\s*(?:APPROVED|IN PROGRESS|PENDING|BLOCKED|TODO)',
         "Inline status claims violate Law 3 (docs describe WHAT, not progress)",
         "Remove status line; reference STATUS.md for current state",
+        exceptions=["STATUS.md", "TASKS.md"],  # Source-of-truth files
     ),
     ForbiddenPattern(
         r'VECTOR #\d+',
         "VECTOR references drift (VECTORs move to Ra when completed)",
         "Remove VECTOR reference; work status belongs in TASKS.md only",
+        exceptions=["TASKS.md"],  # TASKS.md IS the VECTOR tracker
     ),
     ForbiddenPattern(
         r'promotion path for (?:VECTOR|NEXT|SINK)',
         "Promotion path references drift when work completes",
         "Remove promotion reference; work status belongs in TASKS.md only",
+        exceptions=["TASKS.md"],  # TASKS.md IS the promotion tracker
     ),
 
     # =========================================================================
@@ -252,6 +283,7 @@ FORBIDDEN_PATTERNS = [
             "AgentRunbook.v0.md",      # Runbook may quote red-team findings
             "AgentGuardrails.v0.md",   # Guardrails may quote examples
             "AgentRig.v0.md",          # Agent rig critique text
+            "TASKS.md",               # Historical log entries
         ],
     ),
     ForbiddenPattern(
@@ -262,6 +294,7 @@ FORBIDDEN_PATTERNS = [
             "AgentRunbook.v0.md",
             "AgentGuardrails.v0.md",
             "AgentRig.v0.md",
+            "TASKS.md",               # Historical log entries
         ],
     ),
     ForbiddenPattern(
@@ -272,6 +305,7 @@ FORBIDDEN_PATTERNS = [
             "AgentRunbook.v0.md",
             "AgentGuardrails.v0.md",
             "AgentRig.v0.md",
+            "TASKS.md",               # Historical log entries
         ],
     ),
 
@@ -282,6 +316,7 @@ FORBIDDEN_PATTERNS = [
         r'Updated \d{4}-\d{2}-\d{2}\).*\n\n\*\*Completed:\*\*',
         "Inline status sections drift from STATUS.md",
         "Reference STATUS.md instead: 'See STATUS.md for current state'",
+        exceptions=["STATUS.md"],  # STATUS.md IS the status source
     ),
 
     # =========================================================================
@@ -291,13 +326,13 @@ FORBIDDEN_PATTERNS = [
         r'\b[1-9]\d{2,3}\+?\s+tests\b',
         "Hardcoded test counts drift (e.g., '800+ tests', '1000+ tests')",
         "Reference STATUS.md for test counts, or use 'comprehensive test coverage'",
-        exceptions=["DocGovernance.v0.md"],  # Meta-doc about governance can discuss counts
+        exceptions=["DocGovernance.v0.md", "STATUS.md", "TASKS.md"],  # Source-of-truth + meta-doc
     ),
     ForbiddenPattern(
         r'L[1-4]:\s*(?:DESIGN|FUTURE|BLOCKED|PENDING)',
         "L-level status claims drift from STATUS.md",
         "Use ACHIEVED/DONE for completed levels, or reference STATUS.md directly",
-        exceptions=["DocGovernance.v0.md"],  # Governance doc can discuss the concept
+        exceptions=["DocGovernance.v0.md", "STATUS.md"],  # Source-of-truth + governance meta-doc
     ),
 ]
 
@@ -526,7 +561,13 @@ class TestNoHardcodedCounts:
             r'not\s+\d+',                            # Negation: "not 37"
         ]
 
+        # Source-of-truth files that legitimately contain projection counts
+        _projection_count_exempt = {"STATUS.md", "TASKS.md"}
+
         for doc_path in iter_governed_docs():
+            if doc_path.name in _projection_count_exempt:
+                continue
+
             content = doc_path.read_text()
 
             # Remove changelog/history sections (these are historical context)
@@ -544,7 +585,7 @@ class TestNoHardcodedCounts:
 
             # Filter out counts that are verified by grounding tests
             # These are the actual seed projection counts (from test_seed_counts.py)
-            verified_counts = {"5", "6", "7", "8", "9", "11", "12", "13"}
+            verified_counts = {"3", "4", "5", "6", "7", "8", "9", "11", "12", "13", "15"}
             suspicious = [m for m in matches if m not in verified_counts]
 
             if suspicious:
@@ -559,7 +600,7 @@ class TestNoHardcodedCounts:
             msg += "  - Use '~' prefix for estimates: '~6 projections'\n"
             msg += "  - Reference tests for actual counts: 'see test_seed_counts.py'\n"
             msg += "  - Historical context is OK: 'originally N projections'\n"
-            msg += "  - Verified counts (from test_seed_counts.py): {5, 6, 7, 8, 9, 11, 12}\n"
+            msg += "  - Verified counts (from test_seed_counts.py): {3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 15}\n"
             pytest.fail(msg)
 
 

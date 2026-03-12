@@ -55,7 +55,7 @@ Created: 2026-02-04
 - Add lightweight check that no projection is never hit across core tests
 
 **Acceptance Criteria**:
-1. `tools/projection_coverage.py` outputs JSON summary
+1. `mu/tools/analysis/projection_coverage.py` outputs JSON summary
 2. CI uploads coverage artifact
 3. Test fails if any projection has 0 hits in core test suite
 
