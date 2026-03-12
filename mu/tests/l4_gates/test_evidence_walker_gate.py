@@ -21,6 +21,7 @@ from rcx_pi.selfhost.seed_integrity import (
     EXPECTED_PROJECTION_IDS,
     SEED_CHECKSUMS,
 )
+from tests.repo_root import REPO_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +49,7 @@ class TestEvidenceWalkerJsParityGate:
     def test_js_seed_checksums_contains_evidence_walker(self):
         """JS SEED_CHECKSUMS must include evidence_walker.v1.json."""
         import re
-        from pathlib import Path
-        js_main = Path(__file__).parents[2] / "host" / "js" / "cli" / "main.js"
+        js_main = REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js"
         source = js_main.read_text()
         match = re.search(r"evidence_walker\.v1\.json.*?:\s*'([a-f0-9]+)'", source)
         assert match, "evidence_walker.v1.json not found in JS SEED_CHECKSUMS"
@@ -61,8 +61,7 @@ class TestEvidenceWalkerJsParityGate:
     def test_js_projection_ids_contains_evidence_walker(self):
         """JS EXPECTED_PROJECTION_IDS must include evidence_walker.v1.json."""
         import re
-        from pathlib import Path
-        js_main = Path(__file__).parents[2] / "host" / "js" / "cli" / "main.js"
+        js_main = REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js"
         source = js_main.read_text()
         assert "'evidence_walker.v1.json'" in source or '"evidence_walker.v1.json"' in source, (
             "evidence_walker.v1.json not found in JS EXPECTED_PROJECTION_IDS"
