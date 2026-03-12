@@ -147,14 +147,24 @@ function loadVerifiedSeed(seedName, subdir) {
   const seedPath = path.join(__dirname, '..', '..', '..', subdir, seedName);
   const raw = fs.readFileSync(seedPath, 'utf8');
 
-  // Compute hash early (needed for checksum compare below)
+  // Compute hash of raw bytes before any parsing.
   const hash = crypto.createHash('sha256').update(raw).digest('hex');
+
+  // SECURITY: For known seeds, verify checksum BEFORE JSON.parse.
+  // A tampered seed must never reach the parser — checksum is the first gate.
+  // For unknown seeds (not in registry), we fall through to parse-then-reject
+  // so that projection type guards can still fire for diagnostic clarity.
+  const expected = CORE_SEED_CHECKSUMS[seedName];
+  if (expected) {
+    // Known seed — verify checksum before parsing (fail-closed)
+    if (hash !== expected) {
+      throw new Error(`Seed checksum mismatch: ${seedName} (expected ${expected}, got ${hash})`);
+    }
+  }
 
   const seed = JSON.parse(raw);
 
   // Projection entry type guard (fail-closed — reject null/array/scalar before .id access)
-  // ORDER MATTERS: must precede unknown-seed check so malformed-projection tests
-  // using temp seed names still hit the type guard first.
   if (Array.isArray(seed.projections)) {
     for (let i = 0; i < seed.projections.length; i++) {
       const p = seed.projections[i];
@@ -167,17 +177,11 @@ function loadVerifiedSeed(seedName, subdir) {
     }
   }
 
-  // F-46 FIX: Fail-closed on unknown seeds (parity with Python seed_integrity.py:329-330)
-  const expected = CORE_SEED_CHECKSUMS[seedName];
+  // Fail-closed on unknown seeds (parity with Python seed_integrity.py)
   if (!expected) {
     throw new Error(
       `Unknown seed: ${seedName} (no checksum registered in CORE_SEED_CHECKSUMS)`
     );
-  }
-
-  // Checksum verification (fail-closed)
-  if (hash !== expected) {
-    throw new Error(`Seed checksum mismatch: ${seedName} (expected ${expected}, got ${hash})`);
   }
 
   // Projection ID verification (fail-closed)
