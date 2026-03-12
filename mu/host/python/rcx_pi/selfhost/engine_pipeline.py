@@ -567,6 +567,9 @@ def _collect_ontology_evidence(  # BOUNDARY: evidence collection (off kernel pat
         collected = None
         if isinstance(walker_result, dict) and "evidence_done" in walker_result:  # AST_OK: infra — boundary unwrap
             collected = walker_result["evidence_done"].get("collected")
+        elif isinstance(result, dict) and "trace" in result:  # AST_OK: infra — boundary fallback
+            # Walker stalled (e.g. head-only trace nodes) — fall back to raw trace drain
+            collected = result["trace"]
 
         # Boundary post-processing: count entries, extract string pids, dedup, sort
         # Mu runtime denormalizes {head, tail} to Python list; handle both formats

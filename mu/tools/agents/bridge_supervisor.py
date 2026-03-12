@@ -235,10 +235,9 @@ def open_db(paths: BridgePaths) -> sqlite3.Connection:
 
 def open_db_readonly(paths: BridgePaths) -> sqlite3.Connection:
     """Open the bridge DB read-only: no runtime dirs, no WAL, no writes."""
-    conn = sqlite3.connect(paths.db_path)
+    conn = sqlite3.connect(f"file:{paths.db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA query_only=ON")
     return conn
 
 
