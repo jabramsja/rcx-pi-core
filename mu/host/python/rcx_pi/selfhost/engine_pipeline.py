@@ -913,9 +913,15 @@ def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST
         if len(entries) >= max_entries:
             raise ValueError(f"hash_trace_for_recurrence: trace exceeds {max_entries} entries")
         entry = current["head"]
-        if isinstance(entry, dict) and "state" in entry:
-            entry = dict(entry)
-            entry["state_hash"] = mu_hash_control(entry["state"], "hash_trace_for_recurrence")
+        if not isinstance(entry, dict) or "state" not in entry:
+            raise ValueError(
+                "hash_trace_for_recurrence: malformed trace entry "
+                f"(expected dict with 'state' key, got {type(entry).__name__}"
+                + (f" without 'state'" if isinstance(entry, dict) else "")
+                + ")"
+            )
+        entry = dict(entry)
+        entry["state_hash"] = mu_hash_control(entry["state"], "hash_trace_for_recurrence")
         entries.append(entry)
         current = current.get("tail")
     # Rebuild linked list from tail to head

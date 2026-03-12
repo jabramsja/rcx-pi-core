@@ -207,17 +207,17 @@ def is_kernel_projection(projection: Mu) -> bool:
     Returns:
         True if projection ID starts with "kernel." or pattern has _mode key.
     """
-    if not isinstance(projection, dict):
+    if not isinstance(projection, dict):  # AST_OK: infra — type guard for projection classification
         return False
 
     # Check by ID (fast path)
     proj_id = projection.get("id", "")
-    if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+    if isinstance(proj_id, str) and proj_id.startswith("kernel."):  # AST_OK: infra — string type guard
         return True
 
     # Check by pattern structure (fallback)
     pattern = projection.get("pattern", {})
-    if isinstance(pattern, dict) and "_mode" in pattern:
+    if isinstance(pattern, dict) and "_mode" in pattern:  # AST_OK: infra — type guard for pattern shape
         return True
 
     return False
@@ -835,7 +835,7 @@ def is_kernel_intermediate(result: Mu) -> bool:
 
     Phase 8b: This prevents stall detection from being called on kernel internals.
     """
-    if not isinstance(result, dict):
+    if not isinstance(result, dict):  # AST_OK: infra — type guard for kernel state classification
         return False
 
     # Kernel internal fields indicate mid-execution

@@ -183,11 +183,15 @@ function hashTraceForRecurrence(trace, maxEntries) {
       throw new RcxError('trace.overcap', `hash_trace_for_recurrence: trace exceeds ${maxEntries} entries`);
     }
     let entry = current.head;
-    if (entry !== null && typeof entry === 'object' && 'state' in entry) {
-      entry = Object.assign(Object.create(null), entry);
-      if (isValidMu(entry.state)) {
-        entry.state_hash = muHashControl(entry.state, 'hashTraceForRecurrence');
-      }
+    if (entry === null || typeof entry !== 'object' || !('state' in entry)) {
+      const entryType = entry === null ? 'null' : typeof entry;
+      const detail = typeof entry === 'object' && entry !== null ? ' without \'state\'' : '';
+      throw new RcxError('trace.malformed_entry',
+        `hash_trace_for_recurrence: malformed trace entry (expected dict with 'state' key, got ${entryType}${detail})`);
+    }
+    entry = Object.assign(Object.create(null), entry);
+    if (isValidMu(entry.state)) {
+      entry.state_hash = muHashControl(entry.state, 'hashTraceForRecurrence');
     }
     entries.push(entry);
     current = current.tail !== undefined ? current.tail : null;
