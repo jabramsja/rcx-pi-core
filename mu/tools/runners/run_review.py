@@ -488,6 +488,21 @@ class ReviewOrchestrator:
                 agents.remove("grounding")
         return agents
 
+    def _sort_results(self) -> None:
+        """Sort self.results by configured agent order for deterministic output.
+
+        Within each parallel group agents finish in nondeterministic order.
+        This sorts by the flattened PARALLEL_GROUPS sequence (which matches
+        DEPTH_AGENTS ordering) so reports are stable across runs.
+        """
+        # Build index: agent_name -> position in configured order
+        order = {name: i for i, name in enumerate(
+            name for group in PARALLEL_GROUPS for name in group
+        )}
+        # Unknown agents (shouldn't happen) sort to the end
+        sentinel = len(order)
+        self.results.sort(key=lambda r: order.get(r.name, sentinel))
+
     async def run_single_agent(self, agent_name: str, retry_feedback: str = "") -> AgentResult:
         """Run a single agent and return its result.
 
@@ -920,9 +935,14 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     print(f"\n   Run with --verbose for full details")
                     self._hard_gate_failed = True
                     if not self.continue_on_hard_gate:
+                        self._sort_results()
                         self.total_findings_stored = sum(r.findings_stored for r in self.results)
                         return self.results
                     print("\n⚠️  Continuing despite hard gate failure (diagnostic mode)")
+
+        # Sort results by configured agent order for deterministic output
+        # regardless of which agent within a parallel group finishes first.
+        self._sort_results()
 
         self._hard_gate_failed = any(r.blocks_merge for r in self.results)
         self.total_findings_stored = sum(r.findings_stored for r in self.results)
