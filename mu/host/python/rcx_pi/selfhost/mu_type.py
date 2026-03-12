@@ -54,7 +54,7 @@ def make_depth_budget(depth: int) -> dict | None:
     constructing a linked list of length N requires host iteration.
     """
     budget = None
-    for _ in range(depth):  # @host_iteration — irreducible bootstrap: linked-list construction (D009-F2)
+    for _ in range(depth):  # BOUNDARY: irreducible bootstrap linked-list construction (D009-F2, off kernel path — module-load only). Reclassified P7W4.
         budget = {"head": None, "tail": budget}
     return budget
 

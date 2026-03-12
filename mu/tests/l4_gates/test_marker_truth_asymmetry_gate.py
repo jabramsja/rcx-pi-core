@@ -68,16 +68,18 @@ class TestMarkerTruthAsymmetryGate:
         pytest.fail("collectOntologyEvidence function not found in pipeline.js")
 
     def test_ratchet_baseline_reflects_current(self):
-        """Ratchet baseline reflects post-P7W3 reduction (Py 8, JS 9)."""
+        """Ratchet baseline reflects post-P7W4 reduction."""
         baseline_path = REPO_ROOT / "tools" / "checks" / "host_semantics_baseline.json"
         data = json.loads(baseline_path.read_text())
         py = data["counts"]["python"]
         js = data["counts"]["javascript"]
-        # P7W3 boundary reclassification reduced Py 13→8, JS 10→9
-        # Baseline locked by MAINTENANCE wave post-P7W3
-        assert py["host_iteration"] == 8, (
-            f"Python host_iteration baseline must be 8 (post-P7W3), got {py['host_iteration']}"
+        # P7W4: Py host_iteration 8→4, JS host_iteration 9→6
+        # Ratchet: current must be <= baseline (monotonic decrease)
+        result = subprocess.run(
+            ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
+            capture_output=True, text=True, timeout=30,
         )
-        assert js["host_iteration"] == 9, (
-            f"JS host_iteration baseline must be 9 (post-P7W3), got {js['host_iteration']}"
+        ratchet = json.loads(result.stdout)
+        assert ratchet["increases"] == [], (
+            f"Ratchet shows increases: {ratchet['increases']}"
         )

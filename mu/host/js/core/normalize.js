@@ -123,8 +123,8 @@ function classifyLegacyLinkedList(value) {
  *   List: [1, 2] -> {"_type": "list", "head": 1, "tail": {"head": 2, "tail": null}}
  *   Dict: {"a": 1} -> {"_type": "dict", "head": {"head": "a", "tail": 1}, "tail": null}
  *
- * @host_recursion - recursive normalization
- * @host_iteration - for loop for array/dict conversion
+ * BOUNDARY: normalization (off kernel path — called by public API, not stepKernel).
+ * Reclassified P7W4: was host recursion + iteration debt, now BOUNDARY.
  */
 function normalize(value, _depth = 0) {
   // Depth guard
@@ -287,8 +287,8 @@ function _collectDictKVPairs(startNode, context) {
 /**
  * Denormalize from linked-list format back to JS values.
  *
- * @host_recursion - recursive denormalization
- * @host_iteration - while loop for linked list traversal
+ * BOUNDARY: denormalization (off kernel path — called by public API, not stepKernel).
+ * Reclassified P7W4: was host recursion + iteration debt, now BOUNDARY.
  */
 function denormalize(value, _depth = 0) {
   if (_depth > MAX_DEPTH) {

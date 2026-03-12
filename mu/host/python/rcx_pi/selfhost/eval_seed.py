@@ -274,18 +274,14 @@ def get_var_name(mu: Mu) -> str:
     return name
 
 
-@host_recursion(
-    "Recursive tree traversal for pattern matching. "
-    "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
-    "match_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
-)
-@host_builtin(
-    "len() for size, zip() for pairing, set() for key comparison, "
-    "any() for aggregation, 'in' for membership, .items()/.keys() for iteration"
-)
+# BOUNDARY: match() is OFF the kernel execution path since _STAGE0_PILOT=True (Wave H).
+# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → _stage0_match.
+# match() is only called by the public API (match_mu → apply_mu), not by the kernel.
+# Reclassified P7W4: was @host_recursion + @host_builtin, now BOUNDARY.
 def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """
-    Match pattern against input, returning bindings or NO_MATCH.
+    BOUNDARY: Match pattern against input, returning bindings or NO_MATCH.
+    Off kernel path since _STAGE0_PILOT=True (Wave H). Reclassified P7W4.
 
     Rules:
     - {"var": "x"} matches anything, binds to x
@@ -521,12 +517,13 @@ _STAGE0_PILOT = True
 
 
 @host_recursion(
-    "Stage 0 micro-match: isinstance dispatch + recursive dict/list traversal. "
+    "Stage 0 micro-match: isinstance dispatch + recursive dict traversal. "
     "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → match → kernel). "
-    "Same host surface as _match_inner but ~52 LOC accumulator-style."
+    "P7W4: list branch removed (dead code — all kernel inputs normalized to head/tail)."
 )
 @host_builtin(
-    "isinstance, len, zip, set, .keys(), .get(), 'in' — same host-builtin surface as match(). "
+    "isinstance, .keys(), .get(), 'in' — reduced from 7 to 3 builtins (P7W4). "
+    "len/zip/set eliminated: list branch dead code; len() Gate-3 replaced with truthiness. "
     "Production path (_STAGE0_PILOT=True). Tracked separately from match() for ratchet accuracy."
 )
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
@@ -570,25 +567,22 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
         if isinstance(input_value, str) and pattern == input_value:
             return current
         return NO_MATCH
-    # List
-    if isinstance(pattern, list):
-        if not isinstance(input_value, list) or len(pattern) != len(input_value):
-            return NO_MATCH
-        merged = current
-        for p_elem, i_elem in zip(pattern, input_value):
-            merged = _stage0_match(p_elem, i_elem, merged, _depth + 1)
-            if merged is NO_MATCH:
-                return NO_MATCH
-        return merged
+    # List branch REMOVED (P7W4): After normalization, all lists become head/tail
+    # linked lists (dicts). No kernel-path code passes raw Python lists to
+    # _stage0_match. Verified: zero seed patterns/bodies contain raw arrays.
+    # If a raw list reaches here, it falls through to NO_MATCH (correct behavior).
+
     # Dict (Gate-3: allow pattern to omit _type when input has _type="list")
     if isinstance(pattern, dict):
         if not isinstance(input_value, dict):
             return NO_MATCH
-        pattern_keys = set(pattern.keys())
-        input_keys = set(input_value.keys())
+        # P7W4: dict_keys views support set operations directly (Python 3).
+        # Eliminates set() wrapper — 2 fewer host builtins on kernel hot path.
+        pattern_keys = pattern.keys()
+        input_keys = input_value.keys()
         if pattern_keys != input_keys:
             extra_is_type = (input_keys - pattern_keys == {"_type"})
-            no_pattern_extra = (len(pattern_keys - input_keys) == 0)
+            no_pattern_extra = not (pattern_keys - input_keys)
             type_is_list = (input_value.get("_type") == "list")
             if not (extra_is_type and no_pattern_extra and type_is_list):
                 return NO_MATCH
@@ -633,15 +627,15 @@ def _stage0_substitute(body, bindings, _depth=0):
     return body
 
 
-@host_recursion(
-    "Recursive tree traversal for variable substitution. "
-    "BOOTSTRAP PRIMITIVE: eval_step() calls this to apply ANY projection. "
-    "subst_mu.py expresses the ALGORITHM as projections; this function EXECUTES them."
-)
+# BOUNDARY: substitute() is OFF the kernel execution path since _STAGE0_PILOT=True (Wave H).
+# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → _stage0_substitute.
+# substitute() is only called by the public API (subst_mu → apply_mu), not by the kernel.
+# Reclassified P7W4: was @host_recursion, now BOUNDARY.
 def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0,
                _budget: object = _NO_BUDGET) -> Mu:
     """
-    Substitute variable sites in body with bound values.
+    BOUNDARY: Substitute variable sites in body with bound values.
+    Off kernel path since _STAGE0_PILOT=True (Wave H). Reclassified P7W4.
 
     Host debt: 3 isinstance calls for Python type dispatch on body values
     (None/bool/int/float/str check, list check, dict check). Tracked on

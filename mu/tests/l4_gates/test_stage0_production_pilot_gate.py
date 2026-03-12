@@ -103,6 +103,9 @@ class TestStage0CanonicalVectors:
 class TestParityWithMatchInner:
     """Same inputs through _match_inner vs _stage0_match produce identical results."""
 
+    # P7W4: Raw list cases removed — _stage0_match list branch eliminated (dead code
+    # after normalization). On the kernel path, all lists are normalized to head/tail
+    # dicts before Stage 0 sees them. _match_inner still handles raw lists (boundary API).
     PARITY_CASES = [
         # (pattern, input_value)
         ("x", "x"),
@@ -120,11 +123,8 @@ class TestParityWithMatchInner:
         ({"var": "x"}, 42),
         ({"var": "x"}, "hello"),
         ({"var": "x"}, None),
-        ([1, 2, 3], [1, 2, 3]),
-        ([1, 2], [1, 2, 3]),
-        ([{"var": "x"}, {"var": "y"}], [1, 2]),
-        ([{"var": "x"}, {"var": "x"}], [1, 1]),  # nonlinear agree
-        ([{"var": "x"}, {"var": "x"}], [1, 2]),  # nonlinear conflict
+        # List cases removed (P7W4): _stage0_match no longer handles raw lists.
+        # Kernel path normalizes all lists to head/tail dicts before matching.
         ({"a": {"var": "x"}, "b": {"var": "y"}}, {"a": 1, "b": 2}),
         ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": 1, "b": 1}),  # nonlinear agree
         ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": 1, "b": 2}),  # nonlinear conflict

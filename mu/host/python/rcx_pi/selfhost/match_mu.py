@@ -283,7 +283,7 @@ def normalize_for_match(value: Mu) -> Mu:
     stack: list = [("eval", value)]
     result: Mu = None
 
-    while stack:  # @host_iteration: boundary normalization (Phase 6c)
+    while stack:  # BOUNDARY: normalization loop (off kernel path — called by match_mu/apply_mu, not step_kernel_mu). Reclassified P7W4.
         item = stack.pop()
         op = item[0]
 
@@ -622,7 +622,7 @@ def denormalize_from_match(value: Mu) -> Mu:
     stack: list = [("eval", value)]
     result: Mu = None
 
-    while stack:  # @host_iteration: boundary denormalization (Phase 6c)
+    while stack:  # BOUNDARY: denormalization loop (off kernel path — called by match_mu/apply_mu, not step_kernel_mu). Reclassified P7W4.
         item = stack.pop()
         op = item[0]
 
