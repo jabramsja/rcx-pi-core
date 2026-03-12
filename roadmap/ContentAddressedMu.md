@@ -232,7 +232,7 @@ The Forth precedent: This is like Forth discovering that its comparator (=) is r
 | `rcx_pi/selfhost/step_mu.py` | `hash_trace_for_recurrence()` EXISTS |
 | `mu/closures/recurrence.v2.json` | EXISTS — 9 hash-accelerated projections |
 | `mu/host/js/eval_step.js` | `muHash()` EXISTS |
-| `tests/test_recurrence_production.py` | EXISTS — production closure detection tests |
+| `mu/tests/parity/test_recurrence_production.py` | EXISTS — production closure detection tests |
 
 **Level 1 (IMPLEMENTED — 2026-02-10):**
 
@@ -243,7 +243,7 @@ The Forth precedent: This is like Forth discovering that its comparator (=) is r
 | `rcx_pi/selfhost/step_mu.py` | 6 stall detection sites use `mu_hash_cached()` |
 | `rcx_pi/selfhost/projection_runner.py` | 1 stall detection site uses `mu_hash_cached()` |
 | `mu/host/js/eval_step.js` | `muHashCached()` added; `muEqual()` delegates; 6 call sites updated |
-| `tests/test_paxos_end_to_end.py` | Paxos deadlock metabolization pipeline test (6 tests) |
+| `mu/tests/integration/test_paxos_end_to_end.py` | Paxos deadlock metabolization pipeline test (6 tests) |
 
 **Level 2 (IMPLEMENTED — 2026-02-10):**
 

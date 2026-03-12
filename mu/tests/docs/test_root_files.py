@@ -578,12 +578,12 @@ class TestMarkdownSyntax:
                 f"Likely unclosed block near line(s): {open_blocks[-3:] if open_blocks else 'unknown'}"
             )
 
-    @pytest.mark.parametrize("filename", [f for f in ROOT_FILES.keys() if f != "CHANGELOG.md"])
+    @pytest.mark.parametrize("filename", [f for f in ROOT_FILES.keys() if f not in {"CHANGELOG.md", "TASKS.md"}])
     def test_inline_file_references_exist(self, filename: str):
         """Inline file references (backtick paths with directories) should point to existing files.
 
         Only checks paths with '/' to avoid false positives from bare filenames.
-        CHANGELOG.md is excluded as it contains historical references.
+        CHANGELOG.md and TASKS.md are excluded as they contain historical references.
         """
         path = REPO_ROOT / filename
         if not path.exists():

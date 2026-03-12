@@ -17,10 +17,10 @@ A projection-based computational substrate where **structure is the primitive**.
 >
 > Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
-- **~5,500+ tests** across 260+ test files
+- **Comprehensive test coverage** (see STATUS.md for current counts)
 - **11 tracked @host_* markers** (bootstrap substrate lower bound)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
-- **163 projections** across 19 seed files
+- **~163 projections** across 19 seed files (see `test_seed_counts.py` for exact counts)
 
 **Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
 Five automatic routes: null→r_null, closure→r_a, exhaustion→sink, stall→r_inf, default→lobes. Cross-substrate parity verified. Metabolization COMPLETE (E1-E5 all MET).
