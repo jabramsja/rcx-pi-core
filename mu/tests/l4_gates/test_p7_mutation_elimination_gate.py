@@ -253,21 +253,21 @@ class TestRatchetEvidence:
         )
         assert result.returncode == 0, f"Ratchet failed:\n{result.stderr}"
 
-    def test_ratchet_shows_decrease(self):
-        """Ratchet --json must show a decrease in python.host_mutation."""
+    def test_ratchet_baseline_locked(self):
+        """Ratchet baseline must reflect Python host_mutation=0 (locked post-P7W1)."""
         result = subprocess.run(
             ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
             capture_output=True, text=True, timeout=30,
         )
         data = json.loads(result.stdout)
-        assert len(data["decreases"]) > 0, "No decreases recorded by ratchet"
-        mutation_decrease = [
-            d for d in data["decreases"]
-            if d["category"] == "host_mutation" and d["substrate"] == "python"
-        ]
-        assert len(mutation_decrease) == 1, (
-            f"Expected exactly 1 mutation decrease, found {len(mutation_decrease)}"
+        assert data["baseline_counts"]["python"]["host_mutation"] == 0, (
+            f"Baseline Python host_mutation is {data['baseline_counts']['python']['host_mutation']}, "
+            f"expected 0 (locked after P7 Wave 1 elimination)"
         )
-        assert mutation_decrease[0]["delta"] == 1, (
-            f"Expected delta=1, got {mutation_decrease[0]['delta']}"
+        assert data["current"]["python"]["host_mutation"] == 0, (
+            f"Current Python host_mutation is {data['current']['python']['host_mutation']}, "
+            f"expected 0"
+        )
+        assert data["increases"] == [], (
+            f"Ratchet shows increases (regression): {data['increases']}"
         )
