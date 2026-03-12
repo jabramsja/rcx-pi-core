@@ -1,10 +1,13 @@
-"""D005: Stage 0 Micro-Kernel Production Pilot — Gate Tests.
+"""D005: Stage 0 Micro-Kernel Production — Gate Tests.
 
 Validates that Stage 0 match/substitute functions:
-  - Produce identical results to _match_inner/substitute
+  - Produce identical results to _match_inner/substitute (parity regression)
   - Use pure merge (no dict mutation)
   - Respect MAX_MU_DEPTH, bool/int distinction, Gate-3 _type exception
   - Do not increase bootstrap primitive count or host-semantics debt
+
+Stage 0 is the sole production path (flag removed Wave 4, 2026-03-12).
+Legacy _match_inner/substitute parity tests retained as regression guards.
 
 Evidence for: L4DecisionCard.v0.md (D005), target gate G8.
 """
@@ -25,7 +28,6 @@ from rcx_pi.selfhost.eval_seed import (
 )
 from rcx_pi.selfhost.eval_seed import _stage0_match  # ANTICHEAT_OK: Stage 0 gate test
 from rcx_pi.selfhost.eval_seed import _stage0_substitute  # ANTICHEAT_OK: Stage 0 gate test
-from rcx_pi.selfhost.eval_seed import _STAGE0_PILOT  # ANTICHEAT_OK: Stage 0 gate test
 from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
 
 from tests.repo_root import REPO_ROOT
@@ -396,17 +398,23 @@ class TestRatchetPasses:
 # Slice C: Pilot Integration Tests
 # ===========================================================================
 
-class TestPilotFlagDefaultON:
-    """_STAGE0_PILOT must default to True (production mode, Wave H)."""
+class TestStage0IsSoleProductionPath:
+    """Stage 0 is the sole production path (flag removed Wave 4)."""
 
-    def test_default_on(self):
-        assert _STAGE0_PILOT is True, (
-            "_STAGE0_PILOT must default to True — Stage 0 is production (Wave H)"
+    def test_no_flag_in_trusted_path(self):
+        """_apply_projection_trusted must not reference _STAGE0_PILOT."""
+        import inspect
+        from rcx_pi.selfhost.eval_seed import _apply_projection_trusted  # ANTICHEAT_OK: contract test
+        source = inspect.getsource(_apply_projection_trusted)
+        assert "_STAGE0_PILOT" not in source, (
+            "_STAGE0_PILOT flag must be removed from _apply_projection_trusted (Wave 4)"
         )
+        assert "_stage0_match(" in source, "trusted path must call _stage0_match directly"
+        assert "_stage0_substitute(" in source, "trusted path must call _stage0_substitute directly"
 
 
-class TestPilotOFF_NoRegression:
-    """Canonical vectors through step() must work (pilot ON is now default)."""
+class TestStepCanonicalVectors:
+    """Canonical vectors through step() must work (Stage0 sole path)."""
 
     VECTORS = [
         # (projections, input, expected)
@@ -445,84 +453,52 @@ class TestPilotOFF_NoRegression:
         assert result == expected
 
 
-class TestPilotON_CanonicalVectors:
-    """With pilot ON, same canonical vectors produce same results."""
+class TestStepExpandedVectors:
+    """Expanded vector set through step() (Stage0 sole production path)."""
 
-    VECTORS = TestPilotOFF_NoRegression.VECTORS
+    EXPANDED_VECTORS = [
+        # (projections, input, expected_or_None)
+        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], 42, 42),
+        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], "hello", "hello"),
+        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], None, None),
+        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], True, True),
+        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], [1, 2, 3], [1, 2, 3]),
+        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], {"a": 1, "b": 2}, {"a": 1, "b": 2}),
+        ([{"id": "swap", "pattern": [{"var": "a"}, {"var": "b"}], "body": [{"var": "b"}, {"var": "a"}]}], [10, 20], [20, 10]),
+        ([{"id": "nest", "pattern": {"k": {"var": "v"}}, "body": {"out": {"var": "v"}}}], {"k": {"nested": True}}, {"out": {"nested": True}}),
+        ([{"id": "nonlinear", "pattern": [{"var": "x"}, {"var": "x"}], "body": {"var": "x"}}], [5, 5], 5),
+        ([{"id": "nonlinear_fail", "pattern": [{"var": "x"}, {"var": "x"}], "body": {"var": "x"}}], [5, 6], [5, 6]),  # stall
+        ([{"id": "g3", "pattern": {"head": {"var": "h"}}, "body": {"var": "h"}}], {"head": 1, "_type": "list"}, 1),
+    ]
 
-    @pytest.mark.parametrize("projections,input_value,expected", VECTORS,
-                             ids=[f"on_{i}" for i in range(5)])
-    def test_pilot_on_vectors(self, projections, input_value, expected, monkeypatch):
-        import rcx_pi.selfhost.eval_seed as es
-        monkeypatch.setattr(es, '_STAGE0_PILOT', True)
-        result = es.step(projections, input_value)
+    @pytest.mark.parametrize("projections,input_value,expected", EXPANDED_VECTORS,
+                             ids=[f"expanded_{i}" for i in range(len(EXPANDED_VECTORS))])
+    def test_expanded_vectors(self, projections, input_value, expected):
+        from rcx_pi.selfhost.eval_seed import step
+        result = step(projections, input_value)
         assert result == expected
 
 
-class TestPilotON_EquivalenceWithOFF:
-    """Pilot ON and OFF produce identical results on expanded vector set."""
+class TestStepMaxDepth:
+    """step() handles depth-exceeding inputs correctly (Stage0 sole path)."""
 
-    EXPANDED_VECTORS = [
-        # (projections, input)
-        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], 42),
-        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], "hello"),
-        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], None),
-        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], True),
-        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], [1, 2, 3]),
-        ([{"id": "id", "pattern": {"var": "x"}, "body": {"var": "x"}}], {"a": 1, "b": 2}),
-        ([{"id": "swap", "pattern": [{"var": "a"}, {"var": "b"}], "body": [{"var": "b"}, {"var": "a"}]}], [10, 20]),
-        ([{"id": "nest", "pattern": {"k": {"var": "v"}}, "body": {"out": {"var": "v"}}}], {"k": {"nested": True}}),
-        ([{"id": "nonlinear", "pattern": [{"var": "x"}, {"var": "x"}], "body": {"var": "x"}}], [5, 5]),
-        ([{"id": "nonlinear_fail", "pattern": [{"var": "x"}, {"var": "x"}], "body": {"var": "x"}}], [5, 6]),
-        # Gate-3 _type list
-        ([{"id": "g3", "pattern": {"head": {"var": "h"}}, "body": {"var": "h"}}], {"head": 1, "_type": "list"}),
-    ]
+    def test_deep_nested_input(self):
+        from rcx_pi.selfhost.eval_seed import step
 
-    @pytest.mark.parametrize("projections,input_value", EXPANDED_VECTORS,
-                             ids=[f"equiv_{i}" for i in range(len(EXPANDED_VECTORS))])
-    def test_on_off_equivalence(self, projections, input_value, monkeypatch):
-        import rcx_pi.selfhost.eval_seed as es
-
-        # OFF path
-        monkeypatch.setattr(es, '_STAGE0_PILOT', False)
-        off_result = es.step(projections, input_value)
-
-        # ON path
-        monkeypatch.setattr(es, '_STAGE0_PILOT', True)
-        on_result = es.step(projections, input_value)
-
-        assert on_result == off_result, (
-            f"Pilot ON/OFF divergence: OFF={off_result}, ON={on_result}"
-        )
-
-
-class TestPilotON_MaxDepthParity:
-    """Pilot ON handles depth-exceeding inputs same as OFF."""
-
-    def test_deep_nested_input(self, monkeypatch):
-        import rcx_pi.selfhost.eval_seed as es
-
-        # Build a deeply nested structure (not exceeding MAX_MU_DEPTH but deep)
         deep = 42
         for _ in range(50):
             deep = {"v": deep}
-        pattern = deep_pattern = 42
+        pattern = 42
         for _ in range(50):
             pattern = {"v": pattern}
 
         projections = [{"id": "deep", "pattern": pattern, "body": "matched"}]
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', False)
-        off_result = es.step(projections, deep)
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', True)
-        on_result = es.step(projections, deep)
-
-        assert on_result == off_result
+        result = step(projections, deep)
+        assert result == "matched"
 
 
-class TestPilotON_BoolIntParity:
-    """Pilot ON distinguishes bool from int same as OFF."""
+class TestStepBoolIntDistinction:
+    """step() distinguishes bool from int (Stage0 sole path)."""
 
     CASES = [
         ([{"id": "t", "pattern": True, "body": "yes"}], True, "yes"),
@@ -533,53 +509,33 @@ class TestPilotON_BoolIntParity:
 
     @pytest.mark.parametrize("projections,input_value,expected", CASES,
                              ids=["true_true", "true_1", "1_true", "false_0"])
-    def test_bool_int_parity(self, projections, input_value, expected, monkeypatch):
-        import rcx_pi.selfhost.eval_seed as es
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', False)
-        off_result = es.step(projections, input_value)
-        assert off_result == expected
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', True)
-        on_result = es.step(projections, input_value)
-        assert on_result == expected
-        assert on_result == off_result
+    def test_bool_int_distinction(self, projections, input_value, expected):
+        from rcx_pi.selfhost.eval_seed import step
+        result = step(projections, input_value)
+        assert result == expected
 
 
-class TestPilotON_Gate3TypeListParity:
-    """Pilot ON handles Gate-3 _type='list' exception same as OFF."""
+class TestStepGate3TypeList:
+    """step() handles Gate-3 _type='list' exception (Stage0 sole path)."""
 
-    def test_gate3_list_through_trusted_path(self, monkeypatch):
-        import rcx_pi.selfhost.eval_seed as es
+    def test_gate3_list_through_trusted_path(self):
+        from rcx_pi.selfhost.eval_seed import step
 
         projections = [
             {"id": "g3", "pattern": {"head": {"var": "h"}, "tail": {"var": "t"}},
              "body": {"result": {"var": "h"}}},
         ]
         input_value = {"head": 1, "tail": None, "_type": "list"}
+        result = step(projections, input_value)
+        assert result == {"result": 1}
 
-        monkeypatch.setattr(es, '_STAGE0_PILOT', False)
-        off_result = es.step(projections, input_value)
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', True)
-        on_result = es.step(projections, input_value)
-
-        assert on_result == off_result
-        assert on_result == {"result": 1}
-
-    def test_gate3_dict_rejects_through_trusted_path(self, monkeypatch):
-        import rcx_pi.selfhost.eval_seed as es
+    def test_gate3_dict_rejects_through_trusted_path(self):
+        from rcx_pi.selfhost.eval_seed import step
 
         projections = [
             {"id": "g3d", "pattern": {"a": {"var": "x"}},
              "body": {"var": "x"}},
         ]
         input_value = {"a": 1, "_type": "dict"}
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', False)
-        off_result = es.step(projections, input_value)
-
-        monkeypatch.setattr(es, '_STAGE0_PILOT', True)
-        on_result = es.step(projections, input_value)
-
-        assert on_result == off_result  # Both should stall (no match)
+        result = step(projections, input_value)
+        assert result == input_value  # stall (no match)

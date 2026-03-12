@@ -12,7 +12,6 @@ from __future__ import annotations
 import pytest
 
 from rcx_pi.selfhost.eval_seed import step
-from rcx_pi.selfhost.eval_seed import _STAGE0_PILOT as _SOURCE_STAGE0_PILOT  # ANTICHEAT_OK: captures source default at module load (before autouse fixture)
 from rcx_pi.selfhost.step_mu import run_engine_pipeline
 from rcx_pi.selfhost.projection_loader import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
@@ -143,21 +142,11 @@ class TestExecutionLayerTruth:
 # ===========================================================================
 
 class TestD005Stage0Contract:
-    """D005 Stage 0 pilot contract assertions.
+    """D005 Stage 0 production contract assertions.
 
-    Proves Stage 0 functions exist as production-grade execution-layer
-    alternatives. Required by Rule-18 workload_target=execution_layer_truth.
+    Proves Stage 0 functions are the sole production path (flag removed Wave 4).
+    Required by Rule-18 workload_target=execution_layer_truth.
     """
-
-    def test_pilot_flag_default_on(self):
-        """_STAGE0_PILOT must default to True (production mode, Wave H).
-
-        Uses module-level import-by-value (_SOURCE_STAGE0_PILOT) to capture
-        the source-code default before the autouse fixture resets it to False.
-        """
-        assert _SOURCE_STAGE0_PILOT is True, (  # ANTICHEAT_OK: contract test
-            "_STAGE0_PILOT must default to True — Stage 0 is production (Wave H)"
-        )
 
     def test_stage0_functions_exist(self):
         """Stage 0 match/substitute must be importable from eval_seed."""
@@ -168,7 +157,6 @@ class TestD005Stage0Contract:
     def test_no_stage0_in_wrapper_functions(self):
         """Forbidden wrappers (step/match/substitute/step_kernel_mu) must not
         reference _STAGE0_ or _stage0_ symbols — proves wrappers untouched."""
-        import ast
         import inspect
         from rcx_pi.selfhost.eval_seed import step, match, substitute
         from rcx_pi.selfhost.step_mu import step_kernel_mu
@@ -182,35 +170,27 @@ class TestD005Stage0Contract:
                 f"{func.__name__} references _stage0_ — forbidden wrapper modified"
             )
 
-    def test_trusted_path_routing_exists(self):
-        """_apply_projection_trusted must contain both Stage 0 and legacy paths.
+    def test_trusted_path_uses_stage0_directly(self):
+        """_apply_projection_trusted must call Stage0 directly (flag removed).
 
-        This proves the routing is real (not wrapper theater) — the function
-        body references both _stage0_match and _match_inner.
+        After Wave 4, the trusted path calls _stage0_match/_stage0_substitute
+        directly with no conditional routing.
         """
         import inspect
         from rcx_pi.selfhost.eval_seed import _apply_projection_trusted  # ANTICHEAT_OK: contract test
         source = inspect.getsource(_apply_projection_trusted)
         assert "_stage0_match(" in source, (
-            "_apply_projection_trusted must reference _stage0_match — routing missing"
-        )
-        assert "_match_inner(" in source, (
-            "_apply_projection_trusted must reference _match_inner — legacy path missing"
+            "_apply_projection_trusted must call _stage0_match directly"
         )
         assert "_stage0_substitute(" in source, (
-            "_apply_projection_trusted must reference _stage0_substitute — routing missing"
+            "_apply_projection_trusted must call _stage0_substitute directly"
         )
-        assert "substitute(" in source, (
-            "_apply_projection_trusted must reference substitute — legacy path missing"
-        )
-        assert "_STAGE0_PILOT" in source, (
-            "_apply_projection_trusted must reference _STAGE0_PILOT — flag check missing"
+        assert "_STAGE0_PILOT" not in source, (
+            "_apply_projection_trusted must not reference _STAGE0_PILOT (removed Wave 4)"
         )
 
-    def test_off_on_equivalence_canonical_vectors(self):
-        """5 D003 canonical vectors produce identical results through step()
-        with pilot OFF vs ON."""
-        from rcx_pi.selfhost import eval_seed
+    def test_canonical_vectors_through_step(self):
+        """5 D003 canonical vectors produce correct results through step()."""
         from rcx_pi.selfhost.eval_seed import step
 
         vectors = [
@@ -222,19 +202,5 @@ class TestD005Stage0Contract:
         ]
 
         for projections, input_value, expected in vectors:
-            # OFF (default)
-            eval_seed._STAGE0_PILOT = False  # ANTICHEAT_OK: contract test
-            off_result = step(projections, input_value)
-            assert off_result == expected, f"OFF failed: {off_result} != {expected}"
-
-            # ON
-            eval_seed._STAGE0_PILOT = True  # ANTICHEAT_OK: contract test
-            on_result = step(projections, input_value)
-            assert on_result == expected, f"ON failed: {on_result} != {expected}"
-
-            assert on_result == off_result, (
-                f"OFF/ON divergence: OFF={off_result}, ON={on_result}"
-            )
-
-        # Reset (autouse fixture also resets, but be explicit)
-        eval_seed._STAGE0_PILOT = False  # ANTICHEAT_OK: contract test
+            result = step(projections, input_value)
+            assert result == expected, f"step() failed: {result} != {expected}"

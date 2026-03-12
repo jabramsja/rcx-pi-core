@@ -402,8 +402,14 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
   if (typeof maxSteps !== 'number' || maxSteps < 0 || maxSteps > MAX_RUN_STEPS) {
     maxSteps = MAX_RUN_STEPS;
   }
-  // Guard lambda-calc projections up front (public boundary parity with applyProjection)
-  for (const proj of projections) assertNotLambdaCalculus(proj);
+  // Validate projections up front (public boundary parity with applyProjection)
+  for (const proj of projections) {
+    if (!isValidMu(proj) || typeof proj !== 'object' || proj === null || Array.isArray(proj))
+      throw new RcxError('input.invalid_type', 'Projection must be a valid Mu object');
+    if (!('pattern' in proj) || !('body' in proj))
+      throw new RcxError('input.invalid_type', "Projection must have 'pattern' and 'body' keys");
+    assertNotLambdaCalculus(proj);
+  }
 
   let current = input;
   let currentHash = muHashControlCached(input, 'run');
