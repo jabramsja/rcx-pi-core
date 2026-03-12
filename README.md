@@ -18,7 +18,7 @@ A projection-based computational substrate where **structure is the primitive**.
 > Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
 - **~5,500+ tests** across 260+ test files
-- **17 semantic debt** (irreducible bootstrap floor)
+- **16 semantic debt** (irreducible bootstrap floor)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
 - **143 projections** across 17 seed files
 

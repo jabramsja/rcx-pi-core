@@ -291,7 +291,7 @@ class TestLOCBudget:
 
     def test_stage0_substitute_loc(self):
         loc = _count_code_lines(_stage0_substitute)
-        # Limit 36: 27 LOC core + ~5 LOC decorators (@host_recursion + @host_mutation)
+        # Limit 36: 27 LOC core + ~5 LOC decorators (@host_recursion — @host_mutation removed P7 Wave 1)
         assert loc <= 36, f"_stage0_substitute is {loc} LOC (limit 36)"
 
     def test_total_stage0_loc(self):
@@ -371,7 +371,7 @@ class TestAntiLaundering:
 # ===========================================================================
 
 class TestRatchetPasses:
-    """Host-semantics ratchet must pass (total=40, no increase)."""
+    """Host-semantics ratchet must pass (total=39, no increase)."""
 
     def test_ratchet_exits_zero(self):
         result = subprocess.run(
@@ -388,7 +388,7 @@ class TestRatchetPasses:
         if result.returncode != 0:
             pytest.skip("Ratchet --json not available")
         data = json.loads(result.stdout)
-        assert data["current"]["python"]["host_mutation"] == 1
+        assert data["current"]["python"]["host_mutation"] == 0  # P7 Wave 1: mutation eliminated from _stage0_substitute
         assert data["passed"] is True, f"Ratchet did not pass: {data}"
 
 
