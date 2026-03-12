@@ -57,13 +57,14 @@ def _count_code_lines(path: Path) -> int:
 # ---------------------------------------------------------------------------
 
 class TestBootstrapCoreLOCBudget:
-    """bootstrap_core.js must stay within 400 non-blank non-comment lines."""
+    """bootstrap_core.js must stay within 405 non-blank non-comment lines."""
 
     def test_bootstrap_core_loc_budget(self):
         assert BOOTSTRAP_CORE.exists(), f"bootstrap_core.js not found at {BOOTSTRAP_CORE}"
         loc = _count_code_lines(BOOTSTRAP_CORE)
-        assert loc <= 400, (
-            f"bootstrap_core.js has {loc} code lines, exceeds 400 LOC budget. "
+        # Budget 405: 400 baseline + 5 for run() projection validation (Wave 4 security fix)
+        assert loc <= 405, (
+            f"bootstrap_core.js has {loc} code lines, exceeds 405 LOC budget. "
             f"Move non-TCB code to engine/ or core/ modules."
         )
 

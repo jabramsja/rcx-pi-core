@@ -12,6 +12,27 @@ import pytest
 
 from rcx_pi.eval_seed import step, apply_projection, NO_MATCH
 from rcx_pi.step_mu import step_mu, apply_mu
+from rcx_pi.selfhost.mu_type import mu_equal
+
+
+def _assert_mu_parity(py_result, mu_result, expected=None):
+    """Assert parity between Python and Mu results using mu_equal for compounds."""
+    if isinstance(py_result, (dict, list)):
+        assert mu_equal(py_result, mu_result), (
+            f"Parity mismatch: py={py_result}, mu={mu_result}"
+        )
+        if expected is not None:
+            assert mu_equal(py_result, expected), (
+                f"Expected mismatch: got={py_result}, expected={expected}"
+            )
+    else:
+        assert py_result == mu_result, (
+            f"Parity mismatch: py={py_result}, mu={mu_result}"
+        )
+        if expected is not None:
+            assert py_result == expected, (
+                f"Expected mismatch: got={py_result}, expected={expected}"
+            )
 
 
 class TestApplyMuParityWithApplyProjection:
@@ -43,7 +64,7 @@ class TestApplyMuParityWithApplyProjection:
         py_result = apply_projection(proj, 42)
         mu_result = apply_mu(proj, 42)
 
-        assert py_result == mu_result == {"result": 42}
+        _assert_mu_parity(py_result, mu_result, {"result": 42})
 
     def test_nested_pattern(self):
         """Nested pattern with multiple variables."""
@@ -56,7 +77,7 @@ class TestApplyMuParityWithApplyProjection:
         py_result = apply_projection(proj, value)
         mu_result = apply_mu(proj, value)
 
-        assert py_result == mu_result == {"first": 1, "second": 2}
+        _assert_mu_parity(py_result, mu_result, {"first": 1, "second": 2})
 
     def test_list_pattern(self):
         """List pattern captures elements."""
@@ -69,7 +90,7 @@ class TestApplyMuParityWithApplyProjection:
         py_result = apply_projection(proj, value)
         mu_result = apply_mu(proj, value)
 
-        assert py_result == mu_result == {"h": 1, "t": 2}
+        _assert_mu_parity(py_result, mu_result, {"h": 1, "t": 2})
 
 
 class TestStepMuParityWithStep:
@@ -132,7 +153,7 @@ class TestStepMuParityWithStep:
         py_result = step(projections, value)
         mu_result = step_mu(projections, value)
 
-        assert py_result == mu_result == {"op": "result", "val": 5}
+        _assert_mu_parity(py_result, mu_result, {"op": "result", "val": 5})
 
 
 class TestStepMuComplexCases:
@@ -155,7 +176,7 @@ class TestStepMuComplexCases:
         # Test succ(one)
         py2 = step(projections, {"succ": "one"})
         mu2 = step_mu(projections, {"succ": "one"})
-        assert py2 == mu2 == {"double_succ": "one"}
+        _assert_mu_parity(py2, mu2, {"double_succ": "one"})
 
     def test_nested_dict_pattern(self):
         """Deeply nested dict pattern."""
@@ -170,7 +191,7 @@ class TestStepMuComplexCases:
         py_result = step(projections, value)
         mu_result = step_mu(projections, value)
 
-        assert py_result == mu_result == {"extracted": "deep_value"}
+        _assert_mu_parity(py_result, mu_result, {"extracted": "deep_value"})
 
     def test_multiple_vars_same_level(self):
         """Multiple variables at same level."""
@@ -185,7 +206,7 @@ class TestStepMuComplexCases:
         py_result = step(projections, value)
         mu_result = step_mu(projections, value)
 
-        assert py_result == mu_result == {"sum": [1, 2, 3]}
+        _assert_mu_parity(py_result, mu_result, {"sum": [1, 2, 3]})
 
     def test_projection_order_matters(self):
         """First matching projection wins."""
@@ -244,7 +265,7 @@ class TestStepMuEdgeCases:
 
         py2 = step(projections, "world")
         mu2 = step_mu(projections, "world")
-        assert py2 == mu2 == {"echoed": "world"}
+        _assert_mu_parity(py2, mu2, {"echoed": "world"})
 
     def test_numeric_values(self):
         """Numeric value handling (int and float)."""
@@ -256,7 +277,7 @@ class TestStepMuEdgeCases:
 
         assert step(projections, 42) == step_mu(projections, 42) == "int_42"
         assert step(projections, 3.14) == step_mu(projections, 3.14) == "pi"
-        assert step(projections, 99) == step_mu(projections, 99) == {"number": 99}
+        _assert_mu_parity(step(projections, 99), step_mu(projections, 99), {"number": 99})
 
 
 class TestStepMuErrors:

@@ -23,7 +23,7 @@ A projection-based computational substrate where **structure is the primitive**.
 - **163 projections** across 19 seed files
 
 **Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
-Five automatic routes: null→r_null, closure→r_a, exhaustion→sink, stall→lobes, default→lobes. Cross-substrate parity verified. Metabolization COMPLETE (E1-E5 all MET).
+Five automatic routes: null→r_null, closure→r_a, exhaustion→sink, stall→r_inf, default→lobes. Cross-substrate parity verified. Metabolization COMPLETE (E1-E5 all MET).
 
 See `STATUS.md` for full details.
 

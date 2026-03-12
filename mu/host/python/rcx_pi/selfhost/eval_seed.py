@@ -510,10 +510,11 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 #   .append() mutation in _stage0_substitute. Markers added Wave H (2026-03-11).
 # ---------------------------------------------------------------------------
 
-# Stage 0 production flag. Always True since Wave H (2026-03-11).
-# 90 gate tests proved ON/OFF parity. The OFF path remains for equivalence tests
-# (test_stage0_production_pilot_gate.py) but is never active in production.
-_STAGE0_PILOT = True
+# Stage 0 is the sole production path since Wave H (2026-03-11).
+# 90 gate tests proved ON/OFF parity. Flag removed Wave 4 (2026-03-12):
+# _stage0_match/_stage0_substitute are now called directly in _apply_projection_trusted
+# (no conditional routing). Legacy _match_inner/substitute paths remain available for
+# direct unit testing and parity regression tests.
 
 
 @host_recursion(
@@ -524,7 +525,7 @@ _STAGE0_PILOT = True
 @host_builtin(
     "isinstance, .keys(), .get(), 'in' — reduced from 7 to 3 builtins (P7W4). "
     "len/zip/set eliminated: list branch dead code; len() Gate-3 replaced with truthiness. "
-    "Production path (_STAGE0_PILOT=True). Tracked separately from match() for ratchet accuracy."
+    "Sole production path (flag removed Wave 4). Tracked separately from match() for ratchet accuracy."
 )
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     """Stage 0 match: accumulator-style bindings. Returns NO_MATCH on failure."""
@@ -850,19 +851,13 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
 
-    # D005 Stage 0 production routing (default ON since Wave H, 2026-03-11)
-    if _STAGE0_PILOT:
-        bindings = _stage0_match(pattern, input_value)
-    else:
-        bindings = _match_inner(pattern, input_value)
+    # Stage 0 production path (sole path since Wave 4, 2026-03-12)
+    bindings = _stage0_match(pattern, input_value)
 
     if bindings is NO_MATCH:
         return NO_MATCH
 
-    if _STAGE0_PILOT:
-        result = _stage0_substitute(body, bindings)
-    else:
-        result = substitute(body, bindings)
+    result = _stage0_substitute(body, bindings)
 
     if isinstance(body, dict) and body.get("_type") == "dict":
         from rcx_pi.selfhost.match_mu import denormalize_from_match

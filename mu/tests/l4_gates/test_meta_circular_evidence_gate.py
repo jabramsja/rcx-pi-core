@@ -34,24 +34,12 @@ from rcx_pi.selfhost.eval_seed import (
     _apply_projection_trusted,  # ANTICHEAT_OK: trusted-path AST inspection for meta-circular gate
 )
 
-from rcx_pi.selfhost import eval_seed as _eval_seed_module  # ANTICHEAT_OK: Stage0 pilot fixture
+from rcx_pi.selfhost import eval_seed as _eval_seed_module  # ANTICHEAT_OK: routing lock proof
 
 from tests.repo_root import REPO_ROOT
 
 JS_RUNTIME = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
 SEED_DIR = REPO_ROOT / "mu" / "substrate"
-
-
-@pytest.fixture(autouse=True)
-def _force_stage0_production_path():
-    """Override global autouse reset: force Stage0 ON for evidence tests.
-
-    The global reset_state_between_tests fixture sets _STAGE0_PILOT=False.
-    This gate proves the PRODUCTION Stage0 path, so we must run with it ON.
-    """
-    _eval_seed_module._STAGE0_PILOT = True  # ANTICHEAT_OK: gate test forces production Stage0 path
-    yield
-    # Global fixture will reset to False after us — that's fine
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +113,8 @@ class TestStepCountEvidence:
     def test_stage0_routing_lock(self):
         """Runtime proof: Stage0 functions are actually called, not legacy _match_inner.
 
-        This test fails if _STAGE0_PILOT is False or if someone removes the
-        _force_stage0_production_path fixture — ensuring the evidence gate
-        exercises the production trusted path, not the legacy fallback.
+        Stage0 is the sole production path (flag removed Wave 4, 2026-03-12).
+        This test verifies the production trusted path calls Stage0 directly.
         """
         from unittest.mock import patch
         proj = {"id": "lit", "pattern": "x", "body": "y"}
@@ -362,8 +349,8 @@ class TestTrustedPathCallGraphProof:
     def test_apply_projection_trusted_delegates_to_stage0(self):
         """_apply_projection_trusted must delegate to Stage0 match and substitute.
 
-        Stage0 is the production default (_STAGE0_PILOT=True since Wave H).
-        The test requires Stage0 functions specifically, not the fallback path.
+        Stage0 is the sole production path (flag removed Wave 4, 2026-03-12).
+        The test verifies Stage0 functions are called directly.
         """
         source = _get_function_source(_apply_projection_trusted)
         # Stage0 is production default — require Stage0 functions, not fallbacks

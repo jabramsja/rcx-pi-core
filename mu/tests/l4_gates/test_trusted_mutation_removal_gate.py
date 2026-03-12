@@ -146,10 +146,15 @@ class TestMarkersRetainedWhereConstructsRemain:
 class TestTrustedPathSourceLock:
     """Source-lock the trusted path call graph assumptions."""
 
-    def test_apply_projection_trusted_calls_match_inner(self):
+    def test_apply_projection_trusted_calls_stage0(self):
+        """Trusted path calls Stage0 directly (flag removed Wave 4)."""
         source = _get_function_source(_apply_projection_trusted)
-        assert "_match_inner(" in source, (
-            "_apply_projection_trusted no longer calls _match_inner — "
+        assert "_stage0_match(" in source, (
+            "_apply_projection_trusted must call _stage0_match — "
+            "trusted path assumption violated"
+        )
+        assert "_stage0_substitute(" in source, (
+            "_apply_projection_trusted must call _stage0_substitute — "
             "trusted path assumption violated"
         )
 

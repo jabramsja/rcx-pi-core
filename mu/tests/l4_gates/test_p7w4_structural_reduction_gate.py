@@ -28,7 +28,6 @@ from rcx_pi.selfhost.eval_seed import (
     _stage0_substitute,  # ANTICHEAT_OK: AST inspection for P7W4 structural reduction gate
     match,
     substitute,
-    _STAGE0_PILOT,  # ANTICHEAT_OK: production flag verification for P7W4 gate
 )
 from rcx_pi.selfhost.step_mu import step_kernel_mu  # SPEED_OK: source inspection only
 
@@ -113,12 +112,22 @@ class TestStage0ListBranchRemoved:
                     break
 
 
-class TestStage0PilotProduction:
-    """Verify Stage 0 is the production kernel path."""
+class TestStage0IsProductionPath:
+    """Verify Stage 0 functions are the sole production kernel path (flag removed Wave 4)."""
 
-    def test_stage0_pilot_is_true(self):
-        assert _STAGE0_PILOT is True, (
-            "_STAGE0_PILOT must be True (kernel path uses Stage 0 since Wave H)"
+    def test_stage0_functions_callable(self):
+        assert callable(_stage0_match), "_stage0_match must be callable"
+        assert callable(_stage0_substitute), "_stage0_substitute must be callable"
+
+    def test_trusted_path_uses_stage0_directly(self):
+        """_apply_projection_trusted must call Stage0 directly (no flag routing)."""
+        import inspect
+        from rcx_pi.selfhost.eval_seed import _apply_projection_trusted  # ANTICHEAT_OK: contract test
+        source = inspect.getsource(_apply_projection_trusted)
+        assert "_stage0_match(" in source, "trusted path must call _stage0_match"
+        assert "_stage0_substitute(" in source, "trusted path must call _stage0_substitute"
+        assert "_STAGE0_PILOT" not in source, (
+            "trusted path must not reference _STAGE0_PILOT (flag removed Wave 4)"
         )
 
 
