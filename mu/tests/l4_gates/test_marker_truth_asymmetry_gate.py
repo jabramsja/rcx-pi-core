@@ -67,18 +67,17 @@ class TestMarkerTruthAsymmetryGate:
                 return
         pytest.fail("collectOntologyEvidence function not found in pipeline.js")
 
-    def test_ratchet_baseline_reflects_mt1(self):
-        """Ratchet baseline reflects the MT1 marker additions."""
+    def test_ratchet_baseline_reflects_current(self):
+        """Ratchet baseline reflects post-P7W3 reduction (Py 8, JS 9)."""
         baseline_path = REPO_ROOT / "tools" / "checks" / "host_semantics_baseline.json"
         data = json.loads(baseline_path.read_text())
         py = data["counts"]["python"]
         js = data["counts"]["javascript"]
-        # MT1 added 2 Python iteration markers and 1 JS iteration marker
-        # Wave 4f corrected JS count: header self-references no longer inflate baseline
-        # Real JS iteration markers: 10 (was 11 when constants.js header was counted)
-        assert py["host_iteration"] >= 12, (
-            f"Python host_iteration baseline must be >= 12 (MT1), got {py['host_iteration']}"
+        # P7W3 boundary reclassification reduced Py 13→8, JS 10→9
+        # Baseline locked by MAINTENANCE wave post-P7W3
+        assert py["host_iteration"] == 8, (
+            f"Python host_iteration baseline must be 8 (post-P7W3), got {py['host_iteration']}"
         )
-        assert js["host_iteration"] >= 10, (
-            f"JS host_iteration baseline must be >= 10 (honest count, wave 4f), got {js['host_iteration']}"
+        assert js["host_iteration"] == 9, (
+            f"JS host_iteration baseline must be 9 (post-P7W3), got {js['host_iteration']}"
         )
