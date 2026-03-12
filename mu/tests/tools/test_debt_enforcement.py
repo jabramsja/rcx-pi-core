@@ -297,7 +297,7 @@ def test_audit_semantic_purity_threshold_matches_status_md():
     dynamically from STATUS.md rather than hardcoding it, ensuring a single
     source of truth.
 
-    Current threshold: 11 (host debt floor - irreducible bootstrap substrate)
+    Current threshold: 11 (tracked @host_* marker count - bootstrap substrate lower bound)
     - @host_recursion: 2 (eval_seed match/substitute)
     - @host_builtin: 3 (eval_seed, deep_eval)
     - @host_iteration: 3 (run_mu, step_kernel_mu, run_mu_structural)

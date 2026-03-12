@@ -324,7 +324,7 @@ INFRA_CEILING: 74
 INFRA_CURRENT: 73
 ```
 
-**Debt floor breakdown (11 irreducible sites — see enumeration below):**
+**Tracked marker count (11 @host_* markers — see enumeration below):**
 - @host_recursion: 2 (_stage0_match + _stage0_substitute — BOOTSTRAP. match/substitute reclassified as BOUNDARY P7W4)
 - @host_builtin: 3 (_stage0_match x1, deep_eval x2 — match() reclassified P7W4, builtin surface reduced: len/zip/set eliminated)
 - @host_iteration: 2 (step_kernel_mu + list_to_linked — BOOTSTRAP. run_mu/run_mu_structural reclassified as BOUNDARY P7W5. list_to_linked stays: called by step_kernel_mu)
@@ -338,8 +338,8 @@ INFRA_CURRENT: 73
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 11 is the host debt floor (not a target for reduction):**
-The 11 counts ALL host debt sites (7 tracked decorators + 4 AST_OK bootstrap) across L2 kernel and utilities (list_to_linked is inline marker, counted by ratchet but not debt_dashboard):
+**Why 11 is the tracked marker count (lower bound, not comprehensive inventory):**
+The 11 counts explicitly marked @host_* sites (7 tracked decorators + 4 AST_OK bootstrap) across L2 kernel and utilities (list_to_linked is inline marker, counted by ratchet but not debt_dashboard). Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally beyond their @host_recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary):
 
 *L2 kernel substrate (8 sites):*
 1. `_stage0_match()` in eval_seed.py — @host_recursion + @host_builtin (Stage 0 micro-match bootstrap primitive; P7W4: list branch removed, builtin surface reduced to isinstance/.keys()/.get()/in)
@@ -347,7 +347,7 @@ The 11 counts ALL host debt sites (7 tracked decorators + 4 AST_OK bootstrap) ac
 3. `step_kernel_mu()` in step_mu.py — @host_iteration (kernel execution loop — Forth's NEXT)
 4. `list_to_linked()` in step_mu.py — @host_iteration (inline; called by step_kernel_mu to build _projs linked list)
 5. AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
-- NOTE: `match()` and `substitute()` reclassified as BOUNDARY (P7W4) — off kernel path since _STAGE0_PILOT=True (Wave H)
+- NOTE: `match()` and `substitute()` reclassified as BOUNDARY (P7W4) — off kernel path since Stage 0 is production default (Wave H; pilot flag removed wave4-simplification)
 - NOTE: `run_mu()`, `run_mu_structural()` reclassified as BOUNDARY (P7W5) — outer loop scaffolding, off kernel path
 - NOTE: `list_to_linked()` stays @host_iteration (P7W5) — on kernel path, called by step_kernel_mu
 
@@ -373,7 +373,7 @@ These cannot be eliminated because:
 
 **P7 Wave 5 (outer loop boundary reclassification):** Total host markers 17→11 (-6, -35%). Reclassified 6 functions as BOUNDARY: run_mu, run_mu_structural (Py 2), run, runStructural, runAlgorithmWithBridge, runEnginePipelineRecursive (JS 4). list_to_linked/listToLinked stay @host_iteration — on kernel path (called by step_kernel_mu/step). Floor reduced 13→11.
 
-The debt of 11 represents the current HOST DEBT FLOOR (L2 kernel + utilities). L4 paths are documented:
+The 11 represents the current tracked @host_* marker count (lower bound on total host work; L2 kernel + utilities). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
@@ -676,7 +676,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 - `tests/engine/test_phase8b_mechanical_kernel.py` (31 tests)
 - `tests/engine/test_phase8b_grounding_gaps.py` (12 tests)
 
-**Debt:** 11 (9 tracked decorators + 2 AST_OK bootstrap = host debt floor; was 12 before CP-S1A wave 25)
+**Debt:** 11 (9 tracked decorators + 2 AST_OK bootstrap = tracked marker count; was 12 before CP-S1A wave 25)
 
 ---
 
