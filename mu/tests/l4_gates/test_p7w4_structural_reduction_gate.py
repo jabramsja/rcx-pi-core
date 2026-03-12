@@ -25,10 +25,10 @@ import pytest
 
 from rcx_pi.selfhost.eval_seed import (
     _stage0_match,  # ANTICHEAT_OK: AST inspection for P7W4 structural reduction gate
-    _stage0_substitute,
+    _stage0_substitute,  # ANTICHEAT_OK: AST inspection for P7W4 structural reduction gate
     match,
     substitute,
-    _STAGE0_PILOT,
+    _STAGE0_PILOT,  # ANTICHEAT_OK: production flag verification for P7W4 gate
 )
 from rcx_pi.selfhost.step_mu import step_kernel_mu  # SPEED_OK: source inspection only
 
