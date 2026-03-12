@@ -184,16 +184,19 @@ function loadVerifiedSeed(seedName, subdir) {
     );
   }
 
-  // Projection ID verification (fail-closed)
+  // Projection ID verification (fail-closed: registry asymmetry = error)
   const expectedIds = CORE_SEED_PROJECTION_IDS[seedName];
-  if (expectedIds) {
-    const actualIds = seed.projections.map(p => p.id);
-    if (JSON.stringify(actualIds) !== JSON.stringify(expectedIds)) {
-      throw new Error(
-        `Seed projection IDs mismatch: ${seedName} ` +
-        `(expected ${JSON.stringify(expectedIds)}, got ${JSON.stringify(actualIds)})`
-      );
-    }
+  if (!expectedIds) {
+    throw new Error(
+      `Seed ${seedName} has checksum but no projection IDs in CORE_SEED_PROJECTION_IDS (registry asymmetry)`
+    );
+  }
+  const actualIds = seed.projections.map(p => p.id);
+  if (JSON.stringify(actualIds) !== JSON.stringify(expectedIds)) {
+    throw new Error(
+      `Seed projection IDs mismatch: ${seedName} ` +
+      `(expected ${JSON.stringify(expectedIds)}, got ${JSON.stringify(actualIds)})`
+    );
   }
 
   return seed;
