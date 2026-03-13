@@ -26,20 +26,35 @@ sys.modules[_spec.name] = _mod
 _spec.loader.exec_module(_mod)
 
 validate_baseline = _mod.validate_baseline
-compare_inventory = _mod.compare_inventory
-scan_sites = _mod.scan_sites
+compare_inventories = _mod.compare_inventories
+scan_inventories = _mod.scan_inventories
 _scan_python_file = _mod._scan_python_file  # ANTICHEAT_OK: tool unit test
 _scan_js_file = _mod._scan_js_file  # ANTICHEAT_OK: tool unit test
 
 
-def _make_baseline(entries: list[dict], schema_version: int = 1) -> dict:
-    py = sum(1 for e in entries if e["substrate"] == "python")
-    js = sum(1 for e in entries if e["substrate"] == "javascript")
+def _make_baseline(
+    total_entries: list[dict],
+    authority_entries: list[dict] | None = None,
+    schema_version: int = 2,
+) -> dict:
+    authority_entries = authority_entries if authority_entries is not None else list(total_entries)
+    py_total = sum(1 for e in total_entries if e["substrate"] == "python")
+    js_total = sum(1 for e in total_entries if e["substrate"] == "javascript")
+    py_auth = sum(1 for e in authority_entries if e["substrate"] == "python")
+    js_auth = sum(1 for e in authority_entries if e["substrate"] == "javascript")
     return {
         "schema_version": schema_version,
         "generated_at": "2026-03-12T00:00:00Z",
-        "site_counts": {"python": py, "javascript": js, "total": py + js},
-        "entries": entries,
+        "inventories": {
+            "total": {
+                "site_counts": {"python": py_total, "javascript": js_total, "total": py_total + js_total},
+                "entries": total_entries,
+            },
+            "authority": {
+                "site_counts": {"python": py_auth, "javascript": js_auth, "total": py_auth + js_auth},
+                "entries": authority_entries,
+            },
+        },
     }
 
 
@@ -67,6 +82,8 @@ class TestHostAuthorityInventoryRatchet:
             f"stderr: {result.stderr}"
         )
         assert "PASS" in result.stdout
+        assert "Current total inventory" in result.stdout
+        assert "Current authority subset" in result.stdout
 
     def test_json_output_has_expected_keys(self):
         result = subprocess.run(
@@ -78,14 +95,16 @@ class TestHostAuthorityInventoryRatchet:
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert "current_counts" in data
-        assert "baseline_counts" in data
-        assert "new_sites" in data
-        assert "current_sites" in data
+        assert "current_total_counts" in data
+        assert "baseline_total_counts" in data
+        assert "current_authority_counts" in data
+        assert "baseline_authority_counts" in data
+        assert "new_total_sites" in data
+        assert "new_authority_sites" in data
         assert data["passed"] is True
 
     def test_detects_new_site_against_baseline(self):
-        baseline_entries = [
+        baseline_total_entries = [
             {
                 "file": "rcx_pi/selfhost/eval_seed.py",
                 "line": 1,
@@ -94,7 +113,8 @@ class TestHostAuthorityInventoryRatchet:
                 "substrate": "python",
             }
         ]
-        current_entries = baseline_entries + [
+        baseline_authority_entries = list(baseline_total_entries)
+        current_total_entries = baseline_total_entries + [
             {
                 "file": "rcx_pi/selfhost/eval_seed.py",
                 "line": 2,
@@ -103,10 +123,18 @@ class TestHostAuthorityInventoryRatchet:
                 "substrate": "python",
             }
         ]
-        result = compare_inventory(current_entries, _make_baseline(baseline_entries))
+        current_authority_entries = list(current_total_entries)
+        result = compare_inventories(
+            {
+                "total_sites": current_total_entries,
+                "authority_sites": current_authority_entries,
+            },
+            _make_baseline(baseline_total_entries, baseline_authority_entries),
+        )
         assert result["passed"] is False
-        assert len(result["new_sites"]) == 1
-        assert result["new_sites"][0]["name"] == "assert_not_lambda_calculus"
+        assert len(result["new_total_sites"]) == 1
+        assert len(result["new_authority_sites"]) == 1
+        assert result["new_total_sites"][0]["name"] == "assert_not_lambda_calculus"
 
     def test_scan_python_catches_nested_helper(self, tmp_path):
         fake_py = _write_fake_source(
@@ -124,9 +152,11 @@ class TestHostAuthorityInventoryRatchet:
                 ]
             ),
         )
-        sites = _scan_python_file(fake_py)
-        names = {site["name"] for site in sites}
-        assert "outer.inner" in names
+        total_sites, authority_sites = _scan_python_file(fake_py)
+        total_names = {site["name"] for site in total_sites}
+        authority_names = {site["name"] for site in authority_sites}
+        assert "outer.inner" in total_names
+        assert "outer.inner" in authority_names
 
     def test_scan_js_catches_nested_helper(self, tmp_path):
         fake_js = _write_fake_source(
@@ -147,18 +177,23 @@ class TestHostAuthorityInventoryRatchet:
                 ]
             ),
         )
-        sites = _scan_js_file(fake_js)
-        names = {site["name"] for site in sites}
-        assert "inner" in names
+        total_sites, authority_sites = _scan_js_file(fake_js)
+        total_names = {site["name"] for site in total_sites}
+        authority_names = {site["name"] for site in authority_sites}
+        assert "inner" in total_names
+        assert "inner" in authority_names
 
     def test_current_codebase_contains_known_nested_sites(self):
         py_files, js_files = _mod._collect_files()  # ANTICHEAT_OK: tool unit test
-        sites = scan_sites(py_files, js_files)
-        keys = {(site["file"], site["name"]) for site in sites}
-        assert ("rcx_pi/selfhost/eval_seed.py", "assert_not_lambda_calculus._collect_pattern_vars") in keys  # ANTICHEAT_OK: string literal test data
-        assert ("mu/host/js/core/bootstrap_core.js", "safeHash") in keys
-        assert ("rcx_pi/selfhost/engine_pipeline.py", "run_engine_pipeline._emit") in keys  # ANTICHEAT_OK: string literal test data
-        assert ("mu/host/js/engine/pipeline.js", "emit") in keys
+        inventories = scan_inventories(py_files, js_files)
+        total_keys = {(site["file"], site["name"]) for site in inventories["total_sites"]}
+        authority_keys = {(site["file"], site["name"]) for site in inventories["authority_sites"]}
+        assert ("rcx_pi/selfhost/eval_seed.py", "assert_not_lambda_calculus._collect_pattern_vars") in authority_keys  # ANTICHEAT_OK: string literal test data
+        assert ("mu/host/js/core/bootstrap_core.js", "safeHash") in authority_keys
+        assert ("rcx_pi/selfhost/engine_pipeline.py", "run_engine_pipeline._emit") in authority_keys  # ANTICHEAT_OK: string literal test data
+        assert ("mu/host/js/engine/pipeline.js", "emit") in authority_keys
+        assert ("rcx_pi/selfhost/eval_seed.py", "match") in total_keys
+        assert len(inventories["total_sites"]) >= len(inventories["authority_sites"])
 
     def test_update_blocked_in_ci(self):
         env = {**os.environ, "RCX_CI": "1"}
@@ -208,8 +243,38 @@ class TestHostAuthorityInventoryBaselineValidation:
         assert any("duplicate" in err for err in errors)
 
     def test_rejects_missing_required_fields(self):
-        errors = validate_baseline({"schema_version": 1, "entries": [{"file": "x"}]})
+        errors = validate_baseline({"schema_version": 2, "inventories": {"total": {}, "authority": {}}})
         assert any("missing fields" in err for err in errors)
+        assert any("site_counts must be a dict" in err for err in errors)
+        assert any("entries must be a list" in err for err in errors)
+
+    def test_rejects_mismatched_site_counts_vs_entries(self):
+        """Fail-closed: declared site_counts must match actual entry counts."""
+        entry = {
+            "file": "rcx_pi/selfhost/eval_seed.py",
+            "line": 1,
+            "name": "step",
+            "signals": ["loop"],
+            "substrate": "python",
+        }
+        # Declare python=999 but only 1 actual python entry
+        data = {
+            "schema_version": 2,
+            "generated_at": "2026-03-12T00:00:00Z",
+            "inventories": {
+                "total": {
+                    "site_counts": {"python": 999, "javascript": 0, "total": 999},
+                    "entries": [entry],
+                },
+                "authority": {
+                    "site_counts": {"python": 1, "javascript": 0, "total": 1},
+                    "entries": [entry],
+                },
+            },
+        }
+        errors = validate_baseline(data)
+        assert any("does not match actual python entries" in err for err in errors)
+        assert any("does not match actual total entries" in err for err in errors)
 
 
 class TestHostAuthorityInventoryInvocationPaths:
