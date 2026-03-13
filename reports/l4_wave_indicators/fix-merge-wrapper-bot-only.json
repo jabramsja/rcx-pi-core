@@ -1,0 +1,24 @@
+{
+  "wave_id": "fix-merge-wrapper-bot-only",
+  "repeat_run_speedup_ratio": 1.295732,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.430772,
+  "repeat_run_raw_seconds": [
+    0.558165,
+    0.430772
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.558165
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.988937
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-13T20:09:52Z",
+  "collector_version": "2.2.0"
+}

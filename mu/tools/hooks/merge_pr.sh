@@ -6,10 +6,14 @@
 #   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep-only   # Skip merge, just sweep recent PRs
 #
 # What it does:
-#   1. Pre-merge: resolve all unresolved review threads on the target PR
+#   1. Pre-merge: resolve bot-authored unresolved threads (warns on human threads)
 #   2. Merge: gh pr merge --merge --delete-branch --admin
 #   3. Post-merge: wait 30s, re-check for late-arriving bot threads, resolve them
-#   4. Sweep: check last 10 merged PRs for any unresolved threads, resolve them
+#   4. Sweep: check last 10 merged PRs for any bot-authored unresolved threads
+#
+# Only resolves threads authored by chatgpt-codex-connector[bot].
+# Human-authored threads are reported but left unresolved for manual review.
+# Paginates through all threads (handles PRs with 50+ review threads).
 #
 # Requires: gh CLI authenticated with repo access
 
@@ -24,34 +28,89 @@ POST_MERGE_WAIT=30
 # Helpers
 # ---------------------------------------------------------------------------
 
+BOT_LOGIN="chatgpt-codex-connector"
+
 resolve_threads() {
     local pr_num="$1"
     local label="$2"
 
-    local unresolved
-    unresolved=$(gh api graphql -f query="{
-        repository(owner: \"$REPO_OWNER\", name: \"$REPO_NAME\") {
-            pullRequest(number: $pr_num) {
-                reviewThreads(first: 50) {
-                    nodes { id isResolved }
+    # Paginate through ALL review threads (not just first 50)
+    local bot_ids=""
+    local human_count=0
+    local cursor=""
+    local has_next="true"
+
+    while [ "$has_next" = "true" ]; do
+        local after_clause=""
+        if [ -n "$cursor" ]; then
+            after_clause=", after: \\\"$cursor\\\""
+        fi
+
+        local response
+        response=$(gh api graphql -f query="{
+            repository(owner: \"$REPO_OWNER\", name: \"$REPO_NAME\") {
+                pullRequest(number: $pr_num) {
+                    reviewThreads(first: 100$after_clause) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                            id
+                            isResolved
+                            comments(first: 1) { nodes { author { login } } }
+                        }
+                    }
                 }
             }
-        }
-    }" --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id' 2>/dev/null || true)
+        }" 2>/dev/null || true)
 
-    if [ -z "$unresolved" ]; then
+        if [ -z "$response" ]; then
+            break
+        fi
+
+        # Extract pagination info
+        has_next=$(echo "$response" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false')
+        cursor=$(echo "$response" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')
+
+        # Collect bot-authored unresolved thread IDs
+        local page_bot_ids
+        page_bot_ids=$(echo "$response" | jq -r "
+            .data.repository.pullRequest.reviewThreads.nodes[]
+            | select(.isResolved == false)
+            | select(.comments.nodes[0].author.login == \"$BOT_LOGIN\")
+            | .id
+        ")
+        if [ -n "$page_bot_ids" ]; then
+            bot_ids="${bot_ids}${bot_ids:+$'\n'}${page_bot_ids}"
+        fi
+
+        # Count human-authored unresolved threads (warn, don't resolve)
+        local page_human
+        page_human=$(echo "$response" | jq "[
+            .data.repository.pullRequest.reviewThreads.nodes[]
+            | select(.isResolved == false)
+            | select(.comments.nodes[0].author.login != \"$BOT_LOGIN\")
+        ] | length")
+        human_count=$((human_count + page_human))
+    done
+
+    if [ -z "$bot_ids" ] && [ "$human_count" -eq 0 ]; then
         echo "  PR #$pr_num ($label): no unresolved threads"
         return 0
     fi
 
-    local count=0
-    while IFS= read -r thread_id; do
-        [ -z "$thread_id" ] && continue
-        gh api graphql -f query="mutation { resolveReviewThread(input: {threadId: \"$thread_id\"}) { thread { isResolved } } }" > /dev/null 2>&1
-        count=$((count + 1))
-    done <<< "$unresolved"
+    # Resolve only bot-authored threads
+    local bot_count=0
+    if [ -n "$bot_ids" ]; then
+        while IFS= read -r thread_id; do
+            [ -z "$thread_id" ] && continue
+            gh api graphql -f query="mutation { resolveReviewThread(input: {threadId: \"$thread_id\"}) { thread { isResolved } } }" > /dev/null 2>&1
+            bot_count=$((bot_count + 1))
+        done <<< "$bot_ids"
+    fi
 
-    echo "  PR #$pr_num ($label): resolved $count thread(s)"
+    echo "  PR #$pr_num ($label): resolved $bot_count bot thread(s)"
+    if [ "$human_count" -gt 0 ]; then
+        echo "  ⚠️  PR #$pr_num ($label): $human_count HUMAN thread(s) left unresolved (review manually)"
+    fi
     return 0
 }
 
