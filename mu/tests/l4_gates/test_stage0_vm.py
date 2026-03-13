@@ -20,10 +20,10 @@ from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.stage0_vm import (
     Stage0VMError,
-    _classify_kind,
-    _materialize_template,
-    _mu_deep_equal,
-    _resolve_path,
+    _classify_kind,  # ANTICHEAT_OK: unit testing VM kind classification
+    _materialize_template,  # ANTICHEAT_OK: unit testing VM template engine
+    _mu_deep_equal,  # ANTICHEAT_OK: parity comparator for type-strict equality
+    _resolve_path,  # ANTICHEAT_OK: unit testing VM path resolution
     stage0_vm_run,
     stage0_vm_step,
     validate_bundle,
@@ -77,7 +77,7 @@ def _subst_ctx():
 
 def _source_step(projections, input_value):
     """Run the source path (_step_trusted) on input_value."""
-    from rcx_pi.selfhost.eval_seed import _step_trusted
+    from rcx_pi.selfhost.eval_seed import _step_trusted  # ANTICHEAT_OK: parity evidence against source path
     return _step_trusted(projections, input_value)
 
 
