@@ -4564,6 +4564,13 @@
         {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 554,
+          "name": "_validate_entry_point",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 554,
           "name": "_validate_projection_fields",
           "signals": [
             "builtin:enumerate",
@@ -4799,9 +4806,10 @@
       ],
       "site_counts": {
         "javascript": 112,
-        "python": 157,
-        "total": 269
-      }
+        "python": 158,
+        "total": 270
+      },
+      "total": 270
     }
   },
   "schema_version": 2

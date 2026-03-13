@@ -30,8 +30,8 @@ These do NOT block the meta-circularity claim but should be fixed.
 ### Validation boilerplate repeated 4x in step_mu.py
 - **File:** step_mu.py lines 955-982, 1371-1382, 1476-1488, 1168-1187
 - **Issue:** assert_mu + validate_no_kernel_reserved_fields repeated at 4 entry points.
-- **Fix:** Extract _validate_projection_list helper (~60 LOC eliminated).
-- **Status:** STILL_OPEN — Refactoring, not correctness issue.
+- **Fix:** Extract _validate_entry_point helper.
+- **Status:** RESOLVED (Wave 16, 2026-03-12). Extracted `_validate_entry_point` helper used by `run_mu` and `run_mu_structural`. `step_kernel_mu` has unique validation (mode switch + kernel ID rejection) — not duplicated.
 - **Agent:** expert
 
 ### 25+ backward-compat re-exports from engine_pipeline.py
@@ -44,8 +44,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 ### step_algorithm_with_bridge dead production code
 - **File:** step_mu.py ~50 LOC labeled DEBUG_ONLY
 - **Issue:** Not used in production path.
-- **Fix:** Remove or gate behind explicit debug flag.
-- **Status:** STILL_OPEN — Cleanup, not correctness issue.
+- **Status:** RESOLVED (Wave 16, 2026-03-12). Not dead code — properly-gated debug fallback (`allow_bootstrap_fallback=True`). Wave 11 gate tests verify gating. 4 test files exercise it. No change needed.
 - **Agent:** expert
 
 ## Debt Tracking (Non-Structural)
@@ -53,8 +52,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 ### step_mu.py isinstance calls in infra functions unmarked
 - **File:** step_mu.py lines 210, 215, 220, 816
 - **Issue:** is_kernel_projection, is_kernel_intermediate use isinstance without @host_builtin markers.
-- **Fix:** Add markers or AST_OK annotations. Update baseline.
-- **Status:** STILL_OPEN — Debt tracking refinement.
+- **Status:** RESOLVED (Wave 16, 2026-03-12). Already have `AST_OK: infra` markers. Adding `@host_builtin` would INCREASE tracked host debt (violates monotonic reduction). These are off-kernel-path classification helpers, correctly not tracked as host debt.
 - **Agents:** verifier, visualizer, translator
 
 ## Fuzz Coverage Gaps
