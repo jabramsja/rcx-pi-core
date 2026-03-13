@@ -86,7 +86,7 @@ These gates MUST be passed before meta-circular work begins. Each gate is binary
 | Minimal bytecode program runs deterministically | — | SUPERSEDED |
 | Opcode semantics covered by fixtures | — | SUPERSEDED |
 
-**Superseded**: Gate 5 (bytecode interpreter) has been replaced by the kernel + EVAL_SEED approach. Self-hosting is achieved via Phase 5 (`step_mu` uses `match_mu` + `subst_mu` Mu projections). See `mu/docs/core/SelfHosting.v0.md`.
+**Superseded**: Gate 5 (bytecode interpreter) has been replaced by the kernel + EVAL_SEED approach. L1 algorithmic self-hosting demonstrated via Phase 5 (`step_mu` uses `match_mu` + `subst_mu` Mu projections; kernel loop remains host-provided). See `mu/docs/core/SelfHosting.v0.md`.
 
 ---
 
@@ -161,7 +161,7 @@ Before attempting meta-circular execution:
 - [x] v2 Observability (stall/fix observable, debug-only)
 - [x] Gate 5: Reference Interpreter — SUPERSEDED by kernel + EVAL_SEED (Phase 5 complete)
 
-**Current Status**: Self-hosting achieved via kernel + seeds (Phase 5). Bytecode approach archived.
+**Current Status**: L1 algorithmic self-hosting demonstrated via kernel + seeds (Phase 5). Kernel loop and Stage 0 bootstrap remain host-provided (L4 in progress). Bytecode approach archived.
 
 ---
 

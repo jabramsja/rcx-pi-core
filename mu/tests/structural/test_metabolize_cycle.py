@@ -2,7 +2,7 @@
 
 Structural contract tests (fast gate) + truth-table tests (slow — calls run_mu).
 
-Design reference: reports/metabolize_cycle_design_convergence.md
+Design reference: metabolize_cycle.v1.json (see seed file for projection structure)
 """
 import pytest
 

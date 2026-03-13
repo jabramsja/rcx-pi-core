@@ -1,12 +1,13 @@
 """
-Phase 5: Self-Hosting Verification
+Phase 5: L1 Algorithmic Self-Hosting Verification
 
-EVAL_SEED (as Mu data) runs EVAL_SEED (as projections).
-Success = identical traces from Python and Mu evaluation paths.
+Verifies step_mu() (using Mu projections for match/subst) produces identical
+traces to step() (using Python match/substitute). This demonstrates L1
+self-hosting: core algorithms run as structural projections.
 
-This is THE test that proves RCX emergence is structural, not host-dependent.
-
-See mu/docs/core/SelfHosting.v0.md for design.
+Note: The kernel loop and Stage 0 bootstrap remain host-provided.
+Full self-hosting (L4) requires eliminating remaining host bootstrap.
+See STATUS.md for current L-level and mu/docs/core/SelfHosting.v0.md for design.
 """
 
 import pytest
@@ -244,7 +245,7 @@ class TestEvalSeedProjections:
 
 
 class TestSelfHostingCore:
-    """THE self-hosting tests: EVAL_SEED evaluates EVAL_SEED."""
+    """L1 self-hosting tests: step_mu() (Mu projections) matches step() (Python)."""
 
     def test_projection_applies_projection(self):
         """
@@ -311,19 +312,17 @@ class TestSelfHostingCore:
 
     def test_self_hosting_complete(self):
         """
-        THE SELF-HOSTING TEST
+        L1 SELF-HOSTING PARITY TEST
 
         Verifies that:
         1. step_mu() uses Mu projections (match_mu + subst_mu)
         2. step() uses Python functions (match + substitute)
         3. Both produce identical results and traces
 
-        This proves the evaluator can evaluate itself:
-        - EVAL_SEED (the projections) defines how to match and substitute
-        - step_mu() uses those projections to do matching and substitution
-        - The projections are being used to process projections
-
-        If this test passes, self-hosting is achieved.
+        This proves L1 algorithmic self-hosting: match and substitute
+        operations run as structural projections, not host Python code.
+        The kernel loop and Stage 0 bootstrap remain host-provided
+        (L4 work tracks eliminating those — see TASKS.md).
         """
         # Use actual projection-like structures
         projections = [
@@ -375,7 +374,7 @@ class TestSelfHostingCore:
 
         # CRITICAL: Traces must be identical
         is_equal, diff = traces_equal(py_trace, mu_trace)
-        assert is_equal, f"SELF-HOSTING FAILED: Traces differ: {diff}"
+        assert is_equal, f"L1 SELF-HOSTING PARITY FAILED: Traces differ: {diff}"
 
-        # If we get here, self-hosting is achieved!
+        # If we get here, L1 self-hosting parity is demonstrated:
         # Python step() and Mu step_mu() produce identical behavior
