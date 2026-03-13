@@ -531,7 +531,7 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_engine_result_has_terminal_keys(self):
         """engine_result sub-dict must have exactly 8 terminal keys."""
-        from rcx_pi.selfhost.step_mu import _load_tc_key_sets
+        from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for terminal key shape
         from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing  # ANTICHEAT_OK: grounding test for return shape
         engine_keys = _load_tc_key_sets()["tc.engine"]
         result = run_engine_with_routing(
@@ -548,7 +548,7 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_hemispheres_has_hemisphere_keys(self):
         """hemispheres sub-dict must have exactly 5 hemisphere keys."""
-        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for hemisphere key shape
         from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing  # ANTICHEAT_OK: grounding test for return shape
         hemi_keys = _get_hemisphere_keys()
         result = run_engine_with_routing(

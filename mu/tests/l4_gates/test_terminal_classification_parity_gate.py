@@ -466,7 +466,7 @@ class TestHemisphereSourceLock:
     def test_default_hemispheres_keys_match_derived(self):
         """defaultHemispheres() keys must match seed-derived keys (both substrates)."""
         import json
-        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: A9 source-lock test (seed-derived keys)
         from rcx_pi.selfhost.engine_pipeline import _default_hemispheres  # ANTICHEAT_OK: A9 source-lock test
         py_keys = _get_hemisphere_keys()
         assert set(_default_hemispheres().keys()) == py_keys, "Python _default_hemispheres() key drift"
@@ -537,7 +537,7 @@ class TestHemisphereSourceLock:
     def test_default_hemispheres_order_matches_key_order_both_substrates(self):
         """defaultHemispheres() key iteration order must match derived key order (both substrates)."""
         import json
-        from rcx_pi.selfhost.step_mu import _get_hemisphere_key_order
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_key_order  # ANTICHEAT_OK: A9 order-lock test (seed-derived order)
         from rcx_pi.selfhost.engine_pipeline import _default_hemispheres  # ANTICHEAT_OK: A9 order-lock test
         py_default_order = list(_default_hemispheres().keys())
         py_key_order = list(_get_hemisphere_key_order())
