@@ -3,7 +3,7 @@
 Collected from rigorous agent reviews (9 agents, 2026-03-11).
 These do NOT block the meta-circularity claim but should be fixed.
 
-**Resolution sweep: 2026-03-12. Stage0 items resolved by waves 4-9. Remaining items are refactoring/debt.**
+**Resolution sweep: 2026-03-13. Stage0 items resolved by waves 4-9. O(N^2) perf resolved by wave 18. Compat shims resolved by wave 13. Fuzz gap + registry consistency resolved by wave 20. Remaining 3 items are refactoring/design decisions.**
 
 ## Performance
 
@@ -11,7 +11,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 - **File:** step_mu.py lines 1408-1445
 - **Issue:** Iterates all projections calling step_kernel_mu per projection to find which one matched. Called once per step in run_mu_structural. O(steps * projections).
 - **Fix:** Modify step_kernel_mu to return matched projection ID in return_meta mode.
-- **Status:** STILL_OPEN — Performance refactoring, not correctness issue.
+- **Status:** RESOLVED (Wave 18, 2026-03-13). Replaced with O(N) inline Stage 0 match. `_resolve_trace_projection_id` deleted from Python, `resolveTraceProjectionId` + `_resolveIdFast` deleted from JS. 7 L4 gate tests in `mu/tests/l4_gates/test_wave18_trace_id_resolution_gate.py`. ~78 LOC removed.
 - **Agents:** structural-proof, expert, adversary, grounding
 
 ## Dead Code / Duplication
@@ -38,7 +38,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 - **File:** step_mu.py lines 1610-1640
 - **Issue:** KNOWN_COMPAT_SHIM re-exports that should be migrated.
 - **Fix:** Grep callers, update imports, remove shim.
-- **Status:** STILL_OPEN — Refactoring, not correctness issue.
+- **Status:** RESOLVED (Wave 13, 2026-03-12). 29-name backward-compat re-export shim removed from step_mu.py. All callers migrated to direct engine_pipeline imports. KNOWN_COMPAT_SHIM and compatibility layer fully eliminated.
 - **Agent:** expert
 
 ### step_algorithm_with_bridge dead production code
@@ -60,7 +60,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 ### No fuzz test for step_kernel_mu unbound-variable stall path
 - **Issue:** Hypothesis doesn't generate projection-body-variable not-in-pattern for step_kernel_mu path.
 - **Fix:** Add targeted fuzz test for structural lookup exhaustion.
-- **Status:** STILL_OPEN — Test gap, not correctness issue.
+- **Status:** RESOLVED (Wave 20, 2026-03-13). 5 hypothesis fuzz tests in `mu/tests/fuzz/test_unbound_variable_stall.py` covering _stage0_substitute, substitute, and apply_projection unbound-variable paths. Both fail-closed (KeyError) and success paths tested.
 - **Agent:** fuzzer
 
 ## Cross-Substrate Parity (Pre-existing)
@@ -87,7 +87,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 ### Three parallel seed registries in seed_integrity.py
 - **Issue:** SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS, MU_SEED_LOCATIONS maintained separately. No mechanical cross-check.
 - **Fix:** Unify into single registry dict or add cross-validation test.
-- **Status:** STILL_OPEN — Architecture improvement, not correctness issue.
+- **Status:** RESOLVED (Wave 20, 2026-03-13). 47 cross-validation tests in `mu/tests/engine/test_seed_registry_consistency.py` — CHECKSUMS↔PROJECTION_IDS↔LOCATIONS key alignment, SEED_STATUS subset check, SEED_DEPENDENCIES referential integrity + acyclicity, path resolution for all 18 seeds.
 - **Agents:** advisor, structural-proof
 
 ### Dual code paths (_STAGE0_PILOT flag)
