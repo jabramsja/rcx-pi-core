@@ -134,6 +134,20 @@ class TestClassifyKind:
     def test_unknown(self):
         assert _classify_kind(object()) is None
 
+    def test_dict_subclass_rejected(self):
+        """Dict subclasses must not classify as 'dict' — they can override
+        __contains__, __getitem__, __iter__ and inject behavior."""
+        class D(dict):
+            pass
+        assert _classify_kind(D({"x": 1})) is None
+
+    def test_list_subclass_rejected(self):
+        """List subclasses must not classify as 'list' — they can override
+        __iter__, __getitem__ and inject behavior."""
+        class L(list):
+            pass
+        assert _classify_kind(L([1, 2])) is None
+
 
 class TestMuDeepEqual:
     def test_none_equal(self):
@@ -2490,3 +2504,51 @@ class TestValidateBundlePidOrdering:
         }
         with pytest.raises(ValueError, match="'p1' missing 'ops'"):
             validate_bundle(bundle)
+
+
+class TestHostileRootInputs:
+    """Root input classification must reject non-plain host types.
+
+    P7-b.1 follow-up: _classify_kind must use exact-type checks for dict/list
+    so that host subclasses at the input root level produce stall, not match.
+    """
+
+    def _make_kind_check_bundle(self, kind):
+        """Bundle that checks root kind and returns success if matched."""
+        return {
+            "stage0_ir_version": 1,
+            "bundle_id": "hostile-root-test",
+            "source_seed": "test",
+            "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{
+                "id": "p1",
+                "ops": [
+                    {"op": "assert_focus_kind",
+                     "path": ["focus", "root"], "kind": kind},
+                    {"op": "write_path",
+                     "template": {"kind": "literal", "value": "matched"}},
+                    {"op": "return_projection_success"},
+                ],
+            }],
+        }
+
+    def test_dict_subclass_root_produces_stall(self):
+        """Dict subclass as input root must produce stall, not match."""
+        class EvilDict(dict):
+            def __contains__(self, key):
+                raise RuntimeError("evil-contains")
+        bundle = self._make_kind_check_bundle("dict")
+        result = stage0_vm_step(bundle, EvilDict({"x": 1}))
+        assert result["status"] == "stall", (
+            f"Dict subclass root should stall, got: {result['status']}")
+
+    def test_list_subclass_root_produces_stall(self):
+        """List subclass as input root must produce stall, not match."""
+        class EvilList(list):
+            def __iter__(self):
+                raise RuntimeError("evil-iter")
+        bundle = self._make_kind_check_bundle("list")
+        result = stage0_vm_step(bundle, EvilList([1, 2, 3]))
+        assert result["status"] == "stall", (
+            f"List subclass root should stall, got: {result['status']}")
