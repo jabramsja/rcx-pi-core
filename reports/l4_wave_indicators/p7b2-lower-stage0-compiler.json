@@ -1,5 +1,5 @@
 {
-  "wave_id": "p7b2-lower-compiler",
+  "wave_id": "p7b2-lower-stage0-compiler",
   "repeat_run_speedup_ratio": 1.384059,
   "parity_diff_count": 0,
   "net_host_semantic_delta": 0,
