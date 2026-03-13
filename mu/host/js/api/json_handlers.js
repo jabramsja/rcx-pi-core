@@ -7,7 +7,7 @@
  */
 
 const { classifyError, RcxError } = require('../core/constants');
-const { isValidMu, muHash, muHashCached } = require('../core/types');
+const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
 const { normalize, denormalize } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step, run, match } = require('../core/bootstrap_core');
@@ -136,7 +136,7 @@ function handleJsonApi(apiArg, seeds) {
         const limit = maxSteps ?? 200;
         while (steps < limit) {
           const next = step(allProjectionsWithExhaustion, current);
-          if (muHashCached(current) === muHashCached(next)) break;
+          if (muHashControlCached(current, 'run_exhaustion.stall') === muHashControlCached(next, 'run_exhaustion.stall')) break;
           current = next;
           steps++;
         }

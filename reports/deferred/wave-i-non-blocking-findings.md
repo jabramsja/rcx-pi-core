@@ -3,7 +3,7 @@
 Collected from rigorous agent reviews (9 agents, 2026-03-11).
 These do NOT block the meta-circularity claim but should be fixed.
 
-**Resolution sweep: 2026-03-13. Stage0 items resolved by waves 4-9. O(N^2) perf resolved by wave 18. Compat shims resolved by wave 13. Fuzz gap + registry consistency resolved by wave 20. Remaining 3 items are refactoring/design decisions.**
+**Resolution sweep: 2026-03-13. Stage0 items resolved by waves 4-9. O(N^2) perf resolved by wave 18. Compat shims resolved by wave 13. Fuzz gap + registry consistency resolved by wave 20. 11 RESOLVED, 1 DEFERRED (refactoring), 1 NO-GO (design ruling).**
 
 ## Performance
 
@@ -20,7 +20,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 - **File:** eval_seed.py lines 334-506
 - **Issue:** Budget path and depth path are near-identical type-dispatch logic duplicated.
 - **Fix:** Extract shared helper or unify paths.
-- **Status:** STILL_OPEN — Refactoring, not correctness issue.
+- **Status:** DEFERRED (founder decision, 2026-03-13) — Hot-path refactoring with low research value. Only inside a dedicated parity-locked refactor wave with before/after corpus replay.
 - **Agent:** expert
 
 ### Stage0 dead else-branches in _apply_projection_trusted
@@ -79,7 +79,7 @@ These do NOT block the meta-circularity claim but should be fixed.
 - **File:** eval_seed.py _stage0_substitute
 - **Issue:** Pre-existing design — stage0 substitute trusts seed bodies from integrity-checked seeds.
 - **Fix:** Add assert_mu call if budget permits (currently 32/36 LOC).
-- **Status:** STILL_OPEN — Design decision, not a bug. Seeds are integrity-checked at load time.
+- **Status:** NO-GO (founder decision, 2026-03-13) — Adding host validation in the execution path is the wrong direction. Seed body integrity comes from loader/bundle validation, not runtime policing. If the guarantee is weak, strengthen the loader contract, not the kernel semantics.
 - **Agent:** fuzzer
 
 ## Architecture (Pre-existing, Acknowledged)

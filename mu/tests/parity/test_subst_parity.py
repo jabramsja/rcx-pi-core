@@ -284,6 +284,80 @@ class TestSubstParityHeadTail:
 
 
 # =============================================================================
+# Test: Nested Head/Tail Parity (wave4a D10 fix)
+# =============================================================================
+
+
+class TestSubstParityNestedHeadTail:
+    """Test that nested head/tail structures are preserved (wave4a D10 fix).
+
+    Before the fix, denormalize_from_match incorrectly converted nested
+    head/tail structures to Python lists/dicts, breaking parity with
+    eval_seed.substitute() which preserves them as-is.
+    """
+
+    def test_nested_head_tail_in_dict(self):
+        """Dict containing head/tail structure should be preserved."""
+        body = {"wrapper": {"head": 1, "tail": None}}
+        assert_parity(body, {})
+
+    def test_nested_typed_head_tail_in_dict(self):
+        """Dict containing typed head/tail should be preserved."""
+        body = {"data": {"_type": "list", "head": 1, "tail": None}}
+        assert_parity(body, {})
+
+    def test_binding_value_is_head_tail(self):
+        """Binding value that IS head/tail should not be denormalized."""
+        body = {"result": {"var": "x"}}
+        bindings = {"x": {"head": 1, "tail": None}}
+        assert_parity(body, bindings)
+
+    def test_binding_value_is_typed_head_tail(self):
+        """Binding value that IS typed head/tail should not be denormalized."""
+        body = {"result": {"var": "x"}}
+        bindings = {"x": {"_type": "list", "head": 1, "tail": {"head": 2, "tail": None}}}
+        assert_parity(body, bindings)
+
+    def test_binding_value_is_typed_dict_head_tail(self):
+        """Binding value that IS typed dict head/tail should not be denormalized."""
+        body = {"out": {"var": "d"}}
+        kv = {"head": "key", "tail": {"head": "val", "tail": None}}
+        bindings = {"d": {"_type": "dict", "head": kv, "tail": None}}
+        assert_parity(body, bindings)
+
+    def test_head_tail_body_with_nested_list(self):
+        """Root head/tail body containing Python list — list should be preserved."""
+        body = {"head": [1, 2, 3], "tail": None}
+        assert_parity(body, {})
+
+    def test_head_tail_body_with_nested_dict(self):
+        """Root head/tail body containing Python dict — dict should be preserved."""
+        body = {"head": {"key": "value"}, "tail": None}
+        assert_parity(body, {})
+
+    def test_mixed_head_tail_and_regular_dict(self):
+        """Dict with both regular values and nested head/tail."""
+        body = {
+            "regular": {"var": "x"},
+            "structural": {"head": 42, "tail": None},
+        }
+        bindings = {"x": "hello"}
+        assert_parity(body, bindings)
+
+    def test_deeply_nested_head_tail(self):
+        """Head/tail nested several levels deep."""
+        body = {"a": {"b": {"c": {"head": {"var": "x"}, "tail": None}}}}
+        bindings = {"x": 99}
+        assert_parity(body, bindings)
+
+    def test_binding_value_with_nested_head_tail(self):
+        """Binding value is a regular dict containing head/tail."""
+        body = {"var": "x"}
+        bindings = {"x": {"wrapper": {"head": 1, "tail": None}}}
+        assert_parity(body, bindings)
+
+
+# =============================================================================
 # Test: Error Cases
 # =============================================================================
 

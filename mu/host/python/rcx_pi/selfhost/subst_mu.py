@@ -10,7 +10,7 @@ See mu/docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu
+from .mu_type import Mu, assert_mu, MAX_MU_DEPTH
 from .match_mu import (
     normalize_for_match,
     denormalize_from_match,
@@ -54,6 +54,77 @@ def is_head_tail_structure(value: Mu) -> bool:
     return False
 
 
+def _substitute_direct(body: Mu, bindings: dict[str, Mu], _depth: int = 0) -> Mu:
+    """Direct recursive substitution for head/tail body structures.
+
+    Used by _reconcile_parity to preserve head/tail structures that would
+    otherwise be incorrectly denormalized. Parity with eval_seed.substitute()
+    for the head/tail subset of body shapes.
+
+    This is a TEMPORARY parity fixup (wave4a D10). P7-d will replace the
+    normalize→project→denormalize mechanism entirely.
+    """
+    if _depth > MAX_MU_DEPTH:
+        raise TypeError(f"Max depth exceeded in _substitute_direct ({MAX_MU_DEPTH})")
+    if body is None or isinstance(body, (bool, int, float, str)):  # AST_OK: boundary scaffolding — type dispatch
+        return body
+    if isinstance(body, dict):  # AST_OK: boundary scaffolding — type dispatch
+        if len(body) == 1 and "var" in body and isinstance(body["var"], str):  # AST_OK: boundary scaffolding — var check
+            name = body["var"]
+            if name not in bindings:
+                raise KeyError(f"Unbound variable: {name}")
+            return bindings[name]
+        return {k: _substitute_direct(v, bindings, _depth + 1) for k, v in body.items()}  # AST_OK: boundary scaffolding — parity fixup dict rebuild
+    if isinstance(body, list):  # AST_OK: boundary scaffolding — type dispatch
+        return [_substitute_direct(elem, bindings, _depth + 1) for elem in body]  # AST_OK: boundary scaffolding — parity fixup list rebuild
+    return body
+
+
+def _reconcile_parity(original_body: Mu, denormed: Mu,
+                      bindings: dict[str, Mu], _depth: int = 0) -> Mu:
+    """Reconcile denormalized result with original body for eval_seed parity.
+
+    Fixes the nested head/tail parity gap (wave4a D10): denormalize_from_match
+    converts ALL head/tail structures to Python lists/dicts, but eval_seed.substitute
+    preserves head/tail structures that were in the original body or binding values.
+
+    Walk original body and denormalized result in parallel:
+    - At var sites: return raw binding value (not denormalized)
+    - At head/tail body positions: use _substitute_direct (preserves structure)
+    - At regular dict/list positions: recurse into children with denormalized values
+    """
+    if _depth > MAX_MU_DEPTH:
+        return denormed
+    # Var site: return raw binding value
+    if isinstance(original_body, dict) and len(original_body) == 1 and "var" in original_body:  # AST_OK: boundary scaffolding — var check
+        name = original_body["var"]
+        if name not in bindings:
+            raise KeyError(f"Unbound variable: {name}")
+        return bindings[name]
+    # Primitive/None: return denormalized value as-is
+    if original_body is None or isinstance(original_body, (bool, int, float, str)):  # AST_OK: boundary scaffolding — type check
+        return denormed
+    # Head/tail structure: preserve via direct substitution
+    if isinstance(original_body, dict) and is_head_tail_structure(original_body):  # AST_OK: boundary scaffolding — type check
+        return _substitute_direct(original_body, bindings, _depth)
+    # Regular dict: recurse into values
+    if isinstance(original_body, dict) and isinstance(denormed, dict):  # AST_OK: boundary scaffolding — type check
+        result = {}
+        for k in denormed:
+            if k in original_body:
+                result[k] = _reconcile_parity(original_body[k], denormed[k], bindings, _depth + 1)
+            else:
+                result[k] = denormed[k]
+        return result
+    # Regular list: recurse into elements
+    if isinstance(original_body, list) and isinstance(denormed, list):  # AST_OK: boundary scaffolding — type check
+        n = min(len(original_body), len(denormed))
+        return [_reconcile_parity(original_body[i], denormed[i], bindings, _depth + 1)  # AST_OK: boundary scaffolding — parity reconciliation list rebuild
+                for i in range(n)]
+    # Fallback (type mismatch between original and denormed)
+    return denormed
+
+
 def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     """
     Substitute variables in body with bound values using Mu projections.
@@ -80,10 +151,6 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
         if not isinstance(k, str) or not k:  # AST_OK: boundary scaffolding — type check
             raise ValueError(f"subst_mu: binding name must be non-empty string, got {k!r}")
         assert_mu(v, f"subst_mu.bindings[{k!r}]")
-
-    # Check if body is already in head/tail form (structural dict)
-    # If so, we shouldn't denormalize it back to a list
-    body_was_head_tail = is_head_tail_structure(body)
 
     # Normalize body to head/tail structure
     norm_body = normalize_for_match(body)
@@ -119,10 +186,14 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
 
     if is_subst_done(final_state):
         result = final_state.get("result")
-        # Denormalize back to regular Python structures
-        # But if the original body was head/tail, keep it as head/tail
-        if body_was_head_tail:
-            return result
-        return denormalize_from_match(result)
+        # Wave4a D10 parity fix: handle head/tail structures correctly.
+        if is_head_tail_structure(body):
+            # Root head/tail: use direct substitution (preserves structure +
+            # handles nested Python types that denormalize_from_match can't).
+            return _substitute_direct(body, bindings)
+        # Non-head/tail root: denormalize, then reconcile to preserve nested
+        # head/tail structures and raw binding values.
+        denormed = denormalize_from_match(result)
+        return _reconcile_parity(body, denormed, bindings)
 
     raise RuntimeError(f"Unexpected substitute state: {final_state}")

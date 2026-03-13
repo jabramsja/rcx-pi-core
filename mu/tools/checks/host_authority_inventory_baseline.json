@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-13T05:03:02.425250+00:00",
+  "generated_at": "2026-03-13T07:34:36.187542+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -30,7 +30,6 @@
             "builtin:JSON.parse",
             "builtin:JSON.stringify",
             "builtin:Object.keys",
-            "builtin:muHashCached(",
             "loop",
             "mutation:.push("
           ],
@@ -2083,6 +2082,32 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 83,
+          "name": "_reconcile_parity",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:min",
+            "loop",
+            "mutation:assignment",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 57,
+          "name": "_substitute_direct",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/subst_mu.py",
           "line": 37,
           "name": "is_head_tail_structure",
           "signals": [
@@ -2093,7 +2118,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 57,
+          "line": 128,
           "name": "subst_mu",
           "signals": [
             "builtin:isinstance",
@@ -2104,8 +2129,8 @@
       ],
       "site_counts": {
         "javascript": 83,
-        "python": 107,
-        "total": 190
+        "python": 109,
+        "total": 192
       }
     },
     "total": {
@@ -2137,7 +2162,6 @@
             "builtin:JSON.parse",
             "builtin:JSON.stringify",
             "builtin:Object.keys",
-            "builtin:muHashCached(",
             "loop",
             "mutation:.push("
           ],
@@ -4729,6 +4753,32 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 83,
+          "name": "_reconcile_parity",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:min",
+            "loop",
+            "mutation:assignment",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 57,
+          "name": "_substitute_direct",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/subst_mu.py",
           "line": 37,
           "name": "is_head_tail_structure",
           "signals": [
@@ -4739,7 +4789,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 57,
+          "line": 128,
           "name": "subst_mu",
           "signals": [
             "builtin:isinstance",
@@ -4750,8 +4800,8 @@
       ],
       "site_counts": {
         "javascript": 110,
-        "python": 157,
-        "total": 267
+        "python": 159,
+        "total": 269
       }
     }
   },
