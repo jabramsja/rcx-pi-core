@@ -24,7 +24,7 @@ from tests.repo_root import REPO_ROOT
 # Round 21C: Cleared GRANDFATHERED_RCX_PI_RUST_PATHS — all 4 test files
 # repointed to mu/mu_programs/.
 # Round 21D: Cleared GRANDFATHERED_RCX_OMEGA_IMPORTS — both test files
-# archived to tests/archive/legacy/.
+# archived to archive/tests/legacy/ (moved from mu/tests/archive/ in wave15).
 GRANDFATHERED_RCX_OMEGA_IMPORTS: frozenset[str] = frozenset()
 
 # Round 23A: Guardrail infrastructure files reference rcx_pi_rust/ as regex

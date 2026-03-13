@@ -50,7 +50,7 @@ Status: **DONE** (promoted 2026-01-27, Phase 7 COMPLETE, L2 FULL achieved via ex
 - Previously contained: hash computation, trace recording, handler dispatch
 - Infrastructure only - was NOT the operational kernel
 - **DELETED (2026-01-29)**: Class removed from `kernel.py` (only step budget infrastructure remains)
-- Tests archived to `tests/archive/legacy/test_kernel_v0.py`
+- Tests archived to `archive/tests/legacy/test_kernel_v0.py`
 
 **Why this matters:** Phase 7d-1 correctly uses kernel.v1.json projections. The `step_kernel_mu()` function is NOT "bypassing" the kernel - it IS using the structural kernel. The Python Kernel class is boundary scaffolding, not the self-hosting target.
 

@@ -129,7 +129,7 @@ except ImportError:
 # Skip tests that require optional modules not present in this repo
 collect_ignore = [
     "test_normalize_graphviz_svg.py",  # requires scripts module
-    "archive",  # archived tests (e.g., bytecode VM - superseded by kernel approach)
+    "archive",  # archived tests moved to archive/tests/ (wave15) — kept for safety if dir recreated
 ]
 
 # SECURITY: These test files are CRITICAL and must NEVER be in collect_ignore

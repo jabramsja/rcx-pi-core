@@ -2,7 +2,8 @@
 
 This directory contains tests that are **NOT RUN** by pytest.
 
-They are excluded via `collect_ignore = ["archive"]` in `tests/conftest.py`.
+Moved from `mu/tests/archive/` to `archive/tests/` (wave15, 2026-03-12) to free
+growth cap headroom. The `conftest.py` blocks collection even if explicitly targeted.
 
 ## Why Archive Instead of Delete?
 
@@ -27,7 +28,7 @@ If you need to run these for debugging:
 
 ```bash
 # Direct invocation bypasses collect_ignore
-pytest tests/archive/legacy/test_kernel_v0.py -v
+pytest archive/tests/legacy/test_kernel_v0.py -v
 
 # Note: Will emit DeprecationWarnings for legacy Kernel usage
 ```
@@ -35,6 +36,6 @@ pytest tests/archive/legacy/test_kernel_v0.py -v
 ## Adding to Archive
 
 When deprecating tests:
-1. Move to `tests/archive/` (with subdirectory if appropriate)
+1. Move to `archive/tests/` (with subdirectory if appropriate)
 2. Add a header comment explaining why archived
 3. Update this README

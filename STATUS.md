@@ -560,7 +560,7 @@ not "Python did it". See TASKS.md Step 5 for concrete success criteria.
 - Removed `TestKernelIntegration` (4 tests) - used deprecated Kernel
 - Created `tests/structural/test_step_budget.py` (18 tests) for ACTIVE infrastructure
 - Created `tests/structural/test_audit_claims_grounding.py` (18 tests) for audit verification
-- Added `tests/archive/README.md` documenting archive purpose
+- Added `archive/tests/README.md` documenting archive purpose (moved from tests/archive/ in wave15)
 
 **CI/Audit Infrastructure Hardening (2026-01-30, 9-agent review):**
 - Created `tests/tools/` directory with grounding tests for security tools (65+ tests):
@@ -601,7 +601,7 @@ These were reviewed by all 9 agents and deemed NOT_RELEVANT or DEFENSE_IN_DEPTH:
 - kernel.py: DELETED legacy Kernel class (~350 lines removed)
   - KEPT: Step budget infrastructure (get_step_budget, reset_step_budget, MAX_PROJECTION_STEPS)
   - DELETED: Kernel class, create_kernel(), compute_identity(), detect_stall(), gate_dispatch(), record_trace()
-- Archived: `test_kernel_v0.py` moved to `tests/archive/legacy/`
+- Archived: `test_kernel_v0.py` moved to `archive/tests/legacy/` (moved from tests/archive/ in wave15)
 - Created: `tests/structural/test_lambda_calculus_guardrails.py` (11 tests)
 - Added: Tests for `is_kernel_intermediate()` (12 tests)
 - Note: `MAX_PROJECTION_STEPS=50000` (kernel.py) is NOT used by step_kernel_mu which uses `max_steps=10000`
