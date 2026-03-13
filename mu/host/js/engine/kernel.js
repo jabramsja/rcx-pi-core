@@ -2,7 +2,7 @@
 /**
  * RCX Engine Kernel
  *
- * stepKernel, resolveTraceProjectionId, runStructural, stepKernelStructural.
+ * stepKernel, runStructural, stepKernelStructural.
  * These are kernel orchestration, NOT bootstrap primitives.
  *
  * Depends on: core/*
@@ -172,52 +172,6 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
 }
 
 /**
- * Gate 5 parity: Resolve which projection produced nextValue from current.
- * Parameterized: takes kernelProjections instead of module-global.
- */
-function resolveTraceProjectionId(kernelProjections, domainProjections, current, nextValue) {
-  const nextValueHash = muHashControlCached(nextValue, 'resolveTraceProjectionId');
-  for (const proj of domainProjections) {
-    if (typeof proj !== 'object' || proj === null) continue;
-    if (!('pattern' in proj) || !('body' in proj)) continue;
-    const candidate = stepKernel(kernelProjections, current, [proj], {
-      validationMode: 'domain',
-      returnMeta: true,
-    });
-    if (candidate.stall) continue;
-    if (muHashControlCached(candidate.output, 'resolveTraceProjectionId.match') === nextValueHash) {
-      return proj.id ?? null;
-    }
-  }
-  return null;
-}
-
-/**
- * Internal: resolve projection ID using pre-validated, pre-normalized state.
- * Same algorithm as resolveTraceProjectionId but skips redundant
- * validation/normalization/linking that was already done in runStructural.
- * Gate 5 parity: still probes each projection through the full kernel loop.
- */
-function _resolveIdFast(kernelProjections, domainProjections, normalizedProjs, singleLinkedProjs,
-                        normalizedCurrent, rawCurrent, nextValue, validator) {
-  const nextValueHash = muHashControlCached(nextValue, 'resolveTraceProjectionId');
-  for (let j = 0; j < normalizedProjs.length; j++) {
-    const proj = normalizedProjs[j];
-    if (typeof proj !== 'object' || proj === null) continue;
-    if (!('pattern' in proj) || !('body' in proj)) continue;
-
-    const kernelInput = { _step: normalizedCurrent, _projs: singleLinkedProjs[j] };
-    const candidate = _stepKernelCore(kernelProjections, kernelInput, rawCurrent, validator, 10000);
-
-    if (candidate.stall) continue;
-    if (muHashControlCached(candidate.output, 'resolveTraceProjectionId.match') === nextValueHash) {
-      return domainProjections[j].id ?? null;
-    }
-  }
-  return null;
-}
-
-/**
  * Phase 8d: Run with structural trace accumulation.
  * Parameterized: takes kernelProjections instead of module-global.
  *
@@ -254,7 +208,6 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
   rejectNonlinearProjections(domainProjections, 'runStructural');
 
   // Pre-normalize projections once (constant across all trace steps).
-  // Eliminates redundant normalize/validate/link per stepKernel + resolveId call.
   const validator = validateNoKernelReservedFields;
   const normalizedProjs = domainProjections.map(normalizeProjection);
   const kernelDomainProjs = normalizedProjs.map(proj => ({
@@ -262,7 +215,6 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
     body: proj.body
   }));
   const linkedProjs = listToLinked(kernelDomainProjs);
-  const singleLinkedProjs = kernelDomainProjs.map(proj => listToLinked([proj]));
 
   const traceEntries = [];
   let current = input;
@@ -273,10 +225,22 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
     const kernelInput = { _step: normalizedCurrent, _projs: linkedProjs };
     const meta = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000);
     const result = meta.output;
-    const matchedId = _resolveIdFast(
-      kernelProjections, domainProjections, normalizedProjs, singleLinkedProjs,
-      normalizedCurrent, current, result, validator
-    );
+    // Resolve matched projection ID: use Stage 0 match (proven equivalent
+    // to match.v2 by parity tests). First-match-wins: first projection whose
+    // pattern matches current is the one the kernel applied.
+    // O(N) match calls vs the previous O(N*K) kernel runs per step.
+    let matchedId = null;
+    if (meta.termination_reason === 'projection_applied') {
+      for (const proj of domainProjections) {
+        if (typeof proj === 'object' && proj !== null && 'pattern' in proj) {
+          const bindings = match(proj.pattern, current);
+          if (bindings !== NO_MATCH) {
+            matchedId = proj.id ?? null;
+            break;
+          }
+        }
+      }
+    }
 
     validateNoKernelReservedFields(result, 'runStructural output');
     traceEntries.push({
@@ -330,7 +294,6 @@ function stepKernelStructural(kernelProjections, domainProjections, domainInput,
 
 module.exports = {
   stepKernel,
-  resolveTraceProjectionId,
   runStructural,
   stepKernelStructural,
   // Internal: exported for pipeline.js pre-validation optimization

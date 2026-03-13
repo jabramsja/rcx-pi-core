@@ -320,8 +320,8 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 THRESHOLD: 11
 CURRENT: 11 (7 tracked decorators + 4 AST_OK bootstrap)
 FLOOR: 11 (see explanation below)
-INFRA_CEILING: 74
-INFRA_CURRENT: 73
+INFRA_CEILING: 75
+INFRA_CURRENT: 75
 ```
 
 **Tracked marker count (11 @host_* markers — see enumeration below):**
