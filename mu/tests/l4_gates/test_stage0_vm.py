@@ -148,6 +148,33 @@ class TestClassifyKind:
             pass
         assert _classify_kind(L([1, 2])) is None
 
+    def test_str_subclass_rejected(self):
+        """Str subclasses must not classify as 'string' — they can override
+        __eq__ and inject behavior during equality checks."""
+        class S(str):
+            pass
+        assert _classify_kind(S("hello")) is None
+
+    def test_int_subclass_rejected(self):
+        """Int subclasses must not classify as 'int' — they can override
+        __eq__ and inject behavior during equality checks."""
+        class I(int):
+            pass
+        assert _classify_kind(I(42)) is None
+
+    def test_bool_subclass_rejected(self):
+        """Bool subclasses must not classify as 'bool'."""
+        # bool is final in CPython, but the exact-type check handles
+        # any hypothetical subclass consistently.
+        assert _classify_kind(True) == "bool"
+        assert _classify_kind(False) == "bool"
+
+    def test_float_subclass_rejected(self):
+        """Float subclasses must not classify as 'float'."""
+        class F(float):
+            pass
+        assert _classify_kind(F(3.14)) is None
+
 
 class TestMuDeepEqual:
     def test_none_equal(self):
@@ -1856,6 +1883,49 @@ class TestSafeWrappers:
         with pytest.raises(Stage0VMError, match="recursion overflow"):
             _safe_mu_copy(val)
 
+    def test_safe_deep_equal_hostile_eq_fail_closed(self):
+        """Hostile __eq__ on primitive subclass must fail-closed (return False)."""
+        class EvilStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = str.__hash__
+        # Same type, same value — but __eq__ throws
+        a = EvilStr("hello")
+        b = EvilStr("hello")
+        # Must NOT raise — catch-all returns False
+        assert _safe_mu_deep_equal(a, b) is False
+
+    def test_safe_deep_equal_hostile_eq_in_dict_leaf(self):
+        """Hostile __eq__ on leaves inside plain dict must fail-closed."""
+        class EvilStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = str.__hash__
+        a = {"x": EvilStr("hello")}
+        b = {"x": EvilStr("hello")}
+        assert _safe_mu_deep_equal(a, b) is False
+
+    def test_check_captured_equal_hostile_leaf_fail_closed(self):
+        """EvilStr leaves in plain dict must not leak RuntimeError through
+        check_captured_equal — _safe_mu_deep_equal catch-all handles it."""
+        class EvilStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = str.__hash__
+        bundle = _make_bundle([
+            {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict"},
+            {"op": "capture_path", "path": ["focus", "root", "x"], "name": "cx"},
+            {"op": "check_captured_equal",
+             "path": ["focus", "root", "y"], "capture_name": "cx"},
+            {"op": "write_path",
+             "template": {"kind": "literal", "value": "matched"}},
+            {"op": "return_projection_success"},
+        ])
+        evil = EvilStr("hello")
+        # Must NOT raise — equality fail-closed → program fails → stall
+        result = stage0_vm_step(bundle, {"x": evil, "y": evil})
+        assert result["status"] == "stall"
+
 
 # ---------------------------------------------------------------------------
 # P7-b.1 Adversary hardening: null sentinel, closed bundle/program
@@ -2552,3 +2622,25 @@ class TestHostileRootInputs:
         result = stage0_vm_step(bundle, EvilList([1, 2, 3]))
         assert result["status"] == "stall", (
             f"List subclass root should stall, got: {result['status']}")
+
+    def test_str_subclass_root_produces_stall(self):
+        """Str subclass as input root must produce stall, not match."""
+        class EvilStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = str.__hash__
+        bundle = self._make_kind_check_bundle("string")
+        result = stage0_vm_step(bundle, EvilStr("hello"))
+        assert result["status"] == "stall", (
+            f"Str subclass root should stall, got: {result['status']}")
+
+    def test_int_subclass_root_produces_stall(self):
+        """Int subclass as input root must produce stall, not match."""
+        class EvilInt(int):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = int.__hash__
+        bundle = self._make_kind_check_bundle("int")
+        result = stage0_vm_step(bundle, EvilInt(42))
+        assert result["status"] == "stall", (
+            f"Int subclass root should stall, got: {result['status']}")
