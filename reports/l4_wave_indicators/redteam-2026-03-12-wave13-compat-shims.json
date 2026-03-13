@@ -1,5 +1,5 @@
 {
-  "wave_id": "redteam-2026-03-12-wave13-compat-shim-removal",
+  "wave_id": "redteam-2026-03-12-wave13-compat-shims",
   "repeat_run_speedup_ratio": 1.0,
   "parity_diff_count": 0,
   "net_host_semantic_delta": 0,
