@@ -323,22 +323,22 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
 | **Tracked markers** | 15 | Narrow official `@host_*` debt marker sites (5 Py decorator + 6 JS decorator + 4 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion, AST_OK bootstrap). | `tools/checks/host_semantics_baseline.json` |
-| **Authority sites** | 208 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 117 Python + 91 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
-| **Total inventory sites** | 285 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 167 Python + 118 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
+| **Authority sites** | 217 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 120 Python + 97 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
+| **Total inventory sites** | 299 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 172 Python + 127 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
 
-**Why three ledgers:** The 11 tracked markers are the narrow debt the project has categorized and accepted. The 208 authority sites are the broader surface the ratchet prevents from growing. The 285 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
+**Why three ledgers:** The 15 tracked markers are the narrow debt the project has categorized and accepted. The 217 authority sites are the broader surface the ratchet prevents from growing. The 299 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 15 and 285 is the honest measure of how much host work remains uncategorized.
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 15 and 299 is the honest measure of how much host work remains uncategorized.
 
 ```
 THRESHOLD: 15
-CURRENT: 15 (7 tracked decorators + 8 AST_OK bootstrap)
+CURRENT: 15 (5 Py decorator + 6 JS decorator + 4 AST_OK bootstrap from P7-a; 4 additional AST_OK bootstrap in eval_seed pre-date threshold tracking — 8 total enumerated below)
 FLOOR: 15 (see explanation below)
 INFRA_CEILING: 76
 INFRA_CURRENT: 76
 ```
 
-**Tracked marker count (13 — 11 @host_* decorator markers + 2 AST_OK bootstrap — see enumeration below):**
+**Tracked marker count (15 — 5 Py decorator + 6 JS decorator + 4 AST_OK bootstrap from P7-a — see enumeration below for all 8 AST_OK bootstrap):**
 - @host_recursion: 2 (_stage0_match + _stage0_substitute — BOOTSTRAP. match/substitute reclassified as BOUNDARY P7W4)
 - @host_builtin: 3 (_stage0_match x1, deep_eval x2 — match() reclassified P7W4, builtin surface reduced: len/zip/set eliminated)
 - @host_iteration: 2 (step_kernel_mu + list_to_linked — BOOTSTRAP. run_mu/run_mu_structural reclassified as BOUNDARY P7W5. list_to_linked stays: called by step_kernel_mu)
@@ -352,8 +352,8 @@ INFRA_CURRENT: 76
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 13 is the tracked marker count (lower bound, not comprehensive inventory):**
-The 13 counts explicitly marked @host_* sites (5 Py decorator + 6 JS decorator + 2 AST_OK bootstrap) across L2 kernel, utilities, and Stage0 VM (list_to_linked is inline marker, counted by ratchet but not debt_dashboard). Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally beyond their @host_recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary):
+**Why 15 is the tracked marker count (lower bound, not comprehensive inventory):**
+The 15 counts explicitly marked @host_* sites (5 Py decorator + 6 JS decorator + 4 AST_OK bootstrap) across L2 kernel, utilities, and Stage0 VM (list_to_linked is inline marker, counted by ratchet but not debt_dashboard). Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally beyond their @host_recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary):
 
 *L2 kernel substrate (8 sites):*
 1. `_stage0_match()` in eval_seed.py — @host_recursion + @host_builtin (Stage 0 micro-match bootstrap primitive; P7W4: list branch removed, builtin surface reduced to isinstance/.keys()/.get()/in)
@@ -387,9 +387,9 @@ These cannot be eliminated because:
 
 **P7 Wave 5 (outer loop boundary reclassification):** Total host markers 17→11 (-6, -35%). Reclassified 6 functions as BOUNDARY: run_mu, run_mu_structural (Py 2), run, runStructural, runAlgorithmWithBridge, runEnginePipelineRecursive (JS 4). list_to_linked/listToLinked stay @host_iteration — on kernel path (called by step_kernel_mu/step). Floor reduced 13→11.
 
-**P7-a (Stage0 VM prototype):** +2 AST_OK bootstrap markers in stage0_vm.py (dict comprehension for template object materialization, list comprehension for template list materialization). These are irreducible bootstrap — the VM must construct output values from template fields/items. +1 AST_OK infra marker (program_map dict comprehension for dispatch indexing). Floor increased 11→13. Infra ceiling 75→76.
+**P7-a (Stage0 VM prototype):** +2 AST_OK bootstrap markers in stage0_vm.py (dict comprehension for template object materialization, list comprehension for template list materialization). These are irreducible bootstrap — the VM must construct output values from template fields/items. +1 AST_OK infra marker (program_map dict comprehension for dispatch indexing). Floor increased 11→13, then +2 AST_OK (_mu_copy comprehensions from P7-a bot review fix) raised floor to 15. Infra ceiling 75→76.
 
-The 13 represents the current tracked marker count (11 decorator + 2 AST_OK bootstrap — lower bound on total host work; L2 kernel + utilities + Stage0 VM). L4 paths are documented:
+The 15 represents the current tracked marker count (5 Py decorator + 6 JS decorator + 4 AST_OK bootstrap from P7-a — lower bound on total host work; 4 additional AST_OK bootstrap in eval_seed pre-date threshold tracking; L2 kernel + utilities + Stage0 VM). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
@@ -399,7 +399,7 @@ The 13 represents the current tracked marker count (11 decorator + 2 AST_OK boot
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 74 (current 73)
+- AST_OK:infra ceiling: 76 (current 76)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -500,7 +500,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Task list: `TASKS.md`
 - **Agent bridge:** `mu/docs/agents/AgentBridgeProtocol.v0.md` (Claude ↔ Codex collaboration, hybrid review, design deliberation)
 - **Documentation governance:** `mu/docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
-- **Doc tests:** `tests/docs/` (270 tests: contracts, freshness, governance, root files)
+- **Doc tests:** `tests/docs/` (279 tests: contracts, freshness, governance, root files)
 - Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
 ---

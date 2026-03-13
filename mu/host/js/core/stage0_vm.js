@@ -8,6 +8,13 @@
  * bundle data, not in the VM.
  *
  * P7-a prototype. NOT wired into production step/run.
+ *
+ * Stage0 IR v1 numeric contract: int supported, float UNSUPPORTED.
+ * Float rejection enforced by validateBundle. classifyKind retains
+ * float classification for future IR versions but v1 bundles must
+ * not rely on it. JS Number.isInteger(1.0) === true means int/float
+ * distinction is not portable — hence float exclusion in v1.
+ * Bundle JSON must use integer literals (1 not 1.0).
  */
 
 // ---------------------------------------------------------------------------
@@ -16,20 +23,44 @@
 const MAX_VM_PROGRAMS = 64;
 const MAX_VM_OPS_PER_STEP = 1024;
 const MAX_TEMPLATE_DEPTH = 32;
+const MAX_PATH_DEPTH = 64;
 
 // ---------------------------------------------------------------------------
-// Opcode / kind / template enums
+// Opcode schemas (single source of truth for per-opcode field validation)
 // ---------------------------------------------------------------------------
-const KNOWN_OPCODES = new Set([
-  'assert_focus_kind', 'assert_key_profile', 'check_equal',
-  'check_captured_equal', 'capture_path', 'write_path',
-  'return_projection_success', 'return_projection_fail',
-  'check_exists',
-]);
+const OPCODE_SCHEMAS = Object.freeze({
+  'assert_focus_kind':         { required: new Set(['path', 'kind']),          optional: new Set() },
+  'assert_key_profile':        { required: new Set(['path', 'required']),      optional: new Set(['optional']) },
+  'check_equal':               { required: new Set(['path', 'value']),         optional: new Set() },
+  'check_captured_equal':      { required: new Set(['path', 'capture_name']),  optional: new Set() },
+  'capture_path':              { required: new Set(['path', 'name']),          optional: new Set() },
+  'write_path':                { required: new Set(['template']),              optional: new Set() },
+  'return_projection_success': { required: new Set(),                          optional: new Set() },
+  'return_projection_fail':    { required: new Set(),                          optional: new Set() },
+  'check_exists':              { required: new Set(['path']),                  optional: new Set() },
+});
+
+const GLOBAL_OP_OPTIONAL = new Set(['source_map']);
+
+const KNOWN_OPCODES = new Set(Object.keys(OPCODE_SCHEMAS));
+
+// ---------------------------------------------------------------------------
+// Kind / template enums
+// ---------------------------------------------------------------------------
+const SUPPORTED_KINDS = new Set(['null', 'bool', 'int', 'string', 'dict', 'list']);
 
 const TEMPLATE_KINDS = new Set([
   'literal', 'capture_ref', 'object', 'list',
 ]);
+
+const TEMPLATE_SCHEMAS = Object.freeze({
+  'literal':     new Set(['value']),
+  'capture_ref': new Set(['name']),
+  'object':      new Set(['fields']),
+  'list':        new Set(['items']),
+});
+
+const _OPT_ENTRY_ALLOWED_KEYS = new Set(['key', 'allowed_values']);
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -42,6 +73,23 @@ class Stage0VMError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Plain-object check (accepts both Object.prototype and null prototype)
+// muCopy uses Object.create(null) for security, JSON.parse uses Object.prototype.
+// Both are valid Mu dicts. Non-plain objects (Set, Map, Date, etc.) are rejected.
+// ---------------------------------------------------------------------------
+function _isPlainObject(v) {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+// Plain-array check (rejects Array subclasses — parity with Python type(x) is list)
+// JSON.parse only produces plain arrays; Array subclasses are non-Mu host artifacts.
+function _isPlainArray(v) {
+  return Array.isArray(v) && Object.getPrototypeOf(v) === Array.prototype;
+}
+
+// ---------------------------------------------------------------------------
 // Path resolution
 // ---------------------------------------------------------------------------
 function resolvePath(root, path) {
@@ -50,14 +98,20 @@ function resolvePath(root, path) {
       `Path must start with ['focus', 'root'], got ${JSON.stringify(path)}`);
   }
   let current = root;
-  for (let i = 2; i < path.length; i++) {
-    if (current === null || typeof current !== 'object' || Array.isArray(current)) {
-      return [null, false];
+  // Hostile input roots (Proxy, accessor-backed) can throw during property
+  // access. Treat any host error as "path not found" rather than leaking it.
+  try {
+    for (let i = 2; i < path.length; i++) {
+      if (!_isPlainObject(current)) {
+        return [null, false];
+      }
+      if (!Object.hasOwn(current, path[i])) {
+        return [null, false];
+      }
+      current = current[path[i]];
     }
-    if (!Object.hasOwn(current, path[i])) {
-      return [null, false];
-    }
-    current = current[path[i]];
+  } catch (_) {
+    return [null, false];
   }
   return [current, true];
 }
@@ -73,7 +127,7 @@ function classifyKind(value) {
   }
   if (typeof value === 'string') return 'string';
   if (Array.isArray(value)) return 'list';
-  if (typeof value === 'object') return 'dict';
+  if (_isPlainObject(value)) return 'dict';
   return null;
 }
 
@@ -101,7 +155,9 @@ function muDeepEqual(a, b) {
     return true;
   }
   if (ta === 'object') {
-    if (Array.isArray(b)) return false;
+    // Both must be plain objects (not Set, Map, Date, etc.)
+    if (!_isPlainObject(a)) return false;
+    if (!_isPlainObject(b)) return false;
     const aKeys = Object.keys(a);
     const bKeys = Object.keys(b);
     if (aKeys.length !== bKeys.length) return false;
@@ -114,13 +170,26 @@ function muDeepEqual(a, b) {
   return false;
 }
 
+function safeMuDeepEqual(a, b) {
+  // AST_OK: error boundary — translates host RangeError to Stage0VMError
+  try {
+    return muDeepEqual(a, b);
+  } catch (e) {
+    if (e instanceof RangeError) {
+      throw new Stage0VMError(
+        'Structural equality depth exceeded (recursion overflow)');
+    }
+    throw e;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Structural deep copy (Mu values only, no external deps)
 // ---------------------------------------------------------------------------
 function muCopy(value) {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) return value.map(muCopy);
-  if (typeof value === 'object') {
+  if (_isPlainObject(value)) {
     const result = Object.create(null);
     for (const k of Object.keys(value)) {
       result[k] = muCopy(value[k]);
@@ -130,6 +199,135 @@ function muCopy(value) {
   return value; // primitives are immutable
 }
 
+function safeMuCopy(value) {
+  // AST_OK: error boundary — translates host RangeError to Stage0VMError
+  try {
+    return muCopy(value);
+  } catch (e) {
+    if (e instanceof RangeError) {
+      throw new Stage0VMError(
+        'Deep copy depth exceeded (recursion overflow)');
+    }
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Float scanner (iterative, depth-bounded)
+// ---------------------------------------------------------------------------
+function checkNoFloats(value) {
+  // Validate literal values: Mu-domain only, no floats. Iterative + depth-bounded.
+  // Mu value domain: null, boolean, number (integer), string, plain object, array.
+  // Non-Mu types (BigInt, Symbol, function, undefined, Set, Map, etc.) are rejected.
+  const stack = [[value, 0]];
+  while (stack.length > 0) {
+    const [v, depth] = stack.pop();
+    if (depth > MAX_TEMPLATE_DEPTH) {
+      throw new Error(
+        `Literal value depth exceeded (${MAX_TEMPLATE_DEPTH})`);
+    }
+    if (typeof v === 'number' && !Number.isInteger(v)) {
+      throw new Error(
+        `Float values unsupported in Stage0 IR v1: ${v}`);
+    }
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      // Reject non-plain objects (Set, Map, Date, boxed primitives, etc.)
+      if (!_isPlainObject(v)) {
+        throw new Error(
+          `Non-Mu value type in literal: ${v.constructor ? v.constructor.name : 'object'}`);
+      }
+      // Reject symbol keys (invisible to Object.keys/values)
+      if (Object.getOwnPropertySymbols(v).length > 0) {
+        throw new Error(
+          'Non-Mu value type in literal: object with symbol keys');
+      }
+      for (const child of Object.values(v)) {
+        stack.push([child, depth + 1]);
+      }
+    } else if (Array.isArray(v)) {
+      // Reject array subclasses (parity with Python type(x) is list)
+      if (Object.getPrototypeOf(v) !== Array.prototype) {
+        throw new Error(
+          `Non-Mu value type in literal: ${v.constructor ? v.constructor.name : 'Array subclass'}`);
+      }
+      for (const child of v) {
+        stack.push([child, depth + 1]);
+      }
+    } else if (v !== null && typeof v !== 'boolean' &&
+               typeof v !== 'number' && typeof v !== 'string') {
+      throw new Error(
+        `Non-Mu value type in literal: ${typeof v}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Template validation (iterative, depth-bounded, closed-IR)
+// ---------------------------------------------------------------------------
+function validateTemplate(template) {
+  const stack = [[template, 0]];
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop();
+    if (depth > MAX_TEMPLATE_DEPTH) {
+      throw new Error(`Template depth exceeded (${MAX_TEMPLATE_DEPTH})`);
+    }
+    if (!_isPlainObject(node)) {
+      throw new Error(`Template node must be a plain object: ${_safeStringify(node)}`);
+    }
+    if (!Object.hasOwn(node, 'kind')) {
+      throw new Error(`Invalid template node (missing 'kind'): ${_safeStringify(node)}`);
+    }
+    _rejectSymbolKeys(node, 'Template node');
+    const kind = node.kind;
+    if (typeof kind !== 'string') {
+      throw new Error(
+        `Template 'kind' must be a string, got ${typeof kind}`);
+    }
+    if (!TEMPLATE_KINDS.has(kind)) {
+      throw new Error(`Unknown template kind: '${kind}'`);
+    }
+    const required = TEMPLATE_SCHEMAS[kind];
+    const allowed = new Set(['kind', ...required]);
+    for (const k of required) {
+      if (!Object.hasOwn(node, k)) {
+        throw new Error(`Template '${kind}' missing required key '${k}'`);
+      }
+    }
+    for (const k of Object.getOwnPropertyNames(node)) {
+      if (!allowed.has(k)) {
+        throw new Error(`Template '${kind}' has unknown key '${k}'`);
+      }
+    }
+    if (kind === 'object') {
+      if (!_isPlainObject(node.fields)) {
+        throw new Error("Template 'object' 'fields' must be a plain object");
+      }
+      // JS Object.keys() always returns strings (numeric keys are pre-coerced).
+      // Symbol keys are invisible to Object.keys() — reject them explicitly.
+      if (Object.getOwnPropertySymbols(node.fields).length > 0) {
+        throw new Error(
+          "Template 'object' field key must be a string, got symbol");
+      }
+      for (const child of Object.values(node.fields)) {
+        stack.push([child, depth + 1]);
+      }
+    } else if (kind === 'list') {
+      if (!_isPlainArray(node.items)) {
+        throw new Error("Template 'list' 'items' must be an array");
+      }
+      for (const child of node.items) {
+        stack.push([child, depth + 1]);
+      }
+    } else if (kind === 'capture_ref') {
+      if (typeof node.name !== 'string') {
+        throw new Error("Template 'capture_ref' 'name' must be a string");
+      }
+    } else if (kind === 'literal') {
+      checkNoFloats(node.value);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Template materialization
 // ---------------------------------------------------------------------------
@@ -137,20 +335,26 @@ function materializeTemplate(template, captures, depth = 0) {
   if (depth > MAX_TEMPLATE_DEPTH) {
     throw new Stage0VMError(`Template depth exceeded (${MAX_TEMPLATE_DEPTH})`);
   }
-  if (typeof template !== 'object' || template === null || !template.kind) {
-    throw new Stage0VMError(`Invalid template node: ${JSON.stringify(template)}`);
+  if (!_isPlainObject(template) || !Object.hasOwn(template, 'kind')) {
+    throw new Stage0VMError(`Invalid template node: ${_safeStringify(template)}`);
   }
   const kind = template.kind;
   if (!TEMPLATE_KINDS.has(kind)) {
     throw new Stage0VMError(`Unknown template kind: '${kind}'`);
   }
   if (kind === 'literal') {
+    if (!Object.hasOwn(template, 'value')) {
+      throw new Stage0VMError("Template 'literal' missing 'value' key");
+    }
     const v = template.value;
     // Deep-copy mutable literals to prevent bundle mutation across runs
-    if (v !== null && typeof v === 'object') return muCopy(v);
+    if (Array.isArray(v) || _isPlainObject(v)) return safeMuCopy(v);
     return v;
   }
   if (kind === 'capture_ref') {
+    if (!Object.hasOwn(template, 'name')) {
+      throw new Stage0VMError("Template 'capture_ref' missing 'name' key");
+    }
     const name = template.name;
     if (!Object.hasOwn(captures, name)) {
       throw new Stage0VMError(
@@ -159,6 +363,10 @@ function materializeTemplate(template, captures, depth = 0) {
     return captures[name];
   }
   if (kind === 'object') {
+    if (!Object.hasOwn(template, 'fields') || !_isPlainObject(template.fields)) {
+      throw new Stage0VMError(
+        "Template 'object' missing or invalid 'fields' key");
+    }
     const result = Object.create(null);
     for (const [key, val] of Object.entries(template.fields)) {
       result[key] = materializeTemplate(val, captures, depth + 1);
@@ -166,14 +374,91 @@ function materializeTemplate(template, captures, depth = 0) {
     return result;
   }
   // kind === 'list'
+  if (!Object.hasOwn(template, 'items') || !_isPlainArray(template.items)) {
+    throw new Stage0VMError(
+      "Template 'list' missing or invalid 'items' key");
+  }
   return template.items.map(item =>
     materializeTemplate(item, captures, depth + 1));
+}
+
+// ---------------------------------------------------------------------------
+// Path validation helper
+// ---------------------------------------------------------------------------
+function validatePath(path, context) {
+  if (!_isPlainArray(path)) {
+    throw new Error(`${context}: 'path' must be an array`);
+  }
+  if (path.length > MAX_PATH_DEPTH) {
+    throw new Error(
+      `${context}: path length ${path.length} exceeds ` +
+      `MAX_PATH_DEPTH (${MAX_PATH_DEPTH})`);
+  }
+  if (path.length < 2 || path[0] !== 'focus' || path[1] !== 'root') {
+    throw new Error(
+      `${context}: path must start with ['focus', 'root']`);
+  }
+  for (const seg of path) {
+    if (typeof seg !== 'string') {
+      throw new Error(
+        `${context}: path segment must be a string, ` +
+        `got ${typeof seg}`);
+    }
+  }
+}
+
+const _BUNDLE_ALLOWED_KEYS = new Set([
+  'stage0_ir_version', 'bundle_id', 'source_seed',
+  'machine_profile', 'program_order', 'programs',
+  // Metadata keys (documentation, not semantically active)
+  'source_seed_version', 'hand_authored', 'note',
+]);
+const _PROGRAM_ALLOWED_KEYS = new Set([
+  'id', 'ops', 'source_map',
+  // Metadata keys (documentation, not semantically active)
+  'description',
+]);
+
+// Sentinel for "no write_path executed yet" (distinct from null, a valid Mu value)
+const _UNSET = Symbol('unset');
+
+// ---------------------------------------------------------------------------
+// Safe string representation (avoids BigInt TypeError from JSON.stringify)
+// ---------------------------------------------------------------------------
+function _safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    try {
+      return String(value);
+    } catch (_2) {
+      return '<unstringifiable>';
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Symbol-key rejection helper (Object.keys() ignores Symbol keys)
+// ---------------------------------------------------------------------------
+function _rejectSymbolKeys(obj, context) {
+  if (Object.getOwnPropertySymbols(obj).length > 0) {
+    throw new Error(`${context}: Symbol keys are not allowed`);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Bundle validation (fail-closed)
 // ---------------------------------------------------------------------------
 function validateBundle(bundle) {
+  if (!_isPlainObject(bundle)) {
+    const desc = bundle === null ? 'null'
+      : bundle === undefined ? 'undefined'
+      : Array.isArray(bundle) ? 'Array'
+      : typeof bundle !== 'object' ? typeof bundle
+      : bundle.constructor ? bundle.constructor.name : 'non-plain object';
+    throw new Error(`Bundle must be a plain object, got ${desc}`);
+  }
+  _rejectSymbolKeys(bundle, 'Bundle');
   const required = [
     'stage0_ir_version', 'bundle_id', 'source_seed',
     'machine_profile', 'program_order', 'programs',
@@ -181,6 +466,12 @@ function validateBundle(bundle) {
   for (const field of required) {
     if (!Object.hasOwn(bundle, field)) {
       throw new Error(`Missing required bundle field: '${field}'`);
+    }
+  }
+  // Closed-IR: reject unknown bundle-level keys (getOwnPropertyNames catches non-enumerable)
+  for (const k of Object.getOwnPropertyNames(bundle)) {
+    if (!_BUNDLE_ALLOWED_KEYS.has(k)) {
+      throw new Error(`Unknown bundle-level key: '${k}'`);
     }
   }
   if (bundle.stage0_ir_version !== 1) {
@@ -191,39 +482,201 @@ function validateBundle(bundle) {
   }
   const programs = bundle.programs;
   const order = bundle.program_order;
-  if (!Array.isArray(programs)) throw new Error("'programs' must be an array");
-  if (!Array.isArray(order)) throw new Error("'program_order' must be an array");
+  if (!_isPlainArray(programs)) throw new Error("'programs' must be an array");
+  if (!_isPlainArray(order)) throw new Error("'program_order' must be an array");
   if (programs.length > MAX_VM_PROGRAMS) {
     throw new Error(
       `Too many programs: ${programs.length} > ${MAX_VM_PROGRAMS}`);
   }
+
+  // String-type program_order entries (Bridge R4: JS coercion divergence)
+  for (const entry of order) {
+    if (typeof entry !== 'string') {
+      throw new Error(
+        `program_order entry must be a string, got ${typeof entry}`);
+    }
+  }
+
   const seenIds = new Set();
   const actualOrder = [];
   for (const prog of programs) {
-    if (typeof prog !== 'object' || prog === null) {
-      throw new Error('Each program must be an object');
+    if (!_isPlainObject(prog)) {
+      throw new Error('Each program must be a plain object');
     }
+    _rejectSymbolKeys(prog, 'Program');
     if (!Object.hasOwn(prog, 'id')) throw new Error("Program missing 'id'");
     if (!Object.hasOwn(prog, 'ops')) throw new Error(`Program '${prog.id}' missing 'ops'`);
+    // Closed-IR: reject unknown program-level keys (getOwnPropertyNames catches non-enumerable)
+    for (const pk of Object.getOwnPropertyNames(prog)) {
+      if (!_PROGRAM_ALLOWED_KEYS.has(pk)) {
+        throw new Error(
+          `Program '${prog.id}' has unknown key '${pk}'`);
+      }
+    }
     const pid = prog.id;
+    if (typeof pid !== 'string') {
+      throw new Error(`Program 'id' must be a string, got ${typeof pid}`);
+    }
     const ops = prog.ops;
-    if (!Array.isArray(ops) || ops.length === 0) {
+    if (!_isPlainArray(ops) || ops.length === 0) {
       throw new Error(`Program '${pid}' has empty or non-array ops`);
     }
     if (seenIds.has(pid)) throw new Error(`Duplicate program ID: '${pid}'`);
     seenIds.add(pid);
     actualOrder.push(pid);
+
     for (let i = 0; i < ops.length; i++) {
       const opSpec = ops[i];
-      if (typeof opSpec !== 'object' || !opSpec.op) {
+      if (!_isPlainObject(opSpec)) {
+        throw new Error(`Op ${i} in program '${pid}' must be a plain object`);
+      }
+      if (!Object.hasOwn(opSpec, 'op')) {
         throw new Error(`Op ${i} in program '${pid}' missing 'op' field`);
       }
-      if (!KNOWN_OPCODES.has(opSpec.op)) {
+      _rejectSymbolKeys(opSpec, `Op ${i} in program '${pid}'`);
+      const op = opSpec.op;
+      if (typeof op !== 'string') {
         throw new Error(
-          `Unknown opcode '${opSpec.op}' in program '${pid}'`);
+          `Op ${i} in program '${pid}': ` +
+          `'op' must be a string, got ${typeof op}`);
+      }
+      if (!KNOWN_OPCODES.has(op)) {
+        throw new Error(
+          `Unknown opcode '${op}' in program '${pid}'`);
+      }
+
+      // Per-opcode schema validation (closed IR)
+      const schema = OPCODE_SCHEMAS[op];
+      const opRequired = schema.required;
+      const opOptional = schema.optional;
+      const actualKeys = new Set(Object.getOwnPropertyNames(opSpec));
+      for (const k of opRequired) {
+        if (!actualKeys.has(k)) {
+          throw new Error(
+            `Op '${op}' in program '${pid}' missing required field '${k}'`);
+        }
+      }
+      for (const k of actualKeys) {
+        if (k !== 'op' && !opRequired.has(k) && !opOptional.has(k) &&
+            !GLOBAL_OP_OPTIONAL.has(k)) {
+          throw new Error(
+            `Op '${op}' in program '${pid}' has unknown field '${k}'`);
+        }
+      }
+
+      // Semantic checks per opcode
+      if (op === 'assert_focus_kind') {
+        if (typeof opSpec.kind !== 'string') {
+          throw new Error(
+            `Op 'assert_focus_kind' in program '${pid}': ` +
+            `'kind' must be a string, got ${typeof opSpec.kind}`);
+        }
+        if (!SUPPORTED_KINDS.has(opSpec.kind)) {
+          throw new Error(
+            `Op 'assert_focus_kind' in program '${pid}': ` +
+            `unsupported kind '${opSpec.kind}'`);
+        }
+      }
+
+      // Path validation for all ops that have 'path'
+      if (opRequired.has('path')) {
+        validatePath(
+          opSpec.path,
+          `Op '${op}' in program '${pid}'`);
+      }
+
+      // capture_path.name must be a string
+      if (op === 'capture_path') {
+        if (typeof opSpec.name !== 'string') {
+          throw new Error(
+            `Op 'capture_path' in program '${pid}': 'name' must be a string`);
+        }
+      }
+
+      // check_captured_equal.capture_name must be a string
+      if (op === 'check_captured_equal') {
+        if (typeof opSpec.capture_name !== 'string') {
+          throw new Error(
+            `Op 'check_captured_equal' in program '${pid}': ` +
+            `'capture_name' must be a string`);
+        }
+      }
+
+      // check_equal.value: float scan
+      if (op === 'check_equal') {
+        checkNoFloats(opSpec.value);
+      }
+
+      // key-profile semantic checks
+      if (op === 'assert_key_profile') {
+        const reqField = opSpec.required;
+        if (!_isPlainArray(reqField)) {
+          throw new Error(
+            `Op 'assert_key_profile' in program '${pid}': ` +
+            `'required' must be an array`);
+        }
+        for (const item of reqField) {
+          if (typeof item !== 'string') {
+            throw new Error(
+              `Op 'assert_key_profile' in program '${pid}': ` +
+              `'required' items must be strings`);
+          }
+        }
+        if (Object.hasOwn(opSpec, 'optional')) {
+          const optField = opSpec.optional;
+          if (!_isPlainArray(optField)) {
+            throw new Error(
+              `Op 'assert_key_profile' in program '${pid}': ` +
+              `'optional' must be an array`);
+          }
+          for (const optEntry of optField) {
+            if (!_isPlainObject(optEntry)) {
+              throw new Error(
+                `Op 'assert_key_profile' in program '${pid}': ` +
+                `optional entry must be a plain object`);
+            }
+            _rejectSymbolKeys(optEntry,
+              `Op 'assert_key_profile' in program '${pid}': optional entry`);
+            if (!Object.hasOwn(optEntry, 'key')) {
+              throw new Error(
+                `Op 'assert_key_profile' in program '${pid}': ` +
+                `optional entry missing 'key'`);
+            }
+            // Closed inner dict: only {key, allowed_values} allowed (getOwnPropertyNames catches non-enumerable)
+            for (const ek of Object.getOwnPropertyNames(optEntry)) {
+              if (!_OPT_ENTRY_ALLOWED_KEYS.has(ek)) {
+                throw new Error(
+                  `Op 'assert_key_profile' in program '${pid}': ` +
+                  `optional entry has unknown key '${ek}'`);
+              }
+            }
+            if (typeof optEntry.key !== 'string') {
+              throw new Error(
+                `Op 'assert_key_profile' in program '${pid}': ` +
+                `optional entry 'key' must be a string`);
+            }
+            if (Object.hasOwn(optEntry, 'allowed_values')) {
+              const av = optEntry.allowed_values;
+              if (!_isPlainArray(av)) {
+                throw new Error(
+                  `Op 'assert_key_profile' in program '${pid}': ` +
+                  `'allowed_values' must be an array`);
+              }
+              for (const avItem of av) {
+                checkNoFloats(avItem);
+              }
+            }
+          }
+        }
+      }
+
+      // write_path: validate template
+      if (op === 'write_path') {
+        validateTemplate(opSpec.template);
       }
     }
   }
+
   if (JSON.stringify(order) !== JSON.stringify(actualOrder)) {
     throw new Error(
       `program_order mismatch: order=${JSON.stringify(order)}, ` +
@@ -235,6 +688,7 @@ function validateBundle(bundle) {
 // VM step — single dispatch cycle
 // ---------------------------------------------------------------------------
 function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
+  validateBundle(bundle);
   const programs = bundle.programs;
   const programMap = Object.create(null);
   for (const p of programs) programMap[p.id] = p;
@@ -250,7 +704,7 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
     // T1: Begin attempt
     const inputRoot = inputValue;
     const captures = Object.create(null);
-    let pendingRoot = null;
+    let pendingRoot = _UNSET;
     attemptCount++;
     let failed = false;
 
@@ -274,7 +728,7 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
       // ---- assert_key_profile ----
       else if (op === 'assert_key_profile') {
         const [val, ok] = resolvePath(inputRoot, opSpec.path);
-        if (!ok || val === null || typeof val !== 'object' || Array.isArray(val)) {
+        if (!ok || !_isPlainObject(val)) {
           failed = true; break;
         }
         const required = new Set(opSpec.required);
@@ -298,7 +752,7 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
         if (failed) break;
         for (const [k, allowed] of Object.entries(optionalConstraints)) {
           if (actual.has(k)) {
-            if (!allowed.some(av => muDeepEqual(val[k], av))) {
+            if (!allowed.some(av => safeMuDeepEqual(val[k], av))) {
               failed = true; break;
             }
           }
@@ -309,7 +763,7 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
       // ---- check_equal ----
       else if (op === 'check_equal') {
         const [val, ok] = resolvePath(inputRoot, opSpec.path);
-        if (!ok || !muDeepEqual(val, opSpec.value)) {
+        if (!ok || !safeMuDeepEqual(val, opSpec.value)) {
           failed = true; break;
         }
       }
@@ -324,7 +778,7 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
             `check_captured_equal: '${cname}' not yet captured ` +
             `in program '${programId}'`);
         }
-        if (!muDeepEqual(val, captures[cname])) {
+        if (!safeMuDeepEqual(val, captures[cname])) {
           failed = true; break;
         }
       }
@@ -349,7 +803,7 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
 
       // ---- return_projection_success ----
       else if (op === 'return_projection_success') {
-        if (pendingRoot === null) {
+        if (pendingRoot === _UNSET) {
           throw new Stage0VMError(
             `return_projection_success without write_path in program '${programId}'`);
         }
@@ -442,8 +896,12 @@ module.exports = {
   resolvePath,
   classifyKind,
   muDeepEqual,
+  muCopy,
   materializeTemplate,
   MAX_VM_PROGRAMS,
   MAX_VM_OPS_PER_STEP,
   MAX_TEMPLATE_DEPTH,
+  MAX_PATH_DEPTH,
+  OPCODE_SCHEMAS,
+  SUPPORTED_KINDS,
 };

@@ -19,11 +19,17 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.stage0_vm import (
+    MAX_PATH_DEPTH,
+    MAX_TEMPLATE_DEPTH,
+    OPCODE_SCHEMAS,
+    SUPPORTED_KINDS,
     Stage0VMError,
     _classify_kind,  # ANTICHEAT_OK: unit testing VM kind classification
     _materialize_template,  # ANTICHEAT_OK: unit testing VM template engine
     _mu_deep_equal,  # ANTICHEAT_OK: parity comparator for type-strict equality
     _resolve_path,  # ANTICHEAT_OK: unit testing VM path resolution
+    _safe_mu_deep_equal,  # ANTICHEAT_OK: unit testing safe wrapper
+    _safe_mu_copy,  # ANTICHEAT_OK: unit testing safe wrapper
     stage0_vm_run,
     stage0_vm_step,
     validate_bundle,
@@ -1308,3 +1314,1126 @@ class TestCrossSubstrateParity:
             "_subst_ctx": _subst_ctx(),
         }
         self._check_run_parity(subst_bundle, SUBST_BUNDLE_PATH, inp)
+
+
+# =========================================================================
+# P7-b.1: Hardening Floor Tests
+# =========================================================================
+
+def _make_bundle(ops, pid="p1"):
+    """Helper: minimal valid bundle with one program."""
+    return {
+        "stage0_ir_version": 1,
+        "bundle_id": "test",
+        "source_seed": "test",
+        "machine_profile": "rcx.stage0.v1",
+        "program_order": [pid],
+        "programs": [{"id": pid, "ops": ops}],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Per-opcode schema validation
+# ---------------------------------------------------------------------------
+
+class TestOpcodeSchemaValidation:
+    """P7-b.1 Item 1: per-opcode field validation with unknown-key rejection."""
+
+    @pytest.mark.parametrize("opcode,schema", list(OPCODE_SCHEMAS.items()))
+    def test_missing_required_field(self, opcode, schema):
+        """Each required field, when missing, must raise ValueError."""
+        for missing_key in schema["required"]:
+            op_spec = {"op": opcode}
+            for k in schema["required"]:
+                if k != missing_key:
+                    # Provide a placeholder value
+                    if k == "path":
+                        op_spec[k] = ["focus", "root"]
+                    elif k == "kind":
+                        op_spec[k] = "dict"
+                    elif k == "value":
+                        op_spec[k] = 1
+                    elif k == "name":
+                        op_spec[k] = "x"
+                    elif k == "capture_name":
+                        op_spec[k] = "x"
+                    elif k == "required":
+                        op_spec[k] = ["a"]
+                    elif k == "template":
+                        op_spec[k] = {"kind": "literal", "value": 1}
+                    else:
+                        op_spec[k] = "placeholder"
+            bundle = _make_bundle([op_spec])
+            with pytest.raises(ValueError, match="missing required field"):
+                validate_bundle(bundle)
+
+    @pytest.mark.parametrize("opcode", list(OPCODE_SCHEMAS.keys()))
+    def test_unknown_key_rejected(self, opcode):
+        """Unknown keys on any op_spec must raise ValueError."""
+        schema = OPCODE_SCHEMAS[opcode]
+        op_spec = {"op": opcode, "UNKNOWN_EXTRA": True}
+        for k in schema["required"]:
+            if k == "path":
+                op_spec[k] = ["focus", "root"]
+            elif k == "kind":
+                op_spec[k] = "dict"
+            elif k == "value":
+                op_spec[k] = 1
+            elif k == "name":
+                op_spec[k] = "x"
+            elif k == "capture_name":
+                op_spec[k] = "x"
+            elif k == "required":
+                op_spec[k] = ["a"]
+            elif k == "template":
+                op_spec[k] = {"kind": "literal", "value": 1}
+            else:
+                op_spec[k] = "placeholder"
+        bundle = _make_bundle([op_spec])
+        with pytest.raises(ValueError, match="unknown field"):
+            validate_bundle(bundle)
+
+    def test_source_map_accepted(self):
+        """source_map is a global optional and must be accepted on any op."""
+        ops = [{"op": "return_projection_fail", "source_map": {"line": 1}}]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # should not raise
+
+    def test_valid_ops_pass(self, match_bundle, subst_bundle):
+        """Existing hand-authored bundles with source_map pass validation."""
+        validate_bundle(match_bundle)
+        validate_bundle(subst_bundle)
+
+    def test_assert_focus_kind_unsupported_kind(self):
+        """assert_focus_kind with kind='float' must be rejected."""
+        ops = [{"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "float"}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="unsupported kind"):
+            validate_bundle(bundle)
+
+    def test_assert_focus_kind_supported_kinds(self):
+        """All SUPPORTED_KINDS must be accepted."""
+        for kind in SUPPORTED_KINDS:
+            ops = [
+                {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": kind},
+                {"op": "return_projection_fail"},
+            ]
+            bundle = _make_bundle(ops)
+            validate_bundle(bundle)  # should not raise
+
+    def test_path_exceeding_max_depth(self):
+        """Path longer than MAX_PATH_DEPTH must be rejected."""
+        long_path = ["focus", "root"] + ["k"] * (MAX_PATH_DEPTH + 1)
+        ops = [{"op": "check_exists", "path": long_path}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="MAX_PATH_DEPTH"):
+            validate_bundle(bundle)
+
+    def test_path_at_max_depth_accepted(self):
+        """Path at exactly MAX_PATH_DEPTH must be accepted."""
+        ok_path = ["focus", "root"] + ["k"] * (MAX_PATH_DEPTH - 2)
+        ops = [
+            {"op": "check_exists", "path": ok_path},
+            {"op": "return_projection_fail"},
+        ]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Float rejection
+# ---------------------------------------------------------------------------
+
+class TestFloatRejection:
+    """P7-b.1 Item 3: float values rejected in IR v1."""
+
+    def test_check_equal_float_value(self):
+        ops = [{"op": "check_equal", "path": ["focus", "root"], "value": 1.5}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="Float values unsupported"):
+            validate_bundle(bundle)
+
+    def test_check_equal_nested_float(self):
+        """Float nested inside a dict value must be caught."""
+        ops = [{"op": "check_equal", "path": ["focus", "root"], "value": {"a": 1.5}}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="Float values unsupported"):
+            validate_bundle(bundle)
+
+    def test_template_literal_float(self):
+        tmpl = {"kind": "literal", "value": 3.14}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="Float values unsupported"):
+            validate_bundle(bundle)
+
+    def test_allowed_values_float(self):
+        ops = [{
+            "op": "assert_key_profile",
+            "path": ["focus", "root"],
+            "required": ["mode"],
+            "optional": [{"key": "x", "allowed_values": [1.5]}],
+        }]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="Float values unsupported"):
+            validate_bundle(bundle)
+
+    def test_check_equal_int_accepted(self):
+        """Integer values must pass float check."""
+        ops = [
+            {"op": "check_equal", "path": ["focus", "root"], "value": 42},
+            {"op": "return_projection_fail"},
+        ]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # should not raise
+
+    def test_deeply_nested_value_depth_exceeded(self):
+        """Deeply nested literal value exceeds depth bound → ValueError."""
+        # Build a deeply nested dict exceeding MAX_TEMPLATE_DEPTH
+        val = 1
+        for _ in range(MAX_TEMPLATE_DEPTH + 5):
+            val = {"x": val}
+        ops = [{"op": "check_equal", "path": ["focus", "root"], "value": val}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="depth exceeded"):
+            validate_bundle(bundle)
+
+
+# ---------------------------------------------------------------------------
+# String-typing of identifiers (Bridge R4)
+# ---------------------------------------------------------------------------
+
+class TestStringTypingIdentifiers:
+    """P7-b.1 Bridge R4: all semantically active identifiers must be strings."""
+
+    def test_path_non_string_segment(self):
+        ops = [{"op": "check_exists", "path": ["focus", "root", 1]}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="path segment must be a string"):
+            validate_bundle(bundle)
+
+    def test_capture_path_name_non_string(self):
+        ops = [{"op": "capture_path", "path": ["focus", "root"], "name": 42}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'name' must be a string"):
+            validate_bundle(bundle)
+
+    def test_check_captured_equal_capture_name_non_string(self):
+        ops = [{
+            "op": "check_captured_equal",
+            "path": ["focus", "root"],
+            "capture_name": 42,
+        }]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'capture_name' must be a string"):
+            validate_bundle(bundle)
+
+    def test_program_id_non_string(self):
+        bundle = {
+            "stage0_ir_version": 1,
+            "bundle_id": "test",
+            "source_seed": "test",
+            "machine_profile": "rcx.stage0.v1",
+            "program_order": [1],
+            "programs": [{"id": 1, "ops": [{"op": "return_projection_fail"}]}],
+        }
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_program_order_entry_non_string(self):
+        bundle = {
+            "stage0_ir_version": 1,
+            "bundle_id": "test",
+            "source_seed": "test",
+            "machine_profile": "rcx.stage0.v1",
+            "program_order": [1],
+            "programs": [{"id": "1", "ops": [{"op": "return_projection_fail"}]}],
+        }
+        with pytest.raises(ValueError, match="program_order entry must be a string"):
+            validate_bundle(bundle)
+
+    def test_assert_key_profile_required_non_string(self):
+        ops = [{
+            "op": "assert_key_profile",
+            "path": ["focus", "root"],
+            "required": [1],
+        }]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'required' items must be strings"):
+            validate_bundle(bundle)
+
+    def test_assert_key_profile_optional_key_non_string(self):
+        ops = [{
+            "op": "assert_key_profile",
+            "path": ["focus", "root"],
+            "required": ["a"],
+            "optional": [{"key": 1}],
+        }]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'key' must be a string"):
+            validate_bundle(bundle)
+
+    def test_all_string_identifiers_pass(self):
+        """Bundle with all-string identifiers must pass validation."""
+        ops = [
+            {"op": "capture_path", "path": ["focus", "root", "x"], "name": "cap"},
+            {"op": "check_captured_equal",
+             "path": ["focus", "root", "x"], "capture_name": "cap"},
+            {"op": "return_projection_fail"},
+        ]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # should not raise
+
+    def test_capture_ref_name_non_string_in_template(self):
+        """Template capture_ref with non-string name must be rejected."""
+        tmpl = {"kind": "capture_ref", "name": 42}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'name' must be a string"):
+            validate_bundle(bundle)
+
+    def test_assert_focus_kind_non_string_kind(self):
+        """kind=[] must raise ValueError (not TypeError: unhashable type)."""
+        ops = [{"op": "assert_focus_kind", "path": ["focus", "root"], "kind": []}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'kind' must be a string"):
+            validate_bundle(bundle)
+
+    def test_assert_focus_kind_non_string_kind_int(self):
+        """kind=42 must raise ValueError, not silently pass."""
+        ops = [{"op": "assert_focus_kind", "path": ["focus", "root"], "kind": 42}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'kind' must be a string"):
+            validate_bundle(bundle)
+
+
+# ---------------------------------------------------------------------------
+# Optional entry closure (Bridge R5)
+# ---------------------------------------------------------------------------
+
+class TestOptionalEntryClosure:
+    """P7-b.1 Bridge R5: optional entry dicts are closed IR nodes."""
+
+    def test_optional_entry_unknown_key_rejected(self):
+        """Typo like 'allowed_value' (missing 's') must be caught."""
+        ops = [{
+            "op": "assert_key_profile",
+            "path": ["focus", "root"],
+            "required": ["a"],
+            "optional": [{"key": "x", "allowed_value": ["safe"]}],
+        }]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="unknown key"):
+            validate_bundle(bundle)
+
+    def test_optional_entry_valid_keys_accepted(self):
+        """Valid optional entry with both key and allowed_values passes."""
+        ops = [
+            {
+                "op": "assert_key_profile",
+                "path": ["focus", "root"],
+                "required": ["a"],
+                "optional": [{"key": "x", "allowed_values": ["safe", "fast"]}],
+            },
+            {"op": "return_projection_fail"},
+        ]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # should not raise
+
+    def test_allowed_values_non_list_rejected(self):
+        ops = [{
+            "op": "assert_key_profile",
+            "path": ["focus", "root"],
+            "required": ["a"],
+            "optional": [{"key": "x", "allowed_values": "not_a_list"}],
+        }]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="'allowed_values' must be a list"):
+            validate_bundle(bundle)
+
+
+# ---------------------------------------------------------------------------
+# Template validation at bundle time
+# ---------------------------------------------------------------------------
+
+class TestTemplateValidation:
+    """P7-b.1 Item 1: template validation with closed-IR key checks."""
+
+    def test_template_unknown_key_rejected(self):
+        tmpl = {"kind": "literal", "value": 1, "extra": True}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="unknown key"):
+            validate_bundle(bundle)
+
+    def test_template_missing_required_key(self):
+        tmpl = {"kind": "literal"}  # missing 'value'
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="missing required key"):
+            validate_bundle(bundle)
+
+    def test_template_invalid_kind(self):
+        tmpl = {"kind": "BOGUS", "value": 1}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="Unknown template kind"):
+            validate_bundle(bundle)
+
+    def test_template_deeply_nested_exceeds_depth(self):
+        """Template tree exceeding MAX_TEMPLATE_DEPTH must be rejected."""
+        tmpl = {"kind": "literal", "value": 1}
+        for _ in range(MAX_TEMPLATE_DEPTH + 5):
+            tmpl = {"kind": "object", "fields": {"x": tmpl}}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="Template depth exceeded"):
+            validate_bundle(bundle)
+
+    def test_template_object_non_dict_fields(self):
+        tmpl = {"kind": "object", "fields": "not_dict"}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="must be a dict"):
+            validate_bundle(bundle)
+
+    def test_template_list_non_list_items(self):
+        tmpl = {"kind": "list", "items": "not_list"}
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="must be a list"):
+            validate_bundle(bundle)
+
+    def test_valid_template_passes(self):
+        """Valid nested template passes validation."""
+        tmpl = {
+            "kind": "object",
+            "fields": {
+                "a": {"kind": "literal", "value": 1},
+                "b": {"kind": "capture_ref", "name": "x"},
+                "c": {"kind": "list", "items": [
+                    {"kind": "literal", "value": "hello"},
+                ]},
+            },
+        }
+        ops = [{"op": "write_path", "template": tmpl}]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Template error normalization (defense-in-depth, Item 2)
+# ---------------------------------------------------------------------------
+
+class TestTemplateErrorNormalization:
+    """P7-b.1 Item 2: runtime template errors yield Stage0VMError, not raw host errors.
+
+    These test _materialize_template directly (defense-in-depth layer).
+    validate_bundle also catches these at validation time, but
+    _materialize_template is the last line of defense for any template
+    that somehow bypasses validation.
+    """
+
+    def test_literal_missing_value(self):
+        with pytest.raises(Stage0VMError, match="missing 'value'"):
+            _materialize_template({"kind": "literal"}, {})
+
+    def test_capture_ref_missing_name(self):
+        with pytest.raises(Stage0VMError, match="missing 'name'"):
+            _materialize_template({"kind": "capture_ref"}, {})
+
+    def test_object_missing_fields(self):
+        with pytest.raises(Stage0VMError, match="missing or invalid 'fields'"):
+            _materialize_template({"kind": "object"}, {})
+
+    def test_object_non_dict_fields(self):
+        with pytest.raises(Stage0VMError, match="missing or invalid 'fields'"):
+            _materialize_template({"kind": "object", "fields": "bad"}, {})
+
+    def test_list_missing_items(self):
+        with pytest.raises(Stage0VMError, match="missing or invalid 'items'"):
+            _materialize_template({"kind": "list"}, {})
+
+    def test_list_non_list_items(self):
+        with pytest.raises(Stage0VMError, match="missing or invalid 'items'"):
+            _materialize_template({"kind": "list", "items": "bad"}, {})
+
+    def test_valid_template_still_works(self):
+        """Defense-in-depth guards don't break valid templates."""
+        result = _materialize_template({"kind": "literal", "value": 42}, {})
+        assert result == 42
+
+
+# ---------------------------------------------------------------------------
+# Safe wrappers for recursion overflow (Item 4)
+# ---------------------------------------------------------------------------
+
+class TestSafeWrappers:
+    """P7-b.1 Item 4: _safe_mu_deep_equal and _safe_mu_copy wrappers."""
+
+    def test_safe_deep_equal_shallow(self):
+        """Shallow structures work normally."""
+        assert _safe_mu_deep_equal({"a": 1}, {"a": 1}) is True
+        assert _safe_mu_deep_equal({"a": 1}, {"a": 2}) is False
+
+    def test_safe_deep_equal_overflow(self):
+        """Deeply nested structures raise Stage0VMError, not RecursionError."""
+        # Build structure deeper than Python recursion limit
+        a = {"x": None}
+        b = {"x": None}
+        cur_a, cur_b = a, b
+        for _ in range(600):
+            new_a = {"x": None}
+            new_b = {"x": None}
+            cur_a["x"] = new_a
+            cur_b["x"] = new_b
+            cur_a = new_a
+            cur_b = new_b
+        with pytest.raises(Stage0VMError, match="recursion overflow"):
+            _safe_mu_deep_equal(a, b)
+
+    def test_safe_mu_copy_shallow(self):
+        """Shallow copy works normally."""
+        original = {"a": [1, 2]}
+        copied = _safe_mu_copy(original)
+        assert copied == original
+        assert copied is not original
+
+    def test_safe_mu_copy_overflow(self):
+        """Deeply nested copy raises Stage0VMError, not RecursionError."""
+        val = {"x": None}
+        cur = val
+        for _ in range(1500):
+            new = {"x": None}
+            cur["x"] = new
+            cur = new
+        with pytest.raises(Stage0VMError, match="recursion overflow"):
+            _safe_mu_copy(val)
+
+    def test_check_equal_deep_value_overflow(self):
+        """check_equal with deeply nested value overflows → Stage0VMError."""
+        # Build deep value
+        val = {"x": None}
+        cur = val
+        for _ in range(600):
+            new = {"x": None}
+            cur["x"] = new
+            cur = new
+
+        ops = [
+            {"op": "check_equal", "path": ["focus", "root"], "value": 42},
+            {"op": "return_projection_fail"},
+        ]
+        bundle = _make_bundle(ops)
+        # Feed the deep structure as input — check_equal uses _safe_mu_deep_equal
+        # This should NOT overflow because the comparison short-circuits on type mismatch
+        result = stage0_vm_step(bundle, val)
+        assert result["status"] == "stall"
+
+    def test_literal_deep_copy_overflow(self):
+        """Deeply nested value overflows _safe_mu_copy (defense-in-depth)."""
+        val = {"x": None}
+        cur = val
+        for _ in range(1500):
+            new = {"x": None}
+            cur["x"] = new
+            cur = new
+
+        with pytest.raises(Stage0VMError, match="recursion overflow"):
+            _safe_mu_copy(val)
+
+
+# ---------------------------------------------------------------------------
+# P7-b.1 Adversary hardening: null sentinel, closed bundle/program
+# ---------------------------------------------------------------------------
+
+class TestNullSentinel:
+    """Adversary finding: write_path producing null must not conflate with 'no write'."""
+
+    def test_null_literal_write_path_accepted(self):
+        """write_path with null literal + return_projection_success should succeed."""
+        ops = [
+            {"op": "write_path", "template": {"kind": "literal", "value": None}},
+            {"op": "return_projection_success"},
+        ]
+        bundle = _make_bundle(ops)
+        result = stage0_vm_step(bundle, {"any": "input"})
+        assert result["status"] == "match"
+        assert result["root"] is None
+
+    def test_return_without_write_still_errors(self):
+        """return_projection_success without any write_path still raises."""
+        ops = [
+            {"op": "return_projection_success"},
+        ]
+        bundle = _make_bundle(ops)
+        with pytest.raises(Stage0VMError, match="return_projection_success without write_path"):
+            stage0_vm_step(bundle, {"any": "input"})
+
+
+class TestClosedBundleProgram:
+    """Adversary finding: bundle and program top-level must reject unknown keys."""
+
+    def test_bundle_unknown_key_rejected(self):
+        """Extra top-level key in bundle rejected."""
+        bundle = {
+            "stage0_ir_version": 1, "bundle_id": "test",
+            "source_seed": "test", "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{"id": "p1", "ops": [
+                {"op": "write_path", "template": {"kind": "literal", "value": 1}},
+                {"op": "return_projection_success"},
+            ]}],
+            "EVIL_EXTRA": "payload",
+        }
+        with pytest.raises(ValueError, match="Unknown bundle-level key"):
+            validate_bundle(bundle)
+
+    def test_program_unknown_key_rejected(self):
+        """Extra key on program dict rejected."""
+        bundle = {
+            "stage0_ir_version": 1, "bundle_id": "test",
+            "source_seed": "test", "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{"id": "p1", "ops": [
+                {"op": "write_path", "template": {"kind": "literal", "value": 1}},
+                {"op": "return_projection_success"},
+            ], "EVIL_EXTRA": "payload"}],
+        }
+        with pytest.raises(ValueError, match="unknown key"):
+            validate_bundle(bundle)
+
+    def test_program_source_map_accepted(self):
+        """source_map on program is an allowed optional key."""
+        bundle = {
+            "stage0_ir_version": 1, "bundle_id": "test",
+            "source_seed": "test", "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{"id": "p1", "ops": [
+                {"op": "write_path", "template": {"kind": "literal", "value": 1}},
+                {"op": "return_projection_success"},
+            ], "source_map": {"info": "test"}}],
+        }
+        validate_bundle(bundle)  # Should not raise
+
+    def test_valid_bundle_no_extra_keys(self):
+        """Clean bundle with only allowed keys passes."""
+        ops = [
+            {"op": "write_path", "template": {"kind": "literal", "value": 1}},
+            {"op": "return_projection_success"},
+        ]
+        bundle = _make_bundle(ops)
+        validate_bundle(bundle)  # Should not raise
+
+
+class TestPrototypeKeyHardening:
+    """Bridge R1: JS prototype-key pollution must not bypass validation."""
+
+    def test_proto_opcode_rejected(self):
+        """__proto__ as opcode name must raise ValueError, not host TypeError."""
+        bundle = _make_bundle([{"op": "__proto__"}])
+        with pytest.raises(ValueError, match="Unknown opcode"):
+            validate_bundle(bundle)
+
+    def test_proto_template_kind_rejected(self):
+        """__proto__ as template kind must raise ValueError, not host TypeError."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {"kind": "__proto__"}},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Unknown template kind"):
+            validate_bundle(bundle)
+
+    def test_constructor_opcode_rejected(self):
+        """constructor as opcode name must be rejected."""
+        bundle = _make_bundle([{"op": "constructor"}])
+        with pytest.raises(ValueError, match="Unknown opcode"):
+            validate_bundle(bundle)
+
+    def test_step_validates_before_execution(self):
+        """stage0_vm_step enforces validate_bundle before executing."""
+        # Float in check_equal.value — Python catches at validation
+        bundle = {
+            "stage0_ir_version": 1, "bundle_id": "test",
+            "source_seed": "test", "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{"id": "p1", "ops": [
+                {"op": "check_equal", "path": ["focus", "root"],
+                 "value": 3.14},
+                {"op": "return_projection_fail"},
+            ]}],
+        }
+        with pytest.raises(ValueError, match="Float values unsupported"):
+            stage0_vm_step(bundle, 1)
+
+    def test_validate_bundle_none_raises(self):
+        """validate_bundle(None) must raise ValueError, not TypeError."""
+        with pytest.raises(ValueError, match="Bundle must be a dict"):
+            validate_bundle(None)
+
+    def test_validate_bundle_list_raises(self):
+        """validate_bundle([]) must raise ValueError, not TypeError."""
+        with pytest.raises(ValueError, match="Bundle must be a dict"):
+            validate_bundle([])
+
+    def test_validate_bundle_string_raises(self):
+        """validate_bundle('foo') must raise ValueError, not TypeError."""
+        with pytest.raises(ValueError, match="Bundle must be a dict"):
+            validate_bundle("foo")
+
+    def test_opcode_non_string_op_rejected(self):
+        """op=[] must raise ValueError, not TypeError: unhashable type."""
+        bundle = _make_bundle([{"op": []}])
+        with pytest.raises(ValueError, match="'op' must be a string"):
+            validate_bundle(bundle)
+
+    def test_template_kind_non_string_rejected(self):
+        """Template with kind=[] must raise ValueError, not TypeError."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {"kind": []}},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="'kind' must be a string"):
+            validate_bundle(bundle)
+
+    def test_path_invalid_namespace_rejected(self):
+        """Path not starting with ['focus', 'root'] must be caught at validation."""
+        bundle = _make_bundle([
+            {"op": "check_exists", "path": ["not_focus", "root"]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="path must start with"):
+            validate_bundle(bundle)
+
+    def test_template_object_non_string_field_key_rejected(self):
+        """Template object with int field key must be rejected for parity."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "object",
+                "fields": {1: {"kind": "literal", "value": "v"}},
+            }},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="field key must be a string"):
+            validate_bundle(bundle)
+
+
+# ---------------------------------------------------------------------------
+# Hostile subclass adversarial tests (Bridge R8/R9)
+# ---------------------------------------------------------------------------
+
+class TestHostileStrSubclasses:
+    """Hostile str subclasses must be rejected at all validation-boundary
+    string checks.  These subclasses override __hash__/__eq__ to leak
+    raw RuntimeError through isinstance(x, str) checks."""
+
+    def _evil_hash_str(self, value):
+        """Return a str subclass whose __hash__ raises RuntimeError."""
+        class EvilHashStr(str):
+            def __hash__(self):
+                raise RuntimeError("evil-hash")
+        return EvilHashStr(value)
+
+    def _evil_eq_str(self, value):
+        """Return a str subclass whose __eq__ raises RuntimeError."""
+        class EvilEqStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = str.__hash__  # restore hashability (Python unsets on __eq__ override)
+        return EvilEqStr(value)
+
+    def test_hostile_str_program_order_entry(self):
+        """program_order entry with hostile str subclass must be rejected."""
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["program_order"] = [self._evil_hash_str("p1")]
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_program_id(self):
+        """Program id with hostile str subclass must be rejected."""
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["programs"][0]["id"] = self._evil_hash_str("p1")
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_op_field(self):
+        """Op 'op' field with hostile str subclass must be rejected."""
+        bundle = _make_bundle([{"op": self._evil_eq_str("return_projection_fail")}])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_assert_focus_kind(self):
+        """assert_focus_kind 'kind' with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "assert_focus_kind",
+             "path": ["focus", "root"],
+             "kind": self._evil_eq_str("dict")},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_capture_path_name(self):
+        """capture_path 'name' with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "capture_path",
+             "path": ["focus", "root"],
+             "name": self._evil_hash_str("x")},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_check_captured_equal_capture_name(self):
+        """check_captured_equal 'capture_name' with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "check_captured_equal",
+             "path": ["focus", "root"],
+             "capture_name": self._evil_eq_str("x")},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_path_segment(self):
+        """Path segment with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "check_exists",
+             "path": ["focus", "root", self._evil_hash_str("key")]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_required_item(self):
+        """assert_key_profile required item with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "assert_key_profile",
+             "path": ["focus", "root"],
+             "required": [self._evil_hash_str("k")]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="must be strings"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_optional_entry_key(self):
+        """assert_key_profile optional entry key with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "assert_key_profile",
+             "path": ["focus", "root"],
+             "required": ["k"],
+             "optional": [{"key": self._evil_hash_str("x")}]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_template_kind(self):
+        """Template 'kind' with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": self._evil_eq_str("literal"),
+                "value": 1,
+            }},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_template_capture_ref_name(self):
+        """Template capture_ref 'name' with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "capture_ref",
+                "name": self._evil_hash_str("x"),
+            }},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_str_template_object_field_key(self):
+        """Template object field key with hostile str must be rejected."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "object",
+                "fields": {self._evil_eq_str("k"): {
+                    "kind": "literal", "value": 1}},
+            }},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="field key must be a string"):
+            validate_bundle(bundle)
+
+
+class TestHostileNestedLiteralSubclasses:
+    """Hostile dict/list subclasses nested inside literal values must not
+    leak raw exceptions through _check_no_floats traversal."""
+
+    def test_hostile_dict_in_check_equal_value(self):
+        """EvilDict nested in check_equal.value rejected as non-Mu type."""
+        class EvilDict(dict):
+            def values(self):
+                raise RuntimeError("evil-values")
+        bundle = _make_bundle([
+            {"op": "check_equal",
+             "path": ["focus", "root"],
+             "value": EvilDict({"a": 1})},
+            {"op": "return_projection_fail"},
+        ])
+        # Mu-domain validation rejects EvilDict (not type(v) is dict)
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_hostile_list_in_check_equal_value(self):
+        """EvilList nested in check_equal.value rejected as non-Mu type."""
+        class EvilList(list):
+            def __iter__(self):
+                raise RuntimeError("evil-iter")
+        bundle = _make_bundle([
+            {"op": "check_equal",
+             "path": ["focus", "root"],
+             "value": EvilList([1, 2])},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_hostile_dict_in_template_literal_value(self):
+        """EvilDict nested in template literal value rejected as non-Mu type."""
+        class EvilDict(dict):
+            def values(self):
+                raise RuntimeError("evil-values")
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "literal",
+                "value": EvilDict({"a": 1}),
+            }},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_hostile_list_in_template_literal_value(self):
+        """EvilList nested in template literal value rejected as non-Mu type."""
+        class EvilList(list):
+            def __iter__(self):
+                raise RuntimeError("evil-iter")
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "literal",
+                "value": EvilList([1, 2]),
+            }},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_hostile_dict_in_allowed_values(self):
+        """EvilDict nested in allowed_values rejected as non-Mu type."""
+        class EvilDict(dict):
+            def values(self):
+                raise RuntimeError("evil-values")
+        bundle = _make_bundle([
+            {"op": "assert_key_profile",
+             "path": ["focus", "root"],
+             "required": ["k"],
+             "optional": [{"key": "x",
+                           "allowed_values": [EvilDict({"a": 1})]}]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_hostile_list_in_allowed_values(self):
+        """EvilList nested in allowed_values rejected as non-Mu type."""
+        class EvilList(list):
+            def __iter__(self):
+                raise RuntimeError("evil-iter")
+        bundle = _make_bundle([
+            {"op": "assert_key_profile",
+             "path": ["focus", "root"],
+             "required": ["k"],
+             "optional": [{"key": "x",
+                           "allowed_values": [EvilList([1, 2])]}]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_hostile_dict_subclass_outer_bundle_rejected(self):
+        """EvilDict at outer bundle level must be rejected (not just nested)."""
+        class EvilDict(dict):
+            def __getitem__(self, key):
+                raise RuntimeError("evil-getitem")
+        base = _make_bundle([{"op": "return_projection_fail"}])
+        with pytest.raises(ValueError, match="Bundle must be a dict"):
+            validate_bundle(EvilDict(base))
+
+    def test_hostile_list_subclass_outer_programs_rejected(self):
+        """EvilList at program_order level must be rejected."""
+        class EvilList(list):
+            def __iter__(self):
+                raise RuntimeError("evil-iter")
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["program_order"] = EvilList(["p1"])
+        with pytest.raises(ValueError, match="must be a list"):
+            validate_bundle(bundle)
+
+
+class TestHostileDictKeys:
+    """Hostile str subclass dict KEYS (not values) must be rejected before
+    any membership/equality checks can trigger __eq__/__hash__ leaks."""
+
+    def _make_hostile_key_dict(self, real_key, real_value):
+        """Create a plain dict with a hostile str subclass key."""
+        class EvilEqStr(str):
+            def __eq__(self, other):
+                raise RuntimeError("evil-eq")
+            __hash__ = str.__hash__
+        d = {}
+        d.__setitem__(EvilEqStr(real_key), real_value)
+        return d, EvilEqStr
+
+    def test_hostile_bundle_key(self):
+        """Hostile str subclass as bundle dict key must be rejected."""
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        d, _ = self._make_hostile_key_dict("stage0_ir_version", 1)
+        for k, v in bundle.items():
+            if k != "stage0_ir_version":
+                d[k] = v
+        with pytest.raises(ValueError, match="Bundle key must be a string"):
+            validate_bundle(d)
+
+    def test_hostile_program_key(self):
+        """Hostile str subclass as program dict key must be rejected."""
+        d, _ = self._make_hostile_key_dict("id", "p1")
+        d["ops"] = [{"op": "return_projection_fail"}]
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["programs"] = [d]
+        with pytest.raises(ValueError, match="Program key must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_op_key(self):
+        """Hostile str subclass as op dict key must be rejected."""
+        d, _ = self._make_hostile_key_dict("op", "return_projection_fail")
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["programs"][0]["ops"] = [d]
+        with pytest.raises(ValueError, match="key must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_optional_entry_key(self):
+        """Hostile str subclass as optional entry dict key must be rejected."""
+        d, _ = self._make_hostile_key_dict("key", "x")
+        bundle = _make_bundle([
+            {"op": "assert_key_profile",
+             "path": ["focus", "root"],
+             "required": ["k"],
+             "optional": [d]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="optional entry key must be a string"):
+            validate_bundle(bundle)
+
+    def test_hostile_template_node_key(self):
+        """Hostile str subclass as template node dict key must be rejected."""
+        d, _ = self._make_hostile_key_dict("kind", "literal")
+        d["value"] = 1
+        bundle = _make_bundle([
+            {"op": "write_path", "template": d},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Template node key must be a string"):
+            validate_bundle(bundle)
+
+
+class TestVersionTypeParity:
+    """stage0_ir_version must be exact int — reject bool (Python: True==1) and float."""
+
+    def test_bool_version_rejected(self):
+        """stage0_ir_version=True must be rejected (True == 1 in Python but !== in JS)."""
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["stage0_ir_version"] = True
+        with pytest.raises(ValueError, match="must be an int"):
+            validate_bundle(bundle)
+
+    def test_float_version_rejected(self):
+        """stage0_ir_version=1.0 must be rejected (Python-only: JS 1.0===1)."""
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["stage0_ir_version"] = 1.0
+        with pytest.raises(ValueError, match="must be an int"):
+            validate_bundle(bundle)
+
+    def test_int_version_accepted(self):
+        """stage0_ir_version=1 must be accepted."""
+        bundle = _make_bundle([{"op": "return_projection_fail"}])
+        bundle["stage0_ir_version"] = 1
+        validate_bundle(bundle)  # Must not raise
+
+
+class TestNonMuLiteralRejection:
+    """Non-Mu types in literal values must be rejected by Mu-domain validation."""
+
+    def test_tuple_rejected(self):
+        """Python tuple in literal value must be rejected."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "literal", "value": (1, 2)}},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_set_rejected(self):
+        """Python set in literal value must be rejected."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "literal", "value": {1, 2}}},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_bytes_rejected(self):
+        """Python bytes in literal value must be rejected."""
+        bundle = _make_bundle([
+            {"op": "write_path", "template": {
+                "kind": "literal", "value": b"data"}},
+            {"op": "return_projection_success"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_nested_tuple_in_dict_rejected(self):
+        """Tuple nested inside a dict literal value must be rejected."""
+        bundle = _make_bundle([
+            {"op": "check_equal",
+             "path": ["focus", "root"],
+             "value": {"key": (1,)}},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_nested_tuple_in_list_rejected(self):
+        """Tuple nested inside a list literal value must be rejected."""
+        bundle = _make_bundle([
+            {"op": "check_equal",
+             "path": ["focus", "root"],
+             "value": [(1,)]},
+            {"op": "return_projection_fail"},
+        ])
+        with pytest.raises(ValueError, match="Non-Mu value type"):
+            validate_bundle(bundle)
+
+    def test_valid_mu_literals_accepted(self):
+        """All valid Mu literal types must be accepted."""
+        for value in [None, True, False, 0, 42, -1, "", "hello",
+                      {}, {"a": 1}, [], [1, 2], {"nested": [1, None, "x"]}]:
+            bundle = _make_bundle([
+                {"op": "check_equal",
+                 "path": ["focus", "root"],
+                 "value": value},
+                {"op": "return_projection_fail"},
+            ])
+            validate_bundle(bundle)  # Must not raise
