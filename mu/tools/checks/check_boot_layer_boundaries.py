@@ -7,7 +7,7 @@ The bootstrap has three layers with a strict dependency direction:
 
 Rules:
 1. Boot0 MUST NOT import from Boot1 or Boot2
-2. Boot1 MUST NOT import from Boot2 — except via KNOWN_COMPAT_SHIM re-exports
+2. Boot1 MUST NOT import from Boot2
 3. Boot2 may import from Boot0 and Boot1
 4. No import cycles in the semantic dependency graph
 
@@ -71,14 +71,6 @@ def _get_relative_imports(filepath: Path) -> list[tuple[int, str]]:
     return imports
 
 
-def _get_compat_shim_line(filepath: Path) -> int | None:
-    """Find the KNOWN_COMPAT_SHIM marker line, if any."""
-    lines = filepath.read_text(encoding="utf-8").splitlines()
-    for i, line in enumerate(lines, 1):
-        if "KNOWN_COMPAT_SHIM" in line:
-            return i
-    return None
-
 
 def check_boundaries() -> list[str]:
     """Return list of violation messages (empty = pass)."""
@@ -104,24 +96,19 @@ def check_boundaries() -> list[str]:
                     f"Boot0 → Boot2 violation: {boot0_file}:{lineno} imports from {module}"
                 )
 
-    # --- Rule 2: Boot1 must not import from Boot2 (except compat shim) ---
+    # --- Rule 2: Boot1 must not import from Boot2 ---
     for boot1_file in BOOT1_FILES:
         path = PY_SELFHOST / boot1_file
         if not path.exists():
             violations.append(f"Boot1 file missing: {boot1_file}")
             continue
-        shim_line = _get_compat_shim_line(path)
         boot2_bases = {f.removesuffix(".py") for f in BOOT2_FILES}
 
         for lineno, module in _get_relative_imports(path):
             base = module.split(".")[0]
             if base in boot2_bases:
-                if shim_line is not None and lineno >= shim_line:
-                    # This is the compat shim block — allowed
-                    continue
                 violations.append(
-                    f"Boot1 → Boot2 violation: {boot1_file}:{lineno} imports from {module} "
-                    f"(outside KNOWN_COMPAT_SHIM block)"
+                    f"Boot1 → Boot2 violation: {boot1_file}:{lineno} imports from {module}"
                 )
 
     # --- Rule 3: Boot2 may import from Boot0 and Boot1 (no violations possible) ---
@@ -131,8 +118,8 @@ def check_boundaries() -> list[str]:
         if not path.exists():
             violations.append(f"Boot2 file missing: {boot2_file}")
 
-    # --- Rule 4: No import cycles in non-shim imports ---
-    # Build directed graph: file → set of imported boot-layer files (excluding shim)
+    # --- Rule 4: No import cycles ---
+    # Build directed graph: file → set of imported boot-layer files
     graph: dict[str, set[str]] = {}
     all_boot_files = BOOT0_FILES | BOOT1_FILES | BOOT2_FILES
     all_boot_bases = {f.removesuffix(".py"): f for f in all_boot_files}
@@ -141,13 +128,10 @@ def check_boundaries() -> list[str]:
         path = PY_SELFHOST / boot_file
         if not path.exists():
             continue
-        shim_line = _get_compat_shim_line(path) if boot_file in BOOT1_FILES else None
         deps: set[str] = set()
         for lineno, module in _get_relative_imports(path):
             base = module.split(".")[0]
             if base in all_boot_bases:
-                if shim_line is not None and lineno >= shim_line:
-                    continue  # Exclude compat shim from cycle analysis
                 deps.add(all_boot_bases[base])
         graph[boot_file] = deps
 

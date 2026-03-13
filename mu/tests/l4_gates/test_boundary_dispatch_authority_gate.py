@@ -22,13 +22,13 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
-from rcx_pi.selfhost.step_mu import (
+from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: gate verifies typed fail-closed errors
+from rcx_pi.selfhost.engine_pipeline import (
     _load_boundary_ops,  # ANTICHEAT_OK: gate verifies seed-derived boundary ops
     _clear_boundary_ops_cache,  # ANTICHEAT_OK: gate verifies cache-clear parity
     _service_boundary_effect,  # ANTICHEAT_OK: gate verifies dispatch structure
     _BOUNDARY_DISPATCH,  # ANTICHEAT_OK: gate verifies dispatch map keys
     _ALGORITHM_SEED_ALLOWLIST,  # ANTICHEAT_OK: gate verifies algorithm seed authority (F-22)
-    RcxEngineError,  # ANTICHEAT_OK: gate verifies typed fail-closed errors
 )
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
@@ -818,7 +818,8 @@ class TestBehaviorPreservation:
 
     def test_hash_trace_produces_result(self):
         """hash_trace via handler-map returns hashed linked list."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
         trace_input = {"head": {"state": 1}, "tail": {"head": {"state": 2}, "tail": None}}
         request = {
             "operation": "hash_trace",

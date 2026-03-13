@@ -175,13 +175,14 @@ class TestBoot1Parity:
     """Boot1 loop contract constants must match."""
 
     def test_boot1_max_reentry_depth_parity(self):
-        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies cross-substrate constant parity
+        from rcx_pi.selfhost.engine_pipeline import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies cross-substrate constant parity
         js_depth = _extract_js_const(_js_source(), "BOOT1_MAX_REENTRY_DEPTH")
         assert _BOOT1_MAX_REENTRY_DEPTH == js_depth == 20
 
     def test_boot1_default_is_recursive(self):
         """Boot1 default must be recursive (on) for direct pipeline."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         import inspect
         sig = inspect.signature(run_engine_pipeline)
         # use_boot1_recursive defaults to True (boot1 recursive is default)
@@ -225,7 +226,8 @@ class TestPipelineDefaultParity:
     def test_max_steps_default_parity(self):
         """JS runEnginePipeline maxSteps default must match Python (100)."""
         import inspect
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         py_default = inspect.signature(run_engine_pipeline).parameters["max_steps"].default
         js = _js_source()
         # Scope to runEnginePipeline destructuring block to avoid matching run() defaults
@@ -242,7 +244,8 @@ class TestPipelineDefaultParity:
     def test_max_algorithm_iterations_default_parity(self):
         """JS runEnginePipeline maxAlgorithmIterations default must match Python (50)."""
         import inspect
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         py_default = inspect.signature(run_engine_pipeline).parameters["max_algorithm_iterations"].default
         js = _js_source()
         m = re.search(r'function runEnginePipeline\b.*?\{(.*?)\}\s*=\s*options', js, re.DOTALL)

@@ -226,7 +226,8 @@ class TestCurrentEnforcedParityFalsification:
         JS returns {success: false, error_code: ...} via JSON API.
         Both must fail-closed — equivalent failure category.
         """
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
 
         er = _make_engine_result_dict(value="test")
         er["extra_bogus_key"] = "should_not_be_here"  # 9 keys instead of 8
@@ -261,7 +262,8 @@ class TestCurrentEnforcedParityFalsification:
         Python raises ValueError; JS returns {success: false, error_code: "input.invalid_type"}.
         Parity is on failure category, not exception class name.
         """
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
 
         # Python: ValueError expected
         py_error_type = None
@@ -291,7 +293,8 @@ class TestCurrentEnforcedParityFalsification:
 
         Both substrates must reject the malformed hemisphere dict.
         """
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
 
         bad_hemi = _empty_hemi()
         bad_hemi["extra_bucket"] = None  # 6 keys

@@ -21,12 +21,14 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
-from rcx_pi.selfhost.step_mu import (  # noqa: E402
-    ENGINE_EXIT_REASONS,
+from rcx_pi.selfhost.step_mu import (
     TERMINAL_KINDS,
     _is_terminal_shape,  # ANTICHEAT_OK: gate tests verify runtime predicate delegation
-    _is_engine_terminal,  # ANTICHEAT_OK: gate tests verify runtime predicate delegation
     classify_terminal_kind,
+)
+from rcx_pi.selfhost.engine_pipeline import (
+    ENGINE_EXIT_REASONS,
+    _is_engine_terminal,  # ANTICHEAT_OK: gate tests verify runtime predicate delegation
 )
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,8 @@ import inspect
 from pathlib import Path
 
 import pytest
-from rcx_pi.selfhost.step_mu import run_engine_pipeline
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 
 # ── Source paths ─────────────────────────────────────────────────────────
 
@@ -452,17 +453,20 @@ class TestHemisphereRoutingErrors:
     """run_hemisphere_routing must reject invalid inputs."""
 
     def test_engine_result_not_dict_raises(self):
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
         with pytest.raises(ValueError, match="engine_result must be a dict"):
             run_hemisphere_routing("not a dict", {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None})
 
     def test_engine_result_list_raises(self):
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
         with pytest.raises(ValueError, match="engine_result must be a dict"):
             run_hemisphere_routing([1, 2, 3], {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None})
 
     def test_engine_result_none_raises(self):
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
         with pytest.raises(ValueError, match="engine_result must be a dict"):
             run_hemisphere_routing(None, {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None})
 
@@ -474,7 +478,8 @@ class TestEngineWithRoutingValidation:
     """run_engine_with_routing must validate hemispheres parameter."""
 
     def test_hemispheres_not_dict_raises_typeerror(self):
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         with pytest.raises(TypeError, match="hemispheres must be dict"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
@@ -483,7 +488,8 @@ class TestEngineWithRoutingValidation:
             )
 
     def test_hemispheres_missing_keys_raises_valueerror(self):
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         with pytest.raises(ValueError, match="hemispheres shape mismatch"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
@@ -492,7 +498,8 @@ class TestEngineWithRoutingValidation:
             )
 
     def test_hemispheres_extra_keys_raises_valueerror(self):
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         with pytest.raises(ValueError, match="hemispheres shape mismatch"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
@@ -510,7 +517,8 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_return_has_exactly_two_keys(self):
         """Return dict must have exactly {engine_result, hemispheres}."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
             42,
@@ -523,7 +531,8 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_engine_result_has_terminal_keys(self):
         """engine_result sub-dict must have exactly 8 terminal keys."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _load_tc_key_sets  # ANTICHEAT_OK: grounding test for return shape
+        from rcx_pi.selfhost.step_mu import _load_tc_key_sets  # ANTICHEAT_OK: grounding test for terminal key shape
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing  # ANTICHEAT_OK: grounding test for return shape
         engine_keys = _load_tc_key_sets()["tc.engine"]
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
@@ -539,7 +548,8 @@ class TestEngineWithRoutingReturnShape:
     @pytest.mark.slow
     def test_hemispheres_has_hemisphere_keys(self):
         """hemispheres sub-dict must have exactly 5 hemisphere keys."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing, _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for return shape
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys  # ANTICHEAT_OK: grounding test for hemisphere key shape
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing  # ANTICHEAT_OK: grounding test for return shape
         hemi_keys = _get_hemisphere_keys()
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
@@ -870,13 +880,15 @@ class TestBoot1TypeHardening:
 
     def test_routing_rejects_string(self):
         """run_engine_with_routing rejects non-bool use_boot1_recursive."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
             run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive="true")
 
     def test_routing_rejects_int(self):
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
             run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive=1)

@@ -61,6 +61,10 @@ run_python() {
   python3 tools/checks/check_boot_layer_boundaries.py
   echo
 
+  echo "[PY 6d/17] Host-authority inventory ratchet check"
+  python3 tools/checks/check_host_authority_inventory_ratchet.py
+  echo
+
   echo "[PY 7/17] AST police (catches what grep misses)"
   python3 tools/checks/linters/ast_police.py
   echo

@@ -113,6 +113,9 @@ python3 tools/checks/check_seed_auto_execution_contract.py
 echo "== 3b5) Host-semantics ratchet check =="
 python3 tools/checks/check_host_semantics_ratchet.py
 
+echo "== 3b5b) Host-authority inventory ratchet check =="
+python3 tools/checks/check_host_authority_inventory_ratchet.py
+
 echo "== 3b6) Bootstrap purity ratchet check =="
 python3 tools/checks/check_bootstrap_purity_ratchet.py
 

@@ -19,8 +19,7 @@ The JS substrate already has this separation:
 This extraction achieves Python↔JS structural parity for the bootstrap model.
 
 IMPORTANT: This module must NOT be imported by Boot0 (eval_seed.py) or
-Boot1 (step_mu.py) — except via the backward-compat re-export shim at
-the bottom of step_mu.py (KNOWN_COMPAT_SHIM).
+Boot1 (step_mu.py). Callers import directly from engine_pipeline.
 """
 
 from __future__ import annotations

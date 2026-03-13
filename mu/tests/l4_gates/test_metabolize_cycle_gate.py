@@ -19,7 +19,7 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
-from rcx_pi.selfhost.step_mu import (
+from rcx_pi.selfhost.engine_pipeline import (
     run_metabolization_cycle,  # SPEED_OK: boundary wrapper tested via run_mu
     count_hemisphere_entries,
 )

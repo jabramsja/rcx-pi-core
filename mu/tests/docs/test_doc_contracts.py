@@ -194,7 +194,7 @@ DOC_CONTRACTS: dict[str, dict[str, Any]] = {
     "ObserverEventContract.v0.md": {
         "functions": [],
         "constants": {
-            "rcx_pi.selfhost.step_mu.ENGINE_EXIT_REASONS": 4,  # 4 exit reasons (closure, exhaustion, stall, completed)
+            "rcx_pi.selfhost.engine_pipeline.ENGINE_EXIT_REASONS": 4,  # 4 exit reasons (closure, exhaustion, stall, completed)
         },
         "seeds": {},
     },

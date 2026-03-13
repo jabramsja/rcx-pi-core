@@ -40,14 +40,6 @@ def _get_relative_import_modules(filepath: Path) -> list[tuple[int, str]]:
     return imports
 
 
-def _get_compat_shim_line(filepath: Path) -> int | None:
-    """Find the KNOWN_COMPAT_SHIM marker line, if any."""
-    lines = filepath.read_text(encoding="utf-8").splitlines()
-    for i, line in enumerate(lines, 1):
-        if "KNOWN_COMPAT_SHIM" in line:
-            return i
-    return None
-
 
 class TestBoot0Isolation:
     """Boot0 (eval_seed.py) must not import from Boot1 or Boot2."""
@@ -81,23 +73,17 @@ class TestBoot0Isolation:
 
 
 class TestBoot1Isolation:
-    """Boot1 (step_mu.py) must not import from Boot2 except via compat shim."""
+    """Boot1 (step_mu.py) must not import from Boot2."""
 
-    def test_boot1_has_no_boot2_imports_except_shim(self):
-        """step_mu.py only imports from engine_pipeline.py in the re-export shim block."""
+    def test_boot1_has_no_boot2_imports(self):
+        """step_mu.py must not import from engine_pipeline.py (compat shim removed)."""
         path = PY_SELFHOST / "step_mu.py"
-        shim_line = _get_compat_shim_line(path)
-        assert shim_line is not None, (
-            "step_mu.py must have a KNOWN_COMPAT_SHIM marker for re-exports"
-        )
-
         for lineno, module in _get_relative_import_modules(path):
             base = module.split(".")[0]
-            if base == "engine_pipeline":
-                assert lineno >= shim_line, (
-                    f"Boot1 → Boot2 violation at step_mu.py:{lineno}: imports {module} "
-                    f"BEFORE compat shim (shim starts at line {shim_line})"
-                )
+            assert base != "engine_pipeline", (
+                f"Boot1 → Boot2 violation at step_mu.py:{lineno}: imports {module}. "
+                f"Compat shim was removed in wave 13 — import directly from engine_pipeline."
+            )
 
 
 class TestBoot2Dependencies:
@@ -148,47 +134,31 @@ class TestTerminalClassificationStaysInBoot1:
         )
 
 
-class TestReexportCoverage:
-    """step_mu.py re-exports must cover all moved public functions."""
+class TestNoCompatShimRemnants:
+    """Compat shim removed — no callers should import engine_pipeline names from step_mu."""
 
-    def test_reexports_cover_all_moved_functions(self):
-        """step_mu.py re-exports every public function defined in engine_pipeline.py."""
-        # Get module-level public names from engine_pipeline.py (top-level only)
-        ep_path = PY_SELFHOST / "engine_pipeline.py"
-        ep_source = ep_path.read_text()
-        ep_tree = ast.parse(ep_source, str(ep_path))
-        ep_public_names = set()
-        for node in ep_tree.body:  # Top-level statements only
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not node.name.startswith("_"):
-                    ep_public_names.add(node.name)
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and not target.id.startswith("_"):
-                        ep_public_names.add(target.id)
-
-        # Get names imported in step_mu.py from engine_pipeline (shim block)
+    def test_compat_shim_removed(self):
+        """step_mu.py must not re-export from engine_pipeline (shim removed in wave 13)."""
         sm_path = PY_SELFHOST / "step_mu.py"
         sm_source = sm_path.read_text()
+        assert "KNOWN_COMPAT_SHIM" not in sm_source, (
+            "step_mu.py still contains KNOWN_COMPAT_SHIM marker — shim should be removed"
+        )
         sm_tree = ast.parse(sm_source, str(sm_path))
-        reexported_names = set()
         for node in ast.walk(sm_tree):
             if isinstance(node, ast.ImportFrom) and node.level > 0:
                 if node.module and node.module.split(".")[0] == "engine_pipeline":
-                    for alias in node.names:
-                        reexported_names.add(alias.name)
-
-        missing = ep_public_names - reexported_names
-        assert not missing, (
-            f"step_mu.py compat shim missing re-exports for: {sorted(missing)}"
-        )
+                    names = [a.name for a in node.names]
+                    raise AssertionError(
+                        f"step_mu.py still imports from engine_pipeline: {names}"
+                    )
 
 
-class TestNoCyclesWithoutShim:
-    """No import cycles when compat shim is excluded."""
+class TestNoCyclesBetweenBootLayers:
+    """Boot layer imports form a DAG (no circular imports)."""
 
     def test_no_semantic_import_cycles(self):
-        """Boot layer imports (excluding compat shim) form a DAG."""
+        """Boot layer imports form a DAG."""
         files = {
             "eval_seed.py": PY_SELFHOST / "eval_seed.py",
             "step_mu.py": PY_SELFHOST / "step_mu.py",
@@ -196,16 +166,12 @@ class TestNoCyclesWithoutShim:
         }
         base_to_file = {f.removesuffix(".py"): f for f in files}
 
-        # Build graph excluding shim
         graph: dict[str, set[str]] = {}
         for fname, fpath in files.items():
-            shim_line = _get_compat_shim_line(fpath) if fname == "step_mu.py" else None
             deps: set[str] = set()
             for lineno, module in _get_relative_import_modules(fpath):
                 base = module.split(".")[0]
                 if base in base_to_file:
-                    if shim_line is not None and lineno >= shim_line:
-                        continue
                     deps.add(base_to_file[base])
             graph[fname] = deps
 
@@ -213,7 +179,6 @@ class TestNoCyclesWithoutShim:
         remaining = dict(graph)
         order = []
         while remaining:
-            # Find a node with no remaining dependencies
             no_deps = [n for n, deps in remaining.items()
                        if not (deps & set(remaining))]
             assert no_deps, (

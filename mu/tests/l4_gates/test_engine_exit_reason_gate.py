@@ -27,7 +27,8 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
-from rcx_pi.selfhost.step_mu import run_engine_pipeline, ENGINE_EXIT_REASONS
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline, ENGINE_EXIT_REASONS
+
 from rcx_pi.selfhost.kernel import reset_step_budget
 
 pytestmark = [pytest.mark.slow]

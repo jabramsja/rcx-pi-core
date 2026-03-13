@@ -20,9 +20,11 @@ import pytest
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.step_mu import (
     apply_mu,
-    hash_trace_for_recurrence,
     run_algorithm_meta_circular,
     run_mu_structural,
+)
+from rcx_pi.selfhost.engine_pipeline import (
+    hash_trace_for_recurrence,
 )
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget

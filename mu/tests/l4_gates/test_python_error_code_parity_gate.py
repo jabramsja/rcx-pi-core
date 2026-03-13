@@ -32,6 +32,8 @@ from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.step_mu import (
     RcxEngineError,
+)
+from rcx_pi.selfhost.engine_pipeline import (
     run_engine_pipeline,
     run_engine_with_routing,
 )
