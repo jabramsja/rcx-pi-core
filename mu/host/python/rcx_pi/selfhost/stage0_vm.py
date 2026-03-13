@@ -127,23 +127,24 @@ def _resolve_path(root, path):
 def _classify_kind(value):
     """Map a Mu value to its Stage0 kind string.
 
-    Uses exact-type checks for dict/list to reject host subclasses.
-    Dict/list subclasses can override __contains__, __getitem__, __iter__
-    and inject behavior during VM execution — they are not plain Mu values.
+    Uses exact-type checks for ALL types to reject host subclasses.
+    Subclasses can override __eq__, __contains__, __getitem__, __iter__
+    and inject behavior — they are not plain Mu values.
     """
     if value is None:
         return "null"
-    if isinstance(value, bool):      # bool before int (Python subclass)
+    t = type(value)
+    if t is bool:
         return "bool"
-    if isinstance(value, int):
+    if t is int:
         return "int"
-    if isinstance(value, float):
+    if t is float:
         return "float"
-    if isinstance(value, str):
+    if t is str:
         return "string"
-    if type(value) is dict:
+    if t is dict:
         return "dict"
-    if type(value) is list:
+    if t is list:
         return "list"
     return None
 
@@ -157,20 +158,22 @@ def _mu_deep_equal(a, b):
 
     Handles None, bool, int, float, str, dict, list.
     bool and int are distinct types (True != 1).
+    Uses exact-type checks throughout — subclasses are non-Mu.
     """
     if a is None:
         return b is None
     if b is None:
         return False
-    if type(a) is not type(b):
+    t = type(a)
+    if t is not type(b):
         return False
-    if isinstance(a, (bool, int, float, str)):
-        return a == b
-    if isinstance(a, dict):
+    if t is bool or t is int or t is float or t is str:
+        return a == b  # Safe: exact-type means plain primitive __eq__
+    if t is dict:
         if a.keys() != b.keys():
             return False
         return all(_mu_deep_equal(a[k], b[k]) for k in a)
-    if isinstance(a, list):
+    if t is list:
         if len(a) != len(b):
             return False
         return all(_mu_deep_equal(x, y) for x, y in zip(a, b))
@@ -178,13 +181,16 @@ def _mu_deep_equal(a, b):
 
 
 def _safe_mu_deep_equal(a, b):
-    # AST_OK: error boundary — translates host RecursionError to Stage0VMError
-    """Structural equality with recursion overflow protection."""
+    # AST_OK: error boundary — translates host errors to Stage0VMError or fail-closed
+    """Structural equality with recursion overflow and hostile-input protection."""
     try:
         return _mu_deep_equal(a, b)
     except RecursionError:
         raise Stage0VMError(
             "Structural equality depth exceeded (recursion overflow)")
+    except Exception:
+        # Hostile __eq__, __hash__, __iter__ etc. — treat as not-equal (fail-closed)
+        return False
 
 
 # ---------------------------------------------------------------------------

@@ -178,7 +178,7 @@ function muDeepEqual(a, b) {
 }
 
 function safeMuDeepEqual(a, b) {
-  // AST_OK: error boundary — translates host RangeError to Stage0VMError
+  // AST_OK: error boundary — translates host errors to Stage0VMError or fail-closed
   try {
     return muDeepEqual(a, b);
   } catch (e) {
@@ -186,7 +186,8 @@ function safeMuDeepEqual(a, b) {
       throw new Stage0VMError(
         'Structural equality depth exceeded (recursion overflow)');
     }
-    throw e;
+    // Hostile Proxy traps, toString, getPrototypeOf etc. — treat as not-equal
+    return false;
   }
 }
 
