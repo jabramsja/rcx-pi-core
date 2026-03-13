@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 
-from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted
+from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted, match as stage0_match
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached, MAX_MU_DEPTH, MAX_MU_WIDTH
@@ -1439,46 +1439,6 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     return current, trace, False
 
 
-def _resolve_trace_projection_id(
-    projections: list[Mu],
-    current: Mu,
-    next_value: Mu,
-) -> Mu:
-    """
-    Resolve which projection produced `next_value` from `current` using bridge semantics.
-
-    Gate 5 parity requirement:
-    - `run_mu_structural` must share execution semantics with `step_kernel_mu`.
-    - Projection ID extraction therefore probes each projection through
-      `step_kernel_mu(..., kernel_mode="bridge")` instead of calling `match_mu`
-      or `subst_mu` directly.
-
-    Returns:
-        Projection id if a matching projection is found, otherwise None.
-    """
-    # SECURITY: Do NOT suspend the step budget. Probes must consume from the
-    # caller's budget to prevent unbounded computation (adversary finding #1).
-    # Cache next_value hash — it doesn't change across iterations.
-    next_value_hash = mu_hash_control_cached(next_value, "resolve_trace_projection")
-    for proj in projections:
-        if not isinstance(proj, dict):
-            continue
-        if "pattern" not in proj or "body" not in proj:
-            continue
-        candidate = step_kernel_mu(
-            [proj],
-            current,
-            kernel_mode="bridge",
-            validation_mode="domain",
-            return_meta=True,
-        )
-        if candidate["stall"] is True:
-            continue
-        if mu_hash_control_cached(candidate["output"], "resolve_trace_projection.match") == next_value_hash:
-            return proj.get("id")
-    return None
-
-
 # BOUNDARY: Trace infrastructure — calls step_kernel_mu but is NOT on the kernel
 # execution path. Phase 8d structural trace for EngineNews.
 # Reclassified P7W5: was @host_iteration, now BOUNDARY.
@@ -1527,13 +1487,27 @@ def run_mu_structural(
     try:
         for i in range(max_steps):
             # Gate 5 parity: run the same bridge-backed kernel path as production.
-            result = step_kernel_mu(
+            meta = step_kernel_mu(
                 projections,
                 current,
                 kernel_mode="bridge",
                 validation_mode="domain",
+                return_meta=True,
             )
-            matched_id = _resolve_trace_projection_id(projections, current, result)
+            result = meta["output"]
+            # Resolve matched projection ID: use Stage 0 match (proven equivalent
+            # to match.v2 by 33 parity tests in test_self_hosting_v0.py).
+            # First-match-wins: the first projection whose pattern matches current
+            # is the one the kernel applied.  O(N) match calls vs the previous
+            # O(N*K) step_kernel_mu calls per step.
+            matched_id = None
+            if meta["termination_reason"] == "projection_applied":
+                for proj in projections:
+                    if isinstance(proj, dict) and "pattern" in proj:  # AST_OK: infra — trace ID resolution
+                        bindings = stage0_match(proj["pattern"], current)
+                        if bindings is not NO_MATCH:
+                            matched_id = proj.get("id")
+                            break
 
             validate_no_kernel_reserved_fields(result, "run_mu_structural output")
             trace_entries.append({

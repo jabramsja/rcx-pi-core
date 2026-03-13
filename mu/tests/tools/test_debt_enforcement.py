@@ -462,10 +462,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 74 (70 pre-wave11 + 4: wave11 AST_OK:infra
-    # annotations on is_kernel_projection isinstance (3) and
-    # is_kernel_intermediate isinstance (1) in step_mu.py)
-    assert infra_count == 74, (
-        f"Expected 74 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 75 (74 pre-wave18 + 1: wave18 AST_OK:infra
+    # isinstance in run_mu_structural inline trace ID resolution loop)
+    assert infra_count == 75, (
+        f"Expected 75 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

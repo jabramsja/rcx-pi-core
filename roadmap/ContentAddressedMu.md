@@ -122,7 +122,7 @@ Step 2 — Eliminate: All 8 production `mu_equal()` call sites replaced with `mu
 | File | Sites | Purpose |
 |------|-------|---------|
 | `eval_seed.py` | 2 | Binding conflict detection (list + dict match) |
-| `step_mu.py` | 6 | Stall detection (step_kernel_mu, step_algorithm_with_bridge, run_mu, _resolve_trace_projection_id, run_mu_structural, _run_sub_algorithm) |
+| `step_mu.py` | 5 | Stall detection (step_kernel_mu, step_algorithm_with_bridge, run_mu, run_mu_structural, _run_sub_algorithm) |
 | `projection_runner.py` | 1 | Stall detection (make_projection_runner) |
 
 JS parity: `muHashCached()` added to `eval_step.js` with Map-based cache. All 6 JS call sites updated. `muEqual()` delegates to hash comparison.

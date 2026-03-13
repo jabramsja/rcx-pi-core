@@ -35,7 +35,6 @@ from rcx_pi.selfhost.step_mu import (  # SPEED_OK: imported for callsite inspect
 KNOWN_PRODUCTION_CALLERS = {
     "step_mu",                      # core kernel, domain validation (default modes)
     "run_algorithm_meta_circular",  # bridge kernel, algorithm_runtime validation
-    "_resolve_trace_projection_id", # bridge kernel, domain validation
     "run_mu_structural",            # bridge kernel, domain validation
 }
 
