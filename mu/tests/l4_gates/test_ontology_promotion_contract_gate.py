@@ -154,10 +154,15 @@ class TestGovernanceReferences:
     """Verify TASKS.md and STATUS.md reference the contract."""
 
     def test_tasks_md_has_a11_tracker(self):
+        """A11 tracker note must exist in TASKS.md or its Ra archive."""
         tasks_path = REPO_ROOT / "TASKS.md"
         content = tasks_path.read_text(encoding="utf-8")
+        # A11 tracker note may have been archived from TASKS.md Ra section
+        archive_path = REPO_ROOT / "archive" / "tasks_ra_pre_march_2026.md"
+        if archive_path.exists():
+            content += archive_path.read_text(encoding="utf-8")
         assert "wave-a11" in content.lower() or "a11" in content.lower(), (
-            "TASKS.md must contain A11 tracker sync note"
+            "TASKS.md (or Ra archive) must contain A11 tracker sync note"
         )
 
     def test_status_md_references_contract(self):
