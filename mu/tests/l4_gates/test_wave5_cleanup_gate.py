@@ -48,30 +48,43 @@ class TestValidateProjectionFieldsHelper:
         )
 
     def test_helper_called_by_run_mu(self):
-        """Source proof: run_mu calls _validate_projection_fields."""
+        """Source proof: run_mu calls _validate_entry_point (which calls _validate_projection_fields)."""
         src = _read_source("mu/host/python/rcx_pi/selfhost/step_mu.py")
         tree = ast.parse(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "run_mu":
                 func_src = ast.get_source_segment(src, node)
-                assert func_src and "_validate_projection_fields" in func_src, (
-                    "run_mu must call _validate_projection_fields"
+                assert func_src and "_validate_entry_point" in func_src, (
+                    "run_mu must call _validate_entry_point"
                 )
                 return
         raise AssertionError("run_mu not found in step_mu.py")
 
     def test_helper_called_by_run_mu_structural(self):
-        """Source proof: run_mu_structural calls _validate_projection_fields."""
+        """Source proof: run_mu_structural calls _validate_entry_point (which calls _validate_projection_fields)."""
         src = _read_source("mu/host/python/rcx_pi/selfhost/step_mu.py")
         tree = ast.parse(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "run_mu_structural":
                 func_src = ast.get_source_segment(src, node)
-                assert func_src and "_validate_projection_fields" in func_src, (
-                    "run_mu_structural must call _validate_projection_fields"
+                assert func_src and "_validate_entry_point" in func_src, (
+                    "run_mu_structural must call _validate_entry_point"
                 )
                 return
         raise AssertionError("run_mu_structural not found in step_mu.py")
+
+    def test_validate_entry_point_calls_validate_projection_fields(self):
+        """Source proof: _validate_entry_point delegates to _validate_projection_fields."""
+        src = _read_source("mu/host/python/rcx_pi/selfhost/step_mu.py")
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_validate_entry_point":
+                func_src = ast.get_source_segment(src, node)
+                assert func_src and "_validate_projection_fields" in func_src, (
+                    "_validate_entry_point must call _validate_projection_fields"
+                )
+                return
+        raise AssertionError("_validate_entry_point not found in step_mu.py")
 
 
 # ---------------------------------------------------------------------------

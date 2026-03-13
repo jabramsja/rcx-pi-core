@@ -551,6 +551,26 @@ def validate_algorithm_runtime_fields(
     _walk_and_validate(value, _check_algorithm_runtime, context, _depth)
 
 
+def _validate_entry_point(
+    projections: list[Mu],
+    initial: Mu,
+    validator,
+    label: str,
+    *,
+    reject_nonlinear: bool = False,
+) -> None:
+    """Common entry-point validation for run_mu / run_mu_structural.
+
+    Combines assert_mu, field validation, ordering, and projection field checks.
+    """
+    assert_mu(initial, f"{label}.initial")
+    validator(initial, f"{label} initial")
+    if reject_nonlinear:
+        _reject_nonlinear_projections(projections, label)
+    validate_kernel_projections_first(projections)
+    _validate_projection_fields(projections, validator, label)
+
+
 def _validate_projection_fields(
     projections: list[Mu],
     validator,
@@ -558,7 +578,7 @@ def _validate_projection_fields(
 ) -> None:
     """Validate projection pattern/body fields, skipping non-dict entries.
 
-    Shared validation loop for run_mu, run_mu_structural, and
+    Called by _validate_entry_point (for run_mu/run_mu_structural) and
     step_algorithm_with_bridge. Lenient mode: non-dict projections are
     skipped (not rejected) and missing pattern/body keys are tolerated.
     For strict validation (TypeError/KeyError on invalid projections),
@@ -1390,12 +1410,9 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     Raises:
         ValueError: If projections contain non-linear patterns.
     """
-    assert_mu(initial, "run_mu.initial")
-    validate_no_kernel_reserved_fields(initial, "run_mu initial")
-    _reject_nonlinear_projections(projections, "run_mu")
-    validate_kernel_projections_first(projections)
-    _validate_projection_fields(
-        projections, validate_no_kernel_reserved_fields, "run_mu"
+    _validate_entry_point(
+        projections, initial, validate_no_kernel_reserved_fields, "run_mu",
+        reject_nonlinear=True,
     )
 
     trace = []
@@ -1492,11 +1509,8 @@ def run_mu_structural(
     This enables Rule 2.2 (closure-on-second-demand) - EngineNews projections
     can pattern-match against the trace to detect when a state recurs.
     """
-    assert_mu(initial, "run_mu_structural.initial")
-    validate_no_kernel_reserved_fields(initial, "run_mu_structural initial")
-    validate_kernel_projections_first(projections)
-    _validate_projection_fields(
-        projections, validate_no_kernel_reserved_fields, "run_mu_structural"
+    _validate_entry_point(
+        projections, initial, validate_no_kernel_reserved_fields, "run_mu_structural",
     )
 
     budget = get_step_budget()
