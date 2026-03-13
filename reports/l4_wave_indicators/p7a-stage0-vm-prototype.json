@@ -1,0 +1,24 @@
+{
+  "wave_id": "p7a-stage0-vm-prototype",
+  "repeat_run_speedup_ratio": 1.057163,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.396938,
+  "repeat_run_raw_seconds": [
+    0.419628,
+    0.396938
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.419628
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.816566
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-13T10:56:56Z",
+  "collector_version": "2.2.0"
+}

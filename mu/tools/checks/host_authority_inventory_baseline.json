@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-13T07:34:36.187542+00:00",
+  "generated_at": "2026-03-13T11:29:44.360148+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -431,6 +431,100 @@
           "name": "validateSeedDependencies",
           "signals": [
             "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 64,
+          "name": "classifyKind",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 132,
+          "name": "materializeTemplate",
+          "signals": [
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 116,
+          "name": "muCopy",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 79,
+          "name": "muDeepEqual",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 43,
+          "name": "resolvePath",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 396,
+          "name": "stage0VmRun",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 233,
+          "name": "stage0VmStep",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 172,
+          "name": "validateBundle",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:JSON.stringify",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add(",
             "mutation:.push("
           ],
           "substrate": "javascript"
@@ -1813,6 +1907,102 @@
           "substrate": "python"
         },
         {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 97,
+          "name": "_classify_kind",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 163,
+          "name": "_materialize_template",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 149,
+          "name": "_mu_copy",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 120,
+          "name": "_mu_deep_equal",
+          "signals": [
+            "builtin:all",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:zip",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 73,
+          "name": "_resolve_path",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 458,
+          "name": "stage0_vm_run",
+          "signals": [
+            "builtin:len",
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 279,
+          "name": "stage0_vm_step",
+          "signals": [
+            "builtin:any",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 216,
+          "name": "validate_bundle",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 59,
           "name": "__init__",
@@ -2128,9 +2318,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 83,
-        "python": 109,
-        "total": 192
+        "javascript": 91,
+        "python": 117,
+        "total": 208
       }
     },
     "total": {
@@ -2640,6 +2830,100 @@
           "name": "validateSeedDependencies",
           "signals": [
             "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 64,
+          "name": "classifyKind",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 132,
+          "name": "materializeTemplate",
+          "signals": [
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 116,
+          "name": "muCopy",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 79,
+          "name": "muDeepEqual",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 43,
+          "name": "resolvePath",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 396,
+          "name": "stage0VmRun",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 233,
+          "name": "stage0VmStep",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 172,
+          "name": "validateBundle",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:JSON.stringify",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add(",
             "mutation:.push("
           ],
           "substrate": "javascript"
@@ -4358,6 +4642,102 @@
           "substrate": "python"
         },
         {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 97,
+          "name": "_classify_kind",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 163,
+          "name": "_materialize_template",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 149,
+          "name": "_mu_copy",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 120,
+          "name": "_mu_deep_equal",
+          "signals": [
+            "builtin:all",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:zip",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 73,
+          "name": "_resolve_path",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 458,
+          "name": "stage0_vm_run",
+          "signals": [
+            "builtin:len",
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 279,
+          "name": "stage0_vm_step",
+          "signals": [
+            "builtin:any",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 216,
+          "name": "validate_bundle",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 59,
           "name": "__init__",
@@ -4799,9 +5179,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 110,
-        "python": 159,
-        "total": 269
+        "javascript": 118,
+        "python": 167,
+        "total": 285
       }
     }
   },

@@ -1,0 +1,436 @@
+{
+  "stage0_ir_version": 1,
+  "bundle_id": "rcx.stage0.match_v2.example.v1",
+  "source_seed": "match.v2.json",
+  "source_seed_version": "2.0.0",
+  "machine_profile": "rcx.stage0.v1",
+  "hand_authored": true,
+  "note": "Hand-authored lowering of match.v2.json for P7-a prototype. NOT compiler-derived.",
+  "program_order": [
+    "match.done",
+    "match.sibling",
+    "match.equal",
+    "match.var",
+    "match.typed.descend",
+    "match.dict.descend",
+    "match.fail",
+    "match.wrap"
+  ],
+  "programs": [
+    {
+      "id": "match.done",
+      "description": "Focus null, stack empty -> match succeeded, return bindings",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "check_equal", "path": ["focus", "root", "pattern_focus"], "value": null,
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "check_equal", "path": ["focus", "root", "value_focus"], "value": null,
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "b",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "check_equal", "path": ["focus", "root", "stack"], "value": null,
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "_mode": {"kind": "literal", "value": "match_done"},
+            "_status": {"kind": "literal", "value": "success"},
+            "_bindings": {"kind": "capture_ref", "name": "b"},
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.done",
+        "projection_index": 0
+      }
+    },
+    {
+      "id": "match.sibling",
+      "description": "After matching head, move to tail (sibling)",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "check_equal", "path": ["focus", "root", "pattern_focus"], "value": null,
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "check_equal", "path": ["focus", "root", "value_focus"], "value": null,
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "b",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "stack"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "stack"],
+         "required": ["head", "tail"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "stack", "head"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["stack", "head"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "stack", "head"],
+         "required": ["type", "pattern_rest", "value_rest"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["stack", "head"]}},
+        {"op": "check_equal", "path": ["focus", "root", "stack", "head", "type"], "value": "pair",
+         "source_map": {"section": "pattern", "path": ["stack", "head", "type"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack", "head", "pattern_rest"], "name": "pt",
+         "source_map": {"section": "pattern", "path": ["stack", "head", "pattern_rest"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack", "head", "value_rest"], "name": "vt",
+         "source_map": {"section": "pattern", "path": ["stack", "head", "value_rest"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack", "tail"], "name": "rest",
+         "source_map": {"section": "pattern", "path": ["stack", "tail"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "mode": {"kind": "literal", "value": "match"},
+            "pattern_focus": {"kind": "capture_ref", "name": "pt"},
+            "value_focus": {"kind": "capture_ref", "name": "vt"},
+            "bindings": {"kind": "capture_ref", "name": "b"},
+            "stack": {"kind": "capture_ref", "name": "rest"},
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.sibling",
+        "projection_index": 1
+      }
+    },
+    {
+      "id": "match.equal",
+      "description": "Pattern equals value (non-linear: same var appears twice)",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus"], "name": "same",
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "check_captured_equal", "path": ["focus", "root", "value_focus"], "capture_name": "same",
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "b",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack"], "name": "s",
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "mode": {"kind": "literal", "value": "match"},
+            "pattern_focus": {"kind": "literal", "value": null},
+            "value_focus": {"kind": "literal", "value": null},
+            "bindings": {"kind": "capture_ref", "name": "b"},
+            "stack": {"kind": "capture_ref", "name": "s"},
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.equal",
+        "projection_index": 2
+      }
+    },
+    {
+      "id": "match.var",
+      "description": "Variable site binds to any value",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "pattern_focus"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "pattern_focus"],
+         "required": ["var"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus", "var"], "name": "name",
+         "source_map": {"section": "pattern", "path": ["pattern_focus", "var"]}},
+        {"op": "capture_path", "path": ["focus", "root", "value_focus"], "name": "value",
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "bindings",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack"], "name": "stack",
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "mode": {"kind": "literal", "value": "match"},
+            "pattern_focus": {"kind": "literal", "value": null},
+            "value_focus": {"kind": "literal", "value": null},
+            "bindings": {
+              "kind": "object",
+              "fields": {
+                "name": {"kind": "capture_ref", "name": "name"},
+                "value": {"kind": "capture_ref", "name": "value"},
+                "rest": {"kind": "capture_ref", "name": "bindings"}
+              }
+            },
+            "stack": {"kind": "capture_ref", "name": "stack"},
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.var",
+        "projection_index": 3
+      }
+    },
+    {
+      "id": "match.typed.descend",
+      "description": "Descend into type-tagged head/tail (non-linear: type must match)",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "pattern_focus"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "pattern_focus"],
+         "required": ["_type", "head", "tail"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus", "_type"], "name": "type",
+         "source_map": {"section": "pattern", "path": ["pattern_focus", "_type"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus", "head"], "name": "ph",
+         "source_map": {"section": "pattern", "path": ["pattern_focus", "head"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus", "tail"], "name": "pt",
+         "source_map": {"section": "pattern", "path": ["pattern_focus", "tail"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "value_focus"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "value_focus"],
+         "required": ["_type", "head", "tail"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "check_captured_equal", "path": ["focus", "root", "value_focus", "_type"], "capture_name": "type",
+         "source_map": {"section": "pattern", "path": ["value_focus", "_type"]}},
+        {"op": "capture_path", "path": ["focus", "root", "value_focus", "head"], "name": "vh",
+         "source_map": {"section": "pattern", "path": ["value_focus", "head"]}},
+        {"op": "capture_path", "path": ["focus", "root", "value_focus", "tail"], "name": "vt",
+         "source_map": {"section": "pattern", "path": ["value_focus", "tail"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "b",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack"], "name": "s",
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "mode": {"kind": "literal", "value": "match"},
+            "pattern_focus": {"kind": "capture_ref", "name": "ph"},
+            "value_focus": {"kind": "capture_ref", "name": "vh"},
+            "bindings": {"kind": "capture_ref", "name": "b"},
+            "stack": {
+              "kind": "object",
+              "fields": {
+                "head": {
+                  "kind": "object",
+                  "fields": {
+                    "type": {"kind": "literal", "value": "pair"},
+                    "pattern_rest": {"kind": "capture_ref", "name": "pt"},
+                    "value_rest": {"kind": "capture_ref", "name": "vt"}
+                  }
+                },
+                "tail": {"kind": "capture_ref", "name": "s"}
+              }
+            },
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.typed.descend",
+        "projection_index": 4
+      }
+    },
+    {
+      "id": "match.dict.descend",
+      "description": "Descend into plain head/tail structure",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "pattern_focus"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "pattern_focus"],
+         "required": ["head", "tail"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus", "head"], "name": "ph",
+         "source_map": {"section": "pattern", "path": ["pattern_focus", "head"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus", "tail"], "name": "pt",
+         "source_map": {"section": "pattern", "path": ["pattern_focus", "tail"]}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "value_focus"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "value_focus"],
+         "required": ["head", "tail"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "value_focus", "head"], "name": "vh",
+         "source_map": {"section": "pattern", "path": ["value_focus", "head"]}},
+        {"op": "capture_path", "path": ["focus", "root", "value_focus", "tail"], "name": "vt",
+         "source_map": {"section": "pattern", "path": ["value_focus", "tail"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "b",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack"], "name": "s",
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "mode": {"kind": "literal", "value": "match"},
+            "pattern_focus": {"kind": "capture_ref", "name": "ph"},
+            "value_focus": {"kind": "capture_ref", "name": "vh"},
+            "bindings": {"kind": "capture_ref", "name": "b"},
+            "stack": {
+              "kind": "object",
+              "fields": {
+                "head": {
+                  "kind": "object",
+                  "fields": {
+                    "type": {"kind": "literal", "value": "pair"},
+                    "pattern_rest": {"kind": "capture_ref", "name": "pt"},
+                    "value_rest": {"kind": "capture_ref", "name": "vt"}
+                  }
+                },
+                "tail": {"kind": "capture_ref", "name": "s"}
+              }
+            },
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.dict.descend",
+        "projection_index": 5
+      }
+    },
+    {
+      "id": "match.fail",
+      "description": "Catch-all: any match state not caught = failure",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["mode", "pattern_focus", "value_focus", "bindings", "stack", "_match_ctx"],
+         "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "check_equal", "path": ["focus", "root", "mode"], "value": "match",
+         "source_map": {"section": "pattern", "path": ["mode"]}},
+        {"op": "capture_path", "path": ["focus", "root", "pattern_focus"], "name": "pf",
+         "source_map": {"section": "pattern", "path": ["pattern_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "value_focus"], "name": "vf",
+         "source_map": {"section": "pattern", "path": ["value_focus"]}},
+        {"op": "capture_path", "path": ["focus", "root", "bindings"], "name": "_b",
+         "source_map": {"section": "pattern", "path": ["bindings"]}},
+        {"op": "capture_path", "path": ["focus", "root", "stack"], "name": "_s",
+         "source_map": {"section": "pattern", "path": ["stack"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "_mode": {"kind": "literal", "value": "match_done"},
+            "_status": {"kind": "literal", "value": "no_match"},
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.fail",
+        "projection_index": 6
+      }
+    },
+    {
+      "id": "match.wrap",
+      "description": "Entry point - wrap raw match request into state",
+      "ops": [
+        {"op": "assert_focus_kind", "path": ["focus", "root"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_key_profile", "path": ["focus", "root"],
+         "required": ["match", "_match_ctx"], "optional": [],
+         "source_map": {"section": "pattern", "path": []}},
+        {"op": "assert_focus_kind", "path": ["focus", "root", "match"], "kind": "dict",
+         "source_map": {"section": "pattern", "path": ["match"]}},
+        {"op": "assert_key_profile", "path": ["focus", "root", "match"],
+         "required": ["pattern", "value"], "optional": [],
+         "source_map": {"section": "pattern", "path": ["match"]}},
+        {"op": "capture_path", "path": ["focus", "root", "match", "pattern"], "name": "p",
+         "source_map": {"section": "pattern", "path": ["match", "pattern"]}},
+        {"op": "capture_path", "path": ["focus", "root", "match", "value"], "name": "v",
+         "source_map": {"section": "pattern", "path": ["match", "value"]}},
+        {"op": "capture_path", "path": ["focus", "root", "_match_ctx"], "name": "ctx",
+         "source_map": {"section": "pattern", "path": ["_match_ctx"]}},
+        {"op": "write_path", "template": {
+          "kind": "object",
+          "fields": {
+            "mode": {"kind": "literal", "value": "match"},
+            "pattern_focus": {"kind": "capture_ref", "name": "p"},
+            "value_focus": {"kind": "capture_ref", "name": "v"},
+            "bindings": {"kind": "literal", "value": null},
+            "stack": {"kind": "literal", "value": null},
+            "_match_ctx": {"kind": "capture_ref", "name": "ctx"}
+          }
+        }, "source_map": {"section": "body", "path": []}},
+        {"op": "return_projection_success",
+         "source_map": {"section": "body", "path": []}}
+      ],
+      "source_map": {
+        "seed_file": "match.v2.json",
+        "projection_id": "match.wrap",
+        "projection_index": 7
+      }
+    }
+  ]
+}

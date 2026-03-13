@@ -235,20 +235,23 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
     assert result.returncode == 0
     data = json.loads(result.stdout)
 
-    # Current count should be 4 (from match_mu.py, eval_seed.py, step_mu.py)
+    # Current count should be 6 (from match_mu.py, eval_seed.py, step_mu.py, stage0_vm.py)
     # Phase 6c removed 2 (normalize_for_match and denormalize_from_match comprehensions)
     # Phase A reclassified 2 items from bootstrap to infra (match_mu boundary, step_mu constant)
+    # P7-a added 2 (stage0_vm.py dict/list comprehensions in _materialize_template)
     ast_ok_count = data["debt"]["ast_ok_bootstrap"]
 
     # Verify it's a reasonable number
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 4:
+    # Current expected count is 8:
     #   - 2 eval_seed.py list/dict comprehensions (original)
     #   - 2 eval_seed.py budget-path comprehensions (D009 depth threading)
-    assert ast_ok_count == 4, (
-        f"Expected 4 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    #   - 2 stage0_vm.py dict/list comprehensions in _materialize_template (P7-a)
+    #   - 2 stage0_vm.py dict/list comprehensions in _mu_copy (P7-a bot review fix)
+    assert ast_ok_count == 8, (
+        f"Expected 8 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 
@@ -462,9 +465,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 75 (74 pre-wave18 + 1: wave18 AST_OK:infra
-    # isinstance in run_mu_structural inline trace ID resolution loop)
-    assert infra_count == 75, (
-        f"Expected 75 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 76 (75 pre-P7-a + 1: P7-a AST_OK:infra
+    # program_map dict comprehension in stage0_vm_step)
+    assert infra_count == 76, (
+        f"Expected 76 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
