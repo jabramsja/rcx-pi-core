@@ -89,6 +89,41 @@ class TestNestedHeadTailParity:
 
 
 # ---------------------------------------------------------------------------
+# Source lock: _reconcile_parity requires string var name (PR #565 bot fix)
+# ---------------------------------------------------------------------------
+
+class TestReconcileParityVarGuard:
+    """Verify _reconcile_parity requires string var name (not just any value)."""
+
+    def test_reconcile_parity_has_string_guard(self):
+        """_reconcile_parity var site check must include isinstance(..., str)."""
+        py_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "subst_mu.py"
+        source = py_path.read_text()
+        # Find the _reconcile_parity function and verify string guard exists
+        in_func = False
+        for line in source.split("\n"):
+            if "def _reconcile_parity" in line:
+                in_func = True
+            if in_func and '"var" in original_body' in line:
+                assert 'isinstance(original_body["var"], str)' in line, (
+                    "_reconcile_parity var site detection must require string var name "
+                    "(matching eval_seed.is_var). Without this, {\"var\": 1} would be "
+                    "misinterpreted as a substitution site."
+                )
+                return
+        pytest.fail("Could not find var site check in _reconcile_parity")
+
+    def test_non_string_var_preserved_as_literal(self):
+        """{"var": 1} must be preserved as literal dict, not treated as variable."""
+        body = {"wrapper": {"var": 1}}
+        py_result = substitute(body, {})
+        mu_result = subst_mu(body, {})
+        assert mu_equal(py_result, mu_result), (
+            f"Non-string var parity failure: Python={py_result}, Mu={mu_result}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # JS source lock: control hash in run_exhaustion
 # ---------------------------------------------------------------------------
 
