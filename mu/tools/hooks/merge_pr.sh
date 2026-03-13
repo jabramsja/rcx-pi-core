@@ -43,7 +43,7 @@ resolve_threads() {
     while [ "$has_next" = "true" ]; do
         local after_clause=""
         if [ -n "$cursor" ]; then
-            after_clause=", after: \\\"$cursor\\\""
+            after_clause=", after: \"$cursor\""
         fi
 
         local response
