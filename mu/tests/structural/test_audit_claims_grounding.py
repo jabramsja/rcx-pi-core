@@ -15,16 +15,20 @@ from tests.repo_root import REPO_ROOT
 
 
 class TestArchiveBlocking:
-    """Verify that archived tests cannot be run even with explicit paths."""
+    """Verify that archived tests cannot be run even with explicit paths.
+
+    Archive moved from mu/tests/archive/ to archive/tests/ (wave15, 2026-03-12)
+    for growth cap headroom. Tests verify the new location.
+    """
 
     def test_archive_conftest_exists(self):
         """Archive conftest.py must exist to block collection."""
-        conftest = REPO_ROOT / "tests" / "archive" / "conftest.py"
-        assert conftest.exists(), "tests/archive/conftest.py missing"
+        conftest = REPO_ROOT / "archive" / "tests" / "conftest.py"
+        assert conftest.exists(), "archive/tests/conftest.py missing"
 
     def test_archive_conftest_has_ignore_hook(self):
         """Archive conftest.py must have pytest_ignore_collect hook."""
-        conftest = REPO_ROOT / "tests" / "archive" / "conftest.py"
+        conftest = REPO_ROOT / "archive" / "tests" / "conftest.py"
         content = conftest.read_text()
         assert "pytest_ignore_collect" in content, (
             "Archive conftest.py must define pytest_ignore_collect hook"
@@ -35,11 +39,11 @@ class TestArchiveBlocking:
 
     def test_archive_readme_exists(self):
         """Archive README.md must document the archive purpose."""
-        readme = REPO_ROOT / "tests" / "archive" / "README.md"
-        assert readme.exists(), "tests/archive/README.md missing"
+        readme = REPO_ROOT / "archive" / "tests" / "README.md"
+        assert readme.exists(), "archive/tests/README.md missing"
 
     def test_archive_in_collect_ignore(self):
-        """Archive must be in conftest.py collect_ignore list."""
+        """Archive must be in conftest.py collect_ignore list (safety net if dir recreated)."""
         conftest = REPO_ROOT / "tests" / "conftest.py"
         content = conftest.read_text()
         assert "collect_ignore" in content, (
