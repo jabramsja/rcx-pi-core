@@ -21,8 +21,10 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import (
     ALGORITHM_INTERNAL_UNRESERVED_FIELDS as PY_UNRESERVED,
     KERNEL_RESERVED_FIELDS,
-    run_engine_pipeline,
     validate_no_kernel_reserved_fields,
+)
+from rcx_pi.selfhost.engine_pipeline import (
+    run_engine_pipeline,
 )
 
 PY_RUNTIME = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"

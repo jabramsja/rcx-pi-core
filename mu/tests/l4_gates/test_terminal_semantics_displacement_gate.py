@@ -25,6 +25,8 @@ from rcx_pi.selfhost.step_mu import (
     _load_tc_key_sets,  # ANTICHEAT_OK: gate verifies seed-derived key sets
     _clear_tc_cache,  # ANTICHEAT_OK: gate verifies cache-clear parity
     classify_terminal_kind,
+)
+from rcx_pi.selfhost.engine_pipeline import (
     _derive_engine_exit_reason,  # ANTICHEAT_OK: gate verifies seed-backed exit reason
 )
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path

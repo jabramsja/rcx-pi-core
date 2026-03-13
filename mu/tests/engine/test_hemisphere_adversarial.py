@@ -315,7 +315,8 @@ class TestHemisphereAdversarialSmuggling:
 
     def test_boundary_validation_blocks_smuggling(self):
         """run_hemisphere_routing() rejects raw hemi_* injection by wrapping input."""
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
         engine_result = _make_engine_result(value="legit")
         result = run_hemisphere_routing(engine_result, _empty_hemispheres())
         assert isinstance(result, dict)
@@ -324,7 +325,8 @@ class TestHemisphereAdversarialSmuggling:
 
     def test_boundary_validation_rejects_non_dict(self):
         """run_hemisphere_routing() rejects non-dict engine_result."""
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
         with pytest.raises(ValueError, match="engine_result must be a dict"):
             run_hemisphere_routing("not_a_dict", _empty_hemispheres())
 

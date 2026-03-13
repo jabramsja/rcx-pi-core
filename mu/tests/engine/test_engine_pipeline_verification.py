@@ -11,7 +11,8 @@ with the actual engine projections.
 import pytest
 
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
-from rcx_pi.selfhost.step_mu import run_engine_pipeline
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 from rcx_pi.selfhost.kernel import reset_step_budget
 
 

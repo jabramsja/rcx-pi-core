@@ -21,8 +21,10 @@ import pytest
 from rcx_pi.selfhost.step_mu import (
     KERNEL_RESERVED_FIELDS,
     RcxEngineError,
-    run_engine_pipeline,
     validate_no_kernel_reserved_fields,
+)
+from rcx_pi.selfhost.engine_pipeline import (
+    run_engine_pipeline,
     _validate_reentry_payload,  # ANTICHEAT_OK: testing fail-closed shape validation helper
 )
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
@@ -1166,7 +1168,7 @@ class TestBoot1DepthStress:
         """Boot1 respects _BOOT1_MAX_REENTRY_DEPTH (20)."""
         # We can't easily create 20+ re-entries, but we verify the constant
         # exists and is enforced in the implementation.
-        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies depth cap constant
+        from rcx_pi.selfhost.engine_pipeline import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies depth cap constant
         assert _BOOT1_MAX_REENTRY_DEPTH == 20
 
     def test_budget_exhaustion_before_depth_cap(self):
@@ -1286,7 +1288,7 @@ class TestBoot1DepthCapEnforcement:
 
     def test_depth_cap_value_matches_cross_substrate(self):
         """Python and JS depth caps are identical (structural invariant)."""
-        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies cross-substrate parity
+        from rcx_pi.selfhost.engine_pipeline import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies cross-substrate parity
         # Read JS constant
         js_resp = _run_js_json_api({
             "action": "run_engine_pipeline",
@@ -1303,7 +1305,7 @@ class TestBoot1DepthCapEnforcement:
 
     def test_depth_cap_is_positive_integer(self):
         """Depth cap must be a positive integer (not zero, not negative)."""
-        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies type constraint
+        from rcx_pi.selfhost.engine_pipeline import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies type constraint
         assert isinstance(_BOOT1_MAX_REENTRY_DEPTH, int)
         assert _BOOT1_MAX_REENTRY_DEPTH > 0, (
             f"Depth cap must be positive, got {_BOOT1_MAX_REENTRY_DEPTH}"
@@ -1314,7 +1316,7 @@ class TestBoot1DepthCapEnforcement:
 
         Even if we give very high budget, the depth cap provides a hard ceiling.
         """
-        from rcx_pi.selfhost.step_mu import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies budget/depth interaction
+        from rcx_pi.selfhost.engine_pipeline import _BOOT1_MAX_REENTRY_DEPTH  # ANTICHEAT_OK: grounding test verifies budget/depth interaction
         reset_step_budget()
         paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
         cycle_projs = paxos_seed["projections"][:4]

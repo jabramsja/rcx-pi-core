@@ -11,7 +11,7 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed,
     get_seed_path,
 )
-from rcx_pi.selfhost.step_mu import (
+from rcx_pi.selfhost.engine_pipeline import (
     run_metabolization_cycle,  # SPEED_OK: tested via run_mu (slow-marked below)
     count_hemisphere_entries,
 )

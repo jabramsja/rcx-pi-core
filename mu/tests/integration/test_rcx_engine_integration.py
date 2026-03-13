@@ -23,7 +23,9 @@ import pytest
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
-from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS, run_engine_pipeline
+from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 from tests.conftest import run_until_stable
 
 
@@ -484,7 +486,8 @@ class TestFixIntegrationEvidence:
         fix.edge_add prepends a fix edge, breaking structural identity.
         engine.fix_done_applied forwards the fixed state with stall=false.
         """
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.mu_type import mu_hash
 
         result = run_engine_pipeline(
@@ -517,7 +520,8 @@ class TestFixIntegrationEvidence:
         After Fix, the value flows through recurrence and exhaustion as normal.
         The engine_result must still contain all standard fields.
         """
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.mu_type import mu_hash
 
         result = run_engine_pipeline(
@@ -616,7 +620,8 @@ class TestEngineFixIntegration:
 
     def test_stall_graph_routes_through_fix(self):
         """Stalled graph state triggers Fix and returns perturbed value."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.mu_type import mu_hash
 
         graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
@@ -639,7 +644,8 @@ class TestEngineFixIntegration:
 
     def test_pass_through_fix_preserves_value(self):
         """Non-graph stalled state passes through Fix unchanged."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 
         scalar_input = {"value": 42, "status": "test"}
         reset_step_budget()
@@ -653,7 +659,8 @@ class TestEngineFixIntegration:
 
     def test_non_stall_path_still_works(self):
         """Non-stalling input bypasses Fix path entirely."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 
         # Projection that transforms input — no stall
         projs = [

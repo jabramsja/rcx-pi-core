@@ -31,14 +31,14 @@ from tests.repo_root import REPO_ROOT
 # Python-side imports for direct validator testing
 # ---------------------------------------------------------------------------
 from rcx_pi.selfhost.step_mu import RcxEngineError
-from rcx_pi.selfhost.step_mu import _validate_ontology_promotion_record  # ANTICHEAT_OK: A12 gate test requires direct validator access
-from rcx_pi.selfhost.step_mu import _OPROMO_FULLY_LOCKED_SEEDS  # ANTICHEAT_OK: A12 parity test for locked seed set
-from rcx_pi.selfhost.step_mu import _derive_opromo_fully_locked_seeds  # ANTICHEAT_OK: A13 derivation rule test
-from rcx_pi.selfhost.step_mu import _JS_CORE_SEED_REGISTRY_KEYS  # ANTICHEAT_OK: A13 registry mirror test (collapsed from checksums+projIDs)
-from rcx_pi.selfhost.step_mu import _build_ontology_promotion_candidate  # ANTICHEAT_OK: A14 builder unit test
-from rcx_pi.selfhost.step_mu import _service_boundary_effect  # ANTICHEAT_OK: A14 behavioral integration test
-from rcx_pi.selfhost.step_mu import _BOUNDARY_DISPATCH  # ANTICHEAT_OK: A15 monkeypatch target for overwrite guard test
-from rcx_pi.selfhost.step_mu import _collect_ontology_evidence  # ANTICHEAT_OK: A17 evidence collector unit test
+from rcx_pi.selfhost.engine_pipeline import _validate_ontology_promotion_record  # ANTICHEAT_OK: A12 gate test requires direct validator access
+from rcx_pi.selfhost.engine_pipeline import _OPROMO_FULLY_LOCKED_SEEDS  # ANTICHEAT_OK: A12 parity test for locked seed set
+from rcx_pi.selfhost.engine_pipeline import _derive_opromo_fully_locked_seeds  # ANTICHEAT_OK: A13 derivation rule test
+from rcx_pi.selfhost.engine_pipeline import _JS_CORE_SEED_REGISTRY_KEYS  # ANTICHEAT_OK: A13 registry mirror test (collapsed from checksums+projIDs)
+from rcx_pi.selfhost.engine_pipeline import _build_ontology_promotion_candidate  # ANTICHEAT_OK: A14 builder unit test
+from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: A14 behavioral integration test
+from rcx_pi.selfhost.engine_pipeline import _BOUNDARY_DISPATCH  # ANTICHEAT_OK: A15 monkeypatch target for overwrite guard test
+from rcx_pi.selfhost.engine_pipeline import _collect_ontology_evidence  # ANTICHEAT_OK: A17 evidence collector unit test
 from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields  # ANTICHEAT_OK: A14 reserved-field re-validation check
 from rcx_pi.selfhost.seed_integrity import MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
 

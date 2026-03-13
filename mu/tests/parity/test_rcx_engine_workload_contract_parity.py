@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from rcx_pi.selfhost.step_mu import run_engine_pipeline
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 
 from tests.repo_root import REPO_ROOT
 

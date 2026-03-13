@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 
 from rcx_pi.selfhost.eval_seed import step
-from rcx_pi.selfhost.step_mu import run_engine_pipeline
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
 from rcx_pi.selfhost.projection_loader import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
 

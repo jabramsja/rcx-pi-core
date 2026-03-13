@@ -11,7 +11,7 @@ No module-level pytestmark — per-test @pytest.mark.slow only.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from rcx_pi.selfhost.step_mu import (
+from rcx_pi.selfhost.engine_pipeline import (
     run_engine_with_routing,
     hash_trace_for_recurrence,
 )
@@ -201,7 +201,8 @@ class TestExactShapeValidation:
 
     def test_routing_rejects_extra_keys(self):
         """run_hemisphere_routing rejects result with extra keys."""
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
 
         # Craft an engine_result that, when routed, would produce 5 correct keys.
         # We can't easily make run_mu return extra keys, so we test the wrapper's
@@ -300,7 +301,8 @@ class TestRoutingPriorityRegression:
 @pytest.mark.slow
 def test_wrapper_equivalent_to_manual_chain():
     """run_engine_with_routing == manual run_engine_pipeline + run_hemisphere_routing + run_metabolization_cycle."""
-    from rcx_pi.selfhost.step_mu import run_engine_pipeline, run_hemisphere_routing
+    from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline, run_hemisphere_routing
+
     from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
     from rcx_pi.selfhost.kernel import reset_step_budget
 
@@ -312,7 +314,8 @@ def test_wrapper_equivalent_to_manual_chain():
 
     engine_kwargs = dict(max_steps=6, max_engine_iterations=20, max_algorithm_iterations=50)
 
-    from rcx_pi.selfhost.step_mu import run_metabolization_cycle
+    from rcx_pi.selfhost.engine_pipeline import run_metabolization_cycle
+
 
     # Manual chain (use_boot1_recursive=True matches wrapper's Boot1 default)
     engine_result = run_engine_pipeline(cycle_projs, initial, use_boot1_recursive=True, **engine_kwargs)

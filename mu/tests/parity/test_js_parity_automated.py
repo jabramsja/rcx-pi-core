@@ -1223,7 +1223,8 @@ class TestEngineHelpersParity:
 
     def test_hash_trace_simple_parity(self):
         """hash_trace_for_recurrence produces identical output on both substrates."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
 
         trace = {
             "head": {"step": 0, "state": {"x": 1}, "projection": "test"},
@@ -1521,7 +1522,8 @@ class TestEnginePipelineCrossSubstrateParity:
 
     def test_engine_pipeline_paxos_parity(self):
         """Engine pipeline produces identical closure detection on both substrates."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
         from rcx_pi.selfhost.kernel import reset_step_budget
 
@@ -1551,7 +1553,8 @@ class TestEnginePipelineCrossSubstrateParity:
 
     def test_hemisphere_routing_parity(self):
         """Hemisphere routing produces identical bucket assignment on both substrates."""
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
 
         engine_result = {
             "value": {"x": 1}, "closure_detected": True, "tau_step": 2,
@@ -1574,7 +1577,8 @@ class TestEnginePipelineCrossSubstrateParity:
 
     def test_full_pipeline_with_routing_parity(self):
         """Full engine->hemisphere pipeline produces identical results on both substrates."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
         from rcx_pi.selfhost.kernel import reset_step_budget
 
@@ -1640,7 +1644,8 @@ class TestEngineFixPathParity:
 
     def test_engine_fix_path_graph_identity_parity(self):
         """Graph + identity stalls → fix applied, stall=false, value perturbed (both substrates)."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
@@ -1681,7 +1686,8 @@ class TestEngineFixPathParity:
 
     def test_engine_fix_path_non_graph_pass_through_parity(self):
         """Non-graph + identity stalls → fix pass-through, stall=true, value unchanged (both substrates)."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         scalar_input = {"value": 42, "status": "test"}
@@ -1718,7 +1724,8 @@ class TestEngineFixPathParity:
 
     def test_engine_fix_path_routing_graph_parity(self):
         """Graph fix path routes correctly through hemisphere routing (both substrates)."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
@@ -1759,7 +1766,8 @@ class TestEngineFixPathParity:
 
     def test_engine_fix_path_routing_non_graph_parity(self):
         """Non-graph fix pass-through routes consistently through hemispheres (both substrates)."""
-        from rcx_pi.selfhost.step_mu import run_engine_with_routing
+        from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         scalar_input = {"value": 42, "status": "test"}
@@ -1829,7 +1837,8 @@ class TestEngineLoopPathParity:
         with frozen operator, the engine eventually terminates. Both substrates
         must produce the same final engine_result.
         """
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         test_input = {"value": 42}
@@ -1875,7 +1884,8 @@ class TestEngineLoopPathParity:
         closure is detected. Exhaustion action will be 'continue' (non-freeze),
         and the engine terminates directly without trampoline re-entry.
         """
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         # A projection that transforms the value (no stall, no closure)
@@ -1917,7 +1927,8 @@ class TestEngineLoopPathParity:
 
     def test_engine_loop_no_config_leak_parity(self):
         """E4: _config does not leak into terminal output in either substrate."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.kernel import reset_step_budget
 
         test_input = {"value": 42}
@@ -2036,7 +2047,8 @@ class TestFalsyDefaultParity:
 
     def test_hash_trace_maxentries_zero(self):
         """maxEntries=0 → both substrates error (not silently use default 10000)."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
 
         trace = {"head": {"state": "a", "step": 0}, "tail": None}
 
@@ -2484,7 +2496,8 @@ def _run_python_edge_case(action_name, args):
     """
     try:
         if action_name == 'hash_trace':
-            from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+            from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
             hash_trace_for_recurrence(args['trace'], max_entries=args.get('maxEntries', 10000))
             return True, None
         elif action_name == 'validate_reserved_fields':
@@ -2496,7 +2509,8 @@ def _run_python_edge_case(action_name, args):
             validate_algorithm_runtime_fields(args['value'])
             return True, None
         elif action_name == 'run_engine_pipeline':
-            from rcx_pi.selfhost.step_mu import run_engine_pipeline
+            from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
             from rcx_pi.selfhost.kernel import reset_step_budget
             reset_step_budget()
             run_engine_pipeline(
@@ -2508,14 +2522,16 @@ def _run_python_edge_case(action_name, args):
             )
             return True, None
         elif action_name == 'run_hemisphere_routing':
-            from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+            from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
             hemispheres = args.get('hemispheres', {
                 "r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None,
             })
             run_hemisphere_routing(args['engine_result'], hemispheres)
             return True, None
         elif action_name == 'run_engine_with_routing':
-            from rcx_pi.selfhost.step_mu import run_engine_with_routing
+            from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
             from rcx_pi.selfhost.kernel import reset_step_budget
             reset_step_budget()
             kwargs = {}
@@ -2676,7 +2692,8 @@ class TestObserverIsomorphism:
 
     def _run_python_with_observer(self, projections, input_value, **kwargs):
         """Run Python engine pipeline with observer capture."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         observer = []
         result = run_engine_pipeline(
             projections, input_value, observer=observer,
@@ -2701,7 +2718,8 @@ class TestObserverIsomorphism:
         """Identical simple input → identical event streams on both substrates."""
         # Empty projections with a simple value — engine will stall quickly
         # Use run_engine_pipeline directly with a value that triggers stall
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 
         # Use a trivial input that produces a quick terminal result
@@ -2743,7 +2761,8 @@ class TestObserverIsomorphism:
     def test_observer_step_boundary_emitted(self):
         """Both substrates emit at least one step_boundary event."""
         py_observer = []
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         try:
             run_engine_pipeline([], "obs_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
@@ -2767,7 +2786,8 @@ class TestObserverIsomorphism:
         terminal_extra_fields = {"engine_exit_reason", "engine_iterations_used"}
 
         py_observer = []
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         try:
             run_engine_pipeline([], "schema_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
@@ -2793,7 +2813,8 @@ class TestObserverIsomorphism:
             "observer": True,
             "boot1LoopMode": False,  # match Python's use_boot1_recursive=False above
         })
-        from rcx_pi.selfhost.step_mu import ENGINE_EXIT_REASONS
+        from rcx_pi.selfhost.engine_pipeline import ENGINE_EXIT_REASONS
+
         for event in js_resp.get("observer_events", []):
             keys = set(event.keys())
             if event["event_name"] == "engine_terminal":
@@ -2818,7 +2839,8 @@ class TestObserverIsomorphism:
     def test_observer_timestamps_monotonic(self):
         """Timestamps are monotonically increasing within each substrate."""
         py_observer = []
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         try:
             run_engine_pipeline([], "mono_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
@@ -2849,7 +2871,8 @@ class TestObserverIsomorphism:
     def test_observer_state_hash_parity(self):
         """state_hash values match between Python and JS for identical states."""
         py_observer = []
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         try:
             run_engine_pipeline([], "hash_parity", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
@@ -2878,7 +2901,8 @@ class TestObserverIsomorphism:
 
     def test_observer_off_by_default(self):
         """When observer is not passed, no events are collected (default path unchanged)."""
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         # No observer parameter — should work exactly as before
         try:
             run_engine_pipeline([], "default_test", use_boot1_recursive=False)
@@ -2897,7 +2921,8 @@ class TestObserverIsomorphism:
     def test_observer_canonicalization_cross_substrate(self):
         """Canonical JSON of matching events is byte-identical across substrates."""
         py_observer = []
-        from rcx_pi.selfhost.step_mu import run_engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
         try:
             run_engine_pipeline([], "canon_test", observer=py_observer, use_boot1_recursive=False)
         except RuntimeError:
@@ -3203,7 +3228,8 @@ class TestHemisphereRoutingPropertyFuzzer:
     @settings(max_examples=150, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_engine_result_routing_parity(self, er):
         """Valid engine_result routes identically on both substrates."""
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
 
         hemispheres = dict(_DEFAULT_HEMISPHERES)
         expected = _expected_hemisphere(er)
@@ -3244,7 +3270,8 @@ class TestHemisphereRoutingPropertyFuzzer:
     @settings(max_examples=100, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_invalid_engine_result_shape_rejection_parity(self, data):
         """Invalid engine_result shapes rejected by both substrates with typed error_code."""
-        from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
 
         er, kind = data
         hemispheres = dict(_DEFAULT_HEMISPHERES)
@@ -3325,7 +3352,8 @@ class TestTraceHashParityFuzzer:
 
     def test_unicode_key_order_hash_parity_regression(self):
         """Regression: mixed BMP/non-BMP dict keys hash identically on both substrates."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
 
         # Python sorts dict keys by Unicode code points. JS default UTF-16 sorting
         # diverges for this pair unless a code-point comparator is used.
@@ -3354,7 +3382,8 @@ class TestTraceHashParityFuzzer:
     @settings(max_examples=120, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_trace_hash_parity(self, data):
         """Valid linked-list trace hashes identically on both substrates."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
 
         trace, length = data
 
@@ -3376,7 +3405,8 @@ class TestTraceHashParityFuzzer:
     @settings(max_examples=80, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_hash_overcap_parity(self, data):
         """Both substrates reject traces exceeding maxEntries with correct error_code."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
 
         trace, length = data
         max_entries = length - 1  # Guaranteed to trigger overcap
@@ -3411,7 +3441,8 @@ class TestTraceHashParityFuzzer:
     @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_hash_hardcap_clamp_parity(self, data):
         """Oversized maxEntries is clamped — short traces not falsely rejected."""
-        from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
 
         trace, length = data
         oversized = 200000  # > 100000 hard cap — both substrates should clamp
@@ -3500,13 +3531,15 @@ def _run_python_r3(action, request):
             )
             return True, result, None
         elif action == 'hash_trace':
-            from rcx_pi.selfhost.step_mu import hash_trace_for_recurrence
+            from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
             result = hash_trace_for_recurrence(
                 request['trace'], max_entries=request.get('maxEntries', 10000),
             )
             return True, result, None
         elif action == 'run_hemisphere_routing':
-            from rcx_pi.selfhost.step_mu import run_hemisphere_routing
+            from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
             hemispheres = request.get('hemispheres', {
                 'r_null': None, 'r_inf': None, 'r_a': None,
                 'lobes': None, 'sink': None,
@@ -3530,7 +3563,8 @@ def _run_python_r3(action, request):
             validate_algorithm_runtime_fields(request['value'])
             return True, None, None
         elif action == 'run_engine_pipeline':
-            from rcx_pi.selfhost.step_mu import run_engine_pipeline
+            from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
             from rcx_pi.selfhost.kernel import reset_step_budget
             reset_step_budget()
             result = run_engine_pipeline(
@@ -3542,7 +3576,8 @@ def _run_python_r3(action, request):
             )
             return True, result, None
         elif action == 'run_engine_with_routing':
-            from rcx_pi.selfhost.step_mu import run_engine_with_routing
+            from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
+
             from rcx_pi.selfhost.kernel import reset_step_budget
             reset_step_budget()
             kwargs = {}
@@ -3559,7 +3594,7 @@ def _run_python_r3(action, request):
             )
             return True, result, None
         elif action == 'run_metabolization_cycle':
-            from rcx_pi.selfhost.step_mu import run_metabolization_cycle  # SPEED_OK: adapter for R3 replay
+            from rcx_pi.selfhost.engine_pipeline import run_metabolization_cycle  # SPEED_OK: adapter for R3 replay
             result = run_metabolization_cycle(request.get('hemispheres'))
             return True, result, None
         elif action == 'run_recurrence':

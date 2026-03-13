@@ -18,11 +18,13 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.step_mu import (
-    ENGINE_EXIT_REASONS,
     TERMINAL_KINDS,
-    _derive_engine_exit_reason,  # ANTICHEAT_OK: parity gate tests coercion parity (muBool vs bool)
     _load_tc_key_sets,  # ANTICHEAT_OK: parity gate compares seed-derived key sets against JS source
     classify_terminal_kind,
+)
+from rcx_pi.selfhost.engine_pipeline import (
+    ENGINE_EXIT_REASONS,
+    _derive_engine_exit_reason,  # ANTICHEAT_OK: parity gate tests coercion parity (muBool vs bool)
 )
 
 JS_DIR = REPO_ROOT / "mu" / "host" / "js"
@@ -464,7 +466,8 @@ class TestHemisphereSourceLock:
     def test_default_hemispheres_keys_match_derived(self):
         """defaultHemispheres() keys must match seed-derived keys (both substrates)."""
         import json
-        from rcx_pi.selfhost.step_mu import _default_hemispheres, _get_hemisphere_keys  # ANTICHEAT_OK: A9 source-lock test
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_keys
+        from rcx_pi.selfhost.engine_pipeline import _default_hemispheres  # ANTICHEAT_OK: A9 source-lock test
         py_keys = _get_hemisphere_keys()
         assert set(_default_hemispheres().keys()) == py_keys, "Python _default_hemispheres() key drift"
         js_out = self._js_eval(
@@ -534,7 +537,8 @@ class TestHemisphereSourceLock:
     def test_default_hemispheres_order_matches_key_order_both_substrates(self):
         """defaultHemispheres() key iteration order must match derived key order (both substrates)."""
         import json
-        from rcx_pi.selfhost.step_mu import _default_hemispheres, _get_hemisphere_key_order  # ANTICHEAT_OK: A9 order-lock test
+        from rcx_pi.selfhost.step_mu import _get_hemisphere_key_order
+        from rcx_pi.selfhost.engine_pipeline import _default_hemispheres  # ANTICHEAT_OK: A9 order-lock test
         py_default_order = list(_default_hemispheres().keys())
         py_key_order = list(_get_hemisphere_key_order())
         assert py_default_order == py_key_order, (
