@@ -10,6 +10,7 @@ ROADMAP.md (41 lines) duplicates the reading order from `roadmap/MANIFEST.md` (1
 
 ## 2. TASKS.md Ra section bloat (Expert)
 Ra section consumes 494/743 lines (66%). Navigation friction for active task sections. Suggest adding a TOC header with line anchors. Not structural — aesthetic.
+- **Status:** RESOLVED (Wave 19, 2026-03-13). TASKS.md compacted 807→395 lines (51% reduction). 148 pre-March tracker notes archived.
 
 ## 3. GraphQL thread-resolve governance bypass (Adversary)
 CLAUDE.md documents GraphQL + `--admin` workflow that can bypass review. This is intentional for single-admin founder repo. Design choice, not vulnerability.
