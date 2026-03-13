@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-03-13
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -240,10 +240,10 @@ Application seeds are easier because EVAL_SEED does the hard work.
 1. **Python provides kernel** (minimal, ~200 lines of plumbing)
 2. **Python provides EVAL_SEED** (initially as Python code, then as Mu)
 3. **EVAL_SEED runs application seeds** (EngineeNews, etc.)
-4. **EVAL_SEED runs a copy of itself** ← self-hosting achieved
-5. **Emergence proven** - structure running structure, no host contamination
+4. **EVAL_SEED runs a copy of itself** ← L1 algorithmic self-hosting (match/subst as projections)
+5. **Structural execution demonstrated** - algorithms run via projections, host provides kernel loop + Stage 0
 
-Python is only the spark. Once step 4 works, RCX runs RCX.
+Python is the bootstrap. L1-L3 are complete; L4 (eliminating remaining host bootstrap) is in progress (see TASKS.md).
 
 ## Main Loop
 
@@ -335,10 +335,10 @@ The kernel is maximally general. Specific behaviors (EngineeNews, Wolfram-style,
 2. Translate to Mu (projections as data)
 3. Verify Python-EVAL and Mu-EVAL produce same results
 
-### Phase 3: Self-Hosting
-1. Mu-EVAL runs Mu-EVAL
-2. Compare traces: Python→EVAL vs EVAL→EVAL
-3. If identical, self-hosting achieved
+### Phase 3: L1 Algorithmic Self-Hosting
+1. step_mu() uses Mu projections for match/subst
+2. Compare traces: Python→step() vs Mu→step_mu()
+3. If identical, L1 self-hosting demonstrated (kernel loop remains host-provided)
 
 ### Phase 4: Application Seeds
 1. EngineeNews as first real seed

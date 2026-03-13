@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: IMPLEMENTATION
-LAST_VERIFIED: 2026-02-09
+LAST_VERIFIED: 2026-03-13
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -21,7 +21,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 ## Purpose
 
-Define how EVAL_SEED achieves self-hosting: the evaluator (expressed as Mu projections) runs itself. This is the key milestone proving RCX emergence is structural, not host-dependent.
+Define the self-hosting design: how core algorithms (match, substitute, lookup, classification) are expressed as Mu projections and executed by the structural kernel. L1 algorithmic operations are self-hosted; the kernel loop and Stage 0 bootstrap remain host-provided (see STATUS.md for current L-level and TASKS.md for L4 progress).
 
 ## Agent Feedback Integration
 
@@ -79,7 +79,7 @@ For self-hosting, these must become Mu projections that the evaluator can run.
 └─────────────────────────────────────────────────────┘
 ```
 
-If EVAL runs EVAL and produces the same trace as Python running EVAL, self-hosting is achieved.
+When step_mu() (using Mu projections for match/subst) produces the same trace as step() (using Python match/substitute), L1 self-hosting is demonstrated: the algorithmic operations are structural. Full self-hosting (L4) requires eliminating the remaining host bootstrap (see TASKS.md L4 gates).
 
 ## Design Approach: Leverage deep_eval
 
@@ -475,11 +475,11 @@ Phase 5 complete:
 5. [x] Phase 4b: substitute projections (`mu/substrate/subst.v1.json`, `rcx_pi/selfhost/subst_mu.py`)
 6. [x] Phase 4d: Integration tests (67 tests across 3 test files)
 
-**Phase 5 (Self-Hosting): ✅ COMPLETE**
+**Phase 5 (L1 Algorithmic Self-Hosting): ✅ COMPLETE**
 7. [x] Create `apply_mu` as Mu projections (combines match + subst) - `rcx_pi/selfhost/step_mu.py`
-8. [x] EVAL_SEED evaluates EVAL_SEED - `test_self_hosting_complete` passes
-9. [x] Compare traces: Python→EVAL vs EVAL→EVAL - identical for all test cases
-10. [x] **Self-hosting achieved!** 33 tests verify step_mu() == step()
+8. [x] step_mu() (structural) matches step() (Python) for all test cases
+9. [x] Compare traces: Python→step vs Mu→step_mu - identical for all test cases
+10. [x] **L1 self-hosting demonstrated:** 33 tests verify step_mu() == step(). Note: kernel loop and Stage 0 bootstrap remain host-provided (see L4 gates in TASKS.md).
 
 **Phase 6 (Debt Reduction): ✅ COMPLETE**
 11. [x] Phase 6a: Lookup as Mu projections (removed 2 @host_builtin)
