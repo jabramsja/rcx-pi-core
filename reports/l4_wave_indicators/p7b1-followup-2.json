@@ -1,8 +1,8 @@
 {
   "wave_id": "p7b1-followup-2",
-  "repeat_run_speedup_ratio": 1.270131,
+  "repeat_run_speedup_ratio": 1.270132,
   "parity_diff_count": 23,
-  "net_host_semantic_delta": -1,
+  "net_host_semantic_delta": 0,
   "step_growth_slope": 0.331227,
   "repeat_run_raw_seconds": [
     0.420702,
