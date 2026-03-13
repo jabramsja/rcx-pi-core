@@ -1,0 +1,24 @@
+{
+  "wave_id": "p7b1-followup-2",
+  "repeat_run_speedup_ratio": 1.270131,
+  "parity_diff_count": 23,
+  "net_host_semantic_delta": -1,
+  "step_growth_slope": 0.331227,
+  "repeat_run_raw_seconds": [
+    0.420702,
+    0.331227
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.420702
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.751929
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-13T21:52:35Z",
+  "collector_version": "2.2.0"
+}
