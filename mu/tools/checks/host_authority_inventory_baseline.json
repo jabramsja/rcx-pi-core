@@ -436,6 +436,88 @@
           "substrate": "javascript"
         },
         {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 68,
+          "name": "classifyKind",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 120,
+          "name": "materializeTemplate",
+          "signals": [
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 83,
+          "name": "muDeepEqual",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 47,
+          "name": "resolvePath",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 375,
+          "name": "stage0VmRun",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 216,
+          "name": "stage0VmStep",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 155,
+          "name": "validateBundle",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:JSON.stringify",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add(",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
           "file": "mu/host/js/core/terminal_classification.js",
           "line": 20,
           "name": "_deepFreeze",
@@ -1813,6 +1895,91 @@
           "substrate": "python"
         },
         {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 101,
+          "name": "_classify_kind",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 153,
+          "name": "_materialize_template",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 124,
+          "name": "_mu_deep_equal",
+          "signals": [
+            "builtin:all",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:zip",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 77,
+          "name": "_resolve_path",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 438,
+          "name": "stage0_vm_run",
+          "signals": [
+            "builtin:len",
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 263,
+          "name": "stage0_vm_step",
+          "signals": [
+            "builtin:any",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 200,
+          "name": "validate_bundle",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 59,
           "name": "__init__",
@@ -2128,9 +2295,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 83,
-        "python": 109,
-        "total": 192
+        "javascript": 90,
+        "python": 116,
+        "total": 206
       }
     },
     "total": {
@@ -2640,6 +2807,88 @@
           "name": "validateSeedDependencies",
           "signals": [
             "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 68,
+          "name": "classifyKind",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 120,
+          "name": "materializeTemplate",
+          "signals": [
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 83,
+          "name": "muDeepEqual",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 47,
+          "name": "resolvePath",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 375,
+          "name": "stage0VmRun",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 216,
+          "name": "stage0VmStep",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 155,
+          "name": "validateBundle",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:JSON.stringify",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add(",
             "mutation:.push("
           ],
           "substrate": "javascript"
@@ -4358,6 +4607,91 @@
           "substrate": "python"
         },
         {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 101,
+          "name": "_classify_kind",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 153,
+          "name": "_materialize_template",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 124,
+          "name": "_mu_deep_equal",
+          "signals": [
+            "builtin:all",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:zip",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 77,
+          "name": "_resolve_path",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 438,
+          "name": "stage0_vm_run",
+          "signals": [
+            "builtin:len",
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 263,
+          "name": "stage0_vm_step",
+          "signals": [
+            "builtin:any",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 200,
+          "name": "validate_bundle",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 59,
           "name": "__init__",
@@ -4799,9 +5133,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 110,
-        "python": 159,
-        "total": 269
+        "javascript": 117,
+        "python": 166,
+        "total": 283
       }
     }
   },
