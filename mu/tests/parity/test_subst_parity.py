@@ -356,6 +356,14 @@ class TestSubstParityNestedHeadTail:
         bindings = {"x": {"wrapper": {"head": 1, "tail": None}}}
         assert_parity(body, bindings)
 
+    def test_non_string_var_treated_as_literal(self):
+        """{"var": 1} is NOT a variable site — must be preserved as literal dict."""
+        assert_parity({"var": 1}, {})
+
+    def test_non_string_var_nested_in_dict(self):
+        """Nested {"var": <non-string>} must be preserved as literal."""
+        assert_parity({"outer": {"var": 1}}, {})
+
 
 # =============================================================================
 # Test: Error Cases

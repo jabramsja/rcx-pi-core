@@ -96,7 +96,7 @@ def _reconcile_parity(original_body: Mu, denormed: Mu,
     if _depth > MAX_MU_DEPTH:
         return denormed
     # Var site: return raw binding value
-    if isinstance(original_body, dict) and len(original_body) == 1 and "var" in original_body:  # AST_OK: boundary scaffolding — var check
+    if isinstance(original_body, dict) and len(original_body) == 1 and "var" in original_body and isinstance(original_body["var"], str):  # AST_OK: boundary scaffolding — var check
         name = original_body["var"]
         if name not in bindings:
             raise KeyError(f"Unbound variable: {name}")
