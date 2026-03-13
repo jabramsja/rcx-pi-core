@@ -20,7 +20,7 @@ from hypothesis import given, strategies as st, settings, assume
 from hypothesis.strategies import composite
 
 from rcx_pi.selfhost.eval_seed import (
-    _stage0_substitute,
+    _stage0_substitute,  # ANTICHEAT_OK: fuzz-testing kernel-internal substitution path
     substitute,
     apply_projection,
     NO_MATCH,
