@@ -162,15 +162,53 @@ class TestLedgerPerSubstrate:
         status = _load_status()
         baseline = _load_authority_baseline()
         auth_counts = baseline["inventories"]["authority"]["site_counts"]
-        # STATUS.md should mention "109 Python + 83 JavaScript" for authority
-        py_match = re.search(r"(\d+)\s+Python.*?(\d+)\s+JavaScript", status)
-        if py_match:
-            # Only check if the per-substrate line is present
-            # (presence is ensured by the table row)
-            pass
-        # Verify the baseline has the expected structure
         assert "python" in auth_counts, "Baseline missing python authority count"
         assert "javascript" in auth_counts, "Baseline missing javascript authority count"
+        # STATUS.md authority row must mention correct per-substrate breakdown
+        # Look for "N Python + M JavaScript" in the authority row
+        auth_row = re.search(
+            r"\*\*Authority sites\*\*.*?(\d+)\s+Python\s*\+\s*(\d+)\s+JavaScript",
+            status,
+        )
+        assert auth_row, (
+            "STATUS.md authority sites row missing per-substrate breakdown "
+            "(expected 'N Python + M JavaScript')"
+        )
+        status_py = int(auth_row.group(1))
+        status_js = int(auth_row.group(2))
+        assert status_py == auth_counts["python"], (
+            f"STATUS.md authority Python count ({status_py}) != "
+            f"baseline ({auth_counts['python']})"
+        )
+        assert status_js == auth_counts["javascript"], (
+            f"STATUS.md authority JavaScript count ({status_js}) != "
+            f"baseline ({auth_counts['javascript']})"
+        )
+
+    def test_total_inventory_per_substrate(self):
+        """Total inventory per-substrate counts in STATUS.md must match baseline."""
+        status = _load_status()
+        baseline = _load_authority_baseline()
+        total_counts = baseline["inventories"]["total"]["site_counts"]
+        # STATUS.md total inventory row must mention correct per-substrate breakdown
+        total_row = re.search(
+            r"\*\*Total inventory sites\*\*.*?(\d+)\s+Python\s*\+\s*(\d+)\s+JavaScript",
+            status,
+        )
+        assert total_row, (
+            "STATUS.md total inventory sites row missing per-substrate breakdown "
+            "(expected 'N Python + M JavaScript')"
+        )
+        status_py = int(total_row.group(1))
+        status_js = int(total_row.group(2))
+        assert status_py == total_counts["python"], (
+            f"STATUS.md total inventory Python count ({status_py}) != "
+            f"baseline ({total_counts['python']})"
+        )
+        assert status_js == total_counts["javascript"], (
+            f"STATUS.md total inventory JavaScript count ({status_js}) != "
+            f"baseline ({total_counts['javascript']})"
+        )
 
     def test_semantics_per_substrate(self):
         """Semantics baseline per-substrate totals must sum to total."""
