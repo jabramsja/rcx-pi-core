@@ -505,17 +505,17 @@ function validateBundle(bundle) {
     }
     _rejectSymbolKeys(prog, 'Program');
     if (!Object.hasOwn(prog, 'id')) throw new Error("Program missing 'id'");
-    if (!Object.hasOwn(prog, 'ops')) throw new Error(`Program '${prog.id}' missing 'ops'`);
+    const pid = prog.id;
+    if (typeof pid !== 'string') {
+      throw new Error(`Program 'id' must be a string, got ${typeof pid}`);
+    }
+    if (!Object.hasOwn(prog, 'ops')) throw new Error(`Program '${pid}' missing 'ops'`);
     // Closed-IR: reject unknown program-level keys (getOwnPropertyNames catches non-enumerable)
     for (const pk of Object.getOwnPropertyNames(prog)) {
       if (!_PROGRAM_ALLOWED_KEYS.has(pk)) {
         throw new Error(
-          `Program '${prog.id}' has unknown key '${pk}'`);
+          `Program '${pid}' has unknown key '${pk}'`);
       }
-    }
-    const pid = prog.id;
-    if (typeof pid !== 'string') {
-      throw new Error(`Program 'id' must be a string, got ${typeof pid}`);
     }
     const ops = prog.ops;
     if (!_isPlainArray(ops) || ops.length === 0) {

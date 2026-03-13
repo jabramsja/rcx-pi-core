@@ -265,7 +265,11 @@ def _validate_template(template):
                     f"Template node key must be a string, "
                     f"got {type(tk).__name__}")
         if "kind" not in node:
-            raise ValueError(f"Invalid template node: {node!r}")
+            try:
+                desc = repr(node)
+            except Exception:
+                desc = "<unrepresentable>"
+            raise ValueError(f"Invalid template node (missing 'kind'): {desc}")
         kind = node["kind"]
         if type(kind) is not str:
             raise ValueError(
@@ -479,17 +483,17 @@ def validate_bundle(bundle):
                     f"Program key must be a string, got {type(pk).__name__}")
         if "id" not in prog:
             raise ValueError("Program missing 'id'")
-        if "ops" not in prog:
-            raise ValueError(f"Program '{prog['id']}' missing 'ops'")
-        # Closed-IR: reject unknown program-level keys
-        for pk in prog:
-            if pk not in _PROGRAM_ALLOWED_KEYS:
-                raise ValueError(
-                    f"Program '{prog['id']}' has unknown key '{pk}'")
         pid = prog["id"]
         if type(pid) is not str:
             raise ValueError(
                 f"Program 'id' must be a string, got {type(pid).__name__}")
+        if "ops" not in prog:
+            raise ValueError(f"Program '{pid}' missing 'ops'")
+        # Closed-IR: reject unknown program-level keys
+        for pk in prog:
+            if pk not in _PROGRAM_ALLOWED_KEYS:
+                raise ValueError(
+                    f"Program '{pid}' has unknown key '{pk}'")
         ops = prog["ops"]
         if type(ops) is not list or not ops:
             raise ValueError(f"Program '{pid}' has empty or non-list ops")
