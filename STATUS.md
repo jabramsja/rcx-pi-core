@@ -316,6 +316,20 @@ See `mu/docs/audit/CI_POLICY.md` for full context on testing strategy.
 
 ## Debt Status
 
+### Three-Ledger Host Debt Truth
+
+RCX tracks host debt at three distinct granularities. Each ledger answers a different question. All three are mechanically enforced by ratchet baselines and a gate test (`tests/docs/test_debt_truth_gate.py`).
+
+| Ledger | Count | What It Measures | Baseline Source |
+|--------|-------|------------------|-----------------|
+| **Tracked markers** | 11 | Narrow official `@host_*` debt marker sites (7 tracked decorators + 4 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion). | `tools/checks/host_semantics_baseline.json` |
+| **Authority sites** | 192 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 109 Python + 83 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
+| **Total inventory sites** | 269 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 159 Python + 110 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
+
+**Why three ledgers:** The 11 tracked markers are the narrow debt the project has categorized and accepted. The 192 authority sites are the broader surface the ratchet prevents from growing. The 269 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
+
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 11 and 269 is the honest measure of how much host work remains uncategorized.
+
 ```
 THRESHOLD: 11
 CURRENT: 11 (7 tracked decorators + 4 AST_OK bootstrap)
