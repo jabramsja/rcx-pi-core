@@ -125,7 +125,12 @@ def _resolve_path(root, path):
 # ---------------------------------------------------------------------------
 
 def _classify_kind(value):
-    """Map a Mu value to its Stage0 kind string."""
+    """Map a Mu value to its Stage0 kind string.
+
+    Uses exact-type checks for dict/list to reject host subclasses.
+    Dict/list subclasses can override __contains__, __getitem__, __iter__
+    and inject behavior during VM execution — they are not plain Mu values.
+    """
     if value is None:
         return "null"
     if isinstance(value, bool):      # bool before int (Python subclass)
@@ -136,9 +141,9 @@ def _classify_kind(value):
         return "float"
     if isinstance(value, str):
         return "string"
-    if isinstance(value, dict):
+    if type(value) is dict:
         return "dict"
-    if isinstance(value, list):
+    if type(value) is list:
         return "list"
     return None
 

@@ -2,14 +2,19 @@
 # merge_pr.sh — Resolve bot threads, merge, post-merge sweep.
 #
 # Usage:
-#   ./tools/hooks/merge_pr.sh <PR_NUM>
-#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep-only   # Skip merge, just sweep recent PRs
+#   ./tools/hooks/merge_pr.sh <PR_NUM>              # Merge + post-merge check (target PR only)
+#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep      # Merge + sweep last 10 merged PRs
+#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep-only # Skip merge, just sweep recent PRs
 #
 # What it does:
 #   1. Pre-merge: resolve bot-authored unresolved threads (warns on human threads)
 #   2. Merge: gh pr merge --merge --delete-branch --admin
 #   3. Post-merge: wait 30s, re-check for late-arriving bot threads, resolve them
-#   4. Sweep: check last 10 merged PRs for any bot-authored unresolved threads
+#   4. Sweep (opt-in via --sweep): check last 10 merged PRs for bot threads
+#
+# POLICY NOTE: The sweep (Step 4) resolves bot threads on PRs beyond the target.
+# This is safe under the repo policy that merged bot threads are clerical residue.
+# Use --sweep explicitly; without it, only the target PR is touched.
 #
 # Only resolves threads authored by chatgpt-codex-connector[bot].
 # Human-authored threads are reported but left unresolved for manual review.
@@ -119,14 +124,14 @@ resolve_threads() {
 # ---------------------------------------------------------------------------
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <PR_NUM> [--sweep-only]"
+    echo "Usage: $0 <PR_NUM> [--sweep | --sweep-only]"
     exit 1
 fi
 
 PR_NUM="$1"
-SWEEP_ONLY="${2:-}"
+FLAG="${2:-}"
 
-if [ "$SWEEP_ONLY" = "--sweep-only" ]; then
+if [ "$FLAG" = "--sweep-only" ]; then
     echo "=== Sweep-only mode ==="
     echo ""
     echo "--- Sweeping last $SWEEP_COUNT merged PRs ---"
@@ -170,17 +175,22 @@ sleep "$POST_MERGE_WAIT"
 resolve_threads "$PR_NUM" "post-merge"
 echo ""
 
-# Step 4: Sweep recent merged PRs
-echo "--- Step 4: Sweeping last $SWEEP_COUNT merged PRs ---"
-merged_prs=$(gh pr list --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
-if [ -z "$merged_prs" ]; then
-    echo "  No merged PRs found"
+# Step 4: Sweep recent merged PRs (opt-in via --sweep)
+if [ "$FLAG" = "--sweep" ]; then
+    echo "--- Step 4: Sweeping last $SWEEP_COUNT merged PRs ---"
+    merged_prs=$(gh pr list --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
+    if [ -z "$merged_prs" ]; then
+        echo "  No merged PRs found"
+    else
+        while IFS= read -r pr; do
+            [ -z "$pr" ] && continue
+            resolve_threads "$pr" "sweep"
+        done <<< "$merged_prs"
+    fi
+    echo ""
 else
-    while IFS= read -r pr; do
-        [ -z "$pr" ] && continue
-        resolve_threads "$pr" "sweep"
-    done <<< "$merged_prs"
+    echo "--- Step 4: Skipped (use --sweep to sweep recent merged PRs) ---"
+    echo ""
 fi
-echo ""
 
-echo "=== Done. PR #$PR_NUM merged + all threads resolved ==="
+echo "=== Done. PR #$PR_NUM merged + threads resolved ==="

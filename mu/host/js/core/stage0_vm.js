@@ -120,15 +120,22 @@ function resolvePath(root, path) {
 // Kind classification
 // ---------------------------------------------------------------------------
 function classifyKind(value) {
-  if (value === null) return 'null';
-  if (typeof value === 'boolean') return 'bool';
-  if (typeof value === 'number') {
-    return Number.isInteger(value) ? 'int' : 'float';
+  // Wrapped in try-catch: _isPlainObject/_isPlainArray call
+  // Object.getPrototypeOf which can throw on hostile Proxies.
+  // Same discipline as resolvePath — fail-closed on host errors.
+  try {
+    if (value === null) return 'null';
+    if (typeof value === 'boolean') return 'bool';
+    if (typeof value === 'number') {
+      return Number.isInteger(value) ? 'int' : 'float';
+    }
+    if (typeof value === 'string') return 'string';
+    if (_isPlainArray(value)) return 'list';
+    if (_isPlainObject(value)) return 'dict';
+    return null;
+  } catch (_) {
+    return null;
   }
-  if (typeof value === 'string') return 'string';
-  if (Array.isArray(value)) return 'list';
-  if (_isPlainObject(value)) return 'dict';
-  return null;
 }
 
 // ---------------------------------------------------------------------------
