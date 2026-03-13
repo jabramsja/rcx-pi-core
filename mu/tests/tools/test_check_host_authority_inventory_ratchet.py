@@ -248,6 +248,34 @@ class TestHostAuthorityInventoryBaselineValidation:
         assert any("site_counts must be a dict" in err for err in errors)
         assert any("entries must be a list" in err for err in errors)
 
+    def test_rejects_mismatched_site_counts_vs_entries(self):
+        """Fail-closed: declared site_counts must match actual entry counts."""
+        entry = {
+            "file": "rcx_pi/selfhost/eval_seed.py",
+            "line": 1,
+            "name": "step",
+            "signals": ["loop"],
+            "substrate": "python",
+        }
+        # Declare python=999 but only 1 actual python entry
+        data = {
+            "schema_version": 2,
+            "generated_at": "2026-03-12T00:00:00Z",
+            "inventories": {
+                "total": {
+                    "site_counts": {"python": 999, "javascript": 0, "total": 999},
+                    "entries": [entry],
+                },
+                "authority": {
+                    "site_counts": {"python": 1, "javascript": 0, "total": 1},
+                    "entries": [entry],
+                },
+            },
+        }
+        errors = validate_baseline(data)
+        assert any("does not match actual python entries" in err for err in errors)
+        assert any("does not match actual total entries" in err for err in errors)
+
 
 class TestHostAuthorityInventoryInvocationPaths:
     """Both tools/ and mu/tools/ paths must work."""

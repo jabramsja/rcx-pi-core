@@ -229,6 +229,29 @@ def validate_baseline(data: object) -> list[str]:
                     f"{(key.substrate, key.file, key.name)}"
                 )
             seen.add(key)
+        # Cross-validate site_counts against actual entries (fail-closed on stale/inflated counts)
+        if isinstance(site_counts, dict) and isinstance(entries, list):
+            actual_py = sum(1 for e in entries if isinstance(e, dict) and e.get("substrate") == "python")
+            actual_js = sum(1 for e in entries if isinstance(e, dict) and e.get("substrate") == "javascript")
+            actual_total = actual_py + actual_js
+            declared_py = site_counts.get("python", -1)
+            declared_js = site_counts.get("javascript", -1)
+            declared_total = site_counts.get("total", -1)
+            if declared_py != actual_py:
+                errors.append(
+                    f"inventories.{inventory_name}.site_counts.python ({declared_py}) "
+                    f"does not match actual python entries ({actual_py})"
+                )
+            if declared_js != actual_js:
+                errors.append(
+                    f"inventories.{inventory_name}.site_counts.javascript ({declared_js}) "
+                    f"does not match actual javascript entries ({actual_js})"
+                )
+            if declared_total != actual_total:
+                errors.append(
+                    f"inventories.{inventory_name}.site_counts.total ({declared_total}) "
+                    f"does not match actual total entries ({actual_total})"
+                )
     return errors
 
 
