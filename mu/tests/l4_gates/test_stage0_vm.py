@@ -2437,3 +2437,56 @@ class TestNonMuLiteralRejection:
                 {"op": "return_projection_fail"},
             ])
             validate_bundle(bundle)  # Must not raise
+
+
+# ---------------------------------------------------------------------------
+# P7-b.1 bot-finding tests: safe repr + pid ordering
+# ---------------------------------------------------------------------------
+
+
+class TestValidateTemplateSafeRepr:
+    """PR #569 bot finding: _validate_template must not leak __repr__ errors."""
+
+    def test_missing_kind_shows_repr_not_crash(self):
+        """Template node missing 'kind' produces ValueError, not __repr__ crash."""
+        bad_node = {"value": 42}  # no 'kind' key
+        ops = [{"op": "write_path", "template": bad_node}]
+        bundle = _make_bundle(ops)
+        with pytest.raises(ValueError, match="missing 'kind'"):
+            validate_bundle(bundle)
+
+    def test_materialize_hostile_repr_produces_unrepresentable(self):
+        """Non-dict template at runtime produces Stage0VMError with safe repr."""
+        # _materialize_template wraps repr() in try/except
+        with pytest.raises(Stage0VMError, match="Invalid template node"):
+            _materialize_template(42, {})
+
+
+class TestValidateBundlePidOrdering:
+    """PR #569 bot finding: pid must be type-checked before use in error msgs."""
+
+    def test_non_string_pid_rejected(self):
+        """Program with non-string 'id' must be rejected with clear message."""
+        bundle = {
+            "stage0_ir_version": 1,
+            "bundle_id": "test",
+            "source_seed": "test",
+            "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{"id": 123, "ops": []}],
+        }
+        with pytest.raises(ValueError, match="must be a string"):
+            validate_bundle(bundle)
+
+    def test_missing_ops_uses_pid_in_error(self):
+        """Program missing 'ops' must show pid in error message."""
+        bundle = {
+            "stage0_ir_version": 1,
+            "bundle_id": "test",
+            "source_seed": "test",
+            "machine_profile": "rcx.stage0.v1",
+            "program_order": ["p1"],
+            "programs": [{"id": "p1"}],
+        }
+        with pytest.raises(ValueError, match="'p1' missing 'ops'"):
+            validate_bundle(bundle)
