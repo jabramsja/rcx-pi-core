@@ -323,12 +323,12 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
 | **Tracked markers** | 15 | Narrow official `@host_*` debt marker sites (5 Py decorator + 6 JS decorator + 4 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion, AST_OK bootstrap). | `tools/checks/host_semantics_baseline.json` |
-| **Authority sites** | 206 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 116 Python + 90 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
-| **Total inventory sites** | 283 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 166 Python + 117 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
+| **Authority sites** | 208 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 117 Python + 91 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
+| **Total inventory sites** | 285 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 167 Python + 118 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
 
-**Why three ledgers:** The 11 tracked markers are the narrow debt the project has categorized and accepted. The 206 authority sites are the broader surface the ratchet prevents from growing. The 283 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
+**Why three ledgers:** The 11 tracked markers are the narrow debt the project has categorized and accepted. The 208 authority sites are the broader surface the ratchet prevents from growing. The 285 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 15 and 283 is the honest measure of how much host work remains uncategorized.
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 15 and 285 is the honest measure of how much host work remains uncategorized.
 
 ```
 THRESHOLD: 15
