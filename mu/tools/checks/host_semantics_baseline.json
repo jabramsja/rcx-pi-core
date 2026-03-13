@@ -15,8 +15,8 @@
   },
   "generated_at": "2026-03-12T16:30:00.000000Z",
   "schema_version": 1,
-  "total": 13,
-  "total_ast_ok_bootstrap": 2,
+  "total": 15,
+  "total_ast_ok_bootstrap": 4,
   "total_javascript": 6,
-  "total_python": 7
+  "total_python": 9
 }

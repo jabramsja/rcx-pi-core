@@ -143,6 +143,20 @@ def _mu_deep_equal(a, b):
 
 
 # ---------------------------------------------------------------------------
+# Structural deep copy (no stdlib — Mu values only)
+# ---------------------------------------------------------------------------
+
+def _mu_copy(value):
+    """Deep-copy a Mu value using only primitives (no copy/json imports)."""
+    if isinstance(value, dict):
+        return {k: _mu_copy(v) for k, v in value.items()}  # AST_OK: bootstrap structural copy of Mu dict
+    if isinstance(value, list):
+        return [_mu_copy(item) for item in value]  # AST_OK: bootstrap structural copy of Mu list
+    # Primitives (str, int, float, bool, None) are immutable — return as-is
+    return value
+
+
+# ---------------------------------------------------------------------------
 # Template materialization
 # ---------------------------------------------------------------------------
 
@@ -167,7 +181,13 @@ def _materialize_template(template, captures, _depth=0):
         raise Stage0VMError(f"Unknown template kind: '{kind}'")
 
     if kind == "literal":
-        return template["value"]
+        value = template["value"]
+        # Deep-copy mutable literals to prevent bundle mutation across runs
+        if isinstance(value, dict):
+            return _mu_copy(value)
+        if isinstance(value, list):
+            return _mu_copy(value)
+        return value
 
     if kind == "capture_ref":
         name = template["name"]
@@ -379,6 +399,10 @@ def stage0_vm_step(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
 
             # ---- return_projection_success ----
             elif op == "return_projection_success":
+                if pending_root is None:
+                    raise Stage0VMError(
+                        f"return_projection_success without write_path "
+                        f"in program '{program_id}'")
                 return {
                     "status": "match",
                     "matched_program_id": program_id,

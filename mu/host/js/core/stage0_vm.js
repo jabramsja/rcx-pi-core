@@ -115,6 +115,22 @@ function muDeepEqual(a, b) {
 }
 
 // ---------------------------------------------------------------------------
+// Structural deep copy (Mu values only, no external deps)
+// ---------------------------------------------------------------------------
+function muCopy(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(muCopy);
+  if (typeof value === 'object') {
+    const result = Object.create(null);
+    for (const k of Object.keys(value)) {
+      result[k] = muCopy(value[k]);
+    }
+    return result;
+  }
+  return value; // primitives are immutable
+}
+
+// ---------------------------------------------------------------------------
 // Template materialization
 // ---------------------------------------------------------------------------
 function materializeTemplate(template, captures, depth = 0) {
@@ -128,7 +144,12 @@ function materializeTemplate(template, captures, depth = 0) {
   if (!TEMPLATE_KINDS.has(kind)) {
     throw new Stage0VMError(`Unknown template kind: '${kind}'`);
   }
-  if (kind === 'literal') return template.value;
+  if (kind === 'literal') {
+    const v = template.value;
+    // Deep-copy mutable literals to prevent bundle mutation across runs
+    if (v !== null && typeof v === 'object') return muCopy(v);
+    return v;
+  }
   if (kind === 'capture_ref') {
     const name = template.name;
     if (!Object.hasOwn(captures, name)) {
@@ -328,6 +349,10 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
 
       // ---- return_projection_success ----
       else if (op === 'return_projection_success') {
+        if (pendingRoot === null) {
+          throw new Stage0VMError(
+            `return_projection_success without write_path in program '${programId}'`);
+        }
         return {
           status: 'match',
           matched_program_id: programId,
