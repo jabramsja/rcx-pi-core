@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Host-Authority Inventory Ratchet.
 
-Counts named host-runtime sites that still perform semantic work, including
-nested helpers, and fails when new sites appear without review.
+Tracks two ledgers across the live runtime tree:
+
+1. total inventory: every named host-runtime site in scope
+2. authority subset: named sites that show host-authority signals
 
 This is intentionally broader than check_host_semantics_ratchet.py:
 - host_semantics_ratchet.py counts explicit @host_* marker debt
-- this checker inventories named runtime sites with host-authority signals
+- this checker inventories full runtime surface plus the narrower authority subset
 
 Fail-closed on:
   - malformed baseline schema
   - unreadable/parsing failures
   - zero/underscan conditions
-  - any new site relative to the curated baseline
+  - any new total-inventory or authority-subset site relative to baseline
 
 Usage:
     python3 tools/checks/check_host_authority_inventory_ratchet.py
@@ -121,6 +123,9 @@ JS_MUTATION_PATTERNS = (
 
 REQUIRED_ENTRY_FIELDS = frozenset({"file", "line", "name", "signals", "substrate"})
 VALID_SUBSTRATES = frozenset({"python", "javascript"})
+REQUIRED_INVENTORY_NAMES = ("total", "authority")
+REQUIRED_INVENTORY_FIELDS = frozenset({"site_counts", "entries"})
+REQUIRED_SITE_COUNT_FIELDS = frozenset({"python", "javascript", "total"})
 
 
 @dataclass(frozen=True)
@@ -135,39 +140,95 @@ def validate_baseline(data: object) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
         return [f"baseline must be a dict, got {type(data).__name__}"]
-    if data.get("schema_version") != 1:
-        errors.append(f"schema_version must be 1, got {data.get('schema_version')}")
-    entries = data.get("entries")
-    if not isinstance(entries, list):
-        errors.append(f"'entries' must be a list, got {type(entries).__name__}")
+    if data.get("schema_version") != 2:
+        errors.append(f"schema_version must be 2, got {data.get('schema_version')}")
+    inventories = data.get("inventories")
+    if not isinstance(inventories, dict):
+        errors.append(f"'inventories' must be a dict, got {type(inventories).__name__}")
         return errors
-    seen: set[SiteKey] = set()
-    for i, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            errors.append(f"entries[{i}] must be a dict")
+    for inventory_name in REQUIRED_INVENTORY_NAMES:
+        block = inventories.get(inventory_name)
+        if not isinstance(block, dict):
+            errors.append(f"inventories.{inventory_name} must be a dict")
             continue
-        missing = REQUIRED_ENTRY_FIELDS - set(entry.keys())
-        if missing:
-            errors.append(f"entries[{i}] missing fields: {sorted(missing)}")
-            continue
-        substrate = entry.get("substrate")
-        if substrate not in VALID_SUBSTRATES:
+        missing_inventory_fields = REQUIRED_INVENTORY_FIELDS - set(block.keys())
+        if missing_inventory_fields:
             errors.append(
-                f"entries[{i}] substrate must be one of {sorted(VALID_SUBSTRATES)}, got {substrate!r}"
+                f"inventories.{inventory_name} missing fields: {sorted(missing_inventory_fields)}"
             )
-        line = entry.get("line")
-        if not isinstance(line, int) or line <= 0:
-            errors.append(f"entries[{i}].line must be positive int, got {line!r}")
-        signals = entry.get("signals")
-        if not isinstance(signals, list) or not all(isinstance(s, str) for s in signals):
-            errors.append(f"entries[{i}].signals must be list[str], got {signals!r}")
-        file_path = entry.get("file", "")
-        if ".." in Path(file_path).parts:
-            errors.append(f"entries[{i}] path traversal in file: {file_path!r}")
-        key = SiteKey(substrate=str(substrate), file=str(file_path), name=str(entry.get("name")))
-        if key in seen:
-            errors.append(f"entries[{i}] duplicate entry: {(key.substrate, key.file, key.name)}")
-        seen.add(key)
+        site_counts = block.get("site_counts")
+        entries = block.get("entries")
+        if not isinstance(site_counts, dict):
+            errors.append(f"inventories.{inventory_name}.site_counts must be a dict")
+        else:
+            missing_site_count_fields = REQUIRED_SITE_COUNT_FIELDS - set(site_counts.keys())
+            if missing_site_count_fields:
+                errors.append(
+                    f"inventories.{inventory_name}.site_counts missing fields: "
+                    f"{sorted(missing_site_count_fields)}"
+                )
+            else:
+                for count_key in REQUIRED_SITE_COUNT_FIELDS:
+                    count = site_counts.get(count_key)
+                    if not isinstance(count, int) or count < 0:
+                        errors.append(
+                            f"inventories.{inventory_name}.site_counts.{count_key} must be "
+                            f"non-negative int, got {count!r}"
+                        )
+                if (
+                    isinstance(site_counts.get("python"), int)
+                    and isinstance(site_counts.get("javascript"), int)
+                    and isinstance(site_counts.get("total"), int)
+                    and site_counts["total"] != site_counts["python"] + site_counts["javascript"]
+                ):
+                    errors.append(
+                        f"inventories.{inventory_name}.site_counts.total must equal python + "
+                        "javascript"
+                    )
+        if not isinstance(entries, list):
+            errors.append(
+                f"inventories.{inventory_name}.entries must be a list, got {type(entries).__name__}"
+            )
+            continue
+        seen: set[SiteKey] = set()
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                errors.append(f"inventories.{inventory_name}.entries[{i}] must be a dict")
+                continue
+            missing = REQUIRED_ENTRY_FIELDS - set(entry.keys())
+            if missing:
+                errors.append(
+                    f"inventories.{inventory_name}.entries[{i}] missing fields: {sorted(missing)}"
+                )
+                continue
+            substrate = entry.get("substrate")
+            if substrate not in VALID_SUBSTRATES:
+                errors.append(
+                    f"inventories.{inventory_name}.entries[{i}] substrate must be one of "
+                    f"{sorted(VALID_SUBSTRATES)}, got {substrate!r}"
+                )
+            line = entry.get("line")
+            if not isinstance(line, int) or line <= 0:
+                errors.append(
+                    f"inventories.{inventory_name}.entries[{i}].line must be positive int, got {line!r}"
+                )
+            signals = entry.get("signals")
+            if not isinstance(signals, list) or not all(isinstance(s, str) for s in signals):
+                errors.append(
+                    f"inventories.{inventory_name}.entries[{i}].signals must be list[str], got {signals!r}"
+                )
+            file_path = entry.get("file", "")
+            if ".." in Path(file_path).parts:
+                errors.append(
+                    f"inventories.{inventory_name}.entries[{i}] path traversal in file: {file_path!r}"
+                )
+            key = SiteKey(substrate=str(substrate), file=str(file_path), name=str(entry.get("name")))
+            if key in seen:
+                errors.append(
+                    f"inventories.{inventory_name}.entries[{i}] duplicate entry: "
+                    f"{(key.substrate, key.file, key.name)}"
+                )
+            seen.add(key)
     return errors
 
 
@@ -195,11 +256,12 @@ def _collect_files() -> tuple[list[Path], list[Path]]:
 
 
 class _PySiteVisitor(ast.NodeVisitor):
-    """Collect Python named sites with host-authority signals."""
+    """Collect Python named sites for total inventory and authority subset."""
 
     def __init__(self) -> None:
         self.stack: list[str] = []
-        self.sites: list[dict[str, object]] = []
+        self.all_sites: list[dict[str, object]] = []
+        self.authority_sites: list[dict[str, object]] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._visit_fn(node)
@@ -232,8 +294,15 @@ class _PySiteVisitor(ast.NodeVisitor):
             elif isinstance(child, ast.AugAssign):
                 if isinstance(child.target, (ast.Subscript, ast.Attribute)):
                     signals.add("mutation:augassign")
+        self.all_sites.append(
+            {
+                "name": dotted,
+                "line": node.lineno,
+                "signals": sorted(signals),
+            }
+        )
         if signals:
-            self.sites.append(
+            self.authority_sites.append(
                 {
                     "name": dotted,
                     "line": node.lineno,
@@ -245,7 +314,7 @@ class _PySiteVisitor(ast.NodeVisitor):
         self.stack.pop()
 
 
-def _scan_python_file(fpath: Path) -> list[dict[str, object]]:
+def _scan_python_file(fpath: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """AST-based Python site scan. Fail-closed on read/parse errors."""
     try:
         rel = str(fpath.relative_to(REPO_ROOT))
@@ -254,26 +323,28 @@ def _scan_python_file(fpath: Path) -> list[dict[str, object]]:
     try:
         source = fpath.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        return [{
+        error_site = {
             "file": rel,
             "line": 1,
             "name": "__READ_ERROR__",
             "signals": [f"parse_error:{type(exc).__name__}"],
             "substrate": "python",
-        }]
+        }
+        return [error_site], [error_site]
     try:
         tree = ast.parse(source, filename=str(fpath))
     except SyntaxError as exc:
-        return [{
+        error_site = {
             "file": rel,
             "line": exc.lineno or 1,
             "name": "__PARSE_ERROR__",
             "signals": [f"parse_error:{exc.msg}"],
             "substrate": "python",
-        }]
+        }
+        return [error_site], [error_site]
     visitor = _PySiteVisitor()
     visitor.visit(tree)
-    return [
+    all_sites = [
         {
             "file": rel,
             "line": int(site["line"]),
@@ -281,8 +352,19 @@ def _scan_python_file(fpath: Path) -> list[dict[str, object]]:
             "signals": list(site["signals"]),
             "substrate": "python",
         }
-        for site in visitor.sites
+        for site in visitor.all_sites
     ]
+    authority_sites = [
+        {
+            "file": rel,
+            "line": int(site["line"]),
+            "name": str(site["name"]),
+            "signals": list(site["signals"]),
+            "substrate": "python",
+        }
+        for site in visitor.authority_sites
+    ]
+    return all_sites, authority_sites
 
 
 def _mask_js_noncode(text: str) -> str:
@@ -383,7 +465,7 @@ def _js_signals(name: str, masked_body: str) -> list[str]:
     return sorted(signals)
 
 
-def _scan_js_file(fpath: Path) -> list[dict[str, object]]:
+def _scan_js_file(fpath: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Regex/brace-based JS site scan. Fail-closed on read/parsing failures."""
     try:
         rel = str(fpath.relative_to(REPO_ROOT))
@@ -392,15 +474,17 @@ def _scan_js_file(fpath: Path) -> list[dict[str, object]]:
     try:
         source = fpath.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        return [{
+        error_site = {
             "file": rel,
             "line": 1,
             "name": "__READ_ERROR__",
             "signals": [f"parse_error:{type(exc).__name__}"],
             "substrate": "javascript",
-        }]
+        }
+        return [error_site], [error_site]
     masked = _mask_js_noncode(source)
-    sites: list[dict[str, object]] = []
+    all_sites: list[dict[str, object]] = []
+    authority_sites: list[dict[str, object]] = []
     seen: set[tuple[str, int]] = set()
     for pattern in JS_FUNCTION_PATTERNS:
         for match in pattern.finditer(masked):
@@ -409,15 +493,15 @@ def _scan_js_file(fpath: Path) -> list[dict[str, object]]:
                 continue
             brace_pos = masked.find("{", match.start())
             if brace_pos == -1:
-                sites.append(
-                    {
-                        "file": rel,
-                        "line": source.count("\n", 0, match.start()) + 1,
-                        "name": f"{name}.__PARSE_ERROR__",
-                        "signals": ["parse_error:missing_open_brace"],
-                        "substrate": "javascript",
-                    }
-                )
+                error_site = {
+                    "file": rel,
+                    "line": source.count("\n", 0, match.start()) + 1,
+                    "name": f"{name}.__PARSE_ERROR__",
+                    "signals": ["parse_error:missing_open_brace"],
+                    "substrate": "javascript",
+                }
+                all_sites.append(error_site)
+                authority_sites.append(error_site)
                 continue
             key = (name, brace_pos)
             if key in seen:
@@ -425,39 +509,35 @@ def _scan_js_file(fpath: Path) -> list[dict[str, object]]:
             seen.add(key)
             end = _find_matching_brace(masked, brace_pos)
             if end is None:
-                sites.append(
-                    {
-                        "file": rel,
-                        "line": source.count("\n", 0, match.start()) + 1,
-                        "name": f"{name}.__PARSE_ERROR__",
-                        "signals": ["parse_error:unmatched_brace"],
-                        "substrate": "javascript",
-                    }
-                )
+                error_site = {
+                    "file": rel,
+                    "line": source.count("\n", 0, match.start()) + 1,
+                    "name": f"{name}.__PARSE_ERROR__",
+                    "signals": ["parse_error:unmatched_brace"],
+                    "substrate": "javascript",
+                }
+                all_sites.append(error_site)
+                authority_sites.append(error_site)
                 continue
             body_masked = masked[brace_pos + 1:end]
             signals = _js_signals(name, body_masked)
+            site = {
+                "file": rel,
+                "line": source.count("\n", 0, match.start()) + 1,
+                "name": name,
+                "signals": signals,
+                "substrate": "javascript",
+            }
+            all_sites.append(site)
             if signals:
-                sites.append(
-                    {
-                        "file": rel,
-                        "line": source.count("\n", 0, match.start()) + 1,
-                        "name": name,
-                        "signals": signals,
-                        "substrate": "javascript",
-                    }
-                )
-    sites.sort(key=lambda s: (str(s["file"]), int(s["line"]), str(s["name"])))
-    return sites
+                authority_sites.append(site)
+    all_sites.sort(key=lambda s: (str(s["file"]), int(s["line"]), str(s["name"])))
+    authority_sites.sort(key=lambda s: (str(s["file"]), int(s["line"]), str(s["name"])))
+    return all_sites, authority_sites
 
 
-def scan_sites(py_files: list[Path], js_files: list[Path]) -> list[dict[str, object]]:
-    """Scan runtime files and return sorted semantic-work site inventory."""
-    sites: list[dict[str, object]] = []
-    for fpath in py_files:
-        sites.extend(_scan_python_file(fpath))
-    for fpath in js_files:
-        sites.extend(_scan_js_file(fpath))
+def _merge_sites(sites: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Deduplicate sites by substrate/file/name and merge line/signals."""
     merged: dict[SiteKey, dict[str, object]] = {}
     for site in sites:
         key = _site_key(site)
@@ -479,6 +559,24 @@ def scan_sites(py_files: list[Path], js_files: list[Path]) -> list[dict[str, obj
     return result
 
 
+def scan_inventories(py_files: list[Path], js_files: list[Path]) -> dict[str, list[dict[str, object]]]:
+    """Scan runtime files and return total inventory plus authority subset."""
+    total_sites: list[dict[str, object]] = []
+    authority_sites: list[dict[str, object]] = []
+    for fpath in py_files:
+        py_total, py_authority = _scan_python_file(fpath)
+        total_sites.extend(py_total)
+        authority_sites.extend(py_authority)
+    for fpath in js_files:
+        js_total, js_authority = _scan_js_file(fpath)
+        total_sites.extend(js_total)
+        authority_sites.extend(js_authority)
+    return {
+        "total_sites": _merge_sites(total_sites),
+        "authority_sites": _merge_sites(authority_sites),
+    }
+
+
 def _site_key(site: dict[str, object]) -> SiteKey:
     return SiteKey(
         substrate=str(site["substrate"]),
@@ -487,9 +585,11 @@ def _site_key(site: dict[str, object]) -> SiteKey:
     )
 
 
-def compare_inventory(current_sites: list[dict[str, object]], baseline: dict) -> dict[str, object]:
-    """Compare current inventory vs baseline."""
-    baseline_entries = baseline.get("entries", [])
+def _compare_entry_sets(
+    current_sites: list[dict[str, object]],
+    baseline_entries: list[dict[str, object]],
+) -> dict[str, object]:
+    """Compare one inventory ledger vs its baseline entries."""
     baseline_map = {_site_key(entry): entry for entry in baseline_entries}
     current_map = {_site_key(entry): entry for entry in current_sites}
 
@@ -530,65 +630,128 @@ def compare_inventory(current_sites: list[dict[str, object]], baseline: dict) ->
         "new_sites": [current_map[key] for key in new_keys],
         "removed_sites": [baseline_map[key] for key in removed_keys],
         "signal_changes": signal_changes,
-        "passed": len(new_keys) == 0,
+    }
+
+
+def compare_inventories(current_inventories: dict[str, list[dict[str, object]]], baseline: dict) -> dict[str, object]:
+    """Compare total inventory plus authority subset vs baseline."""
+    inventories = baseline.get("inventories", {})
+    total_result = _compare_entry_sets(
+        current_inventories["total_sites"],
+        inventories.get("total", {}).get("entries", []),
+    )
+    authority_result = _compare_entry_sets(
+        current_inventories["authority_sites"],
+        inventories.get("authority", {}).get("entries", []),
+    )
+    return {
+        "current_total_counts": total_result["current_counts"],
+        "baseline_total_counts": total_result["baseline_counts"],
+        "current_authority_counts": authority_result["current_counts"],
+        "baseline_authority_counts": authority_result["baseline_counts"],
+        "current_total_sites": total_result["current_sites"],
+        "current_authority_sites": authority_result["current_sites"],
+        "new_total_sites": total_result["new_sites"],
+        "new_authority_sites": authority_result["new_sites"],
+        "removed_total_sites": total_result["removed_sites"],
+        "removed_authority_sites": authority_result["removed_sites"],
+        "total_signal_changes": total_result["signal_changes"],
+        "authority_signal_changes": authority_result["signal_changes"],
+        "passed": len(total_result["new_sites"]) == 0 and len(authority_result["new_sites"]) == 0,
     }
 
 
 def format_human(result: dict[str, object], py_files: int, js_files: int) -> str:
     """Format result for human output."""
-    current_counts = result["current_counts"]
-    baseline_counts = result["baseline_counts"]
+    current_total_counts = result["current_total_counts"]
+    baseline_total_counts = result["baseline_total_counts"]
+    current_authority_counts = result["current_authority_counts"]
+    baseline_authority_counts = result["baseline_authority_counts"]
     lines = [
         f"Scanned: {py_files} Python runtime files + {js_files} JS runtime files",
         (
-            "Current host-authority inventory: "
-            f"{current_counts['total']} total "
-            f"({current_counts['python']} Python + {current_counts['javascript']} JS)"
+            "Current total inventory: "
+            f"{current_total_counts['total']} total "
+            f"({current_total_counts['python']} Python + {current_total_counts['javascript']} JS)"
         ),
         (
-            "Baseline host-authority inventory: "
-            f"{baseline_counts['total']} total "
-            f"({baseline_counts['python']} Python + {baseline_counts['javascript']} JS)"
+            "Baseline total inventory: "
+            f"{baseline_total_counts['total']} total "
+            f"({baseline_total_counts['python']} Python + {baseline_total_counts['javascript']} JS)"
+        ),
+        (
+            "Current authority subset: "
+            f"{current_authority_counts['total']} total "
+            f"({current_authority_counts['python']} Python + {current_authority_counts['javascript']} JS)"
+        ),
+        (
+            "Baseline authority subset: "
+            f"{baseline_authority_counts['total']} total "
+            f"({baseline_authority_counts['python']} Python + {baseline_authority_counts['javascript']} JS)"
         ),
     ]
     if result["passed"]:
-        lines.append("PASS: No new host-authority inventory sites detected.")
+        lines.append("PASS: No new total-inventory or authority-subset sites detected.")
     else:
-        lines.append(
-            f"FAIL: {len(result['new_sites'])} new host-authority site(s) not in baseline:"
-        )
-        for site in result["new_sites"][:20]:
+        if result["new_total_sites"]:
             lines.append(
-                f"  {site['substrate']} {site['file']}::{site['name']} "
-                f"(L{site['line']}; signals={','.join(site['signals'])})"
+                f"FAIL: {len(result['new_total_sites'])} new total-inventory site(s) not in baseline:"
             )
-        if len(result["new_sites"]) > 20:
-            lines.append(f"  ... and {len(result['new_sites']) - 20} more")
-    if result["removed_sites"]:
+            for site in result["new_total_sites"][:20]:
+                lines.append(
+                    f"  TOTAL {site['substrate']} {site['file']}::{site['name']} (L{site['line']})"
+                )
+            if len(result["new_total_sites"]) > 20:
+                lines.append(f"  ... and {len(result['new_total_sites']) - 20} more")
+        if result["new_authority_sites"]:
+            lines.append(
+                f"FAIL: {len(result['new_authority_sites'])} new authority-subset site(s) not in baseline:"
+            )
+            for site in result["new_authority_sites"][:20]:
+                lines.append(
+                    f"  AUTH {site['substrate']} {site['file']}::{site['name']} "
+                    f"(L{site['line']}; signals={','.join(site['signals'])})"
+                )
+            if len(result["new_authority_sites"]) > 20:
+                lines.append(f"  ... and {len(result['new_authority_sites']) - 20} more")
+    if result["removed_total_sites"] or result["removed_authority_sites"]:
         lines.append(
-            f"NOTE: {len(result['removed_sites'])} baseline site(s) disappeared — "
+            "NOTE: baseline site removals detected — "
             "baseline can be updated after review."
         )
-    if result["signal_changes"]:
+    if result["authority_signal_changes"]:
         lines.append(
-            f"NOTE: {len(result['signal_changes'])} existing site(s) changed signal shape."
+            f"NOTE: {len(result['authority_signal_changes'])} existing authority site(s) changed signal shape."
         )
     return "\n".join(lines)
 
 
-def write_baseline(path: Path, current_sites: list[dict[str, object]]) -> None:
-    """Write baseline file from current inventory."""
-    py_count = sum(1 for s in current_sites if s["substrate"] == "python")
-    js_count = sum(1 for s in current_sites if s["substrate"] == "javascript")
+def _count_sites(entries: list[dict[str, object]]) -> dict[str, int]:
+    """Return per-substrate and total counts for a site list."""
+    py_count = sum(1 for s in entries if s["substrate"] == "python")
+    js_count = sum(1 for s in entries if s["substrate"] == "javascript")
+    return {
+        "python": py_count,
+        "javascript": js_count,
+        "total": py_count + js_count,
+    }
+
+
+def write_baseline(path: Path, current_inventories: dict[str, list[dict[str, object]]]) -> None:
+    """Write baseline file from current inventories."""
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat(),
-        "site_counts": {
-            "python": py_count,
-            "javascript": js_count,
-            "total": py_count + js_count,
+        "inventories": {
+            "total": {
+                "site_counts": _count_sites(current_inventories["total_sites"]),
+                "entries": current_inventories["total_sites"],
+            },
+            "authority": {
+                "site_counts": _count_sites(current_inventories["authority_sites"]),
+                "entries": current_inventories["authority_sites"],
+            },
         },
-        "entries": current_sites,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
@@ -618,10 +781,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    current_sites = scan_sites(py_files, js_files)
-    if len(current_sites) < MIN_TOTAL_SITES:
+    current_inventories = scan_inventories(py_files, js_files)
+    if len(current_inventories["total_sites"]) < MIN_TOTAL_SITES:
         print(
-            f"ERROR: zero-scan guard: found {len(current_sites)} total sites "
+            f"ERROR: zero-scan guard: found {len(current_inventories['total_sites'])} total sites "
             f"(minimum {MIN_TOTAL_SITES})",
             file=sys.stderr,
         )
@@ -631,20 +794,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.update_baseline:
         if baseline_path.exists():
             baseline = load_baseline(baseline_path)
-            result = compare_inventory(current_sites, baseline)
-            if result["new_sites"]:
+            result = compare_inventories(current_inventories, baseline)
+            if result["new_total_sites"] or result["new_authority_sites"]:
                 print(
-                    "ERROR: Cannot update baseline while new host-authority sites exist. "
-                    "Review them first.",
+                    "ERROR: Cannot update baseline while new total-inventory or authority-subset "
+                    "sites exist. Review them first.",
                     file=sys.stderr,
                 )
                 return 1
-        write_baseline(baseline_path, current_sites)
+        write_baseline(baseline_path, current_inventories)
         print(f"Wrote baseline: {baseline_path}")
         return 0
 
     baseline = load_baseline(baseline_path)
-    result = compare_inventory(current_sites, baseline)
+    result = compare_inventories(current_inventories, baseline)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
