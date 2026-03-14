@@ -554,7 +554,7 @@ def main():
             file=sys.stderr,
         )
     else:
-        print(output)
+        print(output, end="")
 
 
 if __name__ == "__main__":
