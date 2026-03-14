@@ -37,7 +37,7 @@ if [ -z "$NEXT_SECTION" ]; then
 fi
 
 # Find all PR references in NEXT section
-PR_NUMBERS=$(echo "$NEXT_SECTION" | grep -oE 'PR #[0-9]+' | grep -oE '[0-9]+' | sort -u)
+PR_NUMBERS=$(echo "$NEXT_SECTION" | grep -oE 'PR #[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
 
 if [ -z "$PR_NUMBERS" ]; then
     echo "OK: No PR references found in NEXT section"
@@ -52,7 +52,12 @@ while IFS= read -r pr_num; do
     CHECKED=$((CHECKED + 1))
 
     # Check if PR is merged
-    PR_STATE=$(gh pr view "$pr_num" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+    # Fail closed: if gh fails (auth, network), exit with error rather than silently skipping
+    if ! PR_STATE=$(gh pr view "$pr_num" --json state --jq '.state' 2>&1); then
+        echo "ERROR: Failed to check PR #${pr_num} state: $PR_STATE" >&2
+        echo "   Ensure gh CLI is authenticated and network is available."
+        exit 2
+    fi
 
     if [ "$PR_STATE" != "MERGED" ]; then
         continue
