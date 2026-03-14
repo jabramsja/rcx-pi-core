@@ -77,6 +77,7 @@ ROOT_CANONICAL_FILES = {
     "STATUS.md",
     "TASKS.md",
     "ROADMAP.md",
+    "AGENTS.md",
     "README.md",
     "CLAUDE.md",
     "CHANGELOG.md",

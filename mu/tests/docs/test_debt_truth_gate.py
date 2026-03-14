@@ -3,7 +3,7 @@ Three-Ledger Debt Truth Gate — STATUS.md must match mechanical baselines.
 
 Enforces that STATUS.md presents all three host debt ledgers with counts
 that match the canonical baseline JSON files:
-  1. Tracked markers (15) — host_semantics_baseline.json
+  1. Tracked markers (20) — host_semantics_baseline.json
   2. Authority sites (217) — host_authority_inventory_baseline.json
   3. Total inventory sites (299) — host_authority_inventory_baseline.json
 

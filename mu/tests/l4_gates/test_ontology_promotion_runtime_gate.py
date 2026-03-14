@@ -1142,6 +1142,59 @@ class TestBoundaryPathEmission:
         assert result.stdout.startswith("PASS:"), f"JS boundary emission failed: {result.stdout} {result.stderr}"
         assert result.stdout == "PASS:seed"
 
+    def test_js_handler_result_not_mutated_by_emission(self):
+        """JS F-44: ontology promotion attachment must not pollute handler's original dict."""
+        evidence = _make_valid_evidence()
+        js_code = textwrap.dedent(f"""\
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            const evidence = {json.dumps(evidence)};
+
+            // Enable test mode + inject handler that returns a known object
+            pipeline.enableTestMode();
+            const handlerResult = {{ result: 'hello', trace: [], stall: true }};
+            const originalKeys = Object.keys(handlerResult).sort().join(',');
+            pipeline.setTestDispatchOverride({{
+                run_trace: () => handlerResult,
+            }});
+
+            const request = {{
+                operation: 'run_trace',
+                input: {{ start: true }},
+                context: {{
+                    emit_ontology_candidate: true,
+                    ontology_candidate_evidence: evidence,
+                }},
+                inject_key: 'boundary_result',
+            }};
+            const noop = () => {{}};
+            try {{
+                const ctx = pipeline.serviceBoundaryEffect(
+                    [], {{}}, request, 50, noop, 0, 'test'
+                );
+                const injected = ctx.boundary_result;
+                const hasPromotion = 'ontology_promotion' in injected;
+                const handlerMutated = 'ontology_promotion' in handlerResult;
+                const sameObject = injected === handlerResult;
+                const keysUnchanged = Object.keys(handlerResult).sort().join(',') === originalKeys;
+
+                if (!hasPromotion) {{
+                    process.stdout.write('FAIL:no_promo_on_injected');
+                }} else if (handlerMutated) {{
+                    process.stdout.write('FAIL:handler_mutated');
+                }} else if (sameObject) {{
+                    process.stdout.write('FAIL:same_object');
+                }} else if (!keysUnchanged) {{
+                    process.stdout.write('FAIL:keys_changed:' + Object.keys(handlerResult).sort().join(','));
+                }} else {{
+                    process.stdout.write('PASS');
+                }}
+            }} catch (err) {{
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            }}
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", f"JS F-44 immutability: {result.stdout} {result.stderr}"
+
     def test_js_boundary_no_flag_no_emission(self):
         """JS: serviceBoundaryEffect without emit flag → no ontology_promotion."""
         js_code = textwrap.dedent("""\

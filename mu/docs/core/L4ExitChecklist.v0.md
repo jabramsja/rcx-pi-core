@@ -1,10 +1,10 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-03-05
+LAST_VERIFIED: 2026-03-14
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: none
+GROUNDING_TESTS: tests/docs/test_l4_current_state_truth.py
 
 This header enables automated doc drift detection.
 - REFERENCE: Stable definitions, rarely changes
@@ -144,7 +144,7 @@ grep -n "load_verified_seed\|sha256\|SHA256" rcx_pi/selfhost/seed_integrity.py |
 grep -n "def match\|def substitute\|BOOTSTRAP" rcx_pi/selfhost/eval_seed.py | head -10
 ```
 
-**L4 reduction path:** Make eval_step's own match/substitute structural (meta-circular). BLOCKED — circular dependency: eval_step needs match/subst to apply projections, but structural match/subst ARE projections that need eval_step.
+**L4 reduction path:** Make eval_step's own match/substitute structural (meta-circular). Classification blocker RESOLVED by staged bootstrap (D001-D003, D005, G8 PASS); production reduction remains gated by parity, performance, and cutover evidence.
 
 **Status:** PASS (conditional — bootstrap versions remain as irreducible substrate)
 

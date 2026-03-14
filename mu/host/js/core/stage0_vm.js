@@ -7,7 +7,7 @@
  * The VM is intentionally dumb — all semantic knowledge lives in the
  * bundle data, not in the VM.
  *
- * P7-a prototype. NOT wired into production step/run.
+ * P7-a prototype origin. Wired into the production shadow path; cutover remains flag-gated.
  *
  * Stage0 IR v1 numeric contract: int supported, float UNSUPPORTED.
  * Float rejection enforced by validateBundle. classifyKind retains

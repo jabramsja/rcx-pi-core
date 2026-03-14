@@ -1,10 +1,10 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-18
+LAST_VERIFIED: 2026-03-14
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: none
+GROUNDING_TESTS: tests/docs/test_l4_current_state_truth.py
 
 This header enables automated doc drift detection.
 - REFERENCE: Stable definitions, rarely changes
@@ -18,7 +18,7 @@ If this doc's claims don't match reality, update the doc or fix the code.
 
 **Purpose:** Define a concrete Application Binary Interface for L4 (True Self-Hosting) that maps directly to the existing L4 exit gates (G1-G8). The ABI specifies the minimal surface a substrate must implement, and nothing more.
 
-**Status:** DESIGN_SPEC (SINK research). This defines the target interface. No runtime rewrite is proposed.
+**Status:** DESIGN_SPEC (full L4 completion remains SINK; bounded reduction active in NEXT). This defines the target interface. No runtime rewrite is proposed.
 
 ---
 
@@ -158,9 +158,11 @@ These are NOT part of the L4 Micro-ABI. They are programs that run ON TOP of it:
 
 | ABI Op | Current Substrate | L4 Reduction Path | Status |
 |--------|------------------|--------------------|--------|
-| `rcx_load` | JSON + Python `json.load` | Binary format (Hex0 Stage 0) | UNPROVEN |
-| `rcx_step` | Python `for` + `match()` + `substitute()` | Meta-circular (eval_step applies itself) | BLOCKED (circular dependency) |
-| `rcx_run` | Python `for` loop | CPS fuel threading / structural counter | UNPROVEN |
+| `rcx_load` | JSON + Python `json.load` | Binary format (Hex0 Stage 0) | REDUCIBLE_WITH binary format (classification proved; production path unchanged) |
+| `rcx_step` | Python `for` + `match()` + `substitute()` | Meta-circular staged bootstrap / Stage0 reduction | REDUCIBLE_WITH staged bootstrap (G8 PASS; production reduction in progress, not complete) |
+| `rcx_run` | Python `for` loop | CPS fuel threading / structural counter | REDUCIBLE_WITH / PARTIALLY CONFIRMED (fuel data can be structural; host iteration remains) |
+
+These are classification statuses, not production-completion claims. All three rows still require separate productionization evidence before any "reduced in production" claim is honest.
 
 ---
 

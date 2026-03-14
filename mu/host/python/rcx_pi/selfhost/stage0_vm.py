@@ -4,7 +4,7 @@ This VM executes derived bundles (hand-authored or compiled from seeds)
 using a tiny set of opcodes. The VM is intentionally dumb — all semantic
 knowledge lives in the bundle data, not in the VM.
 
-P7-a prototype. NOT wired into production step_kernel_mu().
+P7-a prototype origin. Wired into the production shadow path via _step_kernel_with_vm(); cutover remains flag-gated.
 Design plan: .scratch/p7a_design_plan.md
 
 Opcodes (9):

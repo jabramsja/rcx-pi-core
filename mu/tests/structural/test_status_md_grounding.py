@@ -85,14 +85,17 @@ class TestDebtRatchet:
     """Verify debt ratchet policy: actual debt <= threshold."""
 
     def test_debt_count_matches_status_md(self):
-        """STATUS.md debt count must match debt_dashboard.sh output."""
+        """STATUS.md debt count must match host_semantics_baseline.json total (canonical)."""
+        import json as _json
         status = parse_status_debt()
-        actual = run_debt_dashboard()
+        baseline_path = REPO_ROOT / "mu" / "tools" / "checks" / "host_semantics_baseline.json"
+        baseline = _json.loads(baseline_path.read_text())
+        actual = baseline["total"]
 
         assert status["current"] == actual, (
             f"STATUS.md claims CURRENT: {status['current']} "
-            f"but debt_dashboard.sh reports: {actual}\n"
-            f"Update STATUS.md if debt changed."
+            f"but host_semantics_baseline.json total: {actual}\n"
+            f"Update STATUS.md or the baseline."
         )
 
     def test_debt_does_not_exceed_threshold(self):
