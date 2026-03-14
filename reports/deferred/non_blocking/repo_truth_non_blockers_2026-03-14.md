@@ -96,3 +96,8 @@ Archived as stale/resolved from the source snapshots:
 
 - Bridge R6 noted: only --flags are rejected. Bare positional args pass through.
 - Not blocking — no production caller passes positional args.
+
+### N18. /checkpoint should force comprehensive memory.md + claude.md re-read
+
+- Founder directive: checkpoint should include explicit instruction to re-read memory.md and claude.md, not just acknowledge them. The goal is behavioral change, not acknowledgment.
+- Status: enhancement for /checkpoint skill.
