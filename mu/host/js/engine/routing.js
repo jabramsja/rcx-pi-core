@@ -16,7 +16,7 @@ const { runEnginePipeline, runEnginePipelineRecursive } = require('./pipeline');
  * Parameterized: takes allProjections and hemisphereProjections.
  * Mirrors Python run_hemisphere_routing() (step_mu.py:1592-1621).
  */
-function runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres) {
+function runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres, vmConfig) {
   if (engineResult === null || typeof engineResult !== 'object' || Array.isArray(engineResult)) {
     throw new RcxError('input.invalid_type', 'engine_result must be a dict');
   }
@@ -31,7 +31,7 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
   for (let i = 0; i < limit; i++) {
     const meta = stepKernel(
       allProjections, current, hemisphereProjections,
-      { returnMeta: true }
+      { returnMeta: true, vmConfig: vmConfig || null }
     );
     if (meta.stall) break;
     current = meta.output;
@@ -88,7 +88,7 @@ function countHemisphereEntries(hemispheres, maxEntriesPerBucket) {
  * No host iteration — iteration is structural (walker projections pattern-match).
  * Mirrors Python run_metabolization_cycle().
  */
-function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemispheres) {
+function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemispheres, vmConfig) {
   // Input validation (fail-closed)
   if (hemispheres === null || typeof hemispheres !== 'object' || Array.isArray(hemispheres)) {
     throw new RcxError('input.invalid_type', `hemispheres must be dict, got ${typeof hemispheres}`);
@@ -111,7 +111,7 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
   for (let i = 0; i < stepBudget; i++) {
     const meta = stepKernel(
       allProjections, current, metabolizeCycleProjections,
-      { returnMeta: true }
+      { returnMeta: true, vmConfig: vmConfig || null }
     );
     if (meta.stall) break;
     current = meta.output;
@@ -133,7 +133,7 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
  * Parameterized: takes all projection sets.
  * Mirrors Python run_engine_with_routing() (step_mu.py).
  */
-function runEngineWithRouting(allProjections, hemisphereProjections, kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, hemispheres, engineKwargs, boot1Mode, metabolizeCycleProjections) {
+function runEngineWithRouting(allProjections, hemisphereProjections, kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, hemispheres, engineKwargs, boot1Mode, metabolizeCycleProjections, vmConfig) {
   if (hemispheres === undefined || hemispheres === null) {
     hemispheres = defaultHemispheres();
   } else {
@@ -154,13 +154,22 @@ function runEngineWithRouting(allProjections, hemisphereProjections, kernelProje
       `observer must be array or null, got ${typeof obs}`);
   }
 
+  // P7-d: Split vmConfig by phase — bridge for engine pipeline, core for routing/metabolization.
+  // Engine pipeline uses allProjectionsWithBridge (bridge kernel projections) → bridge vmConfig.
+  // Hemisphere routing and metabolization use allProjections (core, no bridge) → core vmConfig.
+  const engineOpts = vmConfig
+    ? Object.assign({}, engineKwargs, { vmConfig })
+    : engineKwargs;
+  const coreVmConfig = vmConfig
+    ? Object.assign({}, vmConfig, { bridgeProjs: null })
+    : null;
   let engineResult;
   if (boot1Mode) {
-    engineResult = runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, engineKwargs);
+    engineResult = runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, engineOpts);
   } else {
-    engineResult = runEnginePipeline(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, engineKwargs);
+    engineResult = runEnginePipeline(kernelProjections, seedProjectionMap, engineProjections, projections, inputValue, engineOpts);
   }
-  let updatedHemispheres = runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres);
+  let updatedHemispheres = runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres, coreVmConfig);
 
   const outputKeys = new Set(Object.keys(updatedHemispheres));
   if (typeof updatedHemispheres !== 'object' || !setsEqual(outputKeys, HEMISPHERE_KEYS)) {
@@ -169,7 +178,7 @@ function runEngineWithRouting(allProjections, hemisphereProjections, kernelProje
 
   // Run metabolization cycle (structural walker — no host iteration)
   if (metabolizeCycleProjections) {
-    updatedHemispheres = runMetabolizationCycle(allProjections, metabolizeCycleProjections, updatedHemispheres);
+    updatedHemispheres = runMetabolizationCycle(allProjections, metabolizeCycleProjections, updatedHemispheres, coreVmConfig);
   }
 
   return { engine_result: engineResult, hemispheres: updatedHemispheres };

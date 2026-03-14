@@ -138,13 +138,19 @@ class TestPythonTerminationReason:
         non-terminal, non-intermediate value. On second iteration the
         hash matches, triggering hash_stall.
         """
+        import rcx_pi.selfhost.step_mu as _step_mu_mod
         reset_step_budget()
         sentinel = "hash_stall_sentinel"
-        with patch(
-            "rcx_pi.selfhost.step_mu._step_trusted",  # ANTICHEAT_OK: testing defensive kernel path
-            return_value=sentinel,
-        ):
-            meta = step_kernel_mu([REWRITE_PROJ], "a", return_meta=True, max_steps=100)
+        # Disable P7-d shadow check — monkeypatching _step_trusted makes shadow meaningless
+        _step_mu_mod._STAGE0_SHADOW_ENABLED = False
+        try:
+            with patch(
+                "rcx_pi.selfhost.step_mu._step_trusted",  # ANTICHEAT_OK: testing defensive kernel path
+                return_value=sentinel,
+            ):
+                meta = step_kernel_mu([REWRITE_PROJ], "a", return_meta=True, max_steps=100)
+        finally:
+            _step_mu_mod._STAGE0_SHADOW_ENABLED = True
         _assert_meta_shape(meta, expected_reason="hash_stall")
         assert meta["stall"] is True
         assert meta["steps_used"] == 2  # iteration 0: new hash, iteration 1: same hash

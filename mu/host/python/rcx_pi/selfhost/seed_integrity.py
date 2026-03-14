@@ -82,7 +82,7 @@ SEED_CHECKSUMS: dict[str, str] = {
     # Terminal classify v1: structural terminal classification and exit-reason derivation (STRUCTURAL)
     "terminal_classify.v1.json": "413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7",
     # Metabolize cycle v1: structural walker for hemisphere metabolization (APPLICATION)
-    "metabolize_cycle.v1.json": "f8888ecab6845193610499d15dea8a8e845d07ce04391457770ef32cac69dfd8",
+    "metabolize_cycle.v1.json": "1e84573c241dba55a81adf6c60568c25127b836ef5570909bab81fa9303fcf01",
     # Evidence walker v1: structural trace walker for ontology evidence collection (APPLICATION)
     "evidence_walker.v1.json": "e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29",
 }

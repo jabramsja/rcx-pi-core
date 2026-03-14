@@ -73,7 +73,22 @@ function handleJsonApi(apiArg, seeds) {
     recurrenceSeed, exhaustionSeed, hemisphereSeed, engineSeed, metabolizationSeed,
     allProjectionsWithRecurrenceAndBridge,
     SEED_CHECKSUMS: seedChecksums,
+    // P7-d: VM bundles for shadow mode on all public API paths
+    kernelV1Projections, matchBundle, substBundle,
+    bridgeProjections,
   } = seeds;
+
+  // P7-d: Construct vmConfig once for all stepKernel/runStructural calls
+  const vmConfig = (kernelV1Projections && matchBundle && substBundle) ? {
+    kernelV1Projs: kernelV1Projections,
+    bridgeProjs: null, // default core mode; bridge-mode callers override below
+    matchBundle,
+    substBundle,
+  } : null;
+  const vmConfigBridge = vmConfig ? {
+    ...vmConfig,
+    bridgeProjs: bridgeProjections || null,
+  } : null;
 
   // Helper: run Recurrence on trace result
   function runRecurrence(traceResult) {
@@ -95,7 +110,7 @@ function handleJsonApi(apiArg, seeds) {
       const { input, projection } = request;
       try {
         const { result } = stepKernel(
-          allProjections, input, [projection], { maxSteps: 100 }
+          allProjections, input, [projection], { maxSteps: 100, vmConfig }
         );
         const denormalized = denormalize(result);
         response = { success: true, result: denormalized };
@@ -107,7 +122,7 @@ function handleJsonApi(apiArg, seeds) {
       for (const vector of parityVectors.vectors) {
         try {
           const { result } = stepKernel(
-            allProjections, vector.input, [vector.projection], { maxSteps: 100 }
+            allProjections, vector.input, [vector.projection], { maxSteps: 100, vmConfig }
           );
           const denormalized = denormalize(result);
           results.push({ id: vector.id, success: true, result: denormalized, expected: vector.expected_output });
@@ -120,7 +135,7 @@ function handleJsonApi(apiArg, seeds) {
       const { projections, input, maxSteps } = request;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
-        const traceResult = runStructural(allProjectionsWithBridge, projections ?? [], input, maxSteps ?? 100);
+        const traceResult = runStructural(allProjectionsWithBridge, projections ?? [], input, maxSteps ?? 100, vmConfigBridge);
         const closureResult = runRecurrence(traceResult);
         response = { success: true, result: closureResult };
       } catch (e) {
@@ -184,7 +199,7 @@ function handleJsonApi(apiArg, seeds) {
       const { input, maxSteps } = request;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
-        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, recurrenceProjections, maxSteps);
+        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, recurrenceProjections, maxSteps, vmConfigBridge);
         response = { success: true, result };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
@@ -193,7 +208,7 @@ function handleJsonApi(apiArg, seeds) {
       const { input, maxSteps } = request;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
-        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, exhaustionProjections, maxSteps);
+        const result = runAlgorithmWithBridge(allProjectionsWithBridge, input, exhaustionProjections, maxSteps, vmConfigBridge);
         response = { success: true, result };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
@@ -218,7 +233,7 @@ function handleJsonApi(apiArg, seeds) {
       const { projections: userProjs, input, maxSteps } = request;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
-        const traceResult = runStructural(allProjectionsWithBridge, userProjs ?? [], input, maxSteps ?? 100);
+        const traceResult = runStructural(allProjectionsWithBridge, userProjs ?? [], input, maxSteps ?? 100, vmConfigBridge);
         const traceArray = [];
         let node = traceResult.trace;
         while (node && typeof node === 'object' && 'head' in node) {
@@ -238,7 +253,7 @@ function handleJsonApi(apiArg, seeds) {
         const limit = maxSteps ?? 100;
         while (steps < limit) {
           const wrapped = stepKernel(
-            allProjections, current, hemisphereProjections, { returnMeta: true }
+            allProjections, current, hemisphereProjections, { returnMeta: true, vmConfig }
           );
           if (wrapped.stall) break;
           current = wrapped.output;
@@ -267,6 +282,7 @@ function handleJsonApi(apiArg, seeds) {
             maxEngineIterations: maxEngineIterations ?? 20,
             maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
             observer: observerEvents,
+            vmConfig: vmConfigBridge,
           };
           let result;
           if (boot1Mode) {
@@ -292,7 +308,7 @@ function handleJsonApi(apiArg, seeds) {
     } else if (request.action === 'run_hemisphere_routing') {
       const { engine_result, hemispheres } = request;
       try {
-        const result = runHemisphereRouting(allProjections, hemisphereProjections, engine_result, hemispheres ?? defaultHemispheres());
+        const result = runHemisphereRouting(allProjections, hemisphereProjections, engine_result, hemispheres ?? defaultHemispheres(), vmConfig);
         response = { success: true, result };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
@@ -322,7 +338,8 @@ function handleJsonApi(apiArg, seeds) {
               observer: observerEvents,
             },
             boot1Mode,
-            metabolizeCycleProjections
+            metabolizeCycleProjections,
+            vmConfigBridge
           );
           response = { success: true, result };
           if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
@@ -342,6 +359,7 @@ function handleJsonApi(apiArg, seeds) {
           maxSteps: reqMaxSteps ?? 100,
           returnMeta: true,
           validationMode: 'domain',
+          vmConfig: (kernelMode === 'bridge') ? vmConfigBridge : vmConfig,
         });
         response = { success: true, result: meta };
       } catch (e) {
@@ -370,6 +388,7 @@ function handleJsonApi(apiArg, seeds) {
             maxEngineIterations: maxEngIter,
             maxAlgorithmIterations: maxAlgorithmIterations ?? 50,
             observer: metaObserver,
+            vmConfig: vmConfigBridge,
           };
           let engineResult;
           if (boot1Mode) {
@@ -396,7 +415,7 @@ function handleJsonApi(apiArg, seeds) {
     } else if (request.action === 'run_metabolization_cycle') {
       const { hemispheres } = request;
       try {
-        const result = runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemispheres ?? null);
+        const result = runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemispheres ?? null, vmConfig);
         response = { success: true, result };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };

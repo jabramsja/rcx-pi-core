@@ -872,14 +872,16 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
 // ---------------------------------------------------------------------------
 // VM run — multi-step until stall
 // ---------------------------------------------------------------------------
-function stage0VmRun(bundle, inputValue, maxSteps = 100) {
+function stage0VmRun(bundle, inputValue, maxSteps = 100, maxOps = undefined) {
   let current = inputValue;
   const steps = [];
   let totalAttempts = 0;
   let totalOps = 0;
 
   for (let i = 0; i < maxSteps; i++) {
-    const result = stage0VmStep(bundle, current);
+    const result = maxOps !== undefined
+      ? stage0VmStep(bundle, current, maxOps)
+      : stage0VmStep(bundle, current);
     totalAttempts += result.metrics.program_attempts;
     totalOps += result.metrics.op_steps;
 

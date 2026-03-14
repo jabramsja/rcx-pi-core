@@ -41,7 +41,8 @@ from rcx_pi.selfhost.stage0_vm import validate_bundle  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 
-MAX_COMPILE_DEPTH = 64  # Compiler recursion cap; effective path depth is lower due to ["focus","root"] prefix
+MAX_PATTERN_COMPILE_DEPTH = 64  # Pattern recursion cap; effective path depth is lower due to ["focus","root"] prefix
+MAX_TEMPLATE_COMPILE_DEPTH = 64  # Template recursion cap; separate from patterns for independent structural depth control
 COMPILER_VERSION = "1.0.0"
 
 
@@ -128,32 +129,14 @@ def compile_pattern(pattern, base_path, captured_vars, source_path, depth=0):
     Returns:
         List of op dicts.
     """
-    if depth > MAX_COMPILE_DEPTH:
+    if depth > MAX_PATTERN_COMPILE_DEPTH:
         raise CompilerError(
-            f"Pattern depth exceeds {MAX_COMPILE_DEPTH} at path {base_path}")
+            f"Pattern depth exceeds {MAX_PATTERN_COMPILE_DEPTH} at path {base_path}")
 
     ops = []
 
     # Literal: null, bool, int, str
-    if pattern is None or type(pattern) is bool:
-        ops.append({
-            "op": "check_equal",
-            "path": base_path,
-            "value": pattern,
-            "source_map": {"section": "pattern", "path": source_path},
-        })
-        return ops
-
-    if type(pattern) is int:
-        ops.append({
-            "op": "check_equal",
-            "path": base_path,
-            "value": pattern,
-            "source_map": {"section": "pattern", "path": source_path},
-        })
-        return ops
-
-    if type(pattern) is str:
+    if pattern is None or type(pattern) in (bool, int, str):
         ops.append({
             "op": "check_equal",
             "path": base_path,
@@ -196,11 +179,19 @@ def compile_pattern(pattern, base_path, captured_vars, source_path, depth=0):
 
         # assert_key_profile with source-order keys
         keys = list(pattern.keys())
+
+        # Gate-3: allow input to have extra _type="list" when pattern omits _type.
+        # Mirrors _stage0_match (eval_seed.py:586-591) which permits pattern keys
+        # to be a subset of input keys when the only extra key is _type="list".
+        optional = []
+        if "_type" not in keys:
+            optional.append({"key": "_type", "allowed_values": ["list"]})
+
         ops.append({
             "op": "assert_key_profile",
             "path": base_path,
             "required": keys,
-            "optional": [],
+            "optional": optional,
             "source_map": {"section": "pattern", "path": source_path},
         })
 
@@ -240,18 +231,12 @@ def compile_body(body, depth=0):
     Returns:
         A template dict (kind + fields/value/name/items).
     """
-    if depth > MAX_COMPILE_DEPTH:
+    if depth > MAX_TEMPLATE_COMPILE_DEPTH:
         raise CompilerError(
-            f"Body template depth exceeds {MAX_COMPILE_DEPTH}")
+            f"Body template depth exceeds {MAX_TEMPLATE_COMPILE_DEPTH}")
 
     # Literal: null, bool, int, str
-    if body is None or type(body) is bool:
-        return {"kind": "literal", "value": body}
-
-    if type(body) is int:
-        return {"kind": "literal", "value": body}
-
-    if type(body) is str:
+    if body is None or type(body) in (bool, int, str):
         return {"kind": "literal", "value": body}
 
     _check_float(body, "body template")

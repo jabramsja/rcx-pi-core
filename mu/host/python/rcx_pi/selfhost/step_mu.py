@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 
-from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted, match as stage0_match
+from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted, _apply_projection_trusted, match as stage0_match
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached, MAX_MU_DEPTH, MAX_MU_WIDTH
@@ -695,14 +695,95 @@ def clear_combined_kernel_cache() -> None:
 
     9-agent round 2 (Expert finding): Restored for test isolation.
     Tests that mock projections need this to prevent stale cache pollution.
+    P7-d: Also clears partitioned caches and compiled bundle caches.
     """
     global _combined_kernel_cache, _combined_kernel_bridge_cache
+    global _kernel_v1_cache, _bridge_proj_cache
+    global _match_v2_bundle_cache, _subst_v2_bundle_cache
     _combined_kernel_cache = None
     _combined_kernel_bridge_cache = None
+    _kernel_v1_cache = None
+    _bridge_proj_cache = None
+    _match_v2_bundle_cache = None
+    _subst_v2_bundle_cache = None
 
 
 # Module-level cache for combined kernel projections with bootstrap_structural bridge
 _combined_kernel_bridge_cache: list[Mu] | None = None
+
+# =============================================================================
+# P7-d: Partitioned Kernel Projection Loaders + Compiled Bundle Loaders
+# =============================================================================
+
+# Partitioned caches: kernel.v1 only, bridge only
+_kernel_v1_cache: list[Mu] | None = None
+_bridge_proj_cache: list[Mu] | None = None
+
+# Compiled bundle caches
+_match_v2_bundle_cache: dict | None = None
+_subst_v2_bundle_cache: dict | None = None
+
+
+def _load_kernel_v1_projections_shared() -> list[Mu]:
+    """Load ONLY kernel.v1 projections (no match/subst).
+
+    Private shared-cache variant. Callers MUST NOT mutate the returned list.
+    Used by _step_kernel_with_vm for host-path kernel.v1 execution.
+    """
+    global _kernel_v1_cache
+    if _kernel_v1_cache is not None:
+        return _kernel_v1_cache
+    kernel_seed = load_verified_seed(get_seed_path("kernel.v1.json"))
+    _kernel_v1_cache = kernel_seed["projections"]
+    return _kernel_v1_cache
+
+
+def _load_bridge_projections_shared() -> list[Mu]:
+    """Load ONLY bootstrap_structural.v1 projections.
+
+    Private shared-cache variant. Callers MUST NOT mutate the returned list.
+    Used by _step_kernel_with_vm for host-path bridge execution.
+    """
+    global _bridge_proj_cache
+    if _bridge_proj_cache is not None:
+        return _bridge_proj_cache
+    bridge_seed = load_verified_seed(get_seed_path("bootstrap_structural.v1.json"))
+    _bridge_proj_cache = bridge_seed["projections"]
+    return _bridge_proj_cache
+
+
+def _load_compiled_match_v2_bundle() -> dict:
+    """Load + validate compiled match_v2 bundle (cached).
+
+    Fail-closed: validate_bundle raises on invalid bundle structure.
+    """
+    global _match_v2_bundle_cache
+    if _match_v2_bundle_cache is not None:
+        return _match_v2_bundle_cache
+    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — bundle loading
+    from .seed_integrity import get_mu_dir
+    path = get_mu_dir() / "stage0" / "compiled" / "match_v2.compiled.v1.json"
+    with open(path) as f:
+        _match_v2_bundle_cache = json.load(f)
+    validate_bundle(_match_v2_bundle_cache)
+    return _match_v2_bundle_cache
+
+
+def _load_compiled_subst_v2_bundle() -> dict:
+    """Load + validate compiled subst_v2 bundle (cached).
+
+    Fail-closed: validate_bundle raises on invalid bundle structure.
+    """
+    global _subst_v2_bundle_cache
+    if _subst_v2_bundle_cache is not None:
+        return _subst_v2_bundle_cache
+    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — bundle loading
+    from .seed_integrity import get_mu_dir
+    path = get_mu_dir() / "stage0" / "compiled" / "subst_v2.compiled.v1.json"
+    with open(path) as f:
+        _subst_v2_bundle_cache = json.load(f)
+    validate_bundle(_subst_v2_bundle_cache)
+    return _subst_v2_bundle_cache
 
 
 def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
@@ -917,6 +998,116 @@ def make_undefined_motif(op: str, lhs, rhs, cause: str, details=None) -> dict:
     }
 
 
+# =============================================================================
+# P7-d: Stage0 VM Kernel-Step Function
+# =============================================================================
+
+# Shadow mode flag: when True, step_kernel_mu uses VM for match.v2/subst.v2.
+# When False (default), host path is primary with shadow VM comparison.
+_STAGE0_VM_CUTOVER = False
+_STAGE0_SHADOW_ENABLED = True  # Shadow parity check; disable in tests that monkeypatch _step_trusted
+
+
+@host_iteration("P7-d kernel step: host for kernel.v1/bridge, VM for match.v2/subst.v2")
+def _step_kernel_with_vm(
+    kernel_v1_projs: list[Mu],
+    bridge_projs: list[Mu] | None,
+    match_bundle: dict,
+    subst_bundle: dict,
+    input_value: Mu,
+    record_coverage: bool = True,
+) -> Mu:
+    """Kernel step: kernel.v1+bridge via host, match.v2+subst.v2 via Stage0 VM.
+
+    Scope: step_kernel_mu cutover only. _step_trusted remains unchanged for
+    run_engine_pipeline and projection_runner.run.
+
+    Preserves first-match-wins ordering: kernel -> bridge -> match -> subst.
+    Coverage semantics preserved: record_no_match for every tried-but-failed
+    projection/program, record_match for the matched one, no record for
+    projections/programs never tried (after the match).
+
+    Args:
+        kernel_v1_projs: kernel.v1 projections (host path).
+        bridge_projs: bootstrap_structural.v1 projections (host path, bridge mode only).
+            None in core mode.
+        match_bundle: Compiled match_v2 bundle for Stage0 VM.
+        subst_bundle: Compiled subst_v2 bundle for Stage0 VM.
+        input_value: Current kernel state (already normalized/wrapped).
+        record_coverage: When False, skip all coverage recording. Used by
+            shadow mode to avoid double-counting (host path already records).
+
+    Returns:
+        Transformed value if any projection matched, input unchanged on stall.
+    """
+    from rcx_pi.projection_coverage import coverage
+    from rcx_pi.selfhost.stage0_vm import stage0_vm_step  # ANTICHEAT_OK: infra — VM execution
+
+    cov_on = record_coverage and coverage.is_enabled()
+
+    if cov_on:
+        coverage.record_step()
+
+    # 1. kernel.v1 projections (host path)
+    for proj in kernel_v1_projs:
+        proj_id = proj.get("id", "<anon>") if isinstance(proj, dict) else "<invalid>"  # AST_OK: infra — coverage ID extraction
+        result = _apply_projection_trusted(proj, input_value)
+        if result is not NO_MATCH:
+            if cov_on:
+                coverage.record_match(proj_id, input_value, result)
+            return result
+        if cov_on:
+            coverage.record_no_match(proj_id)
+
+    # 2. bridge projections (host path, only in bridge mode)
+    if bridge_projs:
+        for proj in bridge_projs:
+            proj_id = proj.get("id", "<anon>") if isinstance(proj, dict) else "<invalid>"  # AST_OK: infra — coverage ID extraction
+            result = _apply_projection_trusted(proj, input_value)
+            if result is not NO_MATCH:
+                if cov_on:
+                    coverage.record_match(proj_id, input_value, result)
+                return result
+            if cov_on:
+                coverage.record_no_match(proj_id)
+
+    # 3. match.v2 via Stage0 VM
+    vm_result = stage0_vm_step(match_bundle, input_value)
+    if vm_result["status"] == "match":
+        matched_id = vm_result["matched_program_id"]
+        if cov_on:
+            # Record no_match for programs tried before the match (dispatch order)
+            for pid in match_bundle["program_order"]:
+                if pid == matched_id:
+                    break
+                coverage.record_no_match(pid)
+            coverage.record_match(matched_id, input_value, vm_result["root"])
+        return vm_result["root"]
+    else:
+        # Stall: all match.v2 programs tried and failed
+        if cov_on:
+            for pid in match_bundle["program_order"]:
+                coverage.record_no_match(pid)
+
+    # 4. subst.v2 via Stage0 VM
+    vm_result = stage0_vm_step(subst_bundle, input_value)
+    if vm_result["status"] == "match":
+        matched_id = vm_result["matched_program_id"]
+        if cov_on:
+            for pid in subst_bundle["program_order"]:
+                if pid == matched_id:
+                    break
+                coverage.record_no_match(pid)
+            coverage.record_match(matched_id, input_value, vm_result["root"])
+        return vm_result["root"]
+    else:
+        if cov_on:
+            for pid in subst_bundle["program_order"]:
+                coverage.record_no_match(pid)
+
+    return input_value  # stall
+
+
 @host_iteration("Kernel execution loop - mechanical driver (Phase 8b simplified)")
 def step_kernel_mu(
     projections: list[Mu],
@@ -1035,6 +1226,12 @@ def step_kernel_mu(
             f"got: {kernel_mode}"
         )
 
+    # P7-d: Load partitioned projections + compiled bundles for VM path
+    kernel_v1_projs = _load_kernel_v1_projections_shared()
+    bridge_projs = _load_bridge_projections_shared() if kernel_mode == "bridge" else None
+    match_bundle = _load_compiled_match_v2_bundle()
+    subst_bundle = _load_compiled_subst_v2_bundle()
+
     # Normalize domain projections to head/tail format
     normalized_projs = [normalize_projection(p) for p in projections]  # AST_OK: infra - kernel bridge scaffolding
 
@@ -1068,7 +1265,34 @@ def step_kernel_mu(
         for step_i in range(max_steps):
             # Account for kernel-driver work in the shared global budget.
             budget.consume(1)
-            result = _step_trusted(kernel_projs, current)
+            # P7-d: shadow mode or cutover mode
+            if _STAGE0_VM_CUTOVER:
+                result = _step_kernel_with_vm(
+                    kernel_v1_projs, bridge_projs,
+                    match_bundle, subst_bundle, current)
+            else:
+                result = _step_trusted(kernel_projs, current)
+
+                # P7-d shadow: run VM path too, assert equivalence
+                # Disabled when _step_trusted is monkeypatched (shadow is meaningless)
+                if _STAGE0_SHADOW_ENABLED:
+                    # record_coverage=False prevents double-counting
+                    vm_result = _step_kernel_with_vm(
+                        kernel_v1_projs, bridge_projs,
+                        match_bundle, subst_bundle, current,
+                        record_coverage=False)
+                    host_stalled = result is current
+                    vm_stalled = vm_result is current
+                    if host_stalled != vm_stalled:
+                        raise AssertionError(
+                            f"P7-d shadow: polarity divergence — "
+                            f"host_stalled={host_stalled}, vm_stalled={vm_stalled}")
+                    if not host_stalled:
+                        from rcx_pi.selfhost.stage0_vm import _mu_deep_equal  # ANTICHEAT_OK: infra — parity check
+                        if not _mu_deep_equal(result, vm_result):
+                            raise AssertionError(
+                                f"P7-d shadow: output divergence — "
+                                f"host={result!r}, vm={vm_result!r}")
 
             # Terminal state check - simple structural marker detection
             if is_kernel_terminal(result):

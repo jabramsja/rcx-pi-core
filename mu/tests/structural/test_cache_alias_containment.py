@@ -123,6 +123,7 @@ class TestInternalPathUsesPrivateHelper:
 
     def test_core_uses_private_shared_helper(self, monkeypatch):
         """Monkeypatching private helper changes step_kernel_mu behavior."""
+        import rcx_pi.selfhost.step_mu as _step_mu_mod
         sentinel = [{"id": "SENTINEL", "pattern": {"_no_match": True}, "body": {}}]
         called = {"count": 0}
 
@@ -130,6 +131,8 @@ class TestInternalPathUsesPrivateHelper:
             called["count"] += 1
             return sentinel
 
+        # Disable P7-d shadow — monkeypatching loader makes shadow meaningless
+        monkeypatch.setattr(_step_mu_mod, '_STAGE0_SHADOW_ENABLED', False)
         monkeypatch.setattr(
             "rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared",  # ANTICHEAT_OK: F-39 private helper proof
             fake_shared,
@@ -139,6 +142,7 @@ class TestInternalPathUsesPrivateHelper:
 
     def test_bridge_uses_private_shared_helper(self, monkeypatch):
         """Monkeypatching private bridge helper changes step_kernel_mu behavior."""
+        import rcx_pi.selfhost.step_mu as _step_mu_mod
         sentinel = [{"id": "SENTINEL", "pattern": {"_no_match": True}, "body": {}}]
         called = {"count": 0}
 
@@ -146,6 +150,8 @@ class TestInternalPathUsesPrivateHelper:
             called["count"] += 1
             return sentinel
 
+        # Disable P7-d shadow — monkeypatching loader makes shadow meaningless
+        monkeypatch.setattr(_step_mu_mod, '_STAGE0_SHADOW_ENABLED', False)
         monkeypatch.setattr(
             "rcx_pi.selfhost.step_mu._load_combined_kernel_with_bridge_projections_shared",  # ANTICHEAT_OK: F-39 private helper proof
             fake_shared,

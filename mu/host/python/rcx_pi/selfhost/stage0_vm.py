@@ -854,11 +854,15 @@ def stage0_vm_step(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
 # VM run — multi-step until stall
 # ---------------------------------------------------------------------------
 
-def stage0_vm_run(bundle, input_value, max_steps=100):
+def stage0_vm_run(bundle, input_value, max_steps=100, max_ops=None):
     """Run VM in a loop until stall (no program matches).
 
     Each iteration calls stage0_vm_step and feeds the committed root
     back as the next input.  Terminates when the VM stalls.
+
+    Args:
+        max_ops: Per-step op limit forwarded to stage0_vm_step.
+            None uses default MAX_VM_OPS_PER_STEP.
 
     Returns::
 
@@ -873,8 +877,11 @@ def stage0_vm_run(bundle, input_value, max_steps=100):
     total_attempts = 0
     total_ops = 0
 
+    # Build kwargs for stage0_vm_step; omit max_ops if None to use default
+    step_kwargs = {"max_ops": max_ops} if max_ops is not None else {}
+
     for _ in range(max_steps):
-        result = stage0_vm_step(bundle, current)
+        result = stage0_vm_step(bundle, current, **step_kwargs)
         total_attempts += result["metrics"]["program_attempts"]
         total_ops += result["metrics"]["op_steps"]
 

@@ -57,19 +57,26 @@ class TestStepMuUsesKernelProjections:
 
     def test_step_kernel_mu_loads_combined_projections(self):
         """step_kernel_mu loads kernel + match.v2 + subst.v2 projections via private shared helper."""
-        with patch('rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared') as mock_load:  # ANTICHEAT_OK: F-39 internal path proof
-            # Return minimal valid projections
-            mock_load.return_value = []
+        import rcx_pi.selfhost.step_mu as _step_mu_mod
+        # Disable P7-d shadow — monkeypatching loader makes shadow meaningless
+        orig_shadow = _step_mu_mod._STAGE0_SHADOW_ENABLED
+        _step_mu_mod._STAGE0_SHADOW_ENABLED = False
+        try:
+            with patch('rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared') as mock_load:  # ANTICHEAT_OK: F-39 internal path proof
+                # Return minimal valid projections
+                mock_load.return_value = []
 
-            # This will stall immediately with empty projections
-            try:
-                step_kernel_mu([], 42)
-            except (ValueError, TypeError, KeyError):
-                pass  # Expected validation errors
-            except Exception as e:
-                raise AssertionError(f"Unexpected exception in step_kernel_mu: {type(e).__name__}: {e}")
+                # This will stall immediately with empty projections
+                try:
+                    step_kernel_mu([], 42)
+                except (ValueError, TypeError, KeyError):
+                    pass  # Expected validation errors
+                except Exception as e:
+                    raise AssertionError(f"Unexpected exception in step_kernel_mu: {type(e).__name__}: {e}")
 
-            assert mock_load.called
+                assert mock_load.called
+        finally:
+            _step_mu_mod._STAGE0_SHADOW_ENABLED = orig_shadow
 
     def test_step_kernel_mu_calls_eval_step_with_kernel_projs(self):
         """step_kernel_mu uses eval_step with kernel projections.

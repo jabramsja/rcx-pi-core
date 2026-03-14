@@ -82,7 +82,7 @@ function _clearBoundaryOpsCache() {
  * Only current input is re-normalized per iteration.
  * BOUNDARY: Algorithm harness — off kernel path. Reclassified P7W5: was host iteration marker.
  */
-function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
+function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig) {
   // Validate input and projections once at entry (same checks as stepKernel).
   const validator = validateAlgorithmRuntimeFields;
   validator(input, 'domainInput');
@@ -131,7 +131,7 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
   while (steps < limit) {
     const normalizedInput = normalize(current);
     const kernelInput = { _step: normalizedInput, _projs: linkedProjs };
-    const wrapped = _stepKernelCoreNonMeta(allProjs, kernelInput, 10000);
+    const wrapped = _stepKernelCoreNonMeta(allProjs, kernelInput, 10000, vmConfig || null);
     const next = denormalize(wrapped.result);
     validator(next, 'runAlgorithmWithBridge.intermediate');
     const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');
@@ -148,11 +148,11 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps) {
  * Mirrors Python _run_sub_algorithm() (step_mu.py:1404).
  * Parameterized: takes kernelProjections and seedProjectionMap.
  */
-function runSubAlgorithm(kernelProjections, seedProjectionMap, algorithmProjs, initial, maxIterations) {
+function runSubAlgorithm(kernelProjections, seedProjectionMap, algorithmProjs, initial, maxIterations, vmConfig) {
   let current = initial;
   let currentHash = muHashControlCached(initial, 'runSubAlgorithm');
   for (let i = 0; i < maxIterations; i++) {
-    const result = runAlgorithmWithBridge(kernelProjections, current, algorithmProjs, 200);
+    const result = runAlgorithmWithBridge(kernelProjections, current, algorithmProjs, 200, vmConfig);
     if (isTerminalShape(result)) return result;
     const resultHash = muHashControlCached(result, 'runSubAlgorithm.stall');
     if (resultHash === currentHash) return result;
@@ -206,7 +206,7 @@ function hashTraceForRecurrence(trace, maxEntries) {
 // --- Boundary operation handlers (A10: seed-derived dispatch) ---
 const MAX_BOUNDARY_TRACE_STEPS = 10000;
 
-function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations) {
+function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
   if (typeof reqInput !== 'object' || reqInput === null || Array.isArray(reqInput)) {
     throw new RcxError('api.bad_request',
       `run_trace input must be object, got ${reqInput === null ? 'null' : Array.isArray(reqInput) ? 'array' : typeof reqInput}`);
@@ -238,15 +238,15 @@ function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqIn
   traceMaxSteps = Math.floor(traceMaxSteps);
   if (traceMaxSteps < 0) traceMaxSteps = 100;
   if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) traceMaxSteps = MAX_BOUNDARY_TRACE_STEPS;
-  const raw = runStructural(kernelProjections, projs, reqInput.value, traceMaxSteps);
+  const raw = runStructural(kernelProjections, projs, reqInput.value, traceMaxSteps, vmConfig || null);
   return { result: raw.result, trace: raw.trace, stall: raw.stall };
 }
 
-function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations) {
+function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
   return hashTraceForRecurrence(reqInput);
 }
 
-function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations) {
+function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
   if (!('algorithm' in request)) {
     throw new RcxError('api.bad_request',
       "run_algorithm request must include 'algorithm'");
@@ -260,7 +260,7 @@ function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, r
   if (!algoProjs) {
     throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
   }
-  return runSubAlgorithm(kernelProjections, seedProjectionMap, algoProjs, reqInput, maxAlgorithmIterations);
+  return runSubAlgorithm(kernelProjections, seedProjectionMap, algoProjs, reqInput, maxAlgorithmIterations, vmConfig);
 }
 
 // Dispatch map: operation name → handler function (A10 structural displacement).
@@ -315,7 +315,7 @@ function setTestDispatchOverride(override) {
  * replaces host if/elif dispatch. Validates request shape before any
  * field dereference.
  */
-function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, maxAlgorithmIterations, emitFn, iteration, state) {
+function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, maxAlgorithmIterations, emitFn, iteration, state, vmConfig) {
   // --- Request shape validation (typed fail-closed, no raw TypeError) ---
   if (typeof request !== 'object' || request === null || Array.isArray(request)) {
     emitFn('fail_closed', iteration, state, 'api.bad_request');
@@ -378,7 +378,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
     throw new RcxError('input.shape_mismatch',
       `boundary dispatch missing handler for validated op: ${operation}`);
   }
-  const result = handler(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations);
+  const result = handler(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig);
 
   validateNoKernelReservedFields(result, `boundary_result(${operation})`);
 
@@ -809,6 +809,7 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
     maxEngineIterations = 20,
     maxAlgorithmIterations = 50,
     observer = null,
+    vmConfig: pipelineVmConfig = null,
   } = options ?? {};
 
   // SECURITY: Validate frozen for kernel-reserved fields (parity with input validation)
@@ -874,7 +875,7 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
 
     if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
       state = serviceBoundaryEffect(
-        kernelProjections, seedProjectionMap, nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state
+        kernelProjections, seedProjectionMap, nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state, pipelineVmConfig
       );
       continue;
     }
@@ -925,6 +926,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
     maxEngineIterations = 20,
     maxAlgorithmIterations = 50,
     observer = null,
+    vmConfig: recursiveVmConfig = null,
   } = options ?? {};
 
   // SECURITY: Validate frozen for kernel-reserved fields (parity with input validation)
@@ -1016,7 +1018,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
 
       if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
         state = serviceBoundaryEffect(
-          kernelProjections, seedProjectionMap, nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state
+          kernelProjections, seedProjectionMap, nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state, recursiveVmConfig
         );
         continue;
       }
