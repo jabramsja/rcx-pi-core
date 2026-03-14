@@ -142,7 +142,7 @@ class TestPythonTerminationReason:
         reset_step_budget()
         sentinel = "hash_stall_sentinel"
         # Disable P7-d shadow check — monkeypatching _step_trusted makes shadow meaningless
-        _step_mu_mod._STAGE0_SHADOW_ENABLED = False
+        _step_mu_mod._STAGE0_SHADOW_ENABLED = False  # ANTICHEAT_OK: disable shadow for monkeypatch test
         try:
             with patch(
                 "rcx_pi.selfhost.step_mu._step_trusted",  # ANTICHEAT_OK: testing defensive kernel path
@@ -150,7 +150,7 @@ class TestPythonTerminationReason:
             ):
                 meta = step_kernel_mu([REWRITE_PROJ], "a", return_meta=True, max_steps=100)
         finally:
-            _step_mu_mod._STAGE0_SHADOW_ENABLED = True
+            _step_mu_mod._STAGE0_SHADOW_ENABLED = True  # ANTICHEAT_OK: restore shadow flag
         _assert_meta_shape(meta, expected_reason="hash_stall")
         assert meta["stall"] is True
         assert meta["steps_used"] == 2  # iteration 0: new hash, iteration 1: same hash

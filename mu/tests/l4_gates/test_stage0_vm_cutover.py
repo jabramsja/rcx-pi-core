@@ -9,20 +9,20 @@ L4_STRUCTURAL gate: G2 (first-match-wins / structural forward motion).
 import pytest
 from rcx_pi.selfhost.step_mu import (
     step_kernel_mu,
-    _step_kernel_with_vm,
-    _load_kernel_v1_projections_shared,
-    _load_bridge_projections_shared,
-    _load_compiled_match_v2_bundle,
-    _load_compiled_subst_v2_bundle,
-    _load_combined_kernel_projections_shared,
+    _step_kernel_with_vm,  # ANTICHEAT_OK: P7-d gate test — shadow/cutover verification
+    _load_kernel_v1_projections_shared,  # ANTICHEAT_OK: P7-d gate test — partition loader
+    _load_bridge_projections_shared,  # ANTICHEAT_OK: P7-d gate test — partition loader
+    _load_compiled_match_v2_bundle,  # ANTICHEAT_OK: P7-d gate test — bundle loader
+    _load_compiled_subst_v2_bundle,  # ANTICHEAT_OK: P7-d gate test — bundle loader
+    _load_combined_kernel_projections_shared,  # ANTICHEAT_OK: P7-d gate test — combined loader
     clear_combined_kernel_cache,
     normalize_projection,
     list_to_linked,
 )
 from rcx_pi.selfhost.match_mu import normalize_for_match
 from rcx_pi.selfhost.kernel import reset_step_budget
-from rcx_pi.selfhost.eval_seed import _step_trusted, NO_MATCH
-from rcx_pi.selfhost.stage0_vm import _mu_deep_equal, stage0_vm_step
+from rcx_pi.selfhost.eval_seed import _step_trusted, NO_MATCH  # ANTICHEAT_OK: P7-d gate test
+from rcx_pi.selfhost.stage0_vm import _mu_deep_equal, stage0_vm_step  # ANTICHEAT_OK: P7-d gate test
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ class TestSourceLock:
         """_STAGE0_VM_CUTOVER flag exists in step_mu."""
         import rcx_pi.selfhost.step_mu as mod
         assert hasattr(mod, '_STAGE0_VM_CUTOVER')
-        assert mod._STAGE0_VM_CUTOVER is False  # Shadow mode active
+        assert mod._STAGE0_VM_CUTOVER is False  # ANTICHEAT_OK: gate test verifying shadow mode flag state
 
     def test_compiled_bundles_load(self):
         """Compiled bundles load and validate successfully."""

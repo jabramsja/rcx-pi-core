@@ -59,8 +59,8 @@ class TestStepMuUsesKernelProjections:
         """step_kernel_mu loads kernel + match.v2 + subst.v2 projections via private shared helper."""
         import rcx_pi.selfhost.step_mu as _step_mu_mod
         # Disable P7-d shadow — monkeypatching loader makes shadow meaningless
-        orig_shadow = _step_mu_mod._STAGE0_SHADOW_ENABLED
-        _step_mu_mod._STAGE0_SHADOW_ENABLED = False
+        orig_shadow = _step_mu_mod._STAGE0_SHADOW_ENABLED  # ANTICHEAT_OK: save shadow flag for monkeypatch test
+        _step_mu_mod._STAGE0_SHADOW_ENABLED = False  # ANTICHEAT_OK: disable shadow for monkeypatch test
         try:
             with patch('rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared') as mock_load:  # ANTICHEAT_OK: F-39 internal path proof
                 # Return minimal valid projections
@@ -76,7 +76,7 @@ class TestStepMuUsesKernelProjections:
 
                 assert mock_load.called
         finally:
-            _step_mu_mod._STAGE0_SHADOW_ENABLED = orig_shadow
+            _step_mu_mod._STAGE0_SHADOW_ENABLED = orig_shadow  # ANTICHEAT_OK: restore shadow flag
 
     def test_step_kernel_mu_calls_eval_step_with_kernel_projs(self):
         """step_kernel_mu uses eval_step with kernel projections.
