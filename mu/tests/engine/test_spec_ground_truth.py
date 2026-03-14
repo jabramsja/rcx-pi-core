@@ -181,16 +181,19 @@ class TestNegativeCases:
         assert bindings is NO_MATCH, "List pattern must not match dict"
 
     def test_match_extra_keys_in_value(self):
-        """Pattern with fewer keys matches value with extra keys (subset match)."""
+        """Pattern with fewer keys than value must fail (exact-key matching).
+
+        The source path (_match_inner, _stage0_match) and compiled path
+        (assert_key_profile) both enforce exact-key matching. The only
+        exception is _type="list" on normalized list structures (Gate 3).
+        """
         pattern = {"a": 1}
         value = {"a": 1, "b": 2}
 
         bindings = match(pattern, value)
 
-        # Note: This tests current behavior - subset matching
-        # Document whether this should pass or fail based on spec
-        # Current implementation: subset match succeeds
-        assert bindings is not None, "Subset pattern match should succeed"
+        assert bindings is NO_MATCH, (
+            "Extra keys in value must cause NO_MATCH (exact-key matching)")
 
     def test_match_missing_keys_in_value(self):
         """Pattern with more keys than value must fail."""

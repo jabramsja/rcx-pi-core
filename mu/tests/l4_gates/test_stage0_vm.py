@@ -82,9 +82,12 @@ def _subst_ctx():
 # ---------------------------------------------------------------------------
 
 def _source_step(projections, input_value):
-    """Run the source path (_step_trusted) on input_value."""
-    from rcx_pi.selfhost.eval_seed import _step_trusted  # ANTICHEAT_OK: parity evidence against source path
-    return _step_trusted(projections, input_value)
+    """Run the source path (_step_trusted) on input_value.
+
+    Delegates to shared helper (tests/l4_gates/stage0_test_helpers.py).
+    """
+    from tests.l4_gates.stage0_test_helpers import source_step
+    return source_step(projections, input_value)
 
 
 # =========================================================================
@@ -1219,22 +1222,12 @@ class TestMachineErrors:
 
 
 def _run_js_vm(action, bundle_path, input_value=None):
-    """Call JS Stage0 VM via subprocess and return parsed result."""
-    request = {"action": action, "bundle_path": bundle_path}
-    if input_value is not None:
-        request["input"] = input_value
-    runner = os.path.join(REPO_ROOT, "tests", "l4_gates",
-                          "stage0_vm_runner.js")
-    result = subprocess.run(
-        ["node", runner, json.dumps(request)],
-        capture_output=True, text=True, cwd=REPO_ROOT, timeout=30,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    raise RuntimeError(
-        f"No JSON_API_RESPONSE from JS VM:\nstdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}")
+    """Call JS Stage0 VM via subprocess and return parsed result.
+
+    Delegates to shared helper (tests/l4_gates/stage0_test_helpers.py).
+    """
+    from tests.l4_gates.stage0_test_helpers import run_js_stage0
+    return run_js_stage0(action, bundle_path, input_value)
 
 
 MATCH_BUNDLE_PATH = "mu/stage0/examples/match_v2_bundle.v1.json"
@@ -1253,7 +1246,7 @@ class TestCrossSubstrateParity:
         assert py_result["matched_program_id"] == js_result["matched_program_id"], (
             f"Program mismatch: py={py_result['matched_program_id']}, "
             f"js={js_result['matched_program_id']}")
-        assert py_result["root"] == js_result["root"], (
+        assert _mu_deep_equal(py_result["root"], js_result["root"]), (
             f"Root mismatch:\npy={json.dumps(py_result['root'], indent=2)}\n"
             f"js={json.dumps(js_result['root'], indent=2)}")
 
@@ -1265,7 +1258,7 @@ class TestCrossSubstrateParity:
         js_ids = [s["program_id"] for s in js_result["steps"]]
         assert py_ids == js_ids, (
             f"Step sequence mismatch:\npy={py_ids}\njs={js_ids}")
-        assert py_result["root"] == js_result["root"], (
+        assert _mu_deep_equal(py_result["root"], js_result["root"]), (
             f"Final root mismatch:\npy={py_result['root']}\njs={js_result['root']}")
 
     # --- Match cross-substrate ---

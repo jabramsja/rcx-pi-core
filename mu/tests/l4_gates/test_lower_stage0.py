@@ -28,6 +28,7 @@ _COMPILER_DIR = _REPO_ROOT / "tools" / "compilers"
 sys.path.insert(0, str(_COMPILER_DIR))
 
 from rcx_pi.selfhost.stage0_vm import (  # noqa: E402
+    _mu_deep_equal,  # ANTICHEAT_OK: type-strict Mu value comparison
     stage0_vm_step,
     validate_bundle,
 )
@@ -239,7 +240,7 @@ class TestSemanticParity:
     def test_match_parity(self, match_compiled, match_hand, test_input):
         compiled_result = _run_vm_to_completion(match_compiled, test_input)
         hand_result = _run_vm_to_completion(match_hand, test_input)
-        assert compiled_result == hand_result, (
+        assert _mu_deep_equal(compiled_result, hand_result), (
             f"Divergence on input: {test_input}\n"
             f"Compiled: {compiled_result}\n"
             f"Hand: {hand_result}"
@@ -250,7 +251,7 @@ class TestSemanticParity:
     def test_subst_parity(self, subst_compiled, subst_hand, test_input):
         compiled_result = _run_vm_to_completion(subst_compiled, test_input)
         hand_result = _run_vm_to_completion(subst_hand, test_input)
-        assert compiled_result == hand_result, (
+        assert _mu_deep_equal(compiled_result, hand_result), (
             f"Divergence on input: {test_input}\n"
             f"Compiled: {compiled_result}\n"
             f"Hand: {hand_result}"
@@ -612,27 +613,10 @@ class TestIntegrityMetadata:
 # Test 13: JS cross-substrate parity for compiled bundles
 # ---------------------------------------------------------------------------
 
-import os
-import subprocess
-
-
-def _run_js_stage0(action, bundle_path, input_value=None):
-    """Call JS Stage0 VM via subprocess and return parsed result."""
-    request = {"action": action, "bundle_path": bundle_path}
-    if input_value is not None:
-        request["input"] = input_value
-    runner = os.path.join(str(_REPO_ROOT), "tests", "l4_gates",
-                          "stage0_vm_runner.js")
-    result = subprocess.run(
-        ["node", runner, json.dumps(request)],
-        capture_output=True, text=True, cwd=str(_REPO_ROOT), timeout=30,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    raise RuntimeError(
-        f"JS runner produced no JSON response.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}")
+from tests.l4_gates.stage0_test_helpers import (
+    run_js_stage0 as _run_js_stage0,
+    source_step as _source_step,
+)
 
 
 MATCH_COMPILED_REL = "mu/stage0/compiled/match_v2.compiled.v1.json"
@@ -667,7 +651,504 @@ class TestJSCompiledBundleParity:
         js_result = _run_js_stage0("run", MATCH_COMPILED_REL, inp)
         # JS run returns {steps: [...], root: ...}
         js_final = js_result["root"]
-        assert py_final == js_final, (
+        assert _mu_deep_equal(py_final, js_final), (
             f"Final state mismatch:\npy={py_final}\njs={js_final}")
         # Verify the run actually did something (not a stall on first step)
         assert len(js_result["steps"]) > 0, "JS run produced zero steps"
+
+
+# ---------------------------------------------------------------------------
+# P7-c: Three-way parity harness — host Stage0 vs compiled Python vs compiled JS
+#
+# Evidence: compiler-produced bundles execute identically to the host Stage0
+# path (_step_trusted) across both substrates for all 21 projection IDs.
+#
+# Scope assumptions:
+# - Gate-3 normalize/denormalize does NOT trigger (no _type:"dict" literals
+#   in match.v2/subst.v2 patterns — they use _type: {"var": ...}).
+# - Test vectors use integers within JS safe-integer range.
+# ---------------------------------------------------------------------------
+
+
+def _run_source_to_completion(projections, input_value, max_steps=50):
+    """Run host Stage0 path until stall, returning final state."""
+    state = input_value
+    for _ in range(max_steps):
+        result = _source_step(projections, state)
+        if result is state:  # identity check = stall (no projection matched)
+            return state
+        state = result
+    return state
+
+
+def _match_ctx():
+    return {"caller": "p7c_parity"}
+
+
+def _subst_ctx():
+    return {"caller": "p7c_parity"}
+
+
+# Load seed projections for source path comparison
+def _load_seed_projections(seed_path):
+    """Load projections list from a seed JSON file."""
+    with open(seed_path) as f:
+        seed = json.load(f)
+    return seed["projections"]
+
+
+# ---------------------------------------------------------------------------
+# Single-step parity vectors: one per projection ID
+# ---------------------------------------------------------------------------
+
+# match.v2 single-step vectors (8 projections)
+MATCH_PARITY_VECTORS = [
+    # match.wrap — entry point
+    ("match.wrap", {
+        "match": {"pattern": "hello", "value": "hello"},
+        "_match_ctx": _match_ctx(),
+    }),
+    # match.equal — pattern_focus == value_focus
+    ("match.equal", {
+        "mode": "match", "pattern_focus": "hello", "value_focus": "hello",
+        "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    # match.var — variable bind
+    ("match.var", {
+        "mode": "match", "pattern_focus": {"var": "x"},
+        "value_focus": 42, "bindings": None,
+        "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    # match.done — terminal (focus null, stack null)
+    ("match.done", {
+        "mode": "match", "pattern_focus": None, "value_focus": None,
+        "bindings": {"name": "x", "value": 42, "rest": None},
+        "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    # match.sibling — stack pop
+    ("match.sibling", {
+        "mode": "match", "pattern_focus": None, "value_focus": None,
+        "bindings": None,
+        "stack": {
+            "head": {"type": "pair", "pattern_rest": "a", "value_rest": "b"},
+            "tail": None,
+        },
+        "_match_ctx": _match_ctx(),
+    }),
+    # match.typed.descend — type-tagged structure
+    ("match.typed.descend", {
+        "mode": "match",
+        "pattern_focus": {"_type": "list", "head": {"var": "h"}, "tail": {"var": "t"}},
+        "value_focus": {"_type": "list", "head": 1, "tail": None},
+        "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    # match.dict.descend — head/tail structure (no _type)
+    ("match.dict.descend", {
+        "mode": "match",
+        "pattern_focus": {"head": {"var": "h"}, "tail": {"var": "t"}},
+        "value_focus": {"head": "a", "tail": "b"},
+        "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    # match.fail — catch-all (pattern != value, no special structure)
+    ("match.fail", {
+        "mode": "match", "pattern_focus": "a", "value_focus": "b",
+        "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
+    }),
+]
+
+# subst.v2 single-step vectors (13 projections)
+SUBST_PARITY_VECTORS = [
+    # subst.wrap — entry point
+    ("subst.wrap", {
+        "subst": {"body": {"var": "x"}, "bindings": {"name": "x", "value": 42, "rest": None}},
+        "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.primitive — traverse literal
+    ("subst.primitive", {
+        "mode": "subst", "phase": "traverse", "focus": "literal",
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.var — traverse variable site
+    ("subst.var", {
+        "mode": "subst", "phase": "traverse",
+        "focus": {"var": "x"},
+        "bindings": {"name": "x", "value": 42, "rest": None},
+        "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.lookup.found — name matches
+    ("subst.lookup.found", {
+        "mode": "subst", "phase": "lookup",
+        "lookup_name": "x",
+        "lookup_bindings": {"name": "x", "value": 42, "rest": None},
+        "bindings": {"name": "x", "value": 42, "rest": None},
+        "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.lookup.next — name doesn't match, continue
+    ("subst.lookup.next", {
+        "mode": "subst", "phase": "lookup",
+        "lookup_name": "x",
+        "lookup_bindings": {"name": "y", "value": 99, "rest": None},
+        "bindings": {"name": "y", "value": 99, "rest": None},
+        "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.lookup.exhausted — bindings null
+    ("subst.lookup.exhausted", {
+        "mode": "subst", "phase": "lookup",
+        "lookup_name": "z", "lookup_bindings": None,
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.done — terminal (phase=result, context=null)
+    ("subst.done", {
+        "mode": "subst", "phase": "result", "focus": 42,
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.descend — traverse head/tail
+    ("subst.descend", {
+        "mode": "subst", "phase": "traverse",
+        "focus": {"head": 1, "tail": 2},
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.ascend — both head and tail done, reconstruct
+    ("subst.ascend", {
+        "mode": "subst", "phase": "result", "focus": "tail_val",
+        "bindings": None,
+        "context": {
+            "head": {"type": "tail_done", "head_result": "head_val"},
+            "tail": None,
+        },
+        "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.sibling — head done, move to tail
+    ("subst.sibling", {
+        "mode": "subst", "phase": "result", "focus": "head_val",
+        "bindings": None,
+        "context": {
+            "head": {"type": "head_done", "tail": "tail_body"},
+            "tail": None,
+        },
+        "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.typed.descend — type-tagged traverse
+    ("subst.typed.descend", {
+        "mode": "subst", "phase": "traverse",
+        "focus": {"_type": "pair", "head": 1, "tail": 2},
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.typed.sibling — type-tagged head done, move to tail
+    ("subst.typed.sibling", {
+        "mode": "subst", "phase": "result", "focus": "hd_result",
+        "bindings": None,
+        "context": {
+            "head": {"type": "typed_head_done", "_type": "pair", "tail": "tl"},
+            "tail": None,
+        },
+        "_subst_ctx": _subst_ctx(),
+    }),
+    # subst.typed.ascend — type-tagged reconstruct
+    ("subst.typed.ascend", {
+        "mode": "subst", "phase": "result", "focus": "tl_result",
+        "bindings": None,
+        "context": {
+            "head": {"type": "typed_tail_done", "_type": "pair", "head_result": "hd_result"},
+            "tail": None,
+        },
+        "_subst_ctx": _subst_ctx(),
+    }),
+]
+
+# Negative control vectors (should stall on both paths)
+MATCH_NEGATIVE_VECTORS = [
+    # Extra key — exact-key matching rejects
+    ("extra_key", {
+        "match": {"pattern": "a", "value": "a"},
+        "_match_ctx": _match_ctx(),
+        "extra": 1,
+    }),
+    # Missing key — no _match_ctx
+    ("missing_key", {
+        "match": {"pattern": "a", "value": "a"},
+    }),
+    # Wrong type — not a dict
+    ("wrong_type_str", "not_a_dict"),
+    ("wrong_type_int", 42),
+]
+
+SUBST_NEGATIVE_VECTORS = [
+    # Extra key
+    ("extra_key", {
+        "subst": {"body": 1, "bindings": None},
+        "_subst_ctx": _subst_ctx(),
+        "extra": 1,
+    }),
+    # Wrong type
+    ("wrong_type_int", 42),
+]
+
+
+class TestCompilerBundleParityVsHostStage0:
+    """P7-c.1: Compiler-produced bundles execute identically to host Stage0 path.
+
+    Three-way comparison is split: this class covers host-stage0 vs compiled-py.
+    TestCompilerBundleCrossSubstrate covers compiled-py vs compiled-js.
+    """
+
+    # --- Helpers ---
+
+    def _check_match_parity(self, bundle, projections, inp, expected_proj_id):
+        """Assert host Stage0 and compiled Python agree on a match input."""
+        source_result = _source_step(projections, inp)
+        compiled_result = stage0_vm_step(bundle, inp)
+
+        assert compiled_result["status"] == "match", (
+            f"Expected compiled path to match projection '{expected_proj_id}', "
+            f"but got stall. Input: {inp!r}")
+        assert compiled_result["matched_program_id"] == expected_proj_id, (
+            f"Expected program '{expected_proj_id}', "
+            f"got '{compiled_result['matched_program_id']}'")
+        assert _mu_deep_equal(source_result, compiled_result["root"]), (
+            f"Host Stage0 and compiled Python disagree on '{expected_proj_id}'.\n"
+            f"host_stage0={source_result!r}\n"
+            f"compiled_py={compiled_result['root']!r}")
+
+    def _check_stall_parity(self, bundle, projections, inp):
+        """Assert both paths agree: no projection matches (stall)."""
+        source_result = _source_step(projections, inp)
+        compiled_result = stage0_vm_step(bundle, inp)
+
+        # Source path stall: returns input_value unchanged (identity)
+        assert source_result is inp, (
+            f"Expected host Stage0 stall (identity return), "
+            f"but got different object: {source_result!r}")
+        assert compiled_result["status"] == "stall", (
+            f"Expected compiled path stall, got: {compiled_result['status']}")
+
+    # --- match.v2 single-step parity ---
+
+    @pytest.mark.parametrize("proj_id,inp", MATCH_PARITY_VECTORS,
+                             ids=[v[0] for v in MATCH_PARITY_VECTORS])
+    def test_match_single_step_parity(self, proj_id, inp):
+        """Host Stage0 and compiled Python agree on single-step match output."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        projections = _load_seed_projections(MATCH_SEED)
+        self._check_match_parity(bundle, projections, inp, proj_id)
+
+    # --- subst.v2 single-step parity ---
+
+    @pytest.mark.parametrize("proj_id,inp", SUBST_PARITY_VECTORS,
+                             ids=[v[0] for v in SUBST_PARITY_VECTORS])
+    def test_subst_single_step_parity(self, proj_id, inp):
+        """Host Stage0 and compiled Python agree on single-step subst output."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        projections = _load_seed_projections(SUBST_SEED)
+        self._check_subst_parity(bundle, projections, inp, proj_id)
+
+    def _check_subst_parity(self, bundle, projections, inp, expected_proj_id):
+        """Assert host Stage0 and compiled Python agree on a subst input."""
+        source_result = _source_step(projections, inp)
+        compiled_result = stage0_vm_step(bundle, inp)
+
+        assert compiled_result["status"] == "match", (
+            f"Expected compiled path to match projection '{expected_proj_id}', "
+            f"but got stall. Input: {inp!r}")
+        assert compiled_result["matched_program_id"] == expected_proj_id, (
+            f"Expected program '{expected_proj_id}', "
+            f"got '{compiled_result['matched_program_id']}'")
+        assert _mu_deep_equal(source_result, compiled_result["root"]), (
+            f"Host Stage0 and compiled Python disagree on '{expected_proj_id}'.\n"
+            f"host_stage0={source_result!r}\n"
+            f"compiled_py={compiled_result['root']!r}")
+
+    # --- Negative controls (stall parity) ---
+
+    @pytest.mark.parametrize("name,inp", MATCH_NEGATIVE_VECTORS,
+                             ids=[v[0] for v in MATCH_NEGATIVE_VECTORS])
+    def test_match_negative_stall_parity(self, name, inp):
+        """Both paths agree: input matches no match.v2 projection (stall)."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        projections = _load_seed_projections(MATCH_SEED)
+        self._check_stall_parity(bundle, projections, inp)
+
+    @pytest.mark.parametrize("name,inp", SUBST_NEGATIVE_VECTORS,
+                             ids=[v[0] for v in SUBST_NEGATIVE_VECTORS])
+    def test_subst_negative_stall_parity(self, name, inp):
+        """Both paths agree: input matches no subst.v2 projection (stall)."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        projections = _load_seed_projections(SUBST_SEED)
+        self._check_stall_parity(bundle, projections, inp)
+
+    # --- Multi-step run-to-completion parity ---
+
+    def test_match_run_to_completion_success(self):
+        """Full match pipeline: host Stage0 and compiled Python reach same terminal state."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        projections = _load_seed_projections(MATCH_SEED)
+        inp = {
+            "match": {"pattern": "hello", "value": "hello"},
+            "_match_ctx": _match_ctx(),
+        }
+        source_final = _run_source_to_completion(projections, inp)
+        compiled_final = _run_vm_to_completion(bundle, inp)
+        assert _mu_deep_equal(source_final, compiled_final), (
+            f"Multi-step match divergence:\n"
+            f"host_stage0={source_final!r}\ncompiled_py={compiled_final!r}")
+        # Verify terminal state shape
+        assert source_final.get("_mode") == "match_done"
+        assert source_final.get("_status") == "success"
+
+    def test_match_run_to_completion_failure(self):
+        """Full match pipeline: mismatch → both reach no_match terminal."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        projections = _load_seed_projections(MATCH_SEED)
+        inp = {
+            "match": {"pattern": "hello", "value": "world"},
+            "_match_ctx": _match_ctx(),
+        }
+        source_final = _run_source_to_completion(projections, inp)
+        compiled_final = _run_vm_to_completion(bundle, inp)
+        assert _mu_deep_equal(source_final, compiled_final), (
+            f"Multi-step match-fail divergence:\n"
+            f"host_stage0={source_final!r}\ncompiled_py={compiled_final!r}")
+        assert source_final.get("_mode") == "match_done"
+        assert source_final.get("_status") == "no_match"
+
+    def test_subst_run_to_completion(self):
+        """Full subst pipeline: host Stage0 and compiled Python reach same terminal."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        projections = _load_seed_projections(SUBST_SEED)
+        inp = {
+            "subst": {
+                "body": {"var": "x"},
+                "bindings": {"name": "x", "value": 42, "rest": None},
+            },
+            "_subst_ctx": _subst_ctx(),
+        }
+        source_final = _run_source_to_completion(projections, inp)
+        compiled_final = _run_vm_to_completion(bundle, inp)
+        assert _mu_deep_equal(source_final, compiled_final), (
+            f"Multi-step subst divergence:\n"
+            f"host_stage0={source_final!r}\ncompiled_py={compiled_final!r}")
+        assert source_final.get("_mode") == "subst_done"
+        assert source_final.get("_result") == 42
+
+    def test_subst_run_to_completion_structured(self):
+        """Full subst with head/tail body: exercises descend/sibling/ascend chain."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        projections = _load_seed_projections(SUBST_SEED)
+        inp = {
+            "subst": {
+                "body": {"head": {"var": "a"}, "tail": {"var": "b"}},
+                "bindings": {
+                    "name": "a", "value": 1,
+                    "rest": {"name": "b", "value": 2, "rest": None},
+                },
+            },
+            "_subst_ctx": _subst_ctx(),
+        }
+        source_final = _run_source_to_completion(projections, inp)
+        compiled_final = _run_vm_to_completion(bundle, inp)
+        assert _mu_deep_equal(source_final, compiled_final), (
+            f"Multi-step subst-structured divergence:\n"
+            f"host_stage0={source_final!r}\ncompiled_py={compiled_final!r}")
+        assert source_final.get("_mode") == "subst_done"
+        assert _mu_deep_equal(source_final.get("_result"), {"head": 1, "tail": 2})
+
+
+class TestCompilerBundleCrossSubstrate:
+    """P7-c.2: Compiled Python and compiled JS agree on same corpus.
+
+    Uses the same vectors as TestCompilerBundleParityVsHostStage0,
+    exercised through both Python stage0_vm_step and JS stage0VmStep.
+    """
+
+    # --- Helpers ---
+
+    def _check_cross_substrate_step(self, bundle, bundle_rel, inp, expected_proj_id):
+        """Assert compiled Python and JS agree on a single-step result."""
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = _run_js_stage0("step", bundle_rel, inp)
+
+        assert py_result["status"] == js_result["status"], (
+            f"Status mismatch for '{expected_proj_id}': "
+            f"py={py_result['status']}, js={js_result['status']}")
+        if py_result["status"] == "match":
+            assert py_result["matched_program_id"] == js_result["matched_program_id"], (
+                f"Program ID mismatch: py={py_result['matched_program_id']}, "
+                f"js={js_result['matched_program_id']}")
+            assert _mu_deep_equal(py_result["root"], js_result["root"]), (
+                f"Output mismatch for '{expected_proj_id}':\n"
+                f"compiled_py={py_result['root']!r}\n"
+                f"compiled_js={js_result['root']!r}")
+
+    def _check_cross_substrate_stall(self, bundle, bundle_rel, inp):
+        """Assert both substrates agree on stall."""
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = _run_js_stage0("step", bundle_rel, inp)
+        assert py_result["status"] == "stall"
+        assert js_result["status"] == "stall"
+
+    # --- match.v2 cross-substrate ---
+
+    @pytest.mark.parametrize("proj_id,inp", MATCH_PARITY_VECTORS,
+                             ids=[v[0] for v in MATCH_PARITY_VECTORS])
+    def test_match_cross_substrate_step(self, proj_id, inp):
+        """Compiled Python and JS agree on single-step match output."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        self._check_cross_substrate_step(bundle, MATCH_COMPILED_REL, inp, proj_id)
+
+    # --- subst.v2 cross-substrate ---
+
+    @pytest.mark.parametrize("proj_id,inp", SUBST_PARITY_VECTORS,
+                             ids=[v[0] for v in SUBST_PARITY_VECTORS])
+    def test_subst_cross_substrate_step(self, proj_id, inp):
+        """Compiled Python and JS agree on single-step subst output."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        self._check_cross_substrate_step(bundle, SUBST_COMPILED_REL, inp, proj_id)
+
+    # --- Negative controls cross-substrate ---
+
+    @pytest.mark.parametrize("name,inp", MATCH_NEGATIVE_VECTORS,
+                             ids=[v[0] for v in MATCH_NEGATIVE_VECTORS])
+    def test_match_negative_cross_substrate(self, name, inp):
+        """Both substrates agree: input matches no match.v2 projection."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        self._check_cross_substrate_stall(bundle, MATCH_COMPILED_REL, inp)
+
+    @pytest.mark.parametrize("name,inp", SUBST_NEGATIVE_VECTORS,
+                             ids=[v[0] for v in SUBST_NEGATIVE_VECTORS])
+    def test_subst_negative_cross_substrate(self, name, inp):
+        """Both substrates agree: input matches no subst.v2 projection."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        self._check_cross_substrate_stall(bundle, SUBST_COMPILED_REL, inp)
+
+    # --- Multi-step cross-substrate ---
+
+    def test_match_run_cross_substrate(self):
+        """Full match pipeline: compiled Python and JS reach same terminal."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        inp = {
+            "match": {"pattern": "hello", "value": "hello"},
+            "_match_ctx": _match_ctx(),
+        }
+        py_final = _run_vm_to_completion(bundle, inp)
+        js_result = _run_js_stage0("run", MATCH_COMPILED_REL, inp)
+        assert _mu_deep_equal(py_final, js_result["root"]), (
+            f"Cross-substrate match divergence:\n"
+            f"compiled_py={py_final!r}\ncompiled_js={js_result['root']!r}")
+        assert len(js_result["steps"]) > 0
+
+    def test_subst_run_cross_substrate(self):
+        """Full subst pipeline: compiled Python and JS reach same terminal."""
+        bundle = _load_bundle(SUBST_COMPILED_PATH)
+        inp = {
+            "subst": {
+                "body": {"var": "x"},
+                "bindings": {"name": "x", "value": 42, "rest": None},
+            },
+            "_subst_ctx": _subst_ctx(),
+        }
+        py_final = _run_vm_to_completion(bundle, inp)
+        js_result = _run_js_stage0("run", SUBST_COMPILED_REL, inp)
+        assert _mu_deep_equal(py_final, js_result["root"]), (
+            f"Cross-substrate subst divergence:\n"
+            f"compiled_py={py_final!r}\ncompiled_js={js_result['root']!r}")
+        assert len(js_result["steps"]) > 0
