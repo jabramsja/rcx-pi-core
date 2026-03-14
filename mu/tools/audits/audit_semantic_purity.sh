@@ -707,11 +707,10 @@ echo "== 19. Host Debt: Threshold Check =="
 # L3/L4 would require fundamentally different architecture.
 #
 # Python-only debt threshold.
-# This script scans all rcx_pi/ (including deep_eval.py) = 8 decorators + 8 AST_OK = 16.
-# STATUS.md THRESHOLD is cross-substrate (20 = 6 Py ratchet + 6 JS + 8 AST_OK).
-# The ratchet (check_host_semantics_ratchet.py) scans rcx_pi/selfhost/ only (6 decorators).
-# This script's broader scope requires its own threshold.
-DEBT_THRESHOLD=16
+# This script scans all rcx_pi/ (including deep_eval.py) = 8 decorators + 4 AST_OK bootstrap = 12.
+# Wave 5: 4 eval_seed.py markers reclassified from bootstrap to infra.
+# STATUS.md THRESHOLD is cross-substrate (16 = 6 Py ratchet + 6 JS + 4 AST_OK).
+DEBT_THRESHOLD=12
 if [ -z "$DEBT_THRESHOLD" ]; then
     echo "ERROR: Could not read THRESHOLD from STATUS.md"
     exit 1

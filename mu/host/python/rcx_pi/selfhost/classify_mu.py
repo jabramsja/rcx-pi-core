@@ -48,7 +48,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         "list" otherwise (including empty list, primitives, circular).
     """
     # Non-dict structures are not dict-encoded
-    if not isinstance(value, dict):
+    if not isinstance(value, dict):  # AST_OK: infra — type classification
         return "list"
 
     keys = set(value.keys())
@@ -58,7 +58,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         _type = value.get("_type")
         # Security: Only accept string type tags from the whitelist
         # Non-string or unknown types are treated as invalid (return "list")
-        if not isinstance(_type, str):
+        if not isinstance(_type, str):  # AST_OK: infra — type classification
             return "list"
         if _type == "dict":
             return "dict"
@@ -87,8 +87,13 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     while current is not None:  # BOUNDARY: pre-validation loop (off kernel path — called by classify_mu/apply_mu, not step_kernel_mu). Reclassified P7W4.
         _walk_count += 1
         if _walk_count > _max_classify_walk:
-            return "list"  # Too long to classify — treat as list
-        if not isinstance(current, dict):
+            # Deliberate cutoff: lists longer than 10000 nodes are treated as
+            # "list" rather than walking to completion.  This bounds CPU time
+            # for adversarial inputs while being well above any practical dict
+            # size.  The boundary is 10000 (not 10001) because the check fires
+            # after incrementing _walk_count, so node 10001 is never visited.
+            return "list"
+        if not isinstance(current, dict):  # AST_OK: infra — type classification
             break
         node_id = id(current)
         if node_id in visited:
@@ -106,7 +111,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         # because dicts with None values are more common than lists of 2-element sublists.
         # See mu/docs/core/DebtCategories.v0.md for documentation of this design decision.
         head = current.get("head")
-        if isinstance(head, dict):
+        if isinstance(head, dict):  # AST_OK: infra — type classification
             # Gate 3: Type-tagged structures are NOT kv-pairs
             # A kv-pair has exactly {head, tail} keys, not {head, tail, _type}
             if "_type" in head:
@@ -115,7 +120,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
             # Could be a kv-pair: {"head": key, "tail": {"head": val, "tail": null}}
             if set(head.keys()) == {"head", "tail"}:
                 key = head.get("head")
-                if not isinstance(key, str):
+                if not isinstance(key, str):  # AST_OK: infra — type classification
                     # Key is not a string - not a valid dict encoding
                     return "list"
         # If head is not a dict, the projections will catch it as not-kv

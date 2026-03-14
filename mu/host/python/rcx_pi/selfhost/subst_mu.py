@@ -61,8 +61,9 @@ def _substitute_direct(body: Mu, bindings: dict[str, Mu], _depth: int = 0) -> Mu
     otherwise be incorrectly denormalized. Parity with eval_seed.substitute()
     for the head/tail subset of body shapes.
 
-    This is a TEMPORARY parity fixup (wave4a D10). P7-d will replace the
-    normalize→project→denormalize mechanism entirely.
+    This is a TEMPORARY parity fixup (wave4a D10). P7-d shadow mode is active;
+    full cutover awaits evidence that the VM path matches all normalize→project→denormalize
+    edge cases (see STATUS.md for cutover gate status).
     """
     if _depth > MAX_MU_DEPTH:
         raise TypeError(f"Max depth exceeded in _substitute_direct ({MAX_MU_DEPTH})")

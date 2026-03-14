@@ -199,8 +199,8 @@ class TestJsObserverTypeGuardSourceLock:
 # JS: Direct function call rejects invalid observer (via Node subprocess)
 # =============================================================================
 
-class TestJsObserverTypeGuardRuntime:
-    """JS functions reject invalid observer types at runtime."""
+class TestJsObserverTypeGuardSourceCountLock:
+    """JS source contains observer type guard strings (source-lock, not runtime behavioral proof. See test_js_observer_api_guard_gate.py for runtime proof)."""
 
     def _run_js_snippet(self, snippet):
         """Run a JS snippet that verifies observer guards in JS source."""

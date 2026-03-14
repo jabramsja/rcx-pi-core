@@ -245,13 +245,12 @@ def test_debt_dashboard_counts_ast_ok_bootstrap_correctly():
     assert ast_ok_count >= 0, "Count should be non-negative"
     assert ast_ok_count < 100, "Count should be reasonable (sanity check)"
 
-    # Current expected count is 8:
-    #   - 2 eval_seed.py list/dict comprehensions (original)
-    #   - 2 eval_seed.py budget-path comprehensions (D009 depth threading)
+    # Current expected count is 4:
     #   - 2 stage0_vm.py dict/list comprehensions in _materialize_template (P7-a)
     #   - 2 stage0_vm.py dict/list comprehensions in _mu_copy (P7-a bot review fix)
-    assert ast_ok_count == 8, (
-        f"Expected 8 AST_OK:bootstrap markers, found {ast_ok_count}. "
+    # Wave 5: 4 eval_seed.py markers reclassified from bootstrap to infra (precise wording)
+    assert ast_ok_count == 4, (
+        f"Expected 4 AST_OK:bootstrap markers, found {ast_ok_count}. "
         f"If this is intentional, update the test."
     )
 
@@ -465,9 +464,10 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 78 (76 pre-P7-d + 2: P7-d AST_OK:infra
-    # coverage ID extraction in _step_kernel_with_vm)
-    assert infra_count == 78, (
-        f"Expected 78 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 87:
+    # Wave 5: +4 from eval_seed bootstrap→infra reclassification
+    # Wave 5: +5 from classify_mu isinstance annotations
+    assert infra_count == 87, (
+        f"Expected 87 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

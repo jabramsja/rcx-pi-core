@@ -104,8 +104,8 @@ class TestBootstrapCoreExportAllowlist:
 # 3. No inline tests in runtime modules
 # ---------------------------------------------------------------------------
 
-class TestNoInlineTestsInRuntime:
-    """No test output patterns in core/ or engine/ directories."""
+class TestNoInlineTestsInCoreDirs:
+    """No test output patterns in core/ or engine/ directories (source scan)."""
 
     def test_no_console_log_test_patterns(self):
         violations = []

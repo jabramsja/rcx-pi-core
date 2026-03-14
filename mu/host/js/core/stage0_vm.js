@@ -195,8 +195,9 @@ function safeMuDeepEqual(a, b) {
 // Structural deep copy (Mu values only, no external deps)
 // ---------------------------------------------------------------------------
 function muCopy(value) {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) return value.map(muCopy);
+  if (value === null) return null;
+  if (value === undefined) return null;  // Mu has no undefined — canonicalize to null
+  if (_isPlainArray(value)) return value.map(muCopy);  // Reject Array subclasses
   if (_isPlainObject(value)) {
     const result = Object.create(null);
     for (const k of Object.keys(value)) {
@@ -204,11 +205,15 @@ function muCopy(value) {
     }
     return result;
   }
-  return value; // primitives are immutable
+  // Exact-type check for Mu primitives (parity: Python _mu_copy)
+  const t = typeof value;
+  if (t === 'string' || t === 'number' || t === 'boolean') return value;
+  // Non-Mu type (host object, Symbol, etc.) — fail-closed: return null
+  return null;
 }
 
 function safeMuCopy(value) {
-  // AST_OK: error boundary — translates host RangeError to Stage0VMError
+  // AST_OK: error boundary — translates ALL host errors to Stage0VMError (fail-closed)
   try {
     return muCopy(value);
   } catch (e) {
@@ -216,7 +221,9 @@ function safeMuCopy(value) {
       throw new Stage0VMError(
         'Deep copy depth exceeded (recursion overflow)');
     }
-    throw e;
+    // Fail-closed: hostile getters, Proxy traps, etc. → VM error
+    // Do NOT stringify e — hostile toString() can throw secondary exceptions
+    throw new Stage0VMError('Deep copy failed on hostile input');
   }
 }
 
@@ -368,7 +375,9 @@ function materializeTemplate(template, captures, depth = 0) {
       throw new Stage0VMError(
         `Template references uncaptured variable: '${name}'`);
     }
-    return captures[name];
+    // N1 fix: deep-copy captured value to prevent reference leakage
+    // and host-tainted leaf passthrough (parity: Python _safe_mu_copy)
+    return safeMuCopy(captures[name]);
   }
   if (kind === 'object') {
     if (!Object.hasOwn(template, 'fields') || !_isPlainObject(template.fields)) {
@@ -493,6 +502,12 @@ function validateBundle(bundle) {
     if (!Object.hasOwn(bundle, 'source_digest')) {
       throw new Error(
         "Missing 'source_digest' (required for compiler-produced bundles)");
+    }
+    // N2 fix: validate source_digest format (sha256:<64-hex-chars>, parity: Python)
+    const sd = bundle.source_digest;
+    if (typeof sd !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(sd)) {
+      throw new Error(
+        `source_digest must be 'sha256:<64-hex-chars>', got: '${sd}'`);
     }
   }
   if (bundle.stage0_ir_version !== 1) {
