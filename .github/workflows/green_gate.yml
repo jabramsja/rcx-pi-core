@@ -140,10 +140,15 @@ jobs:
             BRANCH="${{ github.ref_name }}"
           fi
           WAVE_ID_FLAG=""
+          WAVE_ID_SUFFIX=""
           if [[ "$BRANCH" == codex/* ]]; then
-            WAVE_ID_FLAG="--wave-id ${BRANCH#codex/}"
+            WAVE_ID_SUFFIX="${BRANCH#codex/}"
           elif [[ "$BRANCH" == jabramsja/* ]]; then
-            WAVE_ID_FLAG="--wave-id ${BRANCH#jabramsja/}"
+            WAVE_ID_SUFFIX="${BRANCH#jabramsja/}"
+          fi
+          # Only set wave-id flag if TASKS.md is in the diff (parity with pre-push-fast)
+          if [ -n "$WAVE_ID_SUFFIX" ] && git diff --name-only "$RANGE" 2>/dev/null | grep -qx "TASKS.md"; then
+            WAVE_ID_FLAG="--wave-id $WAVE_ID_SUFFIX"
           fi
           python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 
