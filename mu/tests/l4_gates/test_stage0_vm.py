@@ -278,8 +278,8 @@ class TestBundleValidation:
     def test_bad_ir_version(self):
         bundle = {
             "stage0_ir_version": 99, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1", "program_order": [],
-            "programs": [],
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
+            "program_order": [], "programs": [],
         }
         with pytest.raises(ValueError, match="Unsupported IR"):
             validate_bundle(bundle)
@@ -287,7 +287,7 @@ class TestBundleValidation:
     def test_unknown_opcode(self):
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{"id": "p1", "ops": [{"op": "explode"}]}],
         }
@@ -298,7 +298,7 @@ class TestBundleValidation:
         prog = {"id": "p1", "ops": [{"op": "return_projection_fail"}]}
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1", "p1"],
             "programs": [prog, prog],
         }
@@ -308,7 +308,7 @@ class TestBundleValidation:
     def test_empty_ops(self):
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{"id": "p1", "ops": []}],
         }
@@ -318,7 +318,7 @@ class TestBundleValidation:
     def test_program_order_mismatch(self):
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p2", "p1"],
             "programs": [
                 {"id": "p1", "ops": [{"op": "return_projection_fail"}]},
@@ -1139,7 +1139,7 @@ class TestMetrics:
         # A bundle that always matches and rewrites (infinite loop)
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "loop", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{
                 "id": "p1",
@@ -1164,7 +1164,7 @@ class TestMachineErrors:
         """Duplicate capture_path name is a lowering bug."""
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{
                 "id": "p1",
@@ -1182,7 +1182,7 @@ class TestMachineErrors:
         """check_captured_equal on uncaptured variable is a lowering bug."""
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{
                 "id": "p1",
@@ -1200,7 +1200,7 @@ class TestMachineErrors:
         """Program that has no terminal opcode is malformed."""
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "x", "source_seed": "x",
-            "machine_profile": "rcx.stage0.v1",
+            "machine_profile": "rcx.stage0.v1", "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{
                 "id": "p1",
@@ -1368,6 +1368,7 @@ def _make_bundle(ops, pid="p1"):
         "bundle_id": "test",
         "source_seed": "test",
         "machine_profile": "rcx.stage0.v1",
+        "hand_authored": True,
         "program_order": [pid],
         "programs": [{"id": pid, "ops": ops}],
     }
@@ -1575,6 +1576,7 @@ class TestStringTypingIdentifiers:
             "bundle_id": "test",
             "source_seed": "test",
             "machine_profile": "rcx.stage0.v1",
+            "hand_authored": True,
             "program_order": [1],
             "programs": [{"id": 1, "ops": [{"op": "return_projection_fail"}]}],
         }
@@ -1587,6 +1589,7 @@ class TestStringTypingIdentifiers:
             "bundle_id": "test",
             "source_seed": "test",
             "machine_profile": "rcx.stage0.v1",
+            "hand_authored": True,
             "program_order": [1],
             "programs": [{"id": "1", "ops": [{"op": "return_projection_fail"}]}],
         }
@@ -1963,7 +1966,7 @@ class TestClosedBundleProgram:
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "test",
             "source_seed": "test", "machine_profile": "rcx.stage0.v1",
-            "program_order": ["p1"],
+            "hand_authored": True, "program_order": ["p1"],
             "programs": [{"id": "p1", "ops": [
                 {"op": "write_path", "template": {"kind": "literal", "value": 1}},
                 {"op": "return_projection_success"},
@@ -1978,7 +1981,7 @@ class TestClosedBundleProgram:
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "test",
             "source_seed": "test", "machine_profile": "rcx.stage0.v1",
-            "program_order": ["p1"],
+            "hand_authored": True, "program_order": ["p1"],
             "programs": [{"id": "p1", "ops": [
                 {"op": "write_path", "template": {"kind": "literal", "value": 1}},
                 {"op": "return_projection_success"},
@@ -1992,7 +1995,7 @@ class TestClosedBundleProgram:
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "test",
             "source_seed": "test", "machine_profile": "rcx.stage0.v1",
-            "program_order": ["p1"],
+            "hand_authored": True, "program_order": ["p1"],
             "programs": [{"id": "p1", "ops": [
                 {"op": "write_path", "template": {"kind": "literal", "value": 1}},
                 {"op": "return_projection_success"},
@@ -2040,7 +2043,7 @@ class TestPrototypeKeyHardening:
         bundle = {
             "stage0_ir_version": 1, "bundle_id": "test",
             "source_seed": "test", "machine_profile": "rcx.stage0.v1",
-            "program_order": ["p1"],
+            "hand_authored": True, "program_order": ["p1"],
             "programs": [{"id": "p1", "ops": [
                 {"op": "check_equal", "path": ["focus", "root"],
                  "value": 3.14},
@@ -2556,6 +2559,7 @@ class TestValidateBundlePidOrdering:
             "bundle_id": "test",
             "source_seed": "test",
             "machine_profile": "rcx.stage0.v1",
+            "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{"id": 123, "ops": []}],
         }
@@ -2569,6 +2573,7 @@ class TestValidateBundlePidOrdering:
             "bundle_id": "test",
             "source_seed": "test",
             "machine_profile": "rcx.stage0.v1",
+            "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{"id": "p1"}],
         }
@@ -2590,6 +2595,7 @@ class TestHostileRootInputs:
             "bundle_id": "hostile-root-test",
             "source_seed": "test",
             "machine_profile": "rcx.stage0.v1",
+            "hand_authored": True,
             "program_order": ["p1"],
             "programs": [{
                 "id": "p1",

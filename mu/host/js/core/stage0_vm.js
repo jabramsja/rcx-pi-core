@@ -418,6 +418,8 @@ function validatePath(path, context) {
 const _BUNDLE_ALLOWED_KEYS = new Set([
   'stage0_ir_version', 'bundle_id', 'source_seed',
   'machine_profile', 'program_order', 'programs',
+  // Integrity keys (required for compiler-produced bundles)
+  'source_digest', 'lowering_version',
   // Metadata keys (documentation, not semantically active)
   'source_seed_version', 'hand_authored', 'note',
 ]);
@@ -480,6 +482,17 @@ function validateBundle(bundle) {
   for (const k of Object.getOwnPropertyNames(bundle)) {
     if (!_BUNDLE_ALLOWED_KEYS.has(k)) {
       throw new Error(`Unknown bundle-level key: '${k}'`);
+    }
+  }
+  // Integrity fields: required for compiler-produced bundles
+  if (bundle.hand_authored !== true) {
+    if (!Object.hasOwn(bundle, 'lowering_version')) {
+      throw new Error(
+        "Missing 'lowering_version' (required for compiler-produced bundles)");
+    }
+    if (!Object.hasOwn(bundle, 'source_digest')) {
+      throw new Error(
+        "Missing 'source_digest' (required for compiler-produced bundles)");
     }
   }
   if (bundle.stage0_ir_version !== 1) {

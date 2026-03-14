@@ -14,6 +14,7 @@ Design plan: .scratch/p7b2_design_plan.md
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -67,10 +68,13 @@ def _reject_duplicate_keys(pairs):
 
 
 def load_seed(path):
-    """Load and validate a seed file. Returns (seed_dict, filename_str)."""
+    """Load and validate a seed file. Returns (seed_dict, filename_str, source_digest)."""
     p = Path(path)
-    with open(p) as f:
-        seed = json.load(f, object_pairs_hook=_reject_duplicate_keys)
+    raw_bytes = p.read_bytes()
+    source_digest = "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
+
+    seed = json.loads(raw_bytes.decode("utf-8"),
+                      object_pairs_hook=_reject_duplicate_keys)
 
     if not isinstance(seed, dict):
         raise CompilerError("Seed must be a JSON object")
@@ -87,7 +91,7 @@ def load_seed(path):
     if not isinstance(projections, list):
         raise CompilerError("Seed 'projections' must be a JSON array")
 
-    return seed, p.name
+    return seed, p.name, source_digest
 
 
 # ---------------------------------------------------------------------------
@@ -402,8 +406,16 @@ def compile_projection(projection, index, seed_filename):
     return program
 
 
-def compile_seed(seed, seed_filename):
-    """Compile a full seed to a Stage0 bundle."""
+def compile_seed(seed, seed_filename, source_digest=None):
+    """Compile a full seed to a Stage0 bundle.
+
+    Args:
+        seed: Parsed seed dict.
+        seed_filename: Original seed filename (for provenance).
+        source_digest: Optional SHA-256 digest of the raw seed file
+            (format: "sha256:<hex>"). Required for production bundles;
+            omit only for in-memory test seeds.
+    """
     if not isinstance(seed.get("meta"), dict):
         raise CompilerError("Seed 'meta' must be a JSON object")
     if "version" not in seed["meta"]:
@@ -437,6 +449,7 @@ def compile_seed(seed, seed_filename):
         "bundle_id": f"rcx.stage0.{seed_name}.compiled.v1",
         "source_seed": seed_filename,
         "source_seed_version": seed["meta"]["version"],
+        "lowering_version": COMPILER_VERSION,
         "machine_profile": "rcx.stage0.v1",
         "hand_authored": False,
         "note": (
@@ -446,6 +459,9 @@ def compile_seed(seed, seed_filename):
         "program_order": program_order,
         "programs": programs,
     }
+
+    if source_digest is not None:
+        bundle["source_digest"] = source_digest
 
     # Layer 2: structural schema validation
     validate_bundle(bundle)
@@ -458,10 +474,14 @@ def compile_seed(seed, seed_filename):
 # ---------------------------------------------------------------------------
 
 def serialize_bundle(bundle):
-    """Serialize bundle to deterministic JSON (byte-identical across runs)."""
+    """Serialize bundle to deterministic JSON (byte-identical across runs).
+
+    Includes trailing newline for POSIX compliance and consistent
+    output between stdout and file modes.
+    """
     return json.dumps(
         bundle, sort_keys=True, indent=2, ensure_ascii=True,
-    )
+    ) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -495,8 +515,8 @@ def main():
             sys.exit(1)
 
     try:
-        seed, seed_filename = load_seed(seed_path)
-        bundle = compile_seed(seed, seed_filename)
+        seed, seed_filename, source_digest = load_seed(seed_path)
+        bundle = compile_seed(seed, seed_filename, source_digest)
     except (OSError, CompilerError, ValueError) as e:
         print(f"Compiler error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -521,7 +541,6 @@ def main():
             try:
                 with os.fdopen(fd, "w") as f:
                     f.write(output)
-                    f.write("\n")
                 os.replace(tmp_path, output_path)
             except BaseException:
                 os.unlink(tmp_path)
@@ -535,7 +554,7 @@ def main():
             file=sys.stderr,
         )
     else:
-        print(output)
+        print(output, end="")
 
 
 if __name__ == "__main__":
