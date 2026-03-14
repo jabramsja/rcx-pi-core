@@ -681,10 +681,10 @@ def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0,
             return body
 
         if isinstance(body, list):
-            return [substitute(elem, bindings, _depth=_depth, _budget=remaining) for elem in body]  # AST_OK: bootstrap recursive substitution
+            return [substitute(elem, bindings, _depth=_depth, _budget=remaining) for elem in body]  # AST_OK: infra — list comprehension rebuilds body elements with substituted values
 
         if isinstance(body, dict):
-            return {k: substitute(v, bindings, _depth=_depth, _budget=remaining) for k, v in body.items()}  # AST_OK: bootstrap recursive substitution
+            return {k: substitute(v, bindings, _depth=_depth, _budget=remaining) for k, v in body.items()}  # AST_OK: infra — dict comprehension rebuilds body entries with substituted values
 
         raise TypeError(f"Invalid body type: {type(body)}")
 
@@ -707,11 +707,11 @@ def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0,
 
     # List - recursively substitute
     if isinstance(body, list):
-        return [substitute(elem, bindings, _depth=_depth + 1) for elem in body]  # AST_OK: bootstrap recursive substitution
+        return [substitute(elem, bindings, _depth=_depth + 1) for elem in body]  # AST_OK: infra — list comprehension rebuilds body elements with substituted values
 
     # Dict - recursively substitute values
     if isinstance(body, dict):
-        return {k: substitute(v, bindings, _depth=_depth + 1) for k, v in body.items()}  # AST_OK: bootstrap recursive substitution
+        return {k: substitute(v, bindings, _depth=_depth + 1) for k, v in body.items()}  # AST_OK: infra — dict comprehension rebuilds body entries with substituted values
 
     # Should not reach here
     raise TypeError(f"Invalid body type: {type(body)}")

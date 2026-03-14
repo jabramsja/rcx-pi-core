@@ -11,14 +11,14 @@ A projection-based computational substrate where **structure is the primitive**.
 | **L3** | Substrate portability (Python + JS) | ✅ COMPLETE |
 | **Gates 1-5** | Meta-circular parity (structural default) | ✅ COMPLETE |
 | **Hemispheres v0** | Native structural routing (12 projections) | ✅ DONE |
-| **L4** | True self-hosting (bootstrap primitive elimination) | DEFERRED — see `mu/docs/core/L4ExitChecklist.v0.md` |
+| **L4** | True self-hosting (bootstrap primitive elimination) | SINK (full completion research; bounded reduction active) |
 
-> **Current reality:** L1-L3 are complete and gate-enforced. L4 (full meta-circularity / bootstrap primitive elimination) is a research goal with open feasibility questions — see `mu/docs/core/G8CpsFeasibility.v0.md`.
+> **Current reality:** L1-L3 are complete and gate-enforced. L4 full completion remains in SINK, but bounded reduction work is active: P7 Stage0 meta-circular reduction landed through shadow-mode cutover (PR #581). Production flip requires performance evidence + founder GO. G8 classification gate PASS (all 4 primitives classified). See `mu/docs/core/L4ExitChecklist.v0.md` and `mu/docs/core/G8CpsFeasibility.v0.md`.
 >
 > Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
 - **Comprehensive test coverage** (see STATUS.md for current counts)
-- **11 tracked @host_* markers** (bootstrap substrate lower bound)
+- **20 tracked host-debt markers** (6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap — see STATUS.md)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
 - **~163 projections** across 19 seed files (see `test_seed_counts.py` for exact counts)
 

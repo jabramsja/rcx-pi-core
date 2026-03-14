@@ -15,8 +15,8 @@ def test_readme_uses_tracked_marker_wording():
         "README.md still uses stale 'irreducible bootstrap floor' wording. "
         "Should say 'tracked @host_* markers (bootstrap substrate lower bound)'."
     )
-    assert "@host_* markers" in content, (
-        "README.md should reference '@host_* markers' for debt count."
+    assert "tracked host-debt markers" in content or "@host_* markers" in content, (
+        "README.md should reference 'tracked host-debt markers' or '@host_* markers' for debt count."
     )
 
 

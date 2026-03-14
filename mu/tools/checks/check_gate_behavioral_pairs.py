@@ -8,14 +8,17 @@ Scans L4 gate test files and classifies each test method into:
   - theater_risk:  Vacuous assertions, no meaningful checks
 
 Usage:
-    python tools/checks/check_gate_behavioral_pairs.py          # Human-readable
+    python tools/checks/check_gate_behavioral_pairs.py          # Human-readable (mismatch enforced by default)
     python tools/checks/check_gate_behavioral_pairs.py --json   # JSON output
-    python tools/checks/check_gate_behavioral_pairs.py --fail-on-theater  # Exit 1 if theater found
+    python tools/checks/check_gate_behavioral_pairs.py --fail-on-theater   # Exit 1 if theater found
+    python tools/checks/check_gate_behavioral_pairs.py --fail-on-mismatch  # Exit 1 on proof-class mismatch (also default)
+    python tools/checks/check_gate_behavioral_pairs.py --no-fail-on-mismatch  # Suppress default mismatch enforcement
 """
 from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -187,6 +190,38 @@ def compute_summary(file_results: dict) -> dict:
     return {"total": total, **counts}
 
 
+# Keywords in class names that imply runtime/behavioral proof obligation.
+# "Parity" excluded — source-level parity (constant equality, registry
+# presence) is legitimate source_lock. Only "Runtime" and "Wiring" imply
+# actual JS execution proof.
+PROOF_CLASS_KEYWORDS = re.compile(r"runtime|wiring", re.IGNORECASE)
+
+
+def find_proof_class_mismatches(file_results: dict) -> list[str]:
+    """Detect proof-class governance loophole.
+
+    A class whose name contains "Runtime" or "Wiring" (case-insensitive)
+    claims to provide runtime/behavioral evidence. If ALL of its test methods are
+    classified as ``source_lock``, the class is making a structural claim it cannot
+    back — that's a proof-class mismatch.
+
+    Returns a list of ``"filepath::ClassName"`` strings for every mismatched class.
+    """
+    mismatches: list[str] = []
+    for filepath, file_data in file_results.items():
+        for class_name, methods in file_data["classes"].items():
+            if not PROOF_CLASS_KEYWORDS.search(class_name):
+                continue
+            classifications = set(methods.values())
+            # A class claiming Runtime/Wiring must have at least one behavioral
+            # method (not source_lock, not theater_risk). Mixed source_lock +
+            # theater_risk still fails — theater_risk is not behavioral proof.
+            behavioral = classifications - {"source_lock", "theater_risk"}
+            if not behavioral:
+                mismatches.append(f"  {filepath}::{class_name}")
+    return mismatches
+
+
 def format_human(file_results: dict, summary: dict) -> str:
     """Format results for human-readable output."""
     lines = ["=== L4 Gate Test Integrity Report ===", ""]
@@ -215,9 +250,18 @@ def format_human(file_results: dict, summary: dict) -> str:
 
 
 def main():
+    KNOWN_FLAGS = {"--json", "--fail-on-theater", "--fail-on-mismatch", "--no-fail-on-mismatch"}
     args = sys.argv[1:]
+    # Fail-closed: reject unknown flags
+    unknown = [a for a in args if a.startswith("--") and a not in KNOWN_FLAGS]
+    if unknown:
+        print(f"ERROR: Unknown flag(s): {', '.join(unknown)}", file=sys.stderr)
+        print(f"  Known flags: {', '.join(sorted(KNOWN_FLAGS))}", file=sys.stderr)
+        sys.exit(2)
     json_mode = "--json" in args
     fail_on_theater = "--fail-on-theater" in args
+    # Mismatch enforcement is ON by default; --no-fail-on-mismatch suppresses it.
+    fail_on_mismatch = "--no-fail-on-mismatch" not in args
 
     gate_dir = L4_GATES_DIR
     if not gate_dir.is_dir():
@@ -233,6 +277,8 @@ def main():
     else:
         print(format_human(file_results, summary))
 
+    exit_code = 0
+
     if fail_on_theater and summary.get("theater_risk", 0) > 0:
         theater_methods = []
         for filepath, file_data in file_results.items():
@@ -243,7 +289,22 @@ def main():
         print(f"FAIL: {len(theater_methods)} theater_risk method(s) found:", file=sys.stderr)
         for m in theater_methods:
             print(m, file=sys.stderr)
-        sys.exit(1)
+        exit_code = 1
+
+    if fail_on_mismatch:
+        mismatches = find_proof_class_mismatches(file_results)
+        if mismatches:
+            print(
+                f"FAIL: {len(mismatches)} proof-class mismatch(es) found "
+                f"(class name implies runtime proof but all methods are source_lock):",
+                file=sys.stderr,
+            )
+            for m in mismatches:
+                print(m, file=sys.stderr)
+            exit_code = 1
+
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

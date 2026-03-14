@@ -199,22 +199,30 @@ def _safe_mu_deep_equal(a, b):
 
 def _mu_copy(value):
     """Deep-copy a Mu value using only primitives (no copy/json imports)."""
-    if isinstance(value, dict):
+    if type(value) is dict:
         return {k: _mu_copy(v) for k, v in value.items()}  # AST_OK: bootstrap structural copy of Mu dict
-    if isinstance(value, list):
+    if type(value) is list:
         return [_mu_copy(item) for item in value]  # AST_OK: bootstrap structural copy of Mu list
-    # Primitives (str, int, float, bool, None) are immutable — return as-is
-    return value
+    # Exact-type check for primitives: reject subclasses (EvilStr, etc.)
+    if type(value) in (str, int, float, bool, type(None)):
+        return value
+    # Non-Mu type (subclass or unknown) — fail-closed: return None
+    # This prevents hostile leaf passthrough from capture_ref
+    return None
 
 
 def _safe_mu_copy(value):
-    # AST_OK: error boundary — translates host RecursionError to Stage0VMError
-    """Deep-copy with recursion overflow protection."""
+    # AST_OK: error boundary — translates ALL host errors to Stage0VMError (fail-closed)
+    """Deep-copy with error boundary protection (parity: JS safeMuCopy)."""
     try:
         return _mu_copy(value)
     except RecursionError:
         raise Stage0VMError(
             "Deep copy depth exceeded (recursion overflow)")
+    except Exception as e:
+        # Fail-closed: hostile dict keys, __iter__ traps, etc. → VM error
+        raise Stage0VMError(
+            f"Deep copy failed on hostile input: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +376,9 @@ def _materialize_template(template, captures, _depth=0):
         if name not in captures:
             raise Stage0VMError(
                 f"Template references uncaptured variable: '{name}'")
-        return captures[name]
+        # N1 fix: deep-copy captured value to prevent reference leakage
+        # and host-tainted leaf passthrough (parity: JS safeMuCopy)
+        return _safe_mu_copy(captures[name])
 
     if kind == "object":
         if "fields" not in template or type(template["fields"]) is not dict:
@@ -465,6 +475,13 @@ def validate_bundle(bundle):
             raise ValueError(
                 "Missing 'source_digest' (required for "
                 "compiler-produced bundles)")
+        # N2 fix: validate source_digest format (sha256:<64-hex-chars>)
+        sd = bundle["source_digest"]
+        if (type(sd) is not str or not sd.startswith("sha256:")
+                or len(sd) != 71
+                or not all(c in '0123456789abcdef' for c in sd[7:])):
+            raise ValueError(
+                f"source_digest must be 'sha256:<64-hex-chars>', got: {sd!r}")
 
     # Exact int type: reject bool (True == 1 in Python but true !== 1 in JS)
     if type(bundle["stage0_ir_version"]) is not int or isinstance(bundle["stage0_ir_version"], bool):

@@ -248,6 +248,9 @@ function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqI
 
 // AST_OK_JS: security allowlist — frozen constant (parity: engine_pipeline.py:680).
 // Authority allowlist for run_algorithm boundary dispatch.
+// Note: Object.freeze on a Set does NOT prevent mutation via Set.prototype.add.call().
+// The Set is module-private and not exported, so external mutation is not possible.
+// Internal mutation is prevented by code discipline (no .add()/.delete()/.clear() calls).
 const _ALGORITHM_SEED_ALLOWLIST = Object.freeze(new Set([
   'recurrence.v1.json',
   'recurrence.v2.json',

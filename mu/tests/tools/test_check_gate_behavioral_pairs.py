@@ -125,6 +125,37 @@ class TestCLIOutput:
         assert isinstance(data["summary"]["total"], int)
         assert data["summary"]["total"] > 0
 
+    def test_mismatch_enforcement_default_clean(self):
+        """Default mode with mismatch enforcement passes (no Runtime/Wiring source-lock classes)."""
+        result = subprocess.run(
+            ["python3", str(_tool_path)],
+            capture_output=True, text=True, check=False,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, (
+            f"Mismatch enforcement failed:\n{result.stderr}"
+        )
+        assert "proof-class mismatch" not in result.stderr
+
+    def test_mismatch_enforcement_suppressed(self):
+        """--no-fail-on-mismatch suppresses mismatch check."""
+        result = subprocess.run(
+            ["python3", str(_tool_path), "--no-fail-on-mismatch"],
+            capture_output=True, text=True, check=False,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0
+
+    def test_unknown_flag_rejected(self):
+        """Unknown CLI flags exit 2 (fail-closed)."""
+        result = subprocess.run(
+            ["python3", str(_tool_path), "--not-a-real-flag"],
+            capture_output=True, text=True, check=False,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 2, f"Expected exit 2, got {result.returncode}"
+        assert "Unknown flag" in result.stderr
+
     def test_fail_on_theater_exit_code(self):
         """--fail-on-theater exits non-zero when theater_risk methods exist."""
         result = subprocess.run(

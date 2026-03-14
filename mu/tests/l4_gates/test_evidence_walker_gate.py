@@ -43,8 +43,8 @@ class TestEvidenceWalkerSeedGate:
         assert "evidence_walker.v1.json" in SEED_CHECKSUMS
 
 
-class TestEvidenceWalkerJsParityGate:
-    """Gate: evidence_walker.v1.json registered in JS registries (cross-substrate parity)."""
+class TestEvidenceWalkerJsRegistryGate:
+    """Gate: evidence_walker.v1.json registered in JS registries (source-lock, not runtime parity)."""
 
     def test_js_seed_checksums_contains_evidence_walker(self):
         """JS SEED_CHECKSUMS must include evidence_walker.v1.json."""
