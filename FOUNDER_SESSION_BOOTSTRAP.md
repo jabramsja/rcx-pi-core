@@ -22,6 +22,7 @@ Edit this file only when session behavior changes, or when stale content would c
 - Treat "wrong architectural direction" as distinct from "merged defect": separate bad advisory ideas from shipped code, and when asked for a retrospective audit classify landed waves as `SAFE`, `QUESTIONABLE`, or `WRONG`.
 - If founder pastes a Claude summary (especially prefixed with `founder:`), immediately return a full Claude prompt without waiting to be asked.
 - Treat this file as protocol, not a rolling project-status ledger. Current project state must be re-verified from canonical sources each session.
+- Use installed Codex skills when they clearly match the task, but do not let skill heuristics override repo protocol, reproduced evidence, or code truth.
 - Every assistant response and every Claude prompt must end with this exact line:
 
 `Questions? Concerns? Thoughts? -- Think hard`
@@ -31,6 +32,7 @@ Do not trust historical state embedded in this file. Read current truth from:
 - `STATUS.md` for phase, gate state, debt, and testing tiers.
 - `TASKS.md` for authorized work, tracker notes, and wave classification context.
 - `CHANGELOG.md` for recently landed waves and exact merge chronology.
+- `reports/README.md` for active report lanes and report placement rules.
 - `git status --short` for live workspace state.
 
 ## 2) Session Start Repro
@@ -40,6 +42,7 @@ Run immediately:
 git status --short
 python3 tools/checks/enforce_l4_execution_contract.py --staged
 python3 mu/tools/checks/check_host_semantics_ratchet.py --json
+python3 tools/checks/check_host_authority_inventory_ratchet.py
 ./tools/checks/check_docs_consistency.sh
 ```
 
@@ -75,15 +78,23 @@ Any full prompt should include:
 `Questions? Concerns? Thoughts? -- Think hard`
 
 ## 5) First 5 Minutes Playbook For New Session
-1. Read `mu/docs/agents/AgentRunbook.v0.md` and honor skill/trigger rules.
-2. Re-ground on RCX doctrine in `CLAUDE.md`, `mu/docs/core/Why_RCX_PI_VM_EXISTS.md`, `mu/docs/core/SelfHosting.v0.md`, `mu/docs/core/MetaCircularKernel.v0.md`, and `mu/docs/core/StructuralPurity.v0.md` before giving runtime/substrate advice.
-3. Run `git status --short`.
-4. Run L4 contract check on actual candidate diff.
-5. Decide if wave must be split by class.
-6. Run targeted validations and issue GO/NO-GO.
+1. Read `mu/docs/agents/AgentRunbook.v0.md` for repo agent/review tooling norms when the task touches runners, reviews, or orchestration.
+2. If using Codex, apply installed skill triggers instead of improvising the workflow. Prefer `rcx-redteam-runtime` for runtime audits, `rcx-doc-truth-sync` for doc/report cleanup, `rcx-parity-authority-audit` for Python/JS or authority review, and `rcx-wave-closeout` for validations and report closeout.
+3. Read `reports/README.md` before moving, archiving, or creating report artifacts.
+4. Re-ground on RCX doctrine in `CLAUDE.md`, `mu/docs/core/Why_RCX_PI_VM_EXISTS.md`, `mu/docs/core/SelfHosting.v0.md`, `mu/docs/core/MetaCircularKernel.v0.md`, and `mu/docs/core/StructuralPurity.v0.md` before giving runtime/substrate advice.
+5. Run `git status --short`.
+6. Run L4 contract check on actual candidate diff.
+7. Decide if wave must be split by class.
+8. Run targeted validations and issue GO/NO-GO.
 
 ## 6) Canonical Paths
 - Repo root: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX`
 - L4 contract checker: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/tools/checks/enforce_l4_execution_contract.py`
 - Host semantics ratchet: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/mu/tools/checks/check_host_semantics_ratchet.py`
+- Host authority inventory ratchet: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/tools/checks/check_host_authority_inventory_ratchet.py`
 - Docs consistency check: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/tools/checks/check_docs_consistency.sh`
+- Reports index: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/README.md`
+- Blocker reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/blockers`
+- Non-blocker reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/non-blockers`
+- Deferred reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/deferred`
+- Archived reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive`

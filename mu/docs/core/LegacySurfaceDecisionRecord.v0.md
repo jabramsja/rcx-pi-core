@@ -13,7 +13,7 @@ These surfaces are NOT on the L3 self-hosting critical path.
 # Legacy Surface Decision Record v0
 
 **Origin:** Round 18 Full-Stack Audit (2026-02-14), findings P3 #10-#12
-**Audit report:** `reports/full_audit_round18/06_synthesis.md`
+**Audit report:** `reports/archive/full_audit_round18/06_synthesis.md`
 
 ---
 

@@ -95,6 +95,8 @@ RCX_MINIMAL_SPINE_MANIFEST.json
 !.claude/hooks/
 !.claude/settings.json
 !.claude/agents/
+!.claude/commands/
+!.claude/skills/
 .agent_memory/
 .agent_bus/
 experiments/
