@@ -655,13 +655,19 @@ class TestJSCompiledBundleParity:
             f"JS validateBundle rejected compiled subst bundle: {result}")
 
     def test_js_compiled_match_execution_parity(self):
-        """JS VM produces same result as Python VM on compiled match bundle."""
+        """JS VM run on compiled match bundle produces same final state as Python."""
         bundle = _load_bundle(MATCH_COMPILED_PATH)
-        inp = {"_type": "match", "pattern": "hello", "value": "hello",
-               "_bindings": {}, "_status": "active", "_mode": "match"}
-        py_result = stage0_vm_step(bundle, inp)
-        js_result = _run_js_stage0("step", MATCH_COMPILED_REL, inp)
-        assert py_result["status"] == js_result["status"], (
-            f"Status mismatch: py={py_result['status']}, "
-            f"js={js_result['status']}")
-        assert py_result["matched_program_id"] == js_result["matched_program_id"]
+        # Use the real wrapped seed input form (same as MATCH_TEST_VECTORS[0])
+        inp = {
+            "match": {"pattern": "hello", "value": "hello"},
+            "_match_ctx": {"caller": "test"},
+        }
+        # Run to completion on both substrates
+        py_final = _run_vm_to_completion(bundle, inp)
+        js_result = _run_js_stage0("run", MATCH_COMPILED_REL, inp)
+        # JS run returns {steps: [...], root: ...}
+        js_final = js_result["root"]
+        assert py_final == js_final, (
+            f"Final state mismatch:\npy={py_final}\njs={js_final}")
+        # Verify the run actually did something (not a stall on first step)
+        assert len(js_result["steps"]) > 0, "JS run produced zero steps"
