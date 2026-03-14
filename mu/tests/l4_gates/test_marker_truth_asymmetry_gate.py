@@ -1,4 +1,6 @@
 """L4 gate: marker-truth asymmetry fix (MT1).
+Non-blocker sweep (2026-03-14): HOST_LOOP markers added to _match_inner loops,
+projection_runner.py AST_OK infra markers added. Ratchet baseline unchanged.
 
 Proves that scoped sites have honest markers: list_to_linked reclassified
 to BOUNDARY in P7 Wave 5 (off kernel path, data preparation only), while
