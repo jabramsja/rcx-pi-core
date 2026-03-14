@@ -38,7 +38,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -202,7 +209,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -297,7 +311,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -333,7 +354,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -499,7 +527,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -594,7 +629,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -630,7 +672,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -805,7 +854,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -870,7 +926,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -1020,7 +1083,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -1101,7 +1171,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -1283,7 +1360,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -1364,7 +1448,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -1550,7 +1641,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -1751,7 +1849,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -2020,7 +2125,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -2115,7 +2227,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -2350,7 +2469,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -2445,7 +2571,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -2671,7 +2804,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -2736,7 +2876,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",
@@ -2918,7 +3065,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -3094,7 +3248,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root"
@@ -3125,7 +3286,14 @@
         },
         {
           "op": "assert_key_profile",
-          "optional": [],
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
           "path": [
             "focus",
             "root",

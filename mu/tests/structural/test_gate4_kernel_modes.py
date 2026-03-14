@@ -14,9 +14,16 @@ from rcx_pi.selfhost.step_mu import (
     step_kernel_mu,
     validate_algorithm_runtime_fields,
 )
+import rcx_pi.selfhost.step_mu as _step_mu_mod
+
+
+def _disable_shadow(monkeypatch):
+    """Disable P7-d shadow mode for tests that monkeypatch kernel loaders."""
+    monkeypatch.setattr(_step_mu_mod, '_STAGE0_SHADOW_ENABLED', False)
 
 
 def test_step_kernel_mu_bridge_mode_selects_bridge_loader(monkeypatch):
+    _disable_shadow(monkeypatch)
     calls = {"core": 0, "bridge": 0}
 
     def fake_core():
@@ -40,6 +47,7 @@ def test_step_kernel_mu_bridge_mode_selects_bridge_loader(monkeypatch):
 
 
 def test_step_kernel_mu_core_mode_selects_core_loader(monkeypatch):
+    _disable_shadow(monkeypatch)
     calls = {"core": 0, "bridge": 0}
 
     def fake_core():
@@ -73,6 +81,7 @@ def test_step_kernel_mu_invalid_validation_mode_fails():
 
 
 def test_algorithm_runtime_allows_top_level_algorithm_fields(monkeypatch):
+    _disable_shadow(monkeypatch)
     monkeypatch.setattr("rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared", lambda: [])  # ANTICHEAT_OK: kernel mode test
     value = {"_mode": "recurrence", "_phase": "scan", "_state": "A", "_step": 2}
 
@@ -81,6 +90,7 @@ def test_algorithm_runtime_allows_top_level_algorithm_fields(monkeypatch):
 
 
 def test_domain_mode_rejects_top_level_reserved_algorithm_fields(monkeypatch):
+    _disable_shadow(monkeypatch)
     monkeypatch.setattr("rcx_pi.selfhost.step_mu._load_combined_kernel_projections_shared", lambda: [])  # ANTICHEAT_OK: kernel mode test
     value = {"_mode": "recurrence", "_phase": "scan"}
 

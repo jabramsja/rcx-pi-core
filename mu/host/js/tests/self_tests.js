@@ -29,10 +29,20 @@ module.exports = function runSelfTests(seeds) {
     parityVectors,
     bridgeProjections,
     validateCombinedBridgeOrdering,
+    // P7-d: VM bundles for shadow mode
+    kernelV1Projections, matchBundle, substBundle,
   } = seeds;
 
+  // P7-d: Construct vmConfig for shadow mode (if bundles available)
+  const vmConfig = (kernelV1Projections && matchBundle && substBundle) ? {
+    kernelV1Projs: kernelV1Projections,
+    bridgeProjs: null, // core mode — no bridge
+    matchBundle,
+    substBundle,
+  } : null;
+
   console.log('=== RCX eval_step.js - Complete Kernel Cycle (v8 - L3 Full Parity with Bridge) ===\n');
-  console.log('Seed integrity: 13 seeds verified (checksum + structure + projection order)');
+  console.log('Seed integrity: 12 seeds verified at startup (+ terminal_classify lazy-loaded on demand)');
   console.log(`Loaded projections from mu/ folder:`);
   console.log(`  - substrate/kernel.v1.json: ${kernel.projections.length} projections`);
   console.log(`  - substrate/match.v2.json: ${matchSeed.projections.length} projections`);
@@ -177,7 +187,7 @@ module.exports = function runSelfTests(seeds) {
     if (vector.expected_error) {
       // Vector expects rejection (e.g., non-linear pattern on core path).
       try {
-        stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100 });
+        stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100, vmConfig });
         console.log(`  ✗ ${vector.id}: should have rejected but didn't`); parityFailed++;
       } catch (e) {
         if (e.message.includes(vector.expected_error)) { console.log(`  ✓ ${vector.id} (rejected: ${vector.expected_error})`); parityPassed++; }
@@ -185,7 +195,7 @@ module.exports = function runSelfTests(seeds) {
       }
     } else {
       try {
-        const { result } = stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100 });
+        const { result } = stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100, vmConfig });
         const denormalized = denormalize(result);
         if (muEqual(denormalized, vector.expected_output)) { console.log(`  ✓ ${vector.id}`); parityPassed++; }
         else { console.log(`  ✗ ${vector.id}: got ${JSON.stringify(denormalized)}, expected ${JSON.stringify(vector.expected_output)}`); parityFailed++; }
@@ -448,6 +458,61 @@ module.exports = function runSelfTests(seeds) {
   catch (e) { const ok = e.message.includes('Non-dict projection'); console.log(`  Non-dict (array) rejected: ${ok} (expected: true)`); bridgeValidationPassed = bridgeValidationPassed && ok; }
   console.log(`\nPASS bridge ordering validation: ${bridgeValidationPassed}`);
 
+  // === Test: P7-d Bridge-Mode VM Shadow ===
+  console.log('\n=== Test: P7-d Bridge-Mode VM Shadow ===\n');
+  let bridgeShadowPassed = true;
+  if (vmConfig && bridgeProjections) {
+    const vmConfigBridge = {
+      ...vmConfig,
+      bridgeProjs: bridgeProjections,
+    };
+    try {
+      // Run a simple kernel step through bridge path with VM shadow
+      const bridgeResult = stepKernel(
+        allProjectionsWithBridge, { op: 'double', value: 42 },
+        [{ pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }],
+        { maxSteps: 50, vmConfig: vmConfigBridge }
+      );
+      const hasBridgeResult = bridgeResult && 'result' in bridgeResult;
+      console.log(`  Bridge-mode stepKernel with vmConfig: ${hasBridgeResult} (expected: true)`);
+      bridgeShadowPassed = bridgeShadowPassed && hasBridgeResult;
+    } catch (e) {
+      console.log(`  Bridge-mode stepKernel with vmConfig: false (${e.message})`);
+      bridgeShadowPassed = false;
+    }
+    try {
+      // Run structural trace through bridge path with VM shadow
+      const bridgeTraceResult = runStructural(
+        allProjectionsWithBridge,
+        [{ id: 'test_double', pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }],
+        { op: 'double', value: 99 }, 10, vmConfigBridge
+      );
+      const hasTraceFields = 'result' in bridgeTraceResult && 'trace' in bridgeTraceResult;
+      console.log(`  Bridge-mode runStructural with vmConfig: ${hasTraceFields} (expected: true)`);
+      bridgeShadowPassed = bridgeShadowPassed && hasTraceFields;
+    } catch (e) {
+      console.log(`  Bridge-mode runStructural with vmConfig: false (${e.message})`);
+      bridgeShadowPassed = false;
+    }
+    // Stall case: bridge mode, no domain projection matches
+    try {
+      const bridgeStallResult = stepKernel(
+        allProjectionsWithBridge, 'no_match_input',
+        [{ pattern: { op: 'never', value: { var: 'x' } }, body: { var: 'x' } }],
+        { maxSteps: 50, returnMeta: true, vmConfig: vmConfigBridge }
+      );
+      const stallDetected = bridgeStallResult.stall === true;
+      console.log(`  Bridge-mode stall with vmConfig: ${stallDetected} (expected: true)`);
+      bridgeShadowPassed = bridgeShadowPassed && stallDetected;
+    } catch (e) {
+      console.log(`  Bridge-mode stall with vmConfig: false (${e.message})`);
+      bridgeShadowPassed = false;
+    }
+  } else {
+    console.log('  SKIP: vmConfig or bridgeProjections not available');
+  }
+  console.log(`\nPASS bridge-mode VM shadow: ${bridgeShadowPassed}`);
+
   // === Summary ===
   console.log('\n=== Summary ===\n');
   const allPassed = passed && passedStall && pass3a && pass3b && pass3c &&
@@ -455,7 +520,8 @@ module.exports = function runSelfTests(seeds) {
                     passReservedFields && isNormalizedAsDict && isPreservedAsHeadTail &&
                     parityAllPassed && securityAllPassed && structuralTraceAllPassed &&
                     recurrenceAllPassed && e2ePassed && engineHelpersPassed &&
-                    metabolizationBehaviorPassed && bridgeValidationPassed;
+                    metabolizationBehaviorPassed && bridgeValidationPassed &&
+                    bridgeShadowPassed;
   console.log(`All tests passed: ${allPassed}`);
   if (!allPassed) process.exit(1);
   console.log(`\nSecurity hardening (v7 - L3 Recurrence Parity, mu/ reorg):`);

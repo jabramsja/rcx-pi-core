@@ -3,8 +3,8 @@
   "description": "Baseline for bootstrap purity ratchet. The host must be a DUMB bootstrap — no new host capabilities may be added. See mu/docs/core/Why_RCX_PI_VM_EXISTS.md. Any increase = hard fail.",
   "contraband_ok_count": {
     "python_kernel": 2,
-    "javascript_kernel": 2,
-    "total": 4
+    "javascript_kernel": 4,
+    "total": 6
   },
   "stdlib_modules": {
     "python_kernel": [

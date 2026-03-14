@@ -38,6 +38,8 @@
     "/archive/",
     "mu/tools/agents/.*_prompt\\.md$",
     "^\\.claude/agents/",
+    "^\\.claude/commands/",
+    "^\\.claude/skills/",
     "\\.auto\\.md$",
     "^archive/",
     "^rcx_pi/specs/",

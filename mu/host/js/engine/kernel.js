@@ -12,18 +12,77 @@ const { NO_MATCH, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields, rejectNonlinearProjections } = require('../core/security');
-const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted } = require('../core/bootstrap_core');
+const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted, _applyProjectionTrusted } = require('../core/bootstrap_core');
+const { stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: P7-d VM dispatch for match.v2/subst.v2 kernel step
+
+// P7-d: Shadow mode flags (parity with Python step_mu.py)
+const _STAGE0_VM_CUTOVER = false;
+let _STAGE0_SHADOW_ENABLED = true;
+
+/**
+ * P7-d: Kernel step using VM for match.v2/subst.v2, host for kernel.v1/bridge.
+ * No coverage system in JS — pure execution only.
+ * Iteration marker on Python parity function (_step_kernel_with_vm in step_mu.py).
+ */
+function _stepKernelWithVM(kernelV1Projs, bridgeProjs, matchBundle, substBundle, inputValue) {
+  // 1. kernel.v1 projections (host path)
+  for (const proj of kernelV1Projs) {
+    const result = _applyProjectionTrusted(proj, inputValue);
+    if (result !== NO_MATCH) return result;
+  }
+
+  // 2. bridge projections (host path, only in bridge mode)
+  if (bridgeProjs) {
+    for (const proj of bridgeProjs) {
+      const result = _applyProjectionTrusted(proj, inputValue);
+      if (result !== NO_MATCH) return result;
+    }
+  }
+
+  // 3. match.v2 via Stage0 VM
+  const matchResult = stage0VmStep(matchBundle, inputValue);
+  if (matchResult.status === 'match') return matchResult.root;
+
+  // 4. subst.v2 via Stage0 VM
+  const substResult = stage0VmStep(substBundle, inputValue);
+  if (substResult.status === 'match') return substResult.root;
+
+  return inputValue; // stall
+}
 
 /**
  * Internal: kernel loop only (returnMeta path).
  * Caller must provide pre-validated, pre-normalized kernelInput.
  * No validation, no normalization — just the state machine.
  */
-function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps) {
+function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig) {
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel');
   for (let i = 0; i < maxSteps; i++) {
-    const result = _stepTrusted(kernelProjections, current);
+    let result;
+    if (vmConfig && _STAGE0_VM_CUTOVER) {
+      result = _stepKernelWithVM(
+        vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+        vmConfig.matchBundle, vmConfig.substBundle, current);
+    } else {
+      result = _stepTrusted(kernelProjections, current);
+      // P7-d shadow: run VM path too, assert equivalence
+      if (vmConfig && _STAGE0_SHADOW_ENABLED) {
+        const vmResult = _stepKernelWithVM(
+          vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+          vmConfig.matchBundle, vmConfig.substBundle, current);
+        const hostStalled = result === current;
+        const vmStalled = vmResult === current;
+        if (hostStalled !== vmStalled) {
+          throw new Error(
+            `P7-d shadow: polarity divergence — hostStalled=${hostStalled}, vmStalled=${vmStalled}`);
+        }
+        if (!hostStalled && !muDeepEqual(result, vmResult)) {
+          throw new Error(
+            `P7-d shadow: output divergence`);
+        }
+      }
+    }
 
     if (isKernelTerminal(result)) {
       const stall = result._stall === true;
@@ -65,12 +124,33 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
  * No validation, no normalization — just the state machine.
  * Returns { result, steps, stalled, trace } (non-meta shape).
  */
-function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps) {
+function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps, vmConfig) {
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel.nonmeta');
   const trace = [];
   for (let i = 0; i < maxSteps; i++) {
-    const next = _stepTrusted(kernelProjections, current);
+    let next;
+    if (vmConfig && _STAGE0_VM_CUTOVER) {
+      next = _stepKernelWithVM(
+        vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+        vmConfig.matchBundle, vmConfig.substBundle, current);
+    } else {
+      next = _stepTrusted(kernelProjections, current);
+      if (vmConfig && _STAGE0_SHADOW_ENABLED) {
+        const vmResult = _stepKernelWithVM(
+          vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+          vmConfig.matchBundle, vmConfig.substBundle, current);
+        const hostStalled = next === current;
+        const vmStalled = vmResult === current;
+        if (hostStalled !== vmStalled) {
+          throw new Error(
+            `P7-d shadow: polarity divergence — hostStalled=${hostStalled}, vmStalled=${vmStalled}`);
+        }
+        if (!hostStalled && !muDeepEqual(next, vmResult)) {
+          throw new Error(`P7-d shadow: output divergence`);
+        }
+      }
+    }
 
     if (!isKernelIntermediate(next)) {
       const nextHash = muHashControlCached(next, 'stepKernel.nonmeta.stall');
@@ -163,12 +243,15 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     _projs: listToLinked(kernelDomainProjs)
   };
 
+  // P7-d: Build vmConfig from options if bundles provided
+  const vmConfig = options.vmConfig || null;
+
   if (returnMeta) {
-    return _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps);
+    return _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig);
   }
 
   // Non-meta mode
-  return _stepKernelCoreNonMeta(projections, kernelInput, maxSteps);
+  return _stepKernelCoreNonMeta(projections, kernelInput, maxSteps, vmConfig);
 }
 
 /**
@@ -177,7 +260,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
  *
  * BOUNDARY: Trace infrastructure — off kernel path. Reclassified P7W5: was host iteration marker.
  */
-function runStructural(kernelProjections, domainProjections, input, maxSteps = 10000) {
+function runStructural(kernelProjections, domainProjections, input, maxSteps = 10000, vmConfig = null) {
   if (!isValidMu(input)) {
     throw new RcxError('input.invalid_type', 'Invalid Mu input to runStructural()');
   }
@@ -223,7 +306,7 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
   for (let i = 0; i < maxSteps; i++) {
     const normalizedCurrent = normalize(current);
     const kernelInput = { _step: normalizedCurrent, _projs: linkedProjs };
-    const meta = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000);
+    const meta = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000, vmConfig);
     const result = meta.output;
     // Resolve matched projection ID: use Stage 0 match (proven equivalent
     // to match.v2 by parity tests). First-match-wins: first projection whose
@@ -288,8 +371,8 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
  * Parameterized: takes kernelProjections instead of module-global.
  */
 function stepKernelStructural(kernelProjections, domainProjections, domainInput, options = {}) {
-  const { maxSteps = 10000 } = options;
-  return runStructural(kernelProjections, domainProjections, domainInput, maxSteps);
+  const { maxSteps = 10000, vmConfig = null } = options;
+  return runStructural(kernelProjections, domainProjections, domainInput, maxSteps, vmConfig);
 }
 
 module.exports = {
@@ -298,4 +381,8 @@ module.exports = {
   stepKernelStructural,
   // Internal: exported for pipeline.js pre-validation optimization
   _stepKernelCoreNonMeta,
+  // P7-d: exported for shadow mode control and testing
+  _stepKernelWithVM,
+  get _STAGE0_SHADOW_ENABLED() { return _STAGE0_SHADOW_ENABLED; },
+  set _STAGE0_SHADOW_ENABLED(v) { _STAGE0_SHADOW_ENABLED = v; },
 };

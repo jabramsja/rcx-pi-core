@@ -3,7 +3,7 @@
  * RCX CLI Main — Seed loading, projection composition, self-tests, CLI output
  *
  * This is the runtime entrypoint. When executed directly or via eval_step.js shim:
- *   1. Loads and verifies all 14 seeds
+ *   1. Loads and verifies 12 seeds at startup (+ terminal_classify lazy-loaded on demand)
  *   2. Composes projection arrays
  *   3. Runs self-tests (console output with "All tests passed: true")
  *   4. If --json-api in process.argv, delegates to api/json_handlers.js
@@ -33,8 +33,8 @@ const SEED_CHECKSUMS = {
   'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
   'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
   'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
-  'metabolize_cycle.v1.json': 'f8888ecab6845193610499d15dea8a8e845d07ce04391457770ef32cac69dfd8',
-  'evidence_walker.v1.json': 'e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29',
+  'metabolize_cycle.v1.json': '1e84573c241dba55a81adf6c60568c25127b836ef5570909bab81fa9303fcf01',
+  'evidence_walker.v1.json': 'e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29', // registered but not loaded at runtime — JS engine pipeline not yet implemented (Python loads in engine_pipeline.py:561)
 };
 
 // Expected projection IDs in security-critical order (first-match-wins)
@@ -114,7 +114,7 @@ const EXPECTED_PROJECTION_IDS = {
     'metabolize.cycle.lobes_reverse_step', 'metabolize.cycle.lobes_reverse_done',
     'metabolize.cycle.unwrap',
   ],
-  'evidence_walker.v1.json': [
+  'evidence_walker.v1.json': [ // registered but not loaded at runtime — see SEED_CHECKSUMS note
     'evidence.walk.init', 'evidence.walk.init_empty',
     'evidence.walk.collect_and_next', 'evidence.walk.collect_and_done',
   ],
@@ -232,6 +232,17 @@ const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json')
 const metabolizationSeed = loadVerifiedSeed(path.join(programsDir, 'metabolization.v1.json'), 'metabolization.v1.json');
 const metabolizeCycleSeed = loadVerifiedSeed(path.join(programsDir, 'metabolize_cycle.v1.json'), 'metabolize_cycle.v1.json');
 
+// P7-d: Load compiled Stage0 bundles for VM execution path
+const compiledDir = path.join(muRoot, 'stage0', 'compiled');
+const { validateBundle, stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: P7-d VM bundle loading for kernel step
+const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
+const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.compiled.v1.json'), 'utf8'));
+validateBundle(matchBundle);
+validateBundle(substBundle);
+
+// P7-d: Partitioned projections for VM path
+const kernelV1Projections = kernel.projections;
+
 // Compose projection arrays
 const allProjections = [...kernel.projections, ...matchSeed.projections, ...substSeed.projections];
 const bridgeProjections = bridgeSeed.projections;
@@ -297,6 +308,9 @@ const seedsContext = {
   bridgeProjections, fixProjections, recurrenceV2Projections,
   SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS,
   validateCombinedBridgeOrdering,
+  // P7-d: VM bundles and partitioned projections
+  kernelV1Projections, matchBundle, substBundle,
+  stage0VmStep, muDeepEqual,
 };
 
 // Run self-tests

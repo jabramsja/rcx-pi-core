@@ -465,9 +465,9 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 76 (75 pre-P7-a + 1: P7-a AST_OK:infra
-    # program_map dict comprehension in stage0_vm_step)
-    assert infra_count == 76, (
-        f"Expected 76 AST_OK:infra markers, found {infra_count}. "
+    # Current expected count is 78 (76 pre-P7-d + 2: P7-d AST_OK:infra
+    # coverage ID extraction in _step_kernel_with_vm)
+    assert infra_count == 78, (
+        f"Expected 78 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )
