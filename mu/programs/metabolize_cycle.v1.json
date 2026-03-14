@@ -4,7 +4,7 @@
     "name": "METABOLIZE_CYCLE",
     "description": "Structural metabolization walker: iterates hemisphere linked lists via pattern matching (no host loops). Phases: sink metabolization, lobes promotion, lobes order restore, exit.",
     "doc": "roadmap/MuHemispheresDesign.md",
-    "spec_ref": "reports/metabolize_cycle_design_convergence.md",
+    "spec_ref": "reports/archive/metabolize_cycle_design_convergence.md",
     "status": "testable",
     "execution_layer": "APPLICATION",
     "requires_patterns": ["linear"],
