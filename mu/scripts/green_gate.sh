@@ -97,6 +97,7 @@ run_python() {
   # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
   # Note: mu/utilities/ seeds (terminal_classify) use underscore-prefixed fields for wrapper keys (_tc, _tc_exit)
   # Note: mu/stage0/examples/ Stage0 VM bundles use underscore-prefixed fields for state (_mode, _status, _bindings, etc.)
+  # Note: mu/stage0/compiled/ compiled bundles inherit underscore keys from source seeds (mechanically derived)
   # Note: mu/tests/fixtures/ test vectors intentionally use underscore keys for kernel-internal state
   if grep -RInE --include='*.json' '"_[a-zA-Z]+":' mu/ 2>/dev/null | \
       grep -v '"_marker":' | \
@@ -112,6 +113,7 @@ run_python() {
       grep -v 'bootstrap_structural.v1.json' | \
       grep -v 'terminal_classify.v1.json' | \
       grep -v 'mu/stage0/examples/' | \
+      grep -v 'mu/stage0/compiled/' | \
       grep -v 'mu/tests/fixtures/'; then
     echo "ERROR: Found non-standard underscore keys in JSON"
     exit 1

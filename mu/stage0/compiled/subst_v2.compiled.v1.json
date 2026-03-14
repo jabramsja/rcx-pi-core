@@ -1,0 +1,3247 @@
+{
+  "bundle_id": "rcx.stage0.subst_v2.compiled.v1",
+  "hand_authored": false,
+  "machine_profile": "rcx.stage0.v1",
+  "note": "Compiler-derived from subst.v2.json by lower_stage0.py v1.0.0",
+  "program_order": [
+    "subst.done",
+    "subst.ascend",
+    "subst.sibling",
+    "subst.var",
+    "subst.lookup.found",
+    "subst.lookup.next",
+    "subst.lookup.exhausted",
+    "subst.typed.descend",
+    "subst.typed.sibling",
+    "subst.typed.ascend",
+    "subst.descend",
+    "subst.primitive",
+    "subst.wrap"
+  ],
+  "programs": [
+    {
+      "description": "Context empty, phase is result -> return final result with kernel-compatible output",
+      "id": "subst.done",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "result"
+        },
+        {
+          "name": "result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          },
+          "value": null
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_mode": {
+                "kind": "literal",
+                "value": "subst_done"
+              },
+              "_result": {
+                "kind": "capture_ref",
+                "name": "result"
+              },
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.done",
+        "projection_index": 0,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Both head and tail done -> reconstruct parent",
+      "id": "subst.ascend",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "result"
+        },
+        {
+          "name": "tail_result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "required": [
+            "type",
+            "head_result"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "type"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "type"
+            ],
+            "section": "pattern"
+          },
+          "value": "tail_done"
+        },
+        {
+          "name": "head_result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "head_result"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "head_result"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "outer",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "outer"
+              },
+              "focus": {
+                "fields": {
+                  "head": {
+                    "kind": "capture_ref",
+                    "name": "head_result"
+                  },
+                  "tail": {
+                    "kind": "capture_ref",
+                    "name": "tail_result"
+                  }
+                },
+                "kind": "object"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "result"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.ascend",
+        "projection_index": 1,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Head done -> move to tail",
+      "id": "subst.sibling",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "result"
+        },
+        {
+          "name": "head_result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "required": [
+            "type",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "type"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "type"
+            ],
+            "section": "pattern"
+          },
+          "value": "head_done"
+        },
+        {
+          "name": "tail",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "outer",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "fields": {
+                  "head": {
+                    "fields": {
+                      "head_result": {
+                        "kind": "capture_ref",
+                        "name": "head_result"
+                      },
+                      "type": {
+                        "kind": "literal",
+                        "value": "tail_done"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "tail": {
+                    "kind": "capture_ref",
+                    "name": "outer"
+                  }
+                },
+                "kind": "object"
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "tail"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "traverse"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.sibling",
+        "projection_index": 2,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Variable site -> create lookup marker for structural resolution",
+      "id": "subst.var",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "traverse"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "required": [
+            "var"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus",
+            "var"
+          ],
+          "source_map": {
+            "path": [
+              "focus",
+              "var"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "c"
+              },
+              "lookup_bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "lookup_name": {
+                "kind": "capture_ref",
+                "name": "name"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "lookup"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.var",
+        "projection_index": 3,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Lookup: name matches current binding -> return value as result",
+      "id": "subst.lookup.found",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "lookup_name",
+            "lookup_bindings",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup"
+        },
+        {
+          "name": "n",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings"
+          ],
+          "required": [
+            "name",
+            "value",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "capture_name": "n",
+          "op": "check_captured_equal",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings",
+            "name"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings",
+              "name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "v",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings",
+            "value"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings",
+              "value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_rest",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings",
+              "rest"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "c"
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "v"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "result"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.lookup.found",
+        "projection_index": 4,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Lookup: name doesn't match -> continue with rest of bindings",
+      "id": "subst.lookup.next",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "lookup_name",
+            "lookup_bindings",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup"
+        },
+        {
+          "name": "n",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings"
+          ],
+          "required": [
+            "name",
+            "value",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_other",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings",
+            "name"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings",
+              "name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_v",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings",
+            "value"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings",
+              "value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "rest",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings",
+              "rest"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "c"
+              },
+              "lookup_bindings": {
+                "kind": "capture_ref",
+                "name": "rest"
+              },
+              "lookup_name": {
+                "kind": "capture_ref",
+                "name": "n"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "lookup"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.lookup.next",
+        "projection_index": 5,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Lookup: bindings exhausted (null) -> unbound variable, emit structural error value",
+      "id": "subst.lookup.exhausted",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "lookup_name",
+            "lookup_bindings",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup"
+        },
+        {
+          "name": "n",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "lookup_bindings"
+            ],
+            "section": "pattern"
+          },
+          "value": null
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "c"
+              },
+              "focus": {
+                "fields": {
+                  "_error": {
+                    "kind": "literal",
+                    "value": "unbound_variable"
+                  },
+                  "_name": {
+                    "kind": "capture_ref",
+                    "name": "n"
+                  }
+                },
+                "kind": "object"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "result"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.lookup.exhausted",
+        "projection_index": 6,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Descend into type-tagged head/tail structure (Phase 6c)",
+      "id": "subst.typed.descend",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "traverse"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "required": [
+            "_type",
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ty",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus",
+            "_type"
+          ],
+          "source_map": {
+            "path": [
+              "focus",
+              "_type"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "h",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "focus",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "t",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "focus",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "fields": {
+                  "head": {
+                    "fields": {
+                      "_type": {
+                        "kind": "capture_ref",
+                        "name": "ty"
+                      },
+                      "tail": {
+                        "kind": "capture_ref",
+                        "name": "t"
+                      },
+                      "type": {
+                        "kind": "literal",
+                        "value": "typed_head_done"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "tail": {
+                    "kind": "capture_ref",
+                    "name": "c"
+                  }
+                },
+                "kind": "object"
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "h"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "traverse"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.typed.descend",
+        "projection_index": 7,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Type-tagged: head done -> move to tail (Phase 6c)",
+      "id": "subst.typed.sibling",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "result"
+        },
+        {
+          "name": "head_result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "required": [
+            "type",
+            "_type",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "type"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "type"
+            ],
+            "section": "pattern"
+          },
+          "value": "typed_head_done"
+        },
+        {
+          "name": "ty",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "_type"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "_type"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "tail",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "outer",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "fields": {
+                  "head": {
+                    "fields": {
+                      "_type": {
+                        "kind": "capture_ref",
+                        "name": "ty"
+                      },
+                      "head_result": {
+                        "kind": "capture_ref",
+                        "name": "head_result"
+                      },
+                      "type": {
+                        "kind": "literal",
+                        "value": "typed_tail_done"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "tail": {
+                    "kind": "capture_ref",
+                    "name": "outer"
+                  }
+                },
+                "kind": "object"
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "tail"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "traverse"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.typed.sibling",
+        "projection_index": 8,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Type-tagged: both head and tail done -> reconstruct with _type (Phase 6c)",
+      "id": "subst.typed.ascend",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "result"
+        },
+        {
+          "name": "tail_result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head"
+          ],
+          "required": [
+            "type",
+            "_type",
+            "head_result"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "type"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "type"
+            ],
+            "section": "pattern"
+          },
+          "value": "typed_tail_done"
+        },
+        {
+          "name": "ty",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "_type"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "_type"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "head_result",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "head",
+            "head_result"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "head",
+              "head_result"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "outer",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "context",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "outer"
+              },
+              "focus": {
+                "fields": {
+                  "_type": {
+                    "kind": "capture_ref",
+                    "name": "ty"
+                  },
+                  "head": {
+                    "kind": "capture_ref",
+                    "name": "head_result"
+                  },
+                  "tail": {
+                    "kind": "capture_ref",
+                    "name": "tail_result"
+                  }
+                },
+                "kind": "object"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "result"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.typed.ascend",
+        "projection_index": 9,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Descend into head/tail structure",
+      "id": "subst.descend",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "traverse"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "h",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "focus",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "t",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "focus",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "fields": {
+                  "head": {
+                    "fields": {
+                      "tail": {
+                        "kind": "capture_ref",
+                        "name": "t"
+                      },
+                      "type": {
+                        "kind": "literal",
+                        "value": "head_done"
+                      }
+                    },
+                    "kind": "object"
+                  },
+                  "tail": {
+                    "kind": "capture_ref",
+                    "name": "c"
+                  }
+                },
+                "kind": "object"
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "h"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "traverse"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.descend",
+        "projection_index": 10,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Primitive value (not var, not head/tail) -> already a result",
+      "id": "subst.primitive",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "focus",
+            "bindings",
+            "context",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "subst"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "traverse"
+        },
+        {
+          "name": "val",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "focus"
+          ],
+          "source_map": {
+            "path": [
+              "focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "b",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "c",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "context"
+          ],
+          "source_map": {
+            "path": [
+              "context"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "b"
+              },
+              "context": {
+                "kind": "capture_ref",
+                "name": "c"
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "val"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "result"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.primitive",
+        "projection_index": 11,
+        "seed_file": "subst.v2.json"
+      }
+    },
+    {
+      "description": "Entry point - wrap raw subst request into state (must be last)",
+      "id": "subst.wrap",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "subst",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "subst"
+          ],
+          "source_map": {
+            "path": [
+              "subst"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [],
+          "path": [
+            "focus",
+            "root",
+            "subst"
+          ],
+          "required": [
+            "body",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "subst"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "body",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "subst",
+            "body"
+          ],
+          "source_map": {
+            "path": [
+              "subst",
+              "body"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "bindings",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "subst",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "subst",
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_subst_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_subst_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_subst_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "bindings"
+              },
+              "context": {
+                "kind": "literal",
+                "value": null
+              },
+              "focus": {
+                "kind": "capture_ref",
+                "name": "body"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "subst"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "traverse"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "subst.wrap",
+        "projection_index": 12,
+        "seed_file": "subst.v2.json"
+      }
+    }
+  ],
+  "source_seed": "subst.v2.json",
+  "source_seed_version": "2.0.0",
+  "stage0_ir_version": 1
+}

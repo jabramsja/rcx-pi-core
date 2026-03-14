@@ -111,36 +111,6 @@
       "target_wave": "P7W5"
     },
     {
-      "class": "TestHemisphereSourceLock",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Subprocess assertion in _js_eval() helper not detected by AST classifier",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_terminal_classification_parity_gate.py",
-      "method": "test_js_seed_registration_loads",
-      "owner": "founder",
-      "target_wave": "A18-P1"
-    },
-    {
-      "class": "TestValidationDepthAlignment",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass pattern; regression guard for old hardcoded limit=100",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_validation_depth_alignment_gate.py",
-      "method": "test_python_depth_200_accepted",
-      "owner": "founder",
-      "target_wave": "A18-P1"
-    },
-    {
-      "class": "TestValidationDepthAlignment",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass pattern; production validator raises on exceeding depth",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_validation_depth_alignment_gate.py",
-      "method": "test_python_validation_covers_max_mu_depth",
-      "owner": "founder",
-      "target_wave": "A18-P1"
-    },
-    {
       "class": "TestBundleValidation",
       "classification": "heuristic_false_positive",
       "defer_reason": "No-exception-is-pass: validateBundle raises on failure",
@@ -159,6 +129,26 @@
       "method": "test_valid_subst_bundle",
       "owner": "founder",
       "target_wave": "P7-a"
+    },
+    {
+      "class": "TestClosedBundleProgram",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on unknown keys",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_program_source_map_accepted",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestClosedBundleProgram",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on unknown keys",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_valid_bundle_no_extra_keys",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
     },
     {
       "class": "TestCrossSubstrateParity",
@@ -289,6 +279,76 @@
       "method": "test_xsub_subst_wrap",
       "owner": "founder",
       "target_wave": "P7-a"
+    },
+    {
+      "class": "TestFloatRejection",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on float; int accepted = valid",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_check_equal_int_accepted",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestNonMuLiteralRejection",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on non-Mu types; valid Mu literals accepted = valid",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_valid_mu_literals_accepted",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestOpcodeSchemaValidation",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on unsupported kind",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_assert_focus_kind_supported_kinds",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestOpcodeSchemaValidation",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on path > MAX_PATH_DEPTH",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_path_at_max_depth_accepted",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestOpcodeSchemaValidation",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on schema violation; source_map is an allowed optional key",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_source_map_accepted",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestOpcodeSchemaValidation",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on schema violation",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_valid_ops_pass",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
+    },
+    {
+      "class": "TestOptionalEntryClosure",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on unknown optional entry key",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_stage0_vm.py",
+      "method": "test_optional_entry_valid_keys_accepted",
+      "owner": "founder",
+      "target_wave": "P7-b.1"
     },
     {
       "class": "TestParityVsSourcePath",
@@ -521,66 +581,6 @@
       "target_wave": "P7-a"
     },
     {
-      "class": "TestFloatRejection",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on float; int accepted = valid",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_check_equal_int_accepted",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
-      "class": "TestOpcodeSchemaValidation",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on unsupported kind",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_assert_focus_kind_supported_kinds",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
-      "class": "TestOpcodeSchemaValidation",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on path > MAX_PATH_DEPTH",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_path_at_max_depth_accepted",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
-      "class": "TestOpcodeSchemaValidation",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on schema violation; source_map is an allowed optional key",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_source_map_accepted",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
-      "class": "TestOpcodeSchemaValidation",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on schema violation",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_valid_ops_pass",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
-      "class": "TestOptionalEntryClosure",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on unknown optional entry key",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_optional_entry_valid_keys_accepted",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
       "class": "TestStringTypingIdentifiers",
       "classification": "heuristic_false_positive",
       "defer_reason": "No-exception-is-pass: validate_bundle raises on non-string identifiers",
@@ -601,26 +601,6 @@
       "target_wave": "P7-b.1"
     },
     {
-      "class": "TestClosedBundleProgram",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on unknown keys",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_program_source_map_accepted",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
-      "class": "TestClosedBundleProgram",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on unknown keys",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_valid_bundle_no_extra_keys",
-      "owner": "founder",
-      "target_wave": "P7-b.1"
-    },
-    {
       "class": "TestVersionTypeParity",
       "classification": "heuristic_false_positive",
       "defer_reason": "No-exception-is-pass: validate_bundle raises on non-int version; int accepted = valid",
@@ -631,17 +611,57 @@
       "target_wave": "P7-b.1"
     },
     {
-      "class": "TestNonMuLiteralRejection",
+      "class": "TestHemisphereSourceLock",
       "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on non-Mu types; valid Mu literals accepted = valid",
+      "defer_reason": "Subprocess assertion in _js_eval() helper not detected by AST classifier",
       "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_stage0_vm.py",
-      "method": "test_valid_mu_literals_accepted",
+      "file": "mu/tests/l4_gates/test_terminal_classification_parity_gate.py",
+      "method": "test_js_seed_registration_loads",
       "owner": "founder",
-      "target_wave": "P7-b.1"
+      "target_wave": "A18-P1"
+    },
+    {
+      "class": "TestValidationDepthAlignment",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; regression guard for old hardcoded limit=100",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_validation_depth_alignment_gate.py",
+      "method": "test_python_depth_200_accepted",
+      "owner": "founder",
+      "target_wave": "A18-P1"
+    },
+    {
+      "class": "TestValidationDepthAlignment",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass pattern; production validator raises on exceeding depth",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_validation_depth_alignment_gate.py",
+      "method": "test_python_validation_covers_max_mu_depth",
+      "owner": "founder",
+      "target_wave": "A18-P1"
+    },
+    {
+      "class": "TestCompilationSmoke",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_match_v2_compiles",
+      "owner": "founder",
+      "target_wave": "P7-b.2"
+    },
+    {
+      "class": "TestCompilationSmoke",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_subst_v2_compiles",
+      "owner": "founder",
+      "target_wave": "P7-b.2"
     }
   ],
-  "generated_at": "2026-03-13T10:05:00.028129Z",
+  "generated_at": "2026-03-13T23:08:21.339397Z",
   "schema_version": 1,
   "total_theater_risk": 64
 }
