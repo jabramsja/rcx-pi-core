@@ -14,7 +14,6 @@ Gap addressed:
 
 import pytest
 
-pytest.importorskip("hypothesis", reason="hypothesis required for fuzzer tests")
 
 from hypothesis import given, strategies as st, settings, assume, HealthCheck
 from hypothesis.strategies import composite

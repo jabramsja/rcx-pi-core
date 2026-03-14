@@ -306,6 +306,7 @@ def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     # Normalization is idempotent, so already-normalized input is unchanged.
     # This allows normalized algorithm seeds to work with raw dict input.
     if isinstance(pattern, dict) and pattern.get("_type") == "dict":
+        # Runtime import: avoids circular dependency (eval_seed ← match_mu ← eval_seed)
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
 
@@ -370,7 +371,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
             if len(pattern) != len(input_value):
                 return NO_MATCH
             bindings: dict[str, Mu] = {}
-            for p_elem, i_elem in zip(pattern, input_value):
+            for p_elem, i_elem in zip(pattern, input_value):  # HOST_LOOP: list element matching (budget path)
                 # Depth-only: same 'remaining' to all siblings
                 sub_bindings = _match_inner(p_elem, i_elem, _depth, _budget=remaining)
                 if sub_bindings is NO_MATCH:
@@ -394,7 +395,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
                 if not (extra_is_type and no_pattern_extra and type_is_list):
                     return NO_MATCH
             bindings = {}
-            for key in pattern:
+            for key in pattern:  # HOST_LOOP: dict key matching (budget path)
                 sub_bindings = _match_inner(pattern[key], input_value[key], _depth, _budget=remaining)
                 if sub_bindings is NO_MATCH:
                     return NO_MATCH
@@ -408,6 +409,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
         return NO_MATCH
 
     # --- Integer depth path (default — existing behavior, zero overhead) ---
+    # Strict inequality: depth > MAX_MU_DEPTH means MAX_MU_DEPTH levels are allowed
     if _depth > MAX_MU_DEPTH:
         return NO_MATCH
 
@@ -454,7 +456,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
         if len(pattern) != len(input_value):
             return NO_MATCH
         bindings: dict[str, Mu] = {}
-        for p_elem, i_elem in zip(pattern, input_value):
+        for p_elem, i_elem in zip(pattern, input_value):  # HOST_LOOP: list element matching (depth path)
             sub_bindings = _match_inner(p_elem, i_elem, _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
@@ -486,7 +488,7 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
             if not (extra_is_type and no_pattern_extra and type_is_list):
                 return NO_MATCH
         bindings = {}
-        for key in pattern:
+        for key in pattern:  # HOST_LOOP: dict key matching (depth path)
             sub_bindings = _match_inner(pattern[key], input_value[key], _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
@@ -759,6 +761,7 @@ def apply_projection(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     # Gate 3: Auto-denormalize output when body uses normalized dict format.
     # This maintains backwards compatibility with code expecting raw dicts.
     if isinstance(body, dict) and body.get("_type") == "dict":
+        # Runtime import: avoids circular dependency (eval_seed ← match_mu ← eval_seed)
         from rcx_pi.selfhost.match_mu import denormalize_from_match
         result = denormalize_from_match(result)
 
@@ -828,11 +831,15 @@ def step(projections: list[Mu], input_value: Mu) -> Mu:
 # eliminates shape-inference from the security model entirely.
 
 def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
-    """Internal: apply projection skipping assert_mu on input_value.
+    """Trusted-path projection application via Stage0 match/substitute.
 
+    Skips assert_mu on input_value (caller already validated at boundary).
     Still validates projection structure (dict with pattern/body keys).
+    Uses _stage0_match + _stage0_substitute directly (sole production path
+    since Wave 4, 2026-03-12).
+
     ONLY for use by kernel loops that have already validated at the boundary.
-    Callers: _step_trusted.
+    Callers: _step_trusted, _step_kernel_with_vm.
 
     Host debt (isinstance) tracked on _stage0_match's @host_builtin decorator.
 
@@ -850,9 +857,12 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 
     # Use _match_inner directly — no assert_mu on input_value
     if isinstance(pattern, dict) and pattern.get("_type") == "dict":
+        # Runtime import: avoids circular dependency (eval_seed ← match_mu ← eval_seed)
         from rcx_pi.selfhost.match_mu import normalize_for_match
         input_value = normalize_for_match(input_value)
 
+    # Deliberate double-match: first match selects projection (in _step_trusted loop),
+    # second match here in apply verifies and extracts bindings for substitution.
     # Stage 0 production path (sole path since Wave 4, 2026-03-12)
     bindings = _stage0_match(pattern, input_value)
 
@@ -862,6 +872,7 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
     result = _stage0_substitute(body, bindings)
 
     if isinstance(body, dict) and body.get("_type") == "dict":
+        # Runtime import: avoids circular dependency (eval_seed ← match_mu ← eval_seed)
         from rcx_pi.selfhost.match_mu import denormalize_from_match
         result = denormalize_from_match(result)
 

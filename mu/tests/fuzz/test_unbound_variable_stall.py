@@ -14,7 +14,6 @@ Usage:
 
 import pytest
 
-hypothesis = pytest.importorskip("hypothesis", reason="hypothesis required for fuzzer tests")
 
 from hypothesis import given, strategies as st, settings, assume
 from hypothesis.strategies import composite

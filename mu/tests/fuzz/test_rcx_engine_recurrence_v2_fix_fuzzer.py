@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import pytest
 
-hypothesis = pytest.importorskip("hypothesis", reason="hypothesis required for fuzzer tests")
 
 from hypothesis import given, strategies as st, settings, HealthCheck
 from hypothesis.strategies import composite

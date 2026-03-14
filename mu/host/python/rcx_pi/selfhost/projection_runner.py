@@ -60,14 +60,14 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
     def is_done(state: Mu) -> bool:
         """Check if state is a completed result."""
         return (
-            isinstance(state, dict)
+            isinstance(state, dict)  # AST_OK: infra — type guard for projection state
             and state.get(terminal_field) == done_mode
         )
 
     def is_state(state: Mu) -> bool:
         """Check if state is in-progress."""
         return (
-            isinstance(state, dict)
+            isinstance(state, dict)  # AST_OK: infra — type guard for projection state
             and state.get("mode") == mode_name
         )
 

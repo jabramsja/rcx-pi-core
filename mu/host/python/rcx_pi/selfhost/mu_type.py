@@ -634,6 +634,7 @@ def _canonicalize_hash_numeric(value: Any) -> Any:
 
     This ensures 1.0 and 1 hash identically, and -0.0 maps to 0.
     Only used in control-channel wrappers after assert_hash_numeric_safe.
+    No depth guard needed: callers validate via assert_mu(MAX_MU_DEPTH=300).
 
     Guard: only int-cast when abs(value) < 1e21 (JS JSON.stringify integer
     threshold). JS uses full integer form for values < 1e21, then switches

@@ -31,7 +31,6 @@ Known Limitations Tested:
 import pytest
 
 # Skip all tests if hypothesis is not installed
-pytest.importorskip("hypothesis", reason="hypothesis required for fuzzer tests")
 
 from hypothesis import given, strategies as st, settings, assume, HealthCheck
 from hypothesis.strategies import composite
