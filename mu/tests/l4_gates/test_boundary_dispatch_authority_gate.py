@@ -982,11 +982,9 @@ class TestAlgorithmSeedAllowlist:
         )
 
     def test_js_rejects_non_algorithm_seed(self):
-        """JS run_algorithm rejects kernel.v1.json via seedProjectionMap."""
+        """JS run_algorithm rejects kernel.v1.json (not in allowlist)."""
         js_code = """
         const pipeline = require('./mu/host/js/engine/pipeline');
-        // Use production seedProjectionMap keys (only 4 algorithm seeds).
-        // kernel.v1.json is not in the map, so it should be rejected.
         const seedMap = Object.create(null);
         seedMap['recurrence.v1.json'] = [{id:'r',pattern:{},body:{}}];
         try {
@@ -997,7 +995,7 @@ class TestAlgorithmSeedAllowlist:
             );
             console.log('ERROR: no throw');
         } catch(e) {
-            if (e.error_code === 'api.bad_request' && e.message.includes('Unknown algorithm seed')) {
+            if (e.error_code === 'api.bad_request' && e.message.includes('authorized algorithm seed')) {
                 console.log('OK');
             } else {
                 console.log('WRONG: ' + e.error_code + ': ' + e.message);
@@ -1010,6 +1008,87 @@ class TestAlgorithmSeedAllowlist:
         )
         assert result.returncode == 0, f"JS failed: {result.stderr}"
         assert result.stdout.strip() == "OK", f"JS non-algorithm seed: {result.stdout.strip()}"
+
+    def test_js_rejects_rogue_injected_into_seed_map(self):
+        """JS run_algorithm rejects rogue name even if present in seedProjectionMap."""
+        js_code = """
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        const seedMap = Object.create(null);
+        seedMap['recurrence.v1.json'] = [{id:'r',pattern:{},body:{}}];
+        seedMap['rogue.v1.json'] = [{id:'rogue',pattern:{},body:{}}];
+        try {
+            pipeline.serviceBoundaryEffect(
+                [], seedMap,
+                {operation:'run_algorithm',input:{},context:{},inject_key:'r',algorithm:'rogue.v1.json'},
+                10, function(){}, 0, {}
+            );
+            console.log('ERROR: rogue executed');
+        } catch(e) {
+            if (e.error_code === 'api.bad_request' && e.message.includes('authorized algorithm seed')) {
+                console.log('OK');
+            } else {
+                console.log('WRONG: ' + e.error_code + ': ' + e.message);
+            }
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        assert result.stdout.strip() == "OK", f"JS rogue injection: {result.stdout.strip()}"
+
+    def test_js_allowlist_matches_python_allowlist(self):
+        """JS _ALGORITHM_SEED_ALLOWLIST matches Python _ALGORITHM_SEED_ALLOWLIST.
+
+        Derives expected values from Python allowlist (not hardcoded) to prevent drift.
+        """
+        import json as _json
+        py_allowed = sorted(_ALGORITHM_SEED_ALLOWLIST)
+        allowed_json = _json.dumps(py_allowed)
+        js_code = f"""
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        const allowed = {allowed_json};
+        const seedMap = Object.create(null);
+        allowed.forEach(s => {{ seedMap[s] = [{{id:'p',pattern:{{}},body:{{}}}}]; }});
+        let ok = true;
+        for (const s of allowed) {{
+            try {{
+                pipeline.serviceBoundaryEffect(
+                    [], seedMap,
+                    {{operation:'run_algorithm',input:{{}},context:{{}},inject_key:'r',algorithm:s}},
+                    1, function(){{}}, 0, {{}}
+                );
+            }} catch(e) {{
+                if (e.message && e.message.includes('authorized algorithm seed')) {{
+                    console.log('FAIL: ' + s + ' rejected by allowlist');
+                    ok = false;
+                }}
+            }}
+        }}
+        seedMap['rogue.v1.json'] = [{{id:'rg',pattern:{{}},body:{{}}}}];
+        try {{
+            pipeline.serviceBoundaryEffect(
+                [], seedMap,
+                {{operation:'run_algorithm',input:{{}},context:{{}},inject_key:'r',algorithm:'rogue.v1.json'}},
+                1, function(){{}}, 0, {{}}
+            );
+            console.log('FAIL: rogue not rejected');
+            ok = false;
+        }} catch(e) {{
+            if (!e.message.includes('authorized algorithm seed')) {{
+                console.log('FAIL: wrong error for rogue: ' + e.message);
+                ok = false;
+            }}
+        }}
+        console.log(ok ? 'OK' : 'FAIL');
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        assert result.stdout.strip() == "OK", f"JS allowlist parity: {result.stdout.strip()}"
 
 
 # ===========================================================================

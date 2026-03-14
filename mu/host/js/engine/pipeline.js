@@ -246,6 +246,15 @@ function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqI
   return hashTraceForRecurrence(reqInput);
 }
 
+// AST_OK_JS: security allowlist — frozen constant (parity: engine_pipeline.py:680).
+// Authority allowlist for run_algorithm boundary dispatch.
+const _ALGORITHM_SEED_ALLOWLIST = Object.freeze(new Set([
+  'recurrence.v1.json',
+  'recurrence.v2.json',
+  'exhaustion.v1.json',
+  'fix.v1.json',
+]));
+
 function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
   if (!('algorithm' in request)) {
     throw new RcxError('api.bad_request',
@@ -255,6 +264,10 @@ function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, r
   if (typeof algoName !== 'string') {
     throw new RcxError('api.bad_request',
       `run_algorithm 'algorithm' must be string, got ${typeof algoName}`);
+  }
+  if (!_ALGORITHM_SEED_ALLOWLIST.has(algoName)) {
+    throw new RcxError('api.bad_request',
+      `run_algorithm 'algorithm' must be an authorized algorithm seed, got '${algoName}'. Allowed: ${JSON.stringify([..._ALGORITHM_SEED_ALLOWLIST].sort())}`);
   }
   const algoProjs = seedProjectionMap[algoName];
   if (!algoProjs) {
@@ -378,7 +391,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
     throw new RcxError('input.shape_mismatch',
       `boundary dispatch missing handler for validated op: ${operation}`);
   }
-  const result = handler(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig);
+  let result = handler(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig);
 
   validateNoKernelReservedFields(result, `boundary_result(${operation})`);
 
@@ -398,6 +411,8 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
         `boundary_result(${operation}): emit_ontology_candidate requested ` +
         `but result already contains ontology_promotion`);
     }
+    // F-44: Copy result before mutation to avoid poisoning handler return value (parity: engine_pipeline.py:825)
+    result = Object.assign(Object.create(null), result);
     result.ontology_promotion = buildOntologyPromotionCandidate(
       evidence, `boundary_result(${operation}).ontology_candidate_evidence`
     );
