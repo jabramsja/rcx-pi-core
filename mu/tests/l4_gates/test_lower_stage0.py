@@ -1067,9 +1067,12 @@ class TestCompilerBundleCrossSubstrate:
         py_result = stage0_vm_step(bundle, inp)
         js_result = _run_js_stage0("step", bundle_rel, inp)
 
-        assert py_result["status"] == js_result["status"], (
-            f"Status mismatch for '{expected_proj_id}': "
-            f"py={py_result['status']}, js={js_result['status']}")
+        assert py_result["status"] == "match", (
+            f"Expected compiled Python to match projection '{expected_proj_id}', "
+            f"but got stall. Input: {inp!r}")
+        assert js_result["status"] == "match", (
+            f"Expected compiled JS to match projection '{expected_proj_id}', "
+            f"but got stall. Input: {inp!r}")
         if py_result["status"] == "match":
             assert py_result["matched_program_id"] == js_result["matched_program_id"], (
                 f"Program ID mismatch: py={py_result['matched_program_id']}, "
