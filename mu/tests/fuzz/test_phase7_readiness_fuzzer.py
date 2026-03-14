@@ -29,7 +29,6 @@ Security Focus:
 import pytest
 
 # Skip all tests if hypothesis is not installed
-hypothesis = pytest.importorskip("hypothesis", reason="hypothesis required for fuzzer tests")
 
 from hypothesis import given, strategies as st, settings, assume, HealthCheck
 from hypothesis.strategies import composite

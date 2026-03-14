@@ -99,6 +99,16 @@ jobs:
           pip install anthropic
           pip install hypothesis pytest  # For fuzzer tests
 
+      - name: Validate PR number
+        if: steps.preconditions.outputs.enabled == 'true'
+        env:
+          PR_NUM: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
+        run: |
+          if ! [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: PR number must be numeric, got: '$PR_NUM'" >&2
+            exit 1
+          fi
+
       - name: Run CI Review
         if: steps.preconditions.outputs.enabled == 'true'
         env:

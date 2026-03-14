@@ -101,3 +101,11 @@ Archived as stale/resolved from the source snapshots:
 
 - Founder directive: checkpoint should include explicit instruction to re-read memory.md and claude.md, not just acknowledge them. The goal is behavioral change, not acknowledgment.
 - Status: enhancement for /checkpoint skill.
+
+### N19. Three-scope debt counting mismatch (ratchet vs dashboard vs baseline)
+
+- Ratchet: 12 decorators (6 Py selfhost/ + 6 JS). Dashboard: 12 (8 Py rcx_pi/ + 4 AST_OK). Baseline: 16 (6 Py + 6 JS + 4 AST_OK).
+- Ratchet excludes deep_eval.py (2 extra decorators). Dashboard excludes JS. Baseline includes both.
+- STATUS.md CURRENT=16 matches baseline. audit_semantic_purity.sh THRESHOLD=12 matches dashboard.
+- Needs dedicated scope-unification wave to make all three agree.
+- Status: documented design mismatch, not blocking.

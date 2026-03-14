@@ -686,6 +686,7 @@ def load_combined_kernel_projections() -> list[Mu]:
     Returns:
         Combined list of kernel, match, and subst projections.
     """
+    # Defensive copy via JSON round-trip (ensures pure Mu, no host references)
     return json.loads(json.dumps(_load_combined_kernel_projections_shared()))
 
 
@@ -900,6 +901,7 @@ def load_combined_kernel_with_bridge_projections() -> list[Mu]:
     Returns:
         Combined list of kernel, match.v2, bootstrap_structural, and subst projections.
     """
+    # Defensive copy via JSON round-trip (ensures pure Mu, no host references)
     return json.loads(json.dumps(_load_combined_kernel_with_bridge_projections_shared()))
 
 

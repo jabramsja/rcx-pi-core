@@ -22,7 +22,6 @@ import pytest
 import time
 
 # Skip if hypothesis not installed
-hypothesis = pytest.importorskip("hypothesis", reason="hypothesis required")
 
 from hypothesis import given, strategies as st, settings, assume, HealthCheck
 from hypothesis.strategies import composite
