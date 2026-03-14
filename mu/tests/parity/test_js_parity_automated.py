@@ -3224,6 +3224,7 @@ class TestHemisphereRoutingPropertyFuzzer:
     populating exactly one hemisphere per the priority order.
     """
 
+    @pytest.mark.timeout(300)
     @given(er=_engine_result())
     @settings(max_examples=150, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_engine_result_routing_parity(self, er):
@@ -3752,6 +3753,7 @@ class TestDifferentialReplayAuditR3:
 
     # --- Generated: hemisphere routing (100 cases) ---
 
+    @pytest.mark.timeout(300)
     @given(er=_engine_result())
     @settings(max_examples=100, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_generated_hemisphere_replay(self, er):

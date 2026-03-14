@@ -53,12 +53,9 @@ Archived as stale/resolved from the source snapshots:
 - the indicator JSON lane is strong provenance, but most artifacts still do not
   explain the wave narrative by themselves
 
-### N8. Hypothesis fuzzer timeout in hemisphere routing parity tests
+### N8. Hypothesis fuzzer timeout in hemisphere routing parity tests — **RESOLVED** (2026-03-14)
 
-- `TestHemisphereRoutingPropertyFuzzer::test_valid_engine_result_routing_parity` and `TestDifferentialReplayAuditR3::test_generated_hemisphere_replay` fail with `Timeout (>120.0s)` in nightly CI and local full parity runs.
-- Root cause: 150-example Hypothesis strategy with 60s JS subprocess timeout, but pytest-timeout at 120s total.
-- Not a logic bug — pass when individual examples complete in time.
-- Fix direction: `@pytest.mark.timeout(300)` or constrain strategy.
+- Fixed: `@pytest.mark.timeout(300)` added to both tests. Default 120s was insufficient for 150-example Hypothesis strategies with JS subprocess calls.
 
 ### N9. debt_dashboard.sh scope differs from ratchet scope
 
