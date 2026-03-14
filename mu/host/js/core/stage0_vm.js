@@ -222,8 +222,8 @@ function safeMuCopy(value) {
         'Deep copy depth exceeded (recursion overflow)');
     }
     // Fail-closed: hostile getters, Proxy traps, etc. → VM error
-    throw new Stage0VMError(
-      `Deep copy failed on hostile input: ${e instanceof Error ? e.message : String(e)}`);
+    // Do NOT stringify e — hostile toString() can throw secondary exceptions
+    throw new Stage0VMError('Deep copy failed on hostile input');
   }
 }
 

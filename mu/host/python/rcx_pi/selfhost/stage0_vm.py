@@ -221,8 +221,8 @@ def _safe_mu_copy(value):
             "Deep copy depth exceeded (recursion overflow)")
     except Exception as e:
         # Fail-closed: hostile dict keys, __iter__ traps, etc. → VM error
-        raise Stage0VMError(
-            f"Deep copy failed on hostile input: {e}")
+        # Do NOT stringify e — hostile __str__ can throw secondary exceptions
+        raise Stage0VMError("Deep copy failed on hostile input")
 
 
 # ---------------------------------------------------------------------------
