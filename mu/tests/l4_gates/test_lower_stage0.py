@@ -606,3 +606,62 @@ class TestIntegrityMetadata:
         del bundle["source_digest"]
         with pytest.raises(ValueError, match="source_digest"):
             validate_bundle(bundle)
+
+
+# ---------------------------------------------------------------------------
+# Test 13: JS cross-substrate parity for compiled bundles
+# ---------------------------------------------------------------------------
+
+import os
+import subprocess
+
+
+def _run_js_stage0(action, bundle_path, input_value=None):
+    """Call JS Stage0 VM via subprocess and return parsed result."""
+    request = {"action": action, "bundle_path": bundle_path}
+    if input_value is not None:
+        request["input"] = input_value
+    runner = os.path.join(str(_REPO_ROOT), "tests", "l4_gates",
+                          "stage0_vm_runner.js")
+    result = subprocess.run(
+        ["node", runner, json.dumps(request)],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), timeout=30,
+    )
+    for line in result.stdout.split("\n"):
+        if line.startswith("JSON_API_RESPONSE:"):
+            return json.loads(line[len("JSON_API_RESPONSE:"):])
+    raise RuntimeError(
+        f"JS runner produced no JSON response.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}")
+
+
+MATCH_COMPILED_REL = "mu/stage0/compiled/match_v2.compiled.v1.json"
+SUBST_COMPILED_REL = "mu/stage0/compiled/subst_v2.compiled.v1.json"
+
+
+class TestJSCompiledBundleParity:
+    """JS Stage0 VM must accept and execute compiler-produced bundles."""
+
+    def test_js_validates_match_compiled_bundle(self):
+        """JS validateBundle accepts the compiled match bundle."""
+        result = _run_js_stage0("validate", MATCH_COMPILED_REL)
+        assert result.get("ok") is True, (
+            f"JS validateBundle rejected compiled match bundle: {result}")
+
+    def test_js_validates_subst_compiled_bundle(self):
+        """JS validateBundle accepts the compiled subst bundle."""
+        result = _run_js_stage0("validate", SUBST_COMPILED_REL)
+        assert result.get("ok") is True, (
+            f"JS validateBundle rejected compiled subst bundle: {result}")
+
+    def test_js_compiled_match_execution_parity(self):
+        """JS VM produces same result as Python VM on compiled match bundle."""
+        bundle = _load_bundle(MATCH_COMPILED_PATH)
+        inp = {"_type": "match", "pattern": "hello", "value": "hello",
+               "_bindings": {}, "_status": "active", "_mode": "match"}
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = _run_js_stage0("step", MATCH_COMPILED_REL, inp)
+        assert py_result["status"] == js_result["status"], (
+            f"Status mismatch: py={py_result['status']}, "
+            f"js={js_result['status']}")
+        assert py_result["matched_program_id"] == js_result["matched_program_id"]
