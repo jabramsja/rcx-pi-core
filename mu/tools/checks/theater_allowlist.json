@@ -641,6 +641,16 @@
       "target_wave": "A18-P1"
     },
     {
+      "class": "TestIntegrityMetadata",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on failure; hand-authored exemption test",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_hand_authored_bundles_validate_without_integrity",
+      "owner": "founder",
+      "target_wave": "P7-b.2"
+    },
+    {
       "class": "TestCompilationSmoke",
       "classification": "heuristic_false_positive",
       "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
@@ -663,5 +673,5 @@
   ],
   "generated_at": "2026-03-13T23:08:21.339397Z",
   "schema_version": 1,
-  "total_theater_risk": 64
+  "total_theater_risk": 67
 }

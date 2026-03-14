@@ -63,14 +63,14 @@ def _load_bundle(path):
 
 @pytest.fixture
 def match_compiled():
-    seed, filename = load_seed(MATCH_SEED)
-    return compile_seed(seed, filename)
+    seed, filename, digest = load_seed(MATCH_SEED)
+    return compile_seed(seed, filename, digest)
 
 
 @pytest.fixture
 def subst_compiled():
-    seed, filename = load_seed(SUBST_SEED)
-    return compile_seed(seed, filename)
+    seed, filename, digest = load_seed(SUBST_SEED)
+    return compile_seed(seed, filename, digest)
 
 
 @pytest.fixture
@@ -322,15 +322,15 @@ class TestNonLinearVariables:
 
 class TestDeterministicRegeneration:
     def test_match_deterministic(self):
-        seed, filename = load_seed(MATCH_SEED)
-        bundle1 = compile_seed(seed, filename)
-        bundle2 = compile_seed(seed, filename)
+        seed, filename, digest = load_seed(MATCH_SEED)
+        bundle1 = compile_seed(seed, filename, digest)
+        bundle2 = compile_seed(seed, filename, digest)
         assert serialize_bundle(bundle1) == serialize_bundle(bundle2)
 
     def test_subst_deterministic(self):
-        seed, filename = load_seed(SUBST_SEED)
-        bundle1 = compile_seed(seed, filename)
-        bundle2 = compile_seed(seed, filename)
+        seed, filename, digest = load_seed(SUBST_SEED)
+        bundle1 = compile_seed(seed, filename, digest)
+        bundle2 = compile_seed(seed, filename, digest)
         assert serialize_bundle(bundle1) == serialize_bundle(bundle2)
 
 
@@ -541,3 +541,68 @@ class TestMalformedSeedRejection:
         }
         with pytest.raises(CompilerError, match="must be a JSON object"):
             compile_seed(fake_seed, "test.json")
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Fixture lock (checked-in bundles match fresh compiler output)
+# ---------------------------------------------------------------------------
+
+COMPILED_DIR = _REPO_ROOT / "mu" / "stage0" / "compiled"
+MATCH_COMPILED_PATH = COMPILED_DIR / "match_v2.compiled.v1.json"
+SUBST_COMPILED_PATH = COMPILED_DIR / "subst_v2.compiled.v1.json"
+
+
+class TestFixtureLock:
+    def test_match_bundle_matches_checked_in(self):
+        """Compiled match.v2 bundle is byte-identical to checked-in artifact."""
+        seed, filename, digest = load_seed(MATCH_SEED)
+        bundle = compile_seed(seed, filename, digest)
+        fresh = serialize_bundle(bundle)
+        checked_in = MATCH_COMPILED_PATH.read_text()
+        assert fresh == checked_in, (
+            f"Checked-in {MATCH_COMPILED_PATH.name} differs from fresh "
+            f"compiler output. Regenerate with:\n"
+            f"  python tools/compilers/lower_stage0.py "
+            f"mu/substrate/match.v2.json -o {MATCH_COMPILED_PATH}"
+        )
+
+    def test_subst_bundle_matches_checked_in(self):
+        """Compiled subst.v2 bundle is byte-identical to checked-in artifact."""
+        seed, filename, digest = load_seed(SUBST_SEED)
+        bundle = compile_seed(seed, filename, digest)
+        fresh = serialize_bundle(bundle)
+        checked_in = SUBST_COMPILED_PATH.read_text()
+        assert fresh == checked_in, (
+            f"Checked-in {SUBST_COMPILED_PATH.name} differs from fresh "
+            f"compiler output. Regenerate with:\n"
+            f"  python tools/compilers/lower_stage0.py "
+            f"mu/substrate/subst.v2.json -o {SUBST_COMPILED_PATH}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Integrity metadata (source_digest + lowering_version)
+# ---------------------------------------------------------------------------
+
+class TestIntegrityMetadata:
+    def test_compiler_bundle_has_source_digest(self, match_compiled):
+        assert "source_digest" in match_compiled
+        assert match_compiled["source_digest"].startswith("sha256:")
+
+    def test_compiler_bundle_has_lowering_version(self, match_compiled):
+        assert "lowering_version" in match_compiled
+        assert match_compiled["lowering_version"] == "1.0.0"
+
+    def test_hand_authored_bundles_validate_without_integrity(self):
+        """Hand-authored bundles (hand_authored=true) pass validation
+        without source_digest or lowering_version."""
+        validate_bundle(_load_bundle(MATCH_HAND))
+        validate_bundle(_load_bundle(SUBST_HAND))
+
+    def test_compiler_bundle_missing_digest_rejected(self):
+        """Compiler-produced bundle without source_digest is rejected."""
+        seed, filename, digest = load_seed(MATCH_SEED)
+        bundle = compile_seed(seed, filename, digest)
+        del bundle["source_digest"]
+        with pytest.raises(ValueError, match="source_digest"):
+            validate_bundle(bundle)

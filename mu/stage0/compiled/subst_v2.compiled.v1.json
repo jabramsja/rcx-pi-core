@@ -1,6 +1,7 @@
 {
   "bundle_id": "rcx.stage0.subst_v2.compiled.v1",
   "hand_authored": false,
+  "lowering_version": "1.0.0",
   "machine_profile": "rcx.stage0.v1",
   "note": "Compiler-derived from subst.v2.json by lower_stage0.py v1.0.0",
   "program_order": [
@@ -3241,6 +3242,7 @@
       }
     }
   ],
+  "source_digest": "sha256:aa6a9581ef2befe3783e5190d5149c4dd71d7e67e70b92e90f93e7c193822d24",
   "source_seed": "subst.v2.json",
   "source_seed_version": "2.0.0",
   "stage0_ir_version": 1

@@ -419,6 +419,8 @@ def _validate_path(path, context):
 _BUNDLE_ALLOWED_KEYS = frozenset({  # AST_OK: key — closed bundle-level key validation
     "stage0_ir_version", "bundle_id", "source_seed",
     "machine_profile", "program_order", "programs",
+    # Integrity keys (required for compiler-produced bundles)
+    "source_digest", "lowering_version",
     # Metadata keys (documentation, not semantically active)
     "source_seed_version", "hand_authored", "note",
 })
@@ -452,6 +454,17 @@ def validate_bundle(bundle):
     for k in bundle:
         if k not in _BUNDLE_ALLOWED_KEYS:
             raise ValueError(f"Unknown bundle-level key: '{k}'")
+
+    # Integrity fields: required for compiler-produced bundles
+    if bundle.get("hand_authored") is not True:
+        if "lowering_version" not in bundle:
+            raise ValueError(
+                "Missing 'lowering_version' (required for "
+                "compiler-produced bundles)")
+        if "source_digest" not in bundle:
+            raise ValueError(
+                "Missing 'source_digest' (required for "
+                "compiler-produced bundles)")
 
     # Exact int type: reject bool (True == 1 in Python but true !== 1 in JS)
     if type(bundle["stage0_ir_version"]) is not int or isinstance(bundle["stage0_ir_version"], bool):

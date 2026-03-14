@@ -1,6 +1,7 @@
 {
   "bundle_id": "rcx.stage0.match_v2.compiled.v1",
   "hand_authored": false,
+  "lowering_version": "1.0.0",
   "machine_profile": "rcx.stage0.v1",
   "note": "Compiler-derived from match.v2.json by lower_stage0.py v1.0.0",
   "program_order": [
@@ -1864,6 +1865,7 @@
       }
     }
   ],
+  "source_digest": "sha256:11c79466bb3c4761513cd09f0d4bfda234802a8f8f130a62282e46f2c078fbb6",
   "source_seed": "match.v2.json",
   "source_seed_version": "2.0.0",
   "stage0_ir_version": 1
