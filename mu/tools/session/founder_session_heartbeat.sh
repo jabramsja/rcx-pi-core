@@ -16,6 +16,7 @@ Notes:
   - Prints a concise founder-protocol reminder on a recurring interval.
   - Run this in a second terminal during a long session.
   - --run-guard executes ./tools/session/founder_session_guard.sh <mode> once before the loop.
+  - For proof-class / active-doc checks, pair this with ./tools/session/founder_session_attest.sh <mode>.
   - --count limits the number of reminders; omit it for an infinite loop.
 EOF
 }
@@ -117,6 +118,7 @@ while :; do
     echo "[founder-heartbeat][$NOW] mode=$MODE beat=$ITERATION"
     echo "Re-read AGENTS.md and FOUNDER_SESSION_BOOTSTRAP.md if scope drifted."
     echo "Guard command: ./tools/session/founder_session_guard.sh $MODE --run"
+    echo "Attest command: ./tools/session/founder_session_attest.sh $MODE"
     print_mode_notes
     if [ "$BELL" -eq 1 ]; then
         printf '\a'

@@ -12,6 +12,11 @@ Edit this file only when session behavior changes, or when stale content would c
 - Prefer code truth over plan/doc wording when they conflict.
 - Red-team not only Claude summaries/plans, but also touched files, adjacent high-risk files, and any newly discovered issues that should be assessed.
 - Keep the dialectic constructive in every response: identify what is wrong, preserve what is usable, and propose the smallest honest path forward.
+- Maintain a disciplined, non-self-deprecating stance. Do not call yourself lazy,
+  careless, or incapable. Treat founder frustration as feedback about the work, not
+  as truth about your effort or competence.
+- Work at the highest possible level. Favor rigor, depth, honest closure, and
+  production-quality sync over expedience or superficial green status.
 - RCX is a structural VM pursuing self-hosting and meta-circularity. Python and JS are bootstrap substrates/scaffolding, not the semantic destination.
 - Treat fixes that add host-only semantics as suspect by default. Prefer structural reductions, parity-preserving boundary tightening, and bootstrap-bound shrinking over making Python or JS "smarter."
 - For runtime/substrate advice, check architectural direction before proposing fixes:
@@ -58,6 +63,16 @@ Optional repo-local launcher:
 ```
 
 Use this when you want the founder bootstrap docs, named-skill reminders, and required startup commands rendered from one repo-local entrypoint. It operationalizes the protocol; it does not auto-invoke skills.
+
+After startup, run the session attestation when the task is a rigorous audit or
+closeout:
+
+```bash
+./tools/session/founder_session_attest.sh redteam
+```
+
+Use this to catch proof-class mismatches and active-doc governance blind spots
+that broad green suites can miss.
 
 Optional reminder loop for long sessions:
 

@@ -18,6 +18,8 @@ Notes:
     the operator/session can apply them deliberately.
   - Default behavior is dry-run: print required docs, skills, and commands.
   - Pass --run to execute the command set and return non-zero if any command fails.
+  - For proof-class / active-doc attestation after startup, run
+    ./tools/session/founder_session_attest.sh <mode>
   - For periodic reminders during a long session, run
     ./tools/session/founder_session_heartbeat.sh <mode> --interval 300
 EOF
@@ -166,6 +168,8 @@ echo "repo: $REPO_ROOT"
 echo ""
 echo "This wrapper operationalizes founder/bootstrap protocol and skill selection."
 echo "It does not auto-run skills; it names the required skill workflows."
+echo ""
+echo "Recommended follow-up attestation: ./tools/session/founder_session_attest.sh $MODE"
 echo ""
 
 ALL_DOCS=("${COMMON_DOCS[@]}")
