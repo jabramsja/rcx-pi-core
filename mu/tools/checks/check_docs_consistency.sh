@@ -72,7 +72,7 @@ fi
 echo ""
 echo "4. Checking TASKS.md structure..."
 
-for section in "## North Star" "## Ra" "## NEXT" "## VECTOR"; do
+for section in "## North Star" "## Ra" "## NEXT" "## VECTOR" "## SINK"; do
     if ! grep -q "$section" TASKS.md; then
         echo "   MISSING: $section section in TASKS.md"
         ERRORS=$((ERRORS + 1))
@@ -100,6 +100,17 @@ if PYTHONHASHSEED=0 python3 -m pytest tests/docs/test_status_tasks_consistency.p
 else
     echo "   WARNING: STATUS/TASKS consistency test found drift"
     echo "   → Run: PYTHONHASHSEED=0 pytest tests/docs/test_status_tasks_consistency.py -v"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# 5c. L4 current-state doctrine grounding
+echo ""
+echo "5c. Checking L4 current-state doctrine grounding..."
+if PYTHONHASHSEED=0 python3 -m pytest tests/docs/test_l4_current_state_truth.py -q --tb=no 2>/dev/null; then
+    echo "   OK: L4 current-state docs match runtime/tracker truth"
+else
+    echo "   WARNING: L4 current-state doctrine test found drift"
+    echo "   → Run: PYTHONHASHSEED=0 pytest tests/docs/test_l4_current_state_truth.py -v"
     ERRORS=$((ERRORS + 1))
 fi
 

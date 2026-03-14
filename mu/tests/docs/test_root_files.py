@@ -68,6 +68,15 @@ ROOT_FILES = {
         "must_contain": ["## 0) Session Contract"],
         "must_link_to": [],
     },
+    "AGENTS.md": {
+        "required": True,
+        "must_contain": [
+            "FOUNDER_SESSION_BOOTSTRAP.md",
+            "./tools/session/founder_session_guard.sh",
+            "./tools/session/founder_session_heartbeat.sh",
+        ],
+        "must_link_to": [],
+    },
 }
 
 # Paths that should exist if referenced in root files

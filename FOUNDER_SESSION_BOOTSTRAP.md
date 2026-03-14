@@ -51,6 +51,22 @@ Then decide:
 2. Whether the wave must be split by class.
 3. What adjacent files, parity mirrors, enforcers, and docs must be red-teamed because of the touched scope.
 
+Optional repo-local launcher:
+
+```bash
+./tools/session/founder_session_guard.sh redteam --run
+```
+
+Use this when you want the founder bootstrap docs, named-skill reminders, and required startup commands rendered from one repo-local entrypoint. It operationalizes the protocol; it does not auto-invoke skills.
+
+Optional reminder loop for long sessions:
+
+```bash
+./tools/session/founder_session_heartbeat.sh redteam --interval 300
+```
+
+Use this in a second terminal when you want a recurring founder-protocol reminder without manually re-checking the bootstrap every few minutes.
+
 ## 3) Required Reporting Format (Any GO/NO-GO)
 Always include:
 1. Exact changed file list by wave/class.
@@ -94,7 +110,7 @@ Any full prompt should include:
 - Host authority inventory ratchet: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/tools/checks/check_host_authority_inventory_ratchet.py`
 - Docs consistency check: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/tools/checks/check_docs_consistency.sh`
 - Reports index: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/README.md`
-- Blocker reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/blockers`
-- Non-blocker reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/non-blockers`
+- Blocker reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/deferred/blocking`
+- Non-blocker reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/deferred/non_blocking`
 - Deferred reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/deferred`
 - Archived reports: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive`

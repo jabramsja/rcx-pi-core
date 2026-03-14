@@ -20,7 +20,7 @@ NAME: Structural Selection Parity (L1-L3 COMPLETE)
 | **L1: Algorithmic** | match/subst algorithms EXPRESSED as Mu projections | DONE (Python executes projections) |
 | **L2: Operational** | kernel state machine EXPRESSED as Mu projections | FULL (decision: accept for-loop as bootstrap primitive) |
 | **L3: Substrate Portability** | Same projections on Python and JavaScript substrates | COMPLETE |
-| **L4: True Self-Hosting** | Bootstrap primitives eliminated or substrate-independent | SINK (research question) |
+| **L4: True Self-Hosting** | Bootstrap primitives eliminated or substrate-independent | SINK (full completion research; bounded reduction active) |
 
 **Terminology Honesty:**
 - "Projection-based" means the ALGORITHM is expressed as Mu projections (data)
@@ -156,6 +156,8 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 ### L4 Research: True Self-Hosting (SINK)
 
 L4 asks: **Can bootstrap primitives be eliminated entirely?**
+
+Current truth: full L4 completion remains in SINK, but bounded reduction work is active. P7 Stage0 meta-circular reduction landed through shadow-mode cutover; production flip still requires performance evidence, parity confidence, and explicit founder GO.
 
 | Primitive | L4 Question | Possible Path |
 |-----------|-------------|---------------|

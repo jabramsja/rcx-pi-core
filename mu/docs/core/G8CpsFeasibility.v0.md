@@ -1,10 +1,10 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-02-18
+LAST_VERIFIED: 2026-03-14
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: none
+GROUNDING_TESTS: tests/docs/test_l4_current_state_truth.py
 
 This header enables automated doc drift detection.
 - REFERENCE: Stable definitions, rarely changes
@@ -16,11 +16,11 @@ If this doc's claims don't match reality, update the doc or fix the code.
 
 # G8 CPS Feasibility Study v0
 
-**Purpose:** Turn L4-G8 (Irreducible Primitive Consensus) from UNPROVEN into a structured feasibility path with falsifiable hypotheses and explicit stop conditions.
+**Purpose:** Preserve the falsifiable feasibility record behind L4-G8 and document what the resulting G8 PASS classification does and does not prove.
 
 **Status:** SINK research. No implementation proposed. This document defines experiments, not commitments.
 
-**Context:** G8 asks whether the 4 bootstrap primitives are truly irreducible. The current classification (see `L4ExitChecklist.v0.md`) labels `eval_step` as IRREDUCIBLE due to circular dependency, and `max_steps`/`stack_guard`/`projection_loader` as REDUCIBLE_WITH specific architectural changes. This study tests whether those classifications hold under scrutiny.
+**Context:** G8 asks whether the 4 bootstrap primitives are truly irreducible. The current classification state (see `L4ExitChecklist.v0.md` and `STATUS.md`) records `eval_step` as REDUCIBLE_WITH staged bootstrap, `max_steps` as REDUCIBLE_WITH CPS fuel threading, `stack_guard` as REDUCIBLE_WITH depth parameter, and `projection_loader` as REDUCIBLE_WITH binary format. This study is the research record for how those classifications were challenged and supported.
 
 ---
 
@@ -225,7 +225,7 @@ H3 tested via 4 plausible "no-iteration" strategies in `tests/research/test_d007
 ## Decision Tree
 
 ```
-Start: G8 UNPROVEN
+Start: G8 PASS (classification gate, caveated)
   │
   ├─ H3 FALSIFIED? (expected YES)
   │   ├─ YES → Methodology validated. Iteration is irreducible in some form.
@@ -282,7 +282,7 @@ All three hypotheses have been tested. The research evidence loop is closed.
 - That iteration can be eliminated — H1+H3 confirm iteration is irreducible in some form
 - That G8 should be resolved now — feasibility is not priority
 
-**G8 remains UNPROVEN** pending a production-pilot decision/outcome. The evidence supports feasibility but does not constitute a production proof. See D008 (`mu/docs/core/L4DecisionCard.v0.md`) for the founder decision packet.
+**G8 is no longer UNPROVEN.** G8 PASS closes the classification question only. Production reduction remains unproven pending parity, profiling, migration, and cutover evidence. See D008 (`mu/docs/core/L4DecisionCard.v0.md`) and `STATUS.md` for the current operating boundary.
 
 ---
 
@@ -304,7 +304,7 @@ D004 remains the production pilot scope definition (LOC budget, invariants, stop
 
 ## References
 
-- `mu/docs/core/L4ExitChecklist.v0.md` — G8 gate definition and current UNPROVEN status
+- `mu/docs/core/L4ExitChecklist.v0.md` — G8 gate definition and current PASS/caveated classification status
 - `mu/docs/core/L4MicroAbi.v0.md` — ABI surface that G8 classifies
 - `mu/docs/core/Boot0Architecture.v0.md` — Staged bootstrap precedent
 - `mu/docs/core/L4DecisionCard.v0.md` — D001-D004 decision cards

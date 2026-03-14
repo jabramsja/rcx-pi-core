@@ -45,9 +45,9 @@ from tools.docs.shared_doc_config import (
 GOVERNED_FOLDERS = get_governed_folders_as_paths()
 
 # Root canonical files excluded from freshness checks:
-# - CLAUDE.md, FOUNDER_SESSION_BOOTSTRAP.md: instructional, not content docs
+# - AGENTS.md, CLAUDE.md, FOUNDER_SESSION_BOOTSTRAP.md: instructional, not content docs
 # - CHANGELOG.md: historical entries legitimately contain old counts/status
-_ROOT_FRESHNESS_EXCLUDES = {"CLAUDE.md", "FOUNDER_SESSION_BOOTSTRAP.md", "CHANGELOG.md"}
+_ROOT_FRESHNESS_EXCLUDES = {"AGENTS.md", "CLAUDE.md", "FOUNDER_SESSION_BOOTSTRAP.md", "CHANGELOG.md"}
 
 
 def iter_governed_docs():

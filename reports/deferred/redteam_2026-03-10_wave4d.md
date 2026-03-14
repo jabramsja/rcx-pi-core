@@ -1,1 +1,0 @@
-../archive/deferred/redteam_2026-03-10_wave4d.md
