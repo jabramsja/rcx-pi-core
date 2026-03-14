@@ -706,9 +706,12 @@ echo "== 19. Host Debt: Threshold Check =="
 # Eliminating them would require eval_step to not exist (circular dependency).
 # L3/L4 would require fundamentally different architecture.
 #
-# Read threshold from STATUS.md (single source of truth)
-# Format: "THRESHOLD: 12" - extract first token after colon to handle inline comments
-DEBT_THRESHOLD=$(grep "^THRESHOLD:" "$PROJECT_ROOT/STATUS.md" | head -1 | cut -d: -f2 | awk '{print $1}')
+# Python-only debt threshold.
+# This script scans all rcx_pi/ (including deep_eval.py) = 8 decorators + 8 AST_OK = 16.
+# STATUS.md THRESHOLD is cross-substrate (20 = 6 Py ratchet + 6 JS + 8 AST_OK).
+# The ratchet (check_host_semantics_ratchet.py) scans rcx_pi/selfhost/ only (6 decorators).
+# This script's broader scope requires its own threshold.
+DEBT_THRESHOLD=16
 if [ -z "$DEBT_THRESHOLD" ]; then
     echo "ERROR: Could not read THRESHOLD from STATUS.md"
     exit 1
