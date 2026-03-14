@@ -10,12 +10,12 @@ echo "=== Checking docs consistency ==="
 
 ERRORS=0
 
-# 1. Check debt count in STATUS.md matches debt_dashboard.sh
+# 1. Check debt count in STATUS.md matches host_semantics_baseline.json (canonical)
 echo ""
 echo "1. Checking debt count..."
 
 STATUS_DEBT=$(grep -E "^CURRENT:" STATUS.md | grep -oE '[0-9]+' | head -1)
-ACTUAL_DEBT=$(./tools/debt_dashboard.sh 2>/dev/null | grep -E "Total Semantic:" | grep -oE '[0-9]+' | head -1)
+ACTUAL_DEBT=$(python3 -c "import json; print(json.load(open('tools/checks/host_semantics_baseline.json'))['total'])" 2>/dev/null)
 
 if [ -z "$STATUS_DEBT" ]; then
     echo "   WARNING: Could not parse debt from STATUS.md"

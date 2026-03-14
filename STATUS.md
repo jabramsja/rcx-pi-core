@@ -104,7 +104,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization + metabolize_cycle: ✅ | Engine orchestration + hemisphere routing + metabolization + metabolize cycle L3 parity; paxos_demo application |
 
 **JS Debt Tracking (AST-level host markers — distinct from Python bootstrap debt):**
-- JS DEBT SUMMARY in `constants.js` lists 6 host operations (2 iteration + 2 recursion + 2 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (16 total: 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
+- JS DEBT SUMMARY in `constants.js` lists 6 host operations (2 iteration + 2 recursion + 2 builtin). Canonical counts in `tools/checks/host_semantics_baseline.json` (20 total: 6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap). See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md` for why every host operation is tracked debt.
 - Functions marked with `@host_iteration`, `@host_recursion`, `@host_builtin`
 - These are AST-level host loop markers, analogous to Python's AST_OK:infra (65), NOT bootstrap primitives. There are 4 bootstrap primitives (eval_step, max_steps, stack_guard, projection_loader) and 5 Python host-debt marker sites — these are distinct concepts.
 - Bootstrap primitives marked with `BOOTSTRAP_PRIMITIVE` (same 4 as Python: eval_step, max_steps, stack_guard, projection_loader; mu_equal DEMOTED)
@@ -192,7 +192,7 @@ L4 asks: **Can bootstrap primitives be eliminated entirely?**
 
 **Post-D008 Operating Mode:** D008 GO rendered (founder, 2026-03-01; supersedes prior DEFER). D005 production pilot COMPLETE (PR #452 merged, 2026-03-01). **G8 PASS (classification gate, caveated, 2026-03-03):** All four primitives classified with executable evidence (D001-D010). G8 PASS closes classification evidence, not L4 completion. L4 remains blocked by stop conditions #3/#4. No production reduction claims. Research-evidence precedent locked: research analogs sufficient for classification gates, production claims require productionization gates. Productionization gate lock documented in L4ExitChecklist.v0.md (D009: memoization/cycle-detection + cross-substrate + node-count vs per-level; D010: int-range + NaN/Inf + JS decoder + migration + integrity-chain). Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). All prior NEXT contracts closed. Wave 25 JS perf fix merged (PR #453, 42x speedup + non-linear hash fix + policy lock). P4 hotspot measured and DEFERRED (2026-03-02, PR #458). **RT1+RT2+RT3 anti-theater hardening COMPLETE (2026-03-03):** RT1 closes cross-substrate seed parsing parity (NaN/Inf rejection) and JS type guards. RT2 introduces `tools/checks/check_simulated_production_logic.py` (9 tests). RT3 hardens the checker: arrow function aliases, concatenated/f-string detection, require+call proof (not just require), inode-based scan dedup, 5-line THEATER_OK proximity. 18 checker tests total. Wired into `tools/audits/audit_fast.sh` and `tools/audits/audit_all.sh`. This is process hardening, not runtime behavior change — host semantics and debt unchanged.
 
-**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-14):** All four P7 sub-waves complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, `_STAGE0_SHADOW_ENABLED = True`, `_STAGE0_VM_CUTOVER = False`, 17 gate tests, PR #581). Shadow verification active — cutover flag awaits performance evidence + founder GO. +1 tracked marker (`@host_iteration: _step_kernel_with_vm`), debt now 16/16.
+**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-14):** All four P7 sub-waves complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, `_STAGE0_SHADOW_ENABLED = True`, `_STAGE0_VM_CUTOVER = False`, 17 gate tests, PR #581). Shadow verification active — cutover flag awaits performance evidence + founder GO. +1 tracked marker (`@host_iteration: _step_kernel_with_vm`), debt now 20/20.
 
 **Conjecture Parking:** Non-Euclidean geometry / structural linear algebra hypotheses are PARKED (not active). See TASKS.md SINK "Conjecture Parking (NOT ACTIVE)" for re-evaluation trigger and promotion rules.
 
@@ -324,38 +324,38 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
-| **Tracked markers** | 16 | Narrow official `@host_*` debt marker sites (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion, AST_OK bootstrap). | `tools/checks/host_semantics_baseline.json` |
+| **Tracked markers** | 20 | Narrow official `@host_*` debt marker sites (6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion, AST_OK bootstrap). | `tools/checks/host_semantics_baseline.json` |
 | **Authority sites** | 218 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 120 Python + 98 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
 | **Total inventory sites** | 305 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 177 Python + 128 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
 
-**Why three ledgers:** The 16 tracked markers are the narrow debt the project has categorized and accepted. The 218 authority sites are the broader surface the ratchet prevents from growing. The 305 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
+**Why three ledgers:** The 20 tracked markers are the narrow debt the project has categorized and accepted. The 218 authority sites are the broader surface the ratchet prevents from growing. The 305 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 16 and 305 is the honest measure of how much host work remains uncategorized.
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 20 and 305 is the honest measure of how much host work remains uncategorized.
 
 ```
-THRESHOLD: 16
-CURRENT: 16 (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap — per host_semantics_baseline.json)
-FLOOR: 16 (see explanation below)
+THRESHOLD: 20
+CURRENT: 20 (6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap — per host_semantics_baseline.json)
+FLOOR: 20 (see explanation below)
 INFRA_CEILING: 78
 INFRA_CURRENT: 78
 ```
 
-**Tracked marker count (16 — 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap — see enumeration below for all 8 AST_OK bootstrap):**
+**Tracked marker count (20 — 6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap):**
 - @host_recursion: 2 (_stage0_match + _stage0_substitute — BOOTSTRAP. match/substitute reclassified as BOUNDARY P7W4)
 - @host_builtin: 3 (_stage0_match x1, deep_eval x2 — match() reclassified P7W4, builtin surface reduced: len/zip/set eliminated)
 - @host_iteration: 3 (step_kernel_mu + list_to_linked + _step_kernel_with_vm — BOOTSTRAP. _step_kernel_with_vm added P7-d: VM dispatch for match.v2/subst.v2)
 - @host_mutation: 1 (deep_eval history.append only)
 - AST_OK bootstrap: 8 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009 + 2 stage0_vm template materialization from P7-a + 2 stage0_vm _mu_copy from P7-a bot review fix)
 
-**Total host semantics markers (16 = 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap):** P7W5 outer loop boundary reclassification: run_mu, run_mu_structural (Py), run, runStructural, runAlgorithmWithBridge, runEnginePipelineRecursive (JS) reclassified as BOUNDARY — all provably off kernel execution path. list_to_linked/listToLinked stay @host_iteration (on kernel path — called by step_kernel_mu/step). Kernel path: step_kernel_mu/step()→_step_trusted→_apply_projection_trusted→_stage0_match/_stage0_substitute. P7-d adds _step_kernel_with_vm @host_iteration on Py (kernel-step VM dispatch for match.v2/subst.v2). P7-a Stage0 VM adds 4 AST_OK bootstrap (2 template materialization + 2 _mu_copy comprehensions in stage0_vm.py). Net from P7W5: -6 markers (17→11, -35%); P7-a: +4 AST_OK bootstrap (11→15); P7-d: +1 host_iteration (15→16). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category decorators: Py = 2 recursion + 1 builtin + 3 iteration + 0 mutation; JS = 2 recursion + 2 builtin + 2 iteration.
+**Total host semantics markers (20 = 6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap):** P7W5 outer loop boundary reclassification: run_mu, run_mu_structural (Py), run, runStructural, runAlgorithmWithBridge, runEnginePipelineRecursive (JS) reclassified as BOUNDARY — all provably off kernel execution path. list_to_linked/listToLinked stay @host_iteration (on kernel path — called by step_kernel_mu/step). Kernel path: step_kernel_mu/step()→_step_trusted→_apply_projection_trusted→_stage0_match/_stage0_substitute. P7-d adds _step_kernel_with_vm @host_iteration on Py (kernel-step VM dispatch for match.v2/subst.v2). P7-a Stage0 VM adds 4 AST_OK bootstrap (2 template materialization + 2 _mu_copy comprehensions in stage0_vm.py). Net from P7W5: -6 markers (17→11, -35%); P7-a: +4 AST_OK bootstrap (11→15); P7-d: +1 host_iteration (15→16). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category decorators: Py = 2 recursion + 1 builtin + 3 iteration + 0 mutation; JS = 2 recursion + 2 builtin + 2 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
 - load_combined_kernel_v3_projections: Available for future use (no debt)
 - No debt increase - Gate 6 uses existing bootstrap layer
 
-**Why 16 is the tracked marker count (lower bound, not comprehensive inventory):**
-The 16 counts explicitly marked @host_* sites (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap) across L2 kernel, utilities, and Stage0 VM (list_to_linked is inline marker, counted by ratchet but not debt_dashboard). Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally beyond their @host_recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary):
+**Why 20 is the tracked marker count (lower bound, not comprehensive inventory):**
+The 20 counts explicitly marked @host_* sites (6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap) across L2 kernel, utilities, and Stage0 VM (list_to_linked is inline marker, counted by ratchet but not debt_dashboard). Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally beyond their @host_recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary):
 
 *L2 kernel substrate (9 sites):*
 1. `_stage0_match()` in eval_seed.py — @host_recursion + @host_builtin (Stage 0 micro-match bootstrap primitive; P7W4: list branch removed, builtin surface reduced to isinstance/.keys()/.get()/in)
@@ -392,7 +392,7 @@ These cannot be eliminated because:
 
 **P7-a (Stage0 VM prototype):** +2 AST_OK bootstrap markers in stage0_vm.py (dict comprehension for template object materialization, list comprehension for template list materialization). These are irreducible bootstrap — the VM must construct output values from template fields/items. +1 AST_OK infra marker (program_map dict comprehension for dispatch indexing). Floor increased 11→13, then +2 AST_OK (_mu_copy comprehensions from P7-a bot review fix) raised floor to 15. Infra ceiling 75→76.
 
-The 16 represents the current tracked marker count (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap — lower bound on total host work; 4 additional AST_OK bootstrap in eval_seed pre-date threshold tracking; L2 kernel + utilities + Stage0 VM). P7-d adds _step_kernel_with_vm @host_iteration on Py (VM dispatch for match.v2/subst.v2 in step_kernel_mu). L4 paths are documented:
+The 20 represents the current tracked marker count (6 Py decorator + 6 JS decorator + 8 AST_OK bootstrap — lower bound on total host work; L2 kernel + utilities + Stage0 VM). All 8 AST_OK bootstrap now included in threshold (previously 4 were excluded as "pre-dating threshold tracking"). P7-d adds _step_kernel_with_vm @host_iteration on Py (VM dispatch for match.v2/subst.v2 in step_kernel_mu). L4 paths are documented:
 - **Boot0 Architecture v0.4** (`mu/docs/core/Boot0Architecture.v0.md`) - staged bootstrap design, 9-agent reviewed
 - **L4 research questions**: Can mu_equal/eval_step become projections? CPS/trampolining?
 - Implementation DEFERRED until L4 research drives it (L3 complete first)
