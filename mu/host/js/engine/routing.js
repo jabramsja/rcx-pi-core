@@ -161,7 +161,7 @@ function runEngineWithRouting(allProjections, hemisphereProjections, kernelProje
     ? Object.assign({}, engineKwargs, { vmConfig })
     : engineKwargs;
   const coreVmConfig = vmConfig
-    ? Object.assign({}, vmConfig, { bridgeProjs: null })
+    ? Object.assign({}, vmConfig, { bridgeBundle: null })
     : null;
   let engineResult;
   if (boot1Mode) {

@@ -4,6 +4,15 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### S1-C: Kernel + Bridge Execution via Stage0 VM
+
+- **Compiled:** kernel.v1 (7 projections) and bootstrap_structural.v1 (5 projections) into Stage0 bundles
+- **Wired:** `_step_kernel_with_vm()` now executes ALL 33 projections via Stage0 VM
+- **Eliminated:** `_apply_projection_trusted` removed from step_kernel_mu path
+- **JS parity:** kernel.js updated with same all-VM execution
+- Total inventory: 308 -> 310 (+2 new bundle loaders)
+- **L4_STRUCTURAL** wave targeting G8.
+
 ### S1-B: VM Cutover Flip (Founder GO)
 
 - **Python:** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in step_mu.py

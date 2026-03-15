@@ -1,0 +1,1356 @@
+{
+  "bundle_id": "rcx.stage0.bootstrap_structural_v1.compiled.v1",
+  "hand_authored": false,
+  "lowering_version": "1.0.0",
+  "machine_profile": "rcx.stage0.v1",
+  "note": "Compiler-derived from bootstrap_structural.v1.json by lower_stage0.py v1.0.0",
+  "program_order": [
+    "bridge.var.check_existing",
+    "bridge.lookup.found_same",
+    "bridge.lookup.found_different",
+    "bridge.lookup.not_found_yet",
+    "bridge.lookup.not_found"
+  ],
+  "programs": [
+    {
+      "description": "Variable site - check if name already bound (entry point for lookup phase)",
+      "id": "bridge.var.check_existing",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "pattern_focus",
+            "value_focus",
+            "bindings",
+            "stack",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "match"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "pattern_focus"
+          ],
+          "source_map": {
+            "path": [
+              "pattern_focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "pattern_focus"
+          ],
+          "required": [
+            "var"
+          ],
+          "source_map": {
+            "path": [
+              "pattern_focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "pattern_focus",
+            "var"
+          ],
+          "source_map": {
+            "path": [
+              "pattern_focus",
+              "var"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "value",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "value_focus"
+          ],
+          "source_map": {
+            "path": [
+              "value_focus"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "bindings",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "bindings"
+          ],
+          "source_map": {
+            "path": [
+              "bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "stack",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "stack"
+          ],
+          "source_map": {
+            "path": [
+              "stack"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_match_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_lookup_bindings": {
+                "kind": "capture_ref",
+                "name": "bindings"
+              },
+              "_lookup_name": {
+                "kind": "capture_ref",
+                "name": "name"
+              },
+              "_lookup_value": {
+                "kind": "capture_ref",
+                "name": "value"
+              },
+              "_match_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "_original_bindings": {
+                "kind": "capture_ref",
+                "name": "bindings"
+              },
+              "_phase": {
+                "kind": "literal",
+                "value": "lookup_binding"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "match"
+              },
+              "stack": {
+                "kind": "capture_ref",
+                "name": "stack"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "bridge.var.check_existing",
+        "projection_index": 0,
+        "seed_file": "bootstrap_structural.v1.json"
+      }
+    },
+    {
+      "description": "Found existing binding with SAME value (non-linear OK) - uses non-linear pattern",
+      "id": "bridge.lookup.found_same",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "_phase",
+            "_lookup_name",
+            "_lookup_value",
+            "_lookup_bindings",
+            "_original_bindings",
+            "stack",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "match"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "_phase"
+          ],
+          "source_map": {
+            "path": [
+              "_phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup_binding"
+        },
+        {
+          "name": "name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "value",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "required": [
+            "name",
+            "value",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "capture_name": "name",
+          "op": "check_captured_equal",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "capture_name": "value",
+          "op": "check_captured_equal",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "rest"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "bindings",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_original_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_original_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "stack",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "stack"
+          ],
+          "source_map": {
+            "path": [
+              "stack"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_match_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_match_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "kind": "capture_ref",
+                "name": "bindings"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "match"
+              },
+              "pattern_focus": {
+                "kind": "literal",
+                "value": null
+              },
+              "stack": {
+                "kind": "capture_ref",
+                "name": "stack"
+              },
+              "value_focus": {
+                "kind": "literal",
+                "value": null
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "bridge.lookup.found_same",
+        "projection_index": 1,
+        "seed_file": "bootstrap_structural.v1.json"
+      }
+    },
+    {
+      "description": "Found existing binding with DIFFERENT value (conflict!) - catch-all after found_same",
+      "id": "bridge.lookup.found_different",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "_phase",
+            "_lookup_name",
+            "_lookup_value",
+            "_lookup_bindings",
+            "_original_bindings",
+            "stack",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "match"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "_phase"
+          ],
+          "source_map": {
+            "path": [
+              "_phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup_binding"
+        },
+        {
+          "name": "name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "value",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "required": [
+            "name",
+            "value",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "capture_name": "name",
+          "op": "check_captured_equal",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "other_value",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "rest"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_ob",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_original_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_original_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_s",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "stack"
+          ],
+          "source_map": {
+            "path": [
+              "stack"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_match_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_match_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "_mode": {
+                "kind": "literal",
+                "value": "match_done"
+              },
+              "_status": {
+                "kind": "literal",
+                "value": "no_match"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "bridge.lookup.found_different",
+        "projection_index": 2,
+        "seed_file": "bootstrap_structural.v1.json"
+      }
+    },
+    {
+      "description": "Name not at head of bindings, continue searching rest",
+      "id": "bridge.lookup.not_found_yet",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "_phase",
+            "_lookup_name",
+            "_lookup_value",
+            "_lookup_bindings",
+            "_original_bindings",
+            "stack",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "match"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "_phase"
+          ],
+          "source_map": {
+            "path": [
+              "_phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup_binding"
+        },
+        {
+          "name": "name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "value",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "required": [
+            "name",
+            "value",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "other_name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_ov",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "rest",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings",
+            "rest"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings",
+              "rest"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "bindings",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_original_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_original_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "stack",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "stack"
+          ],
+          "source_map": {
+            "path": [
+              "stack"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_match_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_lookup_bindings": {
+                "kind": "capture_ref",
+                "name": "rest"
+              },
+              "_lookup_name": {
+                "kind": "capture_ref",
+                "name": "name"
+              },
+              "_lookup_value": {
+                "kind": "capture_ref",
+                "name": "value"
+              },
+              "_match_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "_original_bindings": {
+                "kind": "capture_ref",
+                "name": "bindings"
+              },
+              "_phase": {
+                "kind": "literal",
+                "value": "lookup_binding"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "match"
+              },
+              "stack": {
+                "kind": "capture_ref",
+                "name": "stack"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "bridge.lookup.not_found_yet",
+        "projection_index": 3,
+        "seed_file": "bootstrap_structural.v1.json"
+      }
+    },
+    {
+      "description": "Name not in bindings (reached null), add new binding",
+      "id": "bridge.lookup.not_found",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "_phase",
+            "_lookup_name",
+            "_lookup_value",
+            "_lookup_bindings",
+            "_original_bindings",
+            "stack",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "match"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "_phase"
+          ],
+          "source_map": {
+            "path": [
+              "_phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "lookup_binding"
+        },
+        {
+          "name": "name",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_name"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_name"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "value",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_value"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_value"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "_lookup_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_lookup_bindings"
+            ],
+            "section": "pattern"
+          },
+          "value": null
+        },
+        {
+          "name": "bindings",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_original_bindings"
+          ],
+          "source_map": {
+            "path": [
+              "_original_bindings"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "stack",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "stack"
+          ],
+          "source_map": {
+            "path": [
+              "stack"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "ctx",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "_match_ctx"
+          ],
+          "source_map": {
+            "path": [
+              "_match_ctx"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "_match_ctx": {
+                "kind": "capture_ref",
+                "name": "ctx"
+              },
+              "bindings": {
+                "fields": {
+                  "name": {
+                    "kind": "capture_ref",
+                    "name": "name"
+                  },
+                  "rest": {
+                    "kind": "capture_ref",
+                    "name": "bindings"
+                  },
+                  "value": {
+                    "kind": "capture_ref",
+                    "name": "value"
+                  }
+                },
+                "kind": "object"
+              },
+              "mode": {
+                "kind": "literal",
+                "value": "match"
+              },
+              "pattern_focus": {
+                "kind": "literal",
+                "value": null
+              },
+              "stack": {
+                "kind": "capture_ref",
+                "name": "stack"
+              },
+              "value_focus": {
+                "kind": "literal",
+                "value": null
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "bridge.lookup.not_found",
+        "projection_index": 4,
+        "seed_file": "bootstrap_structural.v1.json"
+      }
+    }
+  ],
+  "source_digest": "sha256:dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964",
+  "source_seed": "bootstrap_structural.v1.json",
+  "source_seed_version": "1.0.0",
+  "stage0_ir_version": 1
+}
