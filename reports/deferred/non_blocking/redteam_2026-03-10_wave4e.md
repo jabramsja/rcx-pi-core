@@ -12,13 +12,10 @@ Archived from the source snapshot as resolved:
 
 ## Open Items
 
-### D2. `collected_at` remains intentionally divergent across substrates
-**Why deferred:** Python uses `datetime.utcnow().isoformat()` while JS uses `new Date().toISOString()`.
-These produce slightly different formats (Python lacks `Z` suffix, JS includes it). This is an
-intentional parity gap — the `collected_at` field is diagnostic metadata, not a semantic value.
-Aligning them would require either (a) adding a datetime import to Python for ISO format, or
-(b) stripping the Z from JS. Neither changes behavior. **No fix planned** — intentional
-substrate-specific formatting for a non-semantic field.
+### D2. `collected_at` remains intentionally divergent across substrates — **RESOLVED**
+Both substrates now use deterministic `derived:<hash>` for `collected_at` instead of
+wall-clock timestamps. See `engine_pipeline.py:613`, `pipeline.js:803`, and gate
+assertion in `test_ontology_promotion_runtime_gate.py:1774`.
 
 ### D3. `FORBIDDEN_INJECT_KEYS` remains JS-only hardening
 **Why deferred:** Founder direction (2026-03-14): do NOT fix parity by importing JS
