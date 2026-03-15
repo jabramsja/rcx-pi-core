@@ -73,21 +73,21 @@ function handleJsonApi(apiArg, seeds) {
     recurrenceSeed, exhaustionSeed, hemisphereSeed, engineSeed, metabolizationSeed,
     allProjectionsWithRecurrenceAndBridge,
     SEED_CHECKSUMS: seedChecksums,
-    // P7-d: VM bundles for shadow mode on all public API paths
-    kernelV1Projections, matchBundle, substBundle,
+    // S1-C: ALL compiled VM bundles for kernel step
+    kernelBundle, bridgeBundle, matchBundle, substBundle,
     bridgeProjections,
   } = seeds;
 
-  // P7-d: Construct vmConfig once for all stepKernel/runStructural calls
-  const vmConfig = (kernelV1Projections && matchBundle && substBundle) ? {
-    kernelV1Projs: kernelV1Projections,
-    bridgeProjs: null, // default core mode; bridge-mode callers override below
+  // S1-C: Construct vmConfig with ALL compiled bundles for VM execution
+  const vmConfig = (kernelBundle && matchBundle && substBundle) ? {
+    kernelBundle,
+    bridgeBundle: null, // default core mode; bridge-mode callers override below
     matchBundle,
     substBundle,
   } : null;
   const vmConfigBridge = vmConfig ? {
     ...vmConfig,
-    bridgeProjs: bridgeProjections || null,
+    bridgeBundle: bridgeBundle || null,
   } : null;
 
   // Helper: run Recurrence on trace result

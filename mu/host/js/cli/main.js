@@ -232,11 +232,15 @@ const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json')
 const metabolizationSeed = loadVerifiedSeed(path.join(programsDir, 'metabolization.v1.json'), 'metabolization.v1.json');
 const metabolizeCycleSeed = loadVerifiedSeed(path.join(programsDir, 'metabolize_cycle.v1.json'), 'metabolize_cycle.v1.json');
 
-// P7-d: Load compiled Stage0 bundles for VM execution path
+// S1-C: Load ALL compiled Stage0 bundles for VM execution path
 const compiledDir = path.join(muRoot, 'stage0', 'compiled');
-const { validateBundle, stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: P7-d VM bundle loading for kernel step
+const { validateBundle, stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: VM bundle loading for kernel step
+const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
+const bridgeBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'bootstrap_structural_v1.compiled.v1.json'), 'utf8'));
 const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
 const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.compiled.v1.json'), 'utf8'));
+validateBundle(kernelBundle);
+validateBundle(bridgeBundle);
 validateBundle(matchBundle);
 validateBundle(substBundle);
 
@@ -257,6 +261,8 @@ function verifyBundleProvenance(bundle) {
     );
   }
 }
+verifyBundleProvenance(kernelBundle);
+verifyBundleProvenance(bridgeBundle);
 verifyBundleProvenance(matchBundle);
 verifyBundleProvenance(substBundle);
 
@@ -328,8 +334,8 @@ const seedsContext = {
   bridgeProjections, fixProjections, recurrenceV2Projections,
   SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS,
   validateCombinedBridgeOrdering,
-  // P7-d: VM bundles and partitioned projections
-  kernelV1Projections, matchBundle, substBundle,
+  // S1-C: ALL compiled VM bundles
+  kernelBundle, bridgeBundle, matchBundle, substBundle,
   stage0VmStep, muDeepEqual,
 };
 

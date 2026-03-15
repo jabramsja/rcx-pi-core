@@ -1,7 +1,8 @@
-"""P7-d: Stage0 VM kernel-step cutover gate tests.
+"""Stage0 VM kernel-step cutover gate tests.
 
-Proves shadow mode equivalence between host path (_step_trusted) and
-VM path (_step_kernel_with_vm) for step_kernel_mu.
+S1-C: ALL projections execute via Stage0 VM (cutover active, shadow disabled).
+Proves VM execution correctness, negative controls for host path absence,
+and cross-substrate parity.
 
 L4_STRUCTURAL gate: G2 (first-match-wins / structural forward motion).
 """
@@ -106,14 +107,18 @@ class TestOutputEquivalence:
 
     def _run_both(self, input_value, bridge=False):
         """Run host and VM paths on kernel-wrapped input, return (host, vm)."""
-        k1 = _kernel_v1()
-        bp = _bridge() if bridge else None
+        from rcx_pi.selfhost.step_mu import (
+            _load_compiled_kernel_v1_bundle,  # ANTICHEAT_OK: S1-C test — bundle loader
+            _load_compiled_bridge_bundle,  # ANTICHEAT_OK: S1-C test — bundle loader
+        )
+        kb = _load_compiled_kernel_v1_bundle()
+        bb = _load_compiled_bridge_bundle() if bridge else None
         mb = _match_bundle()
         sb = _subst_bundle()
         combined = _combined()
 
         host = _step_trusted(combined, input_value)
-        vm = _step_kernel_with_vm(k1, bp, mb, sb, input_value, record_coverage=False)
+        vm = _step_kernel_with_vm(kb, bb, mb, sb, input_value, record_coverage=False)
         return host, vm
 
     def test_kernel_wrap_state(self):
@@ -315,24 +320,25 @@ class TestCutoverTruePath:
         meta = step_kernel_mu([proj], "something_else", return_meta=True)
         assert meta["stall"] is True
 
-    def test_output_matches_shadow(self, monkeypatch):
-        """Cutover=True output matches shadow mode output on same input."""
+    def test_output_matches_host_path(self, monkeypatch):
+        """VM cutover output matches host-path output on same input."""
         import rcx_pi.selfhost.step_mu as mod
         proj = {"id": "test.cut_shadow", "pattern": {"x": {"var": "v"}}, "body": {"result": {"var": "v"}}}
         inp = {"x": 99}
 
-        # Shadow mode (default)
-        shadow_result = step_kernel_mu([proj], inp)
-
-        # Cutover mode
-        monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", True)
+        # Host path (explicitly disable cutover)
+        monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", False)
         monkeypatch.setattr(mod, "_STAGE0_SHADOW_ENABLED", False)
+        host_result = step_kernel_mu([proj], inp)
+
+        # VM cutover path (restore cutover)
+        monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", True)
         clear_combined_kernel_cache()
         reset_step_budget()
         cutover_result = step_kernel_mu([proj], inp)
 
-        assert _mu_deep_equal(shadow_result, cutover_result), \
-            f"Shadow={shadow_result!r}, Cutover={cutover_result!r}"
+        assert _mu_deep_equal(host_result, cutover_result), \
+            f"Host={host_result!r}, Cutover={cutover_result!r}"
 
     def test_multiple_steps_cutover(self, cutover_mode):
         """Multi-step convergence under cutover=True."""
@@ -386,14 +392,9 @@ class TestCutoverIntegration:
     def test_no_monolithic_host_path(self, cutover_mode, monkeypatch):
         """Prove monolithic host path (_step_trusted) does NOT fire when cutover=True.
 
-        Under cutover=True, step_kernel_mu routes through _step_kernel_with_vm
-        (which uses _apply_projection_trusted for kernel.v1/bridge projections
-        and stage0_vm_step for match.v2/subst.v2). The monolithic _step_trusted
-        path is not used.
-
-        Note: _apply_projection_trusted IS still called for kernel.v1/bridge
-        projections — this is by design (host for kernel dispatch, VM for
-        match/subst). The negative control proves the monolithic path is absent.
+        S1-C: ALL projections now execute via stage0_vm_step (kernel, bridge,
+        match, subst). Neither _step_trusted nor _apply_projection_trusted
+        is called on the step_kernel_mu path.
         """
         call_count = _patch_counting_trusted(monkeypatch, cutover_mode)
         proj = {"id": "test.nofallback", "pattern": "a", "body": "b"}
@@ -403,6 +404,30 @@ class TestCutoverIntegration:
         assert call_count["n"] == 0, \
             f"_step_trusted was called {call_count['n']} times under cutover=True — " \
             f"monolithic host path is NOT absent"
+
+    def test_no_apply_projection_trusted(self, cutover_mode, monkeypatch):
+        """S1-C: Prove _apply_projection_trusted does NOT fire in step_kernel_mu.
+
+        Under S1-C, ALL projections (kernel, bridge, match, subst) execute via
+        stage0_vm_step. _apply_projection_trusted should NOT be called.
+        """
+        import rcx_pi.selfhost.eval_seed as eval_mod  # ANTICHEAT_OK: S1-C negative control
+        apply_count = {"n": 0}
+        original_apply = eval_mod._apply_projection_trusted  # ANTICHEAT_OK: S1-C negative control
+
+        def _counting_apply(proj, value):
+            apply_count["n"] += 1
+            return original_apply(proj, value)
+
+        monkeypatch.setattr(eval_mod, "_apply_projection_trusted", _counting_apply)
+
+        proj = {"id": "test.noapply", "pattern": "a", "body": "b"}
+        result = step_kernel_mu([proj], "a")
+
+        assert result == "b"
+        assert apply_count["n"] == 0, \
+            f"_apply_projection_trusted was called {apply_count['n']} times — " \
+            f"S1-C requires ALL projections via VM, no host dispatch"
 
     def test_no_monolithic_host_stall(self, cutover_mode, monkeypatch):
         """Prove monolithic host path doesn't fire on stall under cutover=True."""

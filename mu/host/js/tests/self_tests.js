@@ -30,13 +30,13 @@ module.exports = function runSelfTests(seeds) {
     bridgeProjections,
     validateCombinedBridgeOrdering,
     // P7-d: VM bundles for shadow mode
-    kernelV1Projections, matchBundle, substBundle,
+    kernelBundle, bridgeBundle, matchBundle, substBundle,
   } = seeds;
 
-  // P7-d: Construct vmConfig for shadow mode (if bundles available)
-  const vmConfig = (kernelV1Projections && matchBundle && substBundle) ? {
-    kernelV1Projs: kernelV1Projections,
-    bridgeProjs: null, // core mode — no bridge
+  // S1-C: Construct vmConfig with ALL compiled bundles
+  const vmConfig = (kernelBundle && matchBundle && substBundle) ? {
+    kernelBundle,
+    bridgeBundle: null, // core mode — no bridge
     matchBundle,
     substBundle,
   } : null;
@@ -464,7 +464,7 @@ module.exports = function runSelfTests(seeds) {
   if (vmConfig && bridgeProjections) {
     const vmConfigBridge = {
       ...vmConfig,
-      bridgeProjs: bridgeProjections,
+      bridgeBundle: bridgeBundle,
     };
     try {
       // Run a simple kernel step through bridge path with VM shadow

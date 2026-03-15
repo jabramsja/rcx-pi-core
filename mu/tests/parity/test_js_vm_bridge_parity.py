@@ -192,3 +192,73 @@ class TestSubstVmBridgeParity:
 
         assert py_result["status"] == "stall"
         assert js_result["status"] == "stall"
+
+
+# ---------------------------------------------------------------------------
+# S1-C: Kernel.v1 + Bridge compiled bundle parity
+# ---------------------------------------------------------------------------
+
+KERNEL_COMPILED_REL = "mu/stage0/compiled/kernel_v1.compiled.v1.json"
+BRIDGE_COMPILED_REL = "mu/stage0/compiled/bootstrap_structural_v1.compiled.v1.json"
+
+
+class TestKernelVmBridgeParity:
+    """S1-C: kernel.v1 compiled bundle: Python and JS agree."""
+
+    def test_kernel_wrap_parity(self):
+        """kernel.wrap projection: Python and JS produce same output."""
+        from rcx_pi.selfhost.step_mu import _load_compiled_kernel_v1_bundle  # ANTICHEAT_OK: S1-C parity
+        from rcx_pi.selfhost.match_mu import normalize_for_match
+        from rcx_pi.selfhost.step_mu import normalize_projection, list_to_linked
+        bundle = _load_compiled_kernel_v1_bundle()
+        proj = {"id": "test.kp", "pattern": "a", "body": "b"}
+        normalized = normalize_projection(proj)
+        inp = {"_step": normalize_for_match("a"), "_projs": list_to_linked([normalized])}
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = run_js_stage0("step", KERNEL_COMPILED_REL, inp)
+        assert py_result["status"] == js_result["status"]
+        if py_result["status"] == "match":
+            assert _cross_equal(py_result["root"], js_result["root"]), \
+                f"Kernel output mismatch:\n  py={py_result['root']}\n  js={js_result['root']}"
+
+    def test_kernel_stall_parity(self):
+        """Non-kernel input: both substrates stall."""
+        from rcx_pi.selfhost.step_mu import _load_compiled_kernel_v1_bundle  # ANTICHEAT_OK: S1-C parity
+        bundle = _load_compiled_kernel_v1_bundle()
+        inp = {"random": "data"}
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = run_js_stage0("step", KERNEL_COMPILED_REL, inp)
+        assert py_result["status"] == "stall"
+        assert js_result["status"] == "stall"
+
+
+class TestBridgeVmParity:
+    """S1-C: bootstrap_structural.v1 compiled bundle: Python and JS agree."""
+
+    def test_bridge_var_check_parity(self):
+        """bridge.var.check_existing: Python and JS agree on binding lookup."""
+        from rcx_pi.selfhost.step_mu import _load_compiled_bridge_bundle  # ANTICHEAT_OK: S1-C parity
+        bundle = _load_compiled_bridge_bundle()
+        # Input that triggers bridge.var.check_existing: lookup bindings for non-linear var
+        inp = {
+            "_lookup_name": "x",
+            "_lookup_value": 42,
+            "_lookup_bindings": {"name": "x", "value": 42, "rest": None},
+            "_original_bindings": {"name": "x", "value": 42, "rest": None},
+        }
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = run_js_stage0("step", BRIDGE_COMPILED_REL, inp)
+        assert py_result["status"] == js_result["status"]
+        if py_result["status"] == "match":
+            assert _cross_equal(py_result["root"], js_result["root"]), \
+                f"Bridge output mismatch:\n  py={py_result['root']}\n  js={js_result['root']}"
+
+    def test_bridge_stall_parity(self):
+        """Non-bridge input: both substrates stall."""
+        from rcx_pi.selfhost.step_mu import _load_compiled_bridge_bundle  # ANTICHEAT_OK: S1-C parity
+        bundle = _load_compiled_bridge_bundle()
+        inp = {"random": "data"}
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = run_js_stage0("step", BRIDGE_COMPILED_REL, inp)
+        assert py_result["status"] == "stall"
+        assert js_result["status"] == "stall"

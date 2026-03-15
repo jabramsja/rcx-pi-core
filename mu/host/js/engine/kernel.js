@@ -21,23 +21,19 @@ const _STAGE0_VM_CUTOVER = true;
 let _STAGE0_SHADOW_ENABLED = false; // Shadow disabled (cutover=true makes shadow dead code)
 
 /**
- * P7-d: Kernel step using VM for match.v2/subst.v2, host for kernel.v1/bridge.
+ * S1-C: Kernel step — ALL projections via Stage0 VM.
  * No coverage system in JS — pure execution only.
- * Iteration marker on Python parity function (_step_kernel_with_vm in step_mu.py).
+ * Parity with Python _step_kernel_with_vm in step_mu.py.
  */
-function _stepKernelWithVM(kernelV1Projs, bridgeProjs, matchBundle, substBundle, inputValue) {
-  // 1. kernel.v1 projections (host path)
-  for (const proj of kernelV1Projs) {
-    const result = _applyProjectionTrusted(proj, inputValue);
-    if (result !== NO_MATCH) return result;
-  }
+function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle, inputValue) {
+  // 1. kernel.v1 via Stage0 VM (S1-C: was host _applyProjectionTrusted)
+  const kernelResult = stage0VmStep(kernelBundle, inputValue);
+  if (kernelResult.status === 'match') return kernelResult.root;
 
-  // 2. bridge projections (host path, only in bridge mode)
-  if (bridgeProjs) {
-    for (const proj of bridgeProjs) {
-      const result = _applyProjectionTrusted(proj, inputValue);
-      if (result !== NO_MATCH) return result;
-    }
+  // 2. bridge via Stage0 VM (S1-C: was host _applyProjectionTrusted)
+  if (bridgeBundle) {
+    const bridgeResult = stage0VmStep(bridgeBundle, inputValue);
+    if (bridgeResult.status === 'match') return bridgeResult.root;
   }
 
   // 3. match.v2 via Stage0 VM
@@ -63,14 +59,14 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     let result;
     if (vmConfig && _STAGE0_VM_CUTOVER) {
       result = _stepKernelWithVM(
-        vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+        vmConfig.kernelBundle, vmConfig.bridgeBundle,
         vmConfig.matchBundle, vmConfig.substBundle, current);
     } else {
       result = _stepTrusted(kernelProjections, current);
       // P7-d shadow: run VM path too, assert equivalence
       if (vmConfig && _STAGE0_SHADOW_ENABLED) {
         const vmResult = _stepKernelWithVM(
-          vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+          vmConfig.kernelBundle, vmConfig.bridgeBundle,
           vmConfig.matchBundle, vmConfig.substBundle, current);
         const hostStalled = result === current;
         const vmStalled = vmResult === current;
@@ -133,13 +129,13 @@ function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps, vmConf
     let next;
     if (vmConfig && _STAGE0_VM_CUTOVER) {
       next = _stepKernelWithVM(
-        vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+        vmConfig.kernelBundle, vmConfig.bridgeBundle,
         vmConfig.matchBundle, vmConfig.substBundle, current);
     } else {
       next = _stepTrusted(kernelProjections, current);
       if (vmConfig && _STAGE0_SHADOW_ENABLED) {
         const vmResult = _stepKernelWithVM(
-          vmConfig.kernelV1Projs, vmConfig.bridgeProjs,
+          vmConfig.kernelBundle, vmConfig.bridgeBundle,
           vmConfig.matchBundle, vmConfig.substBundle, current);
         const hostStalled = next === current;
         const vmStalled = vmResult === current;
