@@ -168,6 +168,60 @@ class TestRunProjections:
         assert is_stall is True
 
 
+class TestStallDistinguishability:
+    """D7: Callers can distinguish genuine stall from max-steps exhaustion."""
+
+    def setup_method(self):
+        reset_step_budget()
+
+    def test_genuine_stall_steps_less_than_max(self):
+        """Genuine stall: is_stall=True AND steps < max_steps."""
+        _, _, run = make_projection_runner("test")
+        # Empty projections = immediate stall (step 0 produces unchanged state)
+        state, steps, is_stall = run([], {"mode": "test", "data": 42}, max_steps=10)
+        assert is_stall is True
+        assert steps < 10, f"Genuine stall should have steps < max_steps, got {steps}"
+
+    def test_max_steps_exhaustion_steps_equals_max(self):
+        """Max-steps exhaustion: is_stall=True AND steps == max_steps."""
+        # Need a projection that changes state every step but never terminates.
+        # Use a projection that flips a value back and forth.
+        projections = [
+            {
+                "id": "flip.a",
+                "pattern": {"mode": "test", "val": "a"},
+                "body": {"mode": "test", "val": "b"},
+            },
+            {
+                "id": "flip.b",
+                "pattern": {"mode": "test", "val": "b"},
+                "body": {"mode": "test", "val": "a"},
+            },
+        ]
+        _, _, run = make_projection_runner("test")
+        state, steps, is_stall = run(projections, {"mode": "test", "val": "a"}, max_steps=6)
+        assert is_stall is True
+        assert steps == 6, f"Max-steps exhaustion should have steps == max_steps, got {steps}"
+
+    def test_distinguishability_contract(self):
+        """The stall_reason is fully determined by (is_stall, steps, max_steps)."""
+        _, _, run = make_projection_runner("test")
+
+        # Case 1: Genuine stall
+        _, steps1, stall1 = run([], {"mode": "test", "x": 1}, max_steps=10)
+        reason1 = "genuine_stall" if stall1 and steps1 < 10 else "exhaustion" if stall1 else "done"
+        assert reason1 == "genuine_stall"
+
+        # Case 2: Max-steps exhaustion (flip projections)
+        projs = [
+            {"id": "f.a", "pattern": {"mode": "test", "v": "a"}, "body": {"mode": "test", "v": "b"}},
+            {"id": "f.b", "pattern": {"mode": "test", "v": "b"}, "body": {"mode": "test", "v": "a"}},
+        ]
+        _, steps2, stall2 = run(projs, {"mode": "test", "v": "a"}, max_steps=4)
+        reason2 = "genuine_stall" if stall2 and steps2 < 4 else "exhaustion" if stall2 else "done"
+        assert reason2 == "exhaustion"
+
+
 class TestDifferentModes:
     """Test runner with different mode names."""
 

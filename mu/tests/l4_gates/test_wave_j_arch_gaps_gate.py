@@ -1,5 +1,7 @@
 """
 Wave J: Architectural Gaps Gate Tests
+Non-blocker wave4 (2026-03-14): D7 stall distinguishability documented in
+projection_runner.py run() docstring. 3 new tests prove the contract.
 
 L4_STRUCTURAL gate: validates seed dependency registry, projection-order
 enforcement, control hash coverage, and hemisphere tie-break documentation.

@@ -84,6 +84,11 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
         Returns:
             (final_state, steps_taken, is_stall)
 
+        Stall distinguishability (D7):
+            When is_stall=True, callers can distinguish the cause:
+            - steps_taken == max_steps → max-steps exhaustion (budget ran out)
+            - steps_taken < max_steps  → genuine stall (state unchanged)
+
         Raises:
             RuntimeError: If global step budget exceeded.
         """
@@ -112,8 +117,8 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
             state = next_state
             state_hash = next_hash
 
-        # Max steps exceeded - treat as stall
-        # Report steps consumed to global budget
+        # Max steps exceeded — distinguishable from genuine stall:
+        # steps_taken == max_steps (exhaustion) vs steps_taken < max_steps (stall).
         budget.consume(max_steps)
         return state, max_steps, True
 
