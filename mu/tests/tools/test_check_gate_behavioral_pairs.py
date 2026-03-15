@@ -219,7 +219,7 @@ class TestEdgeCases:
 
             class TestInClass:
                 def test_method(self):
-                    assert True
+                    assert 1 + 1 == 2
         """))
         classes = scan_file(test_file)
         assert "<module>" in classes, "Module-level functions should be under <module> key"
