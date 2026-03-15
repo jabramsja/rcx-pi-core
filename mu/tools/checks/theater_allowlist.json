@@ -31,6 +31,116 @@
       "target_wave": "A18-P1"
     },
     {
+      "class": "TestCompilationSmoke",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_match_v2_compiles",
+      "owner": "founder",
+      "target_wave": "P7-b.2"
+    },
+    {
+      "class": "TestCompilationSmoke",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_subst_v2_compiles",
+      "owner": "founder",
+      "target_wave": "P7-b.2"
+    },
+    {
+      "class": "TestCompilerBundleCrossSubstrate",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized cross-substrate: asserts status + program_id + root equality between Python and JS VMs",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_match_cross_substrate_step",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleCrossSubstrate",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized cross-substrate stall: asserts both substrates agree on stall status",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_match_negative_cross_substrate",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleCrossSubstrate",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized cross-substrate: asserts status + program_id + root equality between Python and JS VMs",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_subst_cross_substrate_step",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleCrossSubstrate",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized cross-substrate stall: asserts both substrates agree on stall status",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_subst_negative_cross_substrate",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleParityVsHostStage0",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized stall parity: asserts identity-based stall detection on source + compiled status check",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_match_negative_stall_parity",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleParityVsHostStage0",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized parity tests: each vector asserts source == compiled output with projection ID and structural equality checks",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_match_single_step_parity",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleParityVsHostStage0",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized stall parity: asserts identity-based stall detection on source + compiled status check",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_subst_negative_stall_parity",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestCompilerBundleParityVsHostStage0",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "Parametrized parity tests: each vector asserts source == compiled output with projection ID and structural equality checks",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_subst_single_step_parity",
+      "owner": "founder",
+      "target_wave": "P7-c"
+    },
+    {
+      "class": "TestIntegrityMetadata",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "No-exception-is-pass: validate_bundle raises on failure; hand-authored exemption test",
+      "expires_on": "2026-06-01",
+      "file": "mu/tests/l4_gates/test_lower_stage0.py",
+      "method": "test_hand_authored_bundles_validate_without_integrity",
+      "owner": "founder",
+      "target_wave": "P7-b.2"
+    },
+    {
       "class": "TestBuilderPython",
       "classification": "heuristic_false_positive",
       "defer_reason": "No-exception-is-pass pattern; production validator raises on failure",
@@ -641,117 +751,57 @@
       "target_wave": "A18-P1"
     },
     {
-      "class": "TestIntegrityMetadata",
+      "class": "TestTier2IntegrationWorkloads",
       "classification": "heuristic_false_positive",
-      "defer_reason": "No-exception-is-pass: validate_bundle raises on failure; hand-authored exemption test",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_hand_authored_bundles_validate_without_integrity",
+      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_a_cycling",
       "owner": "founder",
-      "target_wave": "P7-b.2"
+      "target_wave": "s1a-vm-evidence"
     },
     {
-      "class": "TestCompilationSmoke",
+      "class": "TestTier2IntegrationWorkloads",
       "classification": "heuristic_false_positive",
-      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_match_v2_compiles",
+      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_b_bridge_mode",
       "owner": "founder",
-      "target_wave": "P7-b.2"
+      "target_wave": "s1a-vm-evidence"
     },
     {
-      "class": "TestCompilationSmoke",
+      "class": "TestTier2IntegrationWorkloads",
       "classification": "heuristic_false_positive",
-      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_subst_v2_compiles",
+      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_engine_pipeline",
       "owner": "founder",
-      "target_wave": "P7-b.2"
+      "target_wave": "s1a-vm-evidence"
     },
     {
-      "class": "TestCompilerBundleParityVsHostStage0",
+      "class": "TestTier2IntegrationWorkloads",
       "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized parity tests: each vector asserts source == compiled output with projection ID and structural equality checks",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_match_single_step_parity",
+      "defer_reason": "S1-A D1: Cutover-mode performance profiling \u2014 observational timing, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_cutover_kernel",
       "owner": "founder",
-      "target_wave": "P7-c"
+      "target_wave": "s1a-vm-evidence"
     },
     {
-      "class": "TestCompilerBundleParityVsHostStage0",
+      "class": "TestTier2IntegrationWorkloads",
       "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized stall parity: asserts identity-based stall detection on source + compiled status check",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_match_negative_stall_parity",
+      "defer_reason": "S1-A D1: Cutover-mode performance profiling \u2014 observational timing, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_cutover_engine_pipeline",
       "owner": "founder",
-      "target_wave": "P7-c"
-    },
-    {
-      "class": "TestCompilerBundleParityVsHostStage0",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized parity tests: each vector asserts source == compiled output with projection ID and structural equality checks",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_subst_single_step_parity",
-      "owner": "founder",
-      "target_wave": "P7-c"
-    },
-    {
-      "class": "TestCompilerBundleParityVsHostStage0",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized stall parity: asserts identity-based stall detection on source + compiled status check",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_subst_negative_stall_parity",
-      "owner": "founder",
-      "target_wave": "P7-c"
-    },
-    {
-      "class": "TestCompilerBundleCrossSubstrate",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized cross-substrate: asserts status + program_id + root equality between Python and JS VMs",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_match_cross_substrate_step",
-      "owner": "founder",
-      "target_wave": "P7-c"
-    },
-    {
-      "class": "TestCompilerBundleCrossSubstrate",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized cross-substrate stall: asserts both substrates agree on stall status",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_match_negative_cross_substrate",
-      "owner": "founder",
-      "target_wave": "P7-c"
-    },
-    {
-      "class": "TestCompilerBundleCrossSubstrate",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized cross-substrate: asserts status + program_id + root equality between Python and JS VMs",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_subst_cross_substrate_step",
-      "owner": "founder",
-      "target_wave": "P7-c"
-    },
-    {
-      "class": "TestCompilerBundleCrossSubstrate",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Parametrized cross-substrate stall: asserts both substrates agree on stall status",
-      "expires_on": "2026-06-01",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_subst_negative_cross_substrate",
-      "owner": "founder",
-      "target_wave": "P7-c"
+      "target_wave": "s1a-vm-evidence"
     }
   ],
-  "generated_at": "2026-03-13T23:08:21.339397Z",
+  "generated_at": "2026-03-15T09:28:21.151043Z",
   "schema_version": 1,
   "total_theater_risk": 75
 }

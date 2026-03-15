@@ -18,7 +18,9 @@ from rcx_pi.selfhost.step_mu import (
     clear_combined_kernel_cache,
     normalize_projection,
     list_to_linked,
+    run_algorithm_meta_circular,  # SPEED_OK: called with small inputs (2 projs, 10 steps) — completes in <1s
 )
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline  # ANTICHEAT_OK: S1-A — integration cutover test  # SPEED_OK: called with small inputs — completes in <1s
 from rcx_pi.selfhost.match_mu import normalize_for_match
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.eval_seed import _step_trusted, NO_MATCH  # ANTICHEAT_OK: P7-d gate test
@@ -229,3 +231,193 @@ class TestSourceLock:
                             found_optional = True
                             break
         assert found_optional, "No Gate-3 optional _type='list' found in match_v2 bundle"
+
+
+# ---------------------------------------------------------------------------
+# S1-A D2: Cutover=True path tests (pre-flip evidence)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cutover_mode(monkeypatch):
+    """Enable cutover mode: VM path primary, shadow disabled."""
+    import rcx_pi.selfhost.step_mu as mod
+    monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", True)
+    monkeypatch.setattr(mod, "_STAGE0_SHADOW_ENABLED", False)
+    return mod
+
+
+def _patch_counting_trusted(monkeypatch, mod):
+    """Instrument _step_trusted with call counter. Returns call_count dict."""
+    call_count = {"n": 0}
+    original = _step_trusted
+
+    def _counting(projs, value):
+        call_count["n"] += 1
+        return original(projs, value)
+
+    import rcx_pi.selfhost.eval_seed as eval_mod
+    monkeypatch.setattr(eval_mod, "_step_trusted", _counting)
+    if hasattr(mod, "_step_trusted"):
+        monkeypatch.setattr(mod, "_step_trusted", _counting)
+    return call_count
+
+
+class TestCutoverTruePath:
+    """S1-A D2: Prove _STAGE0_VM_CUTOVER=True branch works correctly.
+
+    Uses cutover_mode fixture to flip the flag. Proves VM executes as primary
+    path with correct semantics on canonical vectors.
+    """
+
+    def test_simple_rewrite_cutover(self, cutover_mode):
+        """a -> b via domain projection under cutover=True."""
+        proj = {"id": "test.cut_rw", "pattern": "a", "body": "b"}
+        result = step_kernel_mu([proj], "a")
+        assert result == "b"
+
+    def test_stall_cutover(self, cutover_mode):
+        """No matching projection under cutover=True -> stall."""
+        proj = {"id": "test.cut_stall", "pattern": "a", "body": "b"}
+        result = step_kernel_mu([proj], "zzz")
+        assert result == "zzz"
+
+    def test_dict_rewrite_cutover(self, cutover_mode):
+        """Dict pattern matching under cutover=True."""
+        proj = {"id": "test.cut_dict", "pattern": {"x": {"var": "v"}}, "body": {"y": {"var": "v"}}}
+        result = step_kernel_mu([proj], {"x": 42})
+        assert result == {"y": 42}
+
+    def test_first_match_wins_cutover(self, cutover_mode):
+        """First-match-wins ordering preserved under cutover=True."""
+        projs = [
+            {"id": "test.cut_first", "pattern": "a", "body": "first"},
+            {"id": "test.cut_second", "pattern": "a", "body": "second"},
+        ]
+        result = step_kernel_mu(projs, "a")
+        assert result == "first"
+
+    def test_bridge_mode_cutover(self, cutover_mode):
+        """Bridge mode works under cutover=True."""
+        proj = {"id": "test.cut_bridge", "pattern": "hello", "body": "world"}
+        result = step_kernel_mu([proj], "hello", kernel_mode="bridge")
+        assert result == "world"
+
+    def test_meta_return_cutover(self, cutover_mode):
+        """return_meta=True works under cutover=True."""
+        proj = {"id": "test.cut_meta", "pattern": "a", "body": "b"}
+        meta = step_kernel_mu([proj], "a", return_meta=True)
+        assert meta["termination_reason"] == "projection_applied"
+        assert meta["output"] == "b"
+
+    def test_stall_meta_cutover(self, cutover_mode):
+        """Stall with return_meta=True under cutover=True."""
+        proj = {"id": "test.cut_stall_meta", "pattern": "never", "body": "x"}
+        meta = step_kernel_mu([proj], "something_else", return_meta=True)
+        assert meta["stall"] is True
+
+    def test_output_matches_shadow(self, monkeypatch):
+        """Cutover=True output matches shadow mode output on same input."""
+        import rcx_pi.selfhost.step_mu as mod
+        proj = {"id": "test.cut_shadow", "pattern": {"x": {"var": "v"}}, "body": {"result": {"var": "v"}}}
+        inp = {"x": 99}
+
+        # Shadow mode (default)
+        shadow_result = step_kernel_mu([proj], inp)
+
+        # Cutover mode
+        monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", True)
+        monkeypatch.setattr(mod, "_STAGE0_SHADOW_ENABLED", False)
+        clear_combined_kernel_cache()
+        reset_step_budget()
+        cutover_result = step_kernel_mu([proj], inp)
+
+        assert _mu_deep_equal(shadow_result, cutover_result), \
+            f"Shadow={shadow_result!r}, Cutover={cutover_result!r}"
+
+    def test_multiple_steps_cutover(self, cutover_mode):
+        """Multi-step convergence under cutover=True."""
+        projs = [
+            {"id": "test.cut_step1", "pattern": {"state": "A"}, "body": {"state": "B"}},
+        ]
+        result = step_kernel_mu(projs, {"state": "A"})
+        assert result == {"state": "B"}
+
+    def test_nested_dict_cutover(self, cutover_mode):
+        """Nested dict pattern under cutover=True."""
+        proj = {"id": "test.cut_nest", "pattern": {"a": {"b": {"var": "v"}}}, "body": {"c": {"var": "v"}}}
+        result = step_kernel_mu([proj], {"a": {"b": "deep"}})
+        assert result == {"c": "deep"}
+
+
+class TestCutoverIntegration:
+    """S1-A D2: Integration-level cutover proof through real API entrypoints.
+
+    Proves VM path fires through run_engine_pipeline and
+    run_algorithm_meta_circular. Includes no-fallback negative control.
+    """
+
+    def test_engine_pipeline_cutover(self, cutover_mode):
+        """run_engine_pipeline works with cutover=True.
+
+        Uses cycling projections that produce engine closure (recurrence).
+        """
+        projs = [
+            {"id": "c.ab", "pattern": {"state": "A"}, "body": {"state": "B"}},
+            {"id": "c.ba", "pattern": {"state": "B"}, "body": {"state": "A"}},
+        ]
+        result = run_engine_pipeline(
+            projs, {"state": "A"},
+            max_steps=10, max_engine_iterations=20, max_algorithm_iterations=50,
+        )
+        # Engine terminal shape: must contain closure/stall/result markers
+        assert isinstance(result, dict), f"Expected dict, got {type(result).__name__}"
+        # Cycling A<->B produces recurrence closure — verify engine terminal semantics
+        assert "_mode" in result or "engine_result" in result or "closure_detected" in result, \
+            f"Engine result lacks terminal markers. Keys: {sorted(result.keys())}"
+
+    def test_algorithm_meta_circular_cutover(self, cutover_mode):
+        """run_algorithm_meta_circular works with cutover=True."""
+        projs = [
+            {"id": "test.int_alg", "pattern": "a", "body": "b"},
+        ]
+        result = run_algorithm_meta_circular(projs, "a")
+        assert result == "b"
+
+    def test_no_monolithic_host_path(self, cutover_mode, monkeypatch):
+        """Prove monolithic host path (_step_trusted) does NOT fire when cutover=True.
+
+        Under cutover=True, step_kernel_mu routes through _step_kernel_with_vm
+        (which uses _apply_projection_trusted for kernel.v1/bridge projections
+        and stage0_vm_step for match.v2/subst.v2). The monolithic _step_trusted
+        path is not used.
+
+        Note: _apply_projection_trusted IS still called for kernel.v1/bridge
+        projections — this is by design (host for kernel dispatch, VM for
+        match/subst). The negative control proves the monolithic path is absent.
+        """
+        call_count = _patch_counting_trusted(monkeypatch, cutover_mode)
+        proj = {"id": "test.nofallback", "pattern": "a", "body": "b"}
+        result = step_kernel_mu([proj], "a")
+
+        assert result == "b", f"Expected 'b', got {result!r}"
+        assert call_count["n"] == 0, \
+            f"_step_trusted was called {call_count['n']} times under cutover=True — " \
+            f"monolithic host path is NOT absent"
+
+    def test_no_monolithic_host_stall(self, cutover_mode, monkeypatch):
+        """Prove monolithic host path doesn't fire on stall under cutover=True."""
+        call_count = _patch_counting_trusted(monkeypatch, cutover_mode)
+        proj = {"id": "test.nofallback_stall", "pattern": "never", "body": "x"}
+        result = step_kernel_mu([proj], "something_else")
+
+        assert result == "something_else"
+        assert call_count["n"] == 0, \
+            f"_step_trusted was called {call_count['n']} times on stall path"
+
+    def test_bridge_integration_cutover(self, cutover_mode):
+        """run_algorithm_meta_circular with bridge mode under cutover=True."""
+        projs = [
+            {"id": "test.int_bridge", "pattern": {"var": "v"}, "body": {"var": "v"}},
+        ]
+        result = run_algorithm_meta_circular(projs, "test_value")
+        assert result == "test_value"  # identity projection
