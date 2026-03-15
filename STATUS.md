@@ -332,7 +332,7 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 
 **Why three ledgers:** The 16 tracked markers are the narrow debt the project has categorized and accepted. The 218 authority sites are the broader surface the ratchet prevents from growing. The 308 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 16 and 306 is the honest measure of how much host work remains uncategorized.
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 16 and 308 is the honest measure of how much host work remains uncategorized.
 
 ```
 THRESHOLD: 16
