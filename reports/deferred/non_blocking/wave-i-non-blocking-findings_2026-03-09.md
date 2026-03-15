@@ -13,7 +13,10 @@ Archived from the source snapshot:
 ## Open Item
 
 ### `_match_inner` budget/depth path duplication
-
-- Status: DEFERRED
-- Current truth: this is still hot-path refactoring with low research value and
-  should only be touched in a dedicated parity-locked cleanup wave
+**Why deferred:** `_match_inner` in eval_seed.py has separate code paths for budget
+tracking and depth tracking that share similar loop structure. Refactoring would consolidate
+these into a unified traversal, but `_match_inner` is the hottest path in the kernel —
+every projection match goes through it. Any refactor here risks performance regression
+and requires careful benchmarking. The duplication is 2 loops of ~15 lines each with
+different termination conditions (budget vs depth). **Target wave:** Dedicated
+parity-locked cleanup wave with performance benchmarking before/after.
