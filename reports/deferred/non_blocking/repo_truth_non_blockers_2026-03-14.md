@@ -54,12 +54,11 @@ Archived as stale/resolved from the source snapshots:
 - the indicator JSON lane is strong provenance, but most artifacts still do not
   explain the wave narrative by themselves
 
-### N9. debt_dashboard.sh scope differs from ratchet scope
+### N9. debt_dashboard.sh scope differs from ratchet scope — **RESOLVED 2026-03-14**
 
-- `debt_dashboard.sh` counts Python-only decorators (8 in rcx_pi/, includes deep_eval.py).
-- `check_host_semantics_ratchet.py` counts 6 Python decorators (excludes deep_eval.py).
-- Both pass independently but measure different Python scopes.
-- Not blocking — canonical source is baseline JSON, not dashboard.
+- Fixed: added Scope Reconciliation section to debt_dashboard.sh output.
+- Documents why Dashboard (8) > Ratchet (6): rcx_pi/ includes deep_eval.py, ratchet counts inline markers.
+- Canonical source is baseline JSON (16), now shown in dashboard output.
 
 ### N12. JS _ALGORITHM_SEED_ALLOWLIST uses Object.freeze(Set) — **RESOLVED 2026-03-14**
 
@@ -99,10 +98,8 @@ Archived as stale/resolved from the source snapshots:
 - Fixed: /checkpoint skill Step 0 now includes MANDATORY re-read with explicit file list and "This is not a checkbox" instruction.
 - Claude Code PreToolUse hook (`.claude/hooks/pre-commit-reminder.sh`) shows MEMORY.md + CLAUDE.md before git commit tool calls.
 
-### N19. Three-scope debt counting mismatch (ratchet vs dashboard vs baseline)
+### N19. Three-scope debt counting mismatch (ratchet vs dashboard vs baseline) — **RESOLVED 2026-03-14**
 
-- Ratchet: 12 decorators (6 Py selfhost/ + 6 JS). Dashboard: 12 (8 Py rcx_pi/ + 4 AST_OK). Baseline: 16 (6 Py + 6 JS + 4 AST_OK).
-- Ratchet excludes deep_eval.py (2 extra decorators). Dashboard excludes JS. Baseline includes both.
-- STATUS.md CURRENT=16 matches baseline. audit_semantic_purity.sh THRESHOLD=12 matches dashboard.
-- Needs dedicated scope-unification wave to make all three agree.
-- Status: documented design mismatch, not blocking.
+- Fixed: dashboard now includes Scope Reconciliation section explaining why the three tools show different numbers.
+- The scopes intentionally differ (different tools, different purposes). The fix is documentation, not unification.
+- Canonical source: baseline JSON (16), shown in dashboard + STATUS.md.
