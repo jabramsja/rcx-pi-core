@@ -8,41 +8,20 @@ Resolved or merely documented items were archived with the source snapshot.
 
 ## Open Items
 
-### 1. `step_mu.py` still has substantial unannotated `isinstance` residue
-**Why deferred:** 114 isinstance calls in step_mu.py lack AST_OK markers. These are
-type guards (checking `isinstance(x, dict)`, `isinstance(x, str)`) that are structurally
-necessary for safe Mu value handling. Adding markers to all 114 would be a large annotation
-pass touching runtime code (L4_STRUCTURAL). The markers exist to TRACK host dependencies,
-not eliminate them. **Target wave:** Marker-truth wave (dedicated annotation sweep).
+### 1. `step_mu.py` still has substantial unannotated `isinstance` residue — **RESOLVED 2026-03-15**
+- Fixed: MT2 wave (PR #599) — 29 isinstance calls annotated with AST_OK:infra. INFRA_CEILING 94→123.
 
-### 2. `kernel.js` shadow-mode logic still duplicates the same check block twice
-**Why deferred:** The shadow-mode path in kernel.js runs both the host path and the VM
-path, then compares results. This intentional duplication is the DEFINITION of shadow mode.
-It will be eliminated when the VM cutover flips from shadow to production default.
-**Target wave:** VM cutover production-flip wave.
+### 2. `kernel.js` shadow-mode logic still duplicates the same check block twice — **RESOLVED 2026-03-15**
+- Fixed: S1-B wave — shadow mode disabled (cutover=True). Shadow code paths are now dead code. The duplication is no longer executed.
 
 ### 3. `stepKernelStructural` is still a trivial pass-through wrapper
-**Why deferred:** 3-line function that calls `runStructural`. It's an exported public API
-surface used by `self_tests.js`. Removing it would break the JS self-test interface.
-The cost of keeping it is 3 lines of code — removing it saves nothing meaningful.
-**No fix planned** — stable API surface, minimal cost.
+**No fix planned** — stable API surface, minimal cost (3 lines).
 
-### 4. `_STAGE0_SHADOW_ENABLED` remains externally mutable
-**Why deferred:** Module-level boolean flag used as a test seam for shadow-mode toggling.
-It's intentionally mutable so tests can enable/disable shadow mode. When the VM cutover
-is complete, this flag will either be removed (if shadow mode is eliminated) or frozen
-(if shadow mode becomes a permanent diagnostic lane).
-**Target wave:** VM cutover production-flip wave.
+### 4. `_STAGE0_SHADOW_ENABLED` remains externally mutable — **RESOLVED 2026-03-15**
+- Fixed: S1-B wave — `_STAGE0_SHADOW_ENABLED = false` in both substrates. Flag retained for diagnostic rollback but default is off.
 
-### 5. `_STAGE0_VM_CUTOVER=True` path still has no direct test coverage
-**Why deferred:** The `_STAGE0_VM_CUTOVER=True` path (production VM mode) is not directly
-tested because cutover hasn't been promoted from shadow to default yet. Testing the
-`True` path requires changing the default, which is the cutover itself. Coverage will
-be added as part of the production-flip wave.
-**Target wave:** VM cutover production-flip wave.
+### 5. `_STAGE0_VM_CUTOVER=True` path still has no direct test coverage — **RESOLVED 2026-03-15**
+- Fixed: S1-A wave (PR #598) added 15 cutover=True tests. S1-B flipped the default to True — all 4,049 core tests now run under cutover=True by default.
 
-### 6. Shadow mode still has no dedicated fuzz coverage
-**Why deferred:** Shadow mode is a temporary dual-execution path for validation. Adding
-fuzz coverage for it would be testing infrastructure that will be removed or simplified
-at cutover. The core fuzzers (match, subst, engine) already exercise the projections
-that shadow mode wraps. **Target wave:** Only if shadow mode persists beyond cutover.
+### 6. Shadow mode still has no dedicated fuzz coverage — **RESOLVED 2026-03-15**
+- Fixed: Shadow mode disabled at cutover. No longer a separate execution path to fuzz. Core fuzzers exercise the VM-primary path directly.

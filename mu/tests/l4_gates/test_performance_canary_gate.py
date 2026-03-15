@@ -137,11 +137,17 @@ class TestPythonTerminationReason:
         Controlled monkeypatch: force _step_trusted to return a fixed
         non-terminal, non-intermediate value. On second iteration the
         hash matches, triggering hash_stall.
+
+        S1-B: Must disable cutover mode to exercise host path (VM path
+        doesn't use _step_trusted).
         """
         import rcx_pi.selfhost.step_mu as _step_mu_mod
         reset_step_budget()
         sentinel = "hash_stall_sentinel"
-        # Disable P7-d shadow check — monkeypatching _step_trusted makes shadow meaningless
+        # Disable cutover + shadow — monkeypatching _step_trusted requires host path
+        orig_cutover = _step_mu_mod._STAGE0_VM_CUTOVER  # ANTICHEAT_OK: save/restore for monkeypatch
+        orig_shadow = _step_mu_mod._STAGE0_SHADOW_ENABLED  # ANTICHEAT_OK: save/restore for monkeypatch
+        _step_mu_mod._STAGE0_VM_CUTOVER = False  # ANTICHEAT_OK: force host path for monkeypatch test
         _step_mu_mod._STAGE0_SHADOW_ENABLED = False  # ANTICHEAT_OK: disable shadow for monkeypatch test
         try:
             with patch(
@@ -150,7 +156,8 @@ class TestPythonTerminationReason:
             ):
                 meta = step_kernel_mu([REWRITE_PROJ], "a", return_meta=True, max_steps=100)
         finally:
-            _step_mu_mod._STAGE0_SHADOW_ENABLED = True  # ANTICHEAT_OK: restore shadow flag
+            _step_mu_mod._STAGE0_VM_CUTOVER = orig_cutover  # ANTICHEAT_OK: restore cutover
+            _step_mu_mod._STAGE0_SHADOW_ENABLED = orig_shadow  # ANTICHEAT_OK: restore shadow
         _assert_meta_shape(meta, expected_reason="hash_stall")
         assert meta["stall"] is True
         assert meta["steps_used"] == 2  # iteration 0: new hash, iteration 1: same hash
