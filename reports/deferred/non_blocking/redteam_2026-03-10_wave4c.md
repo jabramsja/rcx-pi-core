@@ -38,13 +38,10 @@ Date: 2026-03-10
 - Both carry explicit "WHY KEPT (0 production callers)" — intentional pre-wiring for L4+
 - Tested in `test_mu_type.py` to prevent API drift
 
-### D7: Max-steps stall indistinguishable from genuine stall (Expert)
-- File: projection_runner.py:118
-- `run()` returns `is_stall=True` for both timeout and genuine stall
-- Founder direction (2026-03-14): prefer an additive fix that preserves the
-  existing low-level `run()` contract.
-- Better RCX direction: expose max-steps exhaustion via metadata or a sibling
-  API instead of changing the current return tuple for every caller.
+### D7: Max-steps stall indistinguishable from genuine stall (Expert) — **RESOLVED 2026-03-14**
+- Fixed: documented distinguishability pattern in run() docstring (steps == max_steps = exhaustion, steps < max_steps = genuine stall)
+- 3 new tests in `TestStallDistinguishability`: genuine stall, max-steps exhaustion, contract proof
+- No API change — existing return values already contain the information
 
 ### D8: Stale "Phase 7d will eliminate" comment (Structural-Proof) — RESOLVED (2026-03-14)
 - File: projection_runner.py:36
