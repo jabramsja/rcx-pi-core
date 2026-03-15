@@ -191,11 +191,11 @@ class TestSourceLock:
         """stage0_vm_step is importable and callable."""
         assert callable(stage0_vm_step)
 
-    def test_shadow_flag_exists(self):
-        """_STAGE0_VM_CUTOVER flag exists in step_mu."""
+    def test_cutover_flag_active(self):
+        """_STAGE0_VM_CUTOVER is True (S1-B: VM path is primary)."""
         import rcx_pi.selfhost.step_mu as mod
         assert hasattr(mod, '_STAGE0_VM_CUTOVER')
-        assert mod._STAGE0_VM_CUTOVER is False  # ANTICHEAT_OK: gate test verifying shadow mode flag state
+        assert mod._STAGE0_VM_CUTOVER is True  # ANTICHEAT_OK: S1-B gate — VM cutover active
 
     def test_compiled_bundles_load(self):
         """Compiled bundles load and validate successfully."""

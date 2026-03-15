@@ -1039,8 +1039,8 @@ def make_undefined_motif(op: str, lhs, rhs, cause: str, details=None) -> dict:
 
 # Shadow mode flag: when True, step_kernel_mu uses VM for match.v2/subst.v2.
 # When False (default), host path is primary with shadow VM comparison.
-_STAGE0_VM_CUTOVER = False
-_STAGE0_SHADOW_ENABLED = True  # Shadow parity check; disable in tests that monkeypatch _step_trusted
+_STAGE0_VM_CUTOVER = True  # S1-B: VM path is now primary (founder GO 2026-03-15)
+_STAGE0_SHADOW_ENABLED = False  # S1-B: Shadow disabled (cutover=True makes shadow dead code)
 
 
 @host_iteration("P7-d kernel step: host for kernel.v1/bridge, VM for match.v2/subst.v2")

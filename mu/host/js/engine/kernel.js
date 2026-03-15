@@ -15,9 +15,10 @@ const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields, rejectNo
 const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted, _applyProjectionTrusted } = require('../core/bootstrap_core');
 const { stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: P7-d VM dispatch for match.v2/subst.v2 kernel step
 
-// P7-d: Shadow mode flags (parity with Python step_mu.py)
-const _STAGE0_VM_CUTOVER = false;
-let _STAGE0_SHADOW_ENABLED = true;
+// S1-B: VM cutover flags (parity with Python step_mu.py)
+// Founder GO 2026-03-15: VM path is now primary for match.v2/subst.v2
+const _STAGE0_VM_CUTOVER = true;
+let _STAGE0_SHADOW_ENABLED = false; // Shadow disabled (cutover=true makes shadow dead code)
 
 /**
  * P7-d: Kernel step using VM for match.v2/subst.v2, host for kernel.v1/bridge.

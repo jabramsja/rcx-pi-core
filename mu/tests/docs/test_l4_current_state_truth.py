@@ -132,18 +132,18 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "NOT wired into production" not in js_vm, (
         "JS Stage0 VM header still claims it is not wired into production."
     )
-    assert "shadow path" in js_vm.lower(), (
-        "JS Stage0 VM header must describe the live shadow-path wiring."
+    assert "cutover active" in js_vm.lower() or "shadow" in js_vm.lower(), (
+        "JS Stage0 VM header must describe the cutover or shadow status."
     )
 
-    assert "_STAGE0_VM_CUTOVER = False" in py_step
-    assert "_STAGE0_SHADOW_ENABLED = True" in py_step
+    assert "_STAGE0_VM_CUTOVER = True" in py_step  # S1-B: cutover active
+    assert "_STAGE0_SHADOW_ENABLED = False" in py_step  # S1-B: shadow disabled
     assert "for step_i in range(max_steps)" in py_step, (
         "Python runtime no longer shows the host loop that keeps L4 incomplete."
     )
 
-    assert "const _STAGE0_VM_CUTOVER = false;" in js_kernel
-    assert "let _STAGE0_SHADOW_ENABLED = true;" in js_kernel
+    assert "const _STAGE0_VM_CUTOVER = true;" in js_kernel  # S1-B: cutover active
+    assert "let _STAGE0_SHADOW_ENABLED = false;" in js_kernel  # S1-B: shadow disabled
     assert "for (let i = 0; i < maxSteps; i++) {" in js_kernel, (
         "JS runtime no longer shows the host loop that keeps L4 incomplete."
     )

@@ -4,6 +4,16 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### S1-B: VM Cutover Flip (Founder GO)
+
+- **Python:** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in step_mu.py
+- **JavaScript:** `_STAGE0_VM_CUTOVER = true`, `_STAGE0_SHADOW_ENABLED = false` in kernel.js
+- VM path is now primary for match.v2/subst.v2 in step_kernel_mu; host path (_step_trusted) still used by engine_pipeline and projection_runner
+- Shadow mode disabled (dead code under cutover=True, retained for rollback)
+- Updated: test_stage0_vm_cutover.py source-lock, test_l4_current_state_truth.py flag assertions, test_performance_canary_gate.py hash_stall monkeypatch, stage0_vm.js header
+- P7-d deferred items #1-6 all RESOLVED
+- **L4_STRUCTURAL** wave targeting G8. Founder GO 2026-03-15.
+
 ### N15: Compiler/Loader Provenance Verification
 
 - `_verify_bundle_provenance()` in `step_mu.py`: verifies compiled bundle source_digest against SEED_CHECKSUMS registry at load time
