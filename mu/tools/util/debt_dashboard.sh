@@ -215,6 +215,18 @@ else
         echo ""
     fi
 
+    # Scope reconciliation (N19: explains why tools show different numbers)
+    BASELINE_TOTAL=$(python3 -c "import json; print(json.load(open('tools/checks/host_semantics_baseline.json'))['total'])" 2>/dev/null || echo "?")
+    echo "Scope Reconciliation"
+    echo "----------------------------------------------"
+    printf "  Dashboard (rcx_pi/):      %3d Py decorators (includes deep_eval.py)\n" "$TOTAL_TRACKED"
+    printf "  Ratchet (selfhost/):        6 Py markers (decorators + inline #@host_*)\n"
+    printf "  Baseline (cross-substr):  %3s (6 Py + 6 JS + 4 AST_OK bootstrap)\n" "$BASELINE_TOTAL"
+    printf "  STATUS.md CURRENT:        %3s (= baseline, canonical)\n" "$BASELINE_TOTAL"
+    echo "  Note: Dashboard > Ratchet because rcx_pi/ includes deep_eval.py"
+    echo "  Note: Ratchet counts inline # @host_* comments, dashboard counts decorators only"
+    echo ""
+
     # Summary
     echo "=============================================="
     if [ "$TOTAL_SEMANTIC" -eq 0 ]; then
