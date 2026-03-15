@@ -117,6 +117,13 @@ def make_projection_runner(mode_name: str, *, terminal_field: str = "mode") -> t
             state = next_state
             state_hash = next_hash
 
+        # Final done check: if the last step produced a terminal state,
+        # return done (not exhaustion). Without this, terminal-on-last-step
+        # would be misclassified as max-steps exhaustion.
+        if is_done(state):
+            budget.consume(max_steps)
+            return state, max_steps, False
+
         # Max steps exceeded — distinguishable from genuine stall:
         # steps_taken == max_steps (exhaustion) vs steps_taken < max_steps (stall).
         budget.consume(max_steps)

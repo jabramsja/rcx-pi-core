@@ -203,6 +203,21 @@ class TestStallDistinguishability:
         assert is_stall is True
         assert steps == 6, f"Max-steps exhaustion should have steps == max_steps, got {steps}"
 
+    def test_terminal_on_last_step_is_done_not_exhaustion(self):
+        """Terminal state reached on the last allowed step returns is_stall=False."""
+        # Projection that terminates in exactly 1 step
+        projections = [
+            {
+                "id": "finish",
+                "pattern": {"mode": "test", "val": "start"},
+                "body": {"mode": "test_done", "val": "end"},
+            },
+        ]
+        _, _, run = make_projection_runner("test")
+        state, steps, is_stall = run(projections, {"mode": "test", "val": "start"}, max_steps=1)
+        assert state.get("mode") == "test_done", f"Expected done state, got {state}"
+        assert is_stall is False, "Terminal on last step should be done, not exhaustion"
+
     def test_distinguishability_contract(self):
         """The stall_reason is fully determined by (is_stall, steps, max_steps)."""
         _, _, run = make_projection_runner("test")
