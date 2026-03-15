@@ -4,6 +4,14 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### MT2: isinstance Marker-Truth
+
+- 29 unmarked `isinstance` calls in `step_mu.py` annotated with `# AST_OK:infra — type guard`
+- INFRA_CEILING/INFRA_CURRENT: 94 → 123 in STATUS.md
+- `test_debt_enforcement.py` infra count assertion: 94 → 123
+- D4 wave4b (step_mu.py isinstance) + D2 wave4c (projection_runner.py isinstance) marked RESOLVED
+- **L4_STRUCTURAL** (annotation-only, FOUNDER_OVERRIDE). No behavioral changes. No phase/debt change.
+
 ### S1-A VM Cutover Evidence Package
 
 - **D1:** Performance profiling suite (`test_stage0_vm_performance.py`) — 9 Tier 1 diagnostic + 5 Tier 2 integration workloads (including cutover-mode benchmarks)

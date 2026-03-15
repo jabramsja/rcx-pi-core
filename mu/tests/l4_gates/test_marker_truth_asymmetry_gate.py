@@ -85,3 +85,23 @@ class TestMarkerTruthAsymmetryGate:
         assert ratchet["increases"] == [], (
             f"Ratchet shows increases: {ratchet['increases']}"
         )
+
+
+class TestMT2IsinstanceMarkerCoverage:
+    """MT2 gate: all isinstance calls in step_mu.py are annotated with AST_OK markers."""
+
+    def test_step_mu_isinstance_fully_marked(self):
+        """Every isinstance in step_mu.py has an AST_OK or ANTICHEAT_OK marker."""
+        path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        lines = path.read_text().splitlines()
+        unmarked = []
+        for i, line in enumerate(lines, 1):
+            if "isinstance" in line and "AST_OK" not in line and "ANTICHEAT_OK" not in line:
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue  # Skip comments
+                unmarked.append(f"  line {i}: {stripped}")
+        assert not unmarked, (
+            f"step_mu.py has {len(unmarked)} unmarked isinstance call(s):\n"
+            + "\n".join(unmarked)
+        )
