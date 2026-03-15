@@ -21,9 +21,11 @@ wave, not a quick fix. **Target wave:** Parity expansion wave.
 ### NB2. `pytest.skip()` residue across the suite
 **Why deferred:** Assessed 2026-03-14 — most skips are legitimate guards for optional
 dependencies (`jsonschema`, `claude_agent_sdk`) or missing fixture files (`/tmp/cp_s1a_before.json`).
-`RCX_CI=1` already converts skips to test failures in CI, so CI coverage is not affected.
-Removing these guards would make local runs fail on environments that don't have all
-optional dependencies installed. **Not a code quality issue — this is correct defensive coding.**
+Note: `RCX_CI=1` only converts skips that use the `skip_or_fail_in_ci()` helper in conftest.py,
+not bare `pytest.skip()` calls. Bare skips in CI silently reduce coverage without failing.
+Fixing this properly requires either (a) converting all bare `pytest.skip()` to use the helper,
+or (b) adding a conftest hook that fails on any skip in CI mode. Both are mechanical but touch
+30+ test files. **Target wave:** Test hygiene wave (convert bare skips to `skip_or_fail_in_ci`).
 
 ### NB3. `pytest.importorskip("hypothesis")` residue in fuzzer files — RESOLVED (2026-03-14)
 
