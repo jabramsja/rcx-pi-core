@@ -20,6 +20,7 @@ What this checker does NOT prove:
 
 from __future__ import annotations
 
+import functools
 import re
 import subprocess
 from pathlib import Path
@@ -37,6 +38,7 @@ _REPO = Path(__file__).resolve().parents[3]
 _JS_DIR = _REPO / "mu" / "host" / "js"
 
 
+@functools.lru_cache(maxsize=1)
 def _js_source() -> str:
     """Read all JS module files concatenated (monolith was split into modules)."""
     parts = []
@@ -45,33 +47,38 @@ def _js_source() -> str:
     return "\n".join(parts)
 
 
-def _extract_js_seed_checksums(source: str) -> dict[str, str]:
-    """Extract SEED_CHECKSUMS object from JS source."""
-    pattern = r"const\s+SEED_CHECKSUMS\s*=\s*\{(.*?)\};"
+def _extract_js_dict(source: str, const_name: str) -> dict[str, str]:
+    """Extract a JS const object of 'key': 'value' pairs from source."""
+    pattern = rf"const\s+{const_name}\s*=\s*\{{(.*?)\}};"
     m = re.search(pattern, source, re.DOTALL)
     if not m:
-        pytest.fail("Could not find SEED_CHECKSUMS in eval_step.js")
+        pytest.fail(f"Could not find {const_name} in JS source")
     block = m.group(1)
-    # Extract 'name': 'hash' pairs
-    pairs = re.findall(r"'([^']+)':\s*'([^']+)'", block)
-    return dict(pairs)
+    return dict(re.findall(r"'([^']+)':\s*'([^']+)'", block))
 
 
-def _extract_js_projection_ids(source: str) -> dict[str, list[str]]:
-    """Extract EXPECTED_PROJECTION_IDS object from JS source."""
-    pattern = r"const\s+EXPECTED_PROJECTION_IDS\s*=\s*\{(.*?)\};"
+def _extract_js_list_dict(source: str, const_name: str) -> dict[str, list[str]]:
+    """Extract a JS const object of 'key': [...] entries from source."""
+    pattern = rf"const\s+{const_name}\s*=\s*\{{(.*?)\}};"
     m = re.search(pattern, source, re.DOTALL)
     if not m:
-        pytest.fail("Could not find EXPECTED_PROJECTION_IDS in eval_step.js")
+        pytest.fail(f"Could not find {const_name} in JS source")
     block = m.group(1)
     result = {}
-    # Find each seed entry: 'name.json': [...]
     for seed_match in re.finditer(r"'([^']+\.json)':\s*\[(.*?)\]", block, re.DOTALL):
         seed_name = seed_match.group(1)
         ids_block = seed_match.group(2)
         ids = re.findall(r"'([^']+)'", ids_block)
         result[seed_name] = ids
     return result
+
+
+def _extract_js_seed_checksums(source: str) -> dict[str, str]:
+    return _extract_js_dict(source, "SEED_CHECKSUMS")
+
+
+def _extract_js_projection_ids(source: str) -> dict[str, list[str]]:
+    return _extract_js_list_dict(source, "EXPECTED_PROJECTION_IDS")
 
 
 # ── Checksum parity ──────────────────────────────────────────────────────
@@ -212,3 +219,65 @@ class TestSeedChecksumFailClosed:
         from rcx_pi.selfhost.seed_integrity import verify_checksum
         with pytest.raises(ValueError, match="Unknown seed"):
             verify_checksum("nonexistent_seed.v99.json", b"any content")
+
+
+# ---------------------------------------------------------------------------
+# N4: JS seed_loader.js CORE registries subset of cli/main.js registries
+# ---------------------------------------------------------------------------
+
+def _seed_loader_source() -> str:
+    """Read seed_loader.js specifically (not concatenated rglob) to avoid comment shadowing."""
+    path = _REPO / "mu" / "host" / "js" / "core" / "seed_loader.js"
+    return path.read_text()
+
+
+def _main_js_source() -> str:
+    """Read cli/main.js specifically to avoid comment shadowing."""
+    path = _REPO / "mu" / "host" / "js" / "cli" / "main.js"
+    return path.read_text()
+
+
+def _extract_js_core_seed_checksums() -> dict[str, str]:
+    return _extract_js_dict(_seed_loader_source(), "CORE_SEED_CHECKSUMS")
+
+
+def _extract_js_core_projection_ids() -> dict[str, list[str]]:
+    return _extract_js_list_dict(_seed_loader_source(), "CORE_SEED_PROJECTION_IDS")
+
+
+class TestJsSeedLoaderSubsetGate:
+    """N4: seed_loader.js CORE registries must be a strict subset of cli/main.js registries."""
+
+    def test_core_checksums_subset_of_main(self):
+        """Every CORE_SEED_CHECKSUMS entry must exist in SEED_CHECKSUMS with same hash."""
+        core = _extract_js_core_seed_checksums()
+        main = _extract_js_dict(_main_js_source(), "SEED_CHECKSUMS")
+        for seed, core_hash in core.items():
+            assert seed in main, (
+                f"seed_loader.js CORE_SEED_CHECKSUMS has '{seed}' not in cli/main.js SEED_CHECKSUMS"
+            )
+            assert main[seed] == core_hash, (
+                f"Checksum mismatch for '{seed}': seed_loader={core_hash[:16]}... main={main[seed][:16]}..."
+            )
+
+    def test_core_projection_ids_subset_of_main(self):
+        """Every CORE_SEED_PROJECTION_IDS entry must match cli/main.js exactly."""
+        core = _extract_js_core_projection_ids()
+        main = _extract_js_list_dict(_main_js_source(), "EXPECTED_PROJECTION_IDS")
+        for seed, core_ids in core.items():
+            assert seed in main, (
+                f"seed_loader.js CORE_SEED_PROJECTION_IDS has '{seed}' not in cli/main.js"
+            )
+            assert main[seed] == core_ids, (
+                f"Projection ID mismatch for '{seed}':\n"
+                f"  seed_loader: {core_ids}\n  main: {main[seed]}"
+            )
+
+    def test_core_checksum_and_projection_id_keys_match(self):
+        """CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS must have identical key sets."""
+        core_checksums = _extract_js_core_seed_checksums()
+        core_ids = _extract_js_core_projection_ids()
+        assert set(core_checksums) == set(core_ids), (
+            f"seed_loader.js registry asymmetry: "
+            f"checksums={sorted(core_checksums)} ids={sorted(core_ids)}"
+        )

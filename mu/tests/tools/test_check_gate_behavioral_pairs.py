@@ -206,3 +206,33 @@ class TestEdgeCases:
         methods = classes["TestSomething"]
         assert "helper_method" not in methods
         assert "test_real" in methods
+
+    def test_module_level_functions_scanned(self, tmp_path):
+        """Module-level test_* functions (not in classes) are scanned under <module>."""
+        test_file = tmp_path / "test_module_funcs.py"
+        test_file.write_text(textwrap.dedent("""\
+            def test_standalone():
+                assert 1 + 1 == 2
+
+            def helper():
+                pass
+
+            class TestInClass:
+                def test_method(self):
+                    assert 1 + 1 == 2
+        """))
+        classes = scan_file(test_file)
+        assert "<module>" in classes, "Module-level functions should be under <module> key"
+        assert "test_standalone" in classes["<module>"]
+        assert "helper" not in classes["<module>"]
+        assert "TestInClass" in classes
+
+    def test_positional_args_rejected(self):
+        """Bare positional args exit 2 (fail-closed)."""
+        result = subprocess.run(
+            ["python3", str(_tool_path), "some_file.py"],
+            capture_output=True, text=True, check=False,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 2, f"Expected exit 2, got {result.returncode}"
+        assert "positional" in result.stderr.lower()

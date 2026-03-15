@@ -23,18 +23,18 @@ jobs:
       HYPOTHESIS_PROFILE: "ci_fast"  # Fast feedback for feature branches
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
           cache: "pip"  # Cache pip dependencies
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
 
@@ -75,6 +75,8 @@ jobs:
 
       - name: Enforce L4 execution contract
         shell: bash
+        env:
+          GH_HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
           # L4 contract must evaluate the FULL wave diff from dev, not
@@ -83,24 +85,9 @@ jobs:
           git fetch origin dev --quiet
           RANGE="origin/dev...${{ github.sha }}"
           echo "Range: origin/dev...${{ github.sha }}"
-          # Derive wave-id from branch name (supports codex/* and jabramsja/*)
-          # PR: github.head_ref gives source branch; push: github.ref_name
-          if [ -n "${{ github.head_ref }}" ]; then
-            BRANCH="${{ github.head_ref }}"
-          else
-            BRANCH="${{ github.ref_name }}"
-          fi
-          WAVE_ID_FLAG=""
-          WAVE_ID_SUFFIX=""
-          if [[ "$BRANCH" == codex/* ]]; then
-            WAVE_ID_SUFFIX="${BRANCH#codex/}"
-          elif [[ "$BRANCH" == jabramsja/* ]]; then
-            WAVE_ID_SUFFIX="${BRANCH#jabramsja/}"
-          fi
-          # Only set wave-id flag if TASKS.md is in the diff (parity with pre-push-fast + green_gate.yml)
-          if [ -n "$WAVE_ID_SUFFIX" ] && git diff --name-only "$RANGE" 2>/dev/null | grep -qx "TASKS.md"; then
-            WAVE_ID_FLAG="--wave-id $WAVE_ID_SUFFIX"
-          fi
+          # Derive wave-id via shared script (deduped from ci.yml + green_gate.yml)
+          # GH_HEAD_REF passed via env to prevent expression injection (CWE-78)
+          source tools/checks/derive_wave_id.sh "$GH_HEAD_REF" "$RANGE"
           python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 
       - name: Green gate (authoritative, python-only)

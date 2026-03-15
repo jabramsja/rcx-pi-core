@@ -12,12 +12,15 @@ Archived from the source snapshot as stale:
 
 ## Open Items
 
-### 1. GitHub Actions are still tag-pinned rather than SHA-pinned
-### 2. `$WAVE_ID_FLAG` is still passed unquoted in several shell/CI paths — RESOLVED (2026-03-14)
+### 1. GitHub Actions are still tag-pinned rather than SHA-pinned — RESOLVED (2026-03-14)
+SHA-pinned all 5 actions across 8 workflow files (27 replacements). Version comments preserved.
+### 2. `$WAVE_ID_FLAG` is still passed unquoted in several shell/CI paths — PARTIALLY RESOLVED (2026-03-14)
+CI workflows (ci.yml, green_gate.yml) now use `--wave-id=<suffix>` via derive_wave_id.sh. pre-push-fast and audit_fast.sh still use inline unquoted pattern.
 ### 3. Tooling exemptions from host-semantics scanning still rely on convention
 ### 4. Wrapper scripts still lack staleness detection
 ### 5. Wave-ID branch-prefix coupling is still under-defended
-### 6. Wave-ID derivation logic is still duplicated across CI workflows
+### 6. Wave-ID derivation logic is still duplicated across CI workflows — RESOLVED (2026-03-14)
+Extracted to `tools/checks/derive_wave_id.sh`, sourced by ci.yml and green_gate.yml.
 ### 7. Fixture gates still use repeated near-identical jobs instead of a matrix
 ### 8. Environment/setup repetition still lacks a shared composite action
 ### 9. Range-derivation logic still differs across workflows

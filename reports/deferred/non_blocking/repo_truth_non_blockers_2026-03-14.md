@@ -33,11 +33,10 @@ Archived as stale/resolved from the source snapshots:
 - the broader authority and total inventory ledgers remain much larger than the
   narrow tracked-marker ledger
 
-### N4. JS locked seed registries still lack a direct subset/diff gate
+### N4. JS locked seed registries still lack a direct subset/diff gate — **RESOLVED 2026-03-14**
 
-- `seed_loader.js` says the core locked registries must mirror `cli/main.js`
-- there is still no direct test proving the locked subset matches the wider JS
-  CLI registry entry-for-entry
+- Fixed: `TestJsSeedLoaderSubsetGate` in `test_seed_loading_parity.py` proves CORE registries ⊂ main registries.
+- 3 tests: checksum subset, projection ID subset, registry key symmetry.
 
 ### N5. `pipeline.js` still has no explicit size/shape governance
 
@@ -87,15 +86,15 @@ Archived as stale/resolved from the source snapshots:
 - Design decision needed: should compiled bundles include a self-contained content hash, or should verification require the source seed?
 - Status: documented design gap for future compiler evolution.
 
-### N16. check_gate_behavioral_pairs.py: module-level test functions unclassified
+### N16. check_gate_behavioral_pairs.py: module-level test functions unclassified — **RESOLVED 2026-03-14**
 
-- Bridge R6 noted: classifier only scans class-based test methods, not module-level `test_*` functions.
-- Not blocking — all current gate tests use classes. Module-level functions are edge cases.
+- Fixed: `scan_file()` now scans module-level `test_*` functions under `<module>` key.
+- Test: `test_module_level_functions_scanned` in `test_check_gate_behavioral_pairs.py`.
 
-### N17. check_gate_behavioral_pairs.py: positional args accepted silently
+### N17. check_gate_behavioral_pairs.py: positional args accepted silently — **RESOLVED 2026-03-14**
 
-- Bridge R6 noted: only --flags are rejected. Bare positional args pass through.
-- Not blocking — no production caller passes positional args.
+- Fixed: positional args now rejected with exit code 2 (fail-closed).
+- Test: `test_positional_args_rejected` in `test_check_gate_behavioral_pairs.py`.
 
 ### N18. /checkpoint should force comprehensive memory.md + claude.md re-read
 

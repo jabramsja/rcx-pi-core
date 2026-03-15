@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-03
+LAST_VERIFIED: 2026-03-14
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -30,7 +30,10 @@ These checks are required by branch protection on dev.
 ## Branch rules
 - No direct pushes to dev (PRs only).
 - dev must be up to date before merge.
-- Branch protection cannot be bypassed, including by admins.
+- Branch protection is the default merge path.
+- Use an admin override only when operationally necessary after required checks
+  pass and review threads are resolved. Do not treat `--admin` as the routine
+  merge path.
 
 ## Local verification
 Before opening a PR (or when debugging CI), run:
