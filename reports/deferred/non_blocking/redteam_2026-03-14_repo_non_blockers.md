@@ -96,7 +96,7 @@ Why this remains advisory:
   path, so this is still a direct-API hardening gap rather than a reproduced
   production exploit.
 
-## N2 `DEFECT` — Stage0 compiled-bundle integrity **PARTIALLY RESOLVED** (2026-03-14)
+## N2 `DEFECT` — Stage0 compiled-bundle integrity **RESOLVED** (2026-03-15)
 
 **Fix applied:** Both runtimes now validate `source_digest` format: must be exact `str`/`string` type (no subclasses), prefix `sha256:`, exactly 64 lowercase hex chars. Malformed digests like `"bogus"` or non-hex chars are rejected.
 

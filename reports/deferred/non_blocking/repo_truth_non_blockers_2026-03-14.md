@@ -102,11 +102,9 @@ wave (requires Wave A design for module decomposition strategy).
 - Design decision: null/None is the correct fail-closed canonical value for non-Mu inputs. The alternative (stall on non-Mu capture) would require type-checking at capture_path time, which is a larger change.
 - Status: documented design gap, not a production exploit path.
 
-### N15. Stage0 source_digest format-only validation (design gap)
+### N15. Stage0 source_digest format-only validation (design gap) — **RESOLVED 2026-03-15**
 
-- Format validation catches malformed digests. Content verification (re-hashing source seed) requires runtime access to the source file.
-- Design decision needed: should compiled bundles include a self-contained content hash, or should verification require the source seed?
-- Status: documented design gap for future compiler evolution.
+- Fixed: `_verify_bundle_provenance()` in step_mu.py + `verifyBundleProvenance()` in main.js verify bundle source_digest against SEED_CHECKSUMS registry at load time. No source-file I/O needed — uses existing canonical checksums. Fail-closed on mismatch. 5 gate tests prove provenance (pass, reject, missing, unknown).
 
 ### N16. check_gate_behavioral_pairs.py: module-level test functions unclassified — **RESOLVED 2026-03-14**
 

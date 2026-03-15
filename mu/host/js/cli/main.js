@@ -240,6 +240,26 @@ const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.
 validateBundle(matchBundle);
 validateBundle(substBundle);
 
+// N15 provenance: verify bundle source_digest matches SEED_CHECKSUMS
+function verifyBundleProvenance(bundle) {
+  const sourceSeed = bundle.source_seed;
+  const sourceDigest = bundle.source_digest;
+  if (!sourceSeed || !sourceDigest) return; // Hand-authored bundles may lack these
+  const seedName = sourceSeed.endsWith('.json') ? sourceSeed : sourceSeed + '.json';
+  if (!(seedName in SEED_CHECKSUMS)) return; // Unknown seed — cannot verify
+  const expected = 'sha256:' + SEED_CHECKSUMS[seedName];
+  if (sourceDigest !== expected) {
+    throw new Error(
+      `SECURITY: Bundle provenance mismatch for '${seedName}'. ` +
+      `Bundle claims source_digest=${sourceDigest}, ` +
+      `but SEED_CHECKSUMS says ${expected}. ` +
+      `Compiled bundle may be stale or tampered.`
+    );
+  }
+}
+verifyBundleProvenance(matchBundle);
+verifyBundleProvenance(substBundle);
+
 // P7-d: Partitioned projections for VM path
 const kernelV1Projections = kernel.projections;
 

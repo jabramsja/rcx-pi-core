@@ -753,10 +753,40 @@ def _load_bridge_projections_shared() -> list[Mu]:
     return _bridge_proj_cache
 
 
+def _verify_bundle_provenance(bundle: dict) -> None:  # AST_OK:infra — type guard
+    """Verify compiled bundle's source_digest matches SEED_CHECKSUMS registry.
+
+    N15 provenance: Fail-closed on mismatch. Uses SEED_CHECKSUMS as the
+    canonical truth source — no source-file I/O needed. Works in both
+    Python and JS substrates.
+
+    The compiler (lower_stage0.py) computes SHA256 of the raw seed file bytes
+    and embeds it as source_digest. This function verifies that claim against
+    the independently-maintained SEED_CHECKSUMS registry.
+    """
+    from .seed_integrity import SEED_CHECKSUMS  # ANTICHEAT_OK: infra — provenance check
+    source_seed = bundle.get("source_seed")
+    source_digest = bundle.get("source_digest")
+    if not source_seed or not source_digest:
+        return  # Hand-authored bundles may lack these fields
+    seed_filename = source_seed if source_seed.endswith(".json") else source_seed + ".json"
+    if seed_filename not in SEED_CHECKSUMS:
+        return  # Unknown seed — cannot verify (hand-authored or test bundle)
+    expected_digest = "sha256:" + SEED_CHECKSUMS[seed_filename]
+    if source_digest != expected_digest:  # AST_OK:infra — type guard
+        raise ValueError(
+            f"SECURITY: Bundle provenance mismatch for '{seed_filename}'. "
+            f"Bundle claims source_digest={source_digest}, "
+            f"but SEED_CHECKSUMS says {expected_digest}. "
+            f"Compiled bundle may be stale or tampered."
+        )
+
+
 def _load_compiled_match_v2_bundle() -> dict:
     """Load + validate compiled match_v2 bundle (cached).
 
     Fail-closed: validate_bundle raises on invalid bundle structure.
+    N15 provenance: _verify_bundle_provenance raises on digest mismatch.
     """
     global _match_v2_bundle_cache
     if _match_v2_bundle_cache is not None:
@@ -767,6 +797,7 @@ def _load_compiled_match_v2_bundle() -> dict:
     with open(path) as f:
         _match_v2_bundle_cache = json.load(f)
     validate_bundle(_match_v2_bundle_cache)
+    _verify_bundle_provenance(_match_v2_bundle_cache)
     return _match_v2_bundle_cache
 
 
@@ -774,6 +805,7 @@ def _load_compiled_subst_v2_bundle() -> dict:
     """Load + validate compiled subst_v2 bundle (cached).
 
     Fail-closed: validate_bundle raises on invalid bundle structure.
+    N15 provenance: _verify_bundle_provenance raises on digest mismatch.
     """
     global _subst_v2_bundle_cache
     if _subst_v2_bundle_cache is not None:
@@ -784,6 +816,7 @@ def _load_compiled_subst_v2_bundle() -> dict:
     with open(path) as f:
         _subst_v2_bundle_cache = json.load(f)
     validate_bundle(_subst_v2_bundle_cache)
+    _verify_bundle_provenance(_subst_v2_bundle_cache)
     return _subst_v2_bundle_cache
 
 

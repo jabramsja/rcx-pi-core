@@ -421,3 +421,44 @@ class TestCutoverIntegration:
         ]
         result = run_algorithm_meta_circular(projs, "test_value")
         assert result == "test_value"  # identity projection
+
+
+# ---------------------------------------------------------------------------
+# N15: Bundle provenance verification
+# ---------------------------------------------------------------------------
+
+class TestBundleProvenance:
+    """N15 gate: verify compiled bundles have correct source_digest provenance."""
+
+    def test_match_bundle_provenance_passes(self):
+        """match_v2 compiled bundle passes provenance verification."""
+        from rcx_pi.selfhost.step_mu import _verify_bundle_provenance  # ANTICHEAT_OK: N15 gate
+        bundle = _match_bundle()
+        # Should not raise — digest matches SEED_CHECKSUMS
+        _verify_bundle_provenance(bundle)
+
+    def test_subst_bundle_provenance_passes(self):
+        """subst_v2 compiled bundle passes provenance verification."""
+        from rcx_pi.selfhost.step_mu import _verify_bundle_provenance  # ANTICHEAT_OK: N15 gate
+        bundle = _subst_bundle()
+        _verify_bundle_provenance(bundle)
+
+    def test_wrong_digest_rejected(self):
+        """Bundle with wrong source_digest is rejected."""
+        from rcx_pi.selfhost.step_mu import _verify_bundle_provenance  # ANTICHEAT_OK: N15 gate
+        bundle = dict(_match_bundle())  # shallow copy
+        bundle["source_digest"] = "sha256:" + ("0" * 64)  # wrong digest
+        with pytest.raises(ValueError, match="provenance mismatch"):
+            _verify_bundle_provenance(bundle)
+
+    def test_missing_digest_accepted(self):
+        """Bundle without source_digest passes (hand-authored bundles)."""
+        from rcx_pi.selfhost.step_mu import _verify_bundle_provenance  # ANTICHEAT_OK: N15 gate
+        bundle = {"stage0_ir_version": 1, "programs": []}  # minimal, no digest
+        _verify_bundle_provenance(bundle)  # Should not raise
+
+    def test_unknown_seed_accepted(self):
+        """Bundle with unknown source_seed passes (test bundles)."""
+        from rcx_pi.selfhost.step_mu import _verify_bundle_provenance  # ANTICHEAT_OK: N15 gate
+        bundle = {"source_seed": "unknown_test.json", "source_digest": "sha256:" + ("a" * 64)}
+        _verify_bundle_provenance(bundle)  # Should not raise — unknown seed, cannot verify
