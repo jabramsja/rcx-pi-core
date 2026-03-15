@@ -4,6 +4,16 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### N15: Compiler/Loader Provenance Verification
+
+- `_verify_bundle_provenance()` in `step_mu.py`: verifies compiled bundle source_digest against SEED_CHECKSUMS registry at load time
+- `verifyBundleProvenance()` in `main.js`: JS parity implementation
+- 5 gate tests in `test_stage0_vm_cutover.py::TestBundleProvenance` (pass, reject wrong digest, missing, unknown)
+- Theater allowlist: 4 new entries for no-raise provenance tests
+- Total inventory: 306 → 308 (+2 provenance functions), INFRA_CEILING: 123 → 125
+- N2/N15 deferred items marked RESOLVED
+- **L4_STRUCTURAL** wave targeting G8. Python + JS parity. Fail-closed on mismatch.
+
 ### MT2: isinstance Marker-Truth
 
 - 29 unmarked `isinstance` calls in `step_mu.py` annotated with `# AST_OK:infra — type guard`

@@ -463,13 +463,14 @@ def test_infra_count_within_ceiling():
         f"Review and reduce scaffolding markers before adding more."
     )
 
-    # Current expected count is 123:
+    # Current expected count is 125:
     # Wave 5: +4 from eval_seed bootstrap→infra reclassification
     # Wave 5: +5 from classify_mu isinstance annotations
     # Non-blocker sweep: +2 from projection_runner.py isinstance annotations
     # Wave 8 D1: +5 from _traverse_linked_list refactor (set, id, isinstance markers)
     # MT2: +29 from step_mu.py isinstance type guard annotations
-    assert infra_count == 123, (
-        f"Expected 123 AST_OK:infra markers, found {infra_count}. "
+    # N15: +2 from _verify_bundle_provenance isinstance type guards
+    assert infra_count == 125, (
+        f"Expected 125 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

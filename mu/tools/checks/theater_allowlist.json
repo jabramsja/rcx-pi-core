@@ -799,6 +799,46 @@
       "method": "test_workload_cutover_engine_pipeline",
       "owner": "founder",
       "target_wave": "s1a-vm-evidence"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_match_bundle_provenance_passes",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_subst_bundle_provenance_passes",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_missing_digest_accepted",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_unknown_seed_accepted",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
     }
   ],
   "generated_at": "2026-03-15T09:28:21.151043Z",
