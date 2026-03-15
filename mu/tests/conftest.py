@@ -293,6 +293,38 @@ def skip_or_fail_in_ci(reason: str):
         pytest.skip(reason)
 
 
+# NB2 skip ratchet: track bare pytest.skip() calls in CI to prevent silent coverage loss.
+# Baseline: current skip count in CI green gate run. New skips above baseline fail the session.
+_CI_SKIP_BASELINE = 5  # Current known CI skips (file-not-found guards, optional deps)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Report skip count in CI; fail if above baseline (NB2 ratchet)."""
+    if os.environ.get("RCX_CI") != "1":
+        return
+    skipped = len(terminalreporter.stats.get("skipped", []))
+    if skipped > _CI_SKIP_BASELINE:
+        terminalreporter.section("CI Skip Ratchet VIOLATION")
+        terminalreporter.write_line(
+            f"FAIL: {skipped} tests skipped in CI (baseline: {_CI_SKIP_BASELINE}). "
+            f"New bare pytest.skip() calls reduce CI coverage silently. "
+            f"Convert to skip_or_fail_in_ci() or increase _CI_SKIP_BASELINE with justification."
+        )
+        # Signal ratchet violation for session exit hook
+        global _ci_skip_ratchet_violated  # noqa: PLW0603
+        _ci_skip_ratchet_violated = True
+
+
+_ci_skip_ratchet_violated = False
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    """Fail session if skip ratchet was violated."""
+    if _ci_skip_ratchet_violated:
+        session.exitstatus = 1
+
+
 # =============================================================================
 # Kernel Execution Utility (Expert finding: consolidated from duplicates)
 # =============================================================================
