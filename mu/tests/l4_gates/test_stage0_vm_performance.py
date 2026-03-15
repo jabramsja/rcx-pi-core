@@ -1,0 +1,334 @@
+"""S1-A D1: Stage0 VM performance profiling suite.
+
+Two-tier profiling for VM cutover GO/NO-GO evidence:
+- Tier 1: P7-c corpus vectors (diagnostic, per-projection characterization)
+- Tier 2: Integration workloads through run_engine_pipeline (GO/NO-GO threshold)
+
+Performance data is observational — recorded in test output for the indicator
+artifact. No wall-clock CI gating assertions.
+
+L4_ENABLER evidence: G8 (Irreducible Primitive Consensus).
+"""
+# SPEED_OK: Performance profiling suite intentionally runs repeated timing trials.
+# Tier 1 diagnostics are fast (<10s) but Tier 2 integration workloads take ~60s.
+
+import json
+import time
+import pytest
+
+from rcx_pi.selfhost.step_mu import (
+    step_kernel_mu,
+    _step_kernel_with_vm,  # ANTICHEAT_OK: S1-A performance — VM path timing
+    _load_kernel_v1_projections_shared,  # ANTICHEAT_OK: S1-A performance — partition loader
+    _load_bridge_projections_shared,  # ANTICHEAT_OK: S1-A performance — partition loader
+    _load_compiled_match_v2_bundle,  # ANTICHEAT_OK: S1-A performance — bundle loader
+    _load_compiled_subst_v2_bundle,  # ANTICHEAT_OK: S1-A performance — bundle loader
+    _load_combined_kernel_projections_shared,  # ANTICHEAT_OK: S1-A performance — combined loader
+    clear_combined_kernel_cache,
+    normalize_projection,
+    list_to_linked,
+    run_algorithm_meta_circular,
+)
+from rcx_pi.selfhost.match_mu import normalize_for_match
+from rcx_pi.selfhost.kernel import reset_step_budget
+from rcx_pi.selfhost.eval_seed import _step_trusted, NO_MATCH  # ANTICHEAT_OK: S1-A performance — host path timing
+from rcx_pi.selfhost.stage0_vm import stage0_vm_step  # ANTICHEAT_OK: S1-A performance — VM step timing
+from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline  # ANTICHEAT_OK: S1-A performance — integration workload
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _reset_caches():
+    clear_combined_kernel_cache()
+    reset_step_budget()
+    yield
+    clear_combined_kernel_cache()
+
+
+# ---------------------------------------------------------------------------
+# Tier 1: P7-c corpus diagnostic vectors
+# ---------------------------------------------------------------------------
+
+# Reuse the same vectors from test_lower_stage0.py
+# These are per-projection single-step inputs for match.v2 and subst.v2
+
+def _match_ctx():
+    return {"_match_ctx": True}
+
+def _subst_ctx():
+    return {"_subst_ctx": True}
+
+
+MATCH_DIAGNOSTIC_VECTORS = [
+    ("match.wrap", {
+        "match": {"pattern": "hello", "value": "hello"},
+        "_match_ctx": _match_ctx(),
+    }),
+    ("match.equal", {
+        "mode": "match", "pattern_focus": "hello", "value_focus": "hello",
+        "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    ("match.var", {
+        "mode": "match", "pattern_focus": {"var": "x"},
+        "value_focus": 42, "bindings": None,
+        "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    ("match.done", {
+        "mode": "match", "pattern_focus": None, "value_focus": None,
+        "bindings": {"name": "x", "value": 42, "rest": None},
+        "stack": None, "_match_ctx": _match_ctx(),
+    }),
+    ("match.fail", {
+        "mode": "match", "pattern_focus": "a", "value_focus": "b",
+        "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
+    }),
+]
+
+SUBST_DIAGNOSTIC_VECTORS = [
+    ("subst.wrap", {
+        "subst": {"body": {"var": "x"}, "bindings": {"name": "x", "value": 42, "rest": None}},
+        "_subst_ctx": _subst_ctx(),
+    }),
+    ("subst.primitive", {
+        "mode": "subst", "phase": "traverse", "focus": "literal",
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    ("subst.var", {
+        "mode": "subst", "phase": "traverse",
+        "focus": {"var": "x"},
+        "bindings": {"name": "x", "value": 42, "rest": None},
+        "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+    ("subst.done", {
+        "mode": "subst", "phase": "result", "focus": 42,
+        "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
+    }),
+]
+
+
+def _time_fn(fn, arg1, arg2, n_runs=10, warmup=5):
+    """Time N runs of fn(arg1, arg2), return list of durations."""
+    for _ in range(warmup):
+        fn(arg1, arg2)
+    times = []
+    for _ in range(n_runs):
+        t0 = time.perf_counter()
+        fn(arg1, arg2)
+        times.append(time.perf_counter() - t0)
+    return times
+
+
+def _stats(times):
+    """Compute median, p95, stdev from a list of times."""
+    import statistics
+    s = sorted(times)
+    n = len(s)
+    median = s[n // 2]
+    p95 = s[int(n * 0.95)] if n >= 20 else s[-1]
+    stdev = statistics.stdev(s) if n > 1 else 0.0
+    return {"median": median, "p95": p95, "stdev": stdev, "n": n}
+
+
+class TestTier1MatchDiagnostics:
+    """Tier 1: Per-projection timing for match.v2 corpus vectors.
+    Diagnostic only — no CI gating assertions."""
+
+    @pytest.mark.parametrize("proj_id,inp", MATCH_DIAGNOSTIC_VECTORS,
+                             ids=[v[0] for v in MATCH_DIAGNOSTIC_VECTORS])
+    def test_match_vm_timing(self, proj_id, inp):
+        """Record VM timing for match.v2 projection."""
+        bundle = _load_compiled_match_v2_bundle()
+        vm_times = _time_fn(stage0_vm_step, bundle, inp, n_runs=10)
+        vm_stats = _stats(vm_times)
+
+        # Also time host path for comparison
+        combined = _load_combined_kernel_projections_shared()
+        host_times = _time_fn(_step_trusted, combined, inp, n_runs=10)
+        host_stats = _stats(host_times)
+
+        ratio = vm_stats["median"] / host_stats["median"] if host_stats["median"] > 0 else float("inf")
+
+        # Observational: print for indicator artifact, no assertion
+        print(json.dumps({
+            "tier": 1,
+            "projection": proj_id,
+            "vm": vm_stats,
+            "host": host_stats,
+            "ratio": round(ratio, 2),
+        }))
+
+
+class TestTier1SubstDiagnostics:
+    """Tier 1: Per-projection timing for subst.v2 corpus vectors."""
+
+    @pytest.mark.parametrize("proj_id,inp", SUBST_DIAGNOSTIC_VECTORS,
+                             ids=[v[0] for v in SUBST_DIAGNOSTIC_VECTORS])
+    def test_subst_vm_timing(self, proj_id, inp):
+        """Record VM timing for subst.v2 projection."""
+        bundle = _load_compiled_subst_v2_bundle()
+        vm_times = _time_fn(stage0_vm_step, bundle, inp, n_runs=10)
+        vm_stats = _stats(vm_times)
+
+        combined = _load_combined_kernel_projections_shared()
+        host_times = _time_fn(_step_trusted, combined, inp, n_runs=10)
+        host_stats = _stats(host_times)
+
+        ratio = vm_stats["median"] / host_stats["median"] if host_stats["median"] > 0 else float("inf")
+
+        print(json.dumps({
+            "tier": 1,
+            "projection": proj_id,
+            "vm": vm_stats,
+            "host": host_stats,
+            "ratio": round(ratio, 2),
+        }))
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: Integration workloads (GO/NO-GO threshold evidence)
+# ---------------------------------------------------------------------------
+
+def _time_kernel_mu(projections, input_value, n_runs=30, kernel_mode="core"):
+    """Time N runs of step_kernel_mu through the full kernel path."""
+    # Warm-up
+    for _ in range(5):
+        step_kernel_mu(projections, input_value, kernel_mode=kernel_mode)
+    times = []
+    for _ in range(n_runs):
+        clear_combined_kernel_cache()
+        reset_step_budget()
+        t0 = time.perf_counter()
+        step_kernel_mu(projections, input_value, kernel_mode=kernel_mode)
+        times.append(time.perf_counter() - t0)
+    return times
+
+
+@pytest.mark.slow
+class TestTier2IntegrationWorkloads:
+    """Tier 2: Full pipeline timing with statistical analysis.
+    Records data for GO/NO-GO memo. No hard CI gating assertions.
+
+    Benchmarks BOTH shadow mode (default) AND actual cutover mode."""
+
+    def test_workload_a_cycling(self):
+        """Workload A: Cycling A<->B through step_kernel_mu."""
+        projs = [
+            {"id": "c.ab", "pattern": {"state": "A"}, "body": {"state": "B"}},
+            {"id": "c.ba", "pattern": {"state": "B"}, "body": {"state": "A"}},
+        ]
+        inp = {"state": "A"}
+
+        times = _time_kernel_mu(projs, inp, n_runs=30)
+        stats = _stats(times)
+
+        print(json.dumps({
+            "tier": 2,
+            "workload": "cycling_ab",
+            "stats": stats,
+        }))
+        # Observational — data feeds GO/NO-GO memo
+
+    def test_workload_b_bridge_mode(self):
+        """Workload B: Bridge mode with variable binding."""
+        projs = [
+            {"id": "b.var", "pattern": {"x": {"var": "v"}}, "body": {"y": {"var": "v"}}},
+        ]
+        inp = {"x": "hello"}
+
+        times = _time_kernel_mu(projs, inp, n_runs=30, kernel_mode="bridge")
+        stats = _stats(times)
+
+        print(json.dumps({
+            "tier": 2,
+            "workload": "bridge_var_bind",
+            "stats": stats,
+        }))
+
+    def test_workload_engine_pipeline(self):
+        """Workload: Full engine pipeline (run_engine_pipeline) — canonical cycling closure."""
+        projs = [
+            {"id": "c.ab", "pattern": {"state": "A"}, "body": {"state": "B"}},
+            {"id": "c.ba", "pattern": {"state": "B"}, "body": {"state": "A"}},
+        ]
+        inp = {"state": "A"}
+
+        # Warm-up (cycling produces recurrence closure with enough iterations)
+        for _ in range(3):
+            reset_step_budget()
+            run_engine_pipeline(
+                projs, inp, max_steps=10,
+                max_engine_iterations=20, max_algorithm_iterations=50)
+
+        times = []
+        for _ in range(10):
+            reset_step_budget()
+            t0 = time.perf_counter()
+            run_engine_pipeline(
+                projs, inp, max_steps=10,
+                max_engine_iterations=20, max_algorithm_iterations=50)
+            times.append(time.perf_counter() - t0)
+
+        stats = _stats(times)
+        print(json.dumps({
+            "tier": 2,
+            "workload": "engine_pipeline_cycling_shadow",
+            "stats": stats,
+        }))
+
+    def test_workload_cutover_kernel(self, monkeypatch):
+        """Cutover mode: step_kernel_mu with VM primary (no shadow)."""
+        import rcx_pi.selfhost.step_mu as mod
+        monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", True)
+        monkeypatch.setattr(mod, "_STAGE0_SHADOW_ENABLED", False)
+
+        projs = [
+            {"id": "c.ab", "pattern": {"state": "A"}, "body": {"state": "B"}},
+            {"id": "c.ba", "pattern": {"state": "B"}, "body": {"state": "A"}},
+        ]
+        inp = {"state": "A"}
+
+        times = _time_kernel_mu(projs, inp, n_runs=30)
+        stats = _stats(times)
+
+        print(json.dumps({
+            "tier": 2,
+            "workload": "cycling_ab_cutover",
+            "stats": stats,
+        }))
+
+    def test_workload_cutover_engine_pipeline(self, monkeypatch):
+        """Cutover mode: full engine pipeline with VM primary."""
+        import rcx_pi.selfhost.step_mu as mod
+        monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", True)
+        monkeypatch.setattr(mod, "_STAGE0_SHADOW_ENABLED", False)
+
+        projs = [
+            {"id": "c.ab", "pattern": {"state": "A"}, "body": {"state": "B"}},
+            {"id": "c.ba", "pattern": {"state": "B"}, "body": {"state": "A"}},
+        ]
+        inp = {"state": "A"}
+
+        for _ in range(3):
+            reset_step_budget()
+            run_engine_pipeline(
+                projs, inp, max_steps=10,
+                max_engine_iterations=20, max_algorithm_iterations=50)
+
+        times = []
+        for _ in range(10):
+            reset_step_budget()
+            t0 = time.perf_counter()
+            run_engine_pipeline(
+                projs, inp, max_steps=10,
+                max_engine_iterations=20, max_algorithm_iterations=50)
+            times.append(time.perf_counter() - t0)
+
+        stats = _stats(times)
+        print(json.dumps({
+            "tier": 2,
+            "workload": "engine_pipeline_cycling_cutover",
+            "stats": stats,
+        }))

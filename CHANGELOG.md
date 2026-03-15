@@ -2,6 +2,17 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-15
+
+### S1-A VM Cutover Evidence Package
+
+- **D1:** Performance profiling suite (`test_stage0_vm_performance.py`) — 9 Tier 1 diagnostic + 5 Tier 2 integration workloads (including cutover-mode benchmarks)
+- **D2:** Cutover=True path tests (`test_stage0_vm_cutover.py`) — 15 new tests: 10 branch-level (TestCutoverTruePath) + 5 integration-level (TestCutoverIntegration) with no-monolithic-host-path negative control
+- **D3:** JS VM bridge parity (`test_js_vm_bridge_parity.py`) — 8 cross-substrate tests (match.v2 + subst.v2 compiled bundle parity)
+- **D4:** CONDITIONAL GO memo (`reports/l4_wave_indicators/s1a-vm-evidence-go-nogo.md`) — founder-grade evidence for cutover decision
+- Theater allowlist: 5 new entries for observational performance tests
+- **L4_ENABLER** wave targeting G8 (Irreducible Primitive Consensus). No runtime changes. No phase/debt change.
+
 ## 2026-03-05
 
 ### Docs Truth Sync (PR #480)
