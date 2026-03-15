@@ -6,7 +6,7 @@
 
 Purpose: provide a clean sequencing view across normalization, meta-circular execution, and hemispheres. This file is a planning layer only. Canonical state remains `STATUS.md` and `TASKS.md`.
 
-**Reading order:** See [`roadmap/MANIFEST.md`](roadmap/MANIFEST.md) for the canonical 13-document reading order.
+**Reading order:** See [`roadmap/MANIFEST.md`](roadmap/MANIFEST.md) for the canonical 15-document reading order.
 
 **Now**
 See `TASKS.md` NOW section for active items.

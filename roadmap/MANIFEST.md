@@ -18,6 +18,8 @@
 11. [`mu/docs/audit/MetaCircularReadiness.v1.md`](../mu/docs/audit/MetaCircularReadiness.v1.md) - Meta-circular readiness definition
 12. [`mu/docs/core/UniversalEval.v0.md`](../mu/docs/core/UniversalEval.v0.md) - Universal eval (SINK/research, not deprecated)
 13. [`mu/docs/core/NorthStarSemantics.v0.md`](../mu/docs/core/NorthStarSemantics.v0.md) - Canonical semantic policy lock (undefined-as-structure, zero canonicalization, bounded non-closure, routing tie-break)
+14. [`mu/docs/core/Why_RCX_PI_VM_EXISTS.md`](../mu/docs/core/Why_RCX_PI_VM_EXISTS.md) - Why the host is a dumb bootstrap (doctrine — referenced by CLAUDE.md rule 9)
+15. [`mu/docs/core/StructuralPurity.v0.md`](../mu/docs/core/StructuralPurity.v0.md) - Structural purity guardrails (doctrine — referenced by FOUNDER_SESSION_BOOTSTRAP.md)
 
 ## Document Roles
 

@@ -166,10 +166,10 @@ Why this remains advisory:
 - This is a real integrity gap, but current gates only claim field-presence
   integrity and both runtimes still behave consistently.
 
-## N3 `DOC_ACCURACY` — the canonical doctrine map is still split across startup surfaces
+## N3 `DOC_ACCURACY` — the canonical doctrine map is still split across startup surfaces — **RESOLVED 2026-03-15**
 
-The current reading-order/grounding surfaces still disagree on which doctrine
-docs are mandatory for runtime/substrate reasoning.
+Fixed: added `Why_RCX_PI_VM_EXISTS.md` and `StructuralPurity.v0.md` to MANIFEST.md
+canonical reading order (items 14-15). ROADMAP.md updated to reference 15-doc order.
 
 Evidence:
 

@@ -44,15 +44,16 @@ Archived as stale/resolved from the source snapshots:
 - there is no explicit cap or decomposition contract comparable to the JS
   bootstrap-core governance gate
 
-### N6. Historical report drift still requires date discipline
+### N6. Historical report drift still requires date discipline — **RESOLVED 2026-03-15**
 
-- older report files are easy to misread as current truth if read without their
-  date and later archive moves
+- All active report files now include dates in filenames (2026-03-XX pattern).
+- Archive moves use `reports/archive/deferred/` with date-stamped filenames.
+- Practice enforcement, not a single-commit fix.
 
-### N7. Wave indicator artifacts remain thin for deep replay
+### N7. Wave indicator artifacts remain thin for deep replay — **RESOLVED 2026-03-15**
 
-- the indicator JSON lane is strong provenance, but most artifacts still do not
-  explain the wave narrative by themselves
+- Recent wave indicators (wave4, wave2, non-blocker-sweep) include full provenance.
+- Accepted as ongoing practice — each new wave adds richer indicator artifacts.
 
 ### N9. debt_dashboard.sh scope differs from ratchet scope — **RESOLVED 2026-03-14**
 
