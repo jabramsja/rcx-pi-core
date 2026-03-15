@@ -36,15 +36,8 @@ a factory would require a parameter for optional key inclusion, adding complexit
 2-line semantic difference. The code is clear as-is. **No fix planned** — intentional
 semantic difference, not accidental duplication.
 
-### D4: Unmarked isinstance in security validators (Fuzzer)
-- File: step_mu.py:229,243,263-276,412-463,473-498,532,551,568,613-648
-- 114 isinstance calls, security-critical ones lack AST_OK markers
-**Why deferred:** These isinstance calls are type guards (checking `isinstance(x, dict)`,
-`isinstance(x, str)`, etc.) that are structurally necessary for safe Mu value handling.
-Marking all 114 with AST_OK would be a large annotation pass that touches runtime code
-(L4_STRUCTURAL). The markers exist to TRACK host dependencies, not to eliminate them —
-these type guards cannot be eliminated even in a fully self-hosted system. **Target wave:**
-Marker-truth wave (dedicated annotation sweep across all runtime files).
+### D4: Unmarked isinstance in security validators (Fuzzer) — **RESOLVED 2026-03-15**
+- Fixed: 29 isinstance calls in step_mu.py annotated with `# AST_OK:infra — type guard`. INFRA_CEILING 94→123 in STATUS.md. Original report overstated count (114 vs actual 29 unmarked at time of sweep).
 
 ### D5: hash_trace non-dict entries pass silently (Fuzzer) — RESOLVED (2026-03-14)
 

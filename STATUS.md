@@ -338,8 +338,8 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 THRESHOLD: 16
 CURRENT: 16 (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap — per host_semantics_baseline.json)
 FLOOR: 16 (see explanation below)
-INFRA_CEILING: 94
-INFRA_CURRENT: 94
+INFRA_CEILING: 123
+INFRA_CURRENT: 123
 ```
 
 **Tracked marker count (16 — 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap):**

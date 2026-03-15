@@ -10,16 +10,8 @@ Date: 2026-03-10
 - Marker-truth wave scope, not runtime audit
 - Defer to mt wave
 
-### D2: 2 unmarked isinstance in projection_runner.py nested closures (Verifier + Structural-Proof)
-- File: projection_runner.py:63,70
-- `is_done()`/`is_state()` use isinstance without `@host_builtin`
-**Why deferred:** While nested functions CAN be decorated in Python, these closures inside
-`make_projection_runner` are returned as API functions — adding a decorator would change
-the returned function object. The `@host_builtin` decorator adds metadata that callers
-don't expect. Adding inline `# AST_OK:` markers to these 2 lines would inflate the infra
-count for what are standard type guards (checking if a value is a dict).
-**Target wave:** Marker-truth wave (decide whether inline markers or decorator wrappers
-are appropriate for closure-returned functions).
+### D2: 2 unmarked isinstance in projection_runner.py nested closures (Verifier + Structural-Proof) — **RESOLVED 2026-03-15**
+- Fixed: Both isinstance calls already annotated with `# AST_OK: infra` (found during MT2 sweep — these were marked in a prior wave but the deferred report was not updated).
 
 ### D3: `_canonicalize_hash_numeric` no depth guard (Adversary)
 - File: mu_type.py:574

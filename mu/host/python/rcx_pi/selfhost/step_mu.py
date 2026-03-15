@@ -173,7 +173,7 @@ def classify_terminal_kind(value) -> str:  # AST_OK: infra — unified terminal 
     key set matches a known terminal shape. Engine-internal state with deep
     nesting never reaches eval_step/assert_mu, preventing pathological hangs.
     """
-    if not isinstance(value, dict):
+    if not isinstance(value, dict):  # AST_OK:infra — type guard
         return "non_terminal"
     # Kernel terminal: {_mode: "done", _result, _stall} — host-side (key-membership)
     if value.get("_mode") == "done" and "_result" in value and "_stall" in value:
@@ -187,7 +187,7 @@ def classify_terminal_kind(value) -> str:  # AST_OK: infra — unified terminal 
     # Structural seed classification via projection matching
     tc_projs = _load_tc_projections()
     result = eval_step(tc_projs, {"_tc": value})
-    return result if isinstance(result, str) else "non_terminal"
+    return result if isinstance(result, str) else "non_terminal"  # AST_OK:infra — type guard
 
 
 # =============================================================================
@@ -244,7 +244,7 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
         is_kernel = is_kernel_projection(proj)
 
         if is_kernel and seen_domain:
-            proj_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"
+            proj_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"  # AST_OK:infra — type guard
             raise ValueError(
                 f"SECURITY: Kernel projection '{proj_id}' appears after domain projection "
                 f"'{first_domain_id}'. Kernel projections MUST be first to prevent "
@@ -253,7 +253,7 @@ def validate_kernel_projections_first(projections: list[Mu]) -> None:
 
         if not is_kernel and not seen_domain:
             seen_domain = True
-            first_domain_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"
+            first_domain_id = proj.get("id", "<unknown>") if isinstance(proj, dict) else "<invalid>"  # AST_OK:infra — type guard
 
 
 # =============================================================================
@@ -356,7 +356,7 @@ def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
     Gate 3 Security: This allows validate_no_kernel_reserved_fields to check
     keys inside normalized dict representations, preventing bypass attacks.
     """
-    if not isinstance(value, dict):
+    if not isinstance(value, dict):  # AST_OK:infra — type guard
         return None
     # Empty dict sentinel: {"_type": "dict"}
     if set(value.keys()) == {"_type"}:
@@ -375,7 +375,7 @@ def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
         steps += 1
         if steps > max_steps:
             return None
-        if not isinstance(current, dict):
+        if not isinstance(current, dict):  # AST_OK:infra — type guard
             return None
         # Security hardening: reject cyclic structures to avoid infinite loops.
         node_id = id(current)
@@ -387,15 +387,15 @@ def _iter_normalized_dict_pairs(value: Mu) -> list[tuple[str, Mu]] | None:
         if "head" not in current or "tail" not in current:
             return None
         kv = current.get("head")
-        if not isinstance(kv, dict):
+        if not isinstance(kv, dict):  # AST_OK:infra — type guard
             return None
         if set(kv.keys()) != {"head", "tail"}:
             return None
         key = kv.get("head")
-        if not isinstance(key, str):
+        if not isinstance(key, str):  # AST_OK:infra — type guard
             return None
         kv_tail = kv.get("tail")
-        if not isinstance(kv_tail, dict):
+        if not isinstance(kv_tail, dict):  # AST_OK:infra — type guard
             return None
         if set(kv_tail.keys()) != {"head", "tail"}:
             return None
@@ -418,7 +418,7 @@ def _looks_like_normalized_dict_candidate(value: Mu) -> bool:
     misclassified. If this returns True and pair iteration fails, validators
     should fail closed to prevent encoded-key bypasses.
     """
-    if not isinstance(value, dict):
+    if not isinstance(value, dict):  # AST_OK:infra — type guard
         return False
     keys = set(value.keys())
     if value.get("_type") == "dict":
@@ -428,21 +428,21 @@ def _looks_like_normalized_dict_candidate(value: Mu) -> bool:
     if not (len(keys) == 2 and "head" in keys and "tail" in keys):
         return False
     kv = value.get("head")
-    if not isinstance(kv, dict):
+    if not isinstance(kv, dict):  # AST_OK:infra — type guard
         return False
     # Candidate only when head itself looks like a kv-pair node.
     if set(kv.keys()) != {"head", "tail"}:
         return False
     key = kv.get("head")
-    if not isinstance(key, str):
+    if not isinstance(key, str):  # AST_OK:infra — type guard
         return False
     kv_tail = kv.get("tail")
-    if not isinstance(kv_tail, dict):
+    if not isinstance(kv_tail, dict):  # AST_OK:infra — type guard
         return False
     if set(kv_tail.keys()) != {"head", "tail"}:
         return False
     tail = value.get("tail")
-    return tail is None or isinstance(tail, dict)
+    return tail is None or isinstance(tail, dict)  # AST_OK:infra — type guard
 
 
 _MAX_VALIDATION_DEPTH = MAX_MU_DEPTH  # AST_OK: infra — must cover full allowed depth (was 100, misses 100-300)
@@ -476,7 +476,7 @@ def _walk_and_validate(
             f"Possible deeply nested attack structure."
         )
 
-    if isinstance(value, dict):
+    if isinstance(value, dict):  # AST_OK:infra — type guard
         pairs = _iter_normalized_dict_pairs(value)
         if pairs is not None:
             for key, val in pairs:
@@ -495,7 +495,7 @@ def _walk_and_validate(
             if err:
                 raise ValueError(f"SECURITY: {context} {err}")
             _walk_and_validate(val, key_checker, context, _depth + 1)
-    elif isinstance(value, list):
+    elif isinstance(value, list):  # AST_OK:infra — type guard
         for item in value:
             _walk_and_validate(item, key_checker, context, _depth + 1)
 
@@ -512,7 +512,7 @@ def _check_kernel_reserved(key: str) -> str | None:
 
 def _check_algorithm_runtime(key: str) -> str | None:
     """Key checker: reject unknown underscore fields."""
-    if isinstance(key, str) and key.startswith("_"):
+    if isinstance(key, str) and key.startswith("_"):  # AST_OK:infra — type guard
         if key not in ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS:
             return (
                 f"contains unsupported algorithm underscore field: {key}. "
@@ -585,7 +585,7 @@ def _validate_projection_fields(
     see step_kernel_mu's inline loop.
     """
     for i, proj in enumerate(projections):
-        if not isinstance(proj, dict):
+        if not isinstance(proj, dict):  # AST_OK:infra — type guard
             continue
         if "pattern" in proj:
             validator(proj["pattern"], f"{label} projection[{i}].pattern")
@@ -798,7 +798,7 @@ def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:
     """
     ids: list[Mu] = []
     for proj in projections:
-        if isinstance(proj, dict):
+        if isinstance(proj, dict):  # AST_OK:infra — type guard
             ids.append(proj.get("id"))
         else:
             raise ValueError(
@@ -1188,8 +1188,8 @@ def step_kernel_mu(
     # Kernel projections are loaded separately via load_combined_kernel_projections().
     # Check by ID (kernel.*) not by _mode pattern because algorithm projections use _mode.
     for i, proj in enumerate(projections):
-        proj_id = proj.get("id", "") if isinstance(proj, dict) else ""
-        if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+        proj_id = proj.get("id", "") if isinstance(proj, dict) else ""  # AST_OK:infra — type guard
+        if isinstance(proj_id, str) and proj_id.startswith("kernel."):  # AST_OK:infra — type guard
             raise ValueError(
                 f"SECURITY: step_kernel_mu expects DOMAIN projections only, "
                 f"got kernel projection at index {i}: {proj_id}"
@@ -1199,7 +1199,7 @@ def step_kernel_mu(
     # Fail closed: reject non-dict projections, missing pattern/body, non-Mu content
     # This matches JS stepKernel validation (parity requirement)
     for i, proj in enumerate(projections):
-        if not isinstance(proj, dict):
+        if not isinstance(proj, dict):  # AST_OK:infra — type guard
             raise TypeError(
                 f"SECURITY: projection[{i}] must be a dict, got {type(proj).__name__}"
             )
@@ -1437,10 +1437,10 @@ def step_algorithm_with_bridge(projections: list[Mu], input_value: Mu) -> Mu:
     validate_kernel_projections_first(projections)
 
     for i, proj in enumerate(projections):
-        if not isinstance(proj, dict):
+        if not isinstance(proj, dict):  # AST_OK:infra — type guard
             continue
         proj_id = proj.get("id", "")
-        if isinstance(proj_id, str) and proj_id.startswith("kernel."):
+        if isinstance(proj_id, str) and proj_id.startswith("kernel."):  # AST_OK:infra — type guard
             raise ValueError(
                 f"SECURITY: step_algorithm_with_bridge expects algorithm/domain projections only, "
                 f"got kernel projection at index {i}: {proj_id}"
@@ -1500,7 +1500,7 @@ def apply_mu(projection: Mu, input_value: Mu) -> Mu:
     assert_mu(input_value, "apply_mu.input")
 
     # Validate projection structure (parity with apply_projection error types)
-    if not isinstance(projection, dict):
+    if not isinstance(projection, dict):  # AST_OK:infra — type guard
         raise TypeError(f"Projection must be dict, got {type(projection).__name__}")
     if "pattern" not in projection or "body" not in projection:
         raise KeyError("Projection must have 'pattern' and 'body' keys")
@@ -1547,13 +1547,13 @@ def _has_nonlinear_vars(pattern: Mu) -> bool:
             # Fail-closed: pathological/cyclic input, treat as non-linear.
             return True
         current = stack.pop()
-        if isinstance(current, dict):
-            if set(current.keys()) == {"var"} and isinstance(current["var"], str):
+        if isinstance(current, dict):  # AST_OK:infra — type guard
+            if set(current.keys()) == {"var"} and isinstance(current["var"], str):  # AST_OK:infra — type guard
                 name = current["var"]
                 var_counts[name] = var_counts.get(name, 0) + 1
             else:
                 stack.extend(current.values())
-        elif isinstance(current, list):
+        elif isinstance(current, list):  # AST_OK:infra — type guard
             stack.extend(current)
 
     return any(count > 1 for count in var_counts.values())
@@ -1574,7 +1574,7 @@ def _reject_nonlinear_projections(projections: list[Mu], caller: str) -> None:
         ValueError: If any projection has non-linear patterns.
     """
     for i, proj in enumerate(projections):
-        if not isinstance(proj, dict):
+        if not isinstance(proj, dict):  # AST_OK:infra — type guard
             continue
         pattern = proj.get("pattern")
         if pattern is not None and _has_nonlinear_vars(pattern):
