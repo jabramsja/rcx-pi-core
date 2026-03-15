@@ -110,6 +110,22 @@ Both Python and JS Stage0 VM produce identical results on compiled match.v2 and 
 
 ---
 
+## 7. Adviser Red-Team Addenda (post-ship)
+
+The following points were raised by the adviser agent after S1-A shipped. They don't invalidate the evidence but provide important context for the founder's decision:
+
+1. **10x threshold scope mismatch** — The P7 "temporary <=10x" budget was defined for the optional/shadow path. For primary-path promotion, a tighter budget (2-3x) may be more appropriate. The Tier 2 cutover-mode benchmarks provide the actual data — founder should assess whether the measured ratios are acceptable for default-path.
+
+2. **JS cutover mechanism absent** — `_STAGE0_VM_CUTOVER` is `const false` in JS (`kernel.js:19`) with no setter. Python cutover can proceed independently, but JS cutover requires adding a setter or restructuring. This is S1-B scope. L3 parity is maintained during transition because both substrates still produce identical outputs (shadow mode proves equivalence).
+
+3. **Partial cutover** — Only `step_kernel_mu` uses the VM path. `engine_pipeline.py` and `projection_runner.py` still call `_step_trusted` directly. This is by design (the architectural split: kernel dispatch = host, match/subst = VM). Future migration of remaining callers is a separate workstream.
+
+4. **Coverage recording behavior shift** — Under cutover=True, the VM path records coverage as primary (not shadow). This changes which code path drives `coverage.record_match/no_match`. Shadow mode currently validates equivalence; after cutover, this validation is lost unless explicitly preserved.
+
+5. **Rollback procedure** — Flip `_STAGE0_VM_CUTOVER = False`. Shadow mode re-engages automatically. Rollback is safe if no match.v2/subst.v2 seed changes occurred between cutover-on and rollback.
+
+---
+
 ## Indicator Artifact Reference
 
 This memo IS the indicator artifact for wave s1a-vm-evidence.
