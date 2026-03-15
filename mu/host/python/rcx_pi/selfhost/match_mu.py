@@ -509,34 +509,25 @@ def is_dict_linked_list(value: Mu) -> bool:
     return True
 
 
-def _collect_kv_pairs(val: Mu, context: str) -> list[tuple]:
-    """Collect kv-pairs from a head/tail linked list with cycle detection + iteration guard.
+def _traverse_linked_list(val: Mu, context: str) -> list[Mu]:
+    """Traverse a head/tail linked list with cycle detection + iteration guard.
 
-    Returns list of (key, value) tuples. Fail-closed on improper tails.
+    Returns list of raw head values. Fail-closed on improper tails.
+    D1 refactor: shared traversal for _collect_kv_pairs and _collect_elements.
     """
-    kv_pairs: list[tuple] = []
+    heads: list[Mu] = []
     current = val
-    visited: set[int] = set()
+    visited: set[int] = set()  # AST_OK: infra — cycle detection requires identity tracking
     while current is not None:
         if len(visited) > MAX_DENORM_ITER:
-            raise ValueError(f"denormalize_from_match: {context} kv-pair iteration exceeded {MAX_DENORM_ITER}")
-        node_id = id(current)
+            raise ValueError(f"denormalize_from_match: {context} iteration exceeded {MAX_DENORM_ITER}")
+        node_id = id(current)  # AST_OK: infra — cycle detection requires object identity
         if node_id in visited:
             raise ValueError("Circular reference in linked list during denormalization")
         visited.add(node_id)
-        if not isinstance(current, dict) or "head" not in current:
+        if not isinstance(current, dict) or "head" not in current:  # AST_OK: infra — type guard for linked list node
             break
-        kv = current["head"]
-        if not isinstance(kv, dict) or "head" not in kv:
-            current = current.get("tail")
-            continue
-        key = kv["head"]
-        kv_tail = kv.get("tail")
-        if not isinstance(kv_tail, dict) or "head" not in kv_tail:
-            current = current.get("tail")
-            continue
-        val_to_process = kv_tail["head"]
-        kv_pairs.append((key, val_to_process))
+        heads.append(current["head"])
         current = current.get("tail")
     # Fail-closed: improper tail silently drops data
     if current is not None:
@@ -544,35 +535,26 @@ def _collect_kv_pairs(val: Mu, context: str) -> list[tuple]:
             f"denormalize_from_match: improper linked list tail in {context} — "
             f"expected None, got {type(current).__name__}: {current!r}"
         )
+    return heads
+
+
+def _collect_kv_pairs(val: Mu, context: str) -> list[tuple]:
+    """Collect kv-pairs from a head/tail linked list. Each head is a kv-pair (head/tail)."""
+    kv_pairs: list[tuple] = []
+    for kv in _traverse_linked_list(val, context):
+        if not isinstance(kv, dict) or "head" not in kv:  # AST_OK: infra — type guard for kv-pair node
+            continue
+        key = kv["head"]
+        kv_tail = kv.get("tail")
+        if not isinstance(kv_tail, dict) or "head" not in kv_tail:  # AST_OK: infra — type guard for kv value node
+            continue
+        kv_pairs.append((key, kv_tail["head"]))
     return kv_pairs
 
 
 def _collect_elements(val: Mu, context: str) -> list:
-    """Collect elements from a head/tail linked list with cycle detection + iteration guard.
-
-    Returns list of raw elements. Fail-closed on improper tails.
-    """
-    elements: list = []
-    current = val
-    visited: set[int] = set()
-    while current is not None:
-        if len(visited) > MAX_DENORM_ITER:
-            raise ValueError(f"denormalize_from_match: {context} element iteration exceeded {MAX_DENORM_ITER}")
-        node_id = id(current)
-        if node_id in visited:
-            raise ValueError("Circular reference in linked list during denormalization")
-        visited.add(node_id)
-        if not isinstance(current, dict) or "head" not in current:
-            break
-        elements.append(current["head"])
-        current = current.get("tail")
-    # Fail-closed: improper tail silently drops data
-    if current is not None:
-        raise ValueError(
-            f"denormalize_from_match: improper linked list tail in {context} — "
-            f"expected None, got {type(current).__name__}: {current!r}"
-        )
-    return elements
+    """Collect elements from a head/tail linked list."""
+    return _traverse_linked_list(val, context)
 
 
 def denormalize_from_match(value: Mu) -> Mu:
