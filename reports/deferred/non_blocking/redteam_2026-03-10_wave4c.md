@@ -13,30 +13,45 @@ Date: 2026-03-10
 ### D2: 2 unmarked isinstance in projection_runner.py nested closures (Verifier + Structural-Proof)
 - File: projection_runner.py:63,70
 - `is_done()`/`is_state()` use isinstance without `@host_builtin`
-- Nested functions can't use Python decorators; module comment acknowledges for-loop debt only
-- Defer to mt wave
+**Why deferred:** Python decorators cannot be applied to nested functions (syntax error).
+The module-level docstring already documents the for-loop debt. Adding inline `# AST_OK:`
+markers to these 2 lines would inflate the infra count for what are standard type guards
+(checking if a value is a dict). **Target wave:** Marker-truth wave.
 
 ### D3: `_canonicalize_hash_numeric` no depth guard (Adversary)
 - File: mu_type.py:574
 - Recursive without depth limit, but always called after `assert_mu()` (MAX_MU_DEPTH=300)
-- Private function (`_` prefix), all callers validate depth first
-- Could add defensive depth param in future hardening wave
+**Why deferred:** All callers pass through `assert_mu()` which enforces MAX_MU_DEPTH=300.
+Adding a depth parameter to `_canonicalize_hash_numeric` would be defense-in-depth for a
+call path that's already bounded. The function is private (`_` prefix) with no external
+callers. Risk: zero in current architecture. **Target wave:** Defense-in-depth hardening wave.
 
 ### D4: `NumericHashError` dead code (Expert)
 - File: mu_type.py:560
 - Defined but never raised; comment says "retained for future strictness"
-- Intentional design
+**Why deferred:** The exception class is 2 lines of code, costs nothing at runtime, and
+serves as a named error type for future use when numeric hash strictness is tightened.
+Removing it would require re-adding it later. The "WHY KEPT" comment explicitly documents
+the decision. **No fix planned** — intentional pre-wiring, not dead code.
 
 ### D5: `_mu_hash_cache` not thread-safe (Fuzzer)
 - File: mu_type.py:471,515-524
 - Module-global OrderedDict with compound non-atomic operations
-- Single-threaded runtime by design; GIL prevents corruption but not logical races
-- No practical risk in current architecture
+**Why deferred:** RCX is single-threaded by design — Python GIL prevents data corruption,
+and no logical races exist because projection execution is sequential. Thread-safe
+alternatives (e.g., `threading.Lock`, `concurrent.futures.ThreadPoolExecutor`) would add
+host dependencies and complexity for zero benefit in the current architecture. If RCX ever
+moves to multi-threaded execution, the cache would need redesign anyway (not just a lock).
+**No fix planned** — single-threaded architecture makes this a non-issue.
 
 ### D6: Dead code: `assert_handler_pure`/`validate_kernel_boundary` (Structural-Proof)
 - File: mu_type.py:364-429
 - Both carry explicit "WHY KEPT (0 production callers)" — intentional pre-wiring for L4+
-- Tested in `test_mu_type.py` to prevent API drift
+**Why deferred:** These functions define the API surface for L4 handler purity validation.
+They have 0 production callers today but ARE tested (`test_mu_type.py`) to prevent API
+drift. They will be called when L4 gate enforcement requires handler purity checks.
+Removing them now would lose the validated API surface. **No fix planned** — intentional
+pre-wiring with test coverage to prevent drift.
 
 ### D7: Max-steps stall indistinguishable from genuine stall (Expert) — **RESOLVED 2026-03-14**
 - Fixed: documented distinguishability pattern in run() docstring (steps == max_steps = exhaustion, steps < max_steps = genuine stall)
@@ -51,9 +66,13 @@ Date: 2026-03-10
 ### D9: Three parallel seed registries (Expert)
 - File: seed_integrity.py
 - `SEED_CHECKSUMS`, `EXPECTED_PROJECTION_IDS`, `MU_SEED_LOCATIONS` all 19 entries, currently synced
-- Cross-validation tests now mechanically lock key alignment and path resolution,
-  but adding a seed still requires manual 3-way sync across the registries
-- Design decision, not a bug
+**Why deferred:** The three registries serve different purposes — checksums (integrity),
+projection IDs (ordering), and locations (filesystem paths). Merging them into a single
+registry would either (a) create a complex nested structure that's harder to read, or
+(b) require a schema migration. Cross-validation tests (`test_seed_loading_parity.py`)
+mechanically lock key alignment, so drift is caught immediately. The manual 3-way sync
+when adding a seed is ~3 lines of code — not worth a schema redesign.
+**No fix planned** — design decision with mechanical test enforcement.
 
 ### D10: classify_linked_list silent return at 10001-node boundary (Fuzzer) — RESOLVED (2026-03-14)
 - File: classify_mu.py:85-90
