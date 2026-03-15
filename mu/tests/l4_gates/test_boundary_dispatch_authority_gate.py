@@ -1,5 +1,8 @@
 """
 L4 Gate Test: Boundary Dispatch Authority (Wave A10).
+Non-blocker wave2 (2026-03-14): N12 allowlist hardened from Object.freeze(Set)
+to frozen null-prototype object. Behavioral parity tests unchanged — allowlist
+lookup uses `in` operator instead of `.has()`.
 
 Proves that boundary-operation dispatch has been structurally displaced from
 host if/elif chains to seed-derived handler-map dispatch via
@@ -1089,6 +1092,38 @@ class TestAlgorithmSeedAllowlist:
         )
         assert result.returncode == 0, f"JS failed: {result.stderr}"
         assert result.stdout.strip() == "OK", f"JS allowlist parity: {result.stdout.strip()}"
+
+    def test_js_allowlist_rejects_prototype_pollution(self):
+        """N12 regression: JS allowlist must not be vulnerable to prototype-chain key injection."""
+        js_code = """
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        // Attempt to inject via prototype chain — if allowlist is a plain object
+        // with Object.prototype, 'constructor' and 'toString' would be truthy.
+        // A null-prototype object rejects all prototype keys.
+        const seedMap = Object.create(null);
+        seedMap['recurrence.v1.json'] = [{id:'p',pattern:{},body:{}}];
+        // Try a prototype key as algorithm name — must be rejected
+        try {
+            pipeline.serviceBoundaryEffect(
+                [], seedMap,
+                {operation:'run_algorithm',input:{},context:{},inject_key:'r',algorithm:'constructor'},
+                1, function(){}, 0, {}
+            );
+            console.log('FAIL: constructor not rejected');
+        } catch(e) {
+            if (e.message && e.message.includes('authorized algorithm seed')) {
+                console.log('OK');
+            } else {
+                console.log('FAIL: wrong error: ' + e.message);
+            }
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        assert result.stdout.strip() == "OK", f"N12 regression: {result.stdout.strip()}"
 
 
 # ===========================================================================

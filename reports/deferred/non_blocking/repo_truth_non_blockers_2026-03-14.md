@@ -61,17 +61,15 @@ Archived as stale/resolved from the source snapshots:
 - Both pass independently but measure different Python scopes.
 - Not blocking — canonical source is baseline JSON, not dashboard.
 
-### N12. JS _ALGORITHM_SEED_ALLOWLIST uses Object.freeze(Set) — bridge suggests frozen null-prototype object
+### N12. JS _ALGORITHM_SEED_ALLOWLIST uses Object.freeze(Set) — **RESOLVED 2026-03-14**
 
-- Bridge R2 noted: Object.freeze on a Set prevents .add()/.delete()/.clear() but the Set prototype methods are still callable via prototype chain. A frozen null-prototype object or frozen array + includes would be "truly immutable."
-- Current implementation is sufficient (Set is module-private, not exported, no mutation paths exist). Defense-in-depth hardening only.
-- Status: non-blocking advisory from bridge R2.
+- Fixed: replaced `Object.freeze(new Set(...))` with `Object.freeze(Object.assign(Object.create(null), {...}))`.
+- Null-prototype object: no prototype chain mutation, `in` operator for lookup, `Object.keys()` for enumeration.
 
-### N13. reports/codex/ exempt from docs governance — attestation false-fail
+### N13. reports/codex/ exempt from docs governance — attestation false-fail — **RESOLVED 2026-03-14**
 
 - Founder directive (2026-03-14): reports/codex/ belongs to GPT, leave as-is.
-- Fix attestation to acknowledge the exemption explicitly instead of failing.
-- POLICY_BOUND: resolved by founder decision (Option B).
+- Attestation already changed to advisory (not failure) in founder_session_attest.sh.
 
 ### N14. Stage0 capture_ref returns null/None for hostile leaves (design gap)
 
@@ -96,10 +94,10 @@ Archived as stale/resolved from the source snapshots:
 - Fixed: positional args now rejected with exit code 2 (fail-closed).
 - Test: `test_positional_args_rejected` in `test_check_gate_behavioral_pairs.py`.
 
-### N18. /checkpoint should force comprehensive memory.md + claude.md re-read
+### N18. /checkpoint should force comprehensive memory.md + claude.md re-read — **RESOLVED 2026-03-14**
 
-- Founder directive: checkpoint should include explicit instruction to re-read memory.md and claude.md, not just acknowledge them. The goal is behavioral change, not acknowledgment.
-- Status: enhancement for /checkpoint skill.
+- Fixed: /checkpoint skill Step 0 now includes MANDATORY re-read with explicit file list and "This is not a checkbox" instruction.
+- Claude Code PreToolUse hook (`.claude/hooks/pre-commit-reminder.sh`) shows MEMORY.md + CLAUDE.md before git commit tool calls.
 
 ### N19. Three-scope debt counting mismatch (ratchet vs dashboard vs baseline)
 
