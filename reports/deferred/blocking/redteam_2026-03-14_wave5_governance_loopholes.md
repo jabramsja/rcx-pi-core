@@ -179,22 +179,23 @@ Why this blocks:
 
 - This is the loophole that lets gates stay green while proving the wrong thing.
 
-## B4 `DOC_ACCURACY` — docs governance is still producing a false-green current-state signal — **RESOLVED**
-**Fix:** README.md updated: 11→20 tracked markers, L4 framing updated to "SINK (bounded reduction active)" with P7 Stage0 truth paragraph.
+## B4 `DOC_ACCURACY` — docs governance produced a false-green current-state signal — **RESOLVED**
+**Fix:** root `README.md` drift was corrected. Founder policy also confirmed that
+`reports/codex/` remains intentionally exempt because it is a working vector
+lane rather than a canonical current-state surface.
 
 `check_docs_consistency.sh` reports success even though:
 
-1. root `README.md` is materially stale for current state
-2. active `reports/codex/` markdown is exempt from docs governance entirely
+1. root `README.md` was materially stale for current state
+2. `reports/codex/` exemption required explicit founder-policy clarification
 
 Evidence:
 
-- stale README current-state claims:
-  - `README.md:14-22`
-  - `README.md:201`
+- corrected README current-state claims:
+  - `README.md`
 - docs consistency script:
   - `tools/checks/check_docs_consistency.sh:83-151`
-- global `reports/` exemption:
+- founder-approved `reports/codex/` exemption:
   - `tools/docs/docs_registry.json:34-53`
   - `tools/docs/shared_doc_config.py:78-112`
 
@@ -217,18 +218,16 @@ PY
 Observed:
 
 - docs consistency reports `All checks passed. Docs are consistent.`
-- attestation fails on:
-  - `README tracked marker count 11 != STATUS CURRENT 20`
-  - `README still frames L4 only as open feasibility while current repo truth has active Stage0 reduction work`
-  - active `reports/codex/` markdown still exempt from governance
+- docs attestation now passes, reporting the `reports/codex/` exemption as a
+  founder-approved advisory rather than a blocker
 - classification result:
   - `README.md: root_canonical`
   - `reports/codex/README.md: exempt`
 
 Why this blocks:
 
-- A passing docs-governance verdict currently does not mean current founder-facing
-  docs are trustworthy.
+- historical false-green risk was real, but the root README drift is fixed and
+  the Codex-lane exemption is now explicitly documented as founder-approved.
 
 ## Rectification Plan
 
@@ -236,8 +235,9 @@ Why this blocks:
 2. Fail `check_gate_behavioral_pairs.py` when those gates are backed only by `source_lock`.
 3. Require at least one negative control for claimed live-path/wiring gates.
 4. Split inventory/source-lock tests from runtime-parity tests instead of letting one satisfy the other.
-5. Remove blanket active `reports/codex/` exemption from docs governance.
-6. Add root `README.md` current-state truth assertions to the docs-governance suite.
+5. Keep attestation and blocker wording aligned with the founder-approved
+   `reports/codex/` exemption instead of re-opening that policy choice.
+6. Keep root `README.md` current-state truth assertions in the docs-governance suite.
 
 ## Validation Used
 

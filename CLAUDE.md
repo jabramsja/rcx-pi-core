@@ -194,7 +194,7 @@ python3 tools/agents/bridge_supervisor.py review \
 **Branching model:** `dev` is the primary branch. There is no `main` branch in active use. All PRs target `dev`. CI workflows (green gate, fixture gates) trigger on push/PR to `dev`.
 
 **PR merge — resolving bot review comments:**
-The `chatgpt-codex-connector[bot]` auto-reviews PRs and leaves inline comments. Branch protection requires **all review comments resolved** before merge (even with `--admin`). Use the GraphQL API:
+The `chatgpt-codex-connector[bot]` auto-reviews PRs and leaves inline comments. Resolve review threads first. Use `--admin` only when the repo's current protection state still requires an override after checks pass and threads are resolved:
 
 ```bash
 # 1. Find unresolved thread IDs
@@ -213,7 +213,9 @@ gh api graphql -f query='mutation {
     thread { isResolved }
   }
 }'
-# 3. Then merge normally
+# 3. Then merge
+gh pr merge <PR_NUM> --merge --delete-branch
+# 4. If an override is still required, use:
 gh pr merge <PR_NUM> --merge --delete-branch --admin
 ```
 

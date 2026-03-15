@@ -41,7 +41,10 @@ Date: 2026-03-10
 ### D7: Max-steps stall indistinguishable from genuine stall (Expert)
 - File: projection_runner.py:118
 - `run()` returns `is_stall=True` for both timeout and genuine stall
-- Would require API change (4-tuple return) affecting all callers
+- Founder direction (2026-03-14): prefer an additive fix that preserves the
+  existing low-level `run()` contract.
+- Better RCX direction: expose max-steps exhaustion via metadata or a sibling
+  API instead of changing the current return tuple for every caller.
 
 ### D8: Stale "Phase 7d will eliminate" comment (Structural-Proof) — RESOLVED (2026-03-14)
 - File: projection_runner.py:36

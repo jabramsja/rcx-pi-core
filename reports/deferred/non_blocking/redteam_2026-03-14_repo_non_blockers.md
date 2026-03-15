@@ -6,11 +6,16 @@ repo-wide verification sweep.
 The blocker lane is now governance-truth only; see
 `reports/deferred/blocking/redteam_2026-03-14_wave5_governance_loopholes.md`.
 
-## N1 `DEFECT` — Stage0 direct APIs: hostile leaf passthrough **PARTIALLY RESOLVED** (2026-03-14)
+## N1 `DEFECT` — Stage0 direct APIs still retain raw hostile leaves in capture slots before materialization **PARTIALLY RESOLVED** (2026-03-14)
 
 **Fix applied:** `capture_ref` now deep-copies via `_safe_mu_copy`/`safeMuCopy`. Python `_mu_copy` rejects non-Mu types (returns None). JS `muCopy` uses `_isPlainArray`/`_isPlainObject` and rejects non-Mu types (returns null).
 
-**Remaining gap:** Hostile leaves captured at `capture_path` are stored as raw references before copy. The deep copy at `capture_ref` materialization canonicalizes them to null/None, so the *output* is now safe, but the captured reference itself is still raw until materialization. This is a design gap, not a production exploit path (JSON-parsed inputs never produce subclasses).
+**Remaining gap:** Hostile leaves captured at `capture_path` are stored as raw
+references before copy. The deep copy at `capture_ref` materialization
+canonicalizes them to `null`/`None`, so the *output* is now safe, but the
+captured reference itself is still raw until materialization. This is a design
+gap, not a production exploit path (JSON-parsed inputs never produce
+subclasses).
 
 Evidence:
 
@@ -51,6 +56,7 @@ result = stage0_vm_step(bundle, value)
 print(result['status'])
 print(type(result['root']).__name__)
 print(isinstance(result['root'], EvilStr))
+print(repr(result['root']))
 PY
 node - <<'JS'
 const { stage0VmStep } = require('./mu/host/js/core/stage0_vm');
@@ -74,14 +80,15 @@ const value = { x: new String('tainted') };
 const result = stage0VmStep(bundle, value);
 console.log(result.status);
 console.log(result.root instanceof String);
-console.log(result.root.constructor.name);
+console.log(result.root === null);
+console.log(String(result.root));
 JS
 ```
 
 Observed:
 
-- Python: `match / EvilStr / True`
-- JS: `match / true / String`
+- Python: `match / NoneType / False / None`
+- JS: `match / false / true / null`
 
 Why this remains advisory:
 
@@ -93,7 +100,17 @@ Why this remains advisory:
 
 **Fix applied:** Both runtimes now validate `source_digest` format: must be exact `str`/`string` type (no subclasses), prefix `sha256:`, exactly 64 lowercase hex chars. Malformed digests like `"bogus"` or non-hex chars are rejected.
 
-**Remaining gap:** Format is validated but content is not verified — a well-formed but incorrect digest (valid hex but wrong hash) still passes. Full digest verification requires loading the source seed at runtime and re-hashing, which is a design decision beyond this wave.
+**Remaining gap:** Format is validated but content is not verified — a
+well-formed but incorrect digest (valid hex but wrong hash) still passes.
+
+Founder direction (2026-03-14):
+
+- if full verification is added, do it in a way that does not make the
+  semantic execution core depend on host source files at runtime
+- prefer compiler/loader/provenance enforcement over adding source-file access
+  to the Stage0 execution path
+- disposition: defer content verification to a compiler/loader provenance wave,
+  not a Stage0 execution-core wave
 
 Evidence:
 
@@ -117,7 +134,7 @@ bundle = {
     'program_order': ['p1'],
     'programs': [{'id': 'p1', 'ops': [{'op': 'return_projection_fail'}]}],
     'lowering_version': '1.0.0',
-    'source_digest': 'bogus',
+    'source_digest': 'sha256:' + ('0' * 64),
 }
 validate_bundle(bundle)
 print('PY_OK')
@@ -132,7 +149,7 @@ const bundle = {
   program_order: ['p1'],
   programs: [{ id: 'p1', ops: [{ op: 'return_projection_fail' }] }],
   lowering_version: '1.0.0',
-  source_digest: 'bogus',
+  source_digest: 'sha256:' + '0'.repeat(64),
 };
 validateBundle(bundle);
 console.log('JS_OK');

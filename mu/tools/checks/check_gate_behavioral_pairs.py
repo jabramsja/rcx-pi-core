@@ -116,8 +116,8 @@ def classify_method(func_node: ast.FunctionDef) -> str:
 
     has_source = bool(call_names & SOURCE_LOCK_CALLS)
     # Also check for file reads of .py/.js (common source_lock pattern)
-    source_text = ast.dump(func_node)
-    if ".read_text()" in ast.unparse(func_node) or "open(" in ast.unparse(func_node):
+    func_source = ast.unparse(func_node)
+    if ".read_text()" in func_source or "open(" in func_source:
         has_source = True
 
     has_behavioral = bool(call_names & BEHAVIORAL_CALLS)
@@ -155,6 +155,7 @@ def scan_file(filepath: Path) -> dict:
 
     classes: dict[str, dict[str, str]] = {}
 
+    # Scan class-level test methods
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             methods: dict[str, str] = {}
@@ -164,6 +165,15 @@ def scan_file(filepath: Path) -> dict:
                         methods[item.name] = classify_method(item)
             if methods:
                 classes[node.name] = methods
+
+    # Scan module-level test functions (not inside any class)
+    module_funcs: dict[str, str] = {}
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                module_funcs[node.name] = classify_method(node)
+    if module_funcs:
+        classes["<module>"] = module_funcs
 
     return classes
 
@@ -252,6 +262,12 @@ def format_human(file_results: dict, summary: dict) -> str:
 def main():
     KNOWN_FLAGS = {"--json", "--fail-on-theater", "--fail-on-mismatch", "--no-fail-on-mismatch"}
     args = sys.argv[1:]
+    # Fail-closed: reject positional args (no positional args accepted)
+    positional = [a for a in args if not a.startswith("--")]
+    if positional:
+        print(f"ERROR: Unexpected positional arg(s): {', '.join(positional)}", file=sys.stderr)
+        print(f"  This tool accepts only flags: {', '.join(sorted(KNOWN_FLAGS))}", file=sys.stderr)
+        sys.exit(2)
     # Fail-closed: reject unknown flags
     unknown = [a for a in args if a.startswith("--") and a not in KNOWN_FLAGS]
     if unknown:
