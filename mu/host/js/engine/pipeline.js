@@ -248,15 +248,13 @@ function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqI
 
 // AST_OK_JS: security allowlist — frozen constant (parity: engine_pipeline.py:680).
 // Authority allowlist for run_algorithm boundary dispatch.
-// Note: Object.freeze on a Set does NOT prevent mutation via Set.prototype.add.call().
-// The Set is module-private and not exported, so external mutation is not possible.
-// Internal mutation is prevented by code discipline (no .add()/.delete()/.clear() calls).
-const _ALGORITHM_SEED_ALLOWLIST = Object.freeze(new Set([
-  'recurrence.v1.json',
-  'recurrence.v2.json',
-  'exhaustion.v1.json',
-  'fix.v1.json',
-]));
+// Frozen null-prototype object: no prototype chain, no mutation, no .has() bypass.
+const _ALGORITHM_SEED_ALLOWLIST = Object.freeze(Object.assign(Object.create(null), {
+  'recurrence.v1.json': true,
+  'recurrence.v2.json': true,
+  'exhaustion.v1.json': true,
+  'fix.v1.json': true,
+}));
 
 function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
   if (!('algorithm' in request)) {
@@ -268,9 +266,9 @@ function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, r
     throw new RcxError('api.bad_request',
       `run_algorithm 'algorithm' must be string, got ${typeof algoName}`);
   }
-  if (!_ALGORITHM_SEED_ALLOWLIST.has(algoName)) {
+  if (!(algoName in _ALGORITHM_SEED_ALLOWLIST)) {
     throw new RcxError('api.bad_request',
-      `run_algorithm 'algorithm' must be an authorized algorithm seed, got '${algoName}'. Allowed: ${JSON.stringify([..._ALGORITHM_SEED_ALLOWLIST].sort())}`);
+      `run_algorithm 'algorithm' must be an authorized algorithm seed, got '${algoName}'. Allowed: ${JSON.stringify(Object.keys(_ALGORITHM_SEED_ALLOWLIST).sort())}`);
   }
   const algoProjs = seedProjectionMap[algoName];
   if (!algoProjs) {
