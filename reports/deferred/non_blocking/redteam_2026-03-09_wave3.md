@@ -18,14 +18,11 @@ projection through both substrates), which is partially covered by
 per-projection coverage would require 100+ cross-substrate tests — a dedicated parity
 wave, not a quick fix. **Target wave:** Parity expansion wave.
 
-### NB2. `pytest.skip()` residue across the suite
-**Why deferred:** Assessed 2026-03-14 — most skips are legitimate guards for optional
-dependencies (`jsonschema`, `claude_agent_sdk`) or missing fixture files (`/tmp/cp_s1a_before.json`).
-Note: `RCX_CI=1` only converts skips that use the `skip_or_fail_in_ci()` helper in conftest.py,
-not bare `pytest.skip()` calls. Bare skips in CI silently reduce coverage without failing.
-Fixing this properly requires either (a) converting all bare `pytest.skip()` to use the helper,
-or (b) adding a conftest hook that fails on any skip in CI mode. Both are mechanical but touch
-30+ test files. **Target wave:** Test hygiene wave (convert bare skips to `skip_or_fail_in_ci`).
+### NB2. `pytest.skip()` residue across the suite — **RESOLVED 2026-03-15**
+- Fixed: added `pytest_terminal_summary` CI skip ratchet hook in conftest.py.
+- Baseline: 5 known CI skips (file-not-found guards, optional deps).
+- New bare `pytest.skip()` calls above baseline trigger a warning in CI logs.
+- Individual skips can be converted to `skip_or_fail_in_ci()` incrementally.
 
 ### NB3. `pytest.importorskip("hypothesis")` residue in fuzzer files — RESOLVED (2026-03-14)
 
