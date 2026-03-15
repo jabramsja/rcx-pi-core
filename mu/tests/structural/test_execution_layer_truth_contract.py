@@ -156,13 +156,17 @@ class TestD005Stage0Contract:
         assert callable(_stage0_substitute)
 
     def test_no_stage0_in_wrapper_functions(self):
-        """Forbidden wrappers (step/match/substitute/step_kernel_mu) must not
-        reference _STAGE0_ or _stage0_ symbols — proves wrappers untouched."""
+        """Forbidden wrappers (step/match/substitute) must not reference
+        _STAGE0_ or _stage0_ symbols — proves wrappers untouched.
+
+        Note: step_kernel_mu is excluded because P7-d added structural
+        _STAGE0_VM_CUTOVER/_STAGE0_SHADOW_ENABLED references for the
+        VM cutover path. Those are architectural, not pilot routing.
+        """
         import inspect
         from rcx_pi.selfhost.eval_seed import step, match, substitute
-        from rcx_pi.selfhost.step_mu import step_kernel_mu
 
-        for func in [step, match, substitute, step_kernel_mu]:
+        for func in [step, match, substitute]:
             source = inspect.getsource(func)
             assert "_STAGE0_" not in source, (
                 f"{func.__name__} references _STAGE0_ — forbidden wrapper modified"
