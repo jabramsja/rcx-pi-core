@@ -3,6 +3,7 @@ Wave J: Architectural Gaps Gate Tests
 Non-blocker wave4 (2026-03-14): D7 stall distinguishability documented in
 projection_runner.py run() docstring. 4 new tests prove the contract.
 D7 terminal-last-step fix (2026-03-15): post-loop is_done check added.
+Wave 8 D1 (2026-03-15): linked-list traversal deduplicated via _traverse_linked_list.
 
 L4_STRUCTURAL gate: validates seed dependency registry, projection-order
 enforcement, control hash coverage, and hemisphere tie-break documentation.
