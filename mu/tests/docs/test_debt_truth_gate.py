@@ -248,3 +248,39 @@ class TestLedgerThresholdConsistency:
             f"STATUS.md THRESHOLD ({threshold}) != tracked markers ledger "
             f"({counts['tracked_markers']}). Update if floor changed."
         )
+
+
+class TestAuthorityCountConsistency:
+    """Every numeric 'authority' mention in STATUS.md must match the ratchet baseline."""
+
+    def test_all_authority_mentions_match_baseline(self):
+        """Scan STATUS.md for all prose mentions of authority + a number. All must match."""
+        status = _load_status()
+        baseline = _load_authority_baseline()
+        expected = baseline["inventories"]["authority"]["site_counts"]["total"]
+
+        # Match both "authority 216" and "216 authority" patterns in prose
+        # Exclude lines that are file paths, code blocks, or table headers
+        findings = []
+        for i, line in enumerate(status.splitlines(), 1):
+            # Skip code blocks, file paths, and table header/separator rows
+            if line.strip().startswith("|") and "---" in line:
+                continue
+            if "baseline" in line.lower() and ".json" in line:
+                continue
+            if line.strip().startswith("```"):
+                continue
+            # Match "authority N" or "N authority" patterns
+            for m in re.finditer(r"authority\s+(\d+)", line, re.IGNORECASE):
+                val = int(m.group(1))
+                if val != expected:
+                    findings.append(f"  line {i}: found authority {val}, expected {expected}")
+            for m in re.finditer(r"(\d+)\s+authority", line, re.IGNORECASE):
+                val = int(m.group(1))
+                if val != expected:
+                    findings.append(f"  line {i}: found {val} authority, expected {expected}")
+
+        assert not findings, (
+            f"STATUS.md has authority count mismatches vs baseline ({expected}):\n"
+            + "\n".join(findings)
+        )
