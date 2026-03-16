@@ -702,6 +702,16 @@ def _boundary_op_run_algorithm(request, req_input, max_algorithm_iterations):
     return _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
 
 
+# === BoundaryRequest / BoundaryResponse Contract (Canonical Machine Contract v3) ===
+#
+# BoundaryRequest = {operation: str, input: Mu, context: dict, inject_key: str}
+# BoundaryResponse = context with result injected at inject_key
+#
+# Closed operation set (seed-derived authority via _load_boundary_ops()):
+#   "run_trace"      — execute trace via run_mu()
+#   "hash_trace"     — SHA256 per trace entry
+#   "run_algorithm"  — run sub-algorithm via step_kernel_mu()
+#
 # Dispatch map: operation name → handler function (A10 structural displacement).
 # Operation names in keys are structurally paired with handlers; authority for
 # which operations are valid comes from seed-derived _load_boundary_ops().

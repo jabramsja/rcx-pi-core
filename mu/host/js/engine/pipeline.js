@@ -278,6 +278,16 @@ function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, r
   return runSubAlgorithm(kernelProjections, seedProjectionMap, algoProjs, reqInput, maxAlgorithmIterations, vmConfig);
 }
 
+// === BoundaryRequest / BoundaryResponse Contract (Canonical Machine Contract v3) ===
+//
+// BoundaryRequest = {operation: string, input: Mu, context: object, inject_key: string}
+// BoundaryResponse = context with result injected at inject_key
+//
+// Closed operation set (seed-derived authority via _ensureBoundaryOps()):
+//   "run_trace"      — execute trace via run()/runStructural()
+//   "hash_trace"     — SHA256 per trace entry
+//   "run_algorithm"  — run sub-algorithm via runAlgorithmWithBridge()
+//
 // Dispatch map: operation name → handler function (A10 structural displacement).
 // Authority for valid operations comes from seed-derived _ensureBoundaryOps().
 const BOUNDARY_DISPATCH = Object.freeze({

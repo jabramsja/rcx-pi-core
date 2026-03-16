@@ -1396,24 +1396,22 @@ def step_kernel_mu(
                 is_stall = result.get("_stall") is True
                 output = extract_kernel_result(result, input_value)
                 validator(output, "step_kernel_mu output")
-                if return_meta:
-                    reason = "kernel_stall" if is_stall else "projection_applied"
-                    meta = {
-                        "output": output,
-                        "stall": bool(is_stall),
-                        "termination_reason": reason,
-                        "steps_used": step_i + 1,
-                        "max_steps": max_steps,
-                    }
-                    if is_stall:
-                        meta["undefined_motif"] = make_undefined_motif(
-                            op="kernel",
-                            lhs=input_value,
-                            rhs=None,
-                            cause="no_matching_projection",
-                        )
-                    return meta
-                return output
+                reason = "kernel_stall" if is_stall else "projection_applied"
+                canonical = {
+                    "output": output,
+                    "stall": bool(is_stall),
+                    "termination_reason": reason,
+                    "steps_used": step_i + 1,
+                    "max_steps": max_steps,
+                }
+                if is_stall:
+                    canonical["undefined_motif"] = make_undefined_motif(
+                        op="kernel",
+                        lhs=input_value,
+                        rhs=None,
+                        cause="no_matching_projection",
+                    )
+                return canonical if return_meta else canonical["output"]
 
             # Stall check - no change means no progress
             # Skip for intermediate kernel states (they have deep nested structures
@@ -1422,30 +1420,28 @@ def step_kernel_mu(
                 result_hash = mu_hash_control_cached(result, "step_kernel_mu.stall")
                 if result_hash == current_hash:
                     validator(input_value, "step_kernel_mu output")
-                    if return_meta:
-                        return {
-                            "output": input_value,
-                            "stall": True,
-                            "termination_reason": "hash_stall",
-                            "steps_used": step_i + 1,
-                            "max_steps": max_steps,
-                        }
-                    return input_value
+                    canonical = {
+                        "output": input_value,
+                        "stall": True,
+                        "termination_reason": "hash_stall",
+                        "steps_used": step_i + 1,
+                        "max_steps": max_steps,
+                    }
+                    return canonical if return_meta else canonical["output"]
                 current_hash = result_hash
 
             current = result
 
         # Max steps exceeded - return original input (stall)
         validator(input_value, "step_kernel_mu output")
-        if return_meta:
-            return {
-                "output": input_value,
-                "stall": True,
-                "termination_reason": "max_steps_exhausted",
-                "steps_used": max_steps,
-                "max_steps": max_steps,
-            }
-        return input_value
+        canonical = {
+            "output": input_value,
+            "stall": True,
+            "termination_reason": "max_steps_exhausted",
+            "steps_used": max_steps,
+            "max_steps": max_steps,
+        }
+        return canonical if return_meta else canonical["output"]
     finally:
         if started_budget:
             budget.stop()
