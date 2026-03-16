@@ -47,6 +47,16 @@ Do not accept structural claims without execution proof. **Run the artifacts.**
 1. Tie each claim verdict to code/tests/docs evidence.
 2. If proof is partial, state exact missing artifacts.
 
+4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+   ```
+   FINDING: <description>
+   FILE: /absolute/path/file.ext
+   LINES: <start>-<end>
+   CODE: <actual code snippet>
+   VERIFIED: Yes
+   ```
+   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
+
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 

@@ -2412,8 +2412,8 @@
       "entries": [
         {
           "file": "mu/host/js/api/json_handlers.js",
-          "line": 36,
-          "name": "guardIterationCap",
+          "line": 23,
+          "name": "guardMaxSteps",
           "signals": [
             "builtin:Number.isInteger"
           ],
@@ -2421,8 +2421,8 @@
         },
         {
           "file": "mu/host/js/api/json_handlers.js",
-          "line": 23,
-          "name": "guardMaxSteps",
+          "line": 36,
+          "name": "guardIterationCap",
           "signals": [
             "builtin:Number.isInteger"
           ],
@@ -2451,10 +2451,29 @@
         },
         {
           "file": "mu/host/js/cli/main.js",
-          "line": 205,
-          "name": "loadVerifiedSeed",
+          "line": 122,
+          "name": "verifySeedChecksum",
           "signals": [
-            "builtin:JSON.parse"
+            "mutation:.update("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/cli/main.js",
+          "line": 131,
+          "name": "validateSeedStructure",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/cli/main.js",
+          "line": 149,
+          "name": "validateProjectionIds",
+          "signals": [
+            "loop"
           ],
           "substrate": "javascript"
         },
@@ -2472,20 +2491,10 @@
         },
         {
           "file": "mu/host/js/cli/main.js",
-          "line": 149,
-          "name": "validateProjectionIds",
+          "line": 205,
+          "name": "loadVerifiedSeed",
           "signals": [
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/cli/main.js",
-          "line": 131,
-          "name": "validateSeedStructure",
-          "signals": [
-            "builtin:Array.isArray",
-            "loop"
+            "builtin:JSON.parse"
           ],
           "substrate": "javascript"
         },
@@ -2497,11 +2506,47 @@
           "substrate": "javascript"
         },
         {
-          "file": "mu/host/js/cli/main.js",
-          "line": 122,
-          "name": "verifySeedChecksum",
+          "file": "mu/host/js/core/bootstrap_core.js",
+          "line": 18,
+          "name": "match",
           "signals": [
-            "mutation:.update("
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "builtin:muHashCached(",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/bootstrap_core.js",
+          "line": 173,
+          "name": "substitute",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/bootstrap_core.js",
+          "line": 242,
+          "name": "applyProjection",
+          "signals": [
+            "builtin:Array.isArray"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/bootstrap_core.js",
+          "line": 277,
+          "name": "step",
+          "signals": [
+            "loop"
           ],
           "substrate": "javascript"
         },
@@ -2525,11 +2570,9 @@
         },
         {
           "file": "mu/host/js/core/bootstrap_core.js",
-          "line": 242,
-          "name": "applyProjection",
-          "signals": [
-            "builtin:Array.isArray"
-          ],
+          "line": 338,
+          "name": "isKernelTerminal",
+          "signals": [],
           "substrate": "javascript"
         },
         {
@@ -2543,13 +2586,6 @@
         },
         {
           "file": "mu/host/js/core/bootstrap_core.js",
-          "line": 338,
-          "name": "isKernelTerminal",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/bootstrap_core.js",
           "line": 358,
           "name": "makeUndefinedMotif",
           "signals": [
@@ -2559,16 +2595,10 @@
         },
         {
           "file": "mu/host/js/core/bootstrap_core.js",
-          "line": 18,
-          "name": "match",
+          "line": 364,
+          "name": "safeHash",
           "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.entries",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "builtin:muHashCached(",
-            "loop",
-            "recursion"
+            "builtin:muHashCached("
           ],
           "substrate": "javascript"
         },
@@ -2580,15 +2610,6 @@
             "builtin:Array.isArray",
             "loop",
             "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/bootstrap_core.js",
-          "line": 364,
-          "name": "safeHash",
-          "signals": [
-            "builtin:muHashCached("
           ],
           "substrate": "javascript"
         },
@@ -2620,84 +2641,10 @@
           "substrate": "javascript"
         },
         {
-          "file": "mu/host/js/core/bootstrap_core.js",
-          "line": 277,
-          "name": "step",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/bootstrap_core.js",
-          "line": 173,
-          "name": "substitute",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.entries",
-            "loop",
-            "recursion"
-          ],
-          "substrate": "javascript"
-        },
-        {
           "file": "mu/host/js/core/constants.js",
           "line": 158,
           "name": "classifyError",
           "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/normalize.js",
-          "line": 259,
-          "name": "_collectDictKVPairs",
-          "signals": [
-            "loop",
-            "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/normalize.js",
-          "line": 235,
-          "name": "_collectListElements",
-          "signals": [
-            "loop",
-            "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/normalize.js",
-          "line": 224,
-          "name": "_safeSummary",
-          "signals": [
-            "builtin:Object.keys"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/normalize.js",
-          "line": 42,
-          "name": "classifyLegacyLinkedList",
-          "signals": [
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop",
-            "mutation:.add(",
-            "mutation:.sort("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/normalize.js",
-          "line": 286,
-          "name": "denormalize",
-          "signals": [
-            "builtin:Object.entries",
-            "loop",
-            "recursion"
-          ],
           "substrate": "javascript"
         },
         {
@@ -2723,11 +2670,14 @@
         },
         {
           "file": "mu/host/js/core/normalize.js",
-          "line": 379,
-          "name": "listToLinked",
+          "line": 42,
+          "name": "classifyLegacyLinkedList",
           "signals": [
-            "builtin:Array.isArray",
-            "loop"
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add(",
+            "mutation:.sort("
           ],
           "substrate": "javascript"
         },
@@ -2746,8 +2696,102 @@
         },
         {
           "file": "mu/host/js/core/normalize.js",
+          "line": 224,
+          "name": "_safeSummary",
+          "signals": [
+            "builtin:Object.keys"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/normalize.js",
+          "line": 235,
+          "name": "_collectListElements",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/normalize.js",
+          "line": 259,
+          "name": "_collectDictKVPairs",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/normalize.js",
+          "line": 286,
+          "name": "denormalize",
+          "signals": [
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/normalize.js",
           "line": 369,
           "name": "normalizeProjection",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/normalize.js",
+          "line": 379,
+          "name": "listToLinked",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/security.js",
+          "line": 17,
+          "name": "iterNormalizedDictPairs",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add(",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/security.js",
+          "line": 75,
+          "name": "looksLikeNormalizedDictCandidate",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "builtin:Set("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/security.js",
+          "line": 108,
+          "name": "_walkAndValidate",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/security.js",
+          "line": 159,
+          "name": "_checkKernelReserved",
           "signals": [],
           "substrate": "javascript"
         },
@@ -2760,20 +2804,37 @@
         },
         {
           "file": "mu/host/js/core/security.js",
-          "line": 159,
-          "name": "_checkKernelReserved",
+          "line": 178,
+          "name": "validateNoKernelReservedFields",
           "signals": [],
           "substrate": "javascript"
         },
         {
           "file": "mu/host/js/core/security.js",
-          "line": 108,
-          "name": "_walkAndValidate",
+          "line": 187,
+          "name": "validateAlgorithmRuntimeFields",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/security.js",
+          "line": 197,
+          "name": "hasNonlinearVars",
           "signals": [
             "builtin:Array.isArray",
-            "builtin:Object.entries",
+            "builtin:Object.keys",
             "loop",
-            "recursion"
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/security.js",
+          "line": 247,
+          "name": "rejectNonlinearProjections",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
           ],
           "substrate": "javascript"
         },
@@ -2822,71 +2883,13 @@
           "substrate": "javascript"
         },
         {
-          "file": "mu/host/js/core/security.js",
-          "line": 197,
-          "name": "hasNonlinearVars",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "loop",
-            "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/security.js",
-          "line": 17,
-          "name": "iterNormalizedDictPairs",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop",
-            "mutation:.add(",
-            "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/security.js",
-          "line": 75,
-          "name": "looksLikeNormalizedDictCandidate",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "builtin:Set("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/security.js",
-          "line": 247,
-          "name": "rejectNonlinearProjections",
-          "signals": [
-            "builtin:Array.isArray",
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/security.js",
-          "line": 187,
-          "name": "validateAlgorithmRuntimeFields",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/security.js",
-          "line": 178,
-          "name": "validateNoKernelReservedFields",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
           "file": "mu/host/js/core/seed_loader.js",
-          "line": 204,
-          "name": "getSeedChecksum",
-          "signals": [],
+          "line": 73,
+          "name": "validateSeedDependencies",
+          "signals": [
+            "loop",
+            "mutation:.push("
+          ],
           "substrate": "javascript"
         },
         {
@@ -2918,11 +2921,17 @@
         },
         {
           "file": "mu/host/js/core/seed_loader.js",
-          "line": 73,
-          "name": "validateSeedDependencies",
+          "line": 204,
+          "name": "getSeedChecksum",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 74,
+          "name": "_isPlainObject",
           "signals": [
-            "loop",
-            "mutation:.push("
+            "builtin:Array.isArray"
           ],
           "substrate": "javascript"
         },
@@ -2937,38 +2946,10 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 74,
-          "name": "_isPlainObject",
+          "line": 91,
+          "name": "resolvePath",
           "signals": [
-            "builtin:Array.isArray"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 458,
-          "name": "_rejectSymbolKeys",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 443,
-          "name": "_safeStringify",
-          "signals": [
-            "builtin:JSON.stringify"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 229,
-          "name": "checkNoFloats",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Number.isInteger",
-            "loop",
-            "mutation:.push("
+            "loop"
           ],
           "substrate": "javascript"
         },
@@ -2978,29 +2959,6 @@
           "name": "classifyKind",
           "signals": [
             "builtin:Number.isInteger"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 345,
-          "name": "materializeTemplate",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.entries",
-            "loop",
-            "recursion"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 193,
-          "name": "muCopy",
-          "signals": [
-            "builtin:Object.keys",
-            "loop",
-            "recursion"
           ],
           "substrate": "javascript"
         },
@@ -3019,10 +2977,19 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 91,
-          "name": "resolvePath",
+          "line": 179,
+          "name": "safeMuDeepEqual",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 193,
+          "name": "muCopy",
           "signals": [
-            "loop"
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
           ],
           "substrate": "javascript"
         },
@@ -3035,16 +3002,11 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 179,
-          "name": "safeMuDeepEqual",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 886,
-          "name": "stage0VmRun",
+          "line": 229,
+          "name": "checkNoFloats",
           "signals": [
+            "builtin:Array.isArray",
+            "builtin:Number.isInteger",
             "loop",
             "mutation:.push("
           ],
@@ -3052,15 +3014,51 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 722,
-          "name": "stage0VmStep",
+          "line": 278,
+          "name": "validateTemplate",
           "signals": [
-            "builtin:Object.entries",
-            "builtin:Object.keys",
+            "builtin:Object.getOwnPropertyNames",
             "builtin:Set(",
             "loop",
-            "mutation:.add("
+            "mutation:.push("
           ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 345,
+          "name": "materializeTemplate",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.entries",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 401,
+          "name": "validatePath",
+          "signals": [
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 443,
+          "name": "_safeStringify",
+          "signals": [
+            "builtin:JSON.stringify"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
+          "line": 458,
+          "name": "_rejectSymbolKeys",
+          "signals": [],
           "substrate": "javascript"
         },
         {
@@ -3080,30 +3078,25 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 401,
-          "name": "validatePath",
+          "line": 722,
+          "name": "stage0VmStep",
           "signals": [
-            "loop"
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
           ],
           "substrate": "javascript"
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 278,
-          "name": "validateTemplate",
+          "line": 886,
+          "name": "stage0VmRun",
           "signals": [
-            "builtin:Object.getOwnPropertyNames",
-            "builtin:Set(",
             "loop",
             "mutation:.push("
           ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/terminal_classification.js",
-          "line": 174,
-          "name": "_clearTcCache",
-          "signals": [],
           "substrate": "javascript"
         },
         {
@@ -3120,25 +3113,18 @@
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 150,
-          "name": "_ensureHemiKeys",
+          "line": 38,
+          "name": "_muBool",
           "signals": [
-            "builtin:Set(",
-            "loop"
+            "builtin:Array.isArray",
+            "builtin:Object.keys"
           ],
           "substrate": "javascript"
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 90,
-          "name": "_ensureKeySets",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/terminal_classification.js",
-          "line": 139,
-          "name": "_loadHemiSeed",
+          "line": 57,
+          "name": "_loadTcSeed",
           "signals": [],
           "substrate": "javascript"
         },
@@ -3155,6 +3141,13 @@
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
+          "line": 90,
+          "name": "_ensureKeySets",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/terminal_classification.js",
           "line": 104,
           "name": "_loadTcProjections",
           "signals": [
@@ -3165,18 +3158,34 @@
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 57,
-          "name": "_loadTcSeed",
+          "line": 139,
+          "name": "_loadHemiSeed",
           "signals": [],
           "substrate": "javascript"
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 38,
-          "name": "_muBool",
+          "line": 150,
+          "name": "_ensureHemiKeys",
           "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys"
+            "builtin:Set(",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/terminal_classification.js",
+          "line": 174,
+          "name": "_clearTcCache",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/terminal_classification.js",
+          "line": 194,
+          "name": "setsEqual",
+          "signals": [
+            "loop"
           ],
           "substrate": "javascript"
         },
@@ -3193,17 +3202,8 @@
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 280,
-          "name": "defaultHemispheres",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/terminal_classification.js",
-          "line": 254,
-          "name": "deriveEngineExitReason",
+          "line": 237,
+          "name": "isTerminalShape",
           "signals": [],
           "substrate": "javascript"
         },
@@ -3216,50 +3216,15 @@
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 237,
-          "name": "isTerminalShape",
+          "line": 254,
+          "name": "deriveEngineExitReason",
           "signals": [],
           "substrate": "javascript"
         },
         {
           "file": "mu/host/js/core/terminal_classification.js",
-          "line": 194,
-          "name": "setsEqual",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/types.js",
-          "line": 221,
-          "name": "canonicalize",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:JSON.stringify",
-            "builtin:Object.keys",
-            "loop",
-            "mutation:.sort(",
-            "recursion"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/types.js",
           "line": 280,
-          "name": "canonicalizeHashNumeric",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "loop",
-            "recursion"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/types.js",
-          "line": 189,
-          "name": "compareMuStringKeysByCodepoint",
+          "name": "defaultHemispheres",
           "signals": [
             "loop"
           ],
@@ -3267,9 +3232,13 @@
         },
         {
           "file": "mu/host/js/core/types.js",
-          "line": 43,
-          "name": "consumeBudget",
-          "signals": [],
+          "line": 24,
+          "name": "makeDepthBudget",
+          "signals": [
+            "builtin:Object.freeze",
+            "loop",
+            "mutation:.freeze("
+          ],
           "substrate": "javascript"
         },
         {
@@ -3285,16 +3254,9 @@
         },
         {
           "file": "mu/host/js/core/types.js",
-          "line": 86,
-          "name": "isValidMu",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "mutation:.add(",
-            "mutation:.delete(",
-            "recursion"
-          ],
+          "line": 43,
+          "name": "consumeBudget",
+          "signals": [],
           "substrate": "javascript"
         },
         {
@@ -3316,12 +3278,15 @@
         },
         {
           "file": "mu/host/js/core/types.js",
-          "line": 24,
-          "name": "makeDepthBudget",
+          "line": 86,
+          "name": "isValidMu",
           "signals": [
-            "builtin:Object.freeze",
-            "loop",
-            "mutation:.freeze("
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "mutation:.add(",
+            "mutation:.delete(",
+            "recursion"
           ],
           "substrate": "javascript"
         },
@@ -3331,6 +3296,15 @@
           "name": "muEqual",
           "signals": [
             "builtin:muHashCached("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/types.js",
+          "line": 189,
+          "name": "compareMuStringKeysByCodepoint",
+          "signals": [
+            "loop"
           ],
           "substrate": "javascript"
         },
@@ -3350,6 +3324,20 @@
         },
         {
           "file": "mu/host/js/core/types.js",
+          "line": 221,
+          "name": "canonicalize",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:JSON.stringify",
+            "builtin:Object.keys",
+            "loop",
+            "mutation:.sort(",
+            "recursion"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/types.js",
           "line": 246,
           "name": "muHashCached",
           "signals": [
@@ -3361,6 +3349,18 @@
             "mutation:.delete(",
             "mutation:.set(",
             "mutation:.sort("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/types.js",
+          "line": 280,
+          "name": "canonicalizeHashNumeric",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "loop",
+            "recursion"
           ],
           "substrate": "javascript"
         },
@@ -3384,6 +3384,22 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
+          "line": 22,
+          "name": "_stepKernelWithVM",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/kernel.js",
+          "line": 22,
+          "name": "_assertVmMatchResult",
+          "signals": [
+            "typeof"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/kernel.js",
           "line": 49,
           "name": "_stepKernelCore",
           "signals": [
@@ -3402,8 +3418,8 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 22,
-          "name": "_stepKernelWithVM",
+          "line": 164,
+          "name": "stepKernel",
           "signals": [],
           "substrate": "javascript"
         },
@@ -3419,13 +3435,6 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 164,
-          "name": "stepKernel",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/kernel.js",
           "line": 365,
           "name": "stepKernelStructural",
           "signals": [],
@@ -3433,8 +3442,8 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 73,
-          "name": "_clearBoundaryOpsCache",
+          "line": 33,
+          "name": "_loadEngineSeed",
           "signals": [],
           "substrate": "javascript"
         },
@@ -3452,9 +3461,53 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 33,
-          "name": "_loadEngineSeed",
+          "line": 73,
+          "name": "_clearBoundaryOpsCache",
           "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 78,
+          "name": "runAlgorithmWithBridge",
+          "signals": [
+            "builtin:Array.isArray",
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 145,
+          "name": "runSubAlgorithm",
+          "signals": [
+            "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 164,
+          "name": "hashTraceForRecurrence",
+          "signals": [
+            "builtin:Set(",
+            "builtin:muHashControl(",
+            "loop",
+            "mutation:.add(",
+            "mutation:.assign(",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 208,
+          "name": "boundaryOpRunTrace",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Math.",
+            "loop"
+          ],
           "substrate": "javascript"
         },
         {
@@ -3473,12 +3526,54 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 208,
-          "name": "boundaryOpRunTrace",
+          "line": 295,
+          "name": "enableTestMode",
+          "signals": [],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 296,
+          "name": "setTestDispatchOverride",
           "signals": [
             "builtin:Array.isArray",
-            "builtin:Math.",
+            "builtin:Object.keys",
+            "builtin:Set(",
             "loop"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 324,
+          "name": "serviceBoundaryEffect",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.assign("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 462,
+          "name": "validateReentryPayload",
+          "signals": [
+            "builtin:Array.isArray"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 505,
+          "name": "validateOntologyPromotionRecord",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
           ],
           "substrate": "javascript"
         },
@@ -3507,48 +3602,6 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 842,
-          "name": "emit",
-          "signals": [
-            "builtin:muHash(",
-            "mutation:.assign(",
-            "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 295,
-          "name": "enableTestMode",
-          "signals": [],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 164,
-          "name": "hashTraceForRecurrence",
-          "signals": [
-            "builtin:Set(",
-            "builtin:muHashControl(",
-            "loop",
-            "mutation:.add(",
-            "mutation:.assign(",
-            "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 78,
-          "name": "runAlgorithmWithBridge",
-          "signals": [
-            "builtin:Array.isArray",
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
           "line": 809,
           "name": "runEnginePipeline",
           "signals": [
@@ -3556,6 +3609,17 @@
             "builtin:Object.keys",
             "builtin:muHash(",
             "loop",
+            "mutation:.assign(",
+            "mutation:.push("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
+          "line": 842,
+          "name": "emit",
+          "signals": [
+            "builtin:muHash(",
             "mutation:.assign(",
             "mutation:.push("
           ],
@@ -3576,57 +3640,14 @@
           "substrate": "javascript"
         },
         {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 145,
-          "name": "runSubAlgorithm",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 324,
-          "name": "serviceBoundaryEffect",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop",
-            "mutation:.assign("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 296,
-          "name": "setTestDispatchOverride",
+          "file": "mu/host/js/engine/routing.js",
+          "line": 13,
+          "name": "runHemisphereRouting",
           "signals": [
             "builtin:Array.isArray",
             "builtin:Object.keys",
             "builtin:Set(",
             "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 505,
-          "name": "validateOntologyPromotionRecord",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Set(",
-            "loop",
-            "mutation:.add("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/pipeline.js",
-          "line": 462,
-          "name": "validateReentryPayload",
-          "signals": [
-            "builtin:Array.isArray"
           ],
           "substrate": "javascript"
         },
@@ -3642,32 +3663,6 @@
         },
         {
           "file": "mu/host/js/engine/routing.js",
-          "line": 130,
-          "name": "runEngineWithRouting",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop",
-            "mutation:.assign(",
-            "mutation:.sort("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/routing.js",
-          "line": 13,
-          "name": "runHemisphereRouting",
-          "signals": [
-            "builtin:Array.isArray",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop"
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/engine/routing.js",
           "line": 84,
           "name": "runMetabolizationCycle",
           "signals": [
@@ -3676,6 +3671,20 @@
             "builtin:Object.keys",
             "builtin:Set(",
             "loop",
+            "mutation:.sort("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/routing.js",
+          "line": 130,
+          "name": "runEngineWithRouting",
+          "signals": [
+            "builtin:Array.isArray",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.assign(",
             "mutation:.sort("
           ],
           "substrate": "javascript"
@@ -3717,29 +3726,52 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 673,
-          "name": "_boundary_op_hash_trace",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 688,
-          "name": "_boundary_op_run_algorithm",
+          "line": 64,
+          "name": "_load_boundary_ops",
           "signals": [
             "builtin:isinstance",
-            "builtin:sorted"
+            "builtin:len",
+            "builtin:set",
+            "builtin:sorted",
+            "loop",
+            "mutation:add"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 634,
-          "name": "_boundary_op_run_trace",
+          "line": 99,
+          "name": "_clear_boundary_ops_cache",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 110,
+          "name": "_validate_reentry_payload",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 171,
+          "name": "_derive_opromo_fully_locked_seeds",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 195,
+          "name": "_validate_ontology_promotion_record",
           "signals": [
             "builtin:enumerate",
             "builtin:isinstance",
-            "loop"
+            "builtin:len",
+            "builtin:set",
+            "loop",
+            "mutation:add"
           ],
           "substrate": "python"
         },
@@ -3755,9 +3787,18 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 99,
-          "name": "_clear_boundary_ops_cache",
+          "line": 504,
+          "name": "_is_engine_terminal",
           "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 515,
+          "name": "_derive_engine_exit_reason",
+          "signals": [
+            "builtin:isinstance"
+          ],
           "substrate": "python"
         },
         {
@@ -3778,47 +3819,62 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1470,
-          "name": "_default_hemispheres",
+          "line": 634,
+          "name": "_boundary_op_run_trace",
           "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
             "loop"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 515,
-          "name": "_derive_engine_exit_reason",
+          "line": 673,
+          "name": "_boundary_op_hash_trace",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 688,
+          "name": "_boundary_op_run_algorithm",
           "signals": [
-            "builtin:isinstance"
+            "builtin:isinstance",
+            "builtin:sorted"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 171,
-          "name": "_derive_opromo_fully_locked_seeds",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 504,
-          "name": "_is_engine_terminal",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 64,
-          "name": "_load_boundary_ops",
+          "line": 715,
+          "name": "_service_boundary_effect",
           "signals": [
+            "builtin:dict",
             "builtin:isinstance",
-            "builtin:len",
-            "builtin:set",
             "builtin:sorted",
             "loop",
-            "mutation:add"
+            "mutation:assignment",
+            "mutation:pop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 878,
+          "name": "hash_trace_for_recurrence",
+          "signals": [
+            "authority_call:mu_hash_control",
+            "builtin:dict",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:min",
+            "builtin:reversed",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:append",
+            "mutation:assignment"
           ],
           "substrate": "python"
         },
@@ -3849,74 +3905,6 @@
             "mutation:append",
             "mutation:augassign",
             "mutation:update"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 715,
-          "name": "_service_boundary_effect",
-          "signals": [
-            "builtin:dict",
-            "builtin:isinstance",
-            "builtin:sorted",
-            "loop",
-            "mutation:assignment",
-            "mutation:pop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 195,
-          "name": "_validate_ontology_promotion_record",
-          "signals": [
-            "builtin:enumerate",
-            "builtin:isinstance",
-            "builtin:len",
-            "builtin:set",
-            "loop",
-            "mutation:add"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 110,
-          "name": "_validate_reentry_payload",
-          "signals": [
-            "builtin:isinstance"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1374,
-          "name": "count_hemisphere_entries",
-          "signals": [
-            "builtin:enumerate",
-            "builtin:isinstance",
-            "builtin:len",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 878,
-          "name": "hash_trace_for_recurrence",
-          "signals": [
-            "authority_call:mu_hash_control",
-            "builtin:dict",
-            "builtin:isinstance",
-            "builtin:len",
-            "builtin:min",
-            "builtin:reversed",
-            "builtin:set",
-            "loop",
-            "mutation:add",
-            "mutation:append",
-            "mutation:assignment"
           ],
           "substrate": "python"
         },
@@ -3953,24 +3941,24 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1475,
-          "name": "run_engine_with_routing",
-          "signals": [
-            "builtin:isinstance",
-            "builtin:set",
-            "builtin:sorted",
-            "mutation:pop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/engine_pipeline.py",
           "line": 1339,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
             "builtin:set",
             "builtin:sorted"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 1374,
+          "name": "count_hemisphere_entries",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:len",
+            "loop"
           ],
           "substrate": "python"
         },
@@ -3987,10 +3975,24 @@
           "substrate": "python"
         },
         {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 241,
-          "name": "__repr__",
-          "signals": [],
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 1470,
+          "name": "_default_hemispheres",
+          "signals": [
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 1475,
+          "name": "run_engine_with_routing",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:set",
+            "builtin:sorted",
+            "mutation:pop"
+          ],
           "substrate": "python"
         },
         {
@@ -4002,70 +4004,58 @@
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 833,
-          "name": "_apply_projection_trusted",
-          "signals": [
-            "builtin:isinstance"
-          ],
+          "line": 65,
+          "name": "host_recursion",
+          "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 316,
-          "name": "_match_inner",
-          "signals": [
-            "authority_call:mu_hash_cached",
-            "builtin:isinstance",
-            "builtin:len",
-            "builtin:set",
-            "builtin:zip",
-            "loop",
-            "recursion"
-          ],
+          "line": 77,
+          "name": "host_recursion.decorator",
+          "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 534,
-          "name": "_stage0_match",
-          "signals": [
-            "authority_call:mu_hash_cached",
-            "builtin:isinstance",
-            "loop",
-            "recursion"
-          ],
+          "line": 82,
+          "name": "host_builtin",
+          "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 609,
-          "name": "_stage0_substitute",
-          "signals": [
-            "builtin:dict",
-            "builtin:isinstance",
-            "builtin:list",
-            "loop",
-            "recursion"
-          ],
+          "line": 87,
+          "name": "host_builtin.decorator",
+          "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 882,
-          "name": "_step_trusted",
-          "signals": [
-            "builtin:isinstance",
-            "loop"
-          ],
+          "line": 92,
+          "name": "host_mutation",
+          "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 722,
-          "name": "apply_projection",
-          "signals": [
-            "builtin:isinstance"
-          ],
+          "line": 97,
+          "name": "host_mutation.decorator",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 102,
+          "name": "host_iteration",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 108,
+          "name": "host_iteration.decorator",
+          "signals": [],
           "substrate": "python"
         },
         {
@@ -4119,64 +4109,8 @@
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 263,
-          "name": "get_var_name",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 82,
-          "name": "host_builtin",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 87,
-          "name": "host_builtin.decorator",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 102,
-          "name": "host_iteration",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 108,
-          "name": "host_iteration.decorator",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 92,
-          "name": "host_mutation",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 97,
-          "name": "host_mutation.decorator",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 65,
-          "name": "host_recursion",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 77,
-          "name": "host_recursion.decorator",
+          "line": 241,
+          "name": "__repr__",
           "signals": [],
           "substrate": "python"
         },
@@ -4192,8 +4126,75 @@
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 263,
+          "name": "get_var_name",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
           "line": 281,
           "name": "match",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 316,
+          "name": "_match_inner",
+          "signals": [
+            "authority_call:mu_hash_cached",
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
+            "builtin:zip",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 534,
+          "name": "_stage0_match",
+          "signals": [
+            "authority_call:mu_hash_cached",
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 609,
+          "name": "_stage0_substitute",
+          "signals": [
+            "builtin:dict",
+            "builtin:isinstance",
+            "builtin:list",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 639,
+          "name": "substitute",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 722,
+          "name": "apply_projection",
           "signals": [
             "builtin:isinstance"
           ],
@@ -4211,12 +4212,20 @@
         },
         {
           "file": "rcx_pi/selfhost/eval_seed.py",
-          "line": 639,
-          "name": "substitute",
+          "line": 833,
+          "name": "_apply_projection_trusted",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/eval_seed.py",
+          "line": 882,
+          "name": "_step_trusted",
           "signals": [
             "builtin:isinstance",
-            "loop",
-            "recursion"
+            "loop"
           ],
           "substrate": "python"
         },
@@ -4224,6 +4233,31 @@
           "file": "rcx_pi/selfhost/kernel.py",
           "line": 48,
           "name": "__init__",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/kernel.py",
+          "line": 53,
+          "name": "start",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/kernel.py",
+          "line": 59,
+          "name": "stop",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/kernel.py",
+          "line": 63,
+          "name": "is_active",
           "signals": [],
           "substrate": "python"
         },
@@ -4247,15 +4281,6 @@
         },
         {
           "file": "rcx_pi/selfhost/kernel.py",
-          "line": 108,
-          "name": "get_step_budget",
-          "signals": [
-            "mutation:assignment"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/kernel.py",
           "line": 99,
           "name": "get_total",
           "signals": [],
@@ -4263,9 +4288,11 @@
         },
         {
           "file": "rcx_pi/selfhost/kernel.py",
-          "line": 63,
-          "name": "is_active",
-          "signals": [],
+          "line": 108,
+          "name": "get_step_budget",
+          "signals": [
+            "mutation:assignment"
+          ],
           "substrate": "python"
         },
         {
@@ -4278,21 +4305,39 @@
           "substrate": "python"
         },
         {
-          "file": "rcx_pi/selfhost/kernel.py",
-          "line": 53,
-          "name": "start",
+          "file": "rcx_pi/selfhost/match_mu.py",
+          "line": 30,
+          "name": "validate_type_tag",
           "signals": [
-            "mutation:assignment"
+            "builtin:sorted"
           ],
           "substrate": "python"
         },
         {
-          "file": "rcx_pi/selfhost/kernel.py",
-          "line": 59,
-          "name": "stop",
+          "file": "rcx_pi/selfhost/match_mu.py",
+          "line": 66,
+          "name": "_validate_match_bridge_ordering",
           "signals": [
-            "mutation:assignment"
+            "builtin:enumerate",
+            "loop"
           ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/match_mu.py",
+          "line": 103,
+          "name": "load_match_with_bridge_projections",
+          "signals": [
+            "builtin:enumerate",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/match_mu.py",
+          "line": 158,
+          "name": "clear_match_bridge_cache",
+          "signals": [],
           "substrate": "python"
         },
         {
@@ -4311,19 +4356,40 @@
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 555,
-          "name": "_collect_elements",
-          "signals": [],
+          "line": 233,
+          "name": "normalize_for_match",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
+            "builtin:sorted",
+            "loop",
+            "mutation:add",
+            "mutation:append",
+            "mutation:assignment",
+            "mutation:pop"
+          ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 541,
-          "name": "_collect_kv_pairs",
+          "line": 439,
+          "name": "is_kv_pair_linked",
           "signals": [
             "builtin:isinstance",
+            "builtin:set"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/match_mu.py",
+          "line": 465,
+          "name": "is_dict_linked_list",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:set",
             "loop",
-            "mutation:append"
+            "mutation:add"
           ],
           "substrate": "python"
         },
@@ -4343,29 +4409,19 @@
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 66,
-          "name": "_validate_match_bridge_ordering",
-          "signals": [
-            "builtin:enumerate",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 771,
-          "name": "bindings_to_dict",
+          "line": 541,
+          "name": "_collect_kv_pairs",
           "signals": [
             "builtin:isinstance",
             "loop",
-            "mutation:assignment"
+            "mutation:append"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 158,
-          "name": "clear_match_bridge_cache",
+          "line": 555,
+          "name": "_collect_elements",
           "signals": [],
           "substrate": "python"
         },
@@ -4389,42 +4445,21 @@
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
+          "line": 771,
+          "name": "bindings_to_dict",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/match_mu.py",
           "line": 808,
           "name": "dict_to_bindings",
           "signals": [
             "builtin:sorted",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 465,
-          "name": "is_dict_linked_list",
-          "signals": [
-            "builtin:isinstance",
-            "builtin:set",
-            "loop",
-            "mutation:add"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 439,
-          "name": "is_kv_pair_linked",
-          "signals": [
-            "builtin:isinstance",
-            "builtin:set"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 103,
-          "name": "load_match_with_bridge_projections",
-          "signals": [
-            "builtin:enumerate",
             "loop"
           ],
           "substrate": "python"
@@ -4439,62 +4474,41 @@
           "substrate": "python"
         },
         {
-          "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 233,
-          "name": "normalize_for_match",
+          "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 50,
+          "name": "make_depth_budget",
           "signals": [
-            "builtin:isinstance",
-            "builtin:len",
-            "builtin:set",
-            "builtin:sorted",
-            "loop",
-            "mutation:add",
-            "mutation:append",
-            "mutation:assignment",
-            "mutation:pop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 30,
-          "name": "validate_type_tag",
-          "signals": [
-            "builtin:sorted"
+            "loop"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 632,
-          "name": "_canonicalize_hash_numeric",
+          "line": 62,
+          "name": "consume_budget",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 91,
+          "name": "is_mu",
           "signals": [
+            "builtin:all",
             "builtin:isinstance",
+            "builtin:len",
+            "builtin:set",
             "loop",
+            "mutation:add",
+            "mutation:assignment",
             "recursion"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 561,
-          "name": "_compute_mu_hash",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 436,
-          "name": "assert_handler_pure",
-          "signals": [
-            "mutation:assignment"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 461,
-          "name": "assert_handler_pure.wrapped",
+          "line": 255,
+          "name": "validate_mu",
           "signals": [],
           "substrate": "python"
         },
@@ -4507,9 +4521,25 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 711,
-          "name": "assert_no_bootstrap_in_production",
-          "signals": [],
+          "line": 292,
+          "name": "mu_type_name",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 323,
+          "name": "find_callable_path",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "recursion"
+          ],
           "substrate": "python"
         },
         {
@@ -4532,65 +4562,26 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 62,
-          "name": "consume_budget",
+          "line": 436,
+          "name": "assert_handler_pure",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 461,
+          "name": "assert_handler_pure.wrapped",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 323,
-          "name": "find_callable_path",
-          "signals": [
-            "builtin:enumerate",
-            "builtin:isinstance",
-            "builtin:set",
-            "loop",
-            "mutation:add",
-            "recursion"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 706,
-          "name": "get_bootstrap_registry",
-          "signals": [
-            "builtin:list"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 91,
-          "name": "is_mu",
-          "signals": [
-            "builtin:all",
-            "builtin:isinstance",
-            "builtin:len",
-            "builtin:set",
-            "loop",
-            "mutation:add",
-            "mutation:assignment",
-            "recursion"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 50,
-          "name": "make_depth_budget",
+          "line": 477,
+          "name": "validate_kernel_boundary",
           "signals": [
             "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 690,
-          "name": "mark_bootstrap",
-          "signals": [
-            "mutation:append"
           ],
           "substrate": "python"
         },
@@ -4605,13 +4596,6 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 600,
-          "name": "mu_hash",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
           "line": 550,
           "name": "mu_hash_cache_clear",
           "signals": [
@@ -4621,11 +4605,36 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 561,
+          "name": "_compute_mu_hash",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/mu_type.py",
           "line": 566,
           "name": "mu_hash_cached",
           "signals": [
             "builtin:len",
             "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 600,
+          "name": "mu_hash",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/mu_type.py",
+          "line": 632,
+          "name": "_canonicalize_hash_numeric",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "recursion"
           ],
           "substrate": "python"
         },
@@ -4649,26 +4658,26 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 292,
-          "name": "mu_type_name",
+          "line": 690,
+          "name": "mark_bootstrap",
           "signals": [
-            "builtin:isinstance"
+            "mutation:append"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 477,
-          "name": "validate_kernel_boundary",
+          "line": 706,
+          "name": "get_bootstrap_registry",
           "signals": [
-            "loop"
+            "builtin:list"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 255,
-          "name": "validate_mu",
+          "line": 711,
+          "name": "assert_no_bootstrap_in_production",
           "signals": [],
           "substrate": "python"
         },
@@ -4683,8 +4692,8 @@
         },
         {
           "file": "rcx_pi/selfhost/projection_loader.py",
-          "line": 66,
-          "name": "make_projection_loader.clear",
+          "line": 48,
+          "name": "make_projection_loader.load",
           "signals": [
             "mutation:assignment"
           ],
@@ -4692,8 +4701,8 @@
         },
         {
           "file": "rcx_pi/selfhost/projection_loader.py",
-          "line": 48,
-          "name": "make_projection_loader.load",
+          "line": 66,
+          "name": "make_projection_loader.clear",
           "signals": [
             "mutation:assignment"
           ],
@@ -4740,8 +4749,61 @@
         },
         {
           "file": "rcx_pi/selfhost/seed_integrity.py",
+          "line": 388,
+          "name": "validate_seed_dependencies",
+          "signals": [
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/seed_integrity.py",
           "line": 414,
           "name": "compute_checksum",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/seed_integrity.py",
+          "line": 419,
+          "name": "verify_checksum",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/seed_integrity.py",
+          "line": 450,
+          "name": "validate_seed_structure",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/seed_integrity.py",
+          "line": 501,
+          "name": "validate_projection_ids",
+          "signals": [
+            "builtin:set",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/seed_integrity.py",
+          "line": 550,
+          "name": "load_verified_seed",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/seed_integrity.py",
+          "line": 581,
+          "name": "load_verified_seed._reject_non_finite",
           "signals": [],
           "substrate": "python"
         },
@@ -4763,52 +4825,6 @@
         },
         {
           "file": "rcx_pi/selfhost/seed_integrity.py",
-          "line": 550,
-          "name": "load_verified_seed",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/seed_integrity.py",
-          "line": 581,
-          "name": "load_verified_seed._reject_non_finite",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/seed_integrity.py",
-          "line": 501,
-          "name": "validate_projection_ids",
-          "signals": [
-            "builtin:set",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/seed_integrity.py",
-          "line": 388,
-          "name": "validate_seed_dependencies",
-          "signals": [
-            "loop",
-            "mutation:append"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/seed_integrity.py",
-          "line": 450,
-          "name": "validate_seed_structure",
-          "signals": [
-            "builtin:enumerate",
-            "builtin:isinstance",
-            "builtin:set",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/seed_integrity.py",
           "line": 634,
           "name": "verify_all_seeds",
           "signals": [
@@ -4818,21 +4834,12 @@
           "substrate": "python"
         },
         {
-          "file": "rcx_pi/selfhost/seed_integrity.py",
-          "line": 419,
-          "name": "verify_checksum",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 232,
-          "name": "_check_no_floats",
+          "line": 103,
+          "name": "_resolve_path",
           "signals": [
-            "builtin:isinstance",
-            "loop",
-            "mutation:append",
-            "mutation:pop"
+            "builtin:len",
+            "loop"
           ],
           "substrate": "python"
         },
@@ -4841,26 +4848,6 @@
           "line": 127,
           "name": "_classify_kind",
           "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 337,
-          "name": "_materialize_template",
-          "signals": [
-            "loop",
-            "recursion"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 200,
-          "name": "_mu_copy",
-          "signals": [
-            "loop",
-            "recursion"
-          ],
           "substrate": "python"
         },
         {
@@ -4878,11 +4865,18 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 103,
-          "name": "_resolve_path",
+          "line": 183,
+          "name": "_safe_mu_deep_equal",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 200,
+          "name": "_mu_copy",
           "signals": [
-            "builtin:len",
-            "loop"
+            "loop",
+            "recursion"
           ],
           "substrate": "python"
         },
@@ -4895,18 +4889,13 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 183,
-          "name": "_safe_mu_deep_equal",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 406,
-          "name": "_validate_path",
+          "line": 232,
+          "name": "_check_no_floats",
           "signals": [
-            "builtin:len",
-            "loop"
+            "builtin:isinstance",
+            "loop",
+            "mutation:append",
+            "mutation:pop"
           ],
           "substrate": "python"
         },
@@ -4923,25 +4912,21 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 874,
-          "name": "stage0_vm_run",
+          "line": 337,
+          "name": "_materialize_template",
           "signals": [
-            "builtin:len",
             "loop",
-            "mutation:append"
+            "recursion"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 694,
-          "name": "stage0_vm_step",
+          "line": 406,
+          "name": "_validate_path",
           "signals": [
-            "builtin:any",
-            "builtin:set",
-            "loop",
-            "mutation:add",
-            "mutation:assignment"
+            "builtin:len",
+            "loop"
           ],
           "substrate": "python"
         },
@@ -4962,6 +4947,30 @@
           "substrate": "python"
         },
         {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 694,
+          "name": "stage0_vm_step",
+          "signals": [
+            "builtin:any",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 874,
+          "name": "stage0_vm_run",
+          "signals": [
+            "builtin:len",
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 59,
           "name": "__init__",
@@ -4972,28 +4981,13 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 513,
-          "name": "_check_algorithm_runtime",
+          "line": 69,
+          "name": "_load_tc_key_sets",
           "signals": [
-            "builtin:isinstance",
-            "builtin:sorted"
+            "builtin:dict",
+            "loop",
+            "mutation:assignment"
           ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 503,
-          "name": "_check_kernel_reserved",
-          "signals": [
-            "builtin:sorted"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 143,
-          "name": "_clear_hemi_cache",
-          "signals": [],
           "substrate": "python"
         },
         {
@@ -5001,6 +4995,18 @@
           "line": 91,
           "name": "_clear_tc_cache",
           "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 106,
+          "name": "_load_hemisphere_keys",
+          "signals": [
+            "builtin:len",
+            "builtin:sorted",
+            "builtin:tuple",
+            "loop"
+          ],
           "substrate": "python"
         },
         {
@@ -5019,24 +5025,37 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1621,
-          "name": "_has_nonlinear_vars",
+          "line": 143,
+          "name": "_clear_hemi_cache",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 161,
+          "name": "classify_terminal_kind",
           "signals": [
-            "builtin:any",
-            "builtin:isinstance",
-            "builtin:set",
-            "loop",
-            "mutation:assignment",
-            "mutation:extend",
-            "mutation:pop"
+            "builtin:isinstance"
           ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1877,
-          "name": "_is_terminal_shape",
-          "signals": [],
+          "line": 197,
+          "name": "is_kernel_projection",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 226,
+          "name": "validate_kernel_projections_first",
+          "signals": [
+            "builtin:isinstance",
+            "loop"
+          ],
           "substrate": "python"
         },
         {
@@ -5054,85 +5073,6 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 750,
-          "name": "_load_bridge_projections_shared",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 647,
-          "name": "_load_combined_kernel_projections_shared",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 932,
-          "name": "_load_combined_kernel_with_bridge_projections_shared",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 854,
-          "name": "_load_compiled_bridge_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 833,
-          "name": "_load_compiled_kernel_v1_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 793,
-          "name": "_load_compiled_match_v2_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 813,
-          "name": "_load_compiled_subst_v2_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 106,
-          "name": "_load_hemisphere_keys",
-          "signals": [
-            "builtin:len",
-            "builtin:sorted",
-            "builtin:tuple",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 736,
-          "name": "_load_kernel_v1_projections_shared",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 69,
-          "name": "_load_tc_key_sets",
-          "signals": [
-            "builtin:dict",
-            "loop",
-            "mutation:assignment"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
           "line": 413,
           "name": "_looks_like_normalized_dict_candidate",
           "signals": [
@@ -5144,43 +5084,46 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1657,
-          "name": "_reject_nonlinear_projections",
-          "signals": [
-            "builtin:enumerate",
-            "builtin:isinstance",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1891,
-          "name": "_run_sub_algorithm",
-          "signals": [
-            "authority_call:mu_hash_control_cached",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1099,
-          "name": "_step_kernel_with_vm",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 875,
-          "name": "_validate_combined_bridge_ordering",
+          "line": 451,
+          "name": "_walk_and_validate",
           "signals": [
             "builtin:isinstance",
             "loop",
-            "mutation:append"
+            "recursion"
           ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 503,
+          "name": "_check_kernel_reserved",
+          "signals": [
+            "builtin:sorted"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 513,
+          "name": "_check_algorithm_runtime",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:sorted"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 524,
+          "name": "validate_no_kernel_reserved_fields",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 539,
+          "name": "validate_algorithm_runtime_fields",
+          "signals": [],
           "substrate": "python"
         },
         {
@@ -5203,38 +5146,33 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 764,
-          "name": "_verify_bundle_provenance",
+          "line": 604,
+          "name": "list_to_linked",
+          "signals": [
+            "builtin:reversed",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 628,
+          "name": "normalize_projection",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 451,
-          "name": "_walk_and_validate",
-          "signals": [
-            "builtin:isinstance",
-            "loop",
-            "recursion"
-          ],
+          "line": 647,
+          "name": "_load_combined_kernel_projections_shared",
+          "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1575,
-          "name": "apply_mu",
-          "signals": [
-            "builtin:isinstance"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 161,
-          "name": "classify_terminal_kind",
-          "signals": [
-            "builtin:isinstance"
-          ],
+          "line": 676,
+          "name": "load_combined_kernel_projections",
+          "signals": [],
           "substrate": "python"
         },
         {
@@ -5246,8 +5184,82 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1046,
-          "name": "extract_kernel_result",
+          "line": 736,
+          "name": "_load_kernel_v1_projections_shared",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 750,
+          "name": "_load_bridge_projections_shared",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 764,
+          "name": "_verify_bundle_provenance",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 793,
+          "name": "_load_compiled_match_v2_bundle",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 813,
+          "name": "_load_compiled_subst_v2_bundle",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 833,
+          "name": "_load_compiled_kernel_v1_bundle",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 854,
+          "name": "_load_compiled_bridge_bundle",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 875,
+          "name": "_validate_combined_bridge_ordering",
+          "signals": [
+            "builtin:isinstance",
+            "loop",
+            "mutation:append"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 932,
+          "name": "_load_combined_kernel_with_bridge_projections_shared",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 969,
+          "name": "load_combined_kernel_with_bridge_projections",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 998,
+          "name": "is_kernel_terminal",
           "signals": [],
           "substrate": "python"
         },
@@ -5264,41 +5276,8 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 197,
-          "name": "is_kernel_projection",
-          "signals": [
-            "builtin:isinstance"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 998,
-          "name": "is_kernel_terminal",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 604,
-          "name": "list_to_linked",
-          "signals": [
-            "builtin:reversed",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 676,
-          "name": "load_combined_kernel_projections",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 969,
-          "name": "load_combined_kernel_with_bridge_projections",
+          "line": 1046,
+          "name": "extract_kernel_result",
           "signals": [],
           "substrate": "python"
         },
@@ -5322,15 +5301,84 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 628,
-          "name": "normalize_projection",
-          "signals": [],
+          "line": 1099,
+          "name": "_step_kernel_with_vm",
+          "signals": [
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1209,
+          "name": "step_kernel_mu",
+          "signals": [
+            "authority_call:mu_hash_control_cached",
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "loop",
+            "mutation:assignment"
+          ],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
           "line": 1454,
           "name": "run_algorithm_meta_circular",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1513,
+          "name": "step_algorithm_with_bridge",
+          "signals": [
+            "authority_call:mu_hash_control_cached",
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1575,
+          "name": "apply_mu",
+          "signals": [
+            "builtin:isinstance"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1621,
+          "name": "_has_nonlinear_vars",
+          "signals": [
+            "builtin:any",
+            "builtin:isinstance",
+            "builtin:set",
+            "loop",
+            "mutation:assignment",
+            "mutation:extend",
+            "mutation:pop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1657,
+          "name": "_reject_nonlinear_projections",
+          "signals": [
+            "builtin:enumerate",
+            "builtin:isinstance",
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1685,
+          "name": "step_mu",
           "signals": [],
           "substrate": "python"
         },
@@ -5359,58 +5407,41 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1513,
-          "name": "step_algorithm_with_bridge",
+          "line": 1877,
+          "name": "_is_terminal_shape",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/step_mu.py",
+          "line": 1891,
+          "name": "_run_sub_algorithm",
           "signals": [
             "authority_call:mu_hash_control_cached",
-            "builtin:enumerate",
-            "builtin:isinstance",
             "loop"
           ],
           "substrate": "python"
         },
         {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1209,
-          "name": "step_kernel_mu",
+          "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 37,
+          "name": "is_head_tail_structure",
           "signals": [
-            "authority_call:mu_hash_control_cached",
-            "builtin:enumerate",
             "builtin:isinstance",
+            "builtin:set"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 57,
+          "name": "_substitute_direct",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len",
             "loop",
-            "mutation:assignment"
+            "recursion"
           ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1685,
-          "name": "step_mu",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 539,
-          "name": "validate_algorithm_runtime_fields",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 226,
-          "name": "validate_kernel_projections_first",
-          "signals": [
-            "builtin:isinstance",
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 524,
-          "name": "validate_no_kernel_reserved_fields",
-          "signals": [],
           "substrate": "python"
         },
         {
@@ -5429,28 +5460,6 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 57,
-          "name": "_substitute_direct",
-          "signals": [
-            "builtin:isinstance",
-            "builtin:len",
-            "loop",
-            "recursion"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 37,
-          "name": "is_head_tail_structure",
-          "signals": [
-            "builtin:isinstance",
-            "builtin:set"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/subst_mu.py",
           "line": 129,
           "name": "subst_mu",
           "signals": [
@@ -5461,9 +5470,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 129,
+        "javascript": 130,
         "python": 181,
-        "total": 310
+        "total": 311
       }
     }
   },

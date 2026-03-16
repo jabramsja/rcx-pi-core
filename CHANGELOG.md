@@ -4,6 +4,13 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### JS Kernel Cleanup (NB10)
+
+- `_assertVmMatchResult()` added to `_stepKernelWithVM` in kernel.js — fail-closed on undefined `.root` from VM match result (parity with Python KeyError). `null` accepted (valid Mu).
+- NB4 (max-steps stall) and NB7 (terminal extraction) documented as DESIGN-GATED — attempted fixes broke 27 parity tests due to caller dependency on current non-meta semantics.
+- Total inventory: 310 -> 311 (+1 JS assertion function).
+- **L4_STRUCTURAL** wave. Bridge: 2 rounds.
+
 ### Agent Execution Capability
 
 - Updated 5 agent prompts (adversary, verifier, expert, structural-proof, grounding) with "Execution Verification" sections
