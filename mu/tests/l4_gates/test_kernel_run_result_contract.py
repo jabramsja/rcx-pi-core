@@ -91,70 +91,87 @@ class TestKernelRunResultPython:
 
 
 class TestKernelRunResultJS:
-    """JS stepKernel(returnMeta=true) must produce structurally identical KernelRunResult."""
+    """JS stepKernel via --json-api (live seeded kernel) must produce KernelRunResult."""
 
-    def _run_js(self, code: str) -> dict:
-        """Run JS code via node and return parsed JSON."""
-        full = f"""
-        const {{ stepKernel }} = require('./mu/host/js/engine/kernel');
-        {code}
-        """
+    def _run_json_api(self, payload: dict) -> dict:
+        """Run JS via eval_step.js --json-api with real seed loading."""
         result = subprocess.run(
-            ["node", "-e", full],
-            capture_output=True, text=True, timeout=10,
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(payload)],
+            capture_output=True, text=True, timeout=15,
         )
         assert result.returncode == 0, f"JS error: {result.stderr}"
-        return json.loads(result.stdout.strip())
+        # Extract JSON_API_RESPONSE from stdout (self-tests print first)
+        stdout = result.stdout
+        marker = "JSON_API_RESPONSE:"
+        idx = stdout.find(marker)
+        assert idx >= 0, f"No JSON_API_RESPONSE in output: {stdout[-200:]}"
+        json_str = stdout[idx + len(marker):]
+        resp = json.loads(json_str.strip())
+        assert resp.get("success"), f"JS API error: {resp.get('error', 'unknown')}"
+        return resp["result"]
 
-    def test_returnmeta_true_has_required_fields(self):
-        """JS stepKernel(returnMeta=true) must produce all KernelRunResult fields."""
-        meta = self._run_js("""
-        const r = stepKernel([], {x: 1}, [{pattern: {x: 1}, body: {x: 2}}],
-            {returnMeta: true, maxSteps: 100});
-        console.log(JSON.stringify(r));
-        """)
+    def test_projection_applied_has_required_fields(self):
+        """JS live kernel produces KernelRunResult on successful projection."""
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            "input": {"x": 1},
+            "maxSteps": 100,
+        })
         assert REQUIRED_FIELDS <= set(meta.keys()), f"JS missing: {REQUIRED_FIELDS - set(meta.keys())}"
-        assert meta["termination_reason"] in VALID_TERM_REASONS
-        assert isinstance(meta["stall"], bool)
+        assert meta["termination_reason"] == "projection_applied"
+        assert meta["stall"] is False
         assert isinstance(meta["steps_used"], int)
         assert isinstance(meta["max_steps"], int)
 
-    def test_stall_result_has_required_fields(self):
-        """JS stall result must produce all KernelRunResult fields."""
-        meta = self._run_js("""
-        const r = stepKernel([], {x: 1}, [],
-            {returnMeta: true, maxSteps: 100});
-        console.log(JSON.stringify(r));
-        """)
+    def test_kernel_stall_has_required_fields(self):
+        """JS live kernel produces KernelRunResult on stall."""
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [],
+            "input": {"x": 1},
+            "maxSteps": 100,
+        })
         assert REQUIRED_FIELDS <= set(meta.keys())
-        assert meta["termination_reason"] in VALID_TERM_REASONS
+        assert meta["termination_reason"] == "kernel_stall"
         assert meta["stall"] is True
 
-    def test_stall_is_boolean(self):
-        """JS stall field must be boolean, not truthy/falsy."""
-        meta = self._run_js("""
-        const r = stepKernel([], {x: 1}, [{pattern: {x: 1}, body: {x: 2}}],
-            {returnMeta: true});
-        console.log(JSON.stringify({stall_type: typeof r.stall, stall_val: r.stall}));
-        """)
-        assert meta["stall_type"] == "boolean"
+    def test_max_steps_stall_true(self):
+        """JS live kernel: max_steps must have stall=true (NB4 parity)."""
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [
+                {"pattern": {"s": "a"}, "body": {"s": "b"}},
+                {"pattern": {"s": "b"}, "body": {"s": "a"}},
+            ],
+            "input": {"s": "a"},
+            "maxSteps": 4,
+        })
+        assert meta["termination_reason"] == "max_steps_exhausted"
+        assert meta["stall"] is True, "JS NB4: max_steps must have stall=true"
 
-    def test_field_parity_with_python(self):
-        """JS and Python KernelRunResult must have identical field sets."""
-        # Get JS field set
-        js_meta = self._run_js("""
-        const r = stepKernel([], {x: 1}, [{pattern: {x: 1}, body: {x: 2}}],
-            {returnMeta: true});
-        console.log(JSON.stringify(Object.keys(r).sort()));
-        """)
-        js_fields = set(js_meta)  # _run_js returns the parsed array of keys
+    def test_field_set_parity_with_python(self):
+        """JS and Python KernelRunResult must have identical required field sets."""
+        # JS projection_applied via live seeded kernel
+        js_meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            "input": {"x": 1},
+        })
+        js_fields = set(js_meta.keys())
 
-        # Get Python field set
+        # Python projection_applied
         py_meta = step_kernel_mu(
             [{"pattern": {"x": 1}, "body": {"x": 2}}], {"x": 1}, return_meta=True
         )
         py_fields = set(py_meta.keys())
 
-        # Both must have at least the required fields
+        # Required fields must be present in both
         assert REQUIRED_FIELDS <= js_fields, f"JS missing: {REQUIRED_FIELDS - js_fields}"
         assert REQUIRED_FIELDS <= py_fields, f"Python missing: {REQUIRED_FIELDS - py_fields}"
+        # Required fields must match exactly (no extra required fields on either side)
+        js_required = js_fields & REQUIRED_FIELDS
+        py_required = py_fields & REQUIRED_FIELDS
+        assert js_required == py_required, (
+            f"Required field mismatch: JS={js_required}, Python={py_required}"
+        )
