@@ -879,11 +879,13 @@ def test_deferred_blocker_count_matches_prose() -> None:
     ]
 
     if len(blocker_files) == 0:
-        status = STATUS_PATH.read_text(encoding="utf-8")
-        assert "active blocker" not in status.lower(), (
-            "STATUS.md mentions 'active blocker' but reports/deferred/blocking/ "
-            "contains no blocker files (only README.md)."
-        )
+        status = STATUS_PATH.read_text(encoding="utf-8").lower()
+        stale_phrases = ["active blocker", "active blockers", "blockers remain", "blocking issues remain"]
+        for phrase in stale_phrases:
+            assert phrase not in status, (
+                f"STATUS.md mentions '{phrase}' but reports/deferred/blocking/ "
+                f"contains no blocker files (only README.md)."
+            )
 
 
 def test_tasks_next_completed_item_count() -> None:

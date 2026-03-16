@@ -59,10 +59,17 @@ def test_status_distinguishes_full_l4_completion_from_active_reduction() -> None
 def test_tasks_s1_sched_reflects_completed_cutover() -> None:
     """S1-SCHED is COMPLETE — NEXT must reflect that, not claim pending GO."""
     text = _read(TASKS_PATH)
+    next_match = _NEXT_SECTION_RE.search(text)
+    assert next_match, "Could not isolate TASKS.md NEXT section."
+    next_section = next_match.group(1)
 
-    assert "[S1-SCHED]" in text, "TASKS.md must retain the S1-SCHED label."
-    assert "COMPLETE" in text.split("[S1-SCHED]")[1][:200], (
-        "[S1-SCHED] must be marked COMPLETE (founder GO 2026-03-15, cutover active)."
+    assert "[S1-SCHED]" in next_section, "TASKS.md NEXT must retain the S1-SCHED label."
+    # Find S1-SCHED within NEXT and check it's marked COMPLETE
+    sched_pos = next_section.find("[S1-SCHED]")
+    assert sched_pos >= 0, "[S1-SCHED] not found in NEXT section."
+    after_sched = next_section[sched_pos:sched_pos + 200]
+    assert "COMPLETE" in after_sched, (
+        "[S1-SCHED] in NEXT must be marked COMPLETE (founder GO 2026-03-15, cutover active)."
     )
 
 

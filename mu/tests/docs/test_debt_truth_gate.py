@@ -254,7 +254,12 @@ class TestAuthorityCountConsistency:
     """Every numeric 'authority' mention in STATUS.md must match the ratchet baseline."""
 
     def test_all_authority_mentions_match_baseline(self):
-        """Scan STATUS.md for all prose mentions of authority + a number. All must match."""
+        """Scan STATUS.md for all PROSE mentions of authority + a number. All must match.
+
+        Note: The formatted table row (| **Authority sites** | 216 |) is covered
+        by TestLedgerMatchesBaseline. This test catches prose mentions OUTSIDE the
+        table (e.g., P7 chain paragraph, L4 status paragraph).
+        """
         status = _load_status()
         baseline = _load_authority_baseline()
         expected = baseline["inventories"]["authority"]["site_counts"]["total"]
