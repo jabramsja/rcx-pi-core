@@ -43,9 +43,10 @@ class TestIntermediateValidationBehavior:
         # makes pipeline pick up the patched function.
         js_script = (
             "const kernel = require('./mu/host/js/engine/kernel');\n"
-            "kernel._stepKernelCoreNonMeta = function(_a, _k, _m) {\n"  # ANTICHEAT_OK: JS kernel module patch for behavioral gate test
-            "  return { result: { _injected: true, value: 42 },\n"
-            "           steps: 1, stalled: false, trace: [] };\n"
+            "kernel._stepKernelCore = function(_a, _k, _d, _v, _m, _vm) {\n"  # ANTICHEAT_OK: JS kernel module patch for behavioral gate test
+            "  return { output: { _injected: true, value: 42 },\n"
+            "           stall: false, termination_reason: 'projection_applied',\n"
+            "           steps_used: 1, max_steps: 10000 };\n"
             "};\n"
             "const { runAlgorithmWithBridge } = require('./mu/host/js/engine/pipeline');\n"
             "try {\n"
@@ -93,7 +94,9 @@ class TestIntermediateValidationSourceLock:
         reassign_idx = None
 
         for i, line in enumerate(lines):
-            if 'denormalize(wrapped.result)' in line:
+            # Wave 1: runAlgorithmWithBridge now uses canonical _stepKernelCore
+            # Output is already denormalized (canonical.output)
+            if 'canonical.output' in line or 'denormalize(wrapped.result)' in line:
                 denorm_idx = i
             if denorm_idx is not None and validator_idx is None:
                 if 'validator(next' in line and 'intermediate' in line:
@@ -103,11 +106,11 @@ class TestIntermediateValidationSourceLock:
                 break
 
         assert denorm_idx is not None, (
-            "pipeline.js: missing denormalize(wrapped.result) — "
+            "pipeline.js: missing canonical.output or denormalize(wrapped.result) — "
             "runAlgorithmWithBridge loop body structure changed"
         )
         assert reassign_idx is not None, (
-            "pipeline.js: missing 'current = next' after denormalize — "
+            "pipeline.js: missing 'current = next' after output extraction — "
             "runAlgorithmWithBridge loop body structure changed"
         )
         assert validator_idx is not None, (

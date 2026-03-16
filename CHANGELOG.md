@@ -4,6 +4,15 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### Wave 1: Internal Canonical Step Record
+
+- Retired `_stepKernelCoreNonMeta` from JS kernel.js (deleted)
+- `runAlgorithmWithBridge` migrated to `_stepKernelCore` — uses `canonical.output` (already denormalized), removed redundant `denormalize()` call
+- `stepKernel(returnMeta=false)` now compatibility shim over `_stepKernelCore` — re-normalizes output for legacy `denormalize()` round-trip, preserves `stalled:false` on max-steps (NB4 public debt deferred)
+- NB4/NB7 contained internally: canonical `_stepKernelCore` has correct stall semantics and terminal extraction. Public non-meta adapter preserves legacy behavior.
+- Source-lock tests updated for new pipeline.js structure
+- **L4_STRUCTURAL** wave. Founder canonical machine direction. Bridge: 1 round GO.
+
 ### JS Kernel Cleanup (NB10)
 
 - `_assertVmMatchResult()` added to `_stepKernelWithVM` in kernel.js — fail-closed on undefined `.root` from VM match result (parity with Python KeyError). `null` accepted (valid Mu).

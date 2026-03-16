@@ -125,56 +125,9 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
   return { output: domainInput, stall: true, termination_reason: 'max_steps_exhausted', steps_used: maxSteps, max_steps: maxSteps };
 }
 
-/**
- * Internal: kernel loop only (non-meta path).
- * Caller must provide pre-validated, pre-normalized kernelInput.
- * No validation, no normalization — just the state machine.
- * Returns { result, steps, stalled, trace } (non-meta shape).
- */
-function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps, vmConfig) {
-  // NB4/NB7 deferred — callers depend on current stall/terminal semantics.
-  // See reports/deferred/non_blocking/ for design analysis.
-  let current = kernelInput;
-  let currentHash = muHashControlCached(kernelInput, 'stepKernel.nonmeta');
-  const trace = [];
-  for (let i = 0; i < maxSteps; i++) {
-    let next;
-    if (vmConfig && _STAGE0_VM_CUTOVER) {
-      next = _stepKernelWithVM(
-        vmConfig.kernelBundle, vmConfig.bridgeBundle,
-        vmConfig.matchBundle, vmConfig.substBundle, current);
-    } else {
-      next = _stepTrusted(kernelProjections, current);
-      if (vmConfig && _STAGE0_SHADOW_ENABLED) {
-        const vmResult = _stepKernelWithVM(
-          vmConfig.kernelBundle, vmConfig.bridgeBundle,
-          vmConfig.matchBundle, vmConfig.substBundle, current);
-        const hostStalled = next === current;
-        const vmStalled = vmResult === current;
-        if (hostStalled !== vmStalled) {
-          throw new Error(
-            `P7-d shadow: polarity divergence — hostStalled=${hostStalled}, vmStalled=${vmStalled}`);
-        }
-        if (!hostStalled && !muDeepEqual(next, vmResult)) {
-          throw new Error(`P7-d shadow: output divergence`);
-        }
-      }
-    }
-
-    if (!isKernelIntermediate(next)) {
-      const nextHash = muHashControlCached(next, 'stepKernel.nonmeta.stall');
-      if (nextHash === currentHash) {
-        return { result: current, steps: i, stalled: true, trace };
-      }
-      currentHash = nextHash;
-    }
-
-    current = next;
-  }
-  // NB4: max-steps exhaustion reports stalled: false (callers depend on this).
-  // See reports/deferred/non_blocking/ for design analysis.
-  return { result: current, steps: maxSteps, stalled: false, trace };
-}
+// _stepKernelCoreNonMeta DELETED (Wave 1).
+// Replaced by _stepKernelCore + public adapter shim in stepKernel().
+// All internal callers now use _stepKernelCore directly.
 
 /**
  * BOOTSTRAP PRIMITIVE: Kernel entry point with security validation.
@@ -261,8 +214,18 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     return _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig);
   }
 
-  // Non-meta mode
-  return _stepKernelCoreNonMeta(projections, kernelInput, maxSteps, vmConfig);
+  // Non-meta mode: compatibility shim over canonical _stepKernelCore.
+  // Preserves FULL legacy { result, steps, stalled, trace } observable behavior.
+  // result = normalize(output) so caller's denormalize() round-trips correctly.
+  // stalled preserves legacy semantics (false on max-steps — NB4 public debt deferred).
+  const canonical = _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig);
+  const isLegacyStall = canonical.termination_reason === 'hash_stall' || canonical.termination_reason === 'kernel_stall';
+  return {
+    result: normalize(canonical.output),  // re-normalize so caller denormalize() works
+    steps: isLegacyStall ? canonical.steps_used - 1 : canonical.steps_used,  // legacy uses 0-indexed steps on stall
+    stalled: isLegacyStall,  // legacy: false on max-steps (NB4 public debt deferred)
+    trace: [],
+  };
 }
 
 /**
@@ -390,8 +353,8 @@ module.exports = {
   stepKernel,
   runStructural,
   stepKernelStructural,
-  // Internal: exported for pipeline.js pre-validation optimization
-  _stepKernelCoreNonMeta,
+  // Internal: exported for pipeline.js canonical kernel step
+  _stepKernelCore,
   // P7-d: exported for shadow mode control and testing
   _stepKernelWithVM,
   get _STAGE0_SHADOW_ENABLED() { return _STAGE0_SHADOW_ENABLED; },
