@@ -326,6 +326,8 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NEXT (short, bounded follow-ups)
 
+**No active NEXT items.** All previously authorized items have landed and are documented in Ra. The completed items below are retained for historical cross-reference only — they are NOT active authorization.
+
 - ~~**Hemisphere Metabolization Contract**~~ — **COMPLETE** (2026-02-20, E1-E5 all MET). PROMOTED FROM VECTOR P1 (2026-02-19). Metabolization projections implemented in `mu/programs/metabolization.v1.json` (6 projections), loaded and verified in both Python and JS substrates. E1: seed exists + integrity verified. E2: JS behavior evidence (9 inline assertions). E3: cross-substrate parity for T1-T10 + 6 adversarial cases (15 tests). E4: S1-S5 sink-safety + routing priority + no new primitives/fields + Option B shadow-only (15 tests). E5: governance closure. See `mu/docs/core/HemisphereExecutionChecklist.v0.md` for full evidence matrix. Same E1-E5 pattern as Boot1 (`mu/docs/core/Boot1LoopContract.v0.md`).
 
 - ~~**D005 Production Pilot (Staged Bootstrap)**~~ — **COMPLETE** (2026-03-01, PR #452 merged into dev). PROMOTED FROM VECTOR P1 (2026-03-01, d008-founder-go-render). D008 founder verdict: GO. Executed under D004 constraints: ≤100 LOC/substrate, 4 primitives invariant, zero test regression, L3 parity required. Target: G8 (meta-circular matching). Stage 0 micro-kernel integrated into production trusted path with pilot flag (`_STAGE0_PILOT`, default OFF). 90 gate tests + 9 contract tests. G8 remains UNPROVEN (pilot evidence captured, not yet sufficient for PASS). See Ra tracker sync note (d005-stage0-pilot) for full evidence matrix.
@@ -365,7 +367,7 @@ Current Exhaustion Layer: META_CIRCULAR
   - ~~**S1-A:** Cutover evidence package.~~ **Landed** (2026-03-15, PR #598). 37 tests, performance profiling, CONDITIONAL GO memo.
   - ~~**S1-B:** VM cutover flip.~~ **Landed** (2026-03-15, PR #603, founder GO). `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. VM path is primary for match.v2/subst.v2 in step_kernel_mu.
   - **Constraints:** Readable seeds remain canonical. Lowered images are derived artifacts. Deterministic regeneration enforced. Source-vs-image parity gates stay green.
-- ~~**[S1-SCHED] L4 production reduction follow-through.**~~ **COMPLETE** (2026-03-15). S1-A evidence (PR #598) + S1-B flip (PR #603, founder GO). VM path is primary for step_kernel_mu match.v2/subst.v2. Shadow disabled. Full bootstrap-primitives elimination remains parked under `[S1]`.
+- ~~**[S1-SCHED] L4 production reduction follow-through.**~~ **COMPLETE** (2026-03-15). S1-A evidence (PR #598) + S1-B flip (PR #603, founder GO) + S1-C all 33 projections via Stage0 VM (PR #606). VM path is primary for ALL kernel-step projections (kernel.v1 + bridge + match.v2 + subst.v2). Shadow disabled. Full bootstrap-primitives elimination remains parked under `[S1]`.
 
 ## VECTOR (design-only; semantics locked, no implementation allowed)
 
@@ -431,7 +433,7 @@ Current Exhaustion Layer: META_CIRCULAR
 ## SINK (ideas parked; may not advance without explicit promotion decision)
 
 **Items (priority-ordered):**
-- **[S1]** L4 Full Self-Hosting Rewrite — long-horizon goal: eliminate all 4 bootstrap primitives entirely. **G8 PASS (classification gate, caveated, 2026-03-03).** All four primitives classified REDUCIBLE_WITH executable evidence (D001 analytical + D002-D003 + D005-D010 executable). G1-G7 PASS. G8 PASS closes primitive classification evidence, not L4 completion. L4 remains blocked by stop conditions #3 (host for-loop) and #4 (L3-to-L4 gap). No production reduction claims — all primitives remain in production unchanged. Productionization requires separate gates (see L4ExitChecklist.v0.md productionization gate lock). See `mu/docs/core/L4ExitChecklist.v0.md` for gate criteria and `mu/docs/core/L4DecisionCard.v0.md` for G8-ADJ verdict. **→ Production reduction phase promoted to NEXT as [S1-SCHED] (2026-03-11, founder directive).**
+- **[S1]** L4 Full Self-Hosting Rewrite — long-horizon goal: eliminate all 4 bootstrap primitives entirely. **G8 PASS (classification gate, caveated, 2026-03-03).** All four primitives classified REDUCIBLE_WITH executable evidence (D001 analytical + D002-D003 + D005-D010 executable). G1-G7 PASS. G8 PASS closes primitive classification evidence, not L4 completion. L4 remains blocked by stop conditions #3 (host for-loop) and #4 (L3-to-L4 gap). No full bootstrap-primitive elimination claims — bounded production reduction has occurred (S1-B/S1-C: VM cutover active, 33 projections on Stage0 VM) but all 4 primitives (eval_step, max_steps, stack_guard, projection_loader) remain in production. Productionization of full elimination requires separate gates (see L4ExitChecklist.v0.md productionization gate lock). See `mu/docs/core/L4ExitChecklist.v0.md` for gate criteria and `mu/docs/core/L4DecisionCard.v0.md` for G8-ADJ verdict. **→ Production reduction phase promoted to NEXT as [S1-SCHED] (2026-03-11, founder directive).**
 - **[S2]** Projection caching optimization (post-Phase 8) - cache normalized projections for repeated use; use content-based hash, NOT id(). From withdrawn KernelSeedRealignment.v0.md.
 - **[S3]** Multi-value/concurrent execution
 - **[S4]** Performance-first optimizations
