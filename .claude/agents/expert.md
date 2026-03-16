@@ -94,6 +94,16 @@ When claiming dead code or unused abstractions, **verify with execution.**
 1. Findings must identify exact complexity source and simplification strategy.
 2. When claiming minimality, show areas inspected and why they survived attack.
 
+4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+   ```
+   FINDING: <description>
+   FILE: /absolute/path/file.ext
+   LINES: <start>-<end>
+   CODE: <actual code snippet>
+   VERIFIED: Yes
+   ```
+   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
+
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 
