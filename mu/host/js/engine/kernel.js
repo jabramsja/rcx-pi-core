@@ -25,24 +25,34 @@ let _STAGE0_SHADOW_ENABLED = false; // Shadow disabled (cutover=true makes shado
  * No coverage system in JS — pure execution only.
  * Parity with Python _step_kernel_with_vm in step_mu.py.
  */
+function _assertVmMatchResult(result, bundleId) {
+  // NB10 fix: fail-closed assertion on VM match result shape (parity with Python KeyError)
+  // null is valid Mu (void/no-structure). Only reject undefined (missing field).
+  if (result.root === undefined) {
+    throw new Error(
+      `SECURITY: stage0VmStep returned status='match' for ${bundleId} but .root is undefined. ` +
+      `Bundle may be malformed or VM produced invalid output.`);
+  }
+}
+
 function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle, inputValue) {
   // 1. kernel.v1 via Stage0 VM (S1-C: was host _applyProjectionTrusted)
   const kernelResult = stage0VmStep(kernelBundle, inputValue);
-  if (kernelResult.status === 'match') return kernelResult.root;
+  if (kernelResult.status === 'match') { _assertVmMatchResult(kernelResult, 'kernel.v1'); return kernelResult.root; }
 
   // 2. bridge via Stage0 VM (S1-C: was host _applyProjectionTrusted)
   if (bridgeBundle) {
     const bridgeResult = stage0VmStep(bridgeBundle, inputValue);
-    if (bridgeResult.status === 'match') return bridgeResult.root;
+    if (bridgeResult.status === 'match') { _assertVmMatchResult(bridgeResult, 'bridge'); return bridgeResult.root; }
   }
 
   // 3. match.v2 via Stage0 VM
   const matchResult = stage0VmStep(matchBundle, inputValue);
-  if (matchResult.status === 'match') return matchResult.root;
+  if (matchResult.status === 'match') { _assertVmMatchResult(matchResult, 'match.v2'); return matchResult.root; }
 
   // 4. subst.v2 via Stage0 VM
   const substResult = stage0VmStep(substBundle, inputValue);
-  if (substResult.status === 'match') return substResult.root;
+  if (substResult.status === 'match') { _assertVmMatchResult(substResult, 'subst.v2'); return substResult.root; }
 
   return inputValue; // stall
 }
@@ -122,6 +132,8 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
  * Returns { result, steps, stalled, trace } (non-meta shape).
  */
 function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps, vmConfig) {
+  // NB4/NB7 deferred — callers depend on current stall/terminal semantics.
+  // See reports/deferred/non_blocking/ for design analysis.
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel.nonmeta');
   const trace = [];
@@ -159,6 +171,8 @@ function _stepKernelCoreNonMeta(kernelProjections, kernelInput, maxSteps, vmConf
 
     current = next;
   }
+  // NB4: max-steps exhaustion reports stalled: false (callers depend on this).
+  // See reports/deferred/non_blocking/ for design analysis.
   return { result: current, steps: maxSteps, stalled: false, trace };
 }
 

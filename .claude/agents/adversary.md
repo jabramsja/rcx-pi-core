@@ -99,6 +99,15 @@ Do not rely on source analysis alone. **Run code to prove your claims.**
 1. Distinguish `SUCCEEDED`, `BLOCKED`, and untested surfaces.
 2. Include exploit path and concrete hardening recommendation for each issue.
 3. `SECURE` requires evidence that major attack families were attempted and blocked.
+4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+   ```
+   FINDING: <description>
+   FILE: /absolute/path/file.ext
+   LINES: <start>-<end>
+   CODE: <actual code snippet>
+   VERIFIED: Yes
+   ```
+   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
 
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:

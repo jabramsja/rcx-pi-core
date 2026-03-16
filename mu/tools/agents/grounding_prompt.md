@@ -48,6 +48,16 @@ Do not accept test claims without running them. **Execute the tests.**
 1. Every gap cites claim location and absent/weak test location.
 2. Distinguish grounded behavior from theater explicitly.
 
+4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+   ```
+   FINDING: <description>
+   FILE: /absolute/path/file.ext
+   LINES: <start>-<end>
+   CODE: <actual code snippet>
+   VERIFIED: Yes
+   ```
+   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
+
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 

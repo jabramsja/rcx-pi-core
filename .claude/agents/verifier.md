@@ -99,6 +99,16 @@ Do not rely on source analysis alone. **Run commands to verify your claims.**
 2. For violations, include precise fix direction tied to cited code.
 3. Approval requires explicit blocked-attack evidence, not prose confidence.
 
+4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+   ```
+   FINDING: <description>
+   FILE: /absolute/path/file.ext
+   LINES: <start>-<end>
+   CODE: <actual code snippet>
+   VERIFIED: Yes
+   ```
+   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
+
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 

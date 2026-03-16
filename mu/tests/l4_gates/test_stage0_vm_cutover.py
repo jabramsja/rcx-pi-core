@@ -449,6 +449,23 @@ class TestCutoverIntegration:
 
 
 # ---------------------------------------------------------------------------
+# NB10: JS VM result fail-closed assertion (gate evidence)
+# ---------------------------------------------------------------------------
+
+class TestVmResultAssertions:
+    """NB10 gate: verify JS _assertVmMatchResult exists and rejects undefined."""
+
+    def test_js_vm_assertion_source_exists(self):
+        """JS kernel.js contains _assertVmMatchResult function."""
+        from tests.repo_root import REPO_ROOT
+        kernel_js = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js").read_text()
+        assert "_assertVmMatchResult" in kernel_js, \
+            "kernel.js missing _assertVmMatchResult — NB10 fail-closed not implemented"
+        assert "result.root === undefined" in kernel_js, \
+            "kernel.js _assertVmMatchResult does not check for undefined .root"
+
+
+# ---------------------------------------------------------------------------
 # N15: Bundle provenance verification
 # ---------------------------------------------------------------------------
 

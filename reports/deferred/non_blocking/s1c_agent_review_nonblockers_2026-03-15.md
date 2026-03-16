@@ -17,9 +17,11 @@ SDK agent review (quick depth) on S1-C implementation files.
 - Coverage no_match/match recording pattern repeated 4 times (once per seed group).
 - **Why deferred:** Same DRY pattern as NB2. Extract helper. Not a correctness issue.
 
-### NB4. `_stepKernelCoreNonMeta` returns stalled:false on max-steps exhaustion (Adversary)
-- Pre-existing JS issue: the non-meta kernel path returns `{stalled: false}` when max-steps is exhausted, while the meta path returns `{stall: true}`. Semantic asymmetry.
-- **Why deferred:** Pre-existing, not caused by S1-C. Requires JS-specific fix in both kernel step paths. Target: JS kernel cleanup wave.
+### NB4. `_stepKernelCoreNonMeta` returns stalled:false on max-steps exhaustion (Adversary) — DESIGN-GATED
+- Real JS semantic divergence: non-meta returns `stalled: false` on max-steps exhaustion (kernel.js:174). Meta path correctly returns `stall: true` (kernel.js:115).
+- **Attempted fix failed:** Changing `stalled: false` to `true` broke 27 parity tests. Callers (engine pipeline, runAlgorithmWithBridge) depend on `stalled: false` for max-steps exhaustion to continue processing.
+- **Root cause:** Non-meta path's `stalled` field has different semantics than meta path's `stall` field. Fixing requires coordinated caller updates.
+- **Target:** Wave A design pass for non-meta/meta path unification.
 
 ### NB5. Bundle provenance bypass via field stripping (Adversary)
 - If `source_seed` or `source_digest` fields are removed from a bundle, `_verify_bundle_provenance` silently passes.
@@ -29,9 +31,11 @@ SDK agent review (quick depth) on S1-C implementation files.
 - `test_meta_circular_evidence_gate.py` uses `isinstance` check without marker.
 - **Why deferred:** Test file, not runtime code. Markers are for runtime debt tracking.
 
-### NB7. JS `_stepKernelCoreNonMeta` omits `isKernelTerminal` check
-- Pre-existing JS divergence: non-meta path checks terminal via key presence, not `isKernelTerminal()` function.
-- **Why deferred:** Pre-existing, not caused by S1-C. Same scope as NB4.
+### NB7. JS `_stepKernelCoreNonMeta` omits `isKernelTerminal` check — DESIGN-GATED
+- Real JS semantic gap: non-meta path never calls `isKernelTerminal()`. Returns raw kernel state ({_mode, _result, _stall}) instead of extracted domain output.
+- **Attempted fix failed:** Adding `isKernelTerminal()` + `extractKernelResult()` broke callers who inspect raw kernel state for their own terminal logic.
+- **Root cause:** Callers (engine pipeline, runAlgorithmWithBridge) build their own terminal detection on top of the raw kernel result. Centralizing extraction requires coordinating all callers.
+- **Target:** Same Wave A as NB4 — non-meta/meta path unification.
 
 ### NB8. `guardMaxSteps` is a special case of `guardIterationCap` (Expert)
 - JS utility function overlap.
@@ -41,10 +45,8 @@ SDK agent review (quick depth) on S1-C implementation files.
 - STATUS.md:345+ still describes tracked markers as "4 AST_OK bootstrap" and kernel path as "host for kernel.v1/bridge".
 - **Why deferred:** Prose update for STATUS.md is a MAINTENANCE tracker sync, not part of the L4_STRUCTURAL wave. Will be fixed in closeout.
 
-### NB10. JS kernel.js: stage0VmStep match result lacks root/matched_program_id assertion (Bridge R6)
-- If stage0VmStep returns `{status:'match'}` without `root` or `matched_program_id`, JS returns undefined.
-- Python raises KeyError (fail-closed). JS returns undefined (fail-open).
-- **Why deferred:** Pre-existing JS defensive gap. Not caused by S1-C. Requires JS hardening pass to add type assertions on VM result fields. Target: JS kernel cleanup wave.
+### NB10. JS kernel.js: stage0VmStep match result lacks root/matched_program_id assertion (Bridge R6) — **RESOLVED 2026-03-15**
+- Fixed: `_assertVmMatchResult()` added to `_stepKernelWithVM` in kernel.js. All 4 VM call sites now assert `.root` is defined before returning. Fail-closed on malformed VM results (parity with Python KeyError).
 
 ### NB11. test_meta_circular_evidence_gate.py header describes pre-S1-C trusted path (Bridge R5)
 - Module docstring says step_kernel_mu proves structural execution through _step_trusted -> _apply_projection_trusted.
