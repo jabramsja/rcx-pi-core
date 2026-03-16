@@ -96,6 +96,26 @@ def test_cutover_active_no_pending_go_in_prose() -> None:
     )
 
 
+def test_kernel_path_reflects_all_vm_cutover() -> None:
+    """If all 33 projections are on VM, STATUS.md must not describe host path as primary kernel path."""
+    py_step = _read(PY_STEP_MU_PATH)
+    if "_STAGE0_VM_CUTOVER = True" not in py_step:
+        return  # cutover not active
+
+    status = _read(STATUS_PATH)
+    # After S1-C, the kernel path goes through _step_kernel_with_vm for ALL projections.
+    # STATUS.md must not describe _step_trusted as the primary kernel path.
+    assert "Kernel path:" not in status or "_step_kernel_with_vm" in status.split("Kernel path:")[1][:200], (
+        "STATUS.md describes a kernel path that doesn't include _step_kernel_with_vm, "
+        "but _STAGE0_VM_CUTOVER = True and all 33 projections execute via VM."
+    )
+    # _step_kernel_with_vm must not be described as partial (host for kernel.v1/bridge)
+    assert "host for kernel.v1" not in status, (
+        "STATUS.md still says _step_kernel_with_vm uses 'host for kernel.v1' "
+        "but S1-C moved all 4 seed groups to VM."
+    )
+
+
 def test_js_nonmeta_core_not_described_as_live() -> None:
     """If _stepKernelCoreNonMeta is deleted from JS, STATUS.md must not describe split paths."""
     js_kernel = _read(JS_KERNEL_PATH)
