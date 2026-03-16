@@ -63,7 +63,7 @@ async def run_structural_proof(claim: str, model_override: str | None = None) ->
         action_line=f'Verify this claim: "{claim}"',
         task_instructions=CONFIG.task_instructions,
         model_override=model_override,
-        allowed_tools=["Read", "Grep", "Glob"],
+        allowed_tools=["Read", "Grep", "Glob", "Bash"],
         max_turns=CONFIG.max_turns,
     )
 

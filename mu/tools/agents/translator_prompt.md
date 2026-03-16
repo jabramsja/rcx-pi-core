@@ -1,7 +1,7 @@
 ---
 name: translator
 description: "Deception detection agent. Hunts for gaps between what code CLAIMS to do and what it ACTUALLY does. Assumes all implementations deviate from intent until proven otherwise."
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

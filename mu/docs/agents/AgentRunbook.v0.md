@@ -435,6 +435,26 @@ Claude Code's Agent Teams feature allows multiple subagents to collaborate on ta
 
 **Decision (2026-03-11):** PARKED. Feature is experimental and disabled by default, API may change. Revisit when Agent Teams stabilizes and has mature documentation. Current two-system architecture (native ad-hoc + SDK batch) is sufficient.
 
+## Execution-Aware Review (S1-C Lesson)
+
+**Background:** S1-C (PR #606) proved that static-only agent review misses real bugs. The bridge (Codex) caught 4 bugs that all 4 SDK agents missed because the bridge executes code while agents only read source text.
+
+**Change:** All 5 review agents (adversary, verifier, expert, structural-proof, grounding) now have `Bash` tool access and "Execution Verification" sections in their prompts. They are instructed to run targeted commands as part of their review.
+
+**What agents should now do:**
+
+| Agent | Execution Focus |
+|-------|----------------|
+| **Adversary** | Repro vulnerability claims with Python/Node scripts; verify fail-closed behavior |
+| **Verifier** | Run evidence commands from tracker notes; run ratchet checks; verify gate tests |
+| **Structural-proof** | Execute projections on sample inputs; verify seed counts; run structural tests |
+| **Grounding** | Run reviewed test files; verify test classification; check theater risk |
+| **Expert** | Verify dead-code claims with grep + test runs; quantify DRY violations |
+
+**Scope constraints:** All agents are restricted to repo-local commands. No network access, no file creation outside `.scratch/`, no destructive operations.
+
+**Rollout:** Grounding and adversary benefit most. Verifier next. Structural-proof last (narrow repo-local helper commands preferred over free-form shell).
+
 ## Notes
 
 - SDK orchestrators run agents **in parallel** for speed

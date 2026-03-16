@@ -134,25 +134,25 @@ def create_agent_definitions(model_override: str | None = None) -> dict[str, Age
         "verifier": AgentDefinition(
             description="Verifies code against North Star invariants. Use for compliance checks.",
             prompt=load_agent_prompt_with_contract("verifier"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("verifier", model_override),
         ),
         "adversary": AgentDefinition(
             description="Red team agent that tries to break code. Use for security review.",
             prompt=load_agent_prompt_with_contract("adversary"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("adversary", model_override),
         ),
         "expert": AgentDefinition(
             description="Expert code reviewer for complexity and simplification. Use for quality review.",
             prompt=load_agent_prompt_with_contract("expert"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("expert", model_override),
         ),
         "structural-proof": AgentDefinition(
             description="Demands concrete proof of structural claims. Use for projection verification.",
             prompt=load_agent_prompt_with_contract("structural-proof"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("structural-proof", model_override),
         ),
 
@@ -160,13 +160,13 @@ def create_agent_definitions(model_override: str | None = None) -> dict[str, Age
         "grounding": AgentDefinition(
             description="Converts claims into executable tests. Use for test coverage verification.",
             prompt=load_agent_prompt_with_contract("grounding"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("grounding", model_override),
         ),
         "fuzzer": AgentDefinition(
             description="Property-based testing with Hypothesis. Use for edge case discovery.",
             prompt=load_agent_prompt_with_contract("fuzzer"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("fuzzer", model_override),
         ),
 
@@ -174,13 +174,13 @@ def create_agent_definitions(model_override: str | None = None) -> dict[str, Age
         "translator": AgentDefinition(
             description="Explains code in plain English. Use for founder review.",
             prompt=load_agent_prompt_with_contract("translator"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("translator", model_override),
         ),
         "visualizer": AgentDefinition(
             description="Creates Mermaid diagrams of structures. Use for visual verification.",
             prompt=load_agent_prompt_with_contract("visualizer"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("visualizer", model_override),
         ),
 
@@ -188,7 +188,7 @@ def create_agent_definitions(model_override: str | None = None) -> dict[str, Age
         "advisor": AgentDefinition(
             description="Strategic advisor for design decisions. Use when stuck.",
             prompt=load_agent_prompt_with_contract("advisor"),
-            tools=["Read", "Grep", "Glob"],
+            tools=["Read", "Grep", "Glob", "Bash"],
             model=resolve_agent_model("advisor", model_override),
         ),
     }
@@ -277,7 +277,7 @@ def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAge
     model = getattr(agent_def, "model", None)
     return build_sdk_options(
         ClaudeAgentOptions,
-        allowed_tools=["Read", "Grep", "Glob"],
+        allowed_tools=["Read", "Grep", "Glob", "Bash"],
         max_turns=max_turns,
         model=model,
         require_model_kwarg=True,

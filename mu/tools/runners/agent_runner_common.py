@@ -86,7 +86,7 @@ async def run_agent_prompt(
         ) from exc
 
     agent_model = resolve_agent_model(agent_name, model_override)
-    tools = allowed_tools or ["Read", "Grep", "Glob"]
+    tools = allowed_tools or ["Read", "Grep", "Glob", "Bash"]
     # Sanitize injection chars but don't truncate — action_line is internally
     # constructed from already-sanitized file lists and may be long.
     action_line_safe = sanitize_for_prompt(action_line, max_len=len(action_line))
@@ -141,7 +141,7 @@ async def run_standard_file_agent(
         action_line=f"Now {config.action_line_prefix}: {file_list}",
         task_instructions=task_instructions,
         model_override=model_override,
-        allowed_tools=["Read", "Grep", "Glob"],
+        allowed_tools=["Read", "Grep", "Glob", "Bash"],
         max_turns=config.max_turns,
     )
 

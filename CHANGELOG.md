@@ -4,6 +4,16 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-15
 
+### Agent Execution Capability
+
+- Updated 5 agent prompts (adversary, verifier, expert, structural-proof, grounding) with "Execution Verification" sections
+- Added `Bash` to `tools` in all prompt frontmatter
+- Updated SDK orchestrator (`run_review.py`) + all individual runners + `agent_runner_common.py`: all agents now consistently have `Bash` tool (infrastructure already granted it; declarations now match reality). Execution behavior guided by prompt instructions, not tool restrictions
+- Updated all individual runners and `agent_runner_common.py` defaults
+- Regenerated all 9 native subagents via `sync_native_agents.sh`
+- Added "Execution-Aware Review" section to `AgentRunbook.v0.md`
+- **L4_ENABLER** wave. Agents can now run targeted repro commands during review.
+
 ### S1-C: Kernel + Bridge Execution via Stage0 VM
 
 - **Compiled:** kernel.v1 (7 projections) and bootstrap_structural.v1 (5 projections) into Stage0 bundles

@@ -453,7 +453,7 @@ async def _run_skeptic_query(prompt: str, model_override: str | None = None) -> 
             prompt=prompt,
             options=build_sdk_options(
                 ClaudeAgentOptions,
-                allowed_tools=["Read", "Grep", "Glob"],
+                allowed_tools=["Read", "Grep", "Glob", "Bash"],
                 max_turns=20,
                 model=skeptic_model,
                 require_model_kwarg=True,

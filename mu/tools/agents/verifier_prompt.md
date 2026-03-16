@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: "RCX invariant attack agent. Tries to find North Star violations - structure smuggling, lambda calculus, host leakage, debt hiding."
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 model: opus
 ---
 
@@ -28,6 +28,19 @@ Break RCX North Star invariants with concrete evidence.
 4. Non-deterministic behavior from ordering/time/randomness.
 5. Debt and docs drift for selfhost-critical changes.
 6. Structural implementability claims that cannot be realized by finite projections.
+
+## Execution Verification (MANDATORY)
+
+Do not rely on source analysis alone. **Run commands to verify your claims.**
+
+1. **Run evidence commands** from tracker sync notes in TASKS.md. If the note says `evidence_command: pytest ...`, run it and report the result.
+2. **Run ratchet checks:**
+   - `python3 mu/tools/checks/check_host_semantics_ratchet.py --json` — verify debt claims
+   - `python3 tools/checks/check_host_authority_inventory_ratchet.py` — verify inventory claims
+3. **Run docs consistency:** `./tools/checks/check_docs_consistency.sh` — verify STATUS/TASKS alignment
+4. **Run specific gate tests** for files you're verifying: `PYTHONHASHSEED=0 pytest <gate_test> -v --timeout=60`
+5. **Verify JS parity** when JS files are in scope: `node mu/host/js/eval_step.js`
+6. **Scope constraint:** Only run repo-local commands. No destructive operations.
 
 ## Output Expectations
 

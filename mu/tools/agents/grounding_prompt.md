@@ -1,7 +1,7 @@
 ---
 name: grounding
 description: "Test gap attack agent. Hunts for untested claims, missing coverage, and test theater. Assumes all claims are ungrounded until proven with executable tests."
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 
@@ -27,6 +27,21 @@ Detect mismatch between claims and executable test evidence.
 3. Parity gaps between Python and JS paths.
 4. Missing negative-path and boundary coverage.
 5. Drift between docs claims and test reality.
+
+## Execution Verification (MANDATORY)
+
+Do not accept test claims without running them. **Execute the tests.**
+
+1. **Run reviewed test files directly:**
+   - `PYTHONHASHSEED=0 pytest <test_file> -v --timeout=60`
+   - Verify pass count matches claimed coverage
+2. **Check test classification** (core/slow/fuzzer):
+   - `PYTHONHASHSEED=0 pytest --collect-only -m "not slow and not fuzzer" <test_file> -q` — verify core classification
+3. **Run parity tests** when cross-substrate claims are made:
+   - `PYTHONHASHSEED=0 pytest mu/tests/parity/ -x -q --timeout=120`
+4. **Verify theater risk:**
+   - `python3 tools/checks/check_theater_risk_ratchet.py` — check for vacuous tests
+5. **Scope constraint:** Only run repo-local test/check commands. No modifications.
 
 ## Output Expectations
 
