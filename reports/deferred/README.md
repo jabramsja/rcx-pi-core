@@ -19,7 +19,6 @@ Archive rule:
 
 Current active inventory:
 
-- `blocking/redteam_2026-03-14_wave5_governance_loopholes.md`
 - `non_blocking/repo_truth_non_blockers_2026-03-14.md`
 - `non_blocking/native_agent_test_findings_2026-03-11.md`
 - `non_blocking/p7d_agent_review_nonblockers.md`
@@ -32,3 +31,5 @@ Current active inventory:
 - `non_blocking/redteam_2026-03-10_wave4e.md`
 - `non_blocking/redteam_2026-03-14_repo_non_blockers.md`
 - `non_blocking/wave-i-non-blocking-findings.md`
+- `non_blocking/s1c_agent_review_nonblockers_2026-03-15.md`
+- `non_blocking/agent_exec_nonblockers_2026-03-15.md`
