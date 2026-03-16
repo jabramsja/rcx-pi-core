@@ -865,3 +865,49 @@ def test_claude_md_references_codex_audit_contract() -> None:
     assert "Codex→Claude Prompt Contract" in text, (
         "CLAUDE.md must reference 'Codex→Claude Prompt Contract'."
     )
+
+
+def test_deferred_blocker_count_matches_prose() -> None:
+    """If no deferred blockers exist, STATUS.md must not imply active blockers remain."""
+    blocking_dir = REPO_ROOT / "reports" / "deferred" / "blocking"
+    if not blocking_dir.exists():
+        return
+
+    blocker_files = [
+        f for f in blocking_dir.iterdir()
+        if f.is_file() and f.name != "README.md"
+    ]
+
+    if len(blocker_files) == 0:
+        status = STATUS_PATH.read_text(encoding="utf-8").lower()
+        stale_phrases = ["active blocker", "active blockers", "blockers remain", "blocking issues remain"]
+        for phrase in stale_phrases:
+            assert phrase not in status, (
+                f"STATUS.md mentions '{phrase}' but reports/deferred/blocking/ "
+                f"contains no blocker files (only README.md)."
+            )
+
+
+def test_tasks_next_completed_item_count() -> None:
+    """NEXT must not accumulate too many completed items without a historical disclaimer."""
+    tasks = TASKS_PATH.read_text(encoding="utf-8")
+    next_match = _NEXT_SECTION_RE.search(tasks)
+    if not next_match:
+        return
+
+    next_section = next_match.group(1)
+
+    # Count struck-through items (completed)
+    completed = re.findall(r"^\-\s*~~\*\*", next_section, re.MULTILINE)
+
+    if len(completed) > 3:
+        # Must have a historical disclaimer if >3 completed items
+        has_disclaimer = (
+            "historical" in next_section.lower()
+            or "no active" in next_section.lower()
+            or "NOT active authorization" in next_section
+        )
+        assert has_disclaimer, (
+            f"TASKS.md NEXT has {len(completed)} completed (struck-through) items "
+            f"but no historical disclaimer. Add 'No active NEXT items' or similar."
+        )

@@ -56,21 +56,55 @@ def test_status_distinguishes_full_l4_completion_from_active_reduction() -> None
     )
 
 
-def test_tasks_s1_sched_has_concrete_next_item() -> None:
+def test_tasks_s1_sched_reflects_completed_cutover() -> None:
+    """S1-SCHED is COMPLETE — NEXT must reflect that, not claim pending GO."""
     text = _read(TASKS_PATH)
     next_match = _NEXT_SECTION_RE.search(text)
     assert next_match, "Could not isolate TASKS.md NEXT section."
     next_section = next_match.group(1)
 
-    assert "[S1-SCHED]" in text, "TASKS.md must retain the S1-SCHED label."
-    assert "[S1-SCHED]" in next_section, (
-        "TASKS.md NEXT must contain a concrete [S1-SCHED] item, not only a SINK reference."
+    assert "[S1-SCHED]" in next_section, "TASKS.md NEXT must retain the S1-SCHED label."
+    # Find S1-SCHED within NEXT and check it's marked COMPLETE
+    sched_pos = next_section.find("[S1-SCHED]")
+    assert sched_pos >= 0, "[S1-SCHED] not found in NEXT section."
+    after_sched = next_section[sched_pos:sched_pos + 200]
+    assert "COMPLETE" in after_sched, (
+        "[S1-SCHED] in NEXT must be marked COMPLETE (founder GO 2026-03-15, cutover active)."
     )
-    assert "_STAGE0_VM_CUTOVER" in next_section, (
-        "[S1-SCHED] must track the real cutover-follow-through scope."
+
+
+def test_cutover_active_no_pending_go_in_prose() -> None:
+    """If VM cutover is active in code, STATUS.md must not claim it awaits founder GO."""
+    py_step = _read(PY_STEP_MU_PATH)
+    if "_STAGE0_VM_CUTOVER = True" not in py_step:
+        return  # cutover not active, skip
+
+    status = _read(STATUS_PATH)
+    # Extract L4 section (from "### L4 Research" to next "### " heading on its own line)
+    l4_match = re.search(r"### L4 Research.*?(?=\n### |\n## |\Z)", status, re.DOTALL)
+    if not l4_match:
+        return
+    l4_section = l4_match.group(0)
+
+    assert not re.search(r"requires.*founder GO", l4_section, re.IGNORECASE), (
+        "STATUS.md L4 section says 'requires founder GO' but _STAGE0_VM_CUTOVER = True in code. "
+        "Cutover already happened."
     )
-    assert "founder GO" in next_section or "founder go" in next_section.lower(), (
-        "[S1-SCHED] must state the founder GO requirement for cutover."
+    assert not re.search(r"awaits.*founder GO", l4_section, re.IGNORECASE), (
+        "STATUS.md L4 section says 'awaits founder GO' but _STAGE0_VM_CUTOVER = True in code. "
+        "Cutover already happened."
+    )
+
+
+def test_js_nonmeta_core_not_described_as_live() -> None:
+    """If _stepKernelCoreNonMeta is deleted from JS, STATUS.md must not describe split paths."""
+    js_kernel = _read(JS_KERNEL_PATH)
+    if re.search(r"function\s+_stepKernelCoreNonMeta", js_kernel):
+        return  # function still defined, skip
+
+    status = _read(STATUS_PATH)
+    assert "_stepKernelCoreNonMeta" not in status, (
+        "STATUS.md references _stepKernelCoreNonMeta but it has been deleted from kernel.js."
     )
 
 
