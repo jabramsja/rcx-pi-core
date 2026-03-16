@@ -1,7 +1,7 @@
 ---
 name: advisor
 description: "Assumption attack agent. Challenges the thinking that got you stuck. Assumes all proposed approaches have fatal flaws until stress-tested. Provides alternatives to expose weak decisions."
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 model: opus
 ---
 

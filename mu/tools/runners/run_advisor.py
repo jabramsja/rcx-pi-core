@@ -99,7 +99,7 @@ Synthesize findings into RCX-relevant options.
         f"{'Also search the web for how other systems solve similar problems.' if web_search else ''}"
     )
     prompt_text = ADVISOR_PROMPT + web_instructions
-    tools = ["Read", "Grep", "Glob"]
+    tools = ["Read", "Grep", "Glob", "Bash"]
     if web_search:
         tools.append("WebSearch")
 

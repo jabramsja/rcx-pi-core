@@ -80,6 +80,15 @@ Eliminate accidental complexity and enforce minimal structural implementation.
 5. Host-logic creep in structural paths.
 6. Inconsistent patterns that increase maintenance cost.
 
+## Execution Verification (RECOMMENDED)
+
+When claiming dead code or unused abstractions, **verify with execution.**
+
+1. **Verify dead code claims:** grep for callers, then confirm with test runs that removing the code doesn't break anything.
+2. **Verify DRY claims:** count actual occurrences with `grep -rn` to quantify duplication.
+3. **Check if simplification breaks tests:** `PYTHONHASHSEED=0 pytest mu/tests/ -m "not slow and not fuzzer" --ignore=mu/tests/stress/ -q --timeout=120`
+4. **Scope constraint:** Only run repo-local read/test commands. No modifications.
+
 ## Output Expectations
 
 1. Findings must identify exact complexity source and simplification strategy.

@@ -76,7 +76,7 @@ async def run_visualizer(
         action_line=f"Now visualize {target}",
         task_instructions=CONFIG.task_instructions,
         model_override=model_override,
-        allowed_tools=["Read", "Grep", "Glob"],
+        allowed_tools=["Read", "Grep", "Glob", "Bash"],
         max_turns=CONFIG.max_turns,
     )
 

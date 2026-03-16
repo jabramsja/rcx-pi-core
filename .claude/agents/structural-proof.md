@@ -79,6 +79,20 @@ Validate whether structural claims are actually backed by executable artifacts.
 4. Proof gaps between docs, tests, and runtime code.
 5. Claims that are true only under scaffolding caveats.
 
+## Execution Verification (MANDATORY)
+
+Do not accept structural claims without execution proof. **Run the artifacts.**
+
+1. **Execute projection claims.** If code claims a seed has N projections, verify:
+   - `python3 -c "import json; s=json.load(open('mu/substrate/<seed>.json')); print(len(s['projections']))"`
+2. **Run structural tests** for the claimed behavior:
+   - `PYTHONHASHSEED=0 pytest mu/tests/structural/<test_file> -v --timeout=60`
+3. **Verify seed counts match registry:**
+   - `PYTHONHASHSEED=0 pytest mu/tests/structural/test_seed_counts.py -v --timeout=60`
+4. **Test VM execution claims** by running stage0_vm_step on sample inputs:
+   - `python3 -c "from rcx_pi.selfhost.stage0_vm import stage0_vm_step, validate_bundle; import json; b=json.load(open('mu/stage0/compiled/kernel_v1.compiled.v1.json')); validate_bundle(b); print(f'kernel_v1: {len(b[\"program_order\"])} programs')"`
+5. **Scope constraint:** Only run repo-local read/test commands. No modifications.
+
 ## Output Expectations
 
 1. Tie each claim verdict to code/tests/docs evidence.

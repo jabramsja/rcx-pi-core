@@ -223,6 +223,7 @@ async def run_agent(
         action_line=f"Review these files: {file_list}",
         task_instructions=ci_instructions,
         model_override=model_override,
+        allowed_tools=["Read", "Grep", "Glob"],  # SECURITY: CI runs with GITHUB_TOKEN — no shell access
         max_turns=20,
     )
 
@@ -245,6 +246,7 @@ async def run_agent(
             action_line=f"Review these files: {file_list}",
             task_instructions=retry_instructions,
             model_override=model_override,
+            allowed_tools=["Read", "Grep", "Glob"],  # SECURITY: CI runs with GITHUB_TOKEN — no shell access
             max_turns=20,
         )
         retry_verdict, retry_passed, retry_compliant, retry_error = _evaluate(agent_name, retry_text)

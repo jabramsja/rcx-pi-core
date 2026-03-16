@@ -1,7 +1,7 @@
 ---
 name: visualizer
 description: "Structure lie detector agent. Draws actual data shapes to EXPOSE hidden Python blobs and structural lies. A picture reveals what code descriptions hide."
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 

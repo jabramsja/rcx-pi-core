@@ -159,7 +159,7 @@ def create_agent_definition(agent_name: str, model_override: str | None = None) 
     return AgentDefinition(
         description=f"RCX {agent_name} agent for interactive review",
         prompt=load_agent_prompt_with_contract(agent_name),
-        tools=["Read", "Grep", "Glob"],
+        tools=["Read", "Grep", "Glob", "Bash"],
         model=model
     )
 
@@ -220,7 +220,7 @@ Start by giving a brief overview of what you see in these files.
         # Prepare options
         options = build_sdk_options(
             ClaudeAgentOptions,
-            allowed_tools=["Read", "Grep", "Glob"],
+            allowed_tools=["Read", "Grep", "Glob", "Bash"],
             max_turns=15,
             model=resolve_agent_model(self.agent_name, self.model_override),
             require_model_kwarg=True,
