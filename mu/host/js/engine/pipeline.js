@@ -10,11 +10,11 @@
 
 const { KERNEL_RESERVED_FIELDS, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControl, muHashControlCached } = require('../core/types');
-const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
+const { normalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
 const { isTerminalShape, isEngineTerminal, deriveEngineExitReason, setsEqual } = require('../core/terminal_classification');
-const { stepKernel, runStructural, _stepKernelCoreNonMeta } = require('./kernel');
+const { stepKernel, runStructural, _stepKernelCore } = require('./kernel');
 const seedLoader = require('../core/seed_loader');
 
 // JS built-in property names that must never be used as inject_key.
@@ -131,8 +131,9 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
   while (steps < limit) {
     const normalizedInput = normalize(current);
     const kernelInput = { _step: normalizedInput, _projs: linkedProjs };
-    const wrapped = _stepKernelCoreNonMeta(allProjs, kernelInput, 10000, vmConfig || null);
-    const next = denormalize(wrapped.result);
+    // Wave 1: use canonical _stepKernelCore instead of retired _stepKernelCoreNonMeta
+    const canonical = _stepKernelCore(allProjs, kernelInput, current, validator, 10000, vmConfig || null);
+    const next = canonical.output;  // already extracted + denormalized by _stepKernelCore
     validator(next, 'runAlgorithmWithBridge.intermediate');
     const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');
     if (nextHash === currentHash) break;

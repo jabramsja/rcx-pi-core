@@ -43,15 +43,25 @@ When claiming dead code or unused abstractions, **verify with execution.**
 1. Findings must identify exact complexity source and simplification strategy.
 2. When claiming minimality, show areas inspected and why they survived attack.
 
-4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+4. **MANDATORY FORMAT — YOUR OUTPUT WILL BE REJECTED IF YOU DO NOT FOLLOW THIS EXACTLY:**
+
+   Every finding MUST have ALL 5 lines. Missing ANY line = compliance failure = your output rejected.
+
    ```
-   FINDING: <description>
-   FILE: /absolute/path/file.ext
+   FINDING: <one-line description of the issue>
+   FILE: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/<path>
    LINES: <start>-<end>
-   CODE: <actual code snippet>
+   CODE: <paste the actual code from the file using Read tool>
    VERIFIED: Yes
    ```
-   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
+
+   - FINDING without FILE = REJECTED
+   - FINDING without LINES = REJECTED  
+   - FINDING without CODE = REJECTED
+   - FINDING without VERIFIED = REJECTED
+   - Prose descriptions without FINDING blocks = REJECTED
+
+   Use the Read tool to get actual code for the CODE field. Do not paraphrase.
 
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
