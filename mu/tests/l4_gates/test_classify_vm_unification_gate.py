@@ -123,8 +123,13 @@ class TestClassifyVMUnificationGate:
         classify_mod._clear_classify_bundle()  # ANTICHEAT_OK: test-only
         classify_mod._load_classify_bundle()  # ANTICHEAT_OK: test-only
 
-    def test_vm_fault_propagates(self):
-        """Non-step-limit Stage0VMError propagates through classify path."""
+    def test_vm_fault_fails_closed_to_list(self):
+        """Stage0VMError from VM path is caught and fail-closed to 'list'.
+
+        This is the correct behavior: classify is a boundary function that
+        must never crash. Circular element values, op-limit errors, and
+        other VM faults all produce "list" (fail-closed).
+        """
         from rcx_pi.selfhost.stage0_vm import Stage0VMError
         import unittest.mock
 
@@ -133,7 +138,7 @@ class TestClassifyVMUnificationGate:
             "rcx_pi.selfhost.stage0_vm.stage0_vm_run_bounded",
             side_effect=fake_error,
         ):
-            with pytest.raises(Stage0VMError, match="Op limit exceeded"):
-                # Legacy path exercises VM (type-tagged path returns early)
-                value = {"head": {"head": "k", "tail": {"head": "v", "tail": None}}, "tail": None}
-                classify_linked_list(value)
+            # Legacy path exercises VM (type-tagged path returns early)
+            value = {"head": {"head": "k", "tail": {"head": "v", "tail": None}}, "tail": None}
+            result = classify_linked_list(value)
+            assert result == "list"  # fail-closed, not exception
