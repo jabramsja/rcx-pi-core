@@ -2,10 +2,11 @@
 Subst v2 Parity Tests - Verify subst.v2.json preserves v1 behavior.
 
 Phase 7b added context passthrough (_subst_ctx) to all substitution projections.
+Wave 3B migrated subst_mu() from v1+host to v2+VM (2026-03-16).
 These tests verify that:
 1. v2 seed structure is compatible with v1
 2. All v1 projection IDs exist in v2
-3. subst_mu() (using v1) behavior is unchanged
+3. subst_mu() (now using v2+VM) produces same results as v1 runner
 4. Execution parity: v1 and v2 produce identical substitution results
 
 If these tests fail after modifying subst.v2.json, the change may have broken
@@ -72,7 +73,7 @@ class TestSubstV2SeedStructure:
 
 
 class TestSubstMuBehaviorStable:
-    """Verify subst_mu() behavior is unchanged (uses v1 internally)."""
+    """Verify subst_mu() public behavior is stable (now uses v2+VM internally, Wave 3B)."""
 
     def test_literal_passthrough(self):
         """Literals pass through unchanged."""
