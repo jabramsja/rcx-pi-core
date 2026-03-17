@@ -128,19 +128,25 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         current = current.get("tail")
 
     # Wave 3D-B: VM-backed classification via stage0_vm_run_bounded
-    from .stage0_vm import stage0_vm_run_bounded  # ANTICHEAT_OK: infra — bounded VM helper
+    from .stage0_vm import stage0_vm_run_bounded, Stage0VMError  # ANTICHEAT_OK: infra — bounded VM helper
     from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
     bundle = _load_classify_bundle()
     initial = {"classify": {"list": value}}
     budget = get_step_budget()
 
-    outcome = stage0_vm_run_bounded(
-        bundle, initial,
-        max_steps=1000,
-        terminal_field="mode",
-        terminal_value="classify_done",
-    )
+    try:
+        outcome = stage0_vm_run_bounded(
+            bundle, initial,
+            max_steps=1000,
+            terminal_field="mode",
+            terminal_value="classify_done",
+        )
+    except Stage0VMError:
+        # VM fault on malformed input (e.g., circular references inside element
+        # values that bypass the pre-validation walk). Fail-closed to "list".
+        budget.consume(1)
+        return "list"
 
     # Budget accounting (parity with projection_runner)
     if outcome["status"] == "terminal":
