@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave3d-b-classify-vm-unification",
+  "repeat_run_speedup_ratio": 1.347904,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.422093,
+  "repeat_run_raw_seconds": [
+    0.568941,
+    0.422093
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.568941
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.991034
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-17T22:50:44Z",
+  "collector_version": "2.2.0"
+}

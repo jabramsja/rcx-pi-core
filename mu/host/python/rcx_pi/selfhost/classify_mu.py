@@ -17,20 +17,20 @@ from typing import Literal
 
 from .mu_type import Mu
 from .projection_loader import make_projection_loader
-from .projection_runner import make_projection_runner
-
 
 # =============================================================================
-# Projection Loading (consolidated via factory)
+# Projection Loading (retained for test compatibility)
 # =============================================================================
 
 load_classify_projections, clear_projection_cache = make_projection_loader("classify.v1.json")
 
 # =============================================================================
-# Classify Runner (consolidated via factory)
+# Compiled Bundle Loading (Wave 3D-B — VM-backed production path)
 # =============================================================================
 
-is_classify_done, is_classify_state, run_classify_projections = make_projection_runner("classify")
+from .stage0_vm import make_compiled_bundle_loader  # ANTICHEAT_OK: infra — bundle loader factory
+
+_load_classify_bundle, _clear_classify_bundle = make_compiled_bundle_loader("classify_v1")
 
 
 def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
@@ -127,22 +127,38 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
 
         current = current.get("tail")
 
-    # Load projections for structural validation
-    projections = load_classify_projections()
+    # Wave 3D-B: VM-backed classification via stage0_vm_run_bounded
+    from .stage0_vm import stage0_vm_run_bounded, Stage0VMError  # ANTICHEAT_OK: infra — bounded VM helper
+    from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
-    # Wrap input in classify request format
+    bundle = _load_classify_bundle()
     initial = {"classify": {"list": value}}
+    budget = get_step_budget()
 
-    # Run projections
-    final_state, steps, is_stall = run_classify_projections(projections, initial)
-
-    # Extract result
-    if is_stall:
-        # Stall means no projection matched = treat as list
+    try:
+        outcome = stage0_vm_run_bounded(
+            bundle, initial,
+            max_steps=1000,
+            terminal_field="mode",
+            terminal_value="classify_done",
+        )
+    except Stage0VMError:
+        # VM fault on malformed input (e.g., circular references inside element
+        # values that bypass the pre-validation walk). Fail-closed to "list".
+        budget.consume(1)
         return "list"
 
-    if is_classify_done(final_state):
-        result_type = final_state.get("type")
+    # Budget accounting (parity with projection_runner)
+    if outcome["status"] == "terminal":
+        budget.consume(outcome["steps"])
+    elif outcome["status"] == "stall":
+        budget.consume(outcome["steps"] + 1)  # +1 for stall-detection probe
+    else:  # exhaustion
+        budget.consume(1000)
+
+    # Extract result — fail-closed to "list"
+    if outcome["status"] == "terminal":
+        result_type = outcome["root"].get("type")
         if result_type == "dict":
             return "dict"
 
