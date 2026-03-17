@@ -30,51 +30,12 @@ from .projection_runner import make_projection_runner
 load_subst_projections, clear_projection_cache = make_projection_loader("subst.v1.json")
 
 # =============================================================================
-# Compiled Bundle Loading (v2 — VM-backed production path, Wave 3B)
+# Compiled Bundle Loading (v2 — VM-backed production path, Wave 3B/3C factory)
 # =============================================================================
 
-_compiled_subst_v2_bundle_cache = None
+from .stage0_vm import make_compiled_bundle_loader  # ANTICHEAT_OK: infra — bundle loader factory
 
-
-def _load_compiled_subst_v2_bundle() -> dict:
-    """Load and validate the compiled subst.v2 Stage0 VM bundle.
-
-    Private to subst_mu.py — does NOT import from step_mu.py (circular dependency).
-    Uses the same validation + provenance pattern as step_mu._load_compiled_subst_v2_bundle().
-    """
-    global _compiled_subst_v2_bundle_cache
-    if _compiled_subst_v2_bundle_cache is not None:
-        return _compiled_subst_v2_bundle_cache
-
-    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — VM bundle validation
-    from .seed_integrity import SEED_CHECKSUMS  # ANTICHEAT_OK: infra — N15 provenance
-
-    from .seed_integrity import get_mu_dir  # ANTICHEAT_OK: infra — path resolution
-    bundle_path = get_mu_dir() / "stage0" / "compiled" / "subst_v2.compiled.v1.json"
-    if not bundle_path.exists():
-        raise FileNotFoundError(f"Compiled subst.v2 bundle not found: {bundle_path}")
-
-    with open(bundle_path, encoding="utf-8") as f:
-        bundle = json.load(f)
-
-    validate_bundle(bundle)
-
-    # N15 provenance verification (inlined — cannot import from step_mu due to circular dep)
-    source_seed = bundle.get("source_seed")
-    source_digest = bundle.get("source_digest")
-    if source_seed and source_digest:
-        seed_filename = source_seed if source_seed.endswith(".json") else source_seed + ".json"
-        if seed_filename in SEED_CHECKSUMS:
-            expected = "sha256:" + SEED_CHECKSUMS[seed_filename]
-            if source_digest != expected:  # AST_OK:infra — type guard
-                raise ValueError(
-                    f"SECURITY: Bundle provenance mismatch for '{seed_filename}'. "
-                    f"Bundle claims source_digest={source_digest}, "
-                    f"but SEED_CHECKSUMS says {expected}."
-                )
-
-    _compiled_subst_v2_bundle_cache = bundle
-    return bundle
+_load_compiled_subst_v2_bundle, _clear_compiled_subst_v2_bundle = make_compiled_bundle_loader("subst_v2")
 
 
 # =============================================================================

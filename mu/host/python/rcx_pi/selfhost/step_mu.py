@@ -696,20 +696,28 @@ def clear_combined_kernel_cache() -> None:
 
     9-agent round 2 (Expert finding): Restored for test isolation.
     Tests that mock projections need this to prevent stale cache pollution.
-    P7-d: Also clears partitioned caches and compiled bundle caches.
+    Wave 3C: compiled bundle caches cleared via factory clear functions.
     """
     global _combined_kernel_cache, _combined_kernel_bridge_cache
     global _kernel_v1_cache, _bridge_proj_cache
-    global _match_v2_bundle_cache, _subst_v2_bundle_cache
-    global _kernel_v1_bundle_cache, _bridge_bundle_cache
     _combined_kernel_cache = None
     _combined_kernel_bridge_cache = None
     _kernel_v1_cache = None
     _bridge_proj_cache = None
-    _match_v2_bundle_cache = None
-    _subst_v2_bundle_cache = None
-    _kernel_v1_bundle_cache = None
-    _bridge_bundle_cache = None
+    # Wave 3C: clear compiled bundle caches via factory (step_mu instances)
+    _clear_compiled_match_v2_bundle()
+    _clear_compiled_subst_v2_bundle()
+    _clear_compiled_kernel_v1_bundle()
+    _clear_compiled_bridge_bundle()
+    # Wave 3C: also clear match_mu + subst_mu independent factory caches
+    # (verifier finding: these are separate closures with separate _cache[0])
+    from .match_mu import _clear_match_bundle, _clear_bridge_bundle  # ANTICHEAT_OK: infra — test isolation
+    _clear_match_bundle()
+    _clear_bridge_bundle()
+    from .match_mu import clear_match_bridge_cache  # ANTICHEAT_OK: infra — test isolation
+    clear_match_bridge_cache()
+    from .subst_mu import _clear_compiled_subst_v2_bundle as _clear_subst_mu_bundle  # ANTICHEAT_OK: infra — test isolation
+    _clear_subst_mu_bundle()
     # S1-C: Also clear TC and hemisphere caches for complete test isolation
     _clear_tc_cache()
     _clear_hemi_cache()
@@ -726,11 +734,13 @@ _combined_kernel_bridge_cache: list[Mu] | None = None
 _kernel_v1_cache: list[Mu] | None = None
 _bridge_proj_cache: list[Mu] | None = None
 
-# Compiled bundle caches
-_match_v2_bundle_cache: dict | None = None
-_subst_v2_bundle_cache: dict | None = None
-_kernel_v1_bundle_cache: dict | None = None
-_bridge_bundle_cache: dict | None = None
+# Compiled bundle loaders (Wave 3C: consolidated via factory)
+from .stage0_vm import make_compiled_bundle_loader  # ANTICHEAT_OK: infra — bundle loader factory
+
+_load_compiled_match_v2_bundle, _clear_compiled_match_v2_bundle = make_compiled_bundle_loader("match_v2")
+_load_compiled_subst_v2_bundle, _clear_compiled_subst_v2_bundle = make_compiled_bundle_loader("subst_v2")
+_load_compiled_kernel_v1_bundle, _clear_compiled_kernel_v1_bundle = make_compiled_bundle_loader("kernel_v1")
+_load_compiled_bridge_bundle, _clear_compiled_bridge_bundle = make_compiled_bundle_loader("bootstrap_structural_v1")
 
 
 def _load_kernel_v1_projections_shared() -> list[Mu]:
@@ -790,86 +800,10 @@ def _verify_bundle_provenance(bundle: dict) -> None:  # AST_OK:infra — type gu
         )
 
 
-def _load_compiled_match_v2_bundle() -> dict:
-    """Load + validate compiled match_v2 bundle (cached).
-
-    Fail-closed: validate_bundle raises on invalid bundle structure.
-    N15 provenance: _verify_bundle_provenance raises on digest mismatch.
-    """
-    global _match_v2_bundle_cache
-    if _match_v2_bundle_cache is not None:
-        return _match_v2_bundle_cache
-    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — bundle loading
-    from .seed_integrity import get_mu_dir
-    path = get_mu_dir() / "stage0" / "compiled" / "match_v2.compiled.v1.json"
-    with open(path) as f:
-        bundle = json.load(f)
-    validate_bundle(bundle)
-    _verify_bundle_provenance(bundle)
-    _match_v2_bundle_cache = bundle  # Cache only after validation passes
-    return _match_v2_bundle_cache
-
-
-def _load_compiled_subst_v2_bundle() -> dict:
-    """Load + validate compiled subst_v2 bundle (cached).
-
-    Fail-closed: validate_bundle raises on invalid bundle structure.
-    N15 provenance: _verify_bundle_provenance raises on digest mismatch.
-    """
-    global _subst_v2_bundle_cache
-    if _subst_v2_bundle_cache is not None:
-        return _subst_v2_bundle_cache
-    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — bundle loading
-    from .seed_integrity import get_mu_dir
-    path = get_mu_dir() / "stage0" / "compiled" / "subst_v2.compiled.v1.json"
-    with open(path) as f:
-        bundle = json.load(f)
-    validate_bundle(bundle)
-    _verify_bundle_provenance(bundle)
-    _subst_v2_bundle_cache = bundle  # Cache only after validation passes
-    return _subst_v2_bundle_cache
-
-
-def _load_compiled_kernel_v1_bundle() -> dict:
-    """Load + validate compiled kernel_v1 bundle (cached).
-
-    S1-C: kernel.v1 projections now execute via Stage0 VM.
-    Fail-closed: validate_bundle + provenance verification.
-    Cache assigned AFTER validation (bridge R2 finding: prevent caching invalid bundles).
-    """
-    global _kernel_v1_bundle_cache
-    if _kernel_v1_bundle_cache is not None:
-        return _kernel_v1_bundle_cache
-    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — bundle loading
-    from .seed_integrity import get_mu_dir
-    path = get_mu_dir() / "stage0" / "compiled" / "kernel_v1.compiled.v1.json"
-    with open(path) as f:
-        bundle = json.load(f)
-    validate_bundle(bundle)
-    _verify_bundle_provenance(bundle)
-    _kernel_v1_bundle_cache = bundle  # Cache only after validation passes
-    return _kernel_v1_bundle_cache
-
-
-def _load_compiled_bridge_bundle() -> dict:
-    """Load + validate compiled bootstrap_structural_v1 bundle (cached).
-
-    S1-C: bridge projections now execute via Stage0 VM.
-    Fail-closed: validate_bundle + provenance verification.
-    Cache assigned AFTER validation (bridge R2 finding: prevent caching invalid bundles).
-    """
-    global _bridge_bundle_cache
-    if _bridge_bundle_cache is not None:
-        return _bridge_bundle_cache
-    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — bundle loading
-    from .seed_integrity import get_mu_dir
-    path = get_mu_dir() / "stage0" / "compiled" / "bootstrap_structural_v1.compiled.v1.json"
-    with open(path) as f:
-        bundle = json.load(f)
-    validate_bundle(bundle)
-    _verify_bundle_provenance(bundle)
-    _bridge_bundle_cache = bundle  # Cache only after validation passes
-    return _bridge_bundle_cache
+# NOTE: _load_compiled_match_v2_bundle, _load_compiled_subst_v2_bundle,
+# _load_compiled_kernel_v1_bundle, _load_compiled_bridge_bundle are now
+# created by make_compiled_bundle_loader() above (Wave 3C consolidation).
+# The factory provides: load, validate_bundle, N15 provenance, and caching.
 
 
 def _validate_combined_bridge_ordering(projections: list[Mu]) -> None:

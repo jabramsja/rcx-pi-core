@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-17T01:58:31.335532+00:00",
+  "generated_at": "2026-03-17T16:33:44.532189+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -1651,9 +1651,10 @@
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 837,
+          "line": 844,
           "name": "match_mu",
           "signals": [
+            "builtin:isinstance",
             "loop"
           ],
           "substrate": "python"
@@ -2031,6 +2032,33 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 930,
+          "name": "make_compiled_bundle_loader",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 980,
+          "name": "make_compiled_bundle_loader._clear",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 947,
+          "name": "make_compiled_bundle_loader._load",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
           "line": 874,
           "name": "stage0_vm_run",
           "signals": [
@@ -2099,7 +2127,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1617,
+          "line": 1542,
           "name": "_has_nonlinear_vars",
           "signals": [
             "builtin:any",
@@ -2161,7 +2189,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1653,
+          "line": 1578,
           "name": "_reject_nonlinear_projections",
           "signals": [
             "builtin:enumerate",
@@ -2172,7 +2200,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1887,
+          "line": 1812,
           "name": "_run_sub_algorithm",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2182,7 +2210,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1099,
+          "line": 1024,
           "name": "_step_kernel_with_vm",
           "signals": [
             "loop"
@@ -2191,7 +2219,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 875,
+          "line": 800,
           "name": "_validate_combined_bridge_ordering",
           "signals": [
             "builtin:isinstance",
@@ -2224,7 +2252,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1571,
+          "line": 1496,
           "name": "apply_mu",
           "signals": [
             "builtin:isinstance"
@@ -2242,7 +2270,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1008,
+          "line": 933,
           "name": "is_kernel_intermediate",
           "signals": [
             "builtin:any",
@@ -2272,7 +2300,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1064,
+          "line": 989,
           "name": "make_undefined_motif",
           "signals": [
             "authority_call:mu_hash_cached"
@@ -2281,7 +2309,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1070,
+          "line": 995,
           "name": "make_undefined_motif._safe_hash",
           "signals": [
             "authority_call:mu_hash_cached"
@@ -2290,7 +2318,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1707,
+          "line": 1632,
           "name": "run_mu",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2301,7 +2329,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1762,
+          "line": 1687,
           "name": "run_mu_structural",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2313,7 +2341,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1509,
+          "line": 1434,
           "name": "step_algorithm_with_bridge",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2325,7 +2353,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1209,
+          "line": 1134,
           "name": "step_kernel_mu",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2348,7 +2376,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 138,
+          "line": 98,
           "name": "_reconcile_parity",
           "signals": [
             "builtin:isinstance",
@@ -2362,7 +2390,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 111,
+          "line": 71,
           "name": "_substitute_direct",
           "signals": [
             "builtin:isinstance",
@@ -2374,7 +2402,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 91,
+          "line": 51,
           "name": "is_head_tail_structure",
           "signals": [
             "builtin:isinstance",
@@ -2384,7 +2412,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 183,
+          "line": 143,
           "name": "subst_mu",
           "signals": [
             "builtin:isinstance",
@@ -2396,8 +2424,8 @@
       ],
       "site_counts": {
         "javascript": 96,
-        "python": 120,
-        "total": 216
+        "python": 123,
+        "total": 219
       }
     },
     "total": {
@@ -4421,9 +4449,10 @@
         },
         {
           "file": "rcx_pi/selfhost/match_mu.py",
-          "line": 837,
+          "line": 844,
           "name": "match_mu",
           "signals": [
+            "builtin:isinstance",
             "loop"
           ],
           "substrate": "python"
@@ -4913,6 +4942,33 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 930,
+          "name": "make_compiled_bundle_loader",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 980,
+          "name": "make_compiled_bundle_loader._clear",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 947,
+          "name": "make_compiled_bundle_loader._load",
+          "signals": [
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
           "line": 874,
           "name": "stage0_vm_run",
           "signals": [
@@ -5009,7 +5065,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1617,
+          "line": 1542,
           "name": "_has_nonlinear_vars",
           "signals": [
             "builtin:any",
@@ -5024,7 +5080,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1873,
+          "line": 1798,
           "name": "_is_terminal_shape",
           "signals": [],
           "substrate": "python"
@@ -5044,7 +5100,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 750,
+          "line": 751,
           "name": "_load_bridge_projections_shared",
           "signals": [],
           "substrate": "python"
@@ -5058,36 +5114,8 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 932,
+          "line": 857,
           "name": "_load_combined_kernel_with_bridge_projections_shared",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 854,
-          "name": "_load_compiled_bridge_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 833,
-          "name": "_load_compiled_kernel_v1_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 793,
-          "name": "_load_compiled_match_v2_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 813,
-          "name": "_load_compiled_subst_v2_bundle",
           "signals": [],
           "substrate": "python"
         },
@@ -5105,7 +5133,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 736,
+          "line": 737,
           "name": "_load_kernel_v1_projections_shared",
           "signals": [],
           "substrate": "python"
@@ -5134,7 +5162,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1653,
+          "line": 1578,
           "name": "_reject_nonlinear_projections",
           "signals": [
             "builtin:enumerate",
@@ -5145,7 +5173,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1887,
+          "line": 1812,
           "name": "_run_sub_algorithm",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5155,7 +5183,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1099,
+          "line": 1024,
           "name": "_step_kernel_with_vm",
           "signals": [
             "loop"
@@ -5164,7 +5192,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 875,
+          "line": 800,
           "name": "_validate_combined_bridge_ordering",
           "signals": [
             "builtin:isinstance",
@@ -5193,7 +5221,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 764,
+          "line": 765,
           "name": "_verify_bundle_provenance",
           "signals": [],
           "substrate": "python"
@@ -5211,7 +5239,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1571,
+          "line": 1496,
           "name": "apply_mu",
           "signals": [
             "builtin:isinstance"
@@ -5236,14 +5264,14 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1046,
+          "line": 971,
           "name": "extract_kernel_result",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1008,
+          "line": 933,
           "name": "is_kernel_intermediate",
           "signals": [
             "builtin:any",
@@ -5263,7 +5291,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 998,
+          "line": 923,
           "name": "is_kernel_terminal",
           "signals": [],
           "substrate": "python"
@@ -5287,14 +5315,14 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 969,
+          "line": 894,
           "name": "load_combined_kernel_with_bridge_projections",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1064,
+          "line": 989,
           "name": "make_undefined_motif",
           "signals": [
             "authority_call:mu_hash_cached"
@@ -5303,7 +5331,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1070,
+          "line": 995,
           "name": "make_undefined_motif._safe_hash",
           "signals": [
             "authority_call:mu_hash_cached"
@@ -5319,14 +5347,14 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1450,
+          "line": 1375,
           "name": "run_algorithm_meta_circular",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1707,
+          "line": 1632,
           "name": "run_mu",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5337,7 +5365,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1762,
+          "line": 1687,
           "name": "run_mu_structural",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5349,7 +5377,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1509,
+          "line": 1434,
           "name": "step_algorithm_with_bridge",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5361,7 +5389,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1209,
+          "line": 1134,
           "name": "step_kernel_mu",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5374,7 +5402,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1681,
+          "line": 1606,
           "name": "step_mu",
           "signals": [],
           "substrate": "python"
@@ -5405,14 +5433,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 40,
-          "name": "_load_compiled_subst_v2_bundle",
-          "signals": [],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 138,
+          "line": 98,
           "name": "_reconcile_parity",
           "signals": [
             "builtin:isinstance",
@@ -5426,7 +5447,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 111,
+          "line": 71,
           "name": "_substitute_direct",
           "signals": [
             "builtin:isinstance",
@@ -5438,7 +5459,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 91,
+          "line": 51,
           "name": "is_head_tail_structure",
           "signals": [
             "builtin:isinstance",
@@ -5448,7 +5469,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 183,
+          "line": 143,
           "name": "subst_mu",
           "signals": [
             "builtin:isinstance",
@@ -5460,8 +5481,8 @@
       ],
       "site_counts": {
         "javascript": 129,
-        "python": 182,
-        "total": 311
+        "python": 180,
+        "total": 309
       }
     }
   },

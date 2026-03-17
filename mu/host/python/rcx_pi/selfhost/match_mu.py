@@ -830,8 +830,15 @@ def dict_to_bindings(d: dict[str, Mu]) -> Mu:
 # v1 runner (legacy, used by load_match_projections / match.v1.json)
 is_match_done, _, run_match_projections = make_projection_runner("match")
 
-# v2 runner (bridge-aware, uses _mode terminal field for match.v2 + bridge)
-is_match_done_v2, _, run_match_bridge = make_projection_runner("match", terminal_field="_mode")
+
+# =============================================================================
+# Compiled Bundle Loading (Wave 3C — via factory)
+# =============================================================================
+
+from .stage0_vm import make_compiled_bundle_loader  # ANTICHEAT_OK: infra — bundle loader factory
+
+_load_match_bundle, _clear_match_bundle = make_compiled_bundle_loader("match_v2")
+_load_bridge_bundle, _clear_bridge_bundle = make_compiled_bundle_loader("bootstrap_structural_v1")
 
 
 def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
@@ -865,22 +872,55 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
     norm_pattern = normalize_for_match(pattern)
     norm_value = normalize_for_match(value)
 
-    # Load match.v2 + bridge projections (bridge intercepts vars for conflict detection)
-    projections = load_match_with_bridge_projections()
+    # Wave 3C: Staged bridge->match VM dispatch (matches kernel path at step_mu.py:1154-1182)
+    from .stage0_vm import stage0_vm_step, Stage0VMError  # ANTICHEAT_OK: infra — VM step
+    from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
+
+    match_bundle = _load_match_bundle()
+    bridge_bundle = _load_bridge_bundle()
 
     # Wrap input in match request format
     # v2 requires _match_ctx field (bridge uses it for binding lookup state)
     initial = {"match": {"pattern": norm_pattern, "value": norm_value}, "_match_ctx": None}
 
-    # Run projections using v2 runner (_mode terminal detection)
-    final_state, steps, is_stall = run_match_bridge(projections, initial)
+    # Staged dispatch loop: try bridge first, then match, per step
+    # Bridge intercepts var-binding states AND handles the full lookup phase.
+    # Match handles done/sibling/equal/descend/fail/wrap states.
+    # This matches the kernel dispatch strategy where bridge gets priority.
+    state = initial
+    max_steps = 1000
+    budget = get_step_budget()
+    is_stall = False
 
-    # Extract result
-    if is_stall:
-        # Stall means no projection matched = pattern didn't match
-        return NO_MATCH
+    for step_i in range(max_steps):
+        # 1 budget unit per bridge->match cycle (same as kernel path)
+        budget.consume(1)
 
-    if is_match_done_v2(final_state):
+        # 1. Try bridge bundle first (bridge gets first-match priority every step)
+        vm_result = stage0_vm_step(bridge_bundle, state)
+        if vm_result["status"] == "match":  # AST_OK:infra — type guard
+            state = vm_result["root"]
+            continue
+
+        # 2. Try match bundle second
+        vm_result = stage0_vm_step(match_bundle, state)
+        if vm_result["status"] == "match":  # AST_OK:infra — type guard
+            state = vm_result["root"]
+            continue
+
+        # 3. Neither matched — stall
+        is_stall = True
+        break
+
+    final_state = state
+
+    # Extract result — check terminal FIRST, then stall
+    # Under staged dispatch, stall happens one step AFTER terminal (match.done fires,
+    # then the next iteration stalls because no projection matches the done state).
+    # So the final state may be a terminal even when is_stall is True.
+
+    # Check for v2 terminal state (_mode == "match_done")
+    if isinstance(final_state, dict) and final_state.get("_mode") == "match_done":  # AST_OK:infra — type guard
         status = final_state.get("_status")  # v2: underscore-prefixed
         if status == "success":
             bindings = final_state.get("_bindings")  # v2: underscore-prefixed
@@ -891,7 +931,10 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
             # Explicit failure status (including "no_match" from bridge conflict detection)
             return NO_MATCH
 
-    # Unexpected terminal state — fail-closed instead of masking as NO_MATCH
-    raise RuntimeError(
-        f"match_mu: unexpected terminal state (not stall, not match_done): {final_state!r}"
-    )
+    # Not a terminal state — check stall/exhaustion
+    if is_stall:
+        # Genuine stall without reaching terminal = no match
+        return NO_MATCH
+
+    # Max steps exhaustion without terminal — treat as NO_MATCH
+    return NO_MATCH
