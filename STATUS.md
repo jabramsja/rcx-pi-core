@@ -45,7 +45,7 @@ NAME: Structural Selection Parity (L1-L3 COMPLETE)
 - [x] Security hardening complete (27 reserved fields: 25 KERNEL_RESERVED_FIELDS + 2 ALGORITHM_ENTRYPOINT_KEYS, deep validation)
 - [ ] Python for-loop still drives kernel execution (`step_mu.py` `step_kernel_mu`, see `@host_iteration` decorator)
 
-**Seed version note:** `match_mu()` now uses match.v2 + bridge projections directly for non-linear pattern conflict detection (B-structural approach, 2026-02-09). `subst_mu()` standalone function uses v1 seeds. The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration.
+**Seed version note:** `match_mu()` now uses match.v2 + bridge projections directly for non-linear pattern conflict detection (B-structural approach, 2026-02-09). `subst_mu()` standalone function uses subst.v2 + Stage0 VM runner (Wave 3B, 2026-03-16). The kernel (`step_kernel_mu`) uses v2 seeds which add context passthrough (`_match_ctx`, `_subst_ctx`) for kernel integration. `classify_mu()` still uses classify.v1 + host runner (no compiled bundle yet).
 
 **L2 FULL (target - requires decision):**
 The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Options:
