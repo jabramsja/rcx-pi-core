@@ -923,6 +923,113 @@ def stage0_vm_run(bundle, input_value, max_steps=100, max_ops=None):
     raise Stage0VMError(f"Run step limit exceeded ({max_steps})")
 
 
+# ---------------------------------------------------------------------------
+# VM bounded run — structured outcome (no exceptions on exhaustion)
+# ---------------------------------------------------------------------------
+
+def stage0_vm_run_bounded(bundle, input_value, *,
+                          max_steps=1000,
+                          terminal_field="mode",
+                          terminal_value=None):
+    """Bounded VM run with structured outcome for Python boundary callers.
+
+    Unlike stage0_vm_run (which raises on step-limit exhaustion), this
+    function returns a structured result for all three outcomes: terminal,
+    stall, and exhaustion. Designed as a shared bootstrap helper for
+    classify_mu, subst_mu, and other callers that need
+    projection_runner-style bounded-run semantics on top of stage0_vm_step.
+
+    Terminal detection is declarative: checks
+        type(state) is dict and state.get(terminal_field) == terminal_value
+    after each VM stall. Under VM dispatch, terminal states don't match any
+    compiled projection, so stage0_vm_step returns "stall". The terminal
+    check distinguishes "done" from "genuinely stuck."
+
+    Does NOT consume the global step budget. Budget accounting is a caller
+    concern — different callers have different accounting needs.
+
+    This is a Python-only boundary helper, NOT a JS parity target.
+    stage0_vm_run() remains the JS-mirrored contract.
+
+    Args:
+        bundle: Validated Stage0 bundle.
+        input_value: Initial Mu state.
+        max_steps: Maximum VM dispatch cycles (default 1000, matching
+            projection_runner.py:77 default).
+        terminal_field: Dict key to check for terminal state (default "mode").
+        terminal_value: Value that indicates terminal (e.g., "classify_done").
+            If None, terminal detection is disabled (run to stall/exhaustion).
+
+    Returns::
+
+        {"status": "terminal" | "stall" | "exhaustion",
+         "root": <final Mu state>,
+         "steps": int}
+
+    Outcome semantics:
+        terminal:   state.get(terminal_field) == terminal_value detected
+                    on VM stall or after max_steps. steps = successful matches.
+        stall:      VM stall and state is NOT terminal. steps < max_steps.
+        exhaustion: max_steps reached without terminal or stall.
+                    steps == max_steps.
+    """
+    current = input_value
+
+    def _is_terminal(state):
+        return (terminal_value is not None
+                and type(state) is dict
+                and state.get(terminal_field) == terminal_value)
+
+    steps = 0
+
+    for _ in range(max_steps):
+        # Pre-step terminal fast path (parity with projection_runner:100-104).
+        # Avoids unnecessary VM dispatch for already-terminal input.
+        if _is_terminal(current):
+            return {
+                "status": "terminal",
+                "root": current,
+                "steps": steps,
+            }
+
+        result = stage0_vm_step(bundle, current)
+
+        if result["status"] == "match":
+            current = result["root"]
+            steps += 1
+            continue
+
+        # VM stall — no projection matched.
+        # Check if state is terminal (VM stall IS the terminal signal).
+        if _is_terminal(current):
+            return {
+                "status": "terminal",
+                "root": current,
+                "steps": steps,
+            }
+
+        return {
+            "status": "stall",
+            "root": current,
+            "steps": steps,
+        }
+
+    # Exhaustion — terminal-on-last-step check
+    # (parity with projection_runner.py:122-125)
+    if _is_terminal(current):
+        return {
+            "status": "terminal",
+            "root": current,
+            "steps": steps,
+        }
+
+    return {
+        "status": "exhaustion",
+        "root": current,
+        "steps": steps,
+    }
+
+
 # =============================================================================
 # Compiled Bundle Loader Factory (Wave 3C — consolidates duplicate loaders)
 # =============================================================================
