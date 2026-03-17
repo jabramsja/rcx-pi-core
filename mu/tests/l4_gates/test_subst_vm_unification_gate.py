@@ -12,7 +12,8 @@ import json
 
 import pytest
 
-from rcx_pi.selfhost.subst_mu import subst_mu, _load_compiled_subst_v2_bundle
+from rcx_pi.selfhost.subst_mu import subst_mu
+from rcx_pi.selfhost.subst_mu import _load_compiled_subst_v2_bundle  # ANTICHEAT_OK: test-only — gate test for bundle loading + provenance
 
 
 class TestSubstVMUnificationGate:
