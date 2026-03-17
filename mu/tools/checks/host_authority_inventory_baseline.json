@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-16T07:12:56.495301+00:00",
+  "generated_at": "2026-03-17T01:58:31.335532+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -851,7 +851,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 696,
+          "line": 706,
           "name": "buildOntologyPromotionCandidate",
           "signals": [
             "builtin:Array.isArray",
@@ -861,7 +861,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 763,
+          "line": 773,
           "name": "collectOntologyEvidence",
           "signals": [
             "builtin:Array.isArray",
@@ -874,7 +874,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 843,
+          "line": 853,
           "name": "emit",
           "signals": [
             "builtin:muHash(",
@@ -909,7 +909,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 810,
+          "line": 820,
           "name": "runEnginePipeline",
           "signals": [
             "builtin:Array.isArray",
@@ -923,7 +923,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 929,
+          "line": 939,
           "name": "runEnginePipelineRecursive",
           "signals": [
             "builtin:Array.isArray",
@@ -946,7 +946,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 325,
+          "line": 335,
           "name": "serviceBoundaryEffect",
           "signals": [
             "builtin:Array.isArray",
@@ -959,7 +959,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 297,
+          "line": 307,
           "name": "setTestDispatchOverride",
           "signals": [
             "builtin:Array.isArray",
@@ -971,7 +971,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 506,
+          "line": 516,
           "name": "validateOntologyPromotionRecord",
           "signals": [
             "builtin:Array.isArray",
@@ -983,7 +983,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 463,
+          "line": 473,
           "name": "validateReentryPayload",
           "signals": [
             "builtin:Array.isArray"
@@ -1124,7 +1124,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1470,
+          "line": 1480,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -1156,7 +1156,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 937,
+          "line": 947,
           "name": "_run_engine_recursive",
           "signals": [
             "authority_call:mu_hash",
@@ -1173,7 +1173,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 979,
+          "line": 989,
           "name": "_run_engine_recursive._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -1186,7 +1186,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 715,
+          "line": 725,
           "name": "_service_boundary_effect",
           "signals": [
             "builtin:dict",
@@ -1223,7 +1223,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1374,
+          "line": 1384,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -1235,7 +1235,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 878,
+          "line": 888,
           "name": "hash_trace_for_recurrence",
           "signals": [
             "authority_call:mu_hash_control",
@@ -1254,7 +1254,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1115,
+          "line": 1125,
           "name": "run_engine_pipeline",
           "signals": [
             "authority_call:mu_hash",
@@ -1272,7 +1272,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1239,
+          "line": 1249,
           "name": "run_engine_pipeline._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -1285,7 +1285,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1475,
+          "line": 1485,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -1297,7 +1297,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1339,
+          "line": 1349,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -1308,7 +1308,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1417,
+          "line": 1427,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -2099,7 +2099,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1621,
+          "line": 1617,
           "name": "_has_nonlinear_vars",
           "signals": [
             "builtin:any",
@@ -2161,7 +2161,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1657,
+          "line": 1653,
           "name": "_reject_nonlinear_projections",
           "signals": [
             "builtin:enumerate",
@@ -2172,7 +2172,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1891,
+          "line": 1887,
           "name": "_run_sub_algorithm",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2224,7 +2224,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1575,
+          "line": 1571,
           "name": "apply_mu",
           "signals": [
             "builtin:isinstance"
@@ -2290,7 +2290,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1711,
+          "line": 1707,
           "name": "run_mu",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2301,7 +2301,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1766,
+          "line": 1762,
           "name": "run_mu_structural",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2313,7 +2313,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1513,
+          "line": 1509,
           "name": "step_algorithm_with_bridge",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -2348,7 +2348,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 84,
+          "line": 138,
           "name": "_reconcile_parity",
           "signals": [
             "builtin:isinstance",
@@ -2362,7 +2362,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 57,
+          "line": 111,
           "name": "_substitute_direct",
           "signals": [
             "builtin:isinstance",
@@ -2374,7 +2374,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 37,
+          "line": 91,
           "name": "is_head_tail_structure",
           "signals": [
             "builtin:isinstance",
@@ -2384,10 +2384,11 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 129,
+          "line": 183,
           "name": "subst_mu",
           "signals": [
             "builtin:isinstance",
+            "builtin:len",
             "loop"
           ],
           "substrate": "python"
@@ -3473,7 +3474,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 696,
+          "line": 706,
           "name": "buildOntologyPromotionCandidate",
           "signals": [
             "builtin:Array.isArray",
@@ -3483,7 +3484,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 763,
+          "line": 773,
           "name": "collectOntologyEvidence",
           "signals": [
             "builtin:Array.isArray",
@@ -3496,7 +3497,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 843,
+          "line": 853,
           "name": "emit",
           "signals": [
             "builtin:muHash(",
@@ -3507,7 +3508,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 296,
+          "line": 306,
           "name": "enableTestMode",
           "signals": [],
           "substrate": "javascript"
@@ -3538,7 +3539,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 810,
+          "line": 820,
           "name": "runEnginePipeline",
           "signals": [
             "builtin:Array.isArray",
@@ -3552,7 +3553,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 929,
+          "line": 939,
           "name": "runEnginePipelineRecursive",
           "signals": [
             "builtin:Array.isArray",
@@ -3575,7 +3576,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 325,
+          "line": 335,
           "name": "serviceBoundaryEffect",
           "signals": [
             "builtin:Array.isArray",
@@ -3588,7 +3589,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 297,
+          "line": 307,
           "name": "setTestDispatchOverride",
           "signals": [
             "builtin:Array.isArray",
@@ -3600,7 +3601,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 506,
+          "line": 516,
           "name": "validateOntologyPromotionRecord",
           "signals": [
             "builtin:Array.isArray",
@@ -3612,7 +3613,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 463,
+          "line": 473,
           "name": "validateReentryPayload",
           "signals": [
             "builtin:Array.isArray"
@@ -3767,7 +3768,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1470,
+          "line": 1480,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -3813,7 +3814,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 937,
+          "line": 947,
           "name": "_run_engine_recursive",
           "signals": [
             "authority_call:mu_hash",
@@ -3830,7 +3831,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 979,
+          "line": 989,
           "name": "_run_engine_recursive._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -3843,7 +3844,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 715,
+          "line": 725,
           "name": "_service_boundary_effect",
           "signals": [
             "builtin:dict",
@@ -3880,7 +3881,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1374,
+          "line": 1384,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -3892,7 +3893,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 878,
+          "line": 888,
           "name": "hash_trace_for_recurrence",
           "signals": [
             "authority_call:mu_hash_control",
@@ -3911,7 +3912,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1115,
+          "line": 1125,
           "name": "run_engine_pipeline",
           "signals": [
             "authority_call:mu_hash",
@@ -3929,7 +3930,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1239,
+          "line": 1249,
           "name": "run_engine_pipeline._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -3942,7 +3943,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1475,
+          "line": 1485,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -3954,7 +3955,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1339,
+          "line": 1349,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -3965,7 +3966,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1417,
+          "line": 1427,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -5008,7 +5009,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1621,
+          "line": 1617,
           "name": "_has_nonlinear_vars",
           "signals": [
             "builtin:any",
@@ -5023,7 +5024,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1877,
+          "line": 1873,
           "name": "_is_terminal_shape",
           "signals": [],
           "substrate": "python"
@@ -5133,7 +5134,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1657,
+          "line": 1653,
           "name": "_reject_nonlinear_projections",
           "signals": [
             "builtin:enumerate",
@@ -5144,7 +5145,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1891,
+          "line": 1887,
           "name": "_run_sub_algorithm",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5210,7 +5211,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1575,
+          "line": 1571,
           "name": "apply_mu",
           "signals": [
             "builtin:isinstance"
@@ -5318,14 +5319,14 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1454,
+          "line": 1450,
           "name": "run_algorithm_meta_circular",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1711,
+          "line": 1707,
           "name": "run_mu",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5336,7 +5337,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1766,
+          "line": 1762,
           "name": "run_mu_structural",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5348,7 +5349,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1513,
+          "line": 1509,
           "name": "step_algorithm_with_bridge",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -5373,7 +5374,7 @@
         },
         {
           "file": "rcx_pi/selfhost/step_mu.py",
-          "line": 1685,
+          "line": 1681,
           "name": "step_mu",
           "signals": [],
           "substrate": "python"
@@ -5404,7 +5405,14 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 84,
+          "line": 40,
+          "name": "_load_compiled_subst_v2_bundle",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/subst_mu.py",
+          "line": 138,
           "name": "_reconcile_parity",
           "signals": [
             "builtin:isinstance",
@@ -5418,7 +5426,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 57,
+          "line": 111,
           "name": "_substitute_direct",
           "signals": [
             "builtin:isinstance",
@@ -5430,7 +5438,7 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 37,
+          "line": 91,
           "name": "is_head_tail_structure",
           "signals": [
             "builtin:isinstance",
@@ -5440,10 +5448,11 @@
         },
         {
           "file": "rcx_pi/selfhost/subst_mu.py",
-          "line": 129,
+          "line": 183,
           "name": "subst_mu",
           "signals": [
             "builtin:isinstance",
+            "builtin:len",
             "loop"
           ],
           "substrate": "python"
@@ -5451,8 +5460,8 @@
       ],
       "site_counts": {
         "javascript": 129,
-        "python": 181,
-        "total": 310
+        "python": 182,
+        "total": 311
       }
     }
   },
