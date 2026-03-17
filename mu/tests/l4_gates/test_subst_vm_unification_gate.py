@@ -52,7 +52,7 @@ class TestSubstVMUnificationGate:
         import rcx_pi.selfhost.subst_mu as subst_mod
 
         # Clear cache to force reload
-        subst_mod._compiled_subst_v2_bundle_cache = None
+        subst_mod._compiled_subst_v2_bundle_cache = None  # ANTICHEAT_OK: test-only cache clear for provenance negative control
 
         # Load the real bundle, tamper with digest
         bundle = _load_compiled_subst_v2_bundle()
@@ -63,16 +63,16 @@ class TestSubstVMUnificationGate:
         # Verify actual rejection: clear cache, monkeypatch json.load to return tampered bundle
         tampered = dict(bundle)
         tampered["source_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-        subst_mod._compiled_subst_v2_bundle_cache = None
+        subst_mod._compiled_subst_v2_bundle_cache = None  # ANTICHEAT_OK: test-only cache clear for provenance negative control
 
         import unittest.mock
         with unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(tampered))):
             with pytest.raises(ValueError, match="SECURITY.*provenance mismatch"):
-                subst_mod._load_compiled_subst_v2_bundle()
+                subst_mod._load_compiled_subst_v2_bundle()  # ANTICHEAT_OK: test-only — verifying provenance rejection
 
         # Restore cache
-        subst_mod._compiled_subst_v2_bundle_cache = None
-        subst_mod._load_compiled_subst_v2_bundle()
+        subst_mod._compiled_subst_v2_bundle_cache = None  # ANTICHEAT_OK: test-only cache restore
+        subst_mod._load_compiled_subst_v2_bundle()  # ANTICHEAT_OK: test-only — restore valid bundle
 
     def test_vm_fault_propagates(self):
         """Non-step-limit Stage0VMError must propagate, not be swallowed."""
