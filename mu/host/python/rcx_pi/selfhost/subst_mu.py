@@ -10,6 +10,8 @@ See mu/docs/core/SelfHosting.v0.md for design.
 
 from __future__ import annotations
 
+import json
+
 from .mu_type import Mu, assert_mu, MAX_MU_DEPTH
 from .match_mu import (
     normalize_for_match,
@@ -22,16 +24,67 @@ from .projection_runner import make_projection_runner
 
 
 # =============================================================================
-# Projection Loading (consolidated via factory)
+# Projection Loading (v1 — retained for tests and legacy callers)
 # =============================================================================
 
 load_subst_projections, clear_projection_cache = make_projection_loader("subst.v1.json")
 
 # =============================================================================
-# Substitute Runner (consolidated via factory)
+# Compiled Bundle Loading (v2 — VM-backed production path, Wave 3B)
+# =============================================================================
+
+_compiled_subst_v2_bundle_cache = None
+
+
+def _load_compiled_subst_v2_bundle() -> dict:
+    """Load and validate the compiled subst.v2 Stage0 VM bundle.
+
+    Private to subst_mu.py — does NOT import from step_mu.py (circular dependency).
+    Uses the same validation + provenance pattern as step_mu._load_compiled_subst_v2_bundle().
+    """
+    global _compiled_subst_v2_bundle_cache
+    if _compiled_subst_v2_bundle_cache is not None:
+        return _compiled_subst_v2_bundle_cache
+
+    from .stage0_vm import validate_bundle  # ANTICHEAT_OK: infra — VM bundle validation
+    from .seed_integrity import SEED_CHECKSUMS  # ANTICHEAT_OK: infra — N15 provenance
+
+    from .seed_integrity import get_mu_dir  # ANTICHEAT_OK: infra — path resolution
+    bundle_path = get_mu_dir() / "stage0" / "compiled" / "subst_v2.compiled.v1.json"
+    if not bundle_path.exists():
+        raise FileNotFoundError(f"Compiled subst.v2 bundle not found: {bundle_path}")
+
+    with open(bundle_path, encoding="utf-8") as f:
+        bundle = json.load(f)
+
+    validate_bundle(bundle)
+
+    # N15 provenance verification (inlined — cannot import from step_mu due to circular dep)
+    source_seed = bundle.get("source_seed")
+    source_digest = bundle.get("source_digest")
+    if source_seed and source_digest:
+        seed_filename = source_seed if source_seed.endswith(".json") else source_seed + ".json"
+        if seed_filename in SEED_CHECKSUMS:
+            expected = "sha256:" + SEED_CHECKSUMS[seed_filename]
+            if source_digest != expected:  # AST_OK:infra — type guard
+                raise ValueError(
+                    f"SECURITY: Bundle provenance mismatch for '{seed_filename}'. "
+                    f"Bundle claims source_digest={source_digest}, "
+                    f"but SEED_CHECKSUMS says {expected}."
+                )
+
+    _compiled_subst_v2_bundle_cache = bundle
+    return bundle
+
+
+# =============================================================================
+# Substitute Runner (v1 — retained for tests and legacy callers)
 # =============================================================================
 
 is_subst_done, is_subst_state, run_subst_projections = make_projection_runner("subst")
+
+# v2 terminal detection (uses _mode instead of mode)
+_is_subst_done_v2, _is_subst_state_v2, _ = make_projection_runner("subst", terminal_field="_mode")
 
 
 def is_head_tail_structure(value: Mu) -> bool:
@@ -159,41 +212,68 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Convert bindings dict to linked list
     linked_bindings = dict_to_bindings(bindings)
 
-    # Load projections
-    projections = load_subst_projections()
+    # Wave 3B: Load compiled subst.v2 bundle for VM-backed execution
+    from .stage0_vm import stage0_vm_run, Stage0VMError  # ANTICHEAT_OK: infra — VM runner
+    from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
-    # Wrap input in subst request format
-    initial = {"subst": {"body": norm_body, "bindings": linked_bindings}}
+    bundle = _load_compiled_subst_v2_bundle()
 
-    # Run projections (bindings are embedded in initial state)
-    final_state, steps, is_stall = run_subst_projections(projections, initial)
+    # Wrap input in subst.v2 request format with _subst_ctx ABI envelope
+    _subst_ctx = {"_input": None, "_remaining": None}
+    initial = {
+        "subst": {"body": norm_body, "bindings": linked_bindings},
+        "_subst_ctx": _subst_ctx,
+    }
 
-    # Extract result
+    # Run via Stage0 VM (direct call, no projection_runner)
+    budget = get_step_budget()
+    try:
+        vm_result = stage0_vm_run(bundle, initial, max_steps=1000)
+        final_state = vm_result["root"]
+        vm_steps = len(vm_result["steps"])
+
+        if _is_subst_done_v2(final_state):
+            # Successful completion: consume matched steps only
+            budget.consume(vm_steps)
+            is_stall = False
+        else:
+            # Genuine stall: +1 for the stall-detection attempt
+            budget.consume(vm_steps + 1)
+            is_stall = True
+    except Stage0VMError as e:
+        # Only catch run-step-limit exhaustion; re-raise real VM faults
+        if "Run step limit exceeded" not in str(e):
+            raise
+        budget.consume(1000)
+        is_stall = True
+        final_state = initial  # return original on exhaustion
+
+    # Extract result (v2 uses _result and _mode instead of result and mode)
     if is_stall:
-        # Check if we stalled on a lookup (unbound variable)
-        # Phase 6a: lookup stalls when lookup_bindings is null
-        if is_subst_state(final_state):
+        # Defensive fallback for incomplete bundles. Under correctly compiled
+        # subst.v2, unbound variables always reach the done path via
+        # lookup.exhausted -> subst.done (Delta 6). This stall-detection path
+        # only activates if the compiled bundle is missing the lookup.exhausted
+        # program or if a genuine non-variable stall occurs.
+        if _is_subst_state_v2(final_state):
             phase = final_state.get("phase")
             if phase == "lookup":
-                # Stalled in lookup phase = unbound variable
                 name = final_state.get("lookup_name")
-                raise KeyError(f"Unbound variable: {name}")
-            # Legacy check for old lookup marker format (shouldn't happen now)
-            focus = final_state.get("focus")
-            if isinstance(focus, dict) and "lookup" in focus:
-                name = focus["lookup"]
                 raise KeyError(f"Unbound variable: {name}")
         raise RuntimeError(f"Substitute stalled unexpectedly: {final_state}")
 
-    if is_subst_done(final_state):
-        result = final_state.get("result")
+    if _is_subst_done_v2(final_state):
+        result = final_state.get("_result")
+
+        # Delta 6: v2 unbound-variable detection (error-as-value)
+        # v2 lookup.exhausted produces _error result instead of stalling
+        if isinstance(result, dict) and result.get("_error") == "unbound_variable":
+            name = result.get("_name")
+            raise KeyError(f"Unbound variable: {name}")
+
         # Wave4a D10 parity fix: handle head/tail structures correctly.
         if is_head_tail_structure(body):
-            # Root head/tail: use direct substitution (preserves structure +
-            # handles nested Python types that denormalize_from_match can't).
             return _substitute_direct(body, bindings)
-        # Non-head/tail root: denormalize, then reconcile to preserve nested
-        # head/tail structures and raw binding values.
         denormed = denormalize_from_match(result)
         return _reconcile_parity(body, denormed, bindings)
 
