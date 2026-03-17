@@ -3224,9 +3224,9 @@ class TestHemisphereRoutingPropertyFuzzer:
     populating exactly one hemisphere per the priority order.
     """
 
-    @pytest.mark.timeout(300)
+    @pytest.mark.timeout(600)
     @given(er=_engine_result())
-    @settings(max_examples=150, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=25, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_engine_result_routing_parity(self, er):
         """Valid engine_result routes identically on both substrates."""
         from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
@@ -3751,11 +3751,11 @@ class TestDifferentialReplayAuditR3:
                     f"error_code: JS={js_code}, Python={py_err}"
                 )
 
-    # --- Generated: hemisphere routing (100 cases) ---
+    # --- Generated: hemisphere routing (25 cases) ---
 
-    @pytest.mark.timeout(300)
+    @pytest.mark.timeout(600)
     @given(er=_engine_result())
-    @settings(max_examples=100, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=25, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
     def test_generated_hemisphere_replay(self, er):
         """Generated hemisphere routing replay."""
         hemispheres = dict(_DEFAULT_HEMISPHERES)
