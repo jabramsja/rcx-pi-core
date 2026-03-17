@@ -718,6 +718,9 @@ def clear_combined_kernel_cache() -> None:
     clear_match_bridge_cache()
     from .subst_mu import _clear_compiled_subst_v2_bundle as _clear_subst_mu_bundle  # ANTICHEAT_OK: infra — test isolation
     _clear_subst_mu_bundle()
+    # Wave 3D-B: clear classify_mu factory cache
+    from .classify_mu import _clear_classify_bundle  # ANTICHEAT_OK: infra — test isolation
+    _clear_classify_bundle()
     # S1-C: Also clear TC and hemisphere caches for complete test isolation
     _clear_tc_cache()
     _clear_hemi_cache()

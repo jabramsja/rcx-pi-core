@@ -1,0 +1,1307 @@
+{
+  "bundle_id": "rcx.stage0.classify_v1.compiled.v1",
+  "hand_authored": false,
+  "lowering_version": "1.0.0",
+  "machine_profile": "rcx.stage0.v1",
+  "note": "Compiler-derived from classify.v1.json by lower_stage0.py v1.0.0",
+  "program_order": [
+    "classify.done",
+    "classify.nested_not_kv",
+    "classify.kv_continue",
+    "classify.not_kv",
+    "classify.empty",
+    "classify.wrap"
+  ],
+  "programs": [
+    {
+      "description": "Reached end with all kv-pairs -> it's a dict encoding",
+      "id": "classify.done",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "remaining",
+            "original"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "classify"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "scan"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          },
+          "value": null
+        },
+        {
+          "name": "orig",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "original"
+          ],
+          "source_map": {
+            "path": [
+              "original"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "mode": {
+                "kind": "literal",
+                "value": "classify_done"
+              },
+              "type": {
+                "kind": "literal",
+                "value": "dict"
+              },
+              "value": {
+                "kind": "capture_ref",
+                "name": "orig"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "classify.done",
+        "projection_index": 0,
+        "seed_file": "classify.v1.json"
+      }
+    },
+    {
+      "description": "If key position has head/tail structure, not a valid kv-pair (key must be primitive)",
+      "id": "classify.nested_not_kv",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "remaining",
+            "original"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "classify"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "scan"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "head"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_x",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "head",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "head",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_y",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "head",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_inner",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_rest",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "orig",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "original"
+          ],
+          "source_map": {
+            "path": [
+              "original"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "mode": {
+                "kind": "literal",
+                "value": "classify_done"
+              },
+              "type": {
+                "kind": "literal",
+                "value": "list"
+              },
+              "value": {
+                "kind": "capture_ref",
+                "name": "orig"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "classify.nested_not_kv",
+        "projection_index": 1,
+        "seed_file": "classify.v1.json"
+      }
+    },
+    {
+      "description": "Current element is kv-pair structure with primitive key -> continue scanning",
+      "id": "classify.kv_continue",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "remaining",
+            "original"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "classify"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "scan"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_key",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "tail"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_val",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "tail",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "tail",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head",
+            "tail",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head",
+              "tail",
+              "tail"
+            ],
+            "section": "pattern"
+          },
+          "value": null
+        },
+        {
+          "name": "rest",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "orig",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "original"
+          ],
+          "source_map": {
+            "path": [
+              "original"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "mode": {
+                "kind": "literal",
+                "value": "classify"
+              },
+              "original": {
+                "kind": "capture_ref",
+                "name": "orig"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "scan"
+              },
+              "remaining": {
+                "kind": "capture_ref",
+                "name": "rest"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "classify.kv_continue",
+        "projection_index": 2,
+        "seed_file": "classify.v1.json"
+      }
+    },
+    {
+      "description": "Current element is NOT kv-pair structure -> it's a list encoding",
+      "id": "classify.not_kv",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "mode",
+            "phase",
+            "remaining",
+            "original"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "mode"
+          ],
+          "source_map": {
+            "path": [
+              "mode"
+            ],
+            "section": "pattern"
+          },
+          "value": "classify"
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "phase"
+          ],
+          "source_map": {
+            "path": [
+              "phase"
+            ],
+            "section": "pattern"
+          },
+          "value": "scan"
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "remaining"
+          ],
+          "required": [
+            "head",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_elem",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "head"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "head"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "_rest",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "remaining",
+            "tail"
+          ],
+          "source_map": {
+            "path": [
+              "remaining",
+              "tail"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "orig",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "original"
+          ],
+          "source_map": {
+            "path": [
+              "original"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "mode": {
+                "kind": "literal",
+                "value": "classify_done"
+              },
+              "type": {
+                "kind": "literal",
+                "value": "list"
+              },
+              "value": {
+                "kind": "capture_ref",
+                "name": "orig"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "classify.not_kv",
+        "projection_index": 3,
+        "seed_file": "classify.v1.json"
+      }
+    },
+    {
+      "description": "Empty list (null) -> classify as list (cannot distinguish empty dict)",
+      "id": "classify.empty",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "classify"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "classify"
+          ],
+          "source_map": {
+            "path": [
+              "classify"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "classify"
+          ],
+          "required": [
+            "list"
+          ],
+          "source_map": {
+            "path": [
+              "classify"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "check_equal",
+          "path": [
+            "focus",
+            "root",
+            "classify",
+            "list"
+          ],
+          "source_map": {
+            "path": [
+              "classify",
+              "list"
+            ],
+            "section": "pattern"
+          },
+          "value": null
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "mode": {
+                "kind": "literal",
+                "value": "classify_done"
+              },
+              "type": {
+                "kind": "literal",
+                "value": "list"
+              },
+              "value": {
+                "kind": "literal",
+                "value": null
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "classify.empty",
+        "projection_index": 4,
+        "seed_file": "classify.v1.json"
+      }
+    },
+    {
+      "description": "Entry point - wrap classify request into scan state (must be last)",
+      "id": "classify.wrap",
+      "ops": [
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root"
+          ],
+          "required": [
+            "classify"
+          ],
+          "source_map": {
+            "path": [],
+            "section": "pattern"
+          }
+        },
+        {
+          "kind": "dict",
+          "op": "assert_focus_kind",
+          "path": [
+            "focus",
+            "root",
+            "classify"
+          ],
+          "source_map": {
+            "path": [
+              "classify"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "assert_key_profile",
+          "optional": [
+            {
+              "allowed_values": [
+                "list"
+              ],
+              "key": "_type"
+            }
+          ],
+          "path": [
+            "focus",
+            "root",
+            "classify"
+          ],
+          "required": [
+            "list"
+          ],
+          "source_map": {
+            "path": [
+              "classify"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "name": "list",
+          "op": "capture_path",
+          "path": [
+            "focus",
+            "root",
+            "classify",
+            "list"
+          ],
+          "source_map": {
+            "path": [
+              "classify",
+              "list"
+            ],
+            "section": "pattern"
+          }
+        },
+        {
+          "op": "write_path",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          },
+          "template": {
+            "fields": {
+              "mode": {
+                "kind": "literal",
+                "value": "classify"
+              },
+              "original": {
+                "kind": "capture_ref",
+                "name": "list"
+              },
+              "phase": {
+                "kind": "literal",
+                "value": "scan"
+              },
+              "remaining": {
+                "kind": "capture_ref",
+                "name": "list"
+              }
+            },
+            "kind": "object"
+          }
+        },
+        {
+          "op": "return_projection_success",
+          "source_map": {
+            "path": [],
+            "section": "body"
+          }
+        }
+      ],
+      "source_map": {
+        "projection_id": "classify.wrap",
+        "projection_index": 5,
+        "seed_file": "classify.v1.json"
+      }
+    }
+  ],
+  "source_digest": "sha256:8ecd4fccca243c49129c0d65c8fef5797f19a36499e17038625fca3051108b79",
+  "source_seed": "classify.v1.json",
+  "source_seed_version": "1.0.0",
+  "stage0_ir_version": 1
+}
