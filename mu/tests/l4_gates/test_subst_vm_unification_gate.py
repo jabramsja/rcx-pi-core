@@ -14,6 +14,7 @@ import pytest
 
 from rcx_pi.selfhost.subst_mu import subst_mu
 from rcx_pi.selfhost.subst_mu import _load_compiled_subst_v2_bundle  # ANTICHEAT_OK: test-only — gate test for bundle loading + provenance
+from rcx_pi.selfhost.subst_mu import _clear_compiled_subst_v2_bundle  # ANTICHEAT_OK: test-only — cache clear for provenance test
 
 
 class TestSubstVMUnificationGate:
@@ -47,24 +48,20 @@ class TestSubstVMUnificationGate:
         assert len(bundle["programs"]) > 0
 
     def test_bundle_provenance_rejects_wrong_digest(self):
-        """N15: wrong source_digest raises ValueError through the loader."""
+        """N15: wrong source_digest raises ValueError through the factory loader."""
         from rcx_pi.selfhost.seed_integrity import SEED_CHECKSUMS
-        from rcx_pi.selfhost.stage0_vm import validate_bundle
         import rcx_pi.selfhost.subst_mu as subst_mod
 
-        # Clear cache to force reload
-        subst_mod._compiled_subst_v2_bundle_cache = None  # ANTICHEAT_OK: test-only cache clear for provenance negative control
-
-        # Load the real bundle, tamper with digest
+        # Load the real bundle to get seed name for assertion
         bundle = _load_compiled_subst_v2_bundle()
         source_seed = bundle.get("source_seed", "")
         seed_filename = source_seed if source_seed.endswith(".json") else source_seed + ".json"
         assert seed_filename in SEED_CHECKSUMS, "subst.v2 must be in SEED_CHECKSUMS"
 
-        # Verify actual rejection: clear cache, monkeypatch json.load to return tampered bundle
+        # Clear cache via factory clear function, then mock open to return tampered bundle
         tampered = dict(bundle)
         tampered["source_digest"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-        subst_mod._compiled_subst_v2_bundle_cache = None  # ANTICHEAT_OK: test-only cache clear for provenance negative control
+        subst_mod._clear_compiled_subst_v2_bundle()  # ANTICHEAT_OK: test-only — clear factory cache
 
         import unittest.mock
         with unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(tampered))):
@@ -72,7 +69,7 @@ class TestSubstVMUnificationGate:
                 subst_mod._load_compiled_subst_v2_bundle()  # ANTICHEAT_OK: test-only — verifying provenance rejection
 
         # Restore cache
-        subst_mod._compiled_subst_v2_bundle_cache = None  # ANTICHEAT_OK: test-only cache restore
+        subst_mod._clear_compiled_subst_v2_bundle()  # ANTICHEAT_OK: test-only — clear for reload
         subst_mod._load_compiled_subst_v2_bundle()  # ANTICHEAT_OK: test-only — restore valid bundle
 
     def test_vm_fault_propagates(self):

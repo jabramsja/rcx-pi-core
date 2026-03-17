@@ -921,3 +921,63 @@ def stage0_vm_run(bundle, input_value, max_steps=100, max_ops=None):
         current = result["root"]
 
     raise Stage0VMError(f"Run step limit exceeded ({max_steps})")
+
+
+# =============================================================================
+# Compiled Bundle Loader Factory (Wave 3C — consolidates duplicate loaders)
+# =============================================================================
+
+def make_compiled_bundle_loader(bundle_name: str):
+    """Create a compiled-bundle loader with validation + N15 provenance.
+
+    Returns (load_fn, clear_fn) pair. The load_fn caches after first load.
+    Importable from any module without circular dependencies.
+
+    Args:
+        bundle_name: e.g. "subst_v2", "match_v2", "kernel_v1", "bootstrap_structural_v1"
+                     Maps to mu/stage0/compiled/{bundle_name}.compiled.v1.json
+
+    Returns:
+        (load_fn, clear_fn) where:
+            load_fn() -> dict: loads, validates, verifies provenance, caches
+            clear_fn() -> None: clears the cache
+    """
+    _cache = [None]  # mutable container for closure
+
+    def _load() -> dict:
+        if _cache[0] is not None:
+            return _cache[0]
+
+        from .seed_integrity import SEED_CHECKSUMS, get_mu_dir  # ANTICHEAT_OK: infra — provenance
+
+        import json as _json
+        bundle_path = get_mu_dir() / "stage0" / "compiled" / f"{bundle_name}.compiled.v1.json"
+        if not bundle_path.exists():
+            raise FileNotFoundError(f"Compiled bundle not found: {bundle_path}")
+
+        with open(bundle_path, encoding="utf-8") as f:
+            bundle = _json.load(f)
+
+        validate_bundle(bundle)
+
+        # N15 provenance verification
+        source_seed = bundle.get("source_seed")
+        source_digest = bundle.get("source_digest")
+        if source_seed and source_digest:
+            seed_filename = source_seed if source_seed.endswith(".json") else source_seed + ".json"
+            if seed_filename in SEED_CHECKSUMS:
+                expected = "sha256:" + SEED_CHECKSUMS[seed_filename]
+                if source_digest != expected:  # AST_OK:infra — type guard
+                    raise ValueError(
+                        f"SECURITY: Bundle provenance mismatch for '{seed_filename}'. "
+                        f"Bundle claims source_digest={source_digest}, "
+                        f"but SEED_CHECKSUMS says {expected}."
+                    )
+
+        _cache[0] = bundle
+        return bundle
+
+    def _clear() -> None:
+        _cache[0] = None
+
+    return _load, _clear

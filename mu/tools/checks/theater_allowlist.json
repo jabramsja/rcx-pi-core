@@ -721,6 +721,96 @@
       "target_wave": "P7-b.1"
     },
     {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_match_bundle_provenance_passes",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_missing_digest_accepted",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_subst_bundle_provenance_passes",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestBundleProvenance",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+      "method": "test_unknown_seed_accepted",
+      "owner": "founder",
+      "target_wave": "n15-provenance"
+    },
+    {
+      "class": "TestTier2IntegrationWorkloads",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_a_cycling",
+      "owner": "founder",
+      "target_wave": "s1a-vm-evidence"
+    },
+    {
+      "class": "TestTier2IntegrationWorkloads",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_b_bridge_mode",
+      "owner": "founder",
+      "target_wave": "s1a-vm-evidence"
+    },
+    {
+      "class": "TestTier2IntegrationWorkloads",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "S1-A D1: Cutover-mode performance profiling \u2014 observational timing, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_cutover_engine_pipeline",
+      "owner": "founder",
+      "target_wave": "s1a-vm-evidence"
+    },
+    {
+      "class": "TestTier2IntegrationWorkloads",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "S1-A D1: Cutover-mode performance profiling \u2014 observational timing, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_cutover_kernel",
+      "owner": "founder",
+      "target_wave": "s1a-vm-evidence"
+    },
+    {
+      "class": "TestTier2IntegrationWorkloads",
+      "classification": "heuristic_false_positive",
+      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
+      "expires_on": "2026-06-15",
+      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
+      "method": "test_workload_engine_pipeline",
+      "owner": "founder",
+      "target_wave": "s1a-vm-evidence"
+    },
+    {
       "class": "TestHemisphereSourceLock",
       "classification": "heuristic_false_positive",
       "defer_reason": "Subprocess assertion in _js_eval() helper not detected by AST classifier",
@@ -751,97 +841,17 @@
       "target_wave": "A18-P1"
     },
     {
-      "class": "TestTier2IntegrationWorkloads",
+      "class": "TestMatchVMStagedDispatchGate",
       "classification": "heuristic_false_positive",
-      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
-      "method": "test_workload_a_cycling",
+      "defer_reason": "Gate test validates ordering invariant via internal function; production match_mu relies on this ordering",
+      "expires_on": "2026-06-17",
+      "file": "mu/tests/l4_gates/test_match_vm_staged_dispatch_gate.py",
+      "method": "test_validate_bridge_ordering_accepts_correct_order",
       "owner": "founder",
-      "target_wave": "s1a-vm-evidence"
-    },
-    {
-      "class": "TestTier2IntegrationWorkloads",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
-      "method": "test_workload_b_bridge_mode",
-      "owner": "founder",
-      "target_wave": "s1a-vm-evidence"
-    },
-    {
-      "class": "TestTier2IntegrationWorkloads",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "S1-A D1: Performance profiling tests are intentionally observational \u2014 record timing data for GO/NO-GO memo, no behavioral assertion needed",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
-      "method": "test_workload_engine_pipeline",
-      "owner": "founder",
-      "target_wave": "s1a-vm-evidence"
-    },
-    {
-      "class": "TestTier2IntegrationWorkloads",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "S1-A D1: Cutover-mode performance profiling \u2014 observational timing, no behavioral assertion needed",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
-      "method": "test_workload_cutover_kernel",
-      "owner": "founder",
-      "target_wave": "s1a-vm-evidence"
-    },
-    {
-      "class": "TestTier2IntegrationWorkloads",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "S1-A D1: Cutover-mode performance profiling \u2014 observational timing, no behavioral assertion needed",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_performance.py",
-      "method": "test_workload_cutover_engine_pipeline",
-      "owner": "founder",
-      "target_wave": "s1a-vm-evidence"
-    },
-    {
-      "class": "TestBundleProvenance",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
-      "method": "test_match_bundle_provenance_passes",
-      "owner": "founder",
-      "target_wave": "n15-provenance"
-    },
-    {
-      "class": "TestBundleProvenance",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
-      "method": "test_subst_bundle_provenance_passes",
-      "owner": "founder",
-      "target_wave": "n15-provenance"
-    },
-    {
-      "class": "TestBundleProvenance",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
-      "method": "test_missing_digest_accepted",
-      "owner": "founder",
-      "target_wave": "n15-provenance"
-    },
-    {
-      "class": "TestBundleProvenance",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "N15: Provenance pass tests verify no-raise behavior \u2014 the assertion IS the absence of ValueError",
-      "expires_on": "2026-06-15",
-      "file": "mu/tests/l4_gates/test_stage0_vm_cutover.py",
-      "method": "test_unknown_seed_accepted",
-      "owner": "founder",
-      "target_wave": "n15-provenance"
+      "target_wave": "wave3c-match-vm"
     }
   ],
-  "generated_at": "2026-03-15T09:28:21.151043Z",
+  "generated_at": "2026-03-17T17:01:57.224039Z",
   "schema_version": 1,
-  "total_theater_risk": 75
+  "total_theater_risk": 84
 }
