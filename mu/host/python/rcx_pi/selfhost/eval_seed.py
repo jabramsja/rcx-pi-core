@@ -883,7 +883,7 @@ def _step_trusted(projections: list[Mu], input_value: Mu) -> Mu:
     """Internal: step without validating input_value.
 
     ONLY for use by kernel loops that have already validated at the boundary.
-    Callers: step_kernel_mu, run_engine_pipeline, projection_runner.run.
+    Callers: step_kernel_mu, run_engine_pipeline.
 
     Host debt (isinstance for coverage ID, for-loop) tracked on the
     host_builtin decorator on match(). For-loop is bootstrap primitive (not debt).

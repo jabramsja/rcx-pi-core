@@ -20,7 +20,6 @@ from .match_mu import (
     _check_empty_var_names,
 )
 from .projection_loader import make_projection_loader
-from .projection_runner import make_projection_runner
 
 
 # =============================================================================
@@ -38,15 +37,9 @@ from .stage0_vm import make_compiled_bundle_loader  # ANTICHEAT_OK: infra — bu
 _load_compiled_subst_v2_bundle, _clear_compiled_subst_v2_bundle = make_compiled_bundle_loader("subst_v2")
 
 
-# =============================================================================
-# Substitute Runner (v1 — retained for tests and legacy callers)
-# =============================================================================
-
-is_subst_done, is_subst_state, run_subst_projections = make_projection_runner("subst")
-
-# v2 terminal detection — Wave 3E: _is_subst_done_v2 and _is_subst_state_v2
-# removed (zero callers after stage0_vm_run_bounded migration; terminal detection
-# handled by bounded helper, stall-phase check inlined in subst_mu).
+# Wave 3F: projection_runner retired. Legacy runner bindings (is_subst_done,
+# is_subst_state, run_subst_projections) removed — zero callers.
+# v2 helpers (_is_subst_done_v2, _is_subst_state_v2) removed in Wave 3E.
 
 
 def is_head_tail_structure(value: Mu) -> bool:
@@ -197,7 +190,7 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
         terminal_value="subst_done",
     )
 
-    # Budget accounting (parity with classify_mu / projection_runner)
+    # Budget accounting (parity with classify_mu / stage0_vm_run_bounded)
     if outcome["status"] == "terminal":
         budget.consume(outcome["steps"])
     elif outcome["status"] == "stall":
@@ -219,7 +212,7 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
         # Genuine stall: check for unbound variable in lookup phase.
         # In-progress v2 states use "mode" (not "_mode") — "_mode" is only
         # for terminal states like "subst_done". This matches the old
-        # _is_subst_state_v2 (projection_runner.py:71 checks state.get("mode")).
+        # _is_subst_state_v2 (v2 seed uses "mode" for in-progress, "_mode" for terminal).
         # Defensive — v2 seed routes unbound vars via error-as-value terminal.
         if (isinstance(final_state, dict)  # AST_OK: boundary scaffolding — stall-phase type check
                 and final_state.get("mode") == "subst"

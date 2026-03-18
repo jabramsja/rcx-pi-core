@@ -937,7 +937,7 @@ def stage0_vm_run_bounded(bundle, input_value, *,
     function returns a structured result for all three outcomes: terminal,
     stall, and exhaustion. Designed as a shared bootstrap helper for
     classify_mu, subst_mu, and other callers that need
-    projection_runner-style bounded-run semantics on top of stage0_vm_step.
+    bounded-run semantics on top of stage0_vm_step.
 
     Terminal detection is declarative: checks
         type(state) is dict and state.get(terminal_field) == terminal_value
@@ -954,8 +954,7 @@ def stage0_vm_run_bounded(bundle, input_value, *,
     Args:
         bundle: Validated Stage0 bundle.
         input_value: Initial Mu state.
-        max_steps: Maximum VM dispatch cycles (default 1000, matching
-            projection_runner.py:77 default).
+        max_steps: Maximum VM dispatch cycles (default 1000).
         terminal_field: Dict key to check for terminal state (default "mode").
         terminal_value: Value that indicates terminal (e.g., "classify_done").
             If None, terminal detection is disabled (run to stall/exhaustion).
@@ -983,7 +982,7 @@ def stage0_vm_run_bounded(bundle, input_value, *,
     steps = 0
 
     for _ in range(max_steps):
-        # Pre-step terminal fast path (parity with projection_runner:100-104).
+        # Pre-step terminal fast path.
         # Avoids unnecessary VM dispatch for already-terminal input.
         if _is_terminal(current):
             return {
@@ -1015,7 +1014,6 @@ def stage0_vm_run_bounded(bundle, input_value, *,
         }
 
     # Exhaustion — terminal-on-last-step check
-    # (parity with projection_runner.py:122-125)
     if _is_terminal(current):
         return {
             "status": "terminal",

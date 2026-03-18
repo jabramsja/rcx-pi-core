@@ -1045,7 +1045,7 @@ def _step_kernel_with_vm(
 
     S1-C: kernel.v1 and bridge projections now execute via VM (previously host).
     Scope: step_kernel_mu cutover only. _step_trusted remains unchanged for
-    run_engine_pipeline and projection_runner.run.
+    run_engine_pipeline.
 
     Preserves first-match-wins ordering: kernel -> bridge -> match -> subst.
     Coverage semantics preserved: record_no_match for every tried-but-failed

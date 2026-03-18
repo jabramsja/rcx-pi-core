@@ -34,7 +34,7 @@ match.v2.json explicitly states "Linear patterns only (no conflict detection)." 
 These seeds work via `eval_seed.step()` which implements binding conflict detection in Python. The bootstrap-structural bridge adds binding conflict detection as structural projections.
 
 **Status (2026-02-09):** Bridge projections are IMPLEMENTED and VERIFIED to fire. Two execution paths now use bridge:
-1. **match_mu direct** (B-structural, 2026-02-09): `match_mu()` loads match.v2 + bridge projections via `projection_runner` for `apply_mu()` non-linear conflict detection.
+1. **match_mu direct** (B-structural, 2026-02-09): `match_mu()` loads match.v2 + bridge projections via staged `stage0_vm_step` dispatch (originally `projection_runner`, retired Wave 3F) for `apply_mu()` non-linear conflict detection.
 2. **kernel bridge mode**: `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge")` for recurrence/exhaustion.
 
 Bootstrap execution remains explicit debug fallback only. `step_mu()`/`run_mu()` are fail-closed: they reject non-linear patterns with ValueError.
@@ -483,7 +483,7 @@ Both paths produce identical results. The execution path verification tests (`te
 ## Changelog
 
 - **v0.7 (2026-02-09):** B-structural match_mu direct usage
-  - match_mu now uses match.v2 + bridge projections directly via projection_runner
+  - match_mu now uses match.v2 + bridge projections directly via staged `stage0_vm_step` dispatch (originally projection_runner, retired Wave 3F)
   - Two execution paths documented: match_mu direct (Path 1) and kernel bridge mode (Path 2)
   - Fail-closed guard: step_mu/run_mu reject non-linear patterns with ValueError
   - 18 structural invariant tests added (test_match_bridge_invariants.py)
@@ -532,11 +532,11 @@ Both paths produce identical results. The execution path verification tests (`te
 The bridge projections are IMPLEMENTED and VERIFIED to fire. Two primary paths use bridge projections:
 
 **Path 1: match_mu Direct (B-structural, 2026-02-09)**
-- `match_mu()` loads match.v2 + bridge projections (13 combined) via `projection_runner`
+- `match_mu()` loads match.v2 + bridge projections (13 combined) via staged `stage0_vm_step` dispatch (originally `projection_runner`, retired Wave 3F)
 - `apply_mu()` calls `match_mu → subst_mu` — fast path with correct non-linear semantics
 - No kernel overhead; bridge projections intercept variable binding for conflict detection
 - `load_match_with_bridge_projections()` caches the combined set
-- `make_projection_runner("match", terminal_field="_mode")` detects v2 terminal states
+- Terminal detection via `_mode` field check after each `stage0_vm_step` dispatch
 
 **Path 2: Kernel Bridge Mode (algorithm execution)**
 - `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`

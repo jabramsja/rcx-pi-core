@@ -23,7 +23,7 @@ from rcx_pi.selfhost.step_mu import (
     list_to_linked,
     normalize_projection,
 )
-from rcx_pi.selfhost.projection_runner import make_projection_runner
+from tests.helpers.projection_stepper import run_projections
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.eval_seed import step
@@ -102,8 +102,10 @@ class TestMatchContextPreservation:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"
@@ -120,8 +122,10 @@ class TestMatchContextPreservation:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"
@@ -138,8 +142,10 @@ class TestMatchContextPreservation:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"
@@ -173,8 +179,10 @@ class TestSubstContextPreservation:
             "_subst_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("subst", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="subst_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "subst_done"
@@ -192,8 +200,10 @@ class TestSubstContextPreservation:
             "_subst_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("subst", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="subst_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "subst_done"
@@ -294,8 +304,10 @@ class TestContextFieldIntegrity:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"
@@ -322,8 +334,10 @@ class TestContextFieldIntegrity:
             "_subst_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("subst", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="subst_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "subst_done"
@@ -354,8 +368,10 @@ class TestAdversarialContexts:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"
@@ -375,8 +391,10 @@ class TestAdversarialContexts:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"
@@ -396,8 +414,10 @@ class TestAdversarialContexts:
             "_match_ctx": ctx,
         }
 
-        _, _, run = make_projection_runner("match", terminal_field="_mode")
-        final, steps, is_stall = run(self.kernel_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            self.kernel_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="match_done",
+        )
 
         assert not is_stall, f"stalled at step {steps}"
         assert final.get("_mode") == "match_done"

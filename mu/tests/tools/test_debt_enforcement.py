@@ -466,13 +466,14 @@ def test_infra_count_within_ceiling():
     # Current expected count is 129:
     # Wave 5: +4 from eval_seed bootstrap→infra reclassification
     # Wave 5: +5 from classify_mu isinstance annotations
-    # Non-blocker sweep: +2 from projection_runner.py isinstance annotations
+    # Non-blocker sweep: projection_runner.py isinstance annotations (retired in Wave 3F, -2 markers removed)
     # Wave 8 D1: +5 from _traverse_linked_list refactor (set, id, isinstance markers)
     # MT2: +29 from step_mu.py isinstance type guard annotations
     # N15: +2 from _verify_bundle_provenance isinstance type guards
     # Wave 3B: +1 from subst_mu compiled bundle loader isinstance type guard
     # Wave 3C: +3 from match_mu staged VM dispatch type guards
-    assert infra_count == 129, (
-        f"Expected 129 AST_OK:infra markers, found {infra_count}. "
+    # Wave 3F: -2 from projection_runner.py retirement (129 -> 127)
+    assert infra_count == 127, (
+        f"Expected 127 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

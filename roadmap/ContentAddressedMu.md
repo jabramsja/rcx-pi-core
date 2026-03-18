@@ -123,7 +123,7 @@ Step 2 — Eliminate: All 8 production `mu_equal()` call sites replaced with `mu
 |------|-------|---------|
 | `eval_seed.py` | 2 | Binding conflict detection (list + dict match) |
 | `step_mu.py` | 5 | Stall detection (step_kernel_mu, step_algorithm_with_bridge, run_mu, run_mu_structural, _run_sub_algorithm) |
-| `projection_runner.py` | 1 | Stall detection (make_projection_runner) |
+| *(retired Wave 3F)* | — | Hash-based stall detection removed with `projection_runner` |
 
 JS parity: `muHashCached()` added to `eval_step.js` with Map-based cache. All 6 JS call sites updated. `muEqual()` delegates to hash comparison.
 
@@ -241,7 +241,7 @@ The Forth precedent: This is like Forth discovering that its comparator (=) is r
 | `rcx_pi/selfhost/mu_type.py` | `mu_hash_cached()` added; `mu_equal()` demoted to convenience wrapper |
 | `rcx_pi/selfhost/eval_seed.py` | 2 binding conflict sites use `mu_hash_cached()` |
 | `rcx_pi/selfhost/step_mu.py` | 6 stall detection sites use `mu_hash_cached()` |
-| `rcx_pi/selfhost/projection_runner.py` | 1 stall detection site uses `mu_hash_cached()` |
+| *(retired Wave 3F)* | Hash-based stall detection removed; callers use VM step status or `stage0_vm_run_bounded` |
 | `mu/host/js/eval_step.js` | `muHashCached()` added; `muEqual()` delegates; 6 call sites updated |
 | `mu/tests/integration/test_paxos_end_to_end.py` | Paxos deadlock metabolization pipeline test (6 tests) |
 

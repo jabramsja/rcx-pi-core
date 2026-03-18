@@ -5,7 +5,7 @@ The step budget is cross-call resource accounting used by:
 - match_mu.py
 - subst_mu.py
 - classify_mu.py
-- projection_runner.py
+(projection_runner.py retired in Wave 3F)
 
 This is ACTIVE infrastructure, NOT deprecated like the Kernel class.
 See kernel.py lines 67-155 for implementation.

@@ -148,7 +148,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
         budget.consume(1)
         return "list"
 
-    # Budget accounting (parity with projection_runner)
+    # Budget accounting (parity with stage0_vm_run_bounded)
     if outcome["status"] == "terminal":
         budget.consume(outcome["steps"])
     elif outcome["status"] == "stall":
