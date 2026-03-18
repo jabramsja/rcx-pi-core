@@ -44,8 +44,9 @@ _load_compiled_subst_v2_bundle, _clear_compiled_subst_v2_bundle = make_compiled_
 
 is_subst_done, is_subst_state, run_subst_projections = make_projection_runner("subst")
 
-# v2 terminal detection (uses _mode instead of mode)
-_is_subst_done_v2, _is_subst_state_v2, _ = make_projection_runner("subst", terminal_field="_mode")
+# v2 terminal detection — Wave 3E: _is_subst_done_v2 and _is_subst_state_v2
+# removed (zero callers after stage0_vm_run_bounded migration; terminal detection
+# handled by bounded helper, stall-phase check inlined in subst_mu).
 
 
 def is_head_tail_structure(value: Mu) -> bool:
@@ -173,8 +174,8 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Convert bindings dict to linked list
     linked_bindings = dict_to_bindings(bindings)
 
-    # Wave 3B: Load compiled subst.v2 bundle for VM-backed execution
-    from .stage0_vm import stage0_vm_run, Stage0VMError  # ANTICHEAT_OK: infra — VM runner
+    # Wave 3E: VM-backed execution via bounded helper
+    from .stage0_vm import stage0_vm_run_bounded  # ANTICHEAT_OK: infra — bounded VM helper
     from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
     bundle = _load_compiled_subst_v2_bundle()
@@ -186,56 +187,58 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
         "_subst_ctx": _subst_ctx,
     }
 
-    # Run via Stage0 VM (direct call, no projection_runner)
+    # Run via Stage0 VM bounded helper (no exception catching needed —
+    # exhaustion handled by bounded helper, VM faults propagate naturally)
     budget = get_step_budget()
-    try:
-        vm_result = stage0_vm_run(bundle, initial, max_steps=1000)
-        final_state = vm_result["root"]
-        vm_steps = len(vm_result["steps"])
+    outcome = stage0_vm_run_bounded(
+        bundle, initial,
+        max_steps=1000,
+        terminal_field="_mode",
+        terminal_value="subst_done",
+    )
 
-        if _is_subst_done_v2(final_state):
-            # Successful completion: consume matched steps only
-            budget.consume(vm_steps)
-            is_stall = False
-        else:
-            # Genuine stall: +1 for the stall-detection attempt
-            budget.consume(vm_steps + 1)
-            is_stall = True
-    except Stage0VMError as e:
-        # Only catch run-step-limit exhaustion; re-raise real VM faults
-        if "Run step limit exceeded" not in str(e):
-            raise
+    # Budget accounting (parity with classify_mu / projection_runner)
+    if outcome["status"] == "terminal":
+        budget.consume(outcome["steps"])
+    elif outcome["status"] == "stall":
+        budget.consume(outcome["steps"] + 1)  # +1 for stall-detection probe
+    else:  # exhaustion
         budget.consume(1000)
-        is_stall = True
-        final_state = initial  # return original on exhaustion
 
-    # Extract result (v2 uses _result and _mode instead of result and mode)
-    if is_stall:
-        # Defensive fallback for incomplete bundles. Under correctly compiled
-        # subst.v2, unbound variables always reach the done path via
-        # lookup.exhausted -> subst.done (Delta 6). This stall-detection path
-        # only activates if the compiled bundle is missing the lookup.exhausted
-        # program or if a genuine non-variable stall occurs.
-        if _is_subst_state_v2(final_state):
-            phase = final_state.get("phase")
-            if phase == "lookup":
-                name = final_state.get("lookup_name")
-                raise KeyError(f"Unbound variable: {name}")
+    final_state = outcome["root"]
+
+    # --- Result interpretation (branched by outcome status) ---
+
+    if outcome["status"] == "exhaustion":
+        # Exhaustion: budget exceeded without terminal or stall.
+        # Do NOT enter stall handler — last state may be mid-lookup,
+        # which would produce a false KeyError for bound variables.
+        raise RuntimeError(f"Substitute exhausted budget (1000 steps): {final_state}")
+
+    if outcome["status"] == "stall":
+        # Genuine stall: check for unbound variable in lookup phase.
+        # In-progress v2 states use "mode" (not "_mode") — "_mode" is only
+        # for terminal states like "subst_done". This matches the old
+        # _is_subst_state_v2 (projection_runner.py:71 checks state.get("mode")).
+        # Defensive — v2 seed routes unbound vars via error-as-value terminal.
+        if (isinstance(final_state, dict)  # AST_OK: boundary scaffolding — stall-phase type check
+                and final_state.get("mode") == "subst"
+                and final_state.get("phase") == "lookup"):
+            name = final_state.get("lookup_name")
+            raise KeyError(f"Unbound variable: {name}")
         raise RuntimeError(f"Substitute stalled unexpectedly: {final_state}")
 
-    if _is_subst_done_v2(final_state):
-        result = final_state.get("_result")
+    # Terminal: extract result
+    result = final_state.get("_result")
 
-        # Delta 6: v2 unbound-variable detection (error-as-value)
-        # v2 lookup.exhausted produces _error result instead of stalling
-        if isinstance(result, dict) and result.get("_error") == "unbound_variable":
-            name = result.get("_name")
-            raise KeyError(f"Unbound variable: {name}")
+    # Delta 6: v2 unbound-variable detection (error-as-value)
+    # v2 lookup.exhausted produces _error result instead of stalling
+    if isinstance(result, dict) and result.get("_error") == "unbound_variable":  # AST_OK: boundary scaffolding — error-as-value check
+        name = result.get("_name")
+        raise KeyError(f"Unbound variable: {name}")
 
-        # Wave4a D10 parity fix: handle head/tail structures correctly.
-        if is_head_tail_structure(body):
-            return _substitute_direct(body, bindings)
-        denormed = denormalize_from_match(result)
-        return _reconcile_parity(body, denormed, bindings)
-
-    raise RuntimeError(f"Unexpected substitute state: {final_state}")
+    # Wave4a D10 parity fix: handle head/tail structures correctly.
+    if is_head_tail_structure(body):
+        return _substitute_direct(body, bindings)
+    denormed = denormalize_from_match(result)
+    return _reconcile_parity(body, denormed, bindings)
