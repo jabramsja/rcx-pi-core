@@ -194,7 +194,7 @@ Current truth: full L4 completion remains in SINK, but bounded reduction work is
 
 **Post-D008 Operating Mode:** D008 GO rendered (founder, 2026-03-01; supersedes prior DEFER). D005 production pilot COMPLETE (PR #452 merged, 2026-03-01). **G8 PASS (classification gate, caveated, 2026-03-03):** All four primitives classified with executable evidence (D001-D010). G8 PASS closes classification evidence, not L4 completion. L4 remains blocked by stop conditions #3/#4. No production reduction claims. Research-evidence precedent locked: research analogs sufficient for classification gates, production claims require productionization gates. Productionization gate lock documented in L4ExitChecklist.v0.md (D009: memoization/cycle-detection + cross-substrate + node-count vs per-level; D010: int-range + NaN/Inf + JS decoder + migration + integrity-chain). Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). All prior NEXT contracts closed. Wave 25 JS perf fix merged (PR #453, 42x speedup + non-linear hash fix + policy lock). P4 hotspot measured and DEFERRED (2026-03-02, PR #458). **RT1+RT2+RT3 anti-theater hardening COMPLETE (2026-03-03):** RT1 closes cross-substrate seed parsing parity (NaN/Inf rejection) and JS type guards. RT2 introduces `tools/checks/check_simulated_production_logic.py` (9 tests). RT3 hardens the checker: arrow function aliases, concatenated/f-string detection, require+call proof (not just require), inode-based scan dedup, 5-line THEATER_OK proximity. 18 checker tests total. Wired into `tools/audits/audit_fast.sh` and `tools/audits/audit_all.sh`. This is process hardening, not runtime behavior change — host semantics and debt unchanged.
 
-**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-15):** All four P7 sub-waves + S1-A/S1-B complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, 17 gate tests, PR #581). S1-A: Cutover evidence package (37 tests, performance profiling, CONDITIONAL GO memo, PR #598). **S1-B: VM CUTOVER ACTIVE (PR #603, founder GO 2026-03-15).** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. **S1-C: ALL 33 projections via Stage0 VM (PR #606).** kernel.v1 (7) + bridge (5) compiled into Stage0 bundles; `_step_kernel_with_vm()` now executes all 4 seed groups via `stage0_vm_step`; `_apply_projection_trusted` eliminated from step_kernel_mu path. Host path (`_step_trusted`) still used by engine_pipeline only (projection_runner retired Wave 3F; classify + subst migrated to VM via Waves 3B-3E). Total inventory 307 (178 Py + 129 JS), authority 216 (120 Py + 96 JS).
+**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-15):** All four P7 sub-waves + S1-A/S1-B complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, 17 gate tests, PR #581). S1-A: Cutover evidence package (37 tests, performance profiling, CONDITIONAL GO memo, PR #598). **S1-B: VM CUTOVER ACTIVE (PR #603, founder GO 2026-03-15).** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. **S1-C: ALL 33 projections via Stage0 VM (PR #606).** kernel.v1 (7) + bridge (5) compiled into Stage0 bundles; `_step_kernel_with_vm()` now executes all 4 seed groups via `stage0_vm_step`; `_apply_projection_trusted` eliminated from step_kernel_mu path. Host path (`_step_trusted`) still used by engine_pipeline only (projection_runner retired Wave 3F; classify + subst migrated to VM via Waves 3B-3E). Total inventory 308 (179 Py + 129 JS), authority 217 (121 Py + 96 JS).
 
 **Conjecture Parking:** Non-Euclidean geometry / structural linear algebra hypotheses are PARKED (not active). See TASKS.md SINK "Conjecture Parking (NOT ACTIVE)" for re-evaluation trigger and promotion rules.
 
@@ -327,19 +327,19 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
 | **Tracked markers** | 16 | Narrow official `@host_*` debt marker sites (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion, AST_OK bootstrap). | `tools/checks/host_semantics_baseline.json` |
-| **Authority sites** | 216 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 120 Python + 96 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
-| **Total inventory sites** | 307 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 178 Python + 129 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
+| **Authority sites** | 217 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 121 Python + 96 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
+| **Total inventory sites** | 308 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 179 Python + 129 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
 
-**Why three ledgers:** The 16 tracked markers are the narrow debt the project has categorized and accepted. The 216 authority sites are the broader surface the ratchet prevents from growing. The 307 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
+**Why three ledgers:** The 16 tracked markers are the narrow debt the project has categorized and accepted. The 217 authority sites are the broader surface the ratchet prevents from growing. The 308 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 16 and 311 is the honest measure of how much host work remains uncategorized.
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 16 and 308 is the honest measure of how much host work remains uncategorized.
 
 ```
 THRESHOLD: 16
 CURRENT: 16 (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap — per host_semantics_baseline.json)
 FLOOR: 16 (see explanation below)
-INFRA_CEILING: 129
-INFRA_CURRENT: 129
+INFRA_CEILING: 135
+INFRA_CURRENT: 135
 ```
 
 **Tracked marker count (16 — 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap):**
@@ -730,7 +730,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-03-18 (Wave 3F projection_runner retirement, authority 216, total 307)
+**Last updated:** 2026-03-18 (Wave 4A engine transition classifier, authority 217, total 308)
 **Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET, 2026-02-20); post-closure execution continues on L4_STRUCTURAL promotion-path work (post A18-P0), with explicit workload targets `rcx_engine.v1` (RCXEngineNew cycle) and UniversalEval/UniversalRecursion path evidence. Canonical authorization remains TASKS.md.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**

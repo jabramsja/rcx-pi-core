@@ -163,9 +163,9 @@ class TestTrampolineTailCallValidation:
     """
 
     def test_python_trampoline_calls_helper(self):
-        """Python trampoline must call _validate_reentry_payload on tail_payload."""
+        """Python trampoline must call _validate_reentry_payload for tail_call."""
         src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
-        assert '_validate_reentry_payload(tail_payload, "trampoline _tail_call")' in src
+        assert '_validate_reentry_payload(payload, "trampoline _tail_call")' in src
 
     def test_js_trampoline_calls_helper(self):
         """JS trampoline must call validateReentryPayload on tailPayload."""
@@ -183,7 +183,7 @@ class TestTrampolineTailCallValidation:
         # Subtract 1 for the function definition line in each
         py_calls = py_total - 1  # def _validate_reentry_payload(
         js_calls = js_total - 1  # function validateReentryPayload(
-        assert py_calls == 3, f"Python must have 3 helper call sites, got {py_calls}"
+        assert py_calls == 4, f"Python must have 4 helper call sites (Boot1 _run_engine, Boot1 _tail_call, trampoline _tail_call, trampoline _run_engine), got {py_calls}"
         assert js_calls == 3, f"JS must have 3 helper call sites, got {js_calls}"
 
 
