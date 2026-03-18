@@ -473,7 +473,8 @@ def test_infra_count_within_ceiling():
     # Wave 3B: +1 from subst_mu compiled bundle loader isinstance type guard
     # Wave 3C: +3 from match_mu staged VM dispatch type guards
     # Wave 3F: -2 from projection_runner.py retirement (129 -> 127)
-    assert infra_count == 127, (
-        f"Expected 127 AST_OK:infra markers, found {infra_count}. "
+    # Wave 4A: +8 from _classify_engine_step extraction + caller refactor (127 -> 135)
+    assert infra_count == 135, (
+        f"Expected 135 AST_OK:infra markers, found {infra_count}. "
         f"If this is intentional, update the test."
     )

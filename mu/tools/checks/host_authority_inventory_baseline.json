@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-18T03:52:15.552794+00:00",
+  "generated_at": "2026-03-18T08:18:34.592943+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -1077,7 +1077,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 688,
+          "line": 736,
           "name": "_boundary_op_run_algorithm",
           "signals": [
             "builtin:isinstance",
@@ -1087,7 +1087,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 634,
+          "line": 682,
           "name": "_boundary_op_run_trace",
           "signals": [
             "builtin:enumerate",
@@ -1108,7 +1108,17 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 538,
+          "line": 515,
+          "name": "_classify_engine_step",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 586,
           "name": "_collect_ontology_evidence",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -1124,7 +1134,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1480,
+          "line": 1517,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -1133,7 +1143,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 515,
+          "line": 563,
           "name": "_derive_engine_exit_reason",
           "signals": [
             "builtin:isinstance"
@@ -1156,12 +1166,11 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 947,
+          "line": 995,
           "name": "_run_engine_recursive",
           "signals": [
             "authority_call:mu_hash",
             "builtin:isinstance",
-            "builtin:len",
             "builtin:sorted",
             "loop",
             "mutation:append",
@@ -1173,7 +1182,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 989,
+          "line": 1037,
           "name": "_run_engine_recursive._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -1186,7 +1195,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 725,
+          "line": 773,
           "name": "_service_boundary_effect",
           "signals": [
             "builtin:dict",
@@ -1223,7 +1232,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1384,
+          "line": 1421,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -1235,7 +1244,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 888,
+          "line": 936,
           "name": "hash_trace_for_recurrence",
           "signals": [
             "authority_call:mu_hash_control",
@@ -1254,12 +1263,11 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1125,
+          "line": 1169,
           "name": "run_engine_pipeline",
           "signals": [
             "authority_call:mu_hash",
             "builtin:isinstance",
-            "builtin:len",
             "builtin:sorted",
             "builtin:sum",
             "loop",
@@ -1272,7 +1280,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1249,
+          "line": 1293,
           "name": "run_engine_pipeline._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -1285,7 +1293,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1485,
+          "line": 1522,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -1297,7 +1305,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1349,
+          "line": 1386,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -1308,7 +1316,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1427,
+          "line": 1464,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -1993,7 +2001,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1037,
+          "line": 1035,
           "name": "make_compiled_bundle_loader",
           "signals": [
             "mutation:assignment"
@@ -2002,7 +2010,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1087,
+          "line": 1085,
           "name": "make_compiled_bundle_loader._clear",
           "signals": [
             "mutation:assignment"
@@ -2011,7 +2019,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1054,
+          "line": 1052,
           "name": "make_compiled_bundle_loader._load",
           "signals": [
             "mutation:assignment"
@@ -2393,8 +2401,8 @@
       ],
       "site_counts": {
         "javascript": 96,
-        "python": 120,
-        "total": 216
+        "python": 121,
+        "total": 217
       }
     },
     "total": {
@@ -3704,14 +3712,14 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 673,
+          "line": 721,
           "name": "_boundary_op_hash_trace",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 688,
+          "line": 736,
           "name": "_boundary_op_run_algorithm",
           "signals": [
             "builtin:isinstance",
@@ -3721,7 +3729,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 634,
+          "line": 682,
           "name": "_boundary_op_run_trace",
           "signals": [
             "builtin:enumerate",
@@ -3742,6 +3750,16 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
+          "line": 515,
+          "name": "_classify_engine_step",
+          "signals": [
+            "builtin:isinstance",
+            "builtin:len"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/engine_pipeline.py",
           "line": 99,
           "name": "_clear_boundary_ops_cache",
           "signals": [],
@@ -3749,7 +3767,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 538,
+          "line": 586,
           "name": "_collect_ontology_evidence",
           "signals": [
             "authority_call:mu_hash_control_cached",
@@ -3765,7 +3783,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1480,
+          "line": 1517,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -3774,7 +3792,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 515,
+          "line": 563,
           "name": "_derive_engine_exit_reason",
           "signals": [
             "builtin:isinstance"
@@ -3811,12 +3829,11 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 947,
+          "line": 995,
           "name": "_run_engine_recursive",
           "signals": [
             "authority_call:mu_hash",
             "builtin:isinstance",
-            "builtin:len",
             "builtin:sorted",
             "loop",
             "mutation:append",
@@ -3828,7 +3845,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 989,
+          "line": 1037,
           "name": "_run_engine_recursive._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -3841,7 +3858,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 725,
+          "line": 773,
           "name": "_service_boundary_effect",
           "signals": [
             "builtin:dict",
@@ -3878,7 +3895,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1384,
+          "line": 1421,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -3890,7 +3907,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 888,
+          "line": 936,
           "name": "hash_trace_for_recurrence",
           "signals": [
             "authority_call:mu_hash_control",
@@ -3909,12 +3926,11 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1125,
+          "line": 1169,
           "name": "run_engine_pipeline",
           "signals": [
             "authority_call:mu_hash",
             "builtin:isinstance",
-            "builtin:len",
             "builtin:sorted",
             "builtin:sum",
             "loop",
@@ -3927,7 +3943,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1249,
+          "line": 1293,
           "name": "run_engine_pipeline._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -3940,7 +3956,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1485,
+          "line": 1522,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -3952,7 +3968,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1349,
+          "line": 1386,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -3963,7 +3979,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1427,
+          "line": 1464,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -4872,7 +4888,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1037,
+          "line": 1035,
           "name": "make_compiled_bundle_loader",
           "signals": [
             "mutation:assignment"
@@ -4881,7 +4897,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1087,
+          "line": 1085,
           "name": "make_compiled_bundle_loader._clear",
           "signals": [
             "mutation:assignment"
@@ -4890,7 +4906,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1054,
+          "line": 1052,
           "name": "make_compiled_bundle_loader._load",
           "signals": [
             "mutation:assignment"
@@ -4919,7 +4935,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 978,
+          "line": 977,
           "name": "stage0_vm_run_bounded._is_terminal",
           "signals": [],
           "substrate": "python"
@@ -5426,8 +5442,8 @@
       ],
       "site_counts": {
         "javascript": 129,
-        "python": 178,
-        "total": 307
+        "python": 179,
+        "total": 308
       }
     }
   },

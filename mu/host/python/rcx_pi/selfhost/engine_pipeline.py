@@ -512,6 +512,54 @@ def _is_engine_terminal(value: Mu) -> bool:  # AST_OK: infra — engine terminal
     return classify_terminal_kind(value) == "engine_terminal"
 
 
+def _classify_engine_step(next_state: Mu, state: Mu) -> tuple:  # AST_OK: infra — pure engine transition classifier
+    """Classify one engine step output as a transition type.
+
+    Pure function — no observer emissions, no validation, no error raising.
+    Callers handle all side effects AFTER classification.
+
+    Wave 4A: Extracted from duplicated if/elif chains in run_engine_pipeline
+    (trampoline) and _run_engine_recursive (Boot1).
+
+    Args:
+        next_state: result of _step_trusted(engine_projs, state)
+        state: previous engine state (for identity-stall detection)
+
+    Returns one of:
+        ("stall_terminal", state)       — identity stall, state IS engine terminal
+        ("stall_non_terminal", state)   — identity stall, state is NOT terminal
+        ("boundary", request_dict)      — _boundary_request detected
+        ("reentry", payload_dict)       — _run_engine re-entry envelope
+        ("tail_call", payload_dict)     — _tail_call re-entry envelope
+        ("terminal", next_state)        — engine terminal result (non-stall)
+        ("continue", next_state)        — engine advanced, keep stepping
+    """
+    # Identity stall — no projection matched
+    if next_state is state:
+        if _is_engine_terminal(state):
+            return ("stall_terminal", state)
+        return ("stall_non_terminal", state)
+
+    # Boundary effect request
+    if isinstance(next_state, dict) and "_boundary_request" in next_state:  # AST_OK: infra — boundary dispatch check
+        return ("boundary", next_state["_boundary_request"])
+
+    # Re-entry envelope (_run_engine)
+    if isinstance(next_state, dict) and "_run_engine" in next_state and len(next_state) == 1:  # AST_OK: infra — re-entry detection
+        return ("reentry", next_state["_run_engine"])
+
+    # Tail-call envelope
+    if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:  # AST_OK: infra — tail-call detection
+        return ("tail_call", next_state["_tail_call"])
+
+    # Engine terminal result
+    if _is_engine_terminal(next_state):
+        return ("terminal", next_state)
+
+    # Engine advanced internally
+    return ("continue", next_state)
+
+
 def _derive_engine_exit_reason(engine_result: dict) -> str:  # AST_OK: infra — pure derivation from terminal flags
     """Derive engine_exit_reason from the existing 8-key terminal dict.
 
@@ -1039,38 +1087,37 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             _emit("step_boundary", iteration, state)
             _total_iterations[0] += 1
 
-            # Engine stalled — check for terminal result
-            if next_state is state:
-                if _is_engine_terminal(state):
-                    if isinstance(state, dict):
-                        if state.get("closure_detected"):
-                            _emit("closure_detected", iteration, state)
-                        if state.get("stall"):
-                            _emit("stall_detected", iteration, state)
-                    _emit("engine_terminal", iteration, state,
-                          engine_exit_reason=_derive_engine_exit_reason(state),
-                          engine_iterations_used=_total_iterations[0])
-                    return state
-                _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
+            # Wave 4A: classify engine step via shared classifier
+            transition, payload = _classify_engine_step(next_state, state)
+
+            if transition == "stall_terminal":
+                if isinstance(payload, dict):  # AST_OK: infra — terminal signal check
+                    if payload.get("closure_detected"):
+                        _emit("closure_detected", iteration, payload)
+                    if payload.get("stall"):
+                        _emit("stall_detected", iteration, payload)
+                _emit("engine_terminal", iteration, payload,
+                      engine_exit_reason=_derive_engine_exit_reason(payload),
+                      engine_iterations_used=_total_iterations[0])
+                return payload
+
+            elif transition == "stall_non_terminal":
+                _emit("fail_closed", iteration, payload, error_code="engine.stalled_non_terminal")
                 raise RcxEngineError(
                     "engine.stalled_non_terminal",
                     f"Boot1 engine stalled at iteration {iteration} (depth {depth}) "
                     f"without producing terminal result. "
-                    f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
+                    f"State keys: {sorted(payload.keys()) if isinstance(payload, dict) else type(payload).__name__}"
                 )
 
-            # Check for boundary effect request
-            if isinstance(next_state, dict) and "_boundary_request" in next_state:
+            elif transition == "boundary":
                 state = _service_boundary_effect(
-                    next_state["_boundary_request"],
+                    payload,
                     max_algorithm_iterations, _emit, iteration, state,
                 )
                 continue
 
-            # Boot1: detect re-entry envelope — update frame and restart outer loop.
-            # engine.exhaustion_done_freeze produces {_run_engine: {projections, input, max_steps, frozen}}.
-            if isinstance(next_state, dict) and "_run_engine" in next_state and len(next_state) == 1:
-                payload = next_state["_run_engine"]
+            elif transition == "reentry":
                 _validate_reentry_payload(payload, "Boot1 _run_engine")
                 cur_projections = payload["projections"]
                 cur_input = payload["input"]
@@ -1081,9 +1128,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 reentry = True
                 break
 
-            # Boot1: _tail_call recognition — update frame and restart outer loop
-            if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
-                payload = next_state["_tail_call"]
+            elif transition == "tail_call":
                 _validate_reentry_payload(payload, "Boot1 _tail_call")
                 cur_projections = payload["projections"]
                 cur_input = payload["input"]
@@ -1094,20 +1139,19 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
                 reentry = True
                 break
 
-            # Check if engine produced terminal result
-            if _is_engine_terminal(next_state):
-                if isinstance(next_state, dict):
-                    if next_state.get("closure_detected"):
-                        _emit("closure_detected", iteration, next_state)
-                    if next_state.get("stall"):
-                        _emit("stall_detected", iteration, next_state)
-                _emit("engine_terminal", iteration, next_state,
-                      engine_exit_reason=_derive_engine_exit_reason(next_state),
+            elif transition == "terminal":
+                if isinstance(payload, dict):  # AST_OK: infra — terminal signal check
+                    if payload.get("closure_detected"):
+                        _emit("closure_detected", iteration, payload)
+                    if payload.get("stall"):
+                        _emit("stall_detected", iteration, payload)
+                _emit("engine_terminal", iteration, payload,
+                      engine_exit_reason=_derive_engine_exit_reason(payload),
                       engine_iterations_used=_total_iterations[0])
-                return next_state
+                return payload
 
-            # Engine advanced internally — keep stepping
-            state = next_state
+            else:  # "continue"
+                state = payload
 
         if reentry:
             continue
@@ -1278,60 +1322,60 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 
         _emit("step_boundary", iteration, state)
 
-        # Engine stalled (no projection matched) — check for terminal result
-        if next_state is state:
-            if _is_engine_terminal(state):
-                # Check for closure/stall signals in terminal result
-                if isinstance(state, dict):
-                    if state.get("closure_detected"):
-                        _emit("closure_detected", iteration, state)
-                    if state.get("stall"):
-                        _emit("stall_detected", iteration, state)
-                _emit("engine_terminal", iteration, state,
-                      engine_exit_reason=_derive_engine_exit_reason(state),
-                      engine_iterations_used=iteration + 1)
-                return state
-            # Non-terminal stall — engine stuck in intermediate state
-            _emit("fail_closed", iteration, state, error_code="engine.stalled_non_terminal")
+        # Wave 4A: classify engine step via shared classifier
+        transition, payload = _classify_engine_step(next_state, state)
+
+        if transition == "stall_terminal":
+            if isinstance(payload, dict):  # AST_OK: infra — terminal signal check
+                if payload.get("closure_detected"):
+                    _emit("closure_detected", iteration, payload)
+                if payload.get("stall"):
+                    _emit("stall_detected", iteration, payload)
+            _emit("engine_terminal", iteration, payload,
+                  engine_exit_reason=_derive_engine_exit_reason(payload),
+                  engine_iterations_used=iteration + 1)
+            return payload
+
+        elif transition == "stall_non_terminal":
+            _emit("fail_closed", iteration, payload, error_code="engine.stalled_non_terminal")
             raise RcxEngineError(
                 "engine.stalled_non_terminal",
                 f"Engine stalled at iteration {iteration} without producing terminal result. "
-                f"State keys: {sorted(state.keys()) if isinstance(state, dict) else type(state).__name__}"
+                f"State keys: {sorted(payload.keys()) if isinstance(payload, dict) else type(payload).__name__}"
             )
 
-        # Check for boundary effect request
-        if isinstance(next_state, dict) and "_boundary_request" in next_state:
+        elif transition == "boundary":
             state = _service_boundary_effect(
-                next_state["_boundary_request"],
+                payload,
                 max_algorithm_iterations, _emit, iteration, state,
             )
             continue
 
-        # Boot1: _tail_call recognition (shadow merge — seed doesn't produce this yet).
-        # When engine projections emit {_tail_call: {projections, input, max_steps, frozen}},
-        # the host loop wraps it as {_run_engine: ...} and continues — O(1) stack, no recursion.
-        # See Boot1LoopContract.v0.md §3 Option A.
-        if isinstance(next_state, dict) and "_tail_call" in next_state and len(next_state) == 1:
-            tail_payload = next_state["_tail_call"]
-            _validate_reentry_payload(tail_payload, "trampoline _tail_call")
-            state = {"_run_engine": tail_payload}
+        elif transition == "tail_call":
+            _validate_reentry_payload(payload, "trampoline _tail_call")
+            state = {"_run_engine": payload}
             continue
 
-        # Check if engine produced terminal result (e.g. after engine.unwrap)
-        if _is_engine_terminal(next_state):
-            # Emit signals found in terminal result
-            if isinstance(next_state, dict):
-                if next_state.get("closure_detected"):
-                    _emit("closure_detected", iteration, next_state)
-                if next_state.get("stall"):
-                    _emit("stall_detected", iteration, next_state)
-            _emit("engine_terminal", iteration, next_state,
-                  engine_exit_reason=_derive_engine_exit_reason(next_state),
+        elif transition == "terminal":
+            if isinstance(payload, dict):  # AST_OK: infra — terminal signal check
+                if payload.get("closure_detected"):
+                    _emit("closure_detected", iteration, payload)
+                if payload.get("stall"):
+                    _emit("stall_detected", iteration, payload)
+            _emit("engine_terminal", iteration, payload,
+                  engine_exit_reason=_derive_engine_exit_reason(payload),
                   engine_iterations_used=iteration + 1)
-            return next_state
+            return payload
 
-        # Engine advanced internally — keep stepping
-        state = next_state
+        elif transition == "reentry":
+            # Trampoline: validate and wrap re-entry payload back into _run_engine envelope.
+            # Boot1 handles this by frame update; trampoline feeds it back to
+            # engine projections which expect the {"_run_engine": ...} shape.
+            _validate_reentry_payload(payload, "trampoline _run_engine")
+            state = {"_run_engine": payload}
+
+        else:  # "continue"
+            state = payload
 
     # FAIL CLOSED: engine loop exhausted without terminal result
     _emit("fail_closed", max_engine_iterations - 1, state, error_code="engine.exhausted")
