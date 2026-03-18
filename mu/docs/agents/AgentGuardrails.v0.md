@@ -203,7 +203,7 @@ VERIFIED: Yes/No
 - **Non-linear patterns**: Same variable appears twice (enforces equality via binding conflict)
 - match.v2.json alone is LINEAR ONLY
 - match.v2 + bridge projections (bootstrap_structural.v1.json) provides non-linear support:
-  - **match_mu direct**: `match_mu()` loads match.v2 + bridge (13 combined projections) via `projection_runner`
+  - **match_mu direct**: `match_mu()` loads match.v2 + bridge (13 combined projections) via staged `stage0_vm_step` dispatch
   - **kernel bridge mode**: `step_kernel_mu(kernel_mode="bridge")` for algorithm execution
 - `step_mu()`/`run_mu()` are fail-closed: reject non-linear patterns with ValueError
 

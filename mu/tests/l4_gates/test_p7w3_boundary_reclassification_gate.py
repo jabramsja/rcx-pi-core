@@ -1,6 +1,6 @@
 """P7 Wave 3: Boundary Scaffolding Marker Reclassification — Gate Tests.
 
-Validates that 6 @host_iteration markers (-5 Python, -1 JS) were removed
+Validates that 5 @host_iteration markers (-4 Python, -1 JS) were removed
 from functions provably NOT on the kernel execution path:
 
   Python:
@@ -8,9 +8,9 @@ from functions provably NOT on the kernel execution path:
     2. is_dict_linked_list() — legacy boundary classification (test-only)
     3. bindings_to_dict() — API boundary conversion (via match_mu → apply_mu)
     4. _collect_ontology_evidence() — engine boundary-effect servicing
-    5. projection_runner run() — boundary iteration (via match_mu/subst_mu → apply_mu)
+    (projection_runner run() — retired in Wave 3F)
   JavaScript:
-    6. collectOntologyEvidence() — engine boundary-effect servicing (parity with #4)
+    5. collectOntologyEvidence() — engine boundary-effect servicing (parity with #4)
 
 Anti-laundering compliance: The "active trusted runtime call graph" for
 anti-laundering is the kernel execution path: step_kernel_mu → _step_trusted →
@@ -37,7 +37,6 @@ from rcx_pi.selfhost.match_mu import (
     is_dict_linked_list,
 )
 from rcx_pi.selfhost.engine_pipeline import _collect_ontology_evidence  # ANTICHEAT_OK: AST inspection for P7w3 boundary reclassification gate
-from rcx_pi.selfhost.projection_runner import make_projection_runner
 from rcx_pi.selfhost.step_mu import step_kernel_mu, run_mu, run_mu_structural  # SPEED_OK: source inspection only (AST proof of kernel path exclusion)
 
 from tests.repo_root import REPO_ROOT
@@ -90,11 +89,7 @@ class TestMarkersRemoved:
             "_collect_ontology_evidence still has @host_iteration marker"
         )
 
-    def test_projection_runner_no_marker(self):
-        source = _get_function_source(make_projection_runner)
-        assert not _source_contains_marker(source, "iteration"), (
-            "make_projection_runner still has @host_iteration marker"
-        )
+    # test_projection_runner_no_marker removed — projection_runner.py retired in Wave 3F
 
     def test_js_collect_ontology_evidence_no_marker(self):
         """JS collectOntologyEvidence must NOT have @host_iteration marker."""
@@ -130,11 +125,7 @@ class TestBoundaryClassification:
             "bindings_to_dict missing BOUNDARY comment"
         )
 
-    def test_projection_runner_has_boundary(self):
-        source = _get_function_source(make_projection_runner)
-        assert "BOUNDARY" in source, (
-            "make_projection_runner missing BOUNDARY comment"
-        )
+    # test_projection_runner_has_boundary removed — projection_runner.py retired in Wave 3F
 
 
 # ===========================================================================

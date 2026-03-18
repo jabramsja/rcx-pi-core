@@ -58,7 +58,7 @@ The gap from PARTIAL to FULL is the Python for-loop in `step_kernel_mu()`. Optio
 **L2 EXCLUDED (by design):**
 - `eval_step()` is bootstrap primitive (irreducible)
 - `run_mu()` outer loop is L3 boundary (repeat-until-stall scaffolding)
-- `projection_runner.py` iteration (composition pattern, not execution)
+- `stage0_vm_run_bounded` iteration (composition pattern, not execution)
 
 ## L3/L4 Definition (Bootstrap Architecture)
 
@@ -194,7 +194,7 @@ Current truth: full L4 completion remains in SINK, but bounded reduction work is
 
 **Post-D008 Operating Mode:** D008 GO rendered (founder, 2026-03-01; supersedes prior DEFER). D005 production pilot COMPLETE (PR #452 merged, 2026-03-01). **G8 PASS (classification gate, caveated, 2026-03-03):** All four primitives classified with executable evidence (D001-D010). G8 PASS closes classification evidence, not L4 completion. L4 remains blocked by stop conditions #3/#4. No production reduction claims. Research-evidence precedent locked: research analogs sufficient for classification gates, production claims require productionization gates. Productionization gate lock documented in L4ExitChecklist.v0.md (D009: memoization/cycle-detection + cross-substrate + node-count vs per-level; D010: int-range + NaN/Inf + JS decoder + migration + integrity-chain). Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). All prior NEXT contracts closed. Wave 25 JS perf fix merged (PR #453, 42x speedup + non-linear hash fix + policy lock). P4 hotspot measured and DEFERRED (2026-03-02, PR #458). **RT1+RT2+RT3 anti-theater hardening COMPLETE (2026-03-03):** RT1 closes cross-substrate seed parsing parity (NaN/Inf rejection) and JS type guards. RT2 introduces `tools/checks/check_simulated_production_logic.py` (9 tests). RT3 hardens the checker: arrow function aliases, concatenated/f-string detection, require+call proof (not just require), inode-based scan dedup, 5-line THEATER_OK proximity. 18 checker tests total. Wired into `tools/audits/audit_fast.sh` and `tools/audits/audit_all.sh`. This is process hardening, not runtime behavior change — host semantics and debt unchanged.
 
-**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-15):** All four P7 sub-waves + S1-A/S1-B complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, 17 gate tests, PR #581). S1-A: Cutover evidence package (37 tests, performance profiling, CONDITIONAL GO memo, PR #598). **S1-B: VM CUTOVER ACTIVE (PR #603, founder GO 2026-03-15).** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. **S1-C: ALL 33 projections via Stage0 VM (PR #606).** kernel.v1 (7) + bridge (5) compiled into Stage0 bundles; `_step_kernel_with_vm()` now executes all 4 seed groups via `stage0_vm_step`; `_apply_projection_trusted` eliminated from step_kernel_mu path. Host path (`_step_trusted`) still used by engine_pipeline and projection_runner (classify only — subst migrated to VM via Wave 3B). Total inventory 311 (182 Py + 129 JS), authority 220 (124 Py + 96 JS).
+**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-15):** All four P7 sub-waves + S1-A/S1-B complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, 17 gate tests, PR #581). S1-A: Cutover evidence package (37 tests, performance profiling, CONDITIONAL GO memo, PR #598). **S1-B: VM CUTOVER ACTIVE (PR #603, founder GO 2026-03-15).** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. **S1-C: ALL 33 projections via Stage0 VM (PR #606).** kernel.v1 (7) + bridge (5) compiled into Stage0 bundles; `_step_kernel_with_vm()` now executes all 4 seed groups via `stage0_vm_step`; `_apply_projection_trusted` eliminated from step_kernel_mu path. Host path (`_step_trusted`) still used by engine_pipeline only (projection_runner retired Wave 3F; classify + subst migrated to VM via Waves 3B-3E). Total inventory 307 (178 Py + 129 JS), authority 216 (120 Py + 96 JS).
 
 **Conjecture Parking:** Non-Euclidean geometry / structural linear algebra hypotheses are PARKED (not active). See TASKS.md SINK "Conjecture Parking (NOT ACTIVE)" for re-evaluation trigger and promotion rules.
 
@@ -327,10 +327,10 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
 | **Tracked markers** | 16 | Narrow official `@host_*` debt marker sites (6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap). The semantic debt the project explicitly categorizes (host_builtin, host_iteration, host_mutation, host_recursion, AST_OK bootstrap). | `tools/checks/host_semantics_baseline.json` |
-| **Authority sites** | 220 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 124 Python + 96 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
-| **Total inventory sites** | 311 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 182 Python + 129 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
+| **Authority sites** | 216 | Named runtime sites currently flagged by the broader authority inventory ratchet. Functions with host-authority signals (isinstance, loops, builtins, recursion) across the runtime tree. Per-substrate: 120 Python + 96 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (authority inventory) |
+| **Total inventory sites** | 307 | Full named host-runtime surface in scope. Every function in the runtime tree that touches any host-language construct. Per-substrate: 178 Python + 129 JavaScript. | `tools/checks/host_authority_inventory_baseline.json` (total inventory) |
 
-**Why three ledgers:** The 16 tracked markers are the narrow debt the project has categorized and accepted. The 220 authority sites are the broader surface the ratchet prevents from growing. The 311 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
+**Why three ledgers:** The 16 tracked markers are the narrow debt the project has categorized and accepted. The 216 authority sites are the broader surface the ratchet prevents from growing. The 307 total inventory sites are the full host-runtime footprint — the upper bound on what "self-hosting" must eventually eliminate or accept as irreducible bootstrap.
 
 **Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory sites are ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`). The gap between 16 and 311 is the honest measure of how much host work remains uncategorized.
 
@@ -349,7 +349,7 @@ INFRA_CURRENT: 129
 - @host_mutation: 1 (deep_eval history.append only)
 - AST_OK bootstrap: 8 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009 + 2 stage0_vm template materialization from P7-a + 2 stage0_vm _mu_copy from P7-a bot review fix)
 
-**Total host semantics markers (16 = 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap):** P7W5 outer loop boundary reclassification: run_mu, run_mu_structural (Py), run, runStructural, runAlgorithmWithBridge, runEnginePipelineRecursive (JS) reclassified as BOUNDARY — all provably off kernel execution path. list_to_linked/listToLinked stay @host_iteration (on kernel path — called by step_kernel_mu/step). Kernel path (post S1-C): step_kernel_mu/step()→_step_kernel_with_vm→stage0_vm_step for ALL 33 projections (kernel.v1 + bridge + match.v2 + subst.v2). Host path (_step_trusted→_apply_projection_trusted) still used by engine_pipeline and projection_runner only. P7-d adds _step_kernel_with_vm @host_iteration on Py (kernel-step VM dispatch for match.v2/subst.v2). P7-a Stage0 VM adds 4 AST_OK bootstrap (2 template materialization + 2 _mu_copy comprehensions in stage0_vm.py). Net from P7W5: -6 markers (17→11, -35%); P7-a: +4 AST_OK bootstrap (11→15); P7-d: +1 host_iteration (15→16). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category decorators: Py = 2 recursion + 1 builtin + 3 iteration + 0 mutation; JS = 2 recursion + 2 builtin + 2 iteration.
+**Total host semantics markers (16 = 6 Py decorator + 6 JS decorator + 4 AST_OK bootstrap):** P7W5 outer loop boundary reclassification: run_mu, run_mu_structural (Py), run, runStructural, runAlgorithmWithBridge, runEnginePipelineRecursive (JS) reclassified as BOUNDARY — all provably off kernel execution path. list_to_linked/listToLinked stay @host_iteration (on kernel path — called by step_kernel_mu/step). Kernel path (post S1-C): step_kernel_mu/step()→_step_kernel_with_vm→stage0_vm_step for ALL 33 projections (kernel.v1 + bridge + match.v2 + subst.v2). Host path (_step_trusted→_apply_projection_trusted) still used by engine_pipeline only (projection_runner retired Wave 3F). P7-d adds _step_kernel_with_vm @host_iteration on Py (kernel-step VM dispatch for match.v2/subst.v2). P7-a Stage0 VM adds 4 AST_OK bootstrap (2 template materialization + 2 _mu_copy comprehensions in stage0_vm.py). Net from P7W5: -6 markers (17→11, -35%); P7-a: +4 AST_OK bootstrap (11→15); P7-d: +1 host_iteration (15→16). Canonical counts in `tools/checks/host_semantics_baseline.json`. Per-category decorators: Py = 2 recursion + 1 builtin + 3 iteration + 0 mutation; JS = 2 recursion + 2 builtin + 2 iteration.
 
 **Gate 6 note (2026-02-02):**
 - run_algorithm_meta_circular: Delegates to eval_step (no new iteration debt)
@@ -408,7 +408,7 @@ The 16 represents the current tracked marker count (6 Py decorator + 6 JS decora
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
-Note: projection_runner had @host_iteration comment reclassified as BOUNDARY in P7 Wave 3 (off kernel path, via match_mu/subst_mu → apply_mu only).
+Note: projection_runner retired in Wave 3F. Its @host_iteration was reclassified as BOUNDARY in P7 Wave 3 before retirement.
 
 **Note on boundary scaffolding:**
 The `while` loops in `match_mu.py` (normalize_for_match, denormalize_from_match, bindings_to_dict, etc.) are NOT counted as debt. These are Python API conversion functions that convert between Python types and Mu linked lists at the boundary. They are explicitly documented as "boundary scaffolding" in their docstrings. Boundary scaffolding is expected to remain indefinitely as part of the Python API layer - it's not a target for structural replacement.
@@ -470,7 +470,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 **Expert agent (SIMPLIFIED):**
 - [x] Consolidate projection loader pattern → `projection_loader.py` (factory)
-- [x] Consolidate runner pattern → `projection_runner.py` (factory)
+- [x] Consolidate runner pattern → retired Wave 3F (match_mu uses staged `stage0_vm_step`; classify/subst use `stage0_vm_run_bounded`)
 - [x] Move test-only helpers out of match_mu.py - CLOSED (expert review found NO test-only code, all is production)
 
 **Structural-proof agent:**
@@ -479,7 +479,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 
 **Additional tests (2026-01-28):**
 - [x] `tests/structural/test_projection_loader.py` - Factory loader tests (13 tests)
-- [x] `tests/structural/test_projection_runner.py` - Factory runner tests (33 tests)
+- [x] Projection runner tests — retired Wave 3F (replaced by `tests/helpers/test_projection_stepper.py`)
 - [x] `tests/fuzz/test_kernel_loop_fuzzer.py` - L2 kernel iteration fuzz tests (16 tests)
 - [x] `tests/fuzz/test_context_passthrough_fuzzer.py` - Context preservation fuzz tests (12 tests)
 - [x] `tests/structural/test_step_mu_kernel_integration.py` - Kernel integration tests (30 tests)
@@ -730,7 +730,7 @@ Simplified step_kernel_mu to MECHANICAL operation:
 
 ---
 
-**Last updated:** 2026-03-17 (Wave 3D-A bounded VM helper, authority 220, total 311)
+**Last updated:** 2026-03-18 (Wave 3F projection_runner retirement, authority 216, total 307)
 **Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET, 2026-02-20); post-closure execution continues on L4_STRUCTURAL promotion-path work (post A18-P0), with explicit workload targets `rcx_engine.v1` (RCXEngineNew cycle) and UniversalEval/UniversalRecursion path evidence. Canonical authorization remains TASKS.md.
 
 **Legacy Surface Decision Record (2026-02-14, Round 19D):**
@@ -808,7 +808,7 @@ New organized structure makes architecture visible:
 - Location: `mu/bridge/bootstrap_structural.v1.json` (5 projections)
 - Design doc: `mu/docs/core/BootstrapStructuralBridge.v0.md`
 - Execution path verified: bridge projections DO fire for non-linear patterns
-- **Path 1: match_mu direct** (2026-02-09) — `match_mu()` loads match.v2 + bridge projections via `projection_runner`. Provides non-linear pattern conflict detection for `apply_mu()` without kernel overhead.
+- **Path 1: match_mu direct** (2026-02-09) — `match_mu()` loads match.v2 + bridge projections via staged `stage0_vm_step` dispatch (originally `projection_runner`, retired Wave 3F). Provides non-linear pattern conflict detection for `apply_mu()` without kernel overhead.
 - **Path 2: kernel bridge mode** — `run_algorithm_meta_circular()` dispatches to `step_kernel_mu(kernel_mode="bridge")` for recurrence/exhaustion.
 - **Fail-closed guard:** `step_mu()`/`run_mu()` reject non-linear patterns with ValueError, directing callers to bridge-aware paths.
 - JS substrate loads bridge projections (`mu/host/js/eval_step.js`) for structural parity paths.

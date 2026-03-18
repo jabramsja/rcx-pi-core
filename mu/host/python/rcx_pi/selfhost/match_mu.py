@@ -14,7 +14,6 @@ from .mu_type import Mu, assert_mu, MAX_MU_DEPTH, MAX_MU_WIDTH
 from .eval_seed import NO_MATCH, _NoMatch
 from .classify_mu import classify_linked_list
 from .projection_loader import make_projection_loader
-from .projection_runner import make_projection_runner
 
 # =============================================================================
 # Type Tag Validation (Phase 6c Security)
@@ -824,13 +823,6 @@ def dict_to_bindings(d: dict[str, Mu]) -> Mu:
 
 
 # =============================================================================
-# Match Runner (consolidated via factory)
-# =============================================================================
-
-# v1 runner (legacy, used by load_match_projections / match.v1.json)
-is_match_done, _, run_match_projections = make_projection_runner("match")
-
-
 # =============================================================================
 # Compiled Bundle Loading (Wave 3C — via factory)
 # =============================================================================

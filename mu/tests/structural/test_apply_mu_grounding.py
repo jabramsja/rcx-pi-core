@@ -27,14 +27,13 @@ from rcx_pi.match_mu import (
     load_match_projections,
     normalize_for_match,
     denormalize_from_match,
-    run_match_projections,
     match_mu,
 )
 from rcx_pi.subst_mu import (
     load_subst_projections,
-    run_subst_projections,
     subst_mu,
 )
+from tests.helpers.projection_stepper import run_projections
 
 
 # =============================================================================
@@ -110,7 +109,7 @@ class TestStructuralMatchExecution:
         }
 
         # Run to completion
-        final, steps, is_stall = run_match_projections(projections, state, max_steps=10)
+        final, steps, is_stall = run_projections(projections, state, max_steps=10, terminal_value="match_done")
 
         # Should stall (no projection matches this case)
         assert is_stall is True
@@ -337,7 +336,7 @@ class TestStallConditions:
         # State with unexpected mode
         invalid_state = {"mode": "unknown_mode", "data": "test"}
 
-        final, steps, is_stall = run_match_projections(projections, invalid_state, max_steps=10)
+        final, steps, is_stall = run_projections(projections, invalid_state, max_steps=10, terminal_value="match_done")
 
         assert is_stall is True
         assert mu_equal(final, invalid_state)

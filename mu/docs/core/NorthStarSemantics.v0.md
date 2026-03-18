@@ -72,7 +72,7 @@ This document is the single canonical source for these policies. If a design doc
 **Rationale:** Python `json.dumps(1.0)` produces `"1.0"` while JS `JSON.stringify(1.0)` produces `"1"`. This means `mu_hash_cached(1.0)` in Python differs from `muHashCached(1.0)` in JS, despite representing the same mathematical value. For control paths (stall detection, convergence checks, recurrence trace hashing), this divergence can cause one substrate to detect stall while the other continues iterating.
 
 **Scope:**
-- **Control paths (use `mu_hash_control*`):** stall detection in `step_kernel_mu`/`stepKernel`, `run_mu`/`run`, `run_mu_structural`/`runStructural`, `run_hemisphere_routing`, `projection_runner`, `runSubAlgorithm`, `hash_trace_for_recurrence`/`hashTraceForRecurrence`.
+- **Control paths (use `mu_hash_control*`):** stall detection in `step_kernel_mu`/`stepKernel`, `run_mu`/`run`, `run_mu_structural`/`runStructural`, `run_hemisphere_routing`, `runSubAlgorithm`, `hash_trace_for_recurrence`/`hashTraceForRecurrence`. (Note: `projection_runner` retired Wave 3F; `stage0_vm_run_bounded` uses VM step status, not hash-based stall detection.)
 - **Data paths (use `mu_hash`/`mu_hash_cached`):** observer event hashing, undefined motif output, `makeUndefinedMotif`.
 - **Non-linear binding (A5→Wave 25 revert):** non-linear binding conflict checks in `match()`/`_match_inner()` use `mu_hash_cached`/`muHashCached` (content hash, NOT control hash). Wave A5 initially switched to control hash, but Wave 25 reverted: control hash canonicalizes `0.0→0`, which collapses int/float type distinction needed for correct non-linear conflict detection. See `_match_inner()` non-linear conflict check comments in `eval_seed.py`.
 

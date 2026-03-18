@@ -15,8 +15,6 @@ from rcx_pi.selfhost.match_mu import (
     clear_match_bridge_cache,
     _validate_match_bridge_ordering,  # ANTICHEAT_OK: grounding test for bridge ordering invariant
 )
-from rcx_pi.selfhost.projection_runner import make_projection_runner
-
 pytestmark = [pytest.mark.slow]
 
 
@@ -113,66 +111,6 @@ class TestBridgeOrderingInvariant:
         # Both should have same structure
         assert len(projs1) == len(projs2)
         assert [p.get("id") for p in projs1] == [p.get("id") for p in projs2]
-
-
-# =============================================================================
-# Projection Runner terminal_field Tests
-# =============================================================================
-
-
-class TestProjectionRunnerTerminalField:
-    """Verify terminal_field parameter backward compatibility and v2 support."""
-
-    def test_default_terminal_field_uses_mode(self):
-        """Default terminal_field='mode' works for v1 callers."""
-        is_done, is_state, _ = make_projection_runner("match")
-
-        # v1 terminal state
-        v1_done = {"mode": "match_done", "status": "success", "bindings": None}
-        assert is_done(v1_done) is True
-
-        # v1 in-progress state
-        v1_progress = {"mode": "match", "pattern": "...", "value": "..."}
-        assert is_state(v1_progress) is True
-
-        # v2 terminal state should NOT match v1 runner
-        v2_done = {"_mode": "match_done", "_status": "success", "_bindings": None}
-        assert is_done(v2_done) is False
-
-    def test_underscore_mode_terminal_field_for_v2(self):
-        """terminal_field='_mode' works for v2 callers."""
-        is_done_v2, is_state_v2, _ = make_projection_runner("match", terminal_field="_mode")
-
-        # v2 terminal state
-        v2_done = {"_mode": "match_done", "_status": "success", "_bindings": None}
-        assert is_done_v2(v2_done) is True
-
-        # v1 terminal state should NOT match v2 runner
-        v1_done = {"mode": "match_done", "status": "success", "bindings": None}
-        assert is_done_v2(v1_done) is False
-
-        # v2 in-progress state still uses "mode" (not "_mode")
-        v2_progress = {"mode": "match", "match": {"pattern": "...", "value": "..."}}
-        assert is_state_v2(v2_progress) is True
-
-    def test_is_done_rejects_non_dict(self):
-        """is_done returns False for non-dict values."""
-        is_done, _, _ = make_projection_runner("match")
-        assert is_done("not a dict") is False
-        assert is_done(42) is False
-        assert is_done(None) is False
-
-    def test_is_done_rejects_wrong_mode(self):
-        """is_done returns False for wrong mode value."""
-        is_done, _, _ = make_projection_runner("match")
-        assert is_done({"mode": "subst_done"}) is False
-        assert is_done({"mode": "match"}) is False
-
-    def test_subst_runner_unaffected(self):
-        """Existing subst runner still works with default terminal_field."""
-        is_done, is_state, _ = make_projection_runner("subst")
-        assert is_done({"mode": "subst_done", "result": 42}) is True
-        assert is_state({"mode": "subst", "body": "...", "bindings": "..."}) is True
 
 
 # =============================================================================

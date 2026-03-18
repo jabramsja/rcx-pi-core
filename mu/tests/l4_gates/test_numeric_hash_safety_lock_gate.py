@@ -327,10 +327,7 @@ class TestSourceLocks:
         assert "mu_hash_control_cached(" in source
         assert "mu_hash_control(" in ep_source  # hash_trace_for_recurrence (Boot2)
 
-    def test_python_projection_runner_uses_control_wrappers(self):
-        """projection_runner.py uses mu_hash_control_cached."""
-        source = (PY_DIR / "projection_runner.py").read_text()
-        assert "mu_hash_control_cached(" in source
+    # test_python_projection_runner_uses_control_wrappers removed — projection_runner.py retired in Wave 3F
 
     def test_js_kernel_uses_control_wrappers(self):
         """kernel.js uses muHashControlCached."""

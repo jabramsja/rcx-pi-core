@@ -17,7 +17,7 @@ import pytest
 
 from rcx_pi.selfhost.subst_mu import subst_mu
 from rcx_pi.selfhost.match_mu import normalize_for_match, dict_to_bindings
-from rcx_pi.selfhost.projection_runner import make_projection_runner
+from tests.helpers.projection_stepper import run_projections
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
@@ -195,22 +195,26 @@ class TestSubstV1V2ExecutionParity:
 
     def _run_v1(self, v1_projs, norm_body, linked_bindings):
         """Run substitution through v1 projections (mode-based terminal)."""
-        _, _, run = make_projection_runner("subst")
         initial = {"subst": {"body": norm_body, "bindings": linked_bindings}}
-        final, steps, is_stall = run(v1_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            v1_projs, initial, max_steps=200,
+            terminal_field="mode", terminal_value="subst_done",
+        )
         assert not is_stall, f"v1 stalled at step {steps}: {final}"
         assert final.get("mode") == "subst_done", f"v1 unexpected terminal: {final}"
         return final["result"]
 
     def _run_v2(self, v2_projs, norm_body, linked_bindings):
         """Run substitution through v2 projections (_mode-based terminal)."""
-        _, _, run = make_projection_runner("subst", terminal_field="_mode")
         ctx = {"_input": "parity_test", "_remaining": None}
         initial = {
             "subst": {"body": norm_body, "bindings": linked_bindings},
             "_subst_ctx": ctx,
         }
-        final, steps, is_stall = run(v2_projs, initial, max_steps=200)
+        final, steps, is_stall = run_projections(
+            v2_projs, initial, max_steps=200,
+            terminal_field="_mode", terminal_value="subst_done",
+        )
         assert not is_stall, f"v2 stalled at step {steps}: {final}"
         assert final.get("_mode") == "subst_done", f"v2 unexpected terminal: {final}"
         # Verify context passthrough as side-check

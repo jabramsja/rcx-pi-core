@@ -207,7 +207,7 @@ VERIFIED: Yes
         text = """
 AGENT: adversary
 CONCERN: Budget amplification possible
-FILE: rcx_pi/selfhost/projection_runner.py
+FILE: rcx_pi/selfhost/stage0_vm.py
 LINES: 50-60
 SEVERITY: HIGH
 VERIFIED: Yes

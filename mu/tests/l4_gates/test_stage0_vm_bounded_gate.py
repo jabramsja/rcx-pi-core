@@ -2,7 +2,7 @@
 Wave 3D-A gate test: stage0_vm_run_bounded shared helper.
 
 Verifies the three-outcome contract (terminal/stall/exhaustion) and
-parity with projection_runner semantics. This helper is a Python-only
+parity with projection_runner semantics (projection_runner.py retired in Wave 3F). This helper is a Python-only
 boundary helper, NOT a JS parity target.
 """
 

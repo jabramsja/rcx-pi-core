@@ -1,7 +1,7 @@
 """
 Wave J: Architectural Gaps Gate Tests
 Non-blocker wave4 (2026-03-14): D7 stall distinguishability documented in
-projection_runner.py run() docstring. 4 new tests prove the contract.
+projection_runner.py run() docstring (projection_runner.py retired in Wave 3F). 4 new tests prove the contract.
 D7 terminal-last-step fix (2026-03-15): post-loop is_done check added.
 Wave 8 D1 (2026-03-15): linked-list traversal deduplicated via _traverse_linked_list.
 
@@ -212,14 +212,7 @@ class TestControlHashCoverage:
             "run_mu_structural must use mu_hash_control_cached (Policy B.1)"
         )
 
-    def test_projection_runner_uses_control_hash(self):
-        """projection_runner module must use mu_hash_control_cached."""
-        import inspect
-        import rcx_pi.selfhost.projection_runner as pr_mod
-        source = inspect.getsource(pr_mod)
-        assert "mu_hash_control_cached" in source, (
-            "projection_runner must use mu_hash_control_cached (Policy B.1)"
-        )
+    # test_projection_runner_uses_control_hash removed — projection_runner.py retired in Wave 3F
 
     def test_nonlinear_binding_uses_data_hash(self):
         """Non-linear binding conflict detection must use mu_hash_cached (NOT control).
