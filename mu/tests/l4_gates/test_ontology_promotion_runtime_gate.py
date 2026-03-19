@@ -447,7 +447,7 @@ class TestEnvelopeTypeValidation:
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=_noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, step=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "ontology_promotion must be dict" in str(exc_info.value)
@@ -1042,7 +1042,7 @@ class TestBoundaryPathEmission:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         # Result should be injected at inject_key
         assert "boundary_result" in returned_ctx
@@ -1061,7 +1061,7 @@ class TestBoundaryPathEmission:
         request = _make_boundary_request()  # no emit flag
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         result = returned_ctx["boundary_result"]
         assert "ontology_promotion" not in result, (
@@ -1096,7 +1096,7 @@ class TestBoundaryPathEmission:
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=_noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, step=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "already contains ontology_promotion" in str(exc_info.value)
@@ -1234,7 +1234,7 @@ class TestBoundaryPathEmission:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         # One-shot: flag and evidence must have been consumed
         assert "emit_ontology_candidate" not in returned_ctx, (
@@ -1271,7 +1271,7 @@ class TestEmissionEdgeCases:
             }
             returned_ctx = _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=_noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, step=0, state="test_state",
             )
             result = returned_ctx["boundary_result"]
             assert "ontology_promotion" not in result, (
@@ -1445,7 +1445,7 @@ class TestCrossSubstrateMalformedEvidence:
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=lambda *a, **kw: None, iteration=0, state="test_state",
+                emit_fn=lambda *a, **kw: None, step=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "already contains ontology_promotion" in str(exc_info.value)
@@ -1798,7 +1798,7 @@ class TestEvidenceCollectorPython:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         assert "collect_ontology_candidate_evidence" not in returned_ctx
 
@@ -1810,7 +1810,7 @@ class TestEvidenceCollectorPython:
             })
             returned_ctx = _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=_noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, step=0, state="test_state",
             )
             assert "ontology_candidate_observation" not in returned_ctx, (
                 f"Truthy non-True value {truthy_val!r} should not trigger collection"
@@ -1826,7 +1826,7 @@ class TestEvidenceCollectorPython:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         result = returned_ctx["boundary_result"]
         # A14 should have attached ontology_promotion
@@ -1843,7 +1843,7 @@ class TestEvidenceCollectorPython:
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=_noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, step=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "already contains ontology_candidate_observation" in str(exc_info.value)
@@ -1855,7 +1855,7 @@ class TestEvidenceCollectorPython:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         result = returned_ctx["boundary_result"]
         assert "ontology_promotion" not in result, (
@@ -2170,7 +2170,7 @@ class TestEvidenceCollectorBoundaryPath:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         assert "ontology_candidate_observation" in returned_ctx
         obs = returned_ctx["ontology_candidate_observation"]
@@ -2186,7 +2186,7 @@ class TestEvidenceCollectorBoundaryPath:
         request = _make_boundary_request()
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         assert "ontology_candidate_observation" not in returned_ctx
 
@@ -2234,7 +2234,7 @@ class TestEvidenceCollectorBoundaryPath:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         assert "collect_ontology_candidate_evidence" not in returned_ctx, (
             "collect_ontology_candidate_evidence should be consumed (one-shot)"
@@ -2249,7 +2249,7 @@ class TestEvidenceCollectorBoundaryPath:
         with pytest.raises(RcxEngineError) as exc_info:
             _service_boundary_effect(
                 request, max_algorithm_iterations=50,
-                emit_fn=_noop_emit, iteration=0, state="test_state",
+                emit_fn=_noop_emit, step=0, state="test_state",
             )
         assert exc_info.value.error_code == "input.shape_mismatch"
         assert "already contains ontology_candidate_observation" in str(exc_info.value)
@@ -2292,7 +2292,7 @@ class TestEvidenceCollectorBoundaryPath:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         result = returned_ctx["boundary_result"]
         assert "ontology_promotion" not in result, (
@@ -2323,7 +2323,7 @@ class TestF44HandlerResultImmutability:
         })
         returned_ctx = _service_boundary_effect(
             request, max_algorithm_iterations=50,
-            emit_fn=_noop_emit, iteration=0, state="test_state",
+            emit_fn=_noop_emit, step=0, state="test_state",
         )
         injected = returned_ctx["boundary_result"]
 

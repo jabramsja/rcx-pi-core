@@ -233,7 +233,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="missing required key"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_non_string_operation(self):
@@ -247,7 +247,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="operation must be string"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_non_dict_context(self):
@@ -261,7 +261,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="context must be dict"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_non_dict_request(self):
@@ -269,7 +269,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="boundary request must be dict"):
             _service_boundary_effect(
                 "not_a_dict", max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_non_string_inject_key(self):
@@ -283,7 +283,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="inject_key must be string"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_unknown_operation_api_bad_request(self):
@@ -297,7 +297,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="Unknown boundary operation"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_trace_non_dict_input(self):
@@ -311,7 +311,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="run_trace input must be dict"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_trace_missing_required_input_keys(self):
@@ -325,7 +325,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="run_trace input must include"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_algorithm_missing_algorithm(self):
@@ -339,7 +339,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="run_algorithm request must include"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_algorithm_non_string_algorithm(self):
@@ -354,7 +354,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="'algorithm' must be string"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_trace_non_list_projections(self):
@@ -368,7 +368,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="'projections' must be list"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_trace_non_dict_projection_element(self):
@@ -382,7 +382,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="projection\\[0\\] must be dict"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_run_trace_max_steps_normalize_string(self):
@@ -400,7 +400,7 @@ class TestRequestValidation:
         # Should NOT raise TypeError — normalized max_steps, empty projs → stall result
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "result" in ctx
 
@@ -419,7 +419,7 @@ class TestRequestValidation:
         # Should NOT raise TypeError — float coerced to int(1)
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "result" in ctx
 
@@ -541,7 +541,7 @@ class TestRequestValidation:
         }
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "result" in ctx
 
@@ -556,7 +556,7 @@ class TestRequestValidation:
         }
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "result" in ctx
 
@@ -571,7 +571,7 @@ class TestRequestValidation:
         with pytest.raises(RcxEngineError, match="must have 'pattern' and 'body'"):
             _service_boundary_effect(
                 bad_request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_js_run_trace_max_steps_inf_normalizes(self):
@@ -811,7 +811,7 @@ class TestBehaviorPreservation:
         }
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "trace_result" in ctx
         result = ctx["trace_result"]
@@ -832,7 +832,7 @@ class TestBehaviorPreservation:
         }
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "hashed" in ctx
 
@@ -868,7 +868,7 @@ class TestAlgorithmSeedAllowlist:
         with pytest.raises(RcxEngineError, match="authorized algorithm seed"):
             _service_boundary_effect(
                 request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_python_rejects_match_seed(self):
@@ -878,7 +878,7 @@ class TestAlgorithmSeedAllowlist:
         with pytest.raises(RcxEngineError, match="authorized algorithm seed"):
             _service_boundary_effect(
                 request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_python_rejects_hemispheres_seed(self):
@@ -888,7 +888,7 @@ class TestAlgorithmSeedAllowlist:
         with pytest.raises(RcxEngineError, match="authorized algorithm seed"):
             _service_boundary_effect(
                 request, max_algorithm_iterations=10,
-                emit_fn=_stub_emit, iteration=0, state={},
+                emit_fn=_stub_emit, step=0, state={},
             )
 
     def test_python_accepts_recurrence_v1(self, monkeypatch):
@@ -906,7 +906,7 @@ class TestAlgorithmSeedAllowlist:
         request = self._make_run_algorithm_request("recurrence.v1.json")
         ctx = _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert "algo_result" in ctx, "authorized seed must produce a result"
         assert called_with.get("projs") is not None, "authorized seed must reach _run_sub_algorithm"
@@ -925,7 +925,7 @@ class TestAlgorithmSeedAllowlist:
         request = self._make_run_algorithm_request("recurrence.v2.json")
         _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert called[0], "recurrence.v2.json must reach _run_sub_algorithm"
 
@@ -943,7 +943,7 @@ class TestAlgorithmSeedAllowlist:
         request = self._make_run_algorithm_request("exhaustion.v1.json")
         _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert called[0], "exhaustion.v1.json must reach _run_sub_algorithm"
 
@@ -961,7 +961,7 @@ class TestAlgorithmSeedAllowlist:
         request = self._make_run_algorithm_request("fix.v1.json")
         _service_boundary_effect(
             request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, iteration=0, state={},
+            emit_fn=_stub_emit, step=0, state={},
         )
         assert called[0], "fix.v1.json must reach _run_sub_algorithm"
 
@@ -1173,7 +1173,7 @@ class TestBoundaryResultDomainValidation:
             with pytest.raises(ValueError, match="_mode"):
                 _service_boundary_effect(
                     request, max_algorithm_iterations=10,
-                    emit_fn=_stub_emit, iteration=0, state={},
+                    emit_fn=_stub_emit, step=0, state={},
                 )
         finally:
             # Restore original dispatch

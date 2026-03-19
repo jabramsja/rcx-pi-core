@@ -774,7 +774,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     request: dict,
     max_algorithm_iterations: int,
     emit_fn,
-    iteration: int,
+    step: int,
     state: Mu,
 ) -> dict:
     """Service a boundary effect request from the engine state machine.
@@ -788,7 +788,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
         request: The _boundary_request dict from engine output.
         max_algorithm_iterations: Max iterations for sub-algorithm convergence.
         emit_fn: Observer emit callback (for error reporting).
-        iteration: Current engine iteration (for error reporting).
+        step: Zero-based engine step index (for error reporting).
         state: Current engine state (for error reporting).
 
     Returns:
@@ -800,26 +800,26 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     """
     # --- Request shape validation (typed fail-closed, no raw KeyError) ---
     if not isinstance(request, dict):
-        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        emit_fn("fail_closed", step, state, error_code="api.bad_request")
         raise RcxEngineError("api.bad_request",
             f"boundary request must be dict, got {type(request).__name__}")
     for key in ("operation", "input", "context", "inject_key"):
         if key not in request:
-            emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+            emit_fn("fail_closed", step, state, error_code="api.bad_request")
             raise RcxEngineError("api.bad_request",
                 f"boundary request missing required key: {key}")
     operation = request["operation"]
     if not isinstance(operation, str):
-        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        emit_fn("fail_closed", step, state, error_code="api.bad_request")
         raise RcxEngineError("api.bad_request",
             f"boundary operation must be string, got {type(operation).__name__}")
     if not isinstance(request["context"], dict):
-        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        emit_fn("fail_closed", step, state, error_code="api.bad_request")
         raise RcxEngineError("api.bad_request",
             f"boundary context must be dict, got {type(request['context']).__name__}")
     inject_key = request["inject_key"]
     if not isinstance(inject_key, str):
-        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        emit_fn("fail_closed", step, state, error_code="api.bad_request")
         raise RcxEngineError("api.bad_request",
             f"boundary inject_key must be string, got {type(inject_key).__name__}")
 
@@ -829,7 +829,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     # SECURITY: inject_key must not be a kernel-reserved field.
     # Prevents boundary requests from forging kernel state.
     if inject_key in KERNEL_RESERVED_FIELDS:
-        emit_fn("fail_closed", iteration, state, error_code="input.reserved_field")
+        emit_fn("fail_closed", step, state, error_code="input.reserved_field")
         raise RcxEngineError("input.reserved_field",
             f"SECURITY: inject_key '{inject_key}' is a kernel-reserved field. "
             f"Boundary requests cannot inject reserved fields."
@@ -838,7 +838,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     # --- Seed-derived operation authority (A10 displacement) ---
     valid_ops = _load_boundary_ops()
     if operation not in valid_ops:
-        emit_fn("fail_closed", iteration, state, error_code="api.bad_request")
+        emit_fn("fail_closed", step, state, error_code="api.bad_request")
         raise RcxEngineError("api.bad_request",
             f"Unknown boundary operation: {operation}. "
             f"Valid: {sorted(valid_ops)}")
@@ -921,7 +921,7 @@ def _service_boundary_effect(  # AST_OK: infra — shared boundary effect handle
     # SECURITY: Reject inject_key collision with existing context keys.
     # Prevents boundary requests from silently overwriting domain context state.
     if inject_key in context:
-        emit_fn("fail_closed", iteration, state, error_code="input.inject_key_collision")
+        emit_fn("fail_closed", step, state, error_code="input.inject_key_collision")
         raise RcxEngineError("input.inject_key_collision",
             f"boundary inject_key '{inject_key}' already exists in context. "
             f"Cannot overwrite existing context state.")
@@ -1082,9 +1082,12 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
         # Engine stepping loop (per re-entry pass)
         reentry = False
         for iteration in range(remaining_iterations):  # AST_OK: infra — Boot1 boundary host loop iteration
+            # W5A: capture zero-based step index from total counter before increment.
+            # All observer emissions in this iteration use step_index (monotonic across re-entry).
+            step_index = _total_iterations[0]
             next_state = _step_trusted(engine_projs, state)
 
-            _emit("step_boundary", iteration, state)
+            _emit("step_boundary", step_index, state)
             _total_iterations[0] += 1
 
             # Wave 4A: classify engine step via shared classifier
@@ -1093,16 +1096,16 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             if transition == "stall_terminal":
                 if isinstance(payload, dict):  # AST_OK: infra — terminal signal check
                     if payload.get("closure_detected"):
-                        _emit("closure_detected", iteration, payload)
+                        _emit("closure_detected", step_index, payload)
                     if payload.get("stall"):
-                        _emit("stall_detected", iteration, payload)
-                _emit("engine_terminal", iteration, payload,
+                        _emit("stall_detected", step_index, payload)
+                _emit("engine_terminal", step_index, payload,
                       engine_exit_reason=_derive_engine_exit_reason(payload),
                       engine_iterations_used=_total_iterations[0])
                 return payload
 
             elif transition == "stall_non_terminal":
-                _emit("fail_closed", iteration, payload, error_code="engine.stalled_non_terminal")
+                _emit("fail_closed", step_index, payload, error_code="engine.stalled_non_terminal")
                 raise RcxEngineError(
                     "engine.stalled_non_terminal",
                     f"Boot1 engine stalled at iteration {iteration} (depth {depth}) "
@@ -1113,7 +1116,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             elif transition == "boundary":
                 state = _service_boundary_effect(
                     payload,
-                    max_algorithm_iterations, _emit, iteration, state,
+                    max_algorithm_iterations, _emit, step_index, state,
                 )
                 continue
 
@@ -1142,10 +1145,10 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             elif transition == "terminal":
                 if isinstance(payload, dict):  # AST_OK: infra — terminal signal check
                     if payload.get("closure_detected"):
-                        _emit("closure_detected", iteration, payload)
+                        _emit("closure_detected", step_index, payload)
                     if payload.get("stall"):
-                        _emit("stall_detected", iteration, payload)
-                _emit("engine_terminal", iteration, payload,
+                        _emit("stall_detected", step_index, payload)
+                _emit("engine_terminal", step_index, payload,
                       engine_exit_reason=_derive_engine_exit_reason(payload),
                       engine_iterations_used=_total_iterations[0])
                 return payload
@@ -1157,7 +1160,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
             continue
 
         # FAIL CLOSED: engine loop exhausted without terminal result
-        _emit("fail_closed", remaining_iterations - 1, state, error_code="engine.exhausted")
+        _emit("fail_closed", _total_iterations[0] - 1, state, error_code="engine.exhausted")
         raise RcxEngineError(
             "engine.exhausted",
             f"Boot1 engine pipeline exhausted {remaining_iterations} iterations "

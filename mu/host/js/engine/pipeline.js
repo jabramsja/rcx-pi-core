@@ -340,34 +340,34 @@ function setTestDispatchOverride(override) {
  * replaces host if/elif dispatch. Validates request shape before any
  * field dereference.
  */
-function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, maxAlgorithmIterations, emitFn, iteration, state, vmConfig) {
+function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, maxAlgorithmIterations, emitFn, step, state, vmConfig) {
   // --- Request shape validation (typed fail-closed, no raw TypeError) ---
   if (typeof request !== 'object' || request === null || Array.isArray(request)) {
-    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    emitFn('fail_closed', step, state, 'api.bad_request');
     throw new RcxError('api.bad_request',
       `boundary request must be object, got ${request === null ? 'null' : Array.isArray(request) ? 'array' : typeof request}`);
   }
   for (const key of ['operation', 'input', 'context', 'inject_key']) {
     if (!(key in request)) {
-      emitFn('fail_closed', iteration, state, 'api.bad_request');
+      emitFn('fail_closed', step, state, 'api.bad_request');
       throw new RcxError('api.bad_request',
         `boundary request missing required key: ${key}`);
     }
   }
   const operation = request.operation;
   if (typeof operation !== 'string') {
-    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    emitFn('fail_closed', step, state, 'api.bad_request');
     throw new RcxError('api.bad_request',
       `boundary operation must be string, got ${typeof operation}`);
   }
   if (typeof request.context !== 'object' || request.context === null || Array.isArray(request.context)) {
-    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    emitFn('fail_closed', step, state, 'api.bad_request');
     throw new RcxError('api.bad_request',
       `boundary context must be object, got ${request.context === null ? 'null' : Array.isArray(request.context) ? 'array' : typeof request.context}`);
   }
   const injectKey = request.inject_key;
   if (typeof injectKey !== 'string') {
-    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    emitFn('fail_closed', step, state, 'api.bad_request');
     throw new RcxError('api.bad_request',
       `boundary inject_key must be string, got ${typeof injectKey}`);
   }
@@ -376,7 +376,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
 
   // SECURITY: inject_key must not be kernel-reserved or JS built-in.
   if (KERNEL_RESERVED_FIELDS.has(injectKey) || FORBIDDEN_INJECT_KEYS.has(injectKey)) {
-    emitFn('fail_closed', iteration, state, 'input.reserved_field');
+    emitFn('fail_closed', step, state, 'input.reserved_field');
     throw new RcxError('input.reserved_field',
       `SECURITY: inject_key '${injectKey}' is forbidden (kernel-reserved or JS built-in). ` +
       `Boundary requests cannot inject reserved fields.`
@@ -386,7 +386,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
   // --- Seed-derived operation authority (A10 displacement) ---
   const validOps = _ensureBoundaryOps();
   if (!validOps.has(operation)) {
-    emitFn('fail_closed', iteration, state, 'api.bad_request');
+    emitFn('fail_closed', step, state, 'api.bad_request');
     throw new RcxError('api.bad_request', `Unknown boundary operation: ${operation}`);
   }
 
@@ -462,7 +462,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
   // Prevents boundary requests from silently overwriting domain context state.
   // Parity with Python _service_boundary_effect inject_key collision guard.
   if (injectKey in context) {
-    emitFn('fail_closed', iteration, state, 'input.inject_key_collision');
+    emitFn('fail_closed', step, state, 'input.inject_key_collision');
     throw new RcxError('input.inject_key_collision',
       `SECURITY: inject_key '${injectKey}' already exists in context. ` +
       `Cannot overwrite existing context state.`);
@@ -1061,9 +1061,12 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
 
     let reentry = false;
     for (let iteration = 0; iteration < remainingIterations; iteration++) {
+      // W5A: capture zero-based step index from total counter before increment.
+      // All observer emissions in this iteration use stepIndex (monotonic across re-entry).
+      const stepIndex = totalIterations;
       const nextState = step(engineProjections, state);
 
-      emit('step_boundary', iteration, state);
+      emit('step_boundary', stepIndex, state);
       totalIterations++;
 
       // Wave 4C: classify engine step via shared classifier
@@ -1071,22 +1074,22 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
 
       if (transition === 'stall_terminal') {
         if (typeof payload === 'object' && payload !== null) {
-          if (payload.closure_detected) emit('closure_detected', iteration, payload);
-          if (payload.stall) emit('stall_detected', iteration, payload);
+          if (payload.closure_detected) emit('closure_detected', stepIndex, payload);
+          if (payload.stall) emit('stall_detected', stepIndex, payload);
         }
-        emit('engine_terminal', iteration, payload, null, {
+        emit('engine_terminal', stepIndex, payload, null, {
           engine_exit_reason: deriveEngineExitReason(payload),
           engine_iterations_used: totalIterations,
         });
         return payload;
       } else if (transition === 'stall_non_terminal') {
-        emit('fail_closed', iteration, payload, 'engine.stalled_non_terminal');
+        emit('fail_closed', stepIndex, payload, 'engine.stalled_non_terminal');
         throw new RcxError('engine.stalled_non_terminal',
           `Boot1 engine stalled at iteration ${iteration} (depth ${depth}) without terminal result.`
         );
       } else if (transition === 'boundary') {
         state = serviceBoundaryEffect(
-          kernelProjections, seedProjectionMap, payload, maxAlgorithmIterations, emit, iteration, state, recursiveVmConfig
+          kernelProjections, seedProjectionMap, payload, maxAlgorithmIterations, emit, stepIndex, state, recursiveVmConfig
         );
         continue;
       } else if (transition === 'reentry') {
@@ -1111,10 +1114,10 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
         break;
       } else if (transition === 'terminal') {
         if (typeof payload === 'object' && payload !== null) {
-          if (payload.closure_detected) emit('closure_detected', iteration, payload);
-          if (payload.stall) emit('stall_detected', iteration, payload);
+          if (payload.closure_detected) emit('closure_detected', stepIndex, payload);
+          if (payload.stall) emit('stall_detected', stepIndex, payload);
         }
-        emit('engine_terminal', iteration, payload, null, {
+        emit('engine_terminal', stepIndex, payload, null, {
           engine_exit_reason: deriveEngineExitReason(payload),
           engine_iterations_used: totalIterations,
         });
@@ -1126,7 +1129,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
 
     if (reentry) continue;
 
-    emit('fail_closed', remainingIterations - 1, state, 'engine.exhausted');
+    emit('fail_closed', totalIterations - 1, state, 'engine.exhausted');
     throw new RcxError('engine.exhausted',
       `Boot1 engine pipeline exhausted ${remainingIterations} iterations (depth ${depth}).`
     );
