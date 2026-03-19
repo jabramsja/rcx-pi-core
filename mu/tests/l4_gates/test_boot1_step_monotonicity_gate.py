@@ -17,15 +17,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 
 import pytest
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+from tests.repo_root import REPO_ROOT
 
 pytestmark = [pytest.mark.slow]
-
-ROOT = Path(__file__).resolve().parents[3]
 
 # User projections that produce multiple engine steps without triggering
 # boundary effects or reserved-field validation issues. Each step transforms
@@ -43,7 +41,7 @@ def _run_js_json_api(request_dict: dict) -> dict:
     """Run a JSON API request against the JS substrate."""
     result = subprocess.run(
         ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
-        capture_output=True, text=True, cwd=ROOT, timeout=120
+        capture_output=True, text=True, cwd=REPO_ROOT, timeout=120
     )
     for line in result.stdout.split('\n'):
         if line.startswith('JSON_API_RESPONSE:'):
