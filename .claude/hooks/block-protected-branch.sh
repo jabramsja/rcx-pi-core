@@ -16,8 +16,7 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
 case "$BRANCH" in
   dev|main|master)
-    cat <<EOF
-{"continue": false, "stopReason": "Cannot ${CMD%% *} on protected branch '$BRANCH'. Create a feature branch first:\n  git checkout -b jabramsja/<wave-name>\nor for closeouts:\n  git checkout -b closeout/<wave-name>"}
-EOF
+    jq -n --arg reason "Cannot ${CMD%% *} on protected branch '$BRANCH'. Create a feature branch first: git checkout -b jabramsja/<wave-name>" \
+      '{"decision": "block", "reason": $reason}'
     ;;
 esac

@@ -2,6 +2,18 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-19
+
+### Wave W6A: Stage0 VM Trusted Path Optimization
+
+- **Two-function trusted path pattern:** `_stage0_vm_step_trusted` (dispatch body) + `stage0_vm_step` (validate + delegate) in Python; mirrored in JS with `_stage0VmStepTrusted` export
+- **Parameterized bounded helper:** `_run_bounded_impl` eliminates loop duplication across match/subst/step dispatch
+- **Source-lock gate tests:** 12 tests in `tests/l4_gates/test_stage0_vm_trusted_path_gate.py` — exhaustive grep for trusted function call sites
+- **Bundle validation contract:** Callers constructing custom vmConfig MUST call `validateBundle()` before passing to `_stepKernelWithVM`
+- Host-semantics delta: 0 (refactor-only, no new host capabilities)
+- Total inventory: 309 -> 313 (+4: 2 Python trusted functions, 2 JS trusted path helpers)
+- **L4_STRUCTURAL** wave targeting G8. PR #635 merged. Bridge: 2 rounds GO.
+
 ## 2026-03-15
 
 ### Wave 1: Internal Canonical Step Record
