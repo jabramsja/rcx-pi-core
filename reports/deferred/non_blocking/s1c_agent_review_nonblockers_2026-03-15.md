@@ -17,11 +17,10 @@ SDK agent review (quick depth) on S1-C implementation files.
 - Coverage no_match/match recording pattern repeated 4 times (once per seed group).
 - **Why deferred:** Same DRY pattern as NB2. Extract helper. Not a correctness issue.
 
-### NB4. `_stepKernelCoreNonMeta` returns stalled:false on max-steps exhaustion (Adversary) — DESIGN-GATED
-- Real JS semantic divergence: non-meta returns `stalled: false` on max-steps exhaustion (kernel.js:174). Meta path correctly returns `stall: true` (kernel.js:115).
-- **Attempted fix failed:** Changing `stalled: false` to `true` broke 27 parity tests. Callers (engine pipeline, runAlgorithmWithBridge) depend on `stalled: false` for max-steps exhaustion to continue processing.
-- **Root cause:** Non-meta path's `stalled` field has different semantics than meta path's `stall` field. Fixing requires coordinated caller updates.
-- **Target:** Wave A design pass for non-meta/meta path unification.
+### NB4. `_stepKernelCoreNonMeta` returns stalled:false on max-steps exhaustion (Adversary) — MIGRATED
+- **Original issue:** Non-meta `_stepKernelCoreNonMeta` returned `stalled: false` on max-steps exhaustion. Attempted fix broke 27 parity tests.
+- **Wave 1 status:** `_stepKernelCoreNonMeta` deleted. Canonical `_stepKernelCore` now used. However, the public adapter (`stepKernel(returnMeta=false)`) preserves legacy `stalled: false` semantics per founder scope guard.
+- **Current tracking:** This debt is now tracked in `wave1_canonical_step_nonblockers_2026-03-16.md` NB6 ("NB4 stalled=false on max-steps in public adapter").
 
 ### NB5. Bundle provenance bypass via field stripping (Adversary)
 - If `source_seed` or `source_digest` fields are removed from a bundle, `_verify_bundle_provenance` silently passes.
@@ -31,11 +30,10 @@ SDK agent review (quick depth) on S1-C implementation files.
 - `test_meta_circular_evidence_gate.py` uses `isinstance` check without marker.
 - **Why deferred:** Test file, not runtime code. Markers are for runtime debt tracking.
 
-### NB7. JS `_stepKernelCoreNonMeta` omits `isKernelTerminal` check — DESIGN-GATED
-- Real JS semantic gap: non-meta path never calls `isKernelTerminal()`. Returns raw kernel state ({_mode, _result, _stall}) instead of extracted domain output.
-- **Attempted fix failed:** Adding `isKernelTerminal()` + `extractKernelResult()` broke callers who inspect raw kernel state for their own terminal logic.
-- **Root cause:** Callers (engine pipeline, runAlgorithmWithBridge) build their own terminal detection on top of the raw kernel result. Centralizing extraction requires coordinating all callers.
-- **Target:** Same Wave A as NB4 — non-meta/meta path unification.
+### NB7. JS `_stepKernelCoreNonMeta` omits `isKernelTerminal` check — **RESOLVED (Wave 1)**
+- **Original issue:** Non-meta `_stepKernelCoreNonMeta` never called `isKernelTerminal()`, returning raw kernel state instead of extracted domain output.
+- **Wave 1 fix:** `_stepKernelCoreNonMeta` deleted. Canonical `_stepKernelCore` now calls `isKernelTerminal(result)` at kernel.js:100 and properly extracts terminal results.
+- **Verification:** `grep isKernelTerminal mu/host/js/engine/kernel.js` confirms call at line 100.
 
 ### NB8. `guardMaxSteps` is a special case of `guardIterationCap` (Expert)
 - JS utility function overlap.

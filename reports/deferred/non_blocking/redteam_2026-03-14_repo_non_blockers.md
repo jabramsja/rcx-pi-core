@@ -4,7 +4,7 @@ This packet is the canonical active advisory packet from the 2026-03-14
 repo-wide verification sweep.
 
 The blocker lane is now governance-truth only; see
-`reports/deferred/blocking/redteam_2026-03-14_wave5_governance_loopholes.md`.
+`reports/archive/deferred/redteam_2026-03-14_wave5_governance_loopholes.md`.
 
 ## N1 `DEFECT` — Stage0 direct APIs still retain raw hostile leaves in capture slots before materialization **PARTIALLY RESOLVED** (2026-03-14)
 
