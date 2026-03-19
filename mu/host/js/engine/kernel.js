@@ -35,6 +35,12 @@ function _assertVmMatchResult(result, bundleId) {
   }
 }
 
+/**
+ * W6A trusted path: bundles MUST be pre-validated via main.js loader.
+ * Callers constructing custom vmConfig MUST call validateBundle() on each bundle
+ * before passing to this function. Unvalidated bundles may cause internal errors
+ * or mis-dispatch (fail-open). See main.js lines 237-245 for validation pattern.
+ */
 function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle, inputValue) {
   // 1. kernel.v1 via Stage0 VM (S1-C: was host _applyProjectionTrusted)
   const kernelResult = _stage0VmStepTrusted(kernelBundle, inputValue);
