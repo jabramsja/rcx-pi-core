@@ -691,20 +691,16 @@ _UNSET = object()
 # VM step — single dispatch cycle
 # ---------------------------------------------------------------------------
 
-def stage0_vm_step(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
-    """Execute one dispatch cycle: try each program, first-match-wins.
 
-    Returns::
+def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
+    """Internal: full dispatch body. Caller must prove loader-cached bundle.
 
-        {"status": "match" | "stall",
-         "matched_program_id": str | None,
-         "root": <Mu>,
-         "metrics": {"program_attempts": int, "op_steps": int}}
+    W6A fast path: skips validate_bundle for trusted callers. All production
+    call sites route through step_mu._step_kernel_with_vm or match_mu dispatch
+    loop, which use loader-cached bundles from make_compiled_bundle_loader.
 
-    On "match": root is the committed pending_root from the winning program.
-    On "stall": root is the unchanged input_value (no program matched).
+    Source-lock enforced by tests/l4_gates/test_stage0_vm_trusted_path_gate.py.
     """
-    validate_bundle(bundle)
     programs = bundle["programs"]
     program_map = {p["id"]: p for p in programs}  # AST_OK: infra index programs by ID for dispatch
     order = bundle["program_order"]
@@ -867,6 +863,26 @@ def stage0_vm_step(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
     }
 
 
+def stage0_vm_step(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
+    """Execute one dispatch cycle: try each program, first-match-wins.
+
+    Public wrapper: validates then delegates to _stage0_vm_step_trusted.
+    Unchanged signature for backward compatibility.
+
+    Returns::
+
+        {"status": "match" | "stall",
+         "matched_program_id": str | None,
+         "root": <Mu>,
+         "metrics": {"program_attempts": int, "op_steps": int}}
+
+    On "match": root is the committed pending_root from the winning program.
+    On "stall": root is the unchanged input_value (no program matched).
+    """
+    validate_bundle(bundle)
+    return _stage0_vm_step_trusted(bundle, input_value, max_ops)
+
+
 # ---------------------------------------------------------------------------
 # VM run — multi-step until stall
 # ---------------------------------------------------------------------------
@@ -927,11 +943,94 @@ def stage0_vm_run(bundle, input_value, max_steps=100, max_ops=None):
 # VM bounded run — structured outcome (no exceptions on exhaustion)
 # ---------------------------------------------------------------------------
 
+def _run_bounded_impl(step_fn, bundle, input_value, *,
+                      max_steps=1000,
+                      terminal_field="mode",
+                      terminal_value=None):
+    """Internal: shared bounded-run loop logic.
+
+    W6A refactor: parameterized by step_fn to allow both trusted and public
+    callers without duplicating loop code. Does NOT validate bundle — that is
+    the caller's responsibility.
+
+    Args:
+        step_fn: Step function to call (stage0_vm_step or _stage0_vm_step_trusted).
+        bundle: Stage0 bundle (validation is caller's responsibility).
+        input_value: Initial Mu state.
+        max_steps: Maximum VM dispatch cycles.
+        terminal_field: Dict key for terminal detection.
+        terminal_value: Value indicating terminal state.
+
+    Returns:
+        {"status": "terminal" | "stall" | "exhaustion",
+         "root": <final Mu state>,
+         "steps": int}
+    """
+    current = input_value
+
+    def _is_terminal(state):
+        return (terminal_value is not None
+                and type(state) is dict
+                and state.get(terminal_field) == terminal_value)
+
+    steps = 0
+
+    for _ in range(max_steps):
+        # Pre-step terminal fast path.
+        # Avoids unnecessary VM dispatch for already-terminal input.
+        if _is_terminal(current):
+            return {
+                "status": "terminal",
+                "root": current,
+                "steps": steps,
+            }
+
+        result = step_fn(bundle, current)
+
+        if result["status"] == "match":
+            current = result["root"]
+            steps += 1
+            continue
+
+        # VM stall — no projection matched.
+        # Check if state is terminal (VM stall IS the terminal signal).
+        if _is_terminal(current):
+            return {
+                "status": "terminal",
+                "root": current,
+                "steps": steps,
+            }
+
+        return {
+            "status": "stall",
+            "root": current,
+            "steps": steps,
+        }
+
+    # Exhaustion — terminal-on-last-step check
+    if _is_terminal(current):
+        return {
+            "status": "terminal",
+            "root": current,
+            "steps": steps,
+        }
+
+    return {
+        "status": "exhaustion",
+        "root": current,
+        "steps": steps,
+    }
+
+
 def stage0_vm_run_bounded(bundle, input_value, *,
                           max_steps=1000,
                           terminal_field="mode",
                           terminal_value=None):
     """Bounded VM run with structured outcome for Python boundary callers.
+
+    Public wrapper: validates UPFRONT then delegates to _run_bounded_impl
+    with _stage0_vm_step_trusted. This ensures fail-closed validation even
+    for the immediate-terminal fast path (B2.1 fix).
 
     Unlike stage0_vm_run (which raises on step-limit exhaustion), this
     function returns a structured result for all three outcomes: terminal,
@@ -972,60 +1071,32 @@ def stage0_vm_run_bounded(bundle, input_value, *,
         exhaustion: max_steps reached without terminal or stall.
                     steps == max_steps.
     """
-    current = input_value
+    validate_bundle(bundle)
+    return _run_bounded_impl(
+        _stage0_vm_step_trusted, bundle, input_value,
+        max_steps=max_steps,
+        terminal_field=terminal_field,
+        terminal_value=terminal_value,
+    )
 
-    def _is_terminal(state):
-        return (terminal_value is not None
-                and type(state) is dict
-                and state.get(terminal_field) == terminal_value)
 
-    steps = 0
+def _stage0_vm_run_bounded_trusted(bundle, input_value, *,
+                                   max_steps=1000,
+                                   terminal_field="mode",
+                                   terminal_value=None):
+    """Internal: bounded run without validation. Caller must prove loader-cached bundle.
 
-    for _ in range(max_steps):
-        # Pre-step terminal fast path.
-        # Avoids unnecessary VM dispatch for already-terminal input.
-        if _is_terminal(current):
-            return {
-                "status": "terminal",
-                "root": current,
-                "steps": steps,
-            }
+    W6A fast path: for classify_mu, subst_mu, and other trusted callers that
+    use loader-cached bundles. Skips validate_bundle entirely.
 
-        result = stage0_vm_step(bundle, current)
-
-        if result["status"] == "match":
-            current = result["root"]
-            steps += 1
-            continue
-
-        # VM stall — no projection matched.
-        # Check if state is terminal (VM stall IS the terminal signal).
-        if _is_terminal(current):
-            return {
-                "status": "terminal",
-                "root": current,
-                "steps": steps,
-            }
-
-        return {
-            "status": "stall",
-            "root": current,
-            "steps": steps,
-        }
-
-    # Exhaustion — terminal-on-last-step check
-    if _is_terminal(current):
-        return {
-            "status": "terminal",
-            "root": current,
-            "steps": steps,
-        }
-
-    return {
-        "status": "exhaustion",
-        "root": current,
-        "steps": steps,
-    }
+    Source-lock enforced by tests/l4_gates/test_stage0_vm_trusted_path_gate.py.
+    """
+    return _run_bounded_impl(
+        _stage0_vm_step_trusted, bundle, input_value,
+        max_steps=max_steps,
+        terminal_field=terminal_field,
+        terminal_value=terminal_value,
+    )
 
 
 # =============================================================================

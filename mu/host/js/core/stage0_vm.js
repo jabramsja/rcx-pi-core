@@ -723,8 +723,17 @@ function validateBundle(bundle) {
 // ---------------------------------------------------------------------------
 // VM step — single dispatch cycle
 // ---------------------------------------------------------------------------
-function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
-  validateBundle(bundle);
+
+/**
+ * Internal: full dispatch body. Caller must prove loader-cached bundle.
+ *
+ * W6A fast path: skips validateBundle for trusted callers. All production
+ * call sites route through kernel.js._stepKernelWithVM, which uses bundles
+ * loaded at module level in main.js (validated once at load).
+ *
+ * Source-lock enforced by tests/l4_gates/test_stage0_vm_trusted_path_gate.py.
+ */
+function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
   const programs = bundle.programs;
   const programMap = Object.create(null);
   for (const p of programs) programMap[p.id] = p;
@@ -884,6 +893,15 @@ function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
   };
 }
 
+/**
+ * Public wrapper: validates then delegates to _stage0VmStepTrusted.
+ * Unchanged signature for backward compatibility.
+ */
+function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
+  validateBundle(bundle);
+  return _stage0VmStepTrusted(bundle, inputValue, maxOps);
+}
+
 // ---------------------------------------------------------------------------
 // VM run — multi-step until stall
 // ---------------------------------------------------------------------------
@@ -930,6 +948,7 @@ module.exports = {
   Stage0VMError,
   validateBundle,
   stage0VmStep,
+  _stage0VmStepTrusted,  // W6A: exported for kernel.js, source-lock enforced
   stage0VmRun,
   resolvePath,
   classifyKind,

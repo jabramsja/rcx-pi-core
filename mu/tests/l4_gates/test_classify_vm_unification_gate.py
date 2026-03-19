@@ -135,7 +135,7 @@ class TestClassifyVMUnificationGate:
 
         fake_error = Stage0VMError("Op limit exceeded (test)")
         with unittest.mock.patch(
-            "rcx_pi.selfhost.stage0_vm.stage0_vm_run_bounded",
+            "rcx_pi.selfhost.stage0_vm._stage0_vm_run_bounded_trusted",  # ANTICHEAT_OK: VM fault mock
             side_effect=fake_error,
         ):
             # Legacy path exercises VM (type-tagged path returns early)

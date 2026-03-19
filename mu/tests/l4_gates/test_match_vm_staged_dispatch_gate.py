@@ -293,7 +293,7 @@ class TestMatchVMStagedDispatchGate:
 
         fake_error = Stage0VMError("Op limit exceeded (test)")
         with unittest.mock.patch(
-            "rcx_pi.selfhost.stage0_vm.stage0_vm_step",
+            "rcx_pi.selfhost.stage0_vm._stage0_vm_step_trusted",  # ANTICHEAT_OK: VM fault mock
             side_effect=fake_error,
         ):
             with pytest.raises(Stage0VMError, match="Op limit exceeded"):
