@@ -13,10 +13,9 @@
       "host_recursion": 2
     }
   },
-  "generated_at": "2026-03-14T00:00:00.000000Z",
+  "generated_at": "2026-03-19T16:49:43.816893Z",
   "schema_version": 1,
-  "total": 16,
-  "total_ast_ok_bootstrap": 4,
+  "total": 12,
   "total_javascript": 6,
-  "total_python": 10
+  "total_python": 6
 }

@@ -167,8 +167,8 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Convert bindings dict to linked list
     linked_bindings = dict_to_bindings(bindings)
 
-    # Wave 3E: VM-backed execution via bounded helper
-    from .stage0_vm import stage0_vm_run_bounded  # ANTICHEAT_OK: infra — bounded VM helper
+    # Wave 3E / W6A: VM-backed execution via trusted bounded run
+    from .stage0_vm import _stage0_vm_run_bounded_trusted  # W6A: trusted path — bundle is loader-cached
     from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
     bundle = _load_compiled_subst_v2_bundle()
@@ -183,7 +183,7 @@ def subst_mu(body: Mu, bindings: dict[str, Mu]) -> Mu:
     # Run via Stage0 VM bounded helper (no exception catching needed —
     # exhaustion handled by bounded helper, VM faults propagate naturally)
     budget = get_step_budget()
-    outcome = stage0_vm_run_bounded(
+    outcome = _stage0_vm_run_bounded_trusted(
         bundle, initial,
         max_steps=1000,
         terminal_field="_mode",

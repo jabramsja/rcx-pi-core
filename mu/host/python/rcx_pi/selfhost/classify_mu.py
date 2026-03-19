@@ -127,8 +127,8 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
 
         current = current.get("tail")
 
-    # Wave 3D-B: VM-backed classification via stage0_vm_run_bounded
-    from .stage0_vm import stage0_vm_run_bounded, Stage0VMError  # ANTICHEAT_OK: infra — bounded VM helper
+    # Wave 3D-B / W6A: VM-backed classification via trusted bounded run
+    from .stage0_vm import _stage0_vm_run_bounded_trusted, Stage0VMError  # W6A: trusted path — bundle is loader-cached
     from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
     bundle = _load_classify_bundle()
@@ -136,7 +136,7 @@ def classify_linked_list(value: Mu) -> Literal["dict", "list"]:
     budget = get_step_budget()
 
     try:
-        outcome = stage0_vm_run_bounded(
+        outcome = _stage0_vm_run_bounded_trusted(
             bundle, initial,
             max_steps=1000,
             terminal_field="mode",

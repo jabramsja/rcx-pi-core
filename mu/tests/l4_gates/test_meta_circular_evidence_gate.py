@@ -113,20 +113,20 @@ class TestStepCountEvidence:
     def test_stage0_routing_lock(self):
         """Runtime proof: Stage0 VM executes projections, not legacy _match_inner.
 
-        S1-C: ALL kernel step projections execute via stage0_vm_step (compiled bundles).
-        Neither _stage0_match (host Stage0) nor _match_inner (legacy) should be called
-        on the step_kernel_mu path.
+        S1-C / W6A: ALL kernel step projections execute via _stage0_vm_step_trusted
+        (compiled bundles). Neither _stage0_match (host Stage0) nor _match_inner
+        (legacy) should be called on the step_kernel_mu path.
         """
         from unittest.mock import patch
         import rcx_pi.selfhost.stage0_vm as _vm_module  # ANTICHEAT_OK: routing lock proof
         proj = {"id": "lit", "pattern": "x", "body": "y"}
         with (  # ANTICHEAT_OK: routing lock proof requires observing internal dispatch
-            patch.object(_vm_module, 'stage0_vm_step', wraps=_vm_module.stage0_vm_step) as vm_step,  # ANTICHEAT_OK
+            patch.object(_vm_module, '_stage0_vm_step_trusted', wraps=_vm_module._stage0_vm_step_trusted) as vm_step,  # W6A: trusted path # ANTICHEAT_OK
             patch.object(_eval_seed_module, '_match_inner', wraps=_eval_seed_module._match_inner) as mi,  # ANTICHEAT_OK
         ):
             step_kernel_mu([proj], "x", return_meta=True)
             assert vm_step.call_count > 0, (
-                "stage0_vm_step was never called — gate is not exercising "
+                "_stage0_vm_step_trusted was never called — gate is not exercising "
                 "the production VM path"
             )
             assert mi.call_count == 0, (

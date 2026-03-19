@@ -865,7 +865,7 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
     norm_value = normalize_for_match(value)
 
     # Wave 3C: Staged bridge->match VM dispatch (matches kernel path at step_mu.py:1154-1182)
-    from .stage0_vm import stage0_vm_step, Stage0VMError  # ANTICHEAT_OK: infra — VM step
+    from .stage0_vm import _stage0_vm_step_trusted, Stage0VMError  # W6A: trusted path — bundles are loader-cached
     from .kernel import get_step_budget  # ANTICHEAT_OK: infra — step budget
 
     match_bundle = _load_match_bundle()
@@ -889,13 +889,13 @@ def match_mu(pattern: Mu, value: Mu) -> dict[str, Mu] | _NoMatch:
         budget.consume(1)
 
         # 1. Try bridge bundle first (bridge gets first-match priority every step)
-        vm_result = stage0_vm_step(bridge_bundle, state)
+        vm_result = _stage0_vm_step_trusted(bridge_bundle, state)
         if vm_result["status"] == "match":  # AST_OK:infra — type guard
             state = vm_result["root"]
             continue
 
         # 2. Try match bundle second
-        vm_result = stage0_vm_step(match_bundle, state)
+        vm_result = _stage0_vm_step_trusted(match_bundle, state)
         if vm_result["status"] == "match":  # AST_OK:infra — type guard
             state = vm_result["root"]
             continue

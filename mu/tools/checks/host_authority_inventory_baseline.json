@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-18T23:19:26.559756+00:00",
+  "generated_at": "2026-03-19T16:49:37.116585+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -464,6 +464,19 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
+          "line": 722,
+          "name": "_stage0VmStepTrusted",
+          "signals": [
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
           "line": 229,
           "name": "checkNoFloats",
           "signals": [
@@ -530,24 +543,11 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 886,
+          "line": 904,
           "name": "stage0VmRun",
           "signals": [
             "loop",
             "mutation:.push("
-          ],
-          "substrate": "javascript"
-        },
-        {
-          "file": "mu/host/js/core/stage0_vm.js",
-          "line": 722,
-          "name": "stage0VmStep",
-          "signals": [
-            "builtin:Object.entries",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop",
-            "mutation:.add("
           ],
           "substrate": "javascript"
         },
@@ -1141,7 +1141,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1524,
+          "line": 1527,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -1239,7 +1239,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1428,
+          "line": 1431,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -1270,7 +1270,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1169,
+          "line": 1172,
           "name": "run_engine_pipeline",
           "signals": [
             "authority_call:mu_hash",
@@ -1287,7 +1287,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1293,
+          "line": 1296,
           "name": "run_engine_pipeline._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -1300,7 +1300,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1529,
+          "line": 1532,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -1312,7 +1312,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1393,
+          "line": 1396,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -1323,7 +1323,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1471,
+          "line": 1474,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -1987,6 +1987,28 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 946,
+          "name": "_run_bounded_impl",
+          "signals": [
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 695,
+          "name": "_stage0_vm_step_trusted",
+          "signals": [
+            "builtin:any",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
           "line": 406,
           "name": "_validate_path",
           "signals": [
@@ -2008,7 +2030,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1035,
+          "line": 1106,
           "name": "make_compiled_bundle_loader",
           "signals": [
             "mutation:assignment"
@@ -2017,7 +2039,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1085,
+          "line": 1156,
           "name": "make_compiled_bundle_loader._clear",
           "signals": [
             "mutation:assignment"
@@ -2026,7 +2048,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1052,
+          "line": 1123,
           "name": "make_compiled_bundle_loader._load",
           "signals": [
             "mutation:assignment"
@@ -2035,34 +2057,12 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 874,
+          "line": 890,
           "name": "stage0_vm_run",
           "signals": [
             "builtin:len",
             "loop",
             "mutation:append"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 930,
-          "name": "stage0_vm_run_bounded",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 694,
-          "name": "stage0_vm_step",
-          "signals": [
-            "builtin:any",
-            "builtin:set",
-            "loop",
-            "mutation:add",
-            "mutation:assignment"
           ],
           "substrate": "python"
         },
@@ -2966,6 +2966,19 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
+          "line": 722,
+          "name": "_stage0VmStepTrusted",
+          "signals": [
+            "builtin:Object.entries",
+            "builtin:Object.keys",
+            "builtin:Set(",
+            "loop",
+            "mutation:.add("
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/core/stage0_vm.js",
           "line": 229,
           "name": "checkNoFloats",
           "signals": [
@@ -3046,7 +3059,7 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 886,
+          "line": 904,
           "name": "stage0VmRun",
           "signals": [
             "loop",
@@ -3056,15 +3069,9 @@
         },
         {
           "file": "mu/host/js/core/stage0_vm.js",
-          "line": 722,
+          "line": 895,
           "name": "stage0VmStep",
-          "signals": [
-            "builtin:Object.entries",
-            "builtin:Object.keys",
-            "builtin:Set(",
-            "loop",
-            "mutation:.add("
-          ],
+          "signals": [],
           "substrate": "javascript"
         },
         {
@@ -3797,7 +3804,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1524,
+          "line": 1527,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -3909,7 +3916,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1428,
+          "line": 1431,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -3940,7 +3947,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1169,
+          "line": 1172,
           "name": "run_engine_pipeline",
           "signals": [
             "authority_call:mu_hash",
@@ -3957,7 +3964,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1293,
+          "line": 1296,
           "name": "run_engine_pipeline._emit",
           "signals": [
             "authority_call:mu_hash",
@@ -3970,7 +3977,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1529,
+          "line": 1532,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -3982,7 +3989,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1393,
+          "line": 1396,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -3993,7 +4000,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1471,
+          "line": 1474,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -4867,6 +4874,22 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 946,
+          "name": "_run_bounded_impl",
+          "signals": [
+            "loop"
+          ],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 971,
+          "name": "_run_bounded_impl._is_terminal",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
           "line": 214,
           "name": "_safe_mu_copy",
           "signals": [],
@@ -4877,6 +4900,26 @@
           "line": 183,
           "name": "_safe_mu_deep_equal",
           "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 1083,
+          "name": "_stage0_vm_run_bounded_trusted",
+          "signals": [],
+          "substrate": "python"
+        },
+        {
+          "file": "rcx_pi/selfhost/stage0_vm.py",
+          "line": 695,
+          "name": "_stage0_vm_step_trusted",
+          "signals": [
+            "builtin:any",
+            "builtin:set",
+            "loop",
+            "mutation:add",
+            "mutation:assignment"
+          ],
           "substrate": "python"
         },
         {
@@ -4902,7 +4945,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1035,
+          "line": 1106,
           "name": "make_compiled_bundle_loader",
           "signals": [
             "mutation:assignment"
@@ -4911,7 +4954,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1085,
+          "line": 1156,
           "name": "make_compiled_bundle_loader._clear",
           "signals": [
             "mutation:assignment"
@@ -4920,7 +4963,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 1052,
+          "line": 1123,
           "name": "make_compiled_bundle_loader._load",
           "signals": [
             "mutation:assignment"
@@ -4929,7 +4972,7 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 874,
+          "line": 890,
           "name": "stage0_vm_run",
           "signals": [
             "builtin:len",
@@ -4940,31 +4983,16 @@
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 930,
+          "line": 1025,
           "name": "stage0_vm_run_bounded",
-          "signals": [
-            "loop"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 977,
-          "name": "stage0_vm_run_bounded._is_terminal",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/stage0_vm.py",
-          "line": 694,
+          "line": 866,
           "name": "stage0_vm_step",
-          "signals": [
-            "builtin:any",
-            "builtin:set",
-            "loop",
-            "mutation:add",
-            "mutation:assignment"
-          ],
+          "signals": [],
           "substrate": "python"
         },
         {
@@ -5455,9 +5483,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 130,
-        "python": 179,
-        "total": 309
+        "javascript": 131,
+        "python": 182,
+        "total": 313
       }
     }
   },

@@ -1065,7 +1065,7 @@ def _step_kernel_with_vm(
         Transformed value if any projection matched, input unchanged on stall.
     """
     from rcx_pi.projection_coverage import coverage
-    from rcx_pi.selfhost.stage0_vm import stage0_vm_step  # ANTICHEAT_OK: infra — VM execution
+    from rcx_pi.selfhost.stage0_vm import _stage0_vm_step_trusted  # W6A: trusted path — bundles are loader-cached
 
     cov_on = record_coverage and coverage.is_enabled()
 
@@ -1073,7 +1073,7 @@ def _step_kernel_with_vm(
         coverage.record_step()
 
     # 1. kernel.v1 via Stage0 VM (S1-C: was host _apply_projection_trusted)
-    vm_result = stage0_vm_step(kernel_bundle, input_value)
+    vm_result = _stage0_vm_step_trusted(kernel_bundle, input_value)
     if vm_result["status"] == "match":  # AST_OK:infra — type guard
         matched_id = vm_result["matched_program_id"]
         if cov_on:
@@ -1090,7 +1090,7 @@ def _step_kernel_with_vm(
 
     # 2. bridge via Stage0 VM (S1-C: was host _apply_projection_trusted)
     if bridge_bundle:
-        vm_result = stage0_vm_step(bridge_bundle, input_value)
+        vm_result = _stage0_vm_step_trusted(bridge_bundle, input_value)
         if vm_result["status"] == "match":  # AST_OK:infra — type guard
             matched_id = vm_result["matched_program_id"]
             if cov_on:
@@ -1106,7 +1106,7 @@ def _step_kernel_with_vm(
                     coverage.record_no_match(pid)
 
     # 3. match.v2 via Stage0 VM
-    vm_result = stage0_vm_step(match_bundle, input_value)
+    vm_result = _stage0_vm_step_trusted(match_bundle, input_value)
     if vm_result["status"] == "match":
         matched_id = vm_result["matched_program_id"]
         if cov_on:
@@ -1124,7 +1124,7 @@ def _step_kernel_with_vm(
                 coverage.record_no_match(pid)
 
     # 4. subst.v2 via Stage0 VM
-    vm_result = stage0_vm_step(subst_bundle, input_value)
+    vm_result = _stage0_vm_step_trusted(subst_bundle, input_value)
     if vm_result["status"] == "match":
         matched_id = vm_result["matched_program_id"]
         if cov_on:

@@ -85,7 +85,7 @@ class TestSubstVMUnificationGate:
 
         fake_error = Stage0VMError("Op limit exceeded (test)")
         with unittest.mock.patch(
-            "rcx_pi.selfhost.stage0_vm.stage0_vm_run_bounded",
+            "rcx_pi.selfhost.stage0_vm._stage0_vm_run_bounded_trusted",  # ANTICHEAT_OK: VM fault mock
             side_effect=fake_error,
         ):
             with pytest.raises(Stage0VMError, match="Op limit exceeded"):
@@ -121,7 +121,7 @@ class TestSubstVMUnificationGate:
         # Mock bounded helper to return a stall with known step count
         stall_outcome = {"status": "stall", "root": {"_mode": "subst", "phase": "unknown"}, "steps": 5}
         with unittest.mock.patch(
-            "rcx_pi.selfhost.stage0_vm.stage0_vm_run_bounded",
+            "rcx_pi.selfhost.stage0_vm._stage0_vm_run_bounded_trusted",  # ANTICHEAT_OK: VM fault mock
             return_value=stall_outcome,
         ):
             budget = get_step_budget()
@@ -154,7 +154,7 @@ class TestSubstVMUnificationGate:
             "steps": 1000,
         }
         with unittest.mock.patch(
-            "rcx_pi.selfhost.stage0_vm.stage0_vm_run_bounded",
+            "rcx_pi.selfhost.stage0_vm._stage0_vm_run_bounded_trusted",  # ANTICHEAT_OK: VM fault mock
             return_value=exhaustion_outcome,
         ):
             budget = get_step_budget()
@@ -187,7 +187,7 @@ class TestSubstVMUnificationGate:
             "steps": 3,
         }
         with unittest.mock.patch(
-            "rcx_pi.selfhost.stage0_vm.stage0_vm_run_bounded",
+            "rcx_pi.selfhost.stage0_vm._stage0_vm_run_bounded_trusted",  # ANTICHEAT_OK: VM fault mock
             return_value=stall_outcome,
         ):
             with pytest.raises(KeyError, match="Unbound variable: z"):

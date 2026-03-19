@@ -13,7 +13,7 @@ const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../cor
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields, rejectNonlinearProjections } = require('../core/security');
 const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted, _applyProjectionTrusted } = require('../core/bootstrap_core');
-const { stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: P7-d VM dispatch for match.v2/subst.v2 kernel step
+const { _stage0VmStepTrusted, muDeepEqual } = require('../core/stage0_vm'); // W6A: trusted path — bundles loaded at module level in main.js // CONTRABAND_OK: stage0_vm is our module, not Node.js vm
 
 // S1-B: VM cutover flags (parity with Python step_mu.py)
 // Founder GO 2026-03-15: VM path is now primary for match.v2/subst.v2
@@ -30,28 +30,34 @@ function _assertVmMatchResult(result, bundleId) {
   // null is valid Mu (void/no-structure). Only reject undefined (missing field).
   if (result.root === undefined) {
     throw new Error(
-      `SECURITY: stage0VmStep returned status='match' for ${bundleId} but .root is undefined. ` +
+      `SECURITY: _stage0VmStepTrusted returned status='match' for ${bundleId} but .root is undefined. ` +
       `Bundle may be malformed or VM produced invalid output.`);
   }
 }
 
+/**
+ * W6A trusted path: bundles MUST be pre-validated via main.js loader.
+ * Callers constructing custom vmConfig MUST call validateBundle() on each bundle
+ * before passing to this function. Unvalidated bundles may cause internal errors
+ * or mis-dispatch (fail-open). See main.js lines 237-245 for validation pattern.
+ */
 function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle, inputValue) {
   // 1. kernel.v1 via Stage0 VM (S1-C: was host _applyProjectionTrusted)
-  const kernelResult = stage0VmStep(kernelBundle, inputValue);
+  const kernelResult = _stage0VmStepTrusted(kernelBundle, inputValue);
   if (kernelResult.status === 'match') { _assertVmMatchResult(kernelResult, 'kernel.v1'); return kernelResult.root; }
 
   // 2. bridge via Stage0 VM (S1-C: was host _applyProjectionTrusted)
   if (bridgeBundle) {
-    const bridgeResult = stage0VmStep(bridgeBundle, inputValue);
+    const bridgeResult = _stage0VmStepTrusted(bridgeBundle, inputValue);
     if (bridgeResult.status === 'match') { _assertVmMatchResult(bridgeResult, 'bridge'); return bridgeResult.root; }
   }
 
   // 3. match.v2 via Stage0 VM
-  const matchResult = stage0VmStep(matchBundle, inputValue);
+  const matchResult = _stage0VmStepTrusted(matchBundle, inputValue);
   if (matchResult.status === 'match') { _assertVmMatchResult(matchResult, 'match.v2'); return matchResult.root; }
 
   // 4. subst.v2 via Stage0 VM
-  const substResult = stage0VmStep(substBundle, inputValue);
+  const substResult = _stage0VmStepTrusted(substBundle, inputValue);
   if (substResult.status === 'match') { _assertVmMatchResult(substResult, 'subst.v2'); return substResult.root; }
 
   return inputValue; // stall
