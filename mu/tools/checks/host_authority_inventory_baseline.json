@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-18T08:18:34.592943+00:00",
+  "generated_at": "2026-03-18T23:19:26.559756+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -828,6 +828,15 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
+          "line": 820,
+          "name": "_classifyEngineStep",
+          "signals": [
+            "builtin:Object.keys"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
           "line": 39,
           "name": "_ensureBoundaryOps",
           "signals": [
@@ -874,7 +883,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 853,
+          "line": 896,
           "name": "emit",
           "signals": [
             "builtin:muHash(",
@@ -909,11 +918,10 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 820,
+          "line": 863,
           "name": "runEnginePipeline",
           "signals": [
             "builtin:Array.isArray",
-            "builtin:Object.keys",
             "builtin:muHash(",
             "loop",
             "mutation:.assign(",
@@ -923,11 +931,10 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 939,
+          "line": 980,
           "name": "runEnginePipelineRecursive",
           "signals": [
             "builtin:Array.isArray",
-            "builtin:Object.keys",
             "builtin:muHash(",
             "loop",
             "mutation:.assign(",
@@ -1134,7 +1141,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1517,
+          "line": 1524,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -1232,7 +1239,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1421,
+          "line": 1428,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -1293,7 +1300,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1522,
+          "line": 1529,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -1305,7 +1312,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1386,
+          "line": 1393,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -1316,7 +1323,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1464,
+          "line": 1471,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -2400,9 +2407,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 96,
+        "javascript": 97,
         "python": 121,
-        "total": 217
+        "total": 218
       }
     },
     "total": {
@@ -3428,6 +3435,15 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
+          "line": 820,
+          "name": "_classifyEngineStep",
+          "signals": [
+            "builtin:Object.keys"
+          ],
+          "substrate": "javascript"
+        },
+        {
+          "file": "mu/host/js/engine/pipeline.js",
           "line": 73,
           "name": "_clearBoundaryOpsCache",
           "signals": [],
@@ -3502,7 +3518,7 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 853,
+          "line": 896,
           "name": "emit",
           "signals": [
             "builtin:muHash(",
@@ -3544,11 +3560,10 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 820,
+          "line": 863,
           "name": "runEnginePipeline",
           "signals": [
             "builtin:Array.isArray",
-            "builtin:Object.keys",
             "builtin:muHash(",
             "loop",
             "mutation:.assign(",
@@ -3558,11 +3573,10 @@
         },
         {
           "file": "mu/host/js/engine/pipeline.js",
-          "line": 939,
+          "line": 980,
           "name": "runEnginePipelineRecursive",
           "signals": [
             "builtin:Array.isArray",
-            "builtin:Object.keys",
             "builtin:muHash(",
             "loop",
             "mutation:.assign(",
@@ -3783,7 +3797,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1517,
+          "line": 1524,
           "name": "_default_hemispheres",
           "signals": [
             "loop"
@@ -3895,7 +3909,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1421,
+          "line": 1428,
           "name": "count_hemisphere_entries",
           "signals": [
             "builtin:enumerate",
@@ -3956,7 +3970,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1522,
+          "line": 1529,
           "name": "run_engine_with_routing",
           "signals": [
             "builtin:isinstance",
@@ -3968,7 +3982,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1386,
+          "line": 1393,
           "name": "run_hemisphere_routing",
           "signals": [
             "builtin:isinstance",
@@ -3979,7 +3993,7 @@
         },
         {
           "file": "rcx_pi/selfhost/engine_pipeline.py",
-          "line": 1464,
+          "line": 1471,
           "name": "run_metabolization_cycle",
           "signals": [
             "builtin:isinstance",
@@ -5441,9 +5455,9 @@
         }
       ],
       "site_counts": {
-        "javascript": 129,
+        "javascript": 130,
         "python": 179,
-        "total": 308
+        "total": 309
       }
     }
   },

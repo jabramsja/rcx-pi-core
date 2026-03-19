@@ -168,23 +168,23 @@ class TestTrampolineTailCallValidation:
         assert '_validate_reentry_payload(payload, "trampoline _tail_call")' in src
 
     def test_js_trampoline_calls_helper(self):
-        """JS trampoline must call validateReentryPayload on tailPayload."""
+        """JS trampoline must call validateReentryPayload for tail_call."""
         src = _read_all_js_source()
-        assert "validateReentryPayload(tailPayload, 'trampoline _tail_call')" in src
+        assert "validateReentryPayload(payload, 'trampoline _tail_call')" in src
 
     def test_all_reentry_paths_use_helper(self):
-        """All 3 re-entry paths in both substrates must use the centralized helper."""
+        """All 4 re-entry paths in both substrates must use the centralized helper."""
         py_src = (REPO_ROOT / "mu/host/python/rcx_pi/selfhost/engine_pipeline.py").read_text()
         js_src = _read_all_js_source()
         # Count "helperName(" occurrences — includes definition + call sites.
-        # Python: 1 def + 3 calls = 4.  JS: 1 function def + 3 calls = 4.
+        # Python: 1 def + 4 calls = 5.  JS: 1 function def + 4 calls = 5.
         py_total = py_src.count("_validate_reentry_payload(")
         js_total = js_src.count("validateReentryPayload(")
         # Subtract 1 for the function definition line in each
         py_calls = py_total - 1  # def _validate_reentry_payload(
         js_calls = js_total - 1  # function validateReentryPayload(
         assert py_calls == 4, f"Python must have 4 helper call sites (Boot1 _run_engine, Boot1 _tail_call, trampoline _tail_call, trampoline _run_engine), got {py_calls}"
-        assert js_calls == 3, f"JS must have 3 helper call sites, got {js_calls}"
+        assert js_calls == 4, f"JS must have 4 helper call sites (Boot1 _run_engine, Boot1 _tail_call, trampoline _tail_call, trampoline _run_engine), got {js_calls}"
 
 
 # ---------------------------------------------------------------------------
