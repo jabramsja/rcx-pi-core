@@ -5,11 +5,10 @@ set -euo pipefail
 
 CMD=$(jq -r '.tool_input.command // ""' < /dev/stdin 2>/dev/null || echo "")
 
-# Only check git commit and git push commands
-case "$CMD" in
-  "git commit"*|"git push"*) ;;
-  *) exit 0 ;;
-esac
+# Match git commit/push anywhere in command (handles && chains, env prefixes)
+if ! echo "$CMD" | grep -qE '\bgit\s+(commit|push)\b'; then
+  exit 0
+fi
 
 cd "$CLAUDE_PROJECT_DIR" 2>/dev/null || exit 0
 
