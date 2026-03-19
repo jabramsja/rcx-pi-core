@@ -1,0 +1,24 @@
+{
+  "wave_id": "wave4c-js-engine-transition-classifier",
+  "repeat_run_speedup_ratio": 1.266452,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.428328,
+  "repeat_run_raw_seconds": [
+    0.542457,
+    0.428328
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.542457
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.970785
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-18T23:53:00Z",
+  "collector_version": "2.2.0"
+}

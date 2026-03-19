@@ -819,6 +819,49 @@ function collectOntologyEvidence(result, operation) {
 const BOOT1_MAX_REENTRY_DEPTH = 20;
 
 /**
+ * Classify one engine step output. Pure function — no emit, no throw.
+ * Wave 4C: mirrors Python _classify_engine_step() (engine_pipeline.py:515).
+ *
+ * @param {*} nextState - result of step(engineProjections, state)
+ * @param {*} state - previous engine state (for identity-stall detection)
+ * @returns {[string, *]} [tag, payload]
+ */
+function _classifyEngineStep(nextState, state) {
+  // Identity stall — no projection matched
+  if (nextState === state) {
+    if (isEngineTerminal(state)) {
+      return ['stall_terminal', state];
+    }
+    return ['stall_non_terminal', state];
+  }
+
+  // Boundary effect request
+  if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
+    return ['boundary', nextState._boundary_request];
+  }
+
+  // Re-entry envelope (_run_engine)
+  if (typeof nextState === 'object' && nextState !== null
+      && '_run_engine' in nextState && Object.keys(nextState).length === 1) {
+    return ['reentry', nextState._run_engine];
+  }
+
+  // Tail-call envelope
+  if (typeof nextState === 'object' && nextState !== null
+      && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
+    return ['tail_call', nextState._tail_call];
+  }
+
+  // Engine terminal result
+  if (isEngineTerminal(nextState)) {
+    return ['terminal', nextState];
+  }
+
+  // Engine advanced internally
+  return ['continue', nextState];
+}
+
+/**
  * Host loop that drives the engine state machine (rcx_engine.v1.json).
  * Parameterized: takes kernelProjections, seedProjectionMap, and engineProjections.
  * BOUNDARY: host orchestrator loop (off kernel path — CALLS stepKernel, not called BY it).
@@ -881,53 +924,51 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
 
     emit('step_boundary', iteration, state);
 
-    if (nextState === state) {
-      if (isEngineTerminal(state)) {
-        if (typeof state === 'object' && state !== null) {
-          if (state.closure_detected) emit('closure_detected', iteration, state);
-          if (state.stall) emit('stall_detected', iteration, state);
-        }
-        emit('engine_terminal', iteration, state, null, {
-          engine_exit_reason: deriveEngineExitReason(state),
-          engine_iterations_used: iteration + 1,
-        });
-        return state;
+    // Wave 4C: classify engine step via shared classifier
+    const [transition, payload] = _classifyEngineStep(nextState, state);
+
+    if (transition === 'stall_terminal') {
+      if (typeof payload === 'object' && payload !== null) {
+        if (payload.closure_detected) emit('closure_detected', iteration, payload);
+        if (payload.stall) emit('stall_detected', iteration, payload);
       }
-      emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
-      throw new RcxError('engine.stalled_non_terminal',
-        `Engine stalled at iteration ${iteration} without producing terminal result. ` +
-        `State keys: ${typeof state === 'object' && state !== null ? JSON.stringify(Object.keys(state).sort()) : typeof state}`
-      );
-    }
-
-    if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
-      state = serviceBoundaryEffect(
-        kernelProjections, seedProjectionMap, nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state, pipelineVmConfig
-      );
-      continue;
-    }
-
-    if (typeof nextState === 'object' && nextState !== null
-        && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
-      const tailPayload = nextState._tail_call;
-      validateReentryPayload(tailPayload, 'trampoline _tail_call');
-      state = { _run_engine: tailPayload };
-      continue;
-    }
-
-    if (isEngineTerminal(nextState)) {
-      if (typeof nextState === 'object' && nextState !== null) {
-        if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
-        if (nextState.stall) emit('stall_detected', iteration, nextState);
-      }
-      emit('engine_terminal', iteration, nextState, null, {
-        engine_exit_reason: deriveEngineExitReason(nextState),
+      emit('engine_terminal', iteration, payload, null, {
+        engine_exit_reason: deriveEngineExitReason(payload),
         engine_iterations_used: iteration + 1,
       });
-      return nextState;
+      return payload;
+    } else if (transition === 'stall_non_terminal') {
+      emit('fail_closed', iteration, payload, 'engine.stalled_non_terminal');
+      throw new RcxError('engine.stalled_non_terminal',
+        `Engine stalled at iteration ${iteration} without producing terminal result. ` +
+        `State keys: ${typeof payload === 'object' && payload !== null ? JSON.stringify(Object.keys(payload).sort()) : typeof payload}`
+      );
+    } else if (transition === 'boundary') {
+      state = serviceBoundaryEffect(
+        kernelProjections, seedProjectionMap, payload, maxAlgorithmIterations, emit, iteration, state, pipelineVmConfig
+      );
+      continue;
+    } else if (transition === 'reentry') {
+      validateReentryPayload(payload, 'trampoline _run_engine');
+      state = { _run_engine: payload };
+      continue;
+    } else if (transition === 'tail_call') {
+      validateReentryPayload(payload, 'trampoline _tail_call');
+      state = { _run_engine: payload };
+      continue;
+    } else if (transition === 'terminal') {
+      if (typeof payload === 'object' && payload !== null) {
+        if (payload.closure_detected) emit('closure_detected', iteration, payload);
+        if (payload.stall) emit('stall_detected', iteration, payload);
+      }
+      emit('engine_terminal', iteration, payload, null, {
+        engine_exit_reason: deriveEngineExitReason(payload),
+        engine_iterations_used: iteration + 1,
+      });
+      return payload;
+    } else { // "continue"
+      state = payload;
     }
-
-    state = nextState;
   }
 
   emit('fail_closed', maxEngineIterations - 1, state, 'engine.exhausted');
@@ -1025,34 +1066,30 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
       emit('step_boundary', iteration, state);
       totalIterations++;
 
-      if (nextState === state) {
-        if (isEngineTerminal(state)) {
-          if (typeof state === 'object' && state !== null) {
-            if (state.closure_detected) emit('closure_detected', iteration, state);
-            if (state.stall) emit('stall_detected', iteration, state);
-          }
-          emit('engine_terminal', iteration, state, null, {
-            engine_exit_reason: deriveEngineExitReason(state),
-            engine_iterations_used: totalIterations,
-          });
-          return state;
+      // Wave 4C: classify engine step via shared classifier
+      const [transition, payload] = _classifyEngineStep(nextState, state);
+
+      if (transition === 'stall_terminal') {
+        if (typeof payload === 'object' && payload !== null) {
+          if (payload.closure_detected) emit('closure_detected', iteration, payload);
+          if (payload.stall) emit('stall_detected', iteration, payload);
         }
-        emit('fail_closed', iteration, state, 'engine.stalled_non_terminal');
+        emit('engine_terminal', iteration, payload, null, {
+          engine_exit_reason: deriveEngineExitReason(payload),
+          engine_iterations_used: totalIterations,
+        });
+        return payload;
+      } else if (transition === 'stall_non_terminal') {
+        emit('fail_closed', iteration, payload, 'engine.stalled_non_terminal');
         throw new RcxError('engine.stalled_non_terminal',
           `Boot1 engine stalled at iteration ${iteration} (depth ${depth}) without terminal result.`
         );
-      }
-
-      if (typeof nextState === 'object' && nextState !== null && '_boundary_request' in nextState) {
+      } else if (transition === 'boundary') {
         state = serviceBoundaryEffect(
-          kernelProjections, seedProjectionMap, nextState._boundary_request, maxAlgorithmIterations, emit, iteration, state, recursiveVmConfig
+          kernelProjections, seedProjectionMap, payload, maxAlgorithmIterations, emit, iteration, state, recursiveVmConfig
         );
         continue;
-      }
-
-      if (typeof nextState === 'object' && nextState !== null
-          && '_run_engine' in nextState && Object.keys(nextState).length === 1) {
-        const payload = nextState._run_engine;
+      } else if (transition === 'reentry') {
         validateReentryPayload(payload, 'Boot1 _run_engine');
         curProjections = payload.projections;
         curInput = payload.input;
@@ -1062,11 +1099,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
         depth++;
         reentry = true;
         break;
-      }
-
-      if (typeof nextState === 'object' && nextState !== null
-          && '_tail_call' in nextState && Object.keys(nextState).length === 1) {
-        const payload = nextState._tail_call;
+      } else if (transition === 'tail_call') {
         validateReentryPayload(payload, 'Boot1 _tail_call');
         curProjections = payload.projections;
         curInput = payload.input;
@@ -1076,21 +1109,19 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
         depth++;
         reentry = true;
         break;
-      }
-
-      if (isEngineTerminal(nextState)) {
-        if (typeof nextState === 'object' && nextState !== null) {
-          if (nextState.closure_detected) emit('closure_detected', iteration, nextState);
-          if (nextState.stall) emit('stall_detected', iteration, nextState);
+      } else if (transition === 'terminal') {
+        if (typeof payload === 'object' && payload !== null) {
+          if (payload.closure_detected) emit('closure_detected', iteration, payload);
+          if (payload.stall) emit('stall_detected', iteration, payload);
         }
-        emit('engine_terminal', iteration, nextState, null, {
-          engine_exit_reason: deriveEngineExitReason(nextState),
+        emit('engine_terminal', iteration, payload, null, {
+          engine_exit_reason: deriveEngineExitReason(payload),
           engine_iterations_used: totalIterations,
         });
-        return nextState;
+        return payload;
+      } else { // "continue"
+        state = payload;
       }
-
-      state = nextState;
     }
 
     if (reentry) continue;
