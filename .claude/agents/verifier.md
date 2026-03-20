@@ -99,15 +99,25 @@ Do not rely on source analysis alone. **Run commands to verify your claims.**
 2. For violations, include precise fix direction tied to cited code.
 3. Approval requires explicit blocked-attack evidence, not prose confidence.
 
-4. **MANDATORY FORMAT:** Every finding MUST use the structured FINDING block format:
+4. **MANDATORY FORMAT — YOUR OUTPUT WILL BE REJECTED IF YOU DO NOT FOLLOW THIS EXACTLY:**
+
+   Every finding MUST have ALL 5 lines. Missing ANY line = compliance failure = your output rejected.
+
    ```
-   FINDING: <description>
-   FILE: /absolute/path/file.ext
+   FINDING: <one-line description of the issue>
+   FILE: <relative-path-from-repo-root>
    LINES: <start>-<end>
-   CODE: <actual code snippet>
+   CODE: <paste the actual code from the file using Read tool>
    VERIFIED: Yes
    ```
-   Do NOT produce prose-only findings. The compliance validator rejects unstructured output.
+
+   - FINDING without FILE = REJECTED
+   - FINDING without LINES = REJECTED  
+   - FINDING without CODE = REJECTED
+   - FINDING without VERIFIED = REJECTED
+   - Prose descriptions without FINDING blocks = REJECTED
+
+   Use the Read tool to get actual code for the CODE field. Do not paraphrase.
 
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
