@@ -53,7 +53,7 @@ depth | timestamp | step
 ObserverEventContract.v0.md lines 64-67). Timestamp is only a tie-breaker for
 same-step events, which never span re-entry depths. No actual ordering violation.
 
-**Repro test:** `mu/tests/l4_gates/test_boot1_timestamp_reentry_repro_gate.py` (3 tests, all pass)
+**Repro test:** `mu/tests/l4_gates/test_boot1_structural_iteration_gate.py::TestBoot1TimestampResetReproduction` (3 tests)
 
 ## Discovered By
 
