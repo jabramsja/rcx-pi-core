@@ -50,7 +50,10 @@ archive/docs/latex/build/
 sandbox_runs/
 
 # Agent review reports (local output, not tracked docs)
-reports/
+# Use wildcard so we can un-ignore subdirectories
+reports/*
+# But deferred findings ARE tracked (policy decisions)
+!reports/deferred/
 
 # Generated sandbox/smoke artifacts (must not be tracked)
 mu/mu_programs/__sandbox_run_*.mu

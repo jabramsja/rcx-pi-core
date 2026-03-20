@@ -138,7 +138,7 @@ Agent outputs are checked for:
 - At least 1 `CODE:` block per finding
 - Zero `VERIFIED: No` entries
 - `STATUS.md` mentioned in first 50 lines
-- No hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS` for current list)
+- No hallucination words (see `tools/runners/validate_agent_compliance.py:HALLUCINATION_WORDS` for current list)
 
 **Non-compliant outputs require revision before acceptance.**
 

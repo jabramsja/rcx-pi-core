@@ -59,6 +59,7 @@ Full orchestration pipeline with parallel execution, depth tiers, unified report
 
 **Decision guide:**
 - Quick check on one file? → Native subagent (`Agent(name="adversary", prompt="...")`)
+  - **Note:** Native subagents do NOT satisfy the pre-bridge evidence gate. Use `run_review.py` for bridge-prep.
 - Changed core code? → `run_review.py --depth full`
 - Security-sensitive change? → `run_review.py --rigorous`
 - Monthly health check? → `run_deep_analysis.py`

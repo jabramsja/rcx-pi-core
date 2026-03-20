@@ -37,3 +37,4 @@ Current active inventory:
 - `non_blocking/w5a_reentry_gate_coverage.md`
 - `non_blocking/wave-i-non-blocking-findings_2026-03-09.md`
 - `non_blocking/wave1_canonical_step_nonblockers_2026-03-16.md`
+- `non_blocking/hook_soft_gate_residue.md`

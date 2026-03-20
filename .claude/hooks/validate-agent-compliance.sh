@@ -64,7 +64,7 @@ fi
 
 # Get project directory
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(dirname "$(dirname "$(dirname "$0")")")}"
-VALIDATOR="$PROJECT_DIR/tools/validate_agent_compliance.py"
+VALIDATOR="$PROJECT_DIR/tools/runners/validate_agent_compliance.py"
 
 # =============================================================================
 # CRITICAL: Fail closed - if validator missing or crashes, BLOCK output
@@ -75,7 +75,7 @@ if [ ! -f "$VALIDATOR" ]; then
   # SECURITY: Validator not found - BLOCK (fail closed)
   jq -n '{
     "decision": "block",
-    "reason": "Validator script not found at tools/validate_agent_compliance.py - cannot verify compliance"
+    "reason": "Validator script not found at tools/runners/validate_agent_compliance.py - cannot verify compliance"
   }'
   exit 0
 fi

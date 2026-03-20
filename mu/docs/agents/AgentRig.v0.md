@@ -187,7 +187,7 @@ All 9 review agents follow `AgentGuardrails.v0.md` which requires:
 
 2. **Forbidden behaviors:**
    - Claims without file:line evidence
-   - Hallucination words (see `tools/validate_agent_compliance.py:HALLUCINATION_WORDS`)
+   - Hallucination words (see `tools/runners/validate_agent_compliance.py:HALLUCINATION_WORDS`)
    - Citing from memory instead of Read/Grep output
 
 3. **Automatic validation:**

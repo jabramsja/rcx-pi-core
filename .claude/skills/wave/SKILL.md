@@ -15,9 +15,9 @@ Executes the Phase A/B wave protocol. This is the core development workflow.
 ## Phase A: Design + Agent Review + Bridge Convergence
 
 ### `/wave plan <name>`
-1. **Design** the plan: scope, files, depth, focus. Write to `.scratch/<name>_plan.md`.
-2. **Run agents** on the plan: `python tools/runners/run_review.py --pr --depth quick --output .scratch/<name>_phase_a_review.md`
-3. **Send to bridge** (plan review, no diff): `/bridge plan .scratch/<name>_plan.md`
+1. **Design** the plan: scope, files, depth, focus. Write to `reports/<name>_plan.md`.
+2. **Run agents** on the plan: `python tools/runners/run_review.py --pr --depth quick --output reports/<name>_phase_a_review.md`
+3. **Send to bridge** (plan review, no diff): `/bridge plan reports/<name>_plan.md`
 4. **Fix blockers** from bridge. NEVER demote blockers to non-blockers. Only TRUE non-blockers go to `reports/deferred/non_blocking/`.
 5. **Loop steps 3-4** until bridge returns only non-blockers.
 6. Report: "Phase A converged. Plan locked. Ready for Phase B."
@@ -27,7 +27,7 @@ Executes the Phase A/B wave protocol. This is the core development workflow.
 ### `/wave implement`
 1. **Implement** the locked plan.
 2. **Run `/audit fast`** — MANDATORY after implementation, before agents.
-3. **Run agents** on the implementation: `python tools/runners/run_review.py --pr --depth full --output .scratch/<name>_phase_b_review.md`
+3. **Run agents** on the implementation: `python tools/runners/run_review.py --pr --depth full --output reports/<name>_phase_b_review.md`
 4. **If JS or Python runtime files changed**: Run `/parity` — MANDATORY.
 5. **If debt markers changed**: Run `/audit ratchets` — MANDATORY.
 6. **Send to bridge** (implementation review, WITH diff): `/bridge review "<summary>"`

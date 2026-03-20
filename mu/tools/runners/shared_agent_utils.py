@@ -324,7 +324,7 @@ def validate_compliance(
     """Run compliance validation on agent output.
 
     This is the single implementation used by all agent runners.
-    Calls tools/validate_agent_compliance.py as a subprocess.
+    Calls tools/runners/validate_agent_compliance.py as a subprocess.
 
     Args:
         output: Agent output text to validate
