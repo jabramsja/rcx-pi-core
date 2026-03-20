@@ -104,7 +104,7 @@ Do not accept structural claims without execution proof. **Run the artifacts.**
 
    ```
    FINDING: <one-line description of the issue>
-   FILE: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/<path>
+   FILE: <relative-path-from-repo-root>
    LINES: <start>-<end>
    CODE: <paste the actual code from the file using Read tool>
    VERIFIED: Yes

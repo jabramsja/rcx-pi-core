@@ -54,6 +54,8 @@ sandbox_runs/
 reports/*
 # But deferred findings ARE tracked (policy decisions)
 !reports/deferred/
+# L4 wave indicator artifacts ARE tracked (evidence)
+!reports/l4_wave_indicators/
 
 # Generated sandbox/smoke artifacts (must not be tracked)
 mu/mu_programs/__sandbox_run_*.mu

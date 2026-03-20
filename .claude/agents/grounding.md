@@ -105,7 +105,7 @@ Do not accept test claims without running them. **Execute the tests.**
 
    ```
    FINDING: <one-line description of the issue>
-   FILE: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/<path>
+   FILE: <relative-path-from-repo-root>
    LINES: <start>-<end>
    CODE: <paste the actual code from the file using Read tool>
    VERIFIED: Yes
