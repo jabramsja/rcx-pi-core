@@ -42,4 +42,4 @@ depth=0, step=4 -> depth=1, step=5  (step MONOTONIC across re-entry)
 Both Python and JS show identical behavior. The runtime fix is verified working.
 The gap remains: gate test doesn't exercise this path, so it lacks regression coverage.
 
-**Repro test:** `.scratch/boot1_timestamp_repro.py::test_boot1_timestamp_reset_on_real_reentry_python`
+**Repro test:** `mu/tests/l4_gates/test_boot1_structural_iteration_gate.py::TestBoot1TimestampResetReproduction`
