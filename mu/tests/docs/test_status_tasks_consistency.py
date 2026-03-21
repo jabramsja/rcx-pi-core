@@ -331,8 +331,8 @@ def test_l4_full_rewrite_remains_in_sink() -> None:
 def test_meta_bridge_slice1_next_entry_advances_after_implementation() -> None:
     """
     If the canonical control-plane rollout says META-BRIDGE-S1 is implemented,
-    the TASKS.md NEXT entry must advance to seeded-package verification instead
-    of staying framed as an implementation target.
+    the TASKS.md NEXT entry must reflect current state: either pending
+    verification (names seeded package) or completed verification (says complete).
     """
     rollout_text = META_BRIDGE_ROLLOUT_PATH.read_text(encoding="utf-8")
     if "`META-BRIDGE-S1` **implemented and merged**" not in rollout_text:
@@ -349,12 +349,15 @@ def test_meta_bridge_slice1_next_entry_advances_after_implementation() -> None:
         "implemented, but TASKS.md does not."
     )
     assert "Active next step:" in item, (
-        "TASKS.md META-BRIDGE-S1 entry must state the verification step after "
-        "implementation."
+        "TASKS.md META-BRIDGE-S1 entry must state the current active next step."
     )
-    assert ".scratch/hook_hardening_precommit_package.json" in item, (
-        "TASKS.md META-BRIDGE-S1 entry must name the seeded Claude package used "
-        "for first end-to-end verification."
+    # Either verification is pending (names seeded package) or complete
+    assert (
+        ".scratch/hook_hardening_precommit_package.json" in item
+        or "verification: complete" in item.lower()
+    ), (
+        "TASKS.md META-BRIDGE-S1 entry must either name the seeded package for "
+        "pending verification or state that verification is complete."
     )
     assert "pre-commit supervisor" in item, (
         "TASKS.md META-BRIDGE-S1 entry must frame the current work as seeded-package "
