@@ -25,6 +25,8 @@ $package_json
 
 $validation_summary
 
+$validation_failure_routing
+
 ## Your Task
 
 1. Read FOUNDER_SESSION_BOOTSTRAP.md first
@@ -37,7 +39,7 @@ $validation_summary
 
 ## Decision Vocabulary (Slice 1)
 
-Success:
+Success (BLOCKED when any validation gate failed):
 - COMMIT_GO: proceed with commit protocol
 - COMMIT_GO_HOLD_PUSH: commit locally, stop before push/PR
 - NO_ACTION: nothing to do

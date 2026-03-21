@@ -751,9 +751,29 @@ def build_meta_reviewer_prompt(
         for r in validation_results
     )
 
+    any_failed = any(not r.passed for r in validation_results)
+    if any_failed:
+        failed_names = [r.name for r in validation_results if not r.passed]
+        validation_failure_routing = (
+            "## VALIDATION FAILURES DETECTED — ROUTING MODE\n\n"
+            f"The following validation gates FAILED: {', '.join(failed_names)}\n\n"
+            "COMMIT_GO and COMMIT_GO_HOLD_PUSH are BLOCKED by the supervisor.\n"
+            "The supervisor will reject any commit-capable decision while gates fail.\n\n"
+            "Your job is to ROUTE, not rubber-stamp. Decide:\n"
+            "- NEEDS_PHASE_A: if the plan itself is wrong or incomplete\n"
+            "- NEEDS_PHASE_B: if the implementation needs rework\n"
+            "- STOP_FOR_FOUNDER: if this is a policy question you cannot resolve\n"
+            "- STOP_FOR_TRIAGE_DISCUSSION: if the queue is exhausted or unclear\n"
+            "- ERROR_VALIDATION_FAILED: if the failures speak for themselves\n\n"
+            "Your request_for_claude MUST say specifically what Claude should fix or re-enter."
+        )
+    else:
+        validation_failure_routing = ""
+
     payload = {
         "package_json": json.dumps(package, indent=2),
         "validation_summary": validation_summary,
+        "validation_failure_routing": validation_failure_routing,
         "repo_root": str(repo_root),
         "task_id": package.get("task_id", "unknown"),
         "wave_name": package.get("wave_name", "unknown"),
@@ -780,6 +800,9 @@ TEMPLATE_AUTHORIZED_DECISIONS = {
     "STOP_FOR_TRIAGE_DISCUSSION",
     "ERROR_VALIDATION_FAILED",
 }
+
+# Decisions that authorize commit — blocked when any validation gate failed
+COMMIT_CAPABLE_DECISIONS = {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
 
 
 def parse_meta_envelope(output: str) -> dict[str, Any]:
@@ -973,32 +996,33 @@ def run_meta_bridge(
     passed = [r.name for r in validation_results if r.passed]
     failed = [{"name": r.name, "error": r.error} for r in validation_results if not r.passed]
 
-    if not all_passed:
-        return MetaBridgeResponse(
-            status="partial",
-            decision=Decision.ERROR_VALIDATION_FAILED.value,
-            summary=f"{len(passed)} of {len(validation_results)} validations passed",
-            validations_passed=passed,
-            validations_failed=failed,
-            request_for_claude="Address validation failures before retry",
-        )
-
+    # Dry-run: validation-only, no Codex routing
     if dry_run:
+        if not all_passed:
+            return MetaBridgeResponse(
+                status="partial",
+                decision=Decision.ERROR_VALIDATION_FAILED.value,
+                summary=f"Dry run: {len(passed)} of {len(validation_results)} validations passed (Codex routing not exercised)",
+                validations_passed=passed,
+                validations_failed=failed,
+                request_for_claude="Fix validation failures, then run without --dry-run for Codex routing decision",
+            )
         return MetaBridgeResponse(
             status="success",
             decision=Decision.NO_ACTION.value,
-            summary="Dry run: validations passed, Codex review skipped",
+            summary="Dry run: all validations passed (Codex routing not exercised)",
             validations_passed=passed,
             validations_failed=[],
-            request_for_claude="Run without --dry-run for full meta-review",
+            request_for_claude="Run without --dry-run for full Codex meta-review and routing decision",
         )
 
-    # Run Codex meta-review
+    # Live mode: always send to Codex for routing, even when validations fail.
+    # Codex decides whether to route to Phase A, Phase B, founder, or error.
+    # Commit-capable decisions are blocked when any validation failed.
     with _MetaBridgeLock(paths.lock_path):
         try:
             envelope = run_meta_review(paths, package, validation_results, verbose=verbose)
         except KeyboardInterrupt:
-            # Handle SIGINT gracefully with structured response
             return MetaBridgeResponse(
                 status="error",
                 decision=Decision.ERROR_CODEX_ABORT.value,
@@ -1037,14 +1061,25 @@ def run_meta_bridge(
             recovery_hint="Re-run meta-bridge with fresh package (repo changed during review)",
         )
 
-    # Build response from Codex envelope
+    # Enforce: commit-capable decisions are impossible when validations failed
     decision = envelope.get("decision", Decision.ERROR_INTERNAL.value)
+    if not all_passed and decision in COMMIT_CAPABLE_DECISIONS:
+        decision = Decision.ERROR_VALIDATION_FAILED.value
+        envelope["summary"] = (
+            f"Codex returned {envelope.get('decision')} but validations failed — "
+            f"commit blocked. Original summary: {envelope.get('summary', '')}"
+        )
+        envelope["request_for_claude"] = (
+            "Validation gates failed. Codex attempted to authorize commit but the "
+            "supervisor blocked it. Fix validation failures and re-run."
+        )
+
     return MetaBridgeResponse(
-        status="success",
+        status="success" if all_passed else "partial",
         decision=decision,
         summary=envelope.get("summary", ""),
         validations_passed=passed,
-        validations_failed=[],
+        validations_failed=failed,
         findings=envelope.get("findings", []),
         request_for_claude=envelope.get("request_for_claude", ""),
     )

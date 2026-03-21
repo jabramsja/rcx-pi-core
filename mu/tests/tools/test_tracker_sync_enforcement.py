@@ -3,6 +3,8 @@ Tests for tools/enforce_tracker_sync.sh.
 
 These tests validate the fail-closed policy:
 - If mu/ core code changes, STATUS.md or TASKS.md must also change.
+- If control-plane tooling under mu/tools/agents/ changes, STATUS.md or TASKS.md
+  must also change.
 - Core = mu/ minus mu/docs/, mu/tools/, mu/scripts/, mu/tests/
 """
 
@@ -66,6 +68,19 @@ class TestTrackerSyncEnforcement:
         assert result.returncode == 0
         assert "no core changes detected" in result.stdout.lower()
 
+    def test_mu_tools_agents_requires_tracker_sync(self):
+        """mu/tools/agents/ changes are control-plane critical and must update trackers."""
+        result = self.run_script("mu/tools/agents/meta_bridge_supervisor.py")
+        assert result.returncode == 1
+        assert "tracker sync violation" in result.stdout.lower()
+        assert "mu/tools/agents/meta_bridge_supervisor.py" in result.stdout
+
+    def test_mu_tools_agents_with_tasks_passes(self):
+        """mu/tools/agents/ changes pass when TASKS.md is updated in the same wave."""
+        result = self.run_script("mu/tools/agents/meta_bridge_supervisor.py", "TASKS.md")
+        assert result.returncode == 0
+        assert "tracker sync ok" in result.stdout.lower()
+
     def test_mu_tests_not_core(self):
         """mu/tests/ changes are infra, not core — should not require tracker sync."""
         result = self.run_script("mu/tests/test_foo.py")
@@ -77,4 +92,3 @@ class TestTrackerSyncEnforcement:
         result = self.run_script("mu/scripts/green_gate.sh")
         assert result.returncode == 0
         assert "no core changes detected" in result.stdout.lower()
-

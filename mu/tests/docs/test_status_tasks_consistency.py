@@ -15,6 +15,9 @@ from tests.repo_root import REPO_ROOT
 STATUS_PATH = REPO_ROOT / "STATUS.md"
 TASKS_PATH = REPO_ROOT / "TASKS.md"
 MANIFEST_PATH = REPO_ROOT / "roadmap" / "MANIFEST.md"
+META_BRIDGE_ROLLOUT_PATH = (
+    REPO_ROOT / "reports" / "control_plane" / "meta_bridge_rollout_2026-03-20.md"
+)
 
 LAYER_TOKENS = ("BOOTSTRAP", "META_CIRCULAR")
 
@@ -283,6 +286,17 @@ def _extract_section(text: str, heading: str) -> str:
     return match.group(1)
 
 
+def _extract_named_task_item(section_text: str, task_id: str) -> str | None:
+    pattern = re.compile(
+        rf"^\-\s+\*\*\[{re.escape(task_id)}\]\*\*(.*?)(?=^\-\s+\*\*\[|^## |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    match = pattern.search(section_text)
+    if not match:
+        return None
+    return match.group(0)
+
+
 def test_g8_decision_path_in_vector_with_priority() -> None:
     """
     TASKS.md VECTOR must contain the G8 production decision path
@@ -311,6 +325,40 @@ def test_l4_full_rewrite_remains_in_sink() -> None:
     assert "L4 Full Self-Hosting" in sink_section or "L4" in sink_section, (
         "TASKS.md SINK must retain the full L4 self-hosting rewrite as a "
         "long-horizon item (distinct from the bounded G8 decision path in VECTOR)."
+    )
+
+
+def test_meta_bridge_slice1_next_entry_advances_after_implementation() -> None:
+    """
+    If the canonical control-plane rollout says META-BRIDGE-S1 is implemented,
+    the TASKS.md NEXT entry must advance to seeded-package verification instead
+    of staying framed as an implementation target.
+    """
+    rollout_text = META_BRIDGE_ROLLOUT_PATH.read_text(encoding="utf-8")
+    if "`META-BRIDGE-S1` **implemented and merged**" not in rollout_text:
+        return
+
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    next_section = _extract_section(tasks_text, "NEXT")
+    item = _extract_named_task_item(next_section, "META-BRIDGE-S1")
+    if item is None:
+        return
+
+    assert "implemented and merged" in item, (
+        "TASKS.md META-BRIDGE-S1 entry is stale: rollout packet says Slice 1 is "
+        "implemented, but TASKS.md does not."
+    )
+    assert "Active next step:" in item, (
+        "TASKS.md META-BRIDGE-S1 entry must state the verification step after "
+        "implementation."
+    )
+    assert ".scratch/hook_hardening_precommit_package.json" in item, (
+        "TASKS.md META-BRIDGE-S1 entry must name the seeded Claude package used "
+        "for first end-to-end verification."
+    )
+    assert "pre-commit supervisor" in item, (
+        "TASKS.md META-BRIDGE-S1 entry must frame the current work as seeded-package "
+        "verification through the implemented pre-commit supervisor."
     )
 
 
