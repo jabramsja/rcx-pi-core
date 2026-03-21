@@ -894,15 +894,17 @@ def run_meta_bridge(
         )
 
     # Verify this is the RCX repo, not an unrelated git checkout
-    # Check for RCX marker files (CLAUDE.md + mu/ directory)
-    rcx_markers = [(repo_root / "CLAUDE.md"), (repo_root / "mu")]
-    if not all(m.exists() for m in rcx_markers):
+    # Check that this script is inside the detected repo (works with sparse checkouts)
+    script_path = Path(__file__).resolve()
+    try:
+        script_path.relative_to(repo_root)
+    except ValueError:
         return MetaBridgeResponse(
             status="error",
             decision=Decision.ERROR_INTERNAL.value,
             summary="Package must be inside the RCX repository",
             error_code="WRONG_GIT_REPO",
-            error_detail=f"Detected repo {repo_root} lacks RCX markers (CLAUDE.md, mu/)",
+            error_detail=f"Package repo {repo_root} differs from script repo",
             recovery_hint="Ensure package file is inside the RCX repository, not an unrelated git checkout",
         )
 
