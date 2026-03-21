@@ -8,10 +8,39 @@ CMD=$(jq -r '.tool_input.command // ""' < /dev/stdin 2>/dev/null || echo "")
 # Collapse newlines to single line for regex matching (catches multiline git commands)
 CMD_ONELINE=$(echo "$CMD" | tr '\n' ' ')
 
-# Match destructive git operations anywhere in command (handles && chains, env prefixes, git -c flags)
-# Covers: commit, push, merge, rebase, cherry-pick, reset, revert, am
-# Uses \bgit\b.*\b(subcommand)\b to allow arbitrary flags between git and subcommand (e.g., git -c key=val commit)
-if ! echo "$CMD_ONELINE" | grep -qE '\bgit\b.*\b(commit|push|merge|rebase|cherry-pick|reset|revert|am)\b'; then
+# Extract git subcommands: find words immediately after "git" (skipping -c key=val style flags).
+# Only block on actual git subcommands, not on branch names or other arguments that
+# happen to contain words like "commit" (e.g., git checkout -b pre-commit-fix).
+BLOCKED=false
+EXPECT_FLAG_ARG=false
+for word in $CMD_ONELINE; do
+  # After a flag that takes an argument (e.g., -C <path>, -c key=val), skip the argument
+  if [ "$EXPECT_FLAG_ARG" = "true" ]; then
+    EXPECT_FLAG_ARG=false
+    continue
+  fi
+  case "$word" in
+    git) NEXT_IS_GIT_SUB=true; continue ;;
+  esac
+  if [ "${NEXT_IS_GIT_SUB:-}" = "true" ]; then
+    # Skip flags and their arguments (e.g., git -C /path commit, git -c key=val commit)
+    # Long options with separate args: --git-dir, --work-tree, --namespace, --super-prefix
+    case "$word" in
+      -C|-c) EXPECT_FLAG_ARG=true; continue ;;
+      --git-dir|--work-tree|--namespace|--super-prefix) EXPECT_FLAG_ARG=true; continue ;;
+      --git-dir=*|--work-tree=*|--namespace=*|--super-prefix=*) continue ;;
+      -*) continue ;;
+      *=*) continue ;;
+    esac
+    # This is the actual git subcommand
+    case "$word" in
+      commit|push|merge|rebase|cherry-pick|reset|revert|am|stash)
+        BLOCKED=true ;;
+    esac
+    NEXT_IS_GIT_SUB=false
+  fi
+done
+if [ "$BLOCKED" = "false" ]; then
   exit 0
 fi
 

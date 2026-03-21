@@ -49,7 +49,8 @@ This file is read by Claude Code at session start.
   </phase_b>
   <commit_protocol name="After Convergence (Autonomous)">
     <step_1>Stage specific files (never git add .)</step_1>
-    <step_2>git commit (pre-commit hook runs)</step_2>
+    <step_1b>Run pre-commit supervisor: python3 mu/tools/agents/meta_bridge_supervisor.py --package &lt;path&gt; --json (on COMMIT_GO/COMMIT_GO_HOLD_PUSH writes receipt to .agent_bus/meta/; git pre-commit hook verifies receipt freshness and staged-state match)</step_1b>
+    <step_2>git commit (pre-commit hook runs — verifies supervisor receipt)</step_2>
     <step_3>git push (pre-push hook runs audit_fast.sh)</step_3>
     <step_4>gh pr create targeting dev</step_4>
     <step_5>Wait for CI (gh pr checks)</step_5>
