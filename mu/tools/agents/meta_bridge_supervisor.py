@@ -832,6 +832,116 @@ def parse_meta_envelope(output: str) -> dict[str, Any]:
     return envelope
 
 
+# ---------------------------------------------------------------------------
+# Pre-commit receipt: proves Claude ran the supervisor for this staged state
+# ---------------------------------------------------------------------------
+
+PRE_COMMIT_RECEIPT_NAME = "pre_commit_receipt.json"
+
+# Decisions that satisfy the receipt check for allowing commit
+RECEIPT_CAPABLE_DECISIONS = {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
+
+
+def compute_staged_sha(repo_root: Path) -> str:
+    """Compute SHA256 of staged diff content (deterministic state binding)."""
+    return _hash_bytes(git_output(repo_root, ["diff", "--cached", "--binary"], text=False))  # type: ignore
+
+
+def write_pre_commit_receipt(
+    response: MetaBridgeResponse,
+    package_path: Path,
+    repo_root: Path | None = None,
+) -> Path:
+    """Write a pre-commit receipt after a commit-capable decision.
+
+    Receipt binds to current staged state so it cannot be reused after
+    staging changes.
+    """
+    if response.decision not in RECEIPT_CAPABLE_DECISIONS:
+        raise MetaBridgeError(
+            f"Cannot write receipt for decision {response.decision}. "
+            f"Only {sorted(RECEIPT_CAPABLE_DECISIONS)} authorize commit."
+        )
+
+    if repo_root is None:
+        package_dir = package_path.resolve().parent
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+            cwd=str(package_dir),
+        ).stdout.strip()
+        repo_root = Path(toplevel)
+
+    staged_sha = compute_staged_sha(repo_root)
+
+    receipt = {
+        "decision": response.decision,
+        "staged_sha": staged_sha,
+        "timestamp_utc": utc_now(),
+    }
+
+    receipt_dir = repo_root / META_BUS_DIR_NAME
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    receipt_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    return receipt_path
+
+
+def verify_pre_commit_receipt(
+    repo_root: Path,
+    *,
+    max_age_seconds: int = 1800,
+) -> tuple[bool, str]:
+    """Verify that a valid pre-commit receipt exists for current staged state.
+
+    Returns (passed, message). The hook calls this — it never runs the supervisor.
+    """
+    receipt_path = repo_root / META_BUS_DIR_NAME / PRE_COMMIT_RECEIPT_NAME
+    if not receipt_path.exists():
+        return False, (
+            "No pre-commit receipt found. Run the meta-bridge supervisor before commit:\n"
+            "  python3 mu/tools/agents/meta_bridge_supervisor.py --package <path> --json"
+        )
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return False, f"Pre-commit receipt unreadable: {exc}"
+
+    # Check decision
+    decision = receipt.get("decision", "")
+    if decision not in RECEIPT_CAPABLE_DECISIONS:
+        return False, f"Receipt decision '{decision}' does not authorize commit"
+
+    # Check staged state matches
+    current_staged_sha = compute_staged_sha(repo_root)
+    receipt_staged_sha = receipt.get("staged_sha", "")
+    if current_staged_sha != receipt_staged_sha:
+        return False, (
+            "Pre-commit receipt is stale: staged content changed since review.\n"
+            "  Re-run the meta-bridge supervisor for the current staged state."
+        )
+
+    # Check age (fail-closed: missing/unparseable/future timestamps all reject)
+    timestamp_str = receipt.get("timestamp_utc", "")
+    if not timestamp_str:
+        return False, "Pre-commit receipt has no timestamp"
+    try:
+        receipt_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return False, "Pre-commit receipt timestamp is unparseable"
+    age = (datetime.now(timezone.utc) - receipt_time).total_seconds()
+    if age < 0:
+        return False, "Pre-commit receipt timestamp is in the future"
+    if age > max_age_seconds:
+        return False, (
+            f"Pre-commit receipt is too old ({int(age)}s > {max_age_seconds}s).\n"
+            "  Re-run the meta-bridge supervisor."
+        )
+
+    return True, f"Pre-commit receipt valid (decision={decision}, staged_sha={current_staged_sha[:8]})"
+
+
 def run_meta_review(
     paths: MetaBridgePaths,
     package: dict[str, Any],
@@ -1166,6 +1276,18 @@ def main() -> int:
                 print(f"  - {f['name']}: {f['error']}")
         if response.request_for_claude:
             print(f"Request for Claude: {response.request_for_claude}")
+
+    # Write pre-commit receipt on commit-capable decisions (not dry-run)
+    # Fail-closed: if receipt write fails, exit non-zero even on COMMIT_GO
+    if not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
+        try:
+            receipt = write_pre_commit_receipt(response, args.package)
+            if args.verbose:
+                print(f"[meta-bridge] Pre-commit receipt written: {receipt}")
+        except Exception as exc:
+            print(f"[error] Failed to write pre-commit receipt: {exc}", file=sys.stderr)
+            print("[error] COMMIT_GO decision voided — receipt is required for commit.", file=sys.stderr)
+            return 1
 
     # Exit code based on decision
     if response.decision == Decision.COMMIT_GO.value:

@@ -208,6 +208,28 @@ if [ -n "$CORE_FILES_CHANGED" ] && [ "${RCX_SKIP_ADVERSARY_CHECK:-}" != "1" ]; t
     fi
 fi
 
+# === 8. Pre-commit supervisor receipt check (BLOCKING, fail-closed) ===
+# Verifies that Claude explicitly ran the meta-bridge supervisor for this staged state.
+# Does NOT run the supervisor — only verifies the receipt.
+# Skip: RCX_SKIP_RECEIPT_CHECK=1 (explicit founder override only).
+# Fail-closed: if the verifier script is missing or crashes, commit is blocked.
+if [ "${RCX_SKIP_RECEIPT_CHECK:-}" = "1" ]; then
+    echo "   ℹ️  Pre-commit receipt check skipped (RCX_SKIP_RECEIPT_CHECK=1)"
+elif [ ! -f "./mu/tools/agents/verify_pre_commit_receipt.py" ]; then
+    echo ""
+    echo "❌ PRE-COMMIT RECEIPT CHECK FAILED"
+    echo "   Verifier script missing: mu/tools/agents/verify_pre_commit_receipt.py"
+    echo "   Cannot verify pre-commit supervisor receipt (fail-closed)."
+    FAILED=1
+else
+    RECEIPT_EXIT=0
+    python3 mu/tools/agents/verify_pre_commit_receipt.py || RECEIPT_EXIT=$?
+    if [ "$RECEIPT_EXIT" -ne 0 ] && [ "$RECEIPT_EXIT" -ne 2 ]; then
+        # exit 0 = pass, exit 2 = skip (nothing staged), anything else = block
+        FAILED=1
+    fi
+fi
+
 # Exit with failure if any blocking check failed
 if [ "$FAILED" -eq 1 ]; then
     echo "Pre-commit checks failed. Use --no-verify to bypass (not recommended)."

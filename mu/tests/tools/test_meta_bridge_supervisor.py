@@ -254,13 +254,33 @@ def _make_valid_package():
 
 
 @pytest.fixture
-def pkg_in_repo():
-    """Write a valid package JSON inside the repo (so git rev-parse works) and clean up."""
-    test_dir = REPO_ROOT / ".agent_bus" / "meta" / "_test"
+def pkg_in_repo(tmp_path):
+    """Write a valid package JSON inside the repo (so git rev-parse works) and clean up.
+
+    Uses tmp_path for the package file but writes it inside the repo so
+    git rev-parse works. Also patches meta_bridge_paths to use tmp_path
+    for lock/bus dirs to avoid parallel contention.
+    """
+    # Package must be inside the repo for git rev-parse
+    import uuid
+    unique_id = uuid.uuid4().hex[:8]
+    test_dir = REPO_ROOT / ".agent_bus" / "meta" / f"_test_{unique_id}"
     test_dir.mkdir(parents=True, exist_ok=True)
     pkg_path = test_dir / "test_package.json"
     pkg_path.write_text(json.dumps(_make_valid_package()), encoding="utf-8")
-    yield pkg_path
+
+    # Use tmp_path for bus/lock dirs to avoid parallel contention
+    bus_dir = tmp_path / "meta_bus"
+    bus_dir.mkdir(parents=True, exist_ok=True)
+    isolated_paths = meta.MetaBridgePaths(
+        repo_root=REPO_ROOT,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+
+    yield pkg_path, isolated_paths
+
     pkg_path.unlink(missing_ok=True)
     try:
         test_dir.rmdir()
@@ -273,8 +293,8 @@ _FAKE_STATE = meta.RepoState(
     untracked_sha="ddd", state_sha="stable",
 )
 
-# Module path prefix for patching
-_MP = "meta_bridge_supervisor"
+
+
 
 
 class TestRunMetaBridgeLiveRouting:
@@ -282,7 +302,7 @@ class TestRunMetaBridgeLiveRouting:
 
     def test_failed_validation_still_calls_run_meta_review(self, pkg_in_repo):
         """Live mode + failed validations must reach run_meta_review, not short-circuit."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         failed_results = _make_validation_results(
             passed_names=["L4 contract"],
             failed_names_errors=[("dirty_state", "stale package")],
@@ -294,9 +314,10 @@ class TestRunMetaBridgeLiveRouting:
             "request_for_claude": "Fix the stale changed_files and re-run",
         }
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
-             patch(f"{_MP}.run_meta_review", return_value=codex_envelope) as mock_review:
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review", return_value=codex_envelope) as mock_review, \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=False)
 
         # Prove run_meta_review was called (not short-circuited)
@@ -307,7 +328,7 @@ class TestRunMetaBridgeLiveRouting:
 
     def test_failed_validation_commit_go_overridden(self, pkg_in_repo):
         """Live mode + failed validations + COMMIT_GO → overridden to ERROR_VALIDATION_FAILED."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         failed_results = _make_validation_results(
             passed_names=["L4 contract"],
             failed_names_errors=[("deferred_blockers", "unacknowledged blocker")],
@@ -319,9 +340,10 @@ class TestRunMetaBridgeLiveRouting:
             "request_for_claude": "Go ahead and commit",
         }
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
-             patch(f"{_MP}.run_meta_review", return_value=codex_envelope) as mock_review:
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review", return_value=codex_envelope) as mock_review, \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=False)
 
         mock_review.assert_called_once()
@@ -331,7 +353,7 @@ class TestRunMetaBridgeLiveRouting:
 
     def test_failed_validation_commit_go_hold_push_overridden(self, pkg_in_repo):
         """Live mode + failed validations + COMMIT_GO_HOLD_PUSH → also overridden."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         failed_results = _make_validation_results(
             passed_names=["L4 contract"],
             failed_names_errors=[("dirty_state", "stale")],
@@ -343,16 +365,17 @@ class TestRunMetaBridgeLiveRouting:
             "request_for_claude": "Commit but hold push",
         }
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
-             patch(f"{_MP}.run_meta_review", return_value=codex_envelope):
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review", return_value=codex_envelope), \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=False)
 
         assert resp.decision == "ERROR_VALIDATION_FAILED"
 
     def test_failed_validation_needs_phase_a_passes_through(self, pkg_in_repo):
         """Live mode + failed validations + NEEDS_PHASE_A → passes through."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         failed_results = _make_validation_results(
             passed_names=["L4 contract"],
             failed_names_errors=[("dirty_state", "stale")],
@@ -364,9 +387,10 @@ class TestRunMetaBridgeLiveRouting:
             "request_for_claude": "Re-enter Phase A with corrected scope",
         }
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
-             patch(f"{_MP}.run_meta_review", return_value=codex_envelope):
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review", return_value=codex_envelope), \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=False)
 
         assert resp.decision == "NEEDS_PHASE_A"
@@ -374,7 +398,7 @@ class TestRunMetaBridgeLiveRouting:
 
     def test_failed_validation_no_action_overridden(self, pkg_in_repo):
         """Live mode + failed validations + NO_ACTION → overridden to ERROR_VALIDATION_FAILED."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         failed_results = _make_validation_results(
             passed_names=["L4 contract"],
             failed_names_errors=[("dirty_state", "stale")],
@@ -386,16 +410,17 @@ class TestRunMetaBridgeLiveRouting:
             "request_for_claude": "No changes needed",
         }
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
-             patch(f"{_MP}.run_meta_review", return_value=codex_envelope):
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review", return_value=codex_envelope), \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=False)
 
         assert resp.decision == "ERROR_VALIDATION_FAILED"
 
     def test_all_passed_commit_go_succeeds(self, pkg_in_repo):
         """Live mode + all validations pass + COMMIT_GO → success."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         passed_results = _make_validation_results(
             passed_names=["L4 contract", "dirty_state", "deferred_blockers"],
             failed_names_errors=[],
@@ -407,9 +432,10 @@ class TestRunMetaBridgeLiveRouting:
             "request_for_claude": "Proceed with commit protocol",
         }
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(passed_results, True)), \
-             patch(f"{_MP}.run_meta_review", return_value=codex_envelope):
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(passed_results, True)), \
+             patch.object(meta, "run_meta_review", return_value=codex_envelope), \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=False)
 
         assert resp.decision == "COMMIT_GO"
@@ -417,15 +443,16 @@ class TestRunMetaBridgeLiveRouting:
 
     def test_dry_run_does_not_call_run_meta_review(self, pkg_in_repo):
         """Dry-run must NOT call run_meta_review regardless of validation outcome."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         passed_results = _make_validation_results(
             passed_names=["L4 contract", "dirty_state"],
             failed_names_errors=[],
         )
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(passed_results, True)), \
-             patch(f"{_MP}.run_meta_review") as mock_review:
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(passed_results, True)), \
+             patch.object(meta, "run_meta_review") as mock_review, \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=True)
 
         mock_review.assert_not_called()
@@ -434,15 +461,16 @@ class TestRunMetaBridgeLiveRouting:
 
     def test_dry_run_failed_does_not_call_run_meta_review(self, pkg_in_repo):
         """Dry-run with failed validations must NOT call run_meta_review."""
-        pkg_path = pkg_in_repo
+        pkg_path, isolated_paths = pkg_in_repo
         failed_results = _make_validation_results(
             passed_names=["L4 contract"],
             failed_names_errors=[("dirty_state", "stale")],
         )
 
-        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
-             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
-             patch(f"{_MP}.run_meta_review") as mock_review:
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review") as mock_review, \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
             resp = meta.run_meta_bridge(pkg_path, dry_run=True)
 
         mock_review.assert_not_called()
