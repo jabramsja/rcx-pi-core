@@ -45,7 +45,7 @@ def _as_trace_json(
         prev = s
 
     now = (
-        datetime.datetime.now(datetime.timezone.utc)
+        datetime.datetime.now(datetime.UTC)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
     )
