@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Enforce tracker sync for core structural code changes.
+# Enforce tracker sync for core structural code changes and tracker-relevant
+# control-plane tooling.
 #
 # Policy:
-# - If files under rcx_pi/selfhost/ or mu/ change, at least one tracker must change:
+# - If core structural files change, at least one tracker must change:
 #   STATUS.md or TASKS.md
+# - If control-plane tooling under mu/tools/agents/ changes, at least one tracker
+#   must change: STATUS.md or TASKS.md
 #
 # Usage:
 #   tools/enforce_tracker_sync.sh --staged
@@ -75,8 +78,15 @@ case "$MODE" in
         ;;
 esac
 
-CORE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^mu/' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)"
-if [[ -z "$CORE_CHANGED" ]]; then
+CORE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^(mu/|rcx_pi/selfhost/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)"
+CONTROL_PLANE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^mu/tools/agents/' || true)"
+TRACKER_RELEVANT_CHANGED="$(
+    printf '%s\n%s\n' "$CORE_CHANGED" "$CONTROL_PLANE_CHANGED" \
+        | sed '/^$/d' \
+        | sort -u
+)"
+
+if [[ -z "$TRACKER_RELEVANT_CHANGED" ]]; then
     echo "Tracker sync OK: no core changes detected."
     exit 0
 fi
@@ -89,10 +99,10 @@ fi
 
 echo ""
 echo "❌ TRACKER SYNC VIOLATION"
-echo "Core structural files changed, but STATUS.md/TASKS.md were not updated."
+echo "Tracker-relevant files changed, but STATUS.md/TASKS.md were not updated."
 echo ""
-echo "Core files changed:"
-echo "$CORE_CHANGED" | sed 's/^/  - /'
+echo "Tracker-relevant files changed:"
+echo "$TRACKER_RELEVANT_CHANGED" | sed 's/^/  - /'
 echo ""
 echo "Required: stage at least one tracker file:"
 echo "  - STATUS.md"
@@ -101,4 +111,3 @@ echo ""
 echo "If behavior/phase/task state did not change, add a short explicit note in TASKS.md."
 echo ""
 exit 1
-
