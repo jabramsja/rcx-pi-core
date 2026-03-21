@@ -81,6 +81,14 @@ class TestCommitBlockedOnFailedValidation:
             decision = meta.Decision.ERROR_VALIDATION_FAILED.value
         assert decision == "ERROR_VALIDATION_FAILED"
 
+    def test_no_action_blocked_when_validation_failed(self):
+        """NO_ACTION also blocked — nothing to do is wrong when validations fail."""
+        decision = "NO_ACTION"
+        all_passed = False
+        if not all_passed and decision in meta.COMMIT_CAPABLE_DECISIONS:
+            decision = meta.Decision.ERROR_VALIDATION_FAILED.value
+        assert decision == "ERROR_VALIDATION_FAILED"
+
     def test_commit_go_allowed_when_all_passed(self):
         """COMMIT_GO passes through when all validations pass."""
         decision = "COMMIT_GO"
@@ -129,12 +137,12 @@ class TestRoutingOnFailedValidation:
 class TestCommitCapableDecisionSet:
     """COMMIT_CAPABLE_DECISIONS must be exactly the commit-authorizing tokens."""
 
-    def test_commit_capable_is_exactly_two(self):
-        assert meta.COMMIT_CAPABLE_DECISIONS == {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
+    def test_commit_capable_is_exactly_three(self):
+        assert meta.COMMIT_CAPABLE_DECISIONS == {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH", "NO_ACTION"}
 
     def test_routing_decisions_not_commit_capable(self):
         routing = {"NEEDS_PHASE_A", "NEEDS_PHASE_B", "STOP_FOR_FOUNDER",
-                    "STOP_FOR_TRIAGE_DISCUSSION", "ERROR_VALIDATION_FAILED", "NO_ACTION"}
+                    "STOP_FOR_TRIAGE_DISCUSSION", "ERROR_VALIDATION_FAILED"}
         assert routing.isdisjoint(meta.COMMIT_CAPABLE_DECISIONS)
 
 
@@ -363,6 +371,27 @@ class TestRunMetaBridgeLiveRouting:
 
         assert resp.decision == "NEEDS_PHASE_A"
         assert resp.request_for_claude == "Re-enter Phase A with corrected scope"
+
+    def test_failed_validation_no_action_overridden(self, pkg_in_repo):
+        """Live mode + failed validations + NO_ACTION → overridden to ERROR_VALIDATION_FAILED."""
+        pkg_path = pkg_in_repo
+        failed_results = _make_validation_results(
+            passed_names=["L4 contract"],
+            failed_names_errors=[("dirty_state", "stale")],
+        )
+        codex_envelope = {
+            "decision": "NO_ACTION",
+            "summary": "Nothing to do",
+            "findings": [],
+            "request_for_claude": "No changes needed",
+        }
+
+        with patch(f"{_MP}.compute_repo_state", return_value=_FAKE_STATE), \
+             patch(f"{_MP}.run_validation_gates", return_value=(failed_results, False)), \
+             patch(f"{_MP}.run_meta_review", return_value=codex_envelope):
+            resp = meta.run_meta_bridge(pkg_path, dry_run=False)
+
+        assert resp.decision == "ERROR_VALIDATION_FAILED"
 
     def test_all_passed_commit_go_succeeds(self, pkg_in_repo):
         """Live mode + all validations pass + COMMIT_GO → success."""

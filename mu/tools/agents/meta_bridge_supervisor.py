@@ -801,8 +801,9 @@ TEMPLATE_AUTHORIZED_DECISIONS = {
     "ERROR_VALIDATION_FAILED",
 }
 
-# Decisions that authorize commit — blocked when any validation gate failed
-COMMIT_CAPABLE_DECISIONS = {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
+# Decisions that imply success — blocked when any validation gate failed.
+# Includes NO_ACTION because "nothing to do" is wrong when validations are failing.
+COMMIT_CAPABLE_DECISIONS = {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH", "NO_ACTION"}
 
 
 def parse_meta_envelope(output: str) -> dict[str, Any]:
