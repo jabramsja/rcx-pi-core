@@ -31,7 +31,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -764,7 +764,7 @@ def write_baseline(path: Path, current_inventories: dict[str, list[dict[str, obj
     """Write baseline file from current inventories."""
     payload = {
         "schema_version": 2,
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "inventories": {
             "total": {
                 "site_counts": _count_sites(current_inventories["total_sites"]),

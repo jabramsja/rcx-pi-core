@@ -873,7 +873,7 @@ def run_meta_bridge(
     Returns MetaBridgeResponse with decision and details.
     """
     # Resolve repo_root from git toplevel, anchored to the package file location
-    # This handles: (1) subdirectory invocation, (2) outside-repo invocation with absolute path
+    # Fail-closed: package must be inside a git repository
     package_dir = package_path.resolve().parent
     try:
         toplevel = subprocess.run(
@@ -883,8 +883,15 @@ def run_meta_bridge(
         ).stdout.strip()
         repo_root = Path(toplevel)
     except subprocess.CalledProcessError:
-        # Fall back to package directory if not in a git repo
-        repo_root = package_dir
+        # Package is not inside a git repository - fail-closed
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Package must be inside a git repository",
+            error_code="NOT_IN_GIT_REPO",
+            error_detail=f"git rev-parse --show-toplevel failed from {package_dir}",
+            recovery_hint="Ensure package file is inside a git repository",
+        )
     paths = meta_bridge_paths(repo_root)
     ensure_runtime_dirs(paths)
 

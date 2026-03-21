@@ -346,13 +346,36 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ---
 
-## NOW (empty by design; only populated if an invariant is broken)
+## NOW (normally empty; founder-directed exceptions may pin an active Codex queue)
 
-*(No active items - all invariants intact)*
+- **[NOW-CODEX-REDTEAM]** Founder-directed active Codex red-team queue:
+  `reports/control_plane/meta_bridge_rollout_2026-03-20.md`.
+  Current directive: remain in the hooks / agents / bridge control-surface lane
+  until founder says that lane is satisfied, then resume the queued runtime and
+  proof-class phases from the same packet. `.scratch/` copies remain
+  non-canonical drafts. **Current operating note:** the previously produced
+  hook/agent control-surface summary/evidence package is presently being used as
+  the seeded test corpus for meta-bridge work, not as the current remediation
+  target; the lane stays active because meta-bridge implementation belongs to
+  that same control surface.
 
 ---
 
 ## NEXT (short, bounded follow-ups)
+
+- **[META-BRIDGE-S1]** Meta-bridge supervisor Slice 1. Pre-commit convergence gate that consumes Claude's summary package and emits program-level decision. Read-only deliberation authority (prompt-enforced, not sandbox-enforced). **Scope:** (1) State machine (IDLE → AWAITING_CLAUDE_SUMMARY → AWAITING_META_REVIEW → decision + ERROR/TIMEOUT/ABORT), (2) Package validation (11 required fields including `task_id` and `blocker_report_paths`), (3) Decision vocabulary (success/redirect/error tokens), (4) Validation gates (full founder-bootstrap: git status porcelain, L4 contract, host-semantics ratchet, host-authority ratchet, docs consistency, attestation, deferred blockers, TASKS.md auth), (5) Structured output (success/error/partial schemas). **Constraints:** No Phase A/B execution. No commit authority. No recursive self-invocation. No nested bridge_supervisor invocation (cut from Slice 1). Timeout inherits from adapter config. Uses `--sandbox danger-full-access` (prompt-enforced read-only). Uses `.agent_bus/meta/` namespace (separate from bridge.db/bridge.lock). **Test case:** P0 Hook Hardening pre-commit package (`.scratch/hook_hardening_precommit_package.json`) derived from the last completed control-surface/hook-hardening summary, which is currently serving as the seeded corpus for exercising the meta-bridge slices rather than as the active remediation target. **Tracked packet:** `reports/control_plane/meta_bridge_rollout_2026-03-20.md`. **Lane:** hooks/agents/bridge control-surface red-team. **Category:** Governance tooling (no host semantics, no kernel impact). **Follow-on (Claude-owned):** keep `TASKS.md` updated as slice/state transitions land and introduce real repo-local executors for Phase A, Phase B, and the commit/merge flow so Claude can run explicit surfaces instead of reconstructing protocol from memory. **Bot comment follow-up (2026-03-21):** P1 Python 3.10 compat fix (`datetime.UTC` → `datetime.timezone.utc`), P2 fail-closed repo check for outside-repo package paths.
+
+- **[NEXT-CODEX-POST-REDTEAM]** Founder-directed parked follow-on queue once
+  the active control-surface red-team lane is founder-cleared:
+  `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
+  This packet adds the broader code/runtime structural-gap phase before the
+  host/boundary unification and later reduction lanes, so the post-red-team
+  order remains explicit across context compaction. This queue stays parked
+  until the planned post-merge meta-bridge follow-on has gone through its own
+  Phase A/Phase B path, the pre-commit supervisor is live as the standing
+  commit gate, and the Claude execution contract has been tightened around
+  tracked packets plus explicit Phase A / Phase B / commit executors rather
+  than memory recall alone.
 
 - ~~**[W3D-B] classify_mu VM unification.**~~ **COMPLETE** (2026-03-17). **PROMOTED FROM VECTOR** (2026-03-17). Migrate classify_mu.py off projection_runner onto stage0_vm_run_bounded (prerequisite: Wave 3D-A, PR #622). classify_mu.py:137 is the last production caller of projection_runner.py:74. After landing, projection_runner has zero production callers. **Scope:** (1) compile classify.v1 to Stage0 bundle, (2) replace projection_runner call with stage0_vm_run_bounded, preserving max_steps=1000 + exhaustion→"list" + budget accounting, (3) gate test, (4) cache isolation update. **Constraints:** No seed changes. No type-tagged fast path changes. No JS parity (Python-only boundary scaffolding). No projection_runner retirement (separate wave). **Promotion criteria met:** (1) compiled bundle readiness verified, (2) parity test plan defined (28 existing + 12 gate), (3) migration scope bounded (~25 LOC), (4) runtime contracts analyzed (max_steps, exhaustion, budget), (5) prerequisite 3D-A landed. **Design basis:** `.scratch/wave3d_promotion_packet.md` v3.
 
@@ -517,4 +540,3 @@ Decision record: `mu/docs/core/LegacySurfaceDecisionRecord.v0.md`
 - Round 24C: docs/ + roadmap/ → mu/docs/ convergence — 96 active files moved to `mu/docs/` (core, agents, cli, schemas, fixtures, execution, audit, reviews, roadmap), 41 files archived to `archive/docs/` + `archive/roadmap/`. Both `docs/` and `roadmap/` directories fully emptied. 231 path rewrites across 161 files. All 14 seed checksums updated (Python + JS). `enforce_tracker_sync.sh` updated to exclude `mu/docs/` from core-change detection. 5 test files with hardcoded `docs/` Path() references fixed. Reclassification guard enforced: zero-ref proof required for every ARCHIVE candidate
 
 Tracker sync note (2026-02-17, doc-drift-sync-deprecation): Comment-only changes — added DEPRECATED annotations to rcx_cli.py (archived program subcommand), worlds_probe.py, world_trace_cli.py, worlds/__init__.py (Rust bridge paths). Removed dead _rcx_dispatch function. Deleted 5 orphaned .pyc files. Added "Deprecated & Archived Code" section to rcx_pi/README.md explaining why Rust bridge paths remain and what was archived in Round 24H. No behavior/phase/debt change.
-
