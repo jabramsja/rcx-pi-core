@@ -45,10 +45,11 @@ touch in this lane:
 ## Canonical rollout order
 
 1. ~~Implement~~ `META-BRIDGE-S1` as the standing pre-commit supervisor **(done — merged PRs #641-#644)**.
-   **Active next step:** verify with seeded hook-hardening package
-   (`.scratch/hook_hardening_precommit_package.json`) as first end-to-end test:
-   `python3 mu/tools/agents/meta_bridge_supervisor.py --package .scratch/hook_hardening_precommit_package.json --dry-run --json`
-2. Keep the pre-commit supervisor as the standing gate before any commit flow.
+   ~~Verify with seeded hook-hardening package~~ **(done 2026-03-21)**.
+   Live Codex routing confirmed working: `NEEDS_PHASE_B` returned on stale package,
+   no supervisor defects. Routing fix (PR #653) confirmed: failed-validation packages
+   reach Codex, commit-capable decisions blocked, routing decisions pass through.
+2. **Active next step:** Keep the pre-commit supervisor as the standing gate before any commit flow.
 3. Design and implement the post-merge supervisor follow-on.
 4. Introduce real repo-local executors for:
    - Phase A
@@ -76,8 +77,8 @@ touch in this lane:
 
 - `META-BRIDGE-S1` **implemented and merged** (PRs #641-#644):
   `mu/tools/agents/meta_bridge_supervisor.py` + `mu/tools/agents/templates/meta_bridge_task.txt`
-- **Active next step:** run seeded Claude package through pre-commit supervisor
-  as first end-to-end verification (`.scratch/hook_hardening_precommit_package.json`)
+- **Seeded-package verification: complete** (2026-03-21). Live Codex routing confirmed.
+- **Active next step:** keep pre-commit supervisor as standing gate for commit flows
 - the post-merge supervisor is not implemented yet
 - real repo-local executors for Phase A / Phase B / commit do not exist yet
 - Claude memory still duplicates protocol truth
