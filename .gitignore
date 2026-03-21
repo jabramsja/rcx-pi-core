@@ -49,9 +49,15 @@ archive/docs/latex/build/
 # RCX tooling sandboxes
 sandbox_runs/
 
+# Working scratch directory (session artifacts, plans, bridge output)
+.scratch/
+
 # Agent review reports (local output, not tracked docs)
 # Use wildcard so we can un-ignore subdirectories
 reports/*
+# Tracked control-plane packets ARE tracked
+!reports/control_plane/
+!reports/control_plane/**
 # But deferred findings ARE tracked (policy decisions)
 !reports/deferred/
 # L4 wave indicator artifacts ARE tracked (evidence)
