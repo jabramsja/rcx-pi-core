@@ -892,6 +892,20 @@ def run_meta_bridge(
             error_detail=f"git rev-parse --show-toplevel failed from {package_dir}",
             recovery_hint="Ensure package file is inside a git repository",
         )
+
+    # Verify this is the RCX repo, not an unrelated git checkout
+    # Check for RCX marker files (CLAUDE.md + mu/ directory)
+    rcx_markers = [(repo_root / "CLAUDE.md"), (repo_root / "mu")]
+    if not all(m.exists() for m in rcx_markers):
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Package must be inside the RCX repository",
+            error_code="WRONG_GIT_REPO",
+            error_detail=f"Detected repo {repo_root} lacks RCX markers (CLAUDE.md, mu/)",
+            recovery_hint="Ensure package file is inside the RCX repository, not an unrelated git checkout",
+        )
+
     paths = meta_bridge_paths(repo_root)
     ensure_runtime_dirs(paths)
 
