@@ -1,7 +1,7 @@
 # Executor Surfaces Plan
 
 Date: 2026-03-22
-Status: Phase B (Slice 1+2 implementation, bridge-converged, non-blockers filed)
+Status: Complete (all 6 slices implemented, PRs #659-#661)
 Phase-A-Lock: LOCKED
 Purpose: decision-complete design for repo-local executor automation surfaces
 
