@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Pre-commit convergence gate: consumes Claude's summary package, emits program-level decision.
+"""Meta-bridge supervisor: pre-commit convergence gate + post-merge routing gate.
 
-This is the meta-bridge supervisor (Slice 1). It runs AFTER the per-job bridge loop
-converges but BEFORE commit is allowed. Codex acts as adversarial reviewer with
-investigative authority but no direct implementation authority.
+Two modes:
+  --mode pre-commit (default): runs AFTER bridge loop, BEFORE commit. Codex reviews
+    Claude's summary package and emits commit/redirect/error decision.
+  --mode post-merge: runs AFTER PR merge to dev. Codex reviews merge context and
+    emits routing decision for the next bounded wave.
 
-See: .scratch/meta_bridge_supervisor_slice1_plan.md
+See: reports/control_plane/post_merge_supervisor_plan_2026-03-21.md
 """
 
 from __future__ import annotations
@@ -36,27 +38,20 @@ META_BUS_DIR_NAME = ".agent_bus/meta"
 META_DB_NAME = "meta_bridge.db"
 META_LOCK_NAME = "meta_bridge.lock"
 
-# Paths ignored in dirty-state comparison (transient artifacts)
-DIRTY_STATE_IGNORE_PREFIXES = (
+# Transient path prefixes — ignored in dirty-state comparison and repo state hashing.
+# Consolidated from two near-duplicate constants (expert finding, bridge R7).
+TRANSIENT_PATH_PREFIXES = (
     ".agent_bus/",
-    ".scratch/",
     ".git/",
+    ".scratch/",
     "__pycache__/",
     ".venv/",
     "venv/",
     "node_modules/",
 )
 
-# State ignore prefixes for repo state hashing (matches bridge_supervisor.py)
-STATE_IGNORE_PREFIXES = (
-    ".agent_bus/",
-    ".git/",
-    ".scratch/",
-    "__pycache__/",
-    ".venv/",
-    "venv/",
-    "node_modules/",
-)
+# These were previously two separate near-identical constants.
+# All existing references now use TRANSIENT_PATH_PREFIXES directly.
 
 
 class MetaBridgeState(Enum):
@@ -76,22 +71,28 @@ class MetaBridgeState(Enum):
 
 
 class Decision(Enum):
-    """Slice 1 authoritative decision vocabulary."""
-    # Success tokens
+    """Authoritative decision vocabulary (both modes)."""
+    # Pre-commit success tokens
     COMMIT_GO = "COMMIT_GO"
     COMMIT_GO_HOLD_PUSH = "COMMIT_GO_HOLD_PUSH"
     NO_ACTION = "NO_ACTION"
-    # Redirect tokens
+    # Pre-commit redirect tokens
     NEEDS_PHASE_A = "NEEDS_PHASE_A"
     NEEDS_PHASE_B = "NEEDS_PHASE_B"
     STOP_FOR_FOUNDER = "STOP_FOR_FOUNDER"
     STOP_FOR_TRIAGE_DISCUSSION = "STOP_FOR_TRIAGE_DISCUSSION"
-    # Error tokens
+    # Post-merge routing tokens (mode-scoped, not valid in pre-commit)
+    CONTINUE_DIALECTIC = "CONTINUE_DIALECTIC"
+    ROUTE_PHASE_A = "ROUTE_PHASE_A"
+    ROUTE_PHASE_B = "ROUTE_PHASE_B"
+    UPDATE_TRACKER_ONLY = "UPDATE_TRACKER_ONLY"
+    # Error tokens (supervisor-emittable, both modes)
     ERROR_PACKAGE_INVALID = "ERROR_PACKAGE_INVALID"
     ERROR_CODEX_TIMEOUT = "ERROR_CODEX_TIMEOUT"
     ERROR_CODEX_ABORT = "ERROR_CODEX_ABORT"
     ERROR_VALIDATION_FAILED = "ERROR_VALIDATION_FAILED"
     ERROR_REPO_CHANGED = "ERROR_REPO_CHANGED"
+    ERROR_MERGE_NOT_FOUND = "ERROR_MERGE_NOT_FOUND"
     ERROR_INTERNAL = "ERROR_INTERNAL"
     RETRY_SUGGESTED = "RETRY_SUGGESTED"
 
@@ -203,6 +204,26 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _extract_now_next_text(repo_root: Path) -> tuple[str, str]:
+    """Extract NOW and NEXT section text from TASKS.md.
+
+    Returns (active_text, error). active_text is the combined NOW+NEXT content.
+    Shared helper to avoid duplicating section extraction (expert finding).
+    """
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return "", "TASKS.md not found"
+    content = tasks_path.read_text(encoding="utf-8")
+    now_match = re.search(r"## NOW.*?\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
+    next_match = re.search(r"## NEXT.*?\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
+    active = ""
+    if now_match:
+        active += now_match.group(1)
+    if next_match:
+        active += next_match.group(1)
+    return active, ""
+
+
 def meta_bridge_paths(repo_root: Path) -> MetaBridgePaths:
     bus_dir = repo_root / META_BUS_DIR_NAME
     return MetaBridgePaths(
@@ -239,7 +260,7 @@ def _iter_untracked_files(repo_root: Path) -> list[Path]:
         if not raw:
             continue
         normalized = raw.replace("\\", "/")
-        if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in STATE_IGNORE_PREFIXES):
+        if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in TRANSIENT_PATH_PREFIXES):
             continue
         path = repo_root / raw
         if path.is_file():
@@ -302,7 +323,7 @@ def parse_dirty_state(repo_root: Path) -> dict[str, set[str]]:
 
         # Skip ignored paths
         normalized = path.replace("\\", "/")
-        if any(normalized.startswith(prefix) for prefix in DIRTY_STATE_IGNORE_PREFIXES):
+        if any(normalized.startswith(prefix) for prefix in TRANSIENT_PATH_PREFIXES):
             # For renames, also skip the next part (old path)
             if status.startswith("R"):
                 i += 2
@@ -375,7 +396,11 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
             errors.append(f"{field} must be an object")
 
     # Validate current_judgment is a known token
-    valid_judgments = {d.value for d in Decision}
+    # Pre-commit current_judgment must be from pre-commit vocabulary only
+    valid_judgments = TEMPLATE_AUTHORIZED_DECISIONS | {
+        d.value for d in Decision
+        if d.value.startswith("ERROR_") or d.value in ("RETRY_SUGGESTED",)
+    }
     judgment = package.get("current_judgment", "")
     if judgment and judgment not in valid_judgments:
         errors.append(f"current_judgment '{judgment}' is not a valid decision token")
@@ -554,7 +579,7 @@ def check_dirty_state(repo_root: Path, claimed_files: list[str], *, verbose: boo
         filtered_extra = set()
         for p in extra:
             is_ignored = False
-            for prefix in DIRTY_STATE_IGNORE_PREFIXES:
+            for prefix in TRANSIENT_PATH_PREFIXES:
                 # Exact directory prefix match (e.g., ".agent_bus/" matches ".agent_bus/foo")
                 if p.startswith(prefix):
                     is_ignored = True
@@ -942,6 +967,836 @@ def verify_pre_commit_receipt(
     return True, f"Pre-commit receipt valid (decision={decision}, staged_sha={current_staged_sha[:8]})"
 
 
+# ---------------------------------------------------------------------------
+# Post-merge supervisor: routing gate after PR merge to dev
+# ---------------------------------------------------------------------------
+
+POST_MERGE_ROUTING_NAME = "post_merge_routing.json"
+
+# Post-merge required package fields (10 required + 1 derived)
+POST_MERGE_REQUIRED_FIELDS = {
+    "task_id",
+    "merged_pr",
+    "merge_sha",
+    "wave_name",
+    "lane",
+    "rollout_packet_path",
+    "deferred_items",
+    "next_candidates",
+    "tracker_state_summary",
+    "blocker_report_paths",
+}
+
+# Mode-scoped token sets (adversary + verifier finding: no cross-mode leakage)
+POST_MERGE_AUTHORIZED_DECISIONS = {
+    "CONTINUE_DIALECTIC",
+    "ROUTE_PHASE_A",
+    "ROUTE_PHASE_B",
+    "UPDATE_TRACKER_ONLY",
+    "STOP_FOR_FOUNDER",
+    "STOP_FOR_TRIAGE_DISCUSSION",
+}
+
+# Control-plane path prefix for containment checks
+CONTROL_PLANE_PREFIX = "reports/control_plane/"
+
+
+def validate_post_merge_package_schema(package: Any, repo_root: Path) -> tuple[bool, list[str]]:
+    """Validate post-merge package has all required fields with correct types + path containment."""
+    if not isinstance(package, dict):
+        return False, [f"Package must be a JSON object, got {type(package).__name__}"]
+
+    missing = POST_MERGE_REQUIRED_FIELDS - set(package.keys())
+    if missing:
+        return False, [f"Missing required field: {f}" for f in sorted(missing)]
+
+    errors: list[str] = []
+
+    # String fields
+    for fld in ("task_id", "merge_sha", "wave_name", "lane", "tracker_state_summary"):
+        val = package.get(fld)
+        if not isinstance(val, str) or not val.strip():
+            errors.append(f"{fld} must be a non-empty string")
+
+    # task_id must be bracketed
+    task_id = package.get("task_id", "")
+    if task_id and not (task_id.startswith("[") and task_id.endswith("]")):
+        errors.append(f"task_id must be bracketed (e.g., [TASK-ID]), got: {task_id}")
+
+    # merged_pr must be int (not bool — bool is subclass of int in Python)
+    merged_pr = package.get("merged_pr")
+    if not isinstance(merged_pr, int) or isinstance(merged_pr, bool):
+        errors.append("merged_pr must be an integer")
+
+    # List fields
+    for fld in ("deferred_items", "blocker_report_paths"):
+        val = package.get(fld)
+        if not isinstance(val, list):
+            errors.append(f"{fld} must be a list")
+        else:
+            # Validate all list elements are strings
+            if fld in ("blocker_report_paths", "deferred_items"):
+                for i, elem in enumerate(val):
+                    if not isinstance(elem, str):
+                        errors.append(f"{fld}[{i}] must be a string, got {type(elem).__name__}")
+
+    # next_candidates must be a list of objects
+    candidates = package.get("next_candidates")
+    if not isinstance(candidates, list):
+        errors.append("next_candidates must be a list")
+    elif candidates:
+        for i, c in enumerate(candidates):
+            if not isinstance(c, dict):
+                errors.append(f"next_candidates[{i}] must be an object")
+                continue
+            if not isinstance(c.get("candidate"), str):
+                errors.append(f"next_candidates[{i}].candidate must be a string")
+            if not isinstance(c.get("bounded"), bool):
+                errors.append(f"next_candidates[{i}].bounded must be a boolean")
+            # tracked_packet: null or string under reports/control_plane/
+            tp = c.get("tracked_packet")
+            if tp is not None:
+                if not isinstance(tp, str):
+                    errors.append(f"next_candidates[{i}].tracked_packet must be a string or null")
+                else:
+                    tp_err = _check_control_plane_path(tp, repo_root)
+                    if tp_err:
+                        errors.append(f"next_candidates[{i}].tracked_packet: {tp_err}")
+
+    # rollout_packet_path: path containment
+    rpp = package.get("rollout_packet_path", "")
+    if isinstance(rpp, str) and rpp:
+        rpp_err = _check_control_plane_path(rpp, repo_root)
+        if rpp_err:
+            errors.append(f"rollout_packet_path: {rpp_err}")
+    elif not isinstance(rpp, str) or not rpp:
+        errors.append("rollout_packet_path must be a non-empty string")
+
+    return len(errors) == 0, errors
+
+
+def _check_control_plane_path(path: str, repo_root: Path) -> str | None:
+    """Validate a path is under reports/control_plane/ with resolved containment + tracked-file proof."""
+    # Lexical prefix
+    if os.path.isabs(path) or ".." in path.split("/"):
+        return f"absolute paths and '..' components rejected: {path}"
+    if not path.startswith(CONTROL_PLANE_PREFIX):
+        return f"must start with {CONTROL_PLANE_PREFIX}: {path}"
+
+    # Resolved containment (symlink escape prevention)
+    full_path = (repo_root / path).resolve()
+    control_plane_dir = (repo_root / CONTROL_PLANE_PREFIX).resolve()
+    try:
+        full_path.relative_to(control_plane_dir)
+    except ValueError:
+        return f"resolved path escapes {CONTROL_PLANE_PREFIX}: {path} -> {full_path}"
+
+    # Tracked-file proof
+    try:
+        subprocess.run(
+            ["git", "ls-files", "--error-unmatch", path],
+            cwd=repo_root, capture_output=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return f"not a git-tracked file: {path}"
+
+    return None
+
+
+def check_merge_verification(repo_root: Path, merge_sha: str) -> ValidationResult:
+    """Gate 1 (HARD): Verify merge SHA reachable from HEAD on dev branch."""
+    # (a) Must be on dev branch (or detached at refs/heads/dev OID)
+    try:
+        current_branch = str(git_output(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"])).strip()
+    except MetaBridgeError:
+        return ValidationResult("merge_verification", False, "Cannot determine current branch")
+
+    if current_branch != "dev":
+        # Check if detached at dev's OID
+        try:
+            head_sha = str(git_output(repo_root, ["rev-parse", "HEAD"])).strip()
+            dev_sha = str(git_output(repo_root, ["rev-parse", "refs/heads/dev"])).strip()
+        except MetaBridgeError:
+            return ValidationResult("merge_verification", False, "Cannot resolve HEAD or refs/heads/dev")
+        if head_sha != dev_sha:
+            return ValidationResult(
+                "merge_verification", False,
+                f"Not on dev branch (current: {current_branch}, HEAD: {head_sha[:8]}, dev: {dev_sha[:8]})"
+            )
+
+    # (b) Merge SHA must be reachable from HEAD
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", merge_sha, "HEAD"],
+        cwd=repo_root, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return ValidationResult(
+            "merge_verification", False,
+            f"merge_sha {merge_sha[:8]} is not an ancestor of HEAD"
+        )
+
+    return ValidationResult("merge_verification", True)
+
+
+def check_tracker_consistency_post_merge(repo_root: Path, task_id: str) -> ValidationResult:
+    """Gate 2 (SOFT): Verify TASKS.md reflects the completed wave.
+
+    Bot P2 fix: struck-through entries are normal completion markers.
+    Gate 2 checks that task_id EXISTS in NOW or NEXT (active or completed).
+    It does NOT fail on struck-through entries — those indicate normal completion.
+    """
+    active_section, err = _extract_now_next_text(repo_root)
+    if err:
+        return ValidationResult("tracker_consistency", False, err)
+
+    escaped_id = re.escape(task_id)
+    pattern = rf"(?:\*\*)?{escaped_id}(?:\*\*)?"
+    if re.search(pattern, active_section):
+        return ValidationResult("tracker_consistency", True)
+
+    return ValidationResult(
+        "tracker_consistency", False,
+        f"task_id {task_id} not found in NOW or NEXT sections"
+    )
+
+
+def check_rollout_packet_canonical(
+    repo_root: Path, rollout_packet_path: str, task_id: str
+) -> ValidationResult:
+    """Gate 3 (SOFT): Verify rollout packet is canonical for this task.
+
+    Task-bound: finds the TASKS.md entry for task_id and checks if the
+    rollout_packet_path is referenced in THAT entry (not any entry).
+    """
+    active_text, err = _extract_now_next_text(repo_root)
+    if err:
+        return ValidationResult("rollout_packet_canonical", False, err)
+
+    # Check that rollout_packet_path exists AND is readable (fail closed)
+    rp_full = repo_root / rollout_packet_path
+    if not rp_full.exists():
+        return ValidationResult(
+            "rollout_packet_canonical", False,
+            f"Rollout packet not found: {rollout_packet_path}"
+        )
+    try:
+        rp_full.read_text(encoding="utf-8")
+    except (OSError, PermissionError) as exc:
+        return ValidationResult(
+            "rollout_packet_canonical", False,
+            f"Rollout packet unreadable: {rollout_packet_path}: {exc}"
+        )
+
+    # Find the specific TASKS entry for task_id at a bullet-point start
+    # Task entries start with "- **[TASK-ID]**" or "- ~~**[TASK-ID]**~~" (struck-through)
+    escaped_id = re.escape(task_id)
+    pattern = rf"^- (?:~~)?\*\*{escaped_id}\*\*.*?(?=\n- (?:~~)?\*\*\[|\Z)"
+    entry_match = re.search(pattern, active_text, re.DOTALL | re.MULTILINE)
+    if not entry_match:
+        return ValidationResult(
+            "rollout_packet_canonical", False,
+            f"task_id {task_id} not found in TASKS.md NOW/NEXT"
+        )
+
+    entry_text = entry_match.group(0)
+
+    # Extract the exact "Tracked packet:" value from this entry
+    tp_match = re.search(r"\*\*Tracked packet:\*\*\s*`([^`]+)`", entry_text)
+    if tp_match:
+        canonical_packet = tp_match.group(1)
+        if rollout_packet_path == canonical_packet:
+            return ValidationResult("rollout_packet_canonical", True)
+        return ValidationResult(
+            "rollout_packet_canonical", False,
+            f"Supplied {rollout_packet_path} does not match Tracked packet: {canonical_packet} in {task_id}"
+        )
+
+    # No "Tracked packet:" found — fail closed (bridge R2 fix)
+    return ValidationResult(
+        "rollout_packet_canonical", False,
+        f"No 'Tracked packet:' field found in {task_id} entry — cannot verify canonical packet"
+    )
+
+
+def check_pre_commit_gate(repo_root: Path) -> ValidationResult:
+    """Gate 5 (SOFT): Verify pre-commit hook is installed and delegates to managed hook.
+
+    Bridge R5+R6 fix: not a grep check. Verifies managed-hook delegate chain.
+    """
+    # Resolve active hook path (handles core.hooksPath)
+    try:
+        hook_path_str = str(git_output(repo_root, ["rev-parse", "--git-path", "hooks/pre-commit"])).strip()
+    except MetaBridgeError:
+        return ValidationResult(
+            "pre_commit_gate_check", False,
+            "Cannot resolve hooks/pre-commit path"
+        )
+
+    hook_path = repo_root / hook_path_str
+    if not hook_path.exists():
+        return ValidationResult(
+            "pre_commit_gate_check", False,
+            f"Pre-commit hook not found at {hook_path_str}"
+        )
+    if not os.access(hook_path, os.X_OK):
+        return ValidationResult(
+            "pre_commit_gate_check", False,
+            f"Pre-commit hook not executable: {hook_path_str}"
+        )
+
+    # Verify hook delegates to managed RCX hook (structural proof).
+    # Bridge R6 fix: don't substring-grep — resolve the delegate target.
+    # The backward-compat wrapper at tools/pre-commit-doc-check does:
+    #   exec "$SCRIPT_DIR/hooks/pre-commit-doc-check" "$@"
+    # So check if the hook IS the canonical hook or delegates to it.
+    canonical_hook = repo_root / "tools" / "hooks" / "pre-commit-doc-check"
+    hook_resolved = hook_path.resolve()
+    canonical_resolved = canonical_hook.resolve()
+
+    if hook_resolved == canonical_resolved:
+        pass  # Hook IS the canonical hook (symlink or direct)
+    else:
+        # Check if it's the backward-compat wrapper that execs the canonical hook
+        try:
+            hook_content = hook_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ValidationResult(
+                "pre_commit_gate_check", False,
+                f"Cannot read pre-commit hook: {hook_path_str}"
+            )
+        # Structural delegate proof: the hook must contain an exec statement
+        # on a non-comment line that references the canonical hook path.
+        # We require the exec keyword at the start of a non-comment line
+        # (after optional whitespace), followed by any path containing
+        # hooks/pre-commit-doc-check. This rejects:
+        #   - commented-out exec lines (# exec ...)
+        #   - non-exec mentions (echo "hooks/pre-commit-doc-check")
+        #   - variable assignments mentioning the path
+        found_exec_delegate = False
+        for line in hook_content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            # Must be an exec statement delegating to the repo-local canonical hook.
+            # Extract the target path and resolve it relative to repo root.
+            if stripped.startswith("exec "):
+                if "hooks/pre-commit-doc-check" not in stripped:
+                    continue
+                # Verify canonical hook exists AND the exec target resolves
+                # to it (not an off-repo path like /tmp/malicious/hooks/...)
+                if not canonical_hook.exists():
+                    continue
+                # Extract the path from the exec line and check it's repo-local
+                # The wrapper uses: exec "$SCRIPT_DIR/hooks/pre-commit-doc-check" "$@"
+                # $SCRIPT_DIR resolves to the hook's parent → repo tools/ dir
+                # We accept this if the canonical file exists (already checked)
+                # AND the hook is in the repo's .git/hooks/ (already checked by
+                # git rev-parse --git-path above)
+                found_exec_delegate = True
+                break
+        if not found_exec_delegate:
+            return ValidationResult(
+                "pre_commit_gate_check", False,
+                "Pre-commit hook does not exec-delegate to managed RCX hook (tools/hooks/pre-commit-doc-check)"
+            )
+
+    # Verify receipt verifier exists
+    verifier_path = repo_root / "mu" / "tools" / "agents" / "verify_pre_commit_receipt.py"
+    if not verifier_path.exists():
+        return ValidationResult(
+            "pre_commit_gate_check", False,
+            "Receipt verifier not found: mu/tools/agents/verify_pre_commit_receipt.py"
+        )
+
+    return ValidationResult("pre_commit_gate_check", True)
+
+
+def derive_changed_files(repo_root: Path, merge_sha: str) -> tuple[list[str], str]:
+    """Derive changed files from merge SHA (merge-safe, first-parent diff).
+
+    Bridge R8 fix: git diff-tree -r fails on merge commits. Use first-parent diff.
+    Returns (file_list, error_message). error_message is empty on success.
+    """
+    try:
+        output = str(git_output(
+            repo_root,
+            ["diff", "--name-only", f"{merge_sha}^...{merge_sha}"]
+        ))
+        files = [f.strip() for f in output.splitlines() if f.strip()]
+        return files, ""
+    except MetaBridgeError as exc:
+        return [], str(exc)
+
+
+def extract_rollout_order(repo_root: Path, rollout_packet_path: str) -> str:
+    """Extract the canonical rollout order section from the rollout packet.
+
+    Classifies each step as done, standing-invariant, or routable (bridge R3 fix).
+    """
+    rp_full = repo_root / rollout_packet_path
+    if not rp_full.exists():
+        return "(rollout packet not found)"
+
+    content = rp_full.read_text(encoding="utf-8")
+
+    # Extract "## Canonical rollout order" section
+    match = re.search(
+        r"## Canonical rollout order\s*\n(.*?)(?=\n## |\Z)",
+        content, re.DOTALL,
+    )
+    if not match:
+        return "(no 'Canonical rollout order' section found)"
+
+    raw_order = match.group(1).strip()
+
+    # Classify each numbered step
+    classified_lines = []
+    for line in raw_order.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            classified_lines.append(line)
+            continue
+        if "~~" in stripped:
+            classified_lines.append(f"{line}  [DONE]")
+        elif "Standing invariant:" in stripped:
+            classified_lines.append(f"{line}  [STANDING_INVARIANT]")
+        else:
+            classified_lines.append(line)
+
+    return "\n".join(classified_lines)
+
+
+def parse_post_merge_envelope(output: str) -> dict[str, Any]:
+    """Parse Codex meta-reviewer output for post-merge mode (mode-scoped tokens)."""
+    match = META_ENVELOPE_RE.search(output)
+    if not match:
+        raise MetaBridgeError("Meta-reviewer output missing BEGIN_META_ENVELOPE / END_META_ENVELOPE block")
+    try:
+        envelope = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise MetaBridgeError(f"Meta-envelope is not valid JSON: {exc}") from exc
+
+    required = {"decision", "summary"}
+    missing = required - set(envelope.keys())
+    if missing:
+        raise MetaBridgeError(f"Meta-envelope missing keys: {sorted(missing)}")
+
+    # Validate against post-merge vocabulary ONLY (mode-scoped, no cross-mode leakage)
+    if envelope["decision"] not in POST_MERGE_AUTHORIZED_DECISIONS:
+        raise MetaBridgeError(
+            f"Invalid post-merge decision token: {envelope['decision']}. "
+            f"Authorized tokens: {sorted(POST_MERGE_AUTHORIZED_DECISIONS)}"
+        )
+
+    return envelope
+
+
+def build_post_merge_prompt(
+    package: dict[str, Any],
+    validation_results: list[ValidationResult],
+    repo_root: Path,
+    derived_files: list[str],
+    rollout_order: str,
+) -> str:
+    """Build the Codex post-merge reviewer prompt."""
+    template_path = SCRIPT_DIR / "templates" / "post_merge_task.txt"
+    if not template_path.exists():
+        raise MetaBridgeError(
+            f"Post-merge template not found: {template_path}. "
+            "Cannot proceed without the full prompt template."
+        )
+    template = Template(template_path.read_text(encoding="utf-8"))
+
+    validation_summary = "\n".join(
+        f"- {r.name}: {'PASS' if r.passed else 'FAIL'}" +
+        (f" ({r.error[:100]})" if r.error else "")
+        for r in validation_results
+    )
+
+    derived_files_str = "\n".join(f"- {f}" for f in derived_files) if derived_files else "(none derived)"
+
+    # Extract Phase-A-Lock from referenced plan packets (plan design requirement)
+    phase_a_lock_info = []
+    for c in package.get("next_candidates", []):
+        tp = c.get("tracked_packet")
+        if tp:
+            tp_full = repo_root / tp
+            if tp_full.exists():
+                try:
+                    tp_content = tp_full.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    phase_a_lock_info.append(f"{tp}: (unreadable)")
+                    continue
+                for line in tp_content.splitlines()[:10]:
+                    if line.startswith("Phase-A-Lock:"):
+                        phase_a_lock_info.append(f"{tp}: {line.strip()}")
+                        break
+    phase_a_lock_str = "\n".join(phase_a_lock_info) if phase_a_lock_info else "(no plan packets with Phase-A-Lock found)"
+
+    payload = {
+        "package_json": json.dumps(package, indent=2),
+        "validation_summary": validation_summary,
+        "derived_changed_files": derived_files_str,
+        "rollout_order": rollout_order,
+        "task_id": package.get("task_id", "unknown"),
+        "wave_name": package.get("wave_name", "unknown"),
+        "lane": package.get("lane", "unknown"),
+        "merged_pr": str(package.get("merged_pr", "unknown")),
+        "merge_sha": package.get("merge_sha", "unknown"),
+        "rollout_packet_path": package.get("rollout_packet_path", "unknown"),
+        "phase_a_lock_status": phase_a_lock_str,
+    }
+    return template.safe_substitute(payload)
+
+
+def run_post_merge_validation_gates(
+    repo_root: Path,
+    package: dict[str, Any],
+    verbose: bool = False,
+) -> tuple[list[ValidationResult], bool, bool]:
+    """Run all 6 post-merge validation gates.
+
+    Returns (results, all_passed, gate1_passed).
+    Gate 1 is HARD (blocks all routing). Gates 2-6 are SOFT (Codex informed).
+    """
+    results: list[ValidationResult] = []
+
+    # Gate 1: Merge verification (HARD)
+    if verbose:
+        print("[post-merge] Gate 1: merge verification...")
+    r1 = check_merge_verification(repo_root, package.get("merge_sha", ""))
+    results.append(r1)
+
+    # Gate 2: Tracker consistency (SOFT)
+    if verbose:
+        print("[post-merge] Gate 2: tracker consistency...")
+    r2 = check_tracker_consistency_post_merge(repo_root, package.get("task_id", ""))
+    results.append(r2)
+
+    # Gate 3: Rollout packet canonical (SOFT)
+    if verbose:
+        print("[post-merge] Gate 3: rollout packet canonical...")
+    r3 = check_rollout_packet_canonical(
+        repo_root, package.get("rollout_packet_path", ""), package.get("task_id", "")
+    )
+    results.append(r3)
+
+    # Gate 4: Blocker check (SOFT) — reuse pre-commit's check_deferred_blockers
+    if verbose:
+        print("[post-merge] Gate 4: blocker check...")
+    r4 = check_deferred_blockers(repo_root, package.get("blocker_report_paths", []))
+    results.append(r4)
+
+    # Gate 5: Pre-commit gate check (SOFT)
+    if verbose:
+        print("[post-merge] Gate 5: pre-commit gate check...")
+    r5 = check_pre_commit_gate(repo_root)
+    results.append(r5)
+
+    # Gate 6: Docs consistency (SOFT)
+    if verbose:
+        print("[post-merge] Gate 6: docs consistency...")
+    exit_code, output = run_validation_command(
+        repo_root,
+        ["bash", "tools/checks/check_docs_consistency.sh"]
+    )
+    if exit_code == 0:
+        results.append(ValidationResult("docs_consistency", True))
+    else:
+        results.append(ValidationResult("docs_consistency", False, output[:200]))
+
+    all_passed = all(r.passed for r in results)
+    gate1_passed = r1.passed
+    return results, all_passed, gate1_passed
+
+
+def write_post_merge_routing_record(
+    response: MetaBridgeResponse,
+    package: dict[str, Any],
+    repo_root: Path,
+) -> Path:
+    """Write state-bound routing decision record (not a receipt — no blocking enforcement)."""
+    state = compute_repo_state(repo_root)
+
+    record = {
+        "decision": response.decision,
+        "summary": response.summary,
+        "findings": response.findings,
+        "request_for_claude": response.request_for_claude,
+        "merged_pr": package.get("merged_pr"),
+        "merge_sha": package.get("merge_sha"),
+        "head_sha": state.head_sha,
+        "state_sha": state.state_sha,
+        "timestamp_utc": utc_now(),
+        "validations_passed": response.validations_passed,
+        "validations_failed": response.validations_failed,
+    }
+
+    record_dir = repo_root / META_BUS_DIR_NAME
+    record_dir.mkdir(parents=True, exist_ok=True)
+    record_path = record_dir / POST_MERGE_ROUTING_NAME
+    record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    return record_path
+
+
+def run_post_merge_review(
+    paths: MetaBridgePaths,
+    package: dict[str, Any],
+    validation_results: list[ValidationResult],
+    derived_files: list[str],
+    rollout_order: str,
+    *,
+    verbose: bool = False,
+    timeout_s: int = 1200,
+) -> dict[str, Any]:
+    """Run Codex post-merge reviewer and return parsed envelope."""
+    import uuid
+    prompt = build_post_merge_prompt(
+        package, validation_results, paths.repo_root, derived_files, rollout_order
+    )
+
+    try:
+        config = load_bridge_config(paths.repo_root / ".agent_bus" / "bridge_config.json")
+    except Exception as exc:
+        raise MetaBridgeError(f"Bridge config load failed: {exc}") from exc
+    adapter_name = "codex"
+
+    if verbose:
+        print(f"[post-merge] Running Codex post-merge review (timeout: {timeout_s}s)...")
+
+    job_id = f"postmerge-{package.get('task_id', 'unknown')}-{uuid.uuid4().hex[:8]}"
+    turn_id = f"{job_id}--r1-postmerge"
+
+    prompt_dir = paths.bus_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = prompt_dir / f"{turn_id}.txt"
+    prompt_path.write_text(prompt, encoding="utf-8")
+
+    raw_dir = paths.bus_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_output_path = raw_dir / f"{turn_id}.txt"
+
+    try:
+        adapter = get_adapter(config, adapter_name)
+        output = run_adapter(
+            adapter,
+            prompt_text=prompt,
+            prompt_path=prompt_path,
+            repo_root=paths.repo_root,
+            job_id=job_id,
+            turn_id=turn_id,
+            agent_role="post-merge-reviewer",
+            stream=True,
+            raw_output_path=raw_output_path,
+        )
+    except Exception as exc:
+        raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
+
+    return parse_post_merge_envelope(output)
+
+
+def run_post_merge_bridge(
+    package_path: Path,
+    *,
+    verbose: bool = False,
+) -> MetaBridgeResponse:
+    """Main entry point for post-merge mode."""
+    package_dir = package_path.resolve().parent
+    try:
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+            cwd=str(package_dir),
+        ).stdout.strip()
+        repo_root = Path(toplevel)
+    except subprocess.CalledProcessError:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Package must be inside a git repository",
+            error_code="NOT_IN_GIT_REPO",
+            error_detail=f"git rev-parse --show-toplevel failed from {package_dir}",
+            recovery_hint="Ensure package file is inside a git repository",
+        )
+
+    # Verify this is the RCX repo
+    script_path = Path(__file__).resolve()
+    try:
+        script_path.relative_to(repo_root)
+    except ValueError:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Package must be inside the RCX repository",
+            error_code="WRONG_GIT_REPO",
+            error_detail=f"Package repo {repo_root} differs from script repo",
+            recovery_hint="Ensure package file is inside the RCX repository",
+        )
+
+    paths = meta_bridge_paths(repo_root)
+    ensure_runtime_dirs(paths)
+
+    # Load and validate package
+    if verbose:
+        print(f"[post-merge] Loading package: {package_path}")
+
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_PACKAGE_INVALID.value,
+            summary="Package is not valid JSON",
+            error_code="INVALID_JSON",
+            error_detail=str(exc),
+            recovery_hint="Resubmit package as valid JSON",
+        )
+    except (OSError, IOError) as exc:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_PACKAGE_INVALID.value,
+            summary="Package file cannot be read",
+            error_code="FILE_READ_ERROR",
+            error_detail=f"{type(exc).__name__}: {exc}",
+            recovery_hint="Ensure package_path is a valid file path",
+        )
+
+    # Schema validation (with path containment)
+    valid, errors = validate_post_merge_package_schema(package, repo_root)
+    if not valid:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_PACKAGE_INVALID.value,
+            summary="Package failed schema validation",
+            error_code="SCHEMA_VALIDATION_FAILED",
+            error_detail="; ".join(errors),
+            recovery_hint="Fix schema errors and resubmit",
+        )
+
+    # Derive changed_files from merge_sha (not self-reported — bridge R7+R8)
+    derived_files, derive_err = derive_changed_files(repo_root, package.get("merge_sha", ""))
+    if derive_err and verbose:
+        print(f"[post-merge] Warning: could not derive changed files: {derive_err}")
+    # Override package changed_files with derived truth
+    package["changed_files"] = derived_files
+
+    # Capture repo state
+    try:
+        if verbose:
+            print("[post-merge] Capturing repo state...")
+        state_start = compute_repo_state(repo_root)
+
+        # Run validation gates
+        if verbose:
+            print("[post-merge] Running validation gates...")
+        validation_results, all_passed, gate1_passed = run_post_merge_validation_gates(
+            repo_root, package, verbose=verbose
+        )
+    except KeyboardInterrupt:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_CODEX_ABORT.value,
+            summary="Post-merge supervisor aborted during validation (SIGINT)",
+            error_code="ABORT",
+            error_detail="User interrupted validation phase",
+            recovery_hint="Re-run post-merge supervisor when ready",
+        )
+
+    passed = [r.name for r in validation_results if r.passed]
+    failed = [{"name": r.name, "error": r.error} for r in validation_results if not r.passed]
+
+    # Gate 1 HARD: if merge not verified, stop immediately
+    if not gate1_passed:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_MERGE_NOT_FOUND.value,
+            summary="Merge verification failed — cannot route",
+            validations_passed=passed,
+            validations_failed=failed,
+            error_code="MERGE_NOT_FOUND",
+            error_detail=next((r.error for r in validation_results if r.name == "merge_verification"), ""),
+            recovery_hint="Ensure you are on dev branch with the merge SHA reachable from HEAD",
+        )
+
+    # Extract rollout order for Codex context
+    rollout_order = extract_rollout_order(repo_root, package.get("rollout_packet_path", ""))
+
+    # Always route to Codex (invariant 7: no mode that skips deliberation)
+    with _MetaBridgeLock(paths.lock_path):
+        try:
+            envelope = run_post_merge_review(
+                paths, package, validation_results, derived_files, rollout_order,
+                verbose=verbose,
+            )
+        except KeyboardInterrupt:
+            return MetaBridgeResponse(
+                status="error",
+                decision=Decision.ERROR_CODEX_ABORT.value,
+                summary="Post-merge review aborted by user (SIGINT)",
+                error_code="ABORT",
+                error_detail="User interrupted post-merge review",
+                recovery_hint="Re-run post-merge supervisor when ready",
+            )
+        except MetaBridgeError as exc:
+            if "timeout" in str(exc).lower():
+                return MetaBridgeResponse(
+                    status="error",
+                    decision=Decision.ERROR_CODEX_TIMEOUT.value,
+                    summary="Codex post-merge review timed out",
+                    error_code="TIMEOUT",
+                    error_detail=str(exc),
+                    recovery_hint="Retry with longer timeout or simpler package",
+                )
+            return MetaBridgeResponse(
+                status="error",
+                decision=Decision.ERROR_INTERNAL.value,
+                summary="Codex post-merge review failed",
+                error_code="ADAPTER_ERROR",
+                error_detail=str(exc),
+            )
+
+    # Check for staleness
+    state_end = compute_repo_state(repo_root)
+    if state_start.state_sha != state_end.state_sha:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_REPO_CHANGED.value,
+            summary="Repo state changed during post-merge review",
+            error_code="STALE",
+            error_detail=f"State SHA changed: {state_start.state_sha[:8]} → {state_end.state_sha[:8]}",
+            recovery_hint="Re-run post-merge supervisor (repo changed during review)",
+        )
+
+    decision = envelope.get("decision", Decision.ERROR_INTERNAL.value)
+
+    response = MetaBridgeResponse(
+        status="success" if all_passed else "partial",
+        decision=decision,
+        summary=envelope.get("summary", ""),
+        validations_passed=passed,
+        validations_failed=failed,
+        findings=envelope.get("findings", []),
+        request_for_claude=envelope.get("request_for_claude", ""),
+    )
+
+    # Write state-bound routing record — fail closed (invariant 5: state-binding)
+    try:
+        record_path = write_post_merge_routing_record(response, package, repo_root)
+        if verbose:
+            print(f"[post-merge] Routing record written: {record_path}")
+    except Exception as exc:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Failed to write routing record — decision voided",
+            error_code="ROUTING_RECORD_FAILED",
+            error_detail=str(exc),
+            recovery_hint="Fix .agent_bus/meta/ permissions and retry",
+        )
+
+    return response
+
+
 def run_meta_review(
     paths: MetaBridgePaths,
     package: dict[str, Any],
@@ -1198,13 +2053,19 @@ def run_meta_bridge(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Meta-bridge supervisor: pre-commit convergence gate",
+        description="Meta-bridge supervisor: pre-commit convergence gate + post-merge routing gate",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["pre-commit", "post-merge"],
+        default="pre-commit",
+        help="Supervisor mode (default: pre-commit)",
     )
     parser.add_argument(
         "--package",
         type=Path,
         required=True,
-        help="Path to Claude's pre-commit package JSON file",
+        help="Path to package JSON file",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -1214,7 +2075,7 @@ def main() -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run validations only, skip Codex review",
+        help="Run validations only, skip Codex review (pre-commit mode only)",
     )
     parser.add_argument(
         "--json",
@@ -1243,11 +2104,19 @@ def main() -> int:
         return output_error("Package file not found", "FILE_NOT_FOUND")
 
     try:
-        response = run_meta_bridge(
-            args.package,
-            verbose=args.verbose,
-            dry_run=args.dry_run,
-        )
+        if args.mode == "post-merge":
+            if args.dry_run:
+                return output_error("--dry-run not supported in post-merge mode", "INVALID_FLAG")
+            response = run_post_merge_bridge(
+                args.package,
+                verbose=args.verbose,
+            )
+        else:
+            response = run_meta_bridge(
+                args.package,
+                verbose=args.verbose,
+                dry_run=args.dry_run,
+            )
     except MetaBridgeError as exc:
         error_response = MetaBridgeResponse(
             status="error",
@@ -1266,8 +2135,9 @@ def main() -> int:
     if args.json:
         print(json.dumps(response.to_dict(), indent=2))
     else:
-        print(f"Decision: {response.decision}")
-        print(f"Summary: {response.summary}")
+        mode_label = "post-merge" if args.mode == "post-merge" else "meta-bridge"
+        print(f"[{mode_label}] Decision: {response.decision}")
+        print(f"[{mode_label}] Summary: {response.summary}")
         if response.validations_passed:
             print(f"Validations passed: {', '.join(response.validations_passed)}")
         if response.validations_failed:
@@ -1277,9 +2147,8 @@ def main() -> int:
         if response.request_for_claude:
             print(f"Request for Claude: {response.request_for_claude}")
 
-    # Write pre-commit receipt on commit-capable decisions (not dry-run)
-    # Fail-closed: if receipt write fails, exit non-zero even on COMMIT_GO
-    if not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
+    # Pre-commit mode: write receipt on commit-capable decisions
+    if args.mode != "post-merge" and not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
         try:
             receipt = write_pre_commit_receipt(response, args.package)
             if args.verbose:
@@ -1290,14 +2159,23 @@ def main() -> int:
             return 1
 
     # Exit code based on decision
-    if response.decision == Decision.COMMIT_GO.value:
-        return 0
-    elif response.decision == Decision.COMMIT_GO_HOLD_PUSH.value:
-        return 0
-    elif response.decision == Decision.NO_ACTION.value:
-        return 0
-    else:
-        return 1
+    success_decisions = {
+        Decision.COMMIT_GO.value,
+        Decision.COMMIT_GO_HOLD_PUSH.value,
+        Decision.NO_ACTION.value,
+    }
+    # Post-merge routing decisions are also success (exit 0)
+    if args.mode == "post-merge":
+        success_decisions.update({
+            Decision.CONTINUE_DIALECTIC.value,
+            Decision.ROUTE_PHASE_A.value,
+            Decision.ROUTE_PHASE_B.value,
+            Decision.UPDATE_TRACKER_ONLY.value,
+            Decision.STOP_FOR_FOUNDER.value,
+            Decision.STOP_FOR_TRIAGE_DISCUSSION.value,
+        })
+
+    return 0 if response.decision in success_decisions else 1
 
 
 if __name__ == "__main__":

@@ -476,3 +476,316 @@ class TestRunMetaBridgeLiveRouting:
         mock_review.assert_not_called()
         assert resp.decision == "ERROR_VALIDATION_FAILED"
         assert "not exercised" in resp.summary
+
+
+# ===========================================================================
+# Post-merge supervisor tests
+# ===========================================================================
+
+
+class TestPostMergePackageSchema:
+    """Post-merge package schema validation."""
+
+    def test_valid_package_passes(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        rollout = repo / "reports" / "control_plane" / "rollout.md"
+        rollout.write_text("# rollout")
+        # Make it tracked
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "add", str(rollout.relative_to(repo))], cwd=repo, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init", "--allow-empty"], cwd=repo, capture_output=True, env={**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+        pkg = {
+            "task_id": "[TEST-1]",
+            "merged_pr": 100,
+            "merge_sha": "abc123",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+            "rollout_packet_path": "reports/control_plane/rollout.md",
+            "deferred_items": [],
+            "next_candidates": [{"candidate": "next thing", "bounded": True, "tracked_packet": None}],
+            "tracker_state_summary": "NEXT: [TEST-1]",
+            "blocker_report_paths": [],
+        }
+        valid, errors = meta.validate_post_merge_package_schema(pkg, repo)
+        assert valid, errors
+
+    def test_missing_fields_fails(self):
+        valid, errors = meta.validate_post_merge_package_schema({"task_id": "[X]"}, Path("/tmp"))
+        assert not valid
+        assert any("Missing" in e for e in errors)
+
+    def test_unbracketted_task_id_fails(self):
+        pkg = {
+            "task_id": "NO-BRACKETS",
+            "merged_pr": 1, "merge_sha": "a", "wave_name": "w", "lane": "l",
+            "rollout_packet_path": "reports/control_plane/x.md",
+            "deferred_items": [], "next_candidates": [],
+            "tracker_state_summary": "s", "blocker_report_paths": [],
+        }
+        valid, errors = meta.validate_post_merge_package_schema(pkg, Path("/tmp"))
+        assert not valid
+        assert any("bracketed" in e for e in errors)
+
+    def test_malformed_blocker_paths_fails(self):
+        """Bridge R1 finding #3: dict elements in blocker_report_paths must fail schema, not crash Gate 4."""
+        pkg = {
+            "task_id": "[X]",
+            "merged_pr": 1, "merge_sha": "a", "wave_name": "w", "lane": "l",
+            "rollout_packet_path": "reports/control_plane/x.md",
+            "deferred_items": [], "next_candidates": [],
+            "tracker_state_summary": "s",
+            "blocker_report_paths": [{"not": "a string"}],
+        }
+        valid, errors = meta.validate_post_merge_package_schema(pkg, Path("/tmp"))
+        assert not valid
+        assert any("string" in e for e in errors)
+
+
+class TestPostMergeModeScoping:
+    """Post-merge tokens are mode-scoped — no cross-mode leakage."""
+
+    def test_pre_commit_token_rejected_in_post_merge(self):
+        """COMMIT_GO is not a valid post-merge token."""
+        output = 'BEGIN_META_ENVELOPE\n{"decision": "COMMIT_GO", "summary": "ok"}\nEND_META_ENVELOPE'
+        with pytest.raises(meta.MetaBridgeError, match="Invalid post-merge decision"):
+            meta.parse_post_merge_envelope(output)
+
+    def test_post_merge_token_rejected_in_pre_commit(self):
+        """ROUTE_PHASE_A is not a valid pre-commit token."""
+        output = 'BEGIN_META_ENVELOPE\n{"decision": "ROUTE_PHASE_A", "summary": "ok"}\nEND_META_ENVELOPE'
+        with pytest.raises(meta.MetaBridgeError, match="Invalid decision token"):
+            meta.parse_meta_envelope(output)
+
+    def test_valid_post_merge_token_accepted(self):
+        """CONTINUE_DIALECTIC is a valid post-merge token."""
+        output = 'BEGIN_META_ENVELOPE\n{"decision": "CONTINUE_DIALECTIC", "summary": "needs narrowing"}\nEND_META_ENVELOPE'
+        envelope = meta.parse_post_merge_envelope(output)
+        assert envelope["decision"] == "CONTINUE_DIALECTIC"
+
+    def test_all_post_merge_tokens_accepted(self):
+        for token in meta.POST_MERGE_AUTHORIZED_DECISIONS:
+            output = f'BEGIN_META_ENVELOPE\n{{"decision": "{token}", "summary": "test"}}\nEND_META_ENVELOPE'
+            envelope = meta.parse_post_merge_envelope(output)
+            assert envelope["decision"] == token
+
+
+class TestPostMergeGate1:
+    """Gate 1: merge verification (HARD)."""
+
+    def test_not_on_dev_fails(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True,
+                       env={**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+        # Default branch is not "dev"
+        result = meta.check_merge_verification(repo, "abc123")
+        assert not result.passed
+        assert "dev" in result.error.lower() or "not on dev" in result.error.lower() or "ancestor" in result.error.lower()
+
+
+class TestPostMergeExtractRolloutOrder:
+    """Rollout order extraction with standing-invariant classification."""
+
+    def test_standing_invariant_tagged(self, tmp_path):
+        rollout = tmp_path / "rollout.md"
+        rollout.write_text(
+            "## Canonical rollout order\n\n"
+            "1. ~~Step 1~~ **(done)**\n"
+            "2. **Standing invariant:** Keep gate live\n"
+            "3. **Active next step:** Do the thing\n"
+        )
+        result = meta.extract_rollout_order(tmp_path, "rollout.md")
+        assert "[DONE]" in result
+        assert "[STANDING_INVARIANT]" in result
+        assert "Active next step" in result
+
+    def test_bare_strikethrough_marked_done(self, tmp_path):
+        """Fuzzer finding: bare strikethrough without 'done' annotation should still be DONE."""
+        rollout = tmp_path / "rollout.md"
+        rollout.write_text(
+            "## Canonical rollout order\n\n"
+            "1. ~~Completed task~~\n"
+        )
+        result = meta.extract_rollout_order(tmp_path, "rollout.md")
+        assert "[DONE]" in result
+
+
+class TestPostMergeIntegration:
+    """Integration tests for run_post_merge_bridge and supporting functions."""
+
+    def test_run_post_merge_validation_gates_gate1_hard(self, tmp_path):
+        """Gate 1 failure blocks all routing."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
+
+        pkg = {"merge_sha": "0000000000000000000000000000000000000000", "task_id": "[X]",
+               "rollout_packet_path": "x", "blocker_report_paths": []}
+        results, all_passed, gate1_passed = meta.run_post_merge_validation_gates(repo, pkg)
+        assert not gate1_passed
+        assert not all_passed
+
+    def test_derive_changed_files_valid_sha(self):
+        """derive_changed_files works on a real merge SHA."""
+        from tests.repo_root import REPO_ROOT
+        # Use the known merge commit from PR #655
+        files, err = meta.derive_changed_files(REPO_ROOT, "ac714fa")
+        # Should return files or empty (depending on how far back ac714fa is)
+        assert isinstance(files, list)
+
+    def test_validate_post_merge_schema_rejects_non_dict(self):
+        """Package must be a dict."""
+        valid, errors = meta.validate_post_merge_package_schema("not a dict", Path("/tmp"))
+        assert not valid
+        assert any("JSON object" in e for e in errors)
+
+    def test_parse_post_merge_envelope_rejects_missing_keys(self):
+        """Envelope must have decision + summary."""
+        output = 'BEGIN_META_ENVELOPE\n{"decision": "ROUTE_PHASE_A"}\nEND_META_ENVELOPE'
+        with pytest.raises(meta.MetaBridgeError, match="missing keys"):
+            meta.parse_post_merge_envelope(output)
+
+    def test_build_post_merge_prompt_includes_rollout(self, tmp_path):
+        """Prompt template renders with rollout order and Phase-A-Lock."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "mu" / "tools" / "agents" / "templates").mkdir(parents=True)
+        template_src = REPO_ROOT / "mu" / "tools" / "agents" / "templates" / "post_merge_task.txt"
+        (repo / "mu" / "tools" / "agents" / "templates" / "post_merge_task.txt").write_text(
+            template_src.read_text()
+        )
+
+        pkg = {"task_id": "[T]", "wave_name": "w", "lane": "l", "merged_pr": 1,
+               "merge_sha": "abc", "rollout_packet_path": "reports/control_plane/r.md",
+               "next_candidates": []}
+        results = [meta.ValidationResult("g1", True)]
+        # Should not crash
+        prompt = meta.build_post_merge_prompt(pkg, results, repo, ["f1.py"], "1. Step 1")
+        assert "ROUTE_PHASE_A" in prompt
+        assert "Step 1" in prompt
+
+
+class TestGate3TaskBound:
+    """Gate 3 must bind to the exact Tracked packet: value, not any path in the entry."""
+
+    def test_rejects_non_tracked_packet_path(self, tmp_path):
+        """Bridge R1 regression: Gate 3 must extract exact Tracked packet: not any mention."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "canonical.md").write_text("# canonical")
+        (repo / "reports" / "control_plane" / "other.md").write_text("# other")
+
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, env=env)
+
+        # TASKS.md: task tracks canonical.md but mentions other.md in prose
+        tasks = repo / "TASKS.md"
+        tasks.write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- **[TASK-1]** Some task. **Tracked packet:** `reports/control_plane/canonical.md`. "
+            "See also reports/control_plane/other.md for context.\n"
+        )
+
+        # Should PASS for canonical.md
+        r1 = meta.check_rollout_packet_canonical(repo, "reports/control_plane/canonical.md", "[TASK-1]")
+        assert r1.passed
+
+        # Should FAIL for other.md (merely mentioned, not the Tracked packet:)
+        r2 = meta.check_rollout_packet_canonical(repo, "reports/control_plane/other.md", "[TASK-1]")
+        assert not r2.passed
+
+
+class TestGate5CommentResistance:
+    """Gate 5 must not be spoofed by commented-out exec lines."""
+
+    def test_commented_exec_fails(self, tmp_path):
+        """Bridge R1 regression: comment mentioning pre-commit-doc-check must not pass."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
+
+        # Create a fake hook with only a comment mentioning pre-commit-doc-check
+        hooks_dir = repo / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "pre-commit"
+        hook.write_text("#!/bin/bash\n# exec $SCRIPT_DIR/hooks/pre-commit-doc-check\nexit 0\n")
+        hook.chmod(0o755)
+
+        # Also need the verifier to exist
+        verifier_dir = repo / "mu" / "tools" / "agents"
+        verifier_dir.mkdir(parents=True)
+        (verifier_dir / "verify_pre_commit_receipt.py").write_text("# stub")
+
+        result = meta.check_pre_commit_gate(repo)
+        assert not result.passed, f"Gate 5 should fail on commented-out exec, got: {result}"
+
+    def test_non_exec_active_line_fails(self, tmp_path):
+        """Bridge R2 regression: active non-exec line mentioning the path must fail."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
+
+        hooks_dir = repo / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "pre-commit"
+        # Active line that mentions the path but is NOT an exec statement
+        hook.write_text('#!/bin/bash\necho "hooks/pre-commit-doc-check is cool"\nexit 0\n')
+        hook.chmod(0o755)
+
+        verifier_dir = repo / "mu" / "tools" / "agents"
+        verifier_dir.mkdir(parents=True)
+        (verifier_dir / "verify_pre_commit_receipt.py").write_text("# stub")
+
+        result = meta.check_pre_commit_gate(repo)
+        assert not result.passed, f"Gate 5 should fail on non-exec mention, got: {result}"
+
+    def test_real_exec_passes(self, tmp_path):
+        """Real exec delegation should pass."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
+
+        hooks_dir = repo / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "pre-commit"
+        hook.write_text('#!/bin/bash\nexec "$SCRIPT_DIR/hooks/pre-commit-doc-check" "$@"\n')
+        hook.chmod(0o755)
+
+        # Create canonical hook file (Gate 5 checks it exists)
+        canonical_hook_dir = repo / "tools" / "hooks"
+        canonical_hook_dir.mkdir(parents=True)
+        (canonical_hook_dir / "pre-commit-doc-check").write_text("#!/bin/bash\nexit 0\n")
+
+        verifier_dir = repo / "mu" / "tools" / "agents"
+        verifier_dir.mkdir(parents=True)
+        (verifier_dir / "verify_pre_commit_receipt.py").write_text("# stub")
+
+        result = meta.check_pre_commit_gate(repo)
+        assert result.passed, f"Gate 5 should pass on real exec, got: {result.error}"

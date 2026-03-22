@@ -1,8 +1,8 @@
 # Post-Merge Supervisor Plan
 
 Date: 2026-03-21
-Status: Phase A (design — 9 bridge rounds, 15 findings addressed, pending founder GO)
-Phase-A-Lock: UNLOCKED
+Status: Phase B (implementation complete, bridge-converged, PR pending)
+Phase-A-Lock: LOCKED
 Purpose: decision-complete design for the post-merge supervisor follow-on
 
 ## Goal
@@ -200,7 +200,7 @@ routing decisions on validation state.
 | Gate | Name | What it checks | Severity |
 |------|------|---------------|----------|
 | 1 | `merge_verification` | (a) Current HEAD is on `dev` branch (or detached at `refs/heads/dev` OID), AND (b) merge SHA reachable from HEAD (`git merge-base --is-ancestor`) | HARD (blocks all routing) |
-| 2 | `tracker_consistency` | TASKS.md reflects the completed wave (task_id not struck-through) | SOFT (Codex informed) |
+| 2 | `tracker_consistency` | TASKS.md contains task_id in NOW or NEXT (active or completed; struck-through entries accepted as normal completion markers) | SOFT (Codex informed) |
 | 3 | `rollout_packet_canonical` | Supplied `rollout_packet_path` is referenced as `Tracked packet:` in the TASKS.md entry matching `task_id`; packet exists and is readable | SOFT (Codex informed) |
 | 4 | `blocker_check` | All `reports/deferred/blocking/` packets acknowledged | SOFT (Codex informed) |
 | 5 | `pre_commit_gate_check` | Pre-commit hook installed AND `verify_pre_commit_receipt.py` exists (local-checkout assurance only, not repo-wide enforcement) | SOFT (Codex informed) |
