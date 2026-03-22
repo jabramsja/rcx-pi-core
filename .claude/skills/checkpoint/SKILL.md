@@ -17,11 +17,9 @@ Run this BEFORE every commit and BEFORE every bridge submission. It catches skip
 ## Steps
 
 0. **MANDATORY: Re-read memory and CLAUDE.md** — Before ANY other check, ACTUALLY READ (not skim, not acknowledge):
-   - `feedback_deflection_pattern.md` — Am I about to classify instead of fix?
-   - `feedback_self_identity.md` — Am I working hard because excellence matters?
-   - `feedback_wave_discipline.md` — Am I following the wave protocol correctly?
+   - `feedback_consolidated.md` — All 17 founder corrections. Am I about to deflect, classify, or hand-wave?
    - `user_founder_preferences.md` — Am I following standing authorizations?
-   - CLAUDE.md rules 1-9 — Do I know the behavioral protocol?
+   - CLAUDE.md behavioral rules — Do I know the protocol?
    This is not a checkbox. Read the CONTENT. Apply it to the CURRENT SITUATION. If any rule conflicts with what I'm about to do, STOP and correct course.
 
 1. **Deflection check** — Am I about to defer, classify, or ask permission instead of fixing something? If yes, STOP and fix it.

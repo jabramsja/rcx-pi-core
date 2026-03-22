@@ -55,11 +55,11 @@ touch in this lane:
    All 4 executors implemented: commit_executor, phase_b_executor, phase_a_executor, dialectic_executor.
    Dispatcher + config foundation in place. `/wave` skill updated to dispatch to executors.
    Tracked packet: `reports/control_plane/executor_surfaces_plan_2026-03-22.md`.
-5. **Active next step:** Transition period — validate executors in production use,
-   allow `/wave`, `/bridge`, `/checkpoint`, hook scripts, and `merge_pr.sh` as
-   explicit fallback surfaces until executors are proven.
-6. Reduce Claude memory to a pointer layer only after executors are proven in production.
-7. Resume the parked structural queue only after steps 1-6 are in place.
+5. ~~Transition period — validate executors in production use~~ **(done — combined with step 6, founder-authorized 2026-03-22)**.
+   Executors validated via context optimization wave (MAINTENANCE class).
+6. ~~Reduce Claude memory to pointer layer~~ **(done — combined with step 5, founder-authorized 2026-03-22)**.
+   CLAUDE.md slimmed 601→201 lines. Memory consolidated 19→6 files. Manual wave protocol archived to `reports/archive/manual_wave_protocol_2026-03-22.md`.
+7. Resume the parked structural queue — steps 1-6 complete, **awaiting separate founder GO** (2026-03-22).
 
 ## Required Claude behavior
 

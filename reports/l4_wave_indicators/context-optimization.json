@@ -1,0 +1,24 @@
+{
+  "wave_id": "context-optimization",
+  "repeat_run_speedup_ratio": 1.210663,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.423871,
+  "repeat_run_raw_seconds": [
+    0.513165,
+    0.423871
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.513165
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.937036
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-22T19:24:41Z",
+  "collector_version": "2.2.0"
+}
