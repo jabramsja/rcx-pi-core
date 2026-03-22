@@ -5,59 +5,81 @@ description: RCX Wave Protocol Executor
 
 # /wave — RCX Wave Protocol Executor
 
-Executes the Phase A/B wave protocol. This is the core development workflow.
+Executes the Phase A/B wave protocol via repo-local executors.
 
 ## Usage
-- `/wave plan <name>` — Start Phase A: design + agent review + bridge convergence
-- `/wave implement` — Start Phase B: implement locked plan + agent review + bridge convergence
+- `/wave plan <name>` — Start Phase A via phase_a_executor
+- `/wave implement <plan-path>` — Start Phase B via phase_b_executor
+- `/wave dispatch` — Read post-merge routing record and dispatch to correct executor
 - `/wave status` — Show current wave state
 
-## Phase A: Design + Agent Review + Bridge Convergence
+## Executor Dispatch (preferred path)
+
+### `/wave dispatch`
+Read the post-merge routing record and dispatch to the correct executor:
+```bash
+python3 mu/tools/executors/executor_dispatch.py --json --skip-freshness
+```
+This reads `.agent_bus/meta/post_merge_routing.json` and invokes:
+- `CONTINUE_DIALECTIC` → `dialectic_executor.py`
+- `ROUTE_PHASE_A` → `phase_a_executor.py`
+- `ROUTE_PHASE_B` → `phase_b_executor.py`
+- `COMMIT_GO` → `commit_executor.py`
+- `STOP_FOR_FOUNDER` / `STOP_FOR_TRIAGE_DISCUSSION` → report and stop
+
+## Phase A: Design via Executor
 
 ### `/wave plan <name>`
-1. **Design** the plan: scope, files, depth, focus. Write to `reports/<name>_plan.md`.
-2. **Run agents** on the plan: `python tools/runners/run_review.py --pr --depth quick --output reports/<name>_phase_a_review.md`
-3. **Send to bridge** (plan review, no diff): `/bridge plan reports/<name>_plan.md`
-4. **Fix blockers** from bridge. NEVER demote blockers to non-blockers. Only TRUE non-blockers go to `reports/deferred/non_blocking/`.
-5. **Loop steps 3-4** until bridge returns only non-blockers.
-6. Report: "Phase A converged. Plan locked. Ready for Phase B."
+Invoke the Phase A executor:
+```bash
+python3 mu/tools/executors/phase_a_executor.py --plan-name <name> -v --json
+```
+The executor:
+1. Creates a plan packet draft in `reports/control_plane/`
+2. Runs SDK agent review
+3. Loops bridge until only non-blockers remain
+4. Sets Phase-A-Lock: LOCKED
 
-## Phase B: Implementation + Agent Review + Bridge Convergence
+## Phase B: Implementation via Executor
 
-### `/wave implement`
-1. **Implement** the locked plan.
-2. **Run `/audit fast`** — MANDATORY after implementation, before agents.
-3. **Run agents** on the implementation: `python tools/runners/run_review.py --pr --depth full --output reports/<name>_phase_b_review.md`
-4. **If JS or Python runtime files changed**: Run `/parity` — MANDATORY.
-5. **If debt markers changed**: Run `/audit ratchets` — MANDATORY.
-6. **Send to bridge** (implementation review, WITH diff): `/bridge review "<summary>"`
-7. **Fix ALL findings** from bridge. Blockers → fix inline. Non-blockers → `reports/deferred/non_blocking/`. NEVER demote blockers.
-8. **Loop steps 2-7** until bridge returns GO.
-9. **Run `/checkpoint`** — verify no skipped skills, no deflection.
-10. **Commit protocol** runs automatically (no ask needed in wave context).
+### `/wave implement <plan-path>`
+Invoke the Phase B executor:
+```bash
+python3 mu/tools/executors/phase_b_executor.py --plan <plan-path> -v --json
+```
+The executor:
+1. Reads the locked plan
+2. Detects code changes
+3. Runs SDK agents + bridge convergence loop
+4. Prepares commit handoff
 
-## After Convergence: Commit Protocol
+## Commit Pipeline via Executor
 
-Per `user_founder_preferences.md`, wave convergence triggers the autonomous commit protocol:
-1. Stage specific files → commit (pre-commit hook) → push (pre-push hook) → PR → CI → merge_pr.sh --sweep
-2. If L4 wave: Run `/tracker` before commit.
+After Phase B converges and pre-commit supervisor approves:
+```bash
+python3 mu/tools/executors/commit_executor.py --handoff <path> -v --json
+```
 
-## Critical Rules (NEVER VIOLATE)
-- **Never collapse the loop**: The commit ONLY happens after the bridge loop converges. A single pass is NOT convergence.
-- **Bridge sees the diff**: Always include code changes for Phase B, not just agent summaries.
-- **Bridge bootstrap**: Every bridge invocation must instruct Codex to read FOUNDER_SESSION_BOOTSTRAP.md first.
-- **Both are red-teamers**: Claude and bridge are both active adversaries, not just executing.
-- **Fix ALL findings**: Don't defer blockers. Don't demote blockers to non-blockers. Fix them.
-- **Auto-invoke skills**: `/audit fast` after implementation, `/parity` after runtime changes, `/audit ratchets` after debt changes, `/tracker` for L4 waves, `/checkpoint` before commit.
+## Post-Merge Supervisor
 
-## Wave Status
+After merge, run the post-merge supervisor to route the next step:
+```bash
+python3 mu/tools/agents/meta_bridge_supervisor.py --mode post-merge --package <path> --json -v
+```
 
-### `/wave status`
-Report:
-- Current wave name
-- Current phase (A or B)
-- Bridge round number
-- Blocker count from last bridge response
-- Non-blocker count
-- Convergence status (converged / N blockers remaining)
-- Skills run: /audit, /parity, /debt, /tracker (ran/skipped/N/A)
+## Fallback: Manual Protocol
+
+During transition (rollout step 5), the manual protocol is still available:
+1. Design the plan manually
+2. Run agents: `python tools/runners/run_review.py --pr --depth full`
+3. Bridge: `python3 tools/agents/bridge_supervisor.py review --task-file <file> --reviewer codex -v`
+4. Loop until converged
+5. Pre-commit supervisor → commit → push → PR → CI → merge_pr.sh --sweep
+6. Post-merge supervisor → next step
+
+## Critical Rules
+- **Never collapse the loop**: Bridge loop must converge before commit.
+- **Bridge sees the diff**: Phase B bridge reviews get the actual diff.
+- **Pre-commit supervisor before every commit**: No skipping receipt check.
+- **Post-merge supervisor after every merge**: Route the next step.
+- **Use executors when available**: Manual fallback only when needed.

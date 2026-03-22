@@ -51,14 +51,14 @@ touch in this lane:
 2. **Standing invariant:** Keep the pre-commit supervisor as the standing gate before any commit flow. *(not a discrete wave — verified continuously)*
 3. ~~Design and implement the post-merge supervisor follow-on~~ **(done — PR #657 merged)**.
    Tracked packet: `reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`.
-4. **Active next step:** Introduce real repo-local executors for Phase A, Phase B,
-   commit/merge flow, and dialectic narrowing.
+4. ~~Introduce real repo-local executors~~ **(done — PRs #659-#661)**.
+   All 4 executors implemented: commit_executor, phase_b_executor, phase_a_executor, dialectic_executor.
+   Dispatcher + config foundation in place. `/wave` skill updated to dispatch to executors.
    Tracked packet: `reports/control_plane/executor_surfaces_plan_2026-03-22.md`.
-   Slice 1+2 merged (PR #659). Slice 3 (phase_b_executor) in progress.
-5. During transition only, allow `/wave`, `/bridge`, `/checkpoint`, hook
-   scripts, and `merge_pr.sh` as explicit fallback surfaces.
-6. Reduce Claude memory to a pointer layer only after the tracked packets and
-   repo-local executors exist.
+5. **Active next step:** Transition period — validate executors in production use,
+   allow `/wave`, `/bridge`, `/checkpoint`, hook scripts, and `merge_pr.sh` as
+   explicit fallback surfaces until executors are proven.
+6. Reduce Claude memory to a pointer layer only after executors are proven in production.
 7. Resume the parked structural queue only after steps 1-6 are in place.
 
 ## Required Claude behavior
@@ -81,8 +81,9 @@ touch in this lane:
 - **Standing invariant:** pre-commit supervisor remains standing gate for commit flows
 - **META-BRIDGE-S2:** post-merge supervisor Slice 1 **implemented and merged** (PR #657).
   Tracked packet: `reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`.
-- Slice 1+2 executor foundation merged (PR #659): dispatcher + commit_executor
-- Slices 3-6 remaining: phase_b_executor, phase_a_executor, dialectic_executor, /wave wrapper
+- All executor surfaces implemented (PRs #659-#661): dispatcher, commit_executor,
+  phase_b_executor, phase_a_executor, dialectic_executor
+- `/wave` skill updated to dispatch to executors
 - Claude memory still duplicates protocol truth
 
 ## Advisory source packets
