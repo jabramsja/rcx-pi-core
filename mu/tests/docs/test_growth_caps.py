@@ -20,7 +20,7 @@ BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 Typed
 
 # Per-wave caps from DocGovernance.v0.md
 CAP_TEST_FILES = 97  # 96 prior + 1 executor dispatch tests (Slice 1+2)
-CAP_TOOL_SCRIPTS = 18  # 15 prior + 1 executor_dispatch.py + 1 commit_executor.py + 1 executor_config.json
+CAP_TOOL_SCRIPTS = 19  # 18 prior + 1 phase_b_executor.py (Slice 3)
 CAP_CORE_DOCS = 10  # 5 core + 3 other + 1 A11 contract + 1 AgentBridgeProtocol
 
 

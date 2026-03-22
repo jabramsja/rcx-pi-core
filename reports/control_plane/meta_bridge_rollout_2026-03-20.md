@@ -54,7 +54,7 @@ touch in this lane:
 4. **Active next step:** Introduce real repo-local executors for Phase A, Phase B,
    commit/merge flow, and dialectic narrowing.
    Tracked packet: `reports/control_plane/executor_surfaces_plan_2026-03-22.md`.
-   Phase B Slice 1+2 (bridge-converged, non-blockers filed, PR pending).
+   Slice 1+2 merged (PR #659). Slice 3 (phase_b_executor) in progress.
 5. During transition only, allow `/wave`, `/bridge`, `/checkpoint`, hook
    scripts, and `merge_pr.sh` as explicit fallback surfaces.
 6. Reduce Claude memory to a pointer layer only after the tracked packets and
@@ -81,7 +81,8 @@ touch in this lane:
 - **Standing invariant:** pre-commit supervisor remains standing gate for commit flows
 - **META-BRIDGE-S2:** post-merge supervisor Slice 1 **implemented and merged** (PR #657).
   Tracked packet: `reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`.
-- real repo-local executors for Phase A / Phase B / commit do not exist yet
+- Slice 1+2 executor foundation merged (PR #659): dispatcher + commit_executor
+- Slices 3-6 remaining: phase_b_executor, phase_a_executor, dialectic_executor, /wave wrapper
 - Claude memory still duplicates protocol truth
 
 ## Advisory source packets
