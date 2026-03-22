@@ -36,7 +36,7 @@ ROUTING_DISPATCH = {
 STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 
 # Available executor scripts
-AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor"}
+AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor"}
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
@@ -235,8 +235,43 @@ def dispatch(
                            "the handoff before dispatching to commit_executor.",
             }
 
+        # Build executor-specific CLI args
+        executor_args = [sys.executable, str(executor_path)]
+        if executor_name == "phase_a_executor":
+            # Phase A needs --plan-name
+            candidates = record.get("next_candidates", [])
+            plan_name = None
+            for c in candidates:
+                candidate_text = c.get("candidate", "")
+                if candidate_text:
+                    plan_name = candidate_text.lower().replace(" ", "_").replace("(", "").replace(")", "")[:50]
+                    break
+            if not plan_name:
+                plan_name = f"plan_{record.get('wave_name', 'unknown')}"
+            executor_args.extend(["--plan-name", plan_name])
+        elif executor_name == "phase_b_executor":
+            # Phase B needs --plan from next_candidates tracked_packet
+            candidates = record.get("next_candidates", [])
+            plan_path = None
+            for c in candidates:
+                tp = c.get("tracked_packet")
+                if tp:
+                    plan_path = tp
+                    break
+            if plan_path:
+                executor_args.extend(["--plan", plan_path])
+            else:
+                return {
+                    "status": "error",
+                    "decision": decision,
+                    "executor": executor_name,
+                    "message": "Cannot find plan path in routing record for phase_b_executor",
+                }
+        else:
+            executor_args.extend(["--routing-record", json.dumps(record)])
+
         result = subprocess.run(
-            [sys.executable, str(executor_path), "--routing-record", json.dumps(record)],
+            executor_args,
             cwd=repo,
             capture_output=True,
             text=True,

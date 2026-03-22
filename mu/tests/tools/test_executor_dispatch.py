@@ -33,6 +33,10 @@ commit_mod = _load_module(
     "commit_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
+phase_a_mod = _load_module(
+    "phase_a_executor",
+    REPO_ROOT / "mu" / "tools" / "executors" / "phase_a_executor.py",
+)
 phase_b_mod = _load_module(
     "phase_b_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
@@ -330,3 +334,61 @@ class TestPhaseBRunPhaseB:
             repo, "reports/control_plane/test_plan.md", verbose=True
         )
         assert result["status"] == "ready"
+
+
+# ===========================================================================
+# Phase A executor tests (Slice 4)
+# ===========================================================================
+
+
+class TestPhaseAPlanCreation:
+    """Phase A executor creates plan packet drafts."""
+
+    def test_create_plan_draft(self, tmp_path):
+        scope = {"request": "create executors", "summary": "executor plan"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "test_plan", scope)
+        assert path.exists()
+        content = path.read_text()
+        assert "Phase-A-Lock: UNLOCKED" in content
+        assert "create executors" in content
+
+    def test_existing_plan_not_overwritten(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        existing = tmp_path / "reports" / "control_plane" / "test_plan_2026-03-22.md"
+        existing.write_text("# existing plan")
+        scope = {"request": "new content"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "test_plan", scope)
+        assert path.read_text() == "# existing plan"
+
+    def test_lock_plan(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text("Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\nPhase-A-Lock: UNLOCKED\n")
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text()
+        assert "Phase-A-Lock: LOCKED" in content
+        assert "bridge-converged" in content
+
+
+class TestPhaseADispatcherIntegration:
+    """Dispatcher correctly routes to phase_a_executor."""
+
+    def test_route_phase_a_dispatches(self):
+        assert dispatch_mod.resolve_executor("ROUTE_PHASE_A") == "phase_a_executor"
+
+    def test_phase_a_now_available(self):
+        assert "phase_a_executor" in dispatch_mod.AVAILABLE_EXECUTORS
+
+
+class TestPhaseAScopeExtraction:
+    """Phase A extracts scope from routing record."""
+
+    def test_extract_scope(self):
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "Next step is executor implementation",
+            "request_for_claude": "Create plan for phase_a_executor",
+        }
+        scope = phase_a_mod.extract_plan_scope(record)
+        assert scope["request"] == "Create plan for phase_a_executor"
+        assert scope["summary"] == "Next step is executor implementation"
