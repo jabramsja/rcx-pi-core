@@ -1,7 +1,7 @@
 # Post-Merge Supervisor Plan
 
 Date: 2026-03-21
-Status: Phase B (implementation complete, bridge-converged, PR pending)
+Status: Complete (implemented and merged, PR #657)
 Phase-A-Lock: LOCKED
 Purpose: decision-complete design for the post-merge supervisor follow-on
 
