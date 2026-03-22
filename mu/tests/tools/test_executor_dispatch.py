@@ -33,6 +33,14 @@ commit_mod = _load_module(
     "commit_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
+phase_a_mod = _load_module(
+    "phase_a_executor",
+    REPO_ROOT / "mu" / "tools" / "executors" / "phase_a_executor.py",
+)
+dialectic_mod = _load_module(
+    "dialectic_executor",
+    REPO_ROOT / "mu" / "tools" / "executors" / "dialectic_executor.py",
+)
 phase_b_mod = _load_module(
     "phase_b_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
@@ -84,20 +92,17 @@ class TestDispatcherStopTokens:
 class TestDispatcherNotImplemented:
     """Unimplemented executors return not_implemented status."""
 
-    def test_phase_a_not_implemented(self):
-        record = {"decision": "ROUTE_PHASE_A", "summary": "plan needed"}
-        result = dispatch_mod.dispatch(record, skip_freshness=True)
-        assert result["status"] == "not_implemented"
-        assert result["executor"] == "phase_a_executor"
+    def test_phase_a_is_now_implemented(self):
+        """Phase A executor is available since Slice 4."""
+        assert "phase_a_executor" in dispatch_mod.AVAILABLE_EXECUTORS
 
     def test_phase_b_is_now_implemented(self):
         """Phase B executor is available since Slice 3."""
         assert "phase_b_executor" in dispatch_mod.AVAILABLE_EXECUTORS
 
-    def test_dialectic_not_implemented(self):
-        record = {"decision": "CONTINUE_DIALECTIC", "summary": "narrow"}
-        result = dispatch_mod.dispatch(record, skip_freshness=True)
-        assert result["status"] == "not_implemented"
+    def test_dialectic_is_now_implemented(self):
+        """Dialectic executor is available since Slice 5."""
+        assert "dialectic_executor" in dispatch_mod.AVAILABLE_EXECUTORS
 
 
 class TestDispatcherConfig:
@@ -330,3 +335,119 @@ class TestPhaseBRunPhaseB:
             repo, "reports/control_plane/test_plan.md", verbose=True
         )
         assert result["status"] == "ready"
+
+
+# ===========================================================================
+# Phase A executor tests (Slice 4)
+# ===========================================================================
+
+
+class TestPhaseAPlanCreation:
+    """Phase A executor creates plan packet drafts."""
+
+    def test_create_plan_draft(self, tmp_path):
+        scope = {"request": "create executors", "summary": "executor plan"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "test_plan", scope)
+        assert path.exists()
+        content = path.read_text()
+        assert "Phase-A-Lock: UNLOCKED" in content
+        assert "create executors" in content
+
+    def test_existing_plan_not_overwritten(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        existing = tmp_path / "reports" / "control_plane" / "test_plan_2026-03-22.md"
+        existing.write_text("# existing plan")
+        scope = {"request": "new content"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "test_plan", scope)
+        assert path.read_text() == "# existing plan"
+
+    def test_lock_plan(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text("Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\nPhase-A-Lock: UNLOCKED\n")
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text()
+        assert "Phase-A-Lock: LOCKED" in content
+        assert "bridge-converged" in content
+
+
+class TestPhaseADispatcherIntegration:
+    """Dispatcher correctly routes to phase_a_executor."""
+
+    def test_route_phase_a_dispatches(self):
+        assert dispatch_mod.resolve_executor("ROUTE_PHASE_A") == "phase_a_executor"
+
+    def test_phase_a_now_available(self):
+        assert "phase_a_executor" in dispatch_mod.AVAILABLE_EXECUTORS
+
+
+class TestPhaseAScopeExtraction:
+    """Phase A extracts scope from routing record."""
+
+    def test_extract_scope(self):
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "Next step is executor implementation",
+            "request_for_claude": "Create plan for phase_a_executor",
+        }
+        scope = phase_a_mod.extract_plan_scope(record)
+        assert scope["request"] == "Create plan for phase_a_executor"
+        assert scope["summary"] == "Next step is executor implementation"
+
+
+# ===========================================================================
+# Dialectic executor tests (Slice 5)
+# ===========================================================================
+
+
+class TestDialecticProposalExtraction:
+    """Dialectic executor extracts unbounded proposals."""
+
+    def test_extract_unbounded_proposal(self):
+        record = {
+            "next_candidates": [
+                {"candidate": "broad thing", "bounded": False},
+                {"candidate": "narrow thing", "bounded": True},
+            ]
+        }
+        proposal = dialectic_mod.extract_proposal(record)
+        assert proposal["candidate"] == "broad thing"
+        assert not proposal["bounded"]
+
+    def test_extract_first_when_all_bounded(self):
+        record = {
+            "next_candidates": [
+                {"candidate": "first", "bounded": True},
+                {"candidate": "second", "bounded": True},
+            ]
+        }
+        proposal = dialectic_mod.extract_proposal(record)
+        assert proposal["candidate"] == "first"
+
+    def test_empty_candidates(self):
+        proposal = dialectic_mod.extract_proposal({"next_candidates": []})
+        assert proposal["candidate"] == ""
+
+
+class TestDialecticEnvelopeParsing:
+    """Dialectic envelope parsing."""
+
+    def test_valid_envelope(self):
+        output = 'text\nBEGIN_DIALECTIC_ENVELOPE\n{"candidate": "narrowed", "bounded": true}\nEND_DIALECTIC_ENVELOPE\nmore'
+        result = dialectic_mod.parse_dialectic_envelope(output)
+        assert result["candidate"] == "narrowed"
+        assert result["bounded"] is True
+
+    def test_missing_envelope_raises(self):
+        with pytest.raises(dialectic_mod.DialecticExecutorError, match="missing"):
+            dialectic_mod.parse_dialectic_envelope("no envelope here")
+
+
+class TestDialecticDispatcherIntegration:
+    """Dispatcher correctly routes to dialectic_executor."""
+
+    def test_route_dialectic_dispatches(self):
+        assert dispatch_mod.resolve_executor("CONTINUE_DIALECTIC") == "dialectic_executor"
+
+    def test_dialectic_now_available(self):
+        assert "dialectic_executor" in dispatch_mod.AVAILABLE_EXECUTORS
